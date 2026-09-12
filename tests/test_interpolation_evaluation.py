@@ -82,11 +82,9 @@ def test_bilinear_sample_grid_midpoint_and_nodata():
     hole = gz.copy()
     hole[0, 1] = np.nan
     assert bilinear_sample_grid(hole, gx, gy, 0.5, 0.0) is None
-    # Beyond the grid the edge cell's linear gradient extends (production
-    # semantics kept byte-identical with the constrained adapter scorer):
-    # value(x=3) = 10 + (20 − 10) × 2 index steps past the edge cell start.
-    outside = bilinear_sample_grid(gz, gx, gy, 3.0, 0.0)
-    assert outside == pytest.approx(30.0)
+    # Off-grid samples are unscorable (CV must not treat extrapolation as
+    # interpolation skill). #1275
+    assert bilinear_sample_grid(gz, gx, gy, 3.0, 0.0) is None
 
 
 def test_signed_r_squared_constant_observed_convention():

@@ -2450,10 +2450,10 @@ class DataPage(QWidget):
         mapping: dict[str, str] = {}
         if service is not None:
             try:
-                for asset in service.list_assets(include_trashed=False):
-                    legacy = getattr(asset, "legacy_resource_id", None)
+                identities = service.list_asset_identities(include_trashed=False)
+                for asset_id, _name, legacy in identities:
                     if legacy:
-                        mapping[asset.id] = str(legacy)
+                        mapping[asset_id] = str(legacy)
             except Exception:
                 mapping = {}
         self._asset_legacy_cache = (
@@ -2531,10 +2531,12 @@ class DataPage(QWidget):
         mapping: dict[str, str] = {}
         if service is not None:
             try:
-                for asset in service.list_assets(include_trashed=True):
-                    name = getattr(asset, "name", "") or ""
+                identities = service.list_asset_identities(include_trashed=True)
+                for asset_id, name, legacy in identities:
                     if name:
-                        mapping[str(asset.id)] = str(name)
+                        mapping[str(asset_id)] = str(name)
+                    if legacy and name:
+                        mapping.setdefault(str(legacy), str(name))
             except Exception:
                 mapping = {}
         for resource in self._resources or []:

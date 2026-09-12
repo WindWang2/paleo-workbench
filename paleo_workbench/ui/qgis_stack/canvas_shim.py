@@ -762,7 +762,7 @@ class QgisCanvasShim(QWidget):
     def _refresh_chrome_overlay(self) -> None:
         self._install_chrome_overlay()
 
-    def set_snapping_config(self, config: dict) -> None:
+    def set_snapping_config(self, config: dict) -> bool:
         """捕捉配置下推 QGIS canvas snappingUtils（M3）。
 
         config 形如 ``{"enabled": bool, "mode": "all_layers"|"active_layer",
@@ -772,11 +772,14 @@ class QgisCanvasShim(QWidget):
         Python 专有模式，QGIS 端无对应物，不下推。
         """
         if getattr(self, "_shutdown_done", False) or not self.canvas_address:
-            return
+            return False
         try:
             self.stack.set_snapping_config(self.canvas_address, json.dumps(config))
         except Exception:
-            pass
+            logging.getLogger(__name__).warning(
+                "native snapping config push failed", exc_info=True)
+            return False
+        return True
 
     def _bridge_feature(self, name: str) -> bool:
         """V10：桥 manifest 特性查询（进程级缓存；无桥 = False 诚实降级）。"""

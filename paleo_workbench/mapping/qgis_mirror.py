@@ -236,6 +236,13 @@ def _doc_declares(method, *names: str) -> bool:
         return False
 
 
+_EMPTY_FEATURE_COLLECTION = '{"type":"FeatureCollection","features":[]}'
+
+
+def _feature_collection_json(features) -> str:
+    return json.dumps({"type": "FeatureCollection", "features": features})
+
+
 def _stack_supports_delta(stack) -> bool:
     """Capability probe for the delta channel (R3).
 
@@ -651,9 +658,16 @@ def mirror_snapshot_to_stack(
                         "changed": changed,
                         "removed_ids": removed,
                     })
-        full_collection = json.dumps(
-            {"type": "FeatureCollection", "features": features})
         delta_supported = _stack_supports_delta(stack)
+        shipped_empty_delta = bool(delta_json and delta_supported)
+        if shipped_empty_delta:
+            # C++ ignores the FeatureCollection when delta_applied (#1272).
+            # Empty payload is only safe on that path; failed-delta and
+            # TypeError retries must ship the real collection or C++
+            # truncates the mirror to empty.
+            full_collection = _EMPTY_FEATURE_COLLECTION
+        else:
+            full_collection = _feature_collection_json(features)
         upsert_kwargs = {
             "is_reference": metadata.get("reference") == "true",
             "is_editable": metadata.get("editable") == "true",
@@ -676,10 +690,10 @@ def mirror_snapshot_to_stack(
         if scale_token is not None and _stack_supports_scale_range(stack):
             upsert_kwargs["min_scale"] = scale_token[0]
             upsert_kwargs["max_scale"] = scale_token[1]
+        crs_auth = _qgis_crs_for_layer(layer, snapshot, on_drop=_sink)
         try:
             qgis_id = stack.upsert_mirror_layer(
-                layer.id, layer.name or layer.id, geom,
-                _qgis_crs_for_layer(layer, snapshot, on_drop=_sink),
+                layer.id, layer.name or layer.id, geom, crs_auth,
                 full_collection,
                 renderer_xml, labeling_xml, legacy_style,
                 bool(layer.visible), float(layer.opacity),
@@ -696,22 +710,39 @@ def mirror_snapshot_to_stack(
                 # V9 W6: the retry silently published without the spec
                 # schema before — now the drift is on the record.
                 _sink(layer.id, "fields_json dropped on signature drift — published un-schematized")
+            full_collection = _feature_collection_json(features)
             qgis_id = stack.upsert_mirror_layer(
-                layer.id, layer.name or layer.id, geom,
-                _qgis_crs_for_layer(layer, snapshot, on_drop=_sink),
+                layer.id, layer.name or layer.id, geom, crs_auth,
                 full_collection,
                 renderer_xml, labeling_xml, legacy_style,
                 bool(layer.visible), float(layer.opacity),
                 **upsert_kwargs,
             )
         except Exception as exc:
-            if has_qgis_renderer or has_qgis_labeling:
-                msg = str(exc).lower()
-                if "renderer" in msg or "labeling" in msg or "invalid" in msg:
-                    raise
-            failures.append(f"layer {layer.id}: {exc}")
-            _sink(layer.id, str(exc))
-            continue
+            retried = False
+            if shipped_empty_delta:
+                try:
+                    retry_kwargs = dict(upsert_kwargs)
+                    retry_kwargs.pop("delta", None)
+                    qgis_id = stack.upsert_mirror_layer(
+                        layer.id, layer.name or layer.id, geom, crs_auth,
+                        _feature_collection_json(features),
+                        renderer_xml, labeling_xml, legacy_style,
+                        bool(layer.visible), float(layer.opacity),
+                        **retry_kwargs,
+                    )
+                    _sink(layer.id, f"delta not applied; full ship ({exc})")
+                    retried = True
+                except Exception:
+                    retried = False
+            if not retried:
+                if has_qgis_renderer or has_qgis_labeling:
+                    msg = str(exc).lower()
+                    if "renderer" in msg or "labeling" in msg or "invalid" in msg:
+                        raise
+                failures.append(f"layer {layer.id}: {exc}")
+                _sink(layer.id, str(exc))
+                continue
         if ledger_active:
             _MIRROR_LEDGER[_ledger_key(stack, layer.id)] = _LedgerEntry(
                 layer_revision, style_sig, bool(layer.visible),

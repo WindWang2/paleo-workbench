@@ -86,6 +86,14 @@ def test_loader_report_is_honest_without_vendor(monkeypatch, tmp_path):
     assert report.prepared is True  # idempotent、不抛
 
 
+def test_prepare_bridge_load_never_raises_without_add_dll_directory(monkeypatch):
+    """#1265: POSIX / missing add_dll_directory must not crash import."""
+    monkeypatch.setattr(loader, "_PREPARED", False)
+    monkeypatch.delattr(loader.os, "add_dll_directory", raising=False)
+    report = loader.prepare_bridge_load(force=True)
+    assert report.prepared is True
+
+
 def test_proj_data_deploys_from_deps_into_vendor(tmp_path, monkeypatch):
     vendor = tmp_path / "vendor"
     (vendor / "output" / "bin").mkdir(parents=True)

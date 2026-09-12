@@ -1378,6 +1378,29 @@ class DataCatalogService:
             return list(self.document.assets)
         return [asset for asset in self.document.assets if not asset.trashed]
 
+    def list_asset_identities(
+        self, include_trashed: bool = False,
+    ) -> list[tuple[str, str, str]]:
+        """Lightweight ``(id, name, legacy_resource_id)`` rows (#1269).
+
+        Lazy catalogs read three columns from SQLite and do not hydrate
+        Pydantic ``DataAsset`` models. Warm catalogs walk the in-memory
+        document (already loaded).
+        """
+        if self._lazy_active():
+            return self._index.list_asset_identity_rows(
+                include_trashed=include_trashed)
+        rows: list[tuple[str, str, str]] = []
+        for asset in self.document.assets:
+            if not include_trashed and asset.trashed:
+                continue
+            rows.append((
+                str(asset.id),
+                str(asset.name or ""),
+                str(asset.legacy_resource_id or ""),
+            ))
+        return rows
+
     def get_trashed_assets(self) -> list[DataAsset]:
         """Assets currently in the trash (tombstoned, recoverable)."""
         if self._lazy_active():

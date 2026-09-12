@@ -168,7 +168,12 @@ def validate_factor_unit_against_values(
     diagnostics: list[str] = []
     u = str(unit).strip()
     if u in {"%", "percent"}:
-        if 0.0 <= lo and hi <= 1.5 and not np.allclose(finite, np.round(finite)):
+        if lo < 1.5 < hi:
+            diagnostics.append(
+                f"factor {factor_name!r} declares % but values span "
+                f"[{lo:.3g}, {hi:.3g}] — mixed fraction and percent scale"
+            )
+        elif 0.0 <= lo and hi <= 1.5 and not np.allclose(finite, np.round(finite)):
             diagnostics.append(
                 f"factor {factor_name!r} declares % but values span "
                 f"[{lo:.3g}, {hi:.3g}] — fractions misread as percent "

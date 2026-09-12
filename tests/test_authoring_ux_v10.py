@@ -305,7 +305,7 @@ def test_regate_blocking_task_before_shortcut(doc):
     _polygon_doc(doc)
     doc.edit_controller.start_editing()
     doc._sync_action_state()
-    assert doc.action_controller.actions["save_edits"].isEnabled() or True
+    assert "save_edits" in doc.action_controller.actions
     doc.edit_controller.blocking_task_label = "workflow:重算"
     messages: list[str] = []
     doc.status_message.connect(messages.append)

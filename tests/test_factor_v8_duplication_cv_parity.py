@@ -68,7 +68,7 @@ def test_plain_idw_duplicate_no_longer_double_votes():
         parameters={"sample_points": [dict(twin_a, value=90.0)] + points},
     )
     apply_interpolation_to_task(single_twin, project=project)
-    assert np.allclose(single_twin.parameters is not None or True, True)  # sanity
+    assert single_twin.parameters is not None
     from paleo_workbench.project.factor_grid_artifacts import peek_live_factor_grid
 
     g_doubled = peek_live_factor_grid(doubled.id)

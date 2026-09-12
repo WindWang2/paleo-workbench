@@ -1563,6 +1563,26 @@ class CatalogIndex:
             )
         return [_asset_model_from_row(row) for row in rows]
 
+    def list_asset_identity_rows(
+        self, *, include_trashed: bool = False,
+    ) -> list[tuple[str, str, str]]:
+        """``(id, name, legacy_resource_id)`` without hydrating DataAsset (#1269)."""
+        if include_trashed:
+            rows = self._read_rows(
+                "SELECT id, name, legacy_resource_id FROM assets ORDER BY rowid",
+                (),
+            )
+        else:
+            rows = self._read_rows(
+                "SELECT id, name, legacy_resource_id FROM assets "
+                "WHERE trashed = 0 ORDER BY rowid",
+                (),
+            )
+        return [
+            (str(row["id"]), str(row["name"] or ""), str(row["legacy_resource_id"] or ""))
+            for row in rows
+        ]
+
     def list_run_models(self) -> list[DataRun]:
         rows = self._read_rows("SELECT * FROM runs ORDER BY rowid", ())
         if not rows:

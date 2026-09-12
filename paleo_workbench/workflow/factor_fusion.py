@@ -87,9 +87,12 @@ class Normalization:
             raise ValueError("normalization requires high > low")
 
     def apply(self, values: np.ndarray) -> np.ndarray:
+        arr = np.asarray(values, dtype=float)
         span = self.high - self.low
-        out = (values - self.low) / span
-        return np.clip(out, 0.0, 1.0)
+        out = np.full(arr.shape, np.nan, dtype=float)
+        finite = np.isfinite(arr)
+        out[finite] = np.clip((arr[finite] - self.low) / span, 0.0, 1.0)
+        return out
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.kind, "low": self.low, "high": self.high}

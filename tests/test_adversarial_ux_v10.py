@@ -199,7 +199,8 @@ def test_restore_layout_then_stage_switch(doc):
     assert stage_groups(doc)["factor"] is True
     doc.apply_stage_tool_profile(MappingStage.INTEGRATED_COMPILATION.value)
     assert stage_groups(doc)["factor"] is False
-    assert not availability["factor_workbench"].enabled or True  # 结论集已换
+    availability = doc.tool_availability()
+    assert availability["factor_workbench"].visible is False
 
 
 def stage_groups(document):

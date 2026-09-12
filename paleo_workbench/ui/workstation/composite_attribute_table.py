@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QStyledItemDelegate,
-    QTableWidget,
+    QTableView,
     QTableWidgetItem,
     QVBoxLayout,
 )
@@ -46,6 +46,169 @@ from paleo_workbench.ui.workstation.attribute_schema import (
     qgis_schema_parity,
 )
 from paleo_workbench.ui.workstation.composite_editing import schema_fields
+
+
+class _CellProxy:
+    """Test-facing cell handle: ``item(row, col).text()`` without QTableWidgetItem."""
+
+    def __init__(self, model, row: int, column: int) -> None:
+        self._model = model
+        self._row = row
+        self._column = column
+
+    def text(self) -> str:
+        value = self._model.data(self._model.index(self._row, self._column))
+        return "" if value is None else str(value)
+
+    def data(self, role=Qt.ItemDataRole.UserRole):
+        return self._model.data(self._model.index(self._row, self._column), role)
+
+
+class _AttributeTableView(QTableView):
+    """QTableView with the QTableWidget accessors the differential tests use."""
+
+    def rowCount(self) -> int:  # noqa: N802
+        model = self.model()
+        return 0 if model is None else model.rowCount()
+
+    def columnCount(self) -> int:  # noqa: N802
+        model = self.model()
+        return 0 if model is None else model.columnCount()
+
+    def item(self, row: int, column: int):
+        model = self.model()
+        if model is None:
+            return None
+        if row < 0 or column < 0 or row >= model.rowCount() or column >= model.columnCount():
+            return None
+        return _CellProxy(model, row, column)
+
+    def horizontalHeaderItem(self, column: int):  # noqa: N802
+        model = self.model()
+        if model is None:
+            return None
+
+        class _Header:
+            def __init__(self, text: str) -> None:
+                self._text = text
+
+            def text(self) -> str:
+                return self._text
+
+        return _Header(str(model.headerData(column, Qt.Orientation.Horizontal) or ""))
+
+
+class _AttributeTableModel(QAbstractTableModel):
+    def __init__(self, dialog) -> None:
+        super().__init__(dialog)
+        self._dialog = dialog
+        self._fids: list[str] = []
+        self._columns: tuple = ()
+        self._editable = False
+
+    def reset_from_layer(self, fids, columns, editable: bool) -> None:
+        self.beginResetModel()
+        self._fids = list(fids)
+        self._columns = tuple(columns)
+        self._editable = bool(editable)
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self._fids)
+
+    def columnCount(self, parent=QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self._columns) + 1
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
+        if role != Qt.ItemDataRole.DisplayRole or orientation != Qt.Orientation.Horizontal:
+            return None
+        if section == 0:
+            return "fid"
+        if 0 < section <= len(self._columns):
+            return CompositeAttributeTableDialog._header_for(self._columns[section - 1])
+        return None
+
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if index.column() > 0 and self._editable:
+            flags |= Qt.ItemFlag.ItemIsEditable
+        return flags
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or index.row() >= len(self._fids):
+            return None
+        fid = self._fids[index.row()]
+        if index.column() == 0:
+            if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole,
+                        Qt.ItemDataRole.UserRole):
+                return fid
+            return None
+        field = self._columns[index.column() - 1]
+        feature = self._dialog._feature(fid)
+        value = "" if feature is None else feature.attributes.get(field.key, "")
+        if role == Qt.ItemDataRole.UserRole:
+            return (fid, field.key, field.kind)
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
+            if value is None:
+                return ""
+            if field.numeric and isinstance(value, (int, float)) and not isinstance(value, bool):
+                return float(value)
+            if field.numeric:
+                try:
+                    return float(str(value).strip())
+                except ValueError:
+                    return str(value)
+            return str(value)
+        return None
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):  # noqa: N802
+        if role != Qt.ItemDataRole.EditRole or not index.isValid() or index.column() == 0:
+            return False
+        field = self._columns[index.column() - 1]
+        fid = self._fids[index.row()]
+        written = self._dialog._write_attribute(fid, field.key, field.kind, str(value))
+        if written is False:
+            return False
+        self.dataChanged.emit(index, index)
+        return True
+
+    def sort(self, column: int, order=Qt.SortOrder.AscendingOrder) -> None:  # noqa: N802
+        if column < 0 or column >= self.columnCount():
+            return
+        reverse = order == Qt.SortOrder.DescendingOrder
+        keyed: list[tuple[str, object]] = []
+        for row, fid in enumerate(self._fids):
+            keyed.append((
+                fid,
+                self.data(self.index(row, column), Qt.ItemDataRole.DisplayRole),
+            ))
+
+        def sort_key(item: tuple[str, object]):
+            value = item[1]
+            if value is None or value == "":
+                return (1, 0.0, "")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return (0, float(value), "")
+            return (0, 0.0, str(value))
+
+        self.layoutAboutToBeChanged.emit()
+        keyed.sort(key=sort_key, reverse=reverse)
+        self._fids = [fid for fid, _ in keyed]
+        self.layoutChanged.emit()
+
+    def emit_rows(self, fids, row_by_id=None) -> None:
+        lookup = row_by_id if row_by_id is not None else {
+            fid: index for index, fid in enumerate(self._fids)
+        }
+        for fid in fids:
+            row = lookup.get(fid)
+            if row is None:
+                continue
+            left = self.index(row, 0)
+            right = self.index(row, self.columnCount() - 1)
+            self.dataChanged.emit(left, right)
 
 
 class _FieldEditorDelegate(QStyledItemDelegate):
@@ -124,8 +287,10 @@ class CompositeAttributeTableDialog(QDialog):
         self._info.setObjectName("WorkstationPanelFootnote")
         outer.addWidget(self._info)
 
-        self.table = QTableWidget(0, 1, self)
+        self._model = _AttributeTableModel(self)
+        self.table = _AttributeTableView(self)
         self.table.setObjectName("CompositeAttributeTableWidget")
+        self.table.setModel(self._model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(
@@ -133,8 +298,6 @@ class CompositeAttributeTableDialog(QDialog):
             | QAbstractItemView.EditTrigger.SelectedClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
         )
-        # V9 W5：表头点击排序（数值列按数值——item 以 typed DisplayRole
-        # 携带数值）。排序移动行后行映射经 _rebuild_row_map 重建。
         self.table.setSortingEnabled(True)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(
@@ -166,9 +329,8 @@ class CompositeAttributeTableDialog(QDialog):
         self._suppress_selection_sync = False
         self._suppress_item_changed = False
         self._suppress_content_refresh = False
-        self.table.itemChanged.connect(self._on_item_changed)
-        self.table.itemSelectionChanged.connect(self._on_selection_changed)
-        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self.table.doubleClicked.connect(self._on_cell_double_clicked)
         self.table.horizontalHeader().sortIndicatorChanged.connect(
             self._on_sort_changed)
 
@@ -195,6 +357,18 @@ class CompositeAttributeTableDialog(QDialog):
         session = layer.edit_session
         return session.features() if session is not None else layer.features()
 
+    def _feature(self, feature_id: str):
+        layer = self._layer()
+        if layer is None:
+            return None
+        session = layer.edit_session
+        try:
+            if session is not None:
+                return session.feature(feature_id)
+            return layer.feature(feature_id)
+        except KeyError:
+            return None
+
     def _columns(self) -> tuple[AttributeFieldMeta, ...]:
         """列元数据（V9 W5：spec/template/extra 单一派生，带缓存）。"""
         cached = getattr(self, "_columns_cache", None)
@@ -215,43 +389,21 @@ class CompositeAttributeTableDialog(QDialog):
         self._invalidate_columns()
         columns = self._columns()
         features = self._features()
-        # 角色门禁（V6）：RAW/锁定图层整表只读并明示原因，单元格不可编辑。
         editable, gate_reason = self._controller.can_edit_layer(self._layer_id)
         parity_state, parity_detail = self._qgis_parity(columns)
         self._suppress_item_changed = True
         self._suppress_selection_sync = True
         self.table.setSortingEnabled(False)
         try:
-            self.table.setColumnCount(len(columns) + 1)
-            self.table.setHorizontalHeaderLabels(
-                ["fid"] + [self._header_for(field) for field in columns]
-            )
-            self.table.setRowCount(len(features))
-            selection = layer.selection
-            for row, feature in enumerate(features):
-                fid_item = QTableWidgetItem(feature.feature_id)
-                fid_item.setFlags(
-                    fid_item.flags() & ~Qt.ItemFlag.ItemIsEditable
-                )
-                fid_item.setData(Qt.ItemDataRole.UserRole, feature.feature_id)
-                self.table.setItem(row, 0, fid_item)
-                if feature.feature_id in selection:
-                    fid_item.setSelected(True)
-                for column, field in enumerate(columns, start=1):
-                    value = feature.attributes.get(field.key, "")
-                    item = QTableWidgetItem()
-                    self._apply_display(item, field, value)
-                    item.setData(
-                        Qt.ItemDataRole.UserRole, (feature.feature_id, field.key, field.kind))
-                    if not editable:
-                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.table.setItem(row, column, item)
+            fids = [feature.feature_id for feature in features]
+            self._model.reset_from_layer(fids, columns, editable)
             self._info.setText(
                 self._status_text(len(features), len(columns), layer, editable,
                                   gate_reason, parity_state, parity_detail))
             self._batch_field.clear()
             for field in columns:
                 self._batch_field.addItem(field.label, field.key)
+            self._sync_selection_from_layer(layer)
         finally:
             self.table.setSortingEnabled(True)
             self._suppress_selection_sync = False
@@ -280,23 +432,6 @@ class CompositeAttributeTableDialog(QDialog):
         return f"{field.label}{mark}"
 
     @staticmethod
-    def _apply_display(item: QTableWidgetItem, field: AttributeFieldMeta, value) -> None:
-        """typed DisplayRole——数值列排序按数值，其余按文本。"""
-        if value is None:
-            item.setData(Qt.ItemDataRole.DisplayRole, "")
-            return
-        if field.numeric and isinstance(value, (int, float)) and not isinstance(value, bool):
-            item.setData(Qt.ItemDataRole.DisplayRole, float(value))
-        elif field.numeric:
-            text = str(value).strip()
-            try:
-                item.setData(Qt.ItemDataRole.DisplayRole, float(text))
-            except ValueError:
-                item.setData(Qt.ItemDataRole.DisplayRole, text)
-        else:
-            item.setData(Qt.ItemDataRole.DisplayRole, str(value))
-
-    @staticmethod
     def _status_text(feature_count, column_count, layer, editable, gate_reason,
                      parity_state, parity_detail) -> str:
         parity_mark = {
@@ -316,13 +451,21 @@ class CompositeAttributeTableDialog(QDialog):
         )
 
     def _row_map(self) -> dict[str, int]:
-        """fid → 当前行（排序后重建的映射）。"""
-        mapping: dict[str, int] = {}
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item is not None:
-                mapping[str(item.text())] = row
-        return mapping
+        """fid → 当前行。"""
+        return {fid: row for row, fid in enumerate(self._model._fids)}
+
+    def _sync_selection_from_layer(self, layer) -> None:
+        selection = layer.selection
+        model = self.table.selectionModel()
+        if model is None:
+            return
+        from PySide6.QtCore import QItemSelection, QItemSelectionModel
+        sel = QItemSelection()
+        for row, fid in enumerate(self._model._fids):
+            if fid in selection:
+                index = self._model.index(row, 0)
+                sel.select(index, index)
+        model.select(sel, QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows)
 
     def _on_sort_changed(self, _column: int, _order) -> None:
         """排序移动行后重建差量刷新基线的行映射。"""
@@ -404,6 +547,7 @@ class CompositeAttributeTableDialog(QDialog):
             self._controller.content_changed.emit(self._layer_id)
         finally:
             self._suppress_content_refresh = False
+        return True
 
     def _unique_value_taken(
         self, field: AttributeFieldMeta, feature_id: str, value: object,
@@ -434,24 +578,6 @@ class CompositeAttributeTableDialog(QDialog):
                 return True
         return False
 
-    def _on_item_changed(self, item: QTableWidgetItem) -> None:
-        if self._suppress_item_changed:
-            return
-        payload = item.data(Qt.ItemDataRole.UserRole)
-        if not payload:
-            return
-        feature_id, key, kind = payload
-        written = self._write_attribute(feature_id, key, kind, item.text())
-        if written is False:
-            # 门禁拒绝（review round 3 P2）：把单元格恢复为已提交值，
-            # 不留「看起来写进去了」的假成功渲染。
-            self._suppress_item_changed = True
-            try:
-                if not self._refresh_changed_features():
-                    self.refresh()
-            finally:
-                self._suppress_item_changed = False
-
     def _apply_batch(self) -> None:
         key = str(self._batch_field.currentData() or "")
         text = self._batch_value.text()
@@ -460,9 +586,8 @@ class CompositeAttributeTableDialog(QDialog):
         rows = sorted({index.row() for index in self.table.selectedIndexes()})
         feature_ids = []
         for row in rows:
-            fid_item = self.table.item(row, 0)
-            if fid_item is not None:
-                feature_ids.append(str(fid_item.text()))
+            if 0 <= row < len(self._model._fids):
+                feature_ids.append(self._model._fids[row])
         kind = next(
             (entry.kind for entry in self._columns() if entry.key == key), "text"
         )
@@ -475,7 +600,7 @@ class CompositeAttributeTableDialog(QDialog):
 
     # -- selection sync -------------------------------------------------------
 
-    def _on_selection_changed(self) -> None:
+    def _on_selection_changed(self, *_args) -> None:
         if self._suppress_selection_sync:
             return
         layer = self._layer()
@@ -483,19 +608,16 @@ class CompositeAttributeTableDialog(QDialog):
             return
         feature_ids = set()
         for index in self.table.selectedIndexes():
-            if index.column() == 0:
-                item = self.table.item(index.row(), 0)
-                if item is not None:
-                    feature_ids.add(str(item.text()))
+            if index.column() == 0 and 0 <= index.row() < len(self._model._fids):
+                feature_ids.add(self._model._fids[index.row()])
         layer.set_selection(feature_ids)
         self._controller.state_changed.emit()
 
-    def _on_cell_double_clicked(self, row: int, column: int) -> None:
-        if column != 0:
+    def _on_cell_double_clicked(self, index) -> None:
+        if not index.isValid() or index.column() != 0:
             return
-        item = self.table.item(row, 0)
-        if item is not None:
-            self.feature_activated.emit(str(item.text()))
+        if 0 <= index.row() < len(self._model._fids):
+            self.feature_activated.emit(self._model._fids[index.row()])
 
     # -- live refresh ------------------------------------------------------------
 
@@ -545,19 +667,9 @@ class CompositeAttributeTableDialog(QDialog):
                 return False  # → 全量
             changed[feature_id] = feature
         self._suppress_item_changed = True
-        # review-2 P1-1：排序开启时 setData 会触发即时重排，循环内后续
-        # row 查找解析到别的要素的 item（错行写入）。更新期间关闭排序，
-        # 结束后恢复并由调用侧的 _on_sort_changed/全量 refresh 重建行映射。
         self.table.setSortingEnabled(False)
         try:
-            for feature_id, feature in changed.items():
-                row = row_by_id[feature_id]
-                for column, field in enumerate(columns, start=1):
-                    item = self.table.item(row, column)
-                    if item is None:
-                        continue  # 行尾列守卫（正常 refresh 不会出现）
-                    value = feature.attributes.get(field.key, "")
-                    self._apply_display(item, field, value)
+            self._model.emit_rows(changed, row_by_id)
         finally:
             self.table.setSortingEnabled(True)
             self._suppress_item_changed = False
@@ -569,13 +681,8 @@ class CompositeAttributeTableDialog(QDialog):
         layer = self._layer()
         if layer is None:
             return
-        selection = layer.selection
         self._suppress_selection_sync = True
         try:
-            self.table.clearSelection()
-            for row in range(self.table.rowCount()):
-                item = self.table.item(row, 0)
-                if item is not None and str(item.text()) in selection:
-                    item.setSelected(True)
+            self._sync_selection_from_layer(layer)
         finally:
             self._suppress_selection_sync = False

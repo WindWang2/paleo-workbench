@@ -97,8 +97,10 @@ def test_canvas_menu_suppressed_mid_capture(doc):
         tool.points = [(0.0, 0.0)]  # pending 采点
         from PySide6.QtCore import QPoint
 
+        built: list[object] = []
+        doc._build_canvas_menu = lambda: built.append("menu") or None
         doc._on_canvas_context_menu(QPoint(5, 5))  # 必须静默返回（不弹）
-        assert True
+        assert built == []
     else:
         pytest.skip("fallback capture tool 无 points 属性")
 
@@ -123,6 +125,27 @@ def test_toggle_editing_commits_other_session(doc):
     # A 的会话已随切换提交（或以状态消息说明）；无会话被静默遗弃。
     assert doc.edit_controller.layer(a.id).edit_session is None
     assert doc.edit_controller.layer(b.id).edit_session is not None
+
+
+def test_tree_layer_switch_commits_other_session(doc):
+    """#1268: 树选中另一层也必须提交/回滚前一会话。"""
+    a = doc.edit_controller.create_layer("A", "polygon")
+    _register_role(doc, a.id, LayerRole.INITIAL_FACIES_DRAFT)
+    doc.edit_controller.set_active_layer(a.id)
+    doc.edit_controller.start_editing()
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    with doc.edit_controller.layer(a.id).edit_session.edit_source("t"):
+        doc.edit_controller.layer(a.id).edit_session.add_feature(VectorFeature(
+            "f1", {"type": "Polygon",
+                   "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}, {}))
+    b = doc.edit_controller.create_layer("B", "polygon")
+    _register_role(doc, b.id, LayerRole.INITIAL_FACIES_DRAFT)
+    doc.edit_controller.set_active_layer(a.id)
+    assert doc.edit_controller.layer(a.id).edit_session is not None
+    doc._on_user_active_layer_changed(str(b.id))
+    assert doc.edit_controller.layer(a.id).edit_session is None
+    assert doc.edit_controller.active_layer_id == str(b.id)
 
 
 # R4-3：拓扑 chip 校验覆盖全部打开的会话（与计数同口径）。

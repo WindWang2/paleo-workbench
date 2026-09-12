@@ -246,7 +246,10 @@ class GeologicalMappingPipeline:
                         try:
                             f_hs, f_ht = float(hs), float(ht)
                             if f_ht > 0:
-                                val = f_hs / f_ht
+                                # Family default unit for 砂地比 is `%`
+                                # (factor_units). Store percent, not v/v, so
+                                # derived wells mix with measured R_s=50.
+                                val = 100.0 * f_hs / f_ht
                                 derived_rule = DERIVED_SAND_RATIO_RULE
                                 derived_sources = {"H_s": hs_key, "H_t": ht_key}
                         except (TypeError, ValueError):

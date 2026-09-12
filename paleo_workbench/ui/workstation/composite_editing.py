@@ -1684,7 +1684,11 @@ class CompositeEditController(QObject):
                     ),
                 }
             config["layers"] = layers
-        canvas.set_snapping_config(config)
+        pushed = canvas.set_snapping_config(config)
+        if pushed is False and snapping.enabled:
+            # Native digitize uses QGIS snap, not Python snap (#1276).
+            snapping.enabled = False
+            self.state_changed.emit()
 
     def repush_snapping(self) -> None:
         """V10 M-N：外部时机（阶段切换/画布重建）后重推捕捉配置。
@@ -2348,8 +2352,9 @@ class CompositeEditController(QObject):
                 or self.role_of_layer(layer_id)
                 or self._layer_roles.get(layer_id, "")
             )
+            allowed, _reason = self.can_edit_layer(layer_id)
             metadata = {
-                "editable": "true",
+                "editable": "true" if allowed else "false",
                 "geometry_kind": self._kinds.get(layer_id, ""),
                 "template": self._templates.get(layer_id, ""),
                 "editing": "true" if session is not None else "false",

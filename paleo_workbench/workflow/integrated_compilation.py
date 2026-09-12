@@ -96,26 +96,34 @@ def _task_id_of_evidence(value: object) -> str | None:
     return None
 
 
+def _grid_from_catalog_version(catalog: Any, version_id: str):
+    """Load a pinned factor-grid version from the catalog, or None."""
+    from paleo_workbench.catalog.grid_artifact import read_grid_artifact
+
+    if catalog is None or not version_id:
+        return None
+    try:
+        version = catalog.get_version(version_id)
+        path = catalog.resolve_path(version)
+        return read_grid_artifact(path)
+    except Exception:
+        return None
+
+
 def fusion_inputs_from_document(
     document: Any,
     evidence_set: Mapping[str, str],
     mismatches: list[str] | None = None,
+    catalog: Any = None,
 ) -> dict[str, FactorGridResult]:
     """Resolve every ``factor:<task>:<version>`` evidence entry to its grid.
 
-    Resolution per task follows :func:`project.factor_grid_artifacts.\
-factor_grid_result_for_task` (live cache → managed npz artifact → legacy
-    inline parameters); **no interpolation is ever triggered**.  Non-factor evidence entries (``draft:<layer_id>``,
-    ``constraints:current``, bare version ids) belong to the manual
-    interpretation path and are skipped.
-
-    The fusion always reads the task's *current* grid; whether a pinned
-    evidence version has been superseded is judged separately by the workspace
-    staleness evaluation (``mapping_workspace.dependencies``), which marks the
-    integrated artifact STALE — fusion results are never silently refreshed.
-    V9 (P1-7): when *mismatches* is provided, entries whose PINNED version
-    differs from the task's current grid version are appended there — the
-    fusion ran on data other than the pin and the product must say so.
+    When a selector carries a pinned version different from the task's
+    current grid, that catalog artifact is the runtime input if it loads
+    (#1271). A missing pin fails closed when the task already has a
+    current version (refuse to fuse "current" as the pin). Catalogless
+    live tokens (no current version, pin not in catalog) still resolve
+    from the live cache.
 
     Raises:
         ValueError: listing every unresolvable factor task (unknown task id,
@@ -146,19 +154,30 @@ factor_grid_result_for_task` (live cache → managed npz artifact → legacy
             pinned_version = parts[2]
         current_version = str(
             getattr(task, "grid_artifact_version_id", "") or "")
-        if pinned_version and current_version \
-                and pinned_version != current_version and mismatches is not None:
-            mismatches.append(
-                f"{label}：钉住版本 {pinned_version} ≠ 任务当前版本 "
-                f"{current_version}——融合使用当前网格（评估层另行标记过期）")
+        if pinned_version and pinned_version != current_version:
+            pinned = _grid_from_catalog_version(catalog, pinned_version)
+            if pinned is not None:
+                if mismatches is not None:
+                    mismatches.append(
+                        f"{label}：钉住版本 {pinned_version} ≠ 任务当前版本 "
+                        f"{current_version or '∅'}——融合使用钉住网格")
+                resolved[task_id] = pinned
+                continue
+            if current_version:
+                unresolvable.append(
+                    f"{label}（{value}）：钉住版本 {pinned_version} 无法从目录"
+                    "装载网格（拒绝用当前网格冒充冻结输入）")
+                continue
+            # No current version and pin not in catalog: legacy live token.
         try:
             resolved[task_id] = factor_grid_result_for_task(task)
         except Exception as exc:  # noqa: BLE001 — report, never partial-fuse
             unresolvable.append(f"{label}（{value}）：{exc}")
     if unresolvable:
         raise ValueError(
-            "以下证据因子无法解析为网格成果（live 缓存 → npz 工件 → 内联参数"
-            "均失败），拒绝在残缺证据集上融合：" + "；".join(unresolvable)
+            "以下证据因子无法解析为网格成果（pin 目录工件 → live 缓存 → "
+            "npz 工件 → 内联参数均失败），拒绝在残缺证据集上融合："
+            + "；".join(unresolvable)
         )
     return resolved
 
@@ -542,9 +561,16 @@ def run_integrated_fusion(
     * ``registered`` / ``catalog_version_id`` — registration outcome (honest
       ``False`` with a reason when ``register=False`` or no catalog service).
     """
+    from paleo_workbench.workflow.interpretation.compilation import (
+        active_input_set,
+    )
+
+    input_set = active_input_set(document)
+    if input_set is not None and not getattr(input_set, "frozen", False):
+        raise ValueError("请先冻结 Compilation Input Set 再运行融合")
     pin_mismatches: list[str] = []
     factor_results = fusion_inputs_from_document(
-        document, evidence_set, mismatches=pin_mismatches)
+        document, evidence_set, mismatches=pin_mismatches, catalog=catalog)
     model = build_fusion_model(
         evidence_set,
         factor_results,

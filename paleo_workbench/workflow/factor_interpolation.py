@@ -136,13 +136,35 @@ METHOD_LABEL_TO_ENGINE = {
     "克里金": "kriging",
     "克里金(MVP·线性)": "kriging",
     "IDW": "IDW",
+    "idw": "IDW",
     "样条": "样条",
+    "spline": "样条",
+    "cubic": "样条",
     "方向趋势": "方向趋势",
+    "directional": "方向趋势",
+    "kriging": "kriging",
     # Haiyou constrained-IDW (region barriers + direction corridors + well
     # re-anchoring) is dispatched host-side via run_constrained_idw; the engine
     # method id CONSTRAINED_IDW_ENGINE_LABEL keeps it distinct from plain IDW.
     "约束IDW": CONSTRAINED_IDW_ENGINE_LABEL,
 }
+
+_KNOWN_ENGINE_METHODS = frozenset(METHOD_LABEL_TO_ENGINE.values()) | {
+    CONSTRAINED_IDW_ENGINE_LABEL, "mock",
+}
+
+
+def resolve_engine_method(method: str) -> str:
+    """Map a UI / registry method id to an engine backend. Unknown → raise."""
+    mapped = METHOD_LABEL_TO_ENGINE.get(method)
+    if mapped is not None:
+        return mapped
+    if method in _KNOWN_ENGINE_METHODS:
+        return method
+    raise ValueError(
+        f"unknown interpolation method {method!r}; "
+        "supported: " + ", ".join(sorted(METHOD_LABEL_TO_ENGINE))
+    )
 
 
 def _snapshot_hash(payload: dict[str, Any]) -> str:
@@ -578,7 +600,7 @@ def apply_interpolation_to_task(
         except (TypeError, ValueError):
             pass
 
-    engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
+    engine_method = resolve_engine_method(method)
     crs = project.coordinate.project_crs if project is not None else None
     # V9 (P1-3): CRS discipline — a constraint group declaring a DIFFERENT
     # CRS than the factor/project CRS refuses the interpolation (mixed
@@ -660,6 +682,12 @@ def apply_interpolation_to_task(
         )
 
     if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
+        policy = str(getattr(normalization, "policy", "") or "")
+        if policy == "keep":
+            raise ValueError(
+                "约束IDW 不支持 duplicate_policy='keep'（引擎 first-wins）；"
+                "请使用 mean/first/error"
+            )
         result = run_constrained_idw(
             points,
             grid_n=grid_n,
@@ -740,7 +768,7 @@ def _task_plan_group_key(
     project: ProjectDocument | None,
 ) -> str | None:
     """Return a plan digest for plain-IDW tasks that can share geometry, else None."""
-    engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
+    engine_method = resolve_engine_method(method)
     if engine_method not in ("IDW", "idw", "mock"):
         return None
     params = task.parameters or {}
@@ -959,7 +987,7 @@ def batch_prepare_factor_maps(
         if (
             plan is not None
             and len(tasks) >= 2
-            and METHOD_LABEL_TO_ENGINE.get(method, method) in ("IDW", "idw", "mock")
+            and resolve_engine_method(method) in ("IDW", "idw", "mock")
         ):
             stack_rows: list[np.ndarray] = []
             aligned_tasks: list[tuple[FactorMapTask, list, Any]] = []
@@ -1075,7 +1103,7 @@ def batch_prepare_factor_maps(
                 power=power,
                 project=project,
                 cancellation_token=cancellation_token,
-                plan=use_plan if METHOD_LABEL_TO_ENGINE.get(method, method) in (
+                plan=use_plan if resolve_engine_method(method) in (
                     "IDW", "idw", "mock"
                 ) else None,
                 fingerprint_memo=fp_memo,
@@ -1172,7 +1200,7 @@ def cross_validate_factor_task(
         raw_points, policy=duplicate_policy_from_params(params)
     )
     method, recorded_grid_n, power = interpolation_params_from_task(task)
-    engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
+    engine_method = resolve_engine_method(method)
     grid_n = recorded_grid_n if recorded_grid_n else DEFAULT_GRID_N
 
     breaks = None
@@ -1337,7 +1365,7 @@ def evaluate_methods_for_task(
             for name in unknown_constraints
         )
         if kinds:
-            engine_method = METHOD_LABEL_TO_ENGINE.get(method_label, method_label)
+            engine_method = resolve_engine_method(method_label)
             capability_warnings.extend(
                 evaluate_request(engine_method, kinds).diagnostics
             )

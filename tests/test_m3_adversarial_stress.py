@@ -475,7 +475,7 @@ class TestFactorExtractionAndGeometryEdgeCases:
         ds_ratio = pipeline.extract_factors(records, "sand_ratio")
         assert len(ds_ratio.valid_points) == 1
         assert ds_ratio.valid_points[0].well_id == "W3"
-        assert math.isclose(ds_ratio.valid_points[0].value, 0.25)
+        assert math.isclose(ds_ratio.valid_points[0].value, 25.0)
 
         # Formation thickness from tops/bases only
         depth_records = [

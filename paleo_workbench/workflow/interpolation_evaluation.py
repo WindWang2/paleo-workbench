@@ -67,6 +67,8 @@ def bilinear_sample_grid(
     fj = (py - y0) / (y1 - y0) * (ny - 1) if ny > 1 else 0.0
     if not (math.isfinite(fi) and math.isfinite(fj)):
         return None
+    if fi < 0.0 or fi > (nx - 1) or fj < 0.0 or fj > (ny - 1):
+        return None
     i = min(max(int(math.floor(fi)), 0), nx - 2)
     j = min(max(int(math.floor(fj)), 0), ny - 2)
     a = fi - i

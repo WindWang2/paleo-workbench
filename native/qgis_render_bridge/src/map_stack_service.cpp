@@ -2290,6 +2290,13 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     if (!delta_applied) {
       features = parseGeoJsonFeatures(
           QString::fromStdString(geojson_feature_collection), existing->fields());
+      if (features.isEmpty() && !delta_json.empty()) {
+        // Host omitted the FeatureCollection because it expected delta_applied.
+        // Truncating would wipe the mirror; refuse so the host can full-ship.
+        throw std::runtime_error(
+            "mirror delta not applied and geojson is empty for doc_id: "
+            + doc_id + "; refuse truncate");
+      }
       if (existing->dataProvider()) {
         if (!existing->dataProvider()->truncate()) {
           throw std::runtime_error("mirror truncate failed for doc_id: " + doc_id);
