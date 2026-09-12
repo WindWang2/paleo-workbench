@@ -1398,6 +1398,7 @@ class CompositeDocument(QWidget):
                 getattr(snapping_service, "modes", ()) or ())
         # V10 M-H：活动层 provider 能力（桥自省面；无面 = None 不参与门禁）。
         provider_writable = None
+        provider_writable_approximate = False
         provider_name = ""
         active_id = str(controller.active_layer_id or "")
         if active_id and self.uses_native_stack:
@@ -1422,6 +1423,7 @@ class CompositeDocument(QWidget):
                     provider_writable = bool(declared)
                     provider_writable_approximate = False
         inputs["provider_writable"] = provider_writable
+        inputs["provider_writable_approximate"] = provider_writable_approximate
         inputs["provider_name"] = provider_name
         return build_tool_context(
             controller_state=inputs,
