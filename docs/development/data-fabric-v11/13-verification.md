@@ -33,11 +33,25 @@ V11 的本地验证记录（无线上 CI，按 goal §2 本地执行）。
 | tests/test_td_calibration_lifecycle.py（ports 接入后） | 20 passed |
 | tests/test_navigation_tree*.py（角色分组重构后） | 全绿 |
 
-## 全量分批套件
+## 全量分批套件（最终结论）
 
-`python scripts/run_suite_batched.py . <out>`：780 个测试文件逐文件跑
-（exit code 记录 + 崩溃重试隔离）。结果见 PR 描述与工件；判定标准：
-无 V11 引入的失败文件（既有已知失败在 main 基线同样出现）。
+`python scripts/run_suite_batched.py . <out>`：780 个测试文件逐文件跑，结果
+**716 pass / 52 fail / 12 crash**。对全部 64 个异常文件做了与 base
+`6c08fb7d` 的**严格 A/B 对照**（每文件双向、退出码+汇总行双重判定）：
+
+- **56 个双向一致**（base 同样 fail/crash）：QGIS 桥未构建（qgis_render_bridge
+  需数小时 vendored 构建，本机未装）、visual_qa 视觉回归、native 引擎 ABI、
+  kriging/插值数值环境、Windows 只读 payload 的 tmp 清理 PermissionError、
+  时序 flaky（test_workflow_review_fixes 在 base 单跑 4/4 复现失败）。
+- **8 个曾在分支失败**：全部因 worktree 的 geo-viz-engine 子模块未检出
+  （资产/源码扫描类测试）。从本地 base 检出按 pinned SHA
+  `08851951` 物化后**全部通过（71 passed, 0 failed）**。非代码回归。
+- 对照期间发现并修复了两个真实的 V11 侧测试期望/token 问题：
+  `well_detail_panel` 裸 font-size 字面量（改 QFont）与
+  `test_external_reference_wells` 的树叶结构断言（适配角色分组）。
+
+**结论：V11 引入的代码回归为零；分支上 64 个异常全部可归因于既有
+环境因素或 worktree 子模块缺失，且后者已物化验证。**
 
 ## Review 轮次
 
