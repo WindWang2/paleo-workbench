@@ -100,6 +100,11 @@ class TopologyService:
     def __init__(self, *, enabled: bool = False, tolerance: float = 1e-9) -> None:
         self.enabled = bool(enabled)
         self.tolerance = max(0.0, float(tolerance))
+        # M4 §5：analysis 检查器结果 + 双豁免。旧桥无 run_geometry_checks
+        # 时 commit_all 仍走 validate_records。
+        from paleo_workbench.mapping.topology_checker import TopologyChecker
+
+        self.checker = TopologyChecker()
         # V8 M3：复合撤销组登记簿 + 最近一次传播见过的图层（origin 层
         # 定位用——服务不持有图层注册表，宿主每次调用传入全集）。
         self._compounds: list[CompoundUndoGroup] = []

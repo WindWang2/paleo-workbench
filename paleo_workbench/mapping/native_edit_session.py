@@ -103,7 +103,9 @@ class NativeEditSessionController:
             return False, f"镜像层进入编辑失败：{exc}"
         if error:
             return False, f"镜像层进入编辑失败：{error}"
-        self._sessions[layer_id] = {"stack": stack, "layer": layer}
+        self._sessions[layer_id] = {
+            "stack": stack, "layer": layer, "canvas": canvas_address,
+        }
         if SESSION_SET.is_open:
             SESSION_SET.request_join([layer_id])  # 门禁已过 → 入集生长
         else:
@@ -169,6 +171,30 @@ class NativeEditSessionController:
             })
         return normalized
 
+    def _topology_gate_issues(self, topology) -> list[dict[str, object]]:
+        """M4 检查器门禁；旧桥回落逐层 validate_records。"""
+        checker = getattr(topology, "checker", None)
+        first = next(iter(self._sessions.values()), None)
+        stack = first["stack"] if first is not None else None
+        if (checker is not None and stack is not None
+                and callable(getattr(stack, "run_geometry_checks", None))):
+            canvas = first.get("canvas") or 0
+            issues = checker.run_for_commit(
+                stack, canvas, list(self._sessions))
+            for layer_id, session in self._sessions.items():
+                count = sum(1 for issue in issues
+                            if str(issue.get("layer_id") or "") == layer_id)
+                topology.record_validation(session["layer"], count)
+            return issues
+        issues: list[dict[str, object]] = []
+        for layer_id, session in self._sessions.items():
+            layer = session["layer"]
+            records = self.readback_features(session["stack"], layer_id)
+            layer_issues = topology.validate_records(layer_id, records)
+            topology.record_validation(layer, len(layer_issues))
+            issues.extend(layer_issues)
+        return issues
+
     # -- 保存：整集合全或无（§3）---------------------------------------------
 
     def commit_all(self, *, gate, topology, on_committed=None) -> tuple[bool, str]:
@@ -188,24 +214,24 @@ class NativeEditSessionController:
                     return False, (
                         f"图层「{getattr(layer, 'name', layer_id)}」"
                         f"{reason}（全部编辑未提交）")
-        # 提交前段 ②：拓扑零错误全集合判定（几何读回 = 编辑缓冲事实）。
+        # 提交前段 ②：拓扑零错误全集合判定。M4：桥检查器（含忽略豁免）
+        # 优先；旧桥回落 validate_records（几何读回 = 编辑缓冲事实）。
         if topology is not None and topology.enabled:
-            for layer_id, session in self._sessions.items():
+            issues = self._topology_gate_issues(topology)
+            if issues:
+                shown = issues[:3]
+                details = "；".join(
+                    f"{issue.get('feature_id', '')}："
+                    f"{issue.get('message', '')}" for issue in shown)
+                more = (f"（另有 {len(issues) - 3} 个问题）"
+                        if len(issues) > 3 else "")
+                first_layer = str(shown[0].get("layer_id") or next(iter(self._sessions)))
+                session = self._sessions.get(first_layer) or next(iter(self._sessions.values()))
                 layer = session["layer"]
-                records = self.readback_features(session["stack"], layer_id)
-                issues = topology.validate_records(layer_id, records)
-                topology.record_validation(layer, len(issues))
-                if issues:
-                    shown = issues[:3]
-                    details = "；".join(
-                        f"{issue.get('feature_id', '')}："
-                        f"{issue.get('message', '')}" for issue in shown)
-                    more = (f"（另有 {len(issues) - 3} 个问题）"
-                            if len(issues) > 3 else "")
-                    return False, (
-                        f"图层「{getattr(layer, 'name', layer_id)}」"
-                        f"{len(issues)} 个要素未通过拓扑检查：{details}{more}"
-                        f"（全部编辑未提交）")
+                return False, (
+                    f"图层「{getattr(layer, 'name', first_layer)}」"
+                    f"{len(issues)} 个要素未通过拓扑检查：{details}{more}"
+                    f"（全部编辑未提交）")
         # 逐层 commit（会话集合序）；失败 → 剩余层 rollBack（全或无）。
         ordered = list(self._sessions.items())
         committed: list[tuple[str, dict]] = []
@@ -246,7 +272,8 @@ class NativeEditSessionController:
             if delta:
                 session["layer"].apply_committed_delta(
                     delta, session_id=f"native-{layer_id}",
-                    source_tool="native")
+                    source_tool="native",
+                    gestures=self.gestures.audit_records())
             if on_committed is not None:
                 on_committed(session["layer"])
         for layer_id, _session in committed:

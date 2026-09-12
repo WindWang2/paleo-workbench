@@ -422,7 +422,9 @@ py::dict capability_manifest() {
           "current_layer_clear", "digitize_scratch_honest_crs",
           // 0.7.0a0 (V11): 树事务窗口（begin/end_tree_update + 修订号 +
           // runtime_facts 结构性计数）；expand-preserving placements。
-          "tree_update_window"}) {
+          "tree_update_window",
+          // 0.10.0a0 (topo-editing M4): analysis checker run/fix.
+          "geometry_checker"}) {
         features.append(feature);
     }
     manifest["features"] = features;
@@ -457,7 +459,10 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // 0.9.0a0 (topo-editing M3): split_mirror_features /
     // merge_mirror_features (native buffer split/merge + attribute
     // inheritance; neighbor topo-points on split).
-    module.attr("__version__") = "0.9.0a0";
+    // 0.10.0a0 (topo-editing M4): run_geometry_checks /
+    // fix_geometry_error(s) / highlight_checker_errors (analysis
+    // overlap/gap/is_valid + workspace remainder).
+    module.attr("__version__") = "0.10.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -953,6 +958,24 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              py::arg("attrs_json") = "",
              "M3 topo-editing: merge listed features (union + attributes); "
              "one undoable macro 'Merged features'.")
+        .def("run_geometry_checks",
+             &pwb::qgis_render::QgisMapStack::runGeometryChecks,
+             py::arg("canvas"), py::arg("config_json"),
+             "M4 topo-editing: run overlap/gap/is_valid/workspace-remainder "
+             "checks; returns JSON {errors:[...]}.")
+        .def("fix_geometry_error",
+             &pwb::qgis_render::QgisMapStack::fixGeometryError,
+             py::arg("canvas"), py::arg("error_id"), py::arg("method") = 0,
+             "M4 topo-editing: fix one checker error (one undoable macro). "
+             "workspace_remainder navigates; is_valid uses makeValid.")
+        .def("fix_geometry_errors",
+             &pwb::qgis_render::QgisMapStack::fixGeometryErrors,
+             py::arg("canvas"), py::arg("error_ids_json"), py::arg("method") = 0,
+             "M4 topo-editing: fix listed errors as one undoable macro.")
+        .def("highlight_checker_errors",
+             &pwb::qgis_render::QgisMapStack::highlightCheckerErrors,
+             py::arg("canvas"), py::arg("error_ids_json"),
+             "M4 topo-editing: rubber-band highlight of checker error geometries.")
         .def("set_edit_pick_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
                 py::function f) {
