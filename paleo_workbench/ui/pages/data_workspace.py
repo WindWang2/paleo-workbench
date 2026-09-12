@@ -99,8 +99,13 @@ class DataWorkspace(QWidget):
         self._center_stack = QStackedWidget()
         self._center_stack.setObjectName("DataCenterStack")
         self.overview_panel = ProjectOverviewPanel()
+        # V11 well data view: per-well role/stale/edits center page.
+        from paleo_workbench.ui.pages.well_detail_panel import WellDetailPanel
+
+        self.well_detail_panel = WellDetailPanel()
         self._center_stack.addWidget(self.asset_table)  # index 0 = table
         self._center_stack.addWidget(self.overview_panel)  # index 1 = overview
+        self._center_stack.addWidget(self.well_detail_panel)  # index 2 = well view
 
         # Right column: vertical splitter of reader + inspector
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -243,6 +248,16 @@ class DataWorkspace(QWidget):
 
     def overview_visible(self) -> bool:
         return self._center_stack.currentIndex() == 1
+
+    def show_well_detail(self, visible: bool) -> None:
+        """井数据视图 node ↔ table swap (index 2; overview rules unchanged)."""
+        if visible:
+            self._center_stack.setCurrentIndex(2)
+        elif self._center_stack.currentIndex() == 2:
+            self._center_stack.setCurrentIndex(0)
+
+    def well_detail_visible(self) -> bool:
+        return self._center_stack.currentIndex() == 2
 
     def set_right_visible(self, visible: bool) -> None:
         self.right_splitter.setVisible(visible)

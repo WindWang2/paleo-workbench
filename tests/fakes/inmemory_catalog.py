@@ -169,6 +169,8 @@ class InMemoryCatalog:
         generator_version: str | None = None,
         domain_task_id: str | None = None,
         input_snapshot_hash: str | None = None,
+        input_ports: list[dict[str, Any]] | None = None,
+        output_ports: list[dict[str, Any]] | None = None,
     ) -> DataRunRef:
         run = DataRunRef(
             run_id=_id("run"),
@@ -180,8 +182,27 @@ class InMemoryCatalog:
             domain_task_id=domain_task_id,
             input_snapshot_hash=input_snapshot_hash,
         )
+        # Typed ports (V11): kept as plain dicts on the fake so callers can
+        # assert what the business layer declared.
+        if input_ports:
+            run.parameters.setdefault("_input_ports", list(input_ports))
+        if output_ports:
+            run.parameters.setdefault("_output_ports", list(output_ports))
         self._runs[run.run_id] = run
         return run
+
+    def set_run_ports(
+        self,
+        run_id: str,
+        *,
+        input_ports: list[dict[str, Any]] | None = None,
+        output_ports: list[dict[str, Any]] | None = None,
+    ) -> None:
+        run = self._runs[run_id]
+        if input_ports is not None:
+            run.parameters["_input_ports"] = list(input_ports)
+        if output_ports is not None:
+            run.parameters["_output_ports"] = list(output_ports)
 
     def complete_run(self, run_id: str, *, status: str = "complete") -> DataRunRef:
         run = self._runs[run_id]

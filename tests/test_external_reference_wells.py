@@ -350,8 +350,11 @@ def test_data_tree_has_separate_reference_well_category(qtbot):
     assert "TARGET" in target_group.child(0).text(0)
     reference_item = reference_group.child(0)
     assert "REF-01" in reference_item.text(0)
+    # V11: the per-well file layer groups by link role (well_head here).
     assert reference_item.childCount() == 1
-    assert reference_item.child(0).text(0) == "▤ reference.xml"
+    role_group = reference_item.child(0)
+    assert role_group.text(0).startswith("◧ 井身/井位 (1)")
+    assert role_group.child(0).text(0) == "▤ reference.xml"
 
 
 def test_navigation_tree_context_menu_requests_concrete_well_delete(

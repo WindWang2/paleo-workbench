@@ -413,6 +413,27 @@ class ProjectController:
                     service.repair_ghost_runs()
                 except Exception:
                     pass
+                # V11 role governance backfill (docs 10-migration §3.1):
+                # promote the unique live candidate for required_single
+                # roles that lost their primary; ambiguous groups wait for
+                # a human. Deterministic + idempotent; guarded like every
+                # open-time maintenance step.
+                try:
+                    if loaded is not None:
+                        from paleo_workbench.catalog.roles_backfill import (
+                            backfill_role_primaries,
+                        )
+
+                        backfill_role_primaries(loaded)
+                except Exception:
+                    pass
+                # V11 typed-lineage backfill (docs 06 §5): deterministic
+                # output-port roles for pre-V11 runs; idempotent no-op when
+                # ports are already present.
+                try:
+                    service.migrate_run_ports()
+                except Exception:
+                    pass
                 # #1223-family: interrupted transcodes/attributes resume on
                 # project open (was: only on first lifecycle activity, so a
                 # reopened project silently carried 'running' runs).

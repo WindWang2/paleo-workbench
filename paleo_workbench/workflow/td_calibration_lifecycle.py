@@ -373,6 +373,17 @@ def save_reviewed_calibration(
             generator=GENERATOR_ID,
             type="time_depth",
             format="dat",
+            input_ports=[
+                {
+                    "role": "checkshot",
+                    "version_id": parent_version_ids[0],
+                    "entity_type": "well",
+                    "entity_id": review.well_entity_id,
+                }
+            ]
+            if parent_version_ids
+            else None,
+            output_port_role="calibrated_td",
             metadata={
                 "fingerprint": fingerprint,
                 "verified": verified,

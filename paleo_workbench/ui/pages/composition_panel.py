@@ -861,6 +861,36 @@ class CompositionPanel(QFrame):
             json.dumps(session.document.to_dict(), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        self._register_catalog_export(Path(path))
+
+    def _register_catalog_export(self, path: Path) -> None:
+        """V11 (docs 02 D10): composition saves join the export ledger.
+
+        Best-effort — the save itself must never fail because provenance
+        registration did (the same contract as every record_export caller).
+        """
+        try:
+            provider = getattr(self, "project_provider", None)
+            project = provider() if callable(provider) else None
+            if project is None:
+                return
+        except Exception:
+            return  # a raising provider must never break the save path
+            from paleo_workbench.project.artifacts import record_export
+
+            record_export(
+                project,
+                linked_id="composition",
+                output_path=str(path),
+                fmt="json",
+                source_task_ids=[],
+            )
+        except Exception:
+            import logging
+
+            logging.getLogger("paleo_workbench.composition").debug(
+                "composition export provenance registration failed", exc_info=True
+            )
 
     def _load_json(self) -> None:
         path, _selected = QFileDialog.getOpenFileName(

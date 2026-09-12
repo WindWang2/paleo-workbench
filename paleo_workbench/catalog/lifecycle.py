@@ -37,6 +37,7 @@ from paleo_workbench.catalog import (
     get_catalog,
     sha256_file_or_none,
 )
+from paleo_workbench.catalog import port_roles as _port_roles
 
 _log = logging.getLogger("paleo_workbench.catalog")
 
@@ -237,6 +238,51 @@ def _fail_run(cat: "CatalogPort", run_id: str | None) -> None:
         _log.warning("failed-run compensation error for %s", run_id, exc_info=True)
 
 
+def _annotate_output_port(
+    cat: "CatalogPort", run_id: str | None, version_id: str | None, role: str
+) -> None:
+    """V11 typed lineage: tag a run's output endpoint with its role.
+
+    Best-effort by contract — backends without typed-port support accept and
+    ignore the call, and a failure here must never fail an otherwise
+    successful registration (ports refine provenance; the flat id lists
+    remain authoritative).
+    """
+    if run_id is None or version_id is None:
+        return
+    try:
+        cat.set_run_ports(
+            run_id, output_ports=[{"role": role, "version_id": version_id}]
+        )
+    except Exception:
+        _log.debug("output-port annotation skipped for run %s", run_id, exc_info=True)
+
+
+def _annotate_input_ports(
+    cat: "CatalogPort",
+    run_id: str | None,
+    version_ids: "list[str] | None",
+    role: str,
+    *,
+    entity_type: str = "",
+    entity_ids: "list[str] | None" = None,
+) -> None:
+    """V11 typed lineage: tag a run's input endpoints with one shared role."""
+    if run_id is None or not version_ids:
+        return
+    ports = []
+    for ordinal, vid in enumerate(version_ids):
+        port = {"role": role, "version_id": vid, "ordinal": ordinal}
+        if entity_type and entity_ids and ordinal < len(entity_ids):
+            port["entity_type"] = entity_type
+            port["entity_id"] = entity_ids[ordinal]
+        ports.append(port)
+    try:
+        cat.set_run_ports(run_id, input_ports=ports)
+    except Exception:
+        _log.debug("input-port annotation skipped for run %s", run_id, exc_info=True)
+
+
 def register_persisted_factor_grids(
     project: "ProjectDocument",
     *,
@@ -319,6 +365,13 @@ def register_horizon_interpretation_run(
             kind="horizon_interpretation",
             format="npz",
             tags=["interpretation", "horizon"],
+        )
+        if parent_version_id:
+            _annotate_input_ports(
+                cat, run.run_id, [parent_version_id], _port_roles.HORIZON
+            )
+        _annotate_output_port(
+            cat, run.run_id, version.version_id, _port_roles.INTERPRETATION
         )
     except Exception:
         # No orphan RUNNING run (H7 failure injection).
@@ -436,6 +489,13 @@ def register_prediction_run(
                 format="json",
             )
         cat.complete_run(run.run_id)
+        _annotate_input_ports(
+            cat, run.run_id, list(factor_versions or []), _port_roles.FACTOR_GRIDS
+        )
+        if version is not None:
+            _annotate_output_port(
+                cat, run.run_id, version.version_id, _port_roles.PREDICTION
+            )
     except Exception:
         _fail_run(cat, run.run_id)
         raise
@@ -589,6 +649,9 @@ def register_export_output(
             format=fmt,
         )
         cat.complete_run(run.run_id)
+        _annotate_output_port(
+            cat, run.run_id, version.version_id, _port_roles.EXPORT
+        )
     except Exception:
         _fail_run(cat, run.run_id)
         raise
@@ -801,6 +864,12 @@ def register_stratigraphic_correlation_run(
             kind="stratigraphic_correlation",
             format="json",
             tags=["interpretation", "correlation", "tops"],
+        )
+        _annotate_input_ports(
+            cat, run.run_id, list(inputs), _port_roles.TOPS
+        )
+        _annotate_output_port(
+            cat, run.run_id, version.version_id, _port_roles.CORRELATION
         )
     except Exception:
         # No orphan RUNNING run (H7 failure injection).

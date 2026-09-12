@@ -61,6 +61,7 @@ from paleo_workbench.catalog.models import (
     CatalogError,
     Model,
     ModelVersion,
+    RunPort,
     Tag,
 )
 from paleo_workbench.catalog.queries import IntegrityReport
@@ -76,6 +77,7 @@ from paleo_workbench.catalog.storage import (
     trash_dir_for as _trash_dir_for,
     trash_payload as _move_to_trash,
 )
+from paleo_workbench.catalog.service_v11 import DataFabricV11Mixin
 from paleo_workbench.catalog.store import CatalogStore, catalog_file_for
 from paleo_workbench.project.models import _now_iso
 from paleo_workbench.project.paths import artifact_dir_for
@@ -259,8 +261,15 @@ def _record_manifest_mtime_ns(index: CatalogIndex, path: Path) -> None:
         pass  # bookkeeping only; never fails a checkpoint
 
 
-class DataCatalogService:
-    """Unified lifecycle service for one project."""
+class DataCatalogService(DataFabricV11Mixin):
+    """Unified lifecycle service for one project.
+
+    The V11 data-fabric surface (typed run ports, compound bundle versions,
+    pin / retention / cleanup eligibility, lifecycle status) lives in
+    :mod:`paleo_workbench.catalog.service_v11` and is mixed in here so there
+    remains exactly ONE catalog service class with one lock, one document
+    and one persistence path.
+    """
 
     def __init__(
         self,
@@ -2610,12 +2619,16 @@ class DataCatalogService:
         type: str | None = None,
         format: str | None = None,
         metadata: dict[str, Any] | None = None,
+        input_ports: Iterable[RunPort | dict[str, Any]] | None = None,
+        output_port_role: str | None = None,
     ) -> DataVersion:
         """Create a new DERIVED asset+version from *parent_version_ids*.
 
         When *operation* is given, a DataRun is registered linking the input
         and output versions, so the result answers the full provenance set:
         parents, run, parameters, generator, time, hash, and payload location.
+        ``input_ports`` / ``output_port_role`` (V11 typed lineage, optional)
+        annotate the run's endpoints with roles.
         """
         parents = [self._version_or_raise(pid) for pid in parent_version_ids]
         parent_type = None
@@ -2643,6 +2656,8 @@ class DataCatalogService:
                 parameters=dict(parameters or {}),
                 generator=generator,
             )
+            self._apply_run_ports(run, input_ports=input_ports, output_ports=None,
+                                  validate_versions=False)
         with self._payload_staging_lease(
             self._staging_target(DataStage.DERIVED, asset.id)
         ):
@@ -2654,6 +2669,10 @@ class DataCatalogService:
             )
             if run is not None:
                 run.output_version_ids = [version.id]
+                if output_port_role:
+                    run.output_ports = [
+                        RunPort(role=output_port_role, version_id=version.id)
+                    ]
             # Commit under the lock (#517); the payload copy/hash above stays
             # outside so the lock is never held across disk I/O.
             with self._lock:
@@ -2687,6 +2706,8 @@ class DataCatalogService:
         generator: str = "",
         status: str = "completed",
         model_ref: dict[str, Any] | None = None,
+        input_ports: Iterable[RunPort | dict[str, Any]] | None = None,
+        output_ports: Iterable[RunPort | dict[str, Any]] | None = None,
     ) -> DataRun:
         run = DataRun(
             operation=operation,
@@ -2696,6 +2717,12 @@ class DataCatalogService:
             generator=generator,
             status=status,
             model_ref=dict(model_ref) if model_ref else None,
+        )
+        # Single port-assignment core (budget + ⊆ invariant); versions may
+        # legitimately not exist yet when the outputs are registered later.
+        self._apply_run_ports(
+            run, input_ports=input_ports, output_ports=output_ports,
+            validate_versions=False,
         )
         self._add_run(run)
         try:

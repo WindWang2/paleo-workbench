@@ -33,24 +33,13 @@ from pydantic import BaseModel, Field
 
 ENTITY_TYPE = Literal["well", "seismic_survey", "geological_entity", "auxiliary_entity"]
 
-WELL_ROLES = (
-    "well_head",
-    "well_log",
-    "trajectory",
-    "tops",
-    "time_depth",
-    "interpretation",
-    "other",
-)
-
-SURVEY_ROLES = (
-    "seismic_volume",
-    "geometry",
-    "velocity",
-    "horizon",
-    "fault",
-    "interpretation",
-    "other",
+# Role vocabularies moved to the V11 role registry (single authority for
+# cardinality / primary policy / display); re-exported here so existing
+# imports keep working. "other" stays last in both tuples.
+from paleo_workbench.project.roles import (  # noqa: E402
+    SURVEY_ROLES,
+    WELL_ROLES,
+    role_definition,
 )
 
 

@@ -247,6 +247,7 @@ class MappingPage(QWidget):
         from paleo_workbench.ui.pages.composition_panel import CompositionPanel
 
         self.composition_panel = CompositionPanel()
+        self.composition_panel.project_provider = lambda: self._project
         self.dock_manager.add_panel(
             "composer", "组图面板", "panel-chrome", self.composition_panel,
             side="right", checked=False, float_key="mapping:composer",

@@ -1,0 +1,229 @@
+"""Well detail panel — the V11 per-well data view surface.
+
+Rendered from :class:`~paleo_workbench.catalog.entity_views.WellDataView`
+(the read facade over project domain + catalog). The panel owns no state
+beyond the last view it was handed — every refresh re-assembles from the
+authorities, so there is no second data store to drift.
+
+Shows: identity header, per-role slots (primary badge, member count,
+current version), missing roles (data-completeness at a glance), stale
+downstream products, uncommitted edits, and missing sources.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from paleo_workbench.ui import tokens
+
+
+class _SectionCard(QFrame):
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.setObjectName("WellDetailCard")
+        palette = tokens.palette_for("light")
+        self.setStyleSheet(
+            f"QFrame#WellDetailCard {{ background: {palette['BG_SEARCH']};"
+            f" border: 1px solid {palette['BORDER']};"
+            f" border-radius: {tokens.RADIUS_CARD}px; }}"
+        )
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(
+            tokens.SPACE_4, tokens.SPACE_3, tokens.SPACE_4, tokens.SPACE_4
+        )
+        self._layout.setSpacing(tokens.SPACE_2)
+        title_label = QLabel(title)
+        title_font = title_label.font()
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        self._layout.addWidget(title_label)
+        self.body = QVBoxLayout()
+        self._layout.addLayout(self.body)
+
+
+class WellDetailPanel(QWidget):
+    """Center-stack page showing one well's full data view."""
+
+    # User asked to leave the detail page (back to the asset table).
+    close_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("WellDetailPanel")
+        self._view: Any = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(
+            tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4
+        )
+        layout.setSpacing(tokens.SPACE_3)
+
+        self._title = QLabel("井数据视图")
+        title_font = self._title.font()
+        title_font.setPointSizeF(max(title_font.pointSizeF(), 0.0) + 3)
+        title_font.setBold(True)
+        self._title.setFont(title_font)
+        self._subtitle = QLabel("")
+        self._subtitle.setStyleSheet(
+            f"color: {tokens.palette_for('light')['TEXT_SECONDARY']};"
+        )
+        layout.addWidget(self._title)
+        layout.addWidget(self._subtitle)
+
+        self._roles_table = QTableWidget(0, 5)
+        self._roles_table.setHorizontalHeaderLabels(
+            ["角色", "资产", "主用", "当前版本", "版本数"]
+        )
+        self._roles_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self._roles_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._roles_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self._roles_table.verticalHeader().setVisible(False)
+        layout.addWidget(self._roles_table, 2)
+
+        self._status_row = QHBoxLayout()
+        self._stale_card = _SectionCard("过期成果")
+        self._edits_card = _SectionCard("未提交编辑")
+        self._missing_card = _SectionCard("缺失/异常")
+        for card in (self._stale_card, self._edits_card, self._missing_card):
+            self._status_row.addWidget(card, 1)
+        layout.addLayout(self._status_row, 1)
+
+        self._close_btn = QPushButton("← 返回资产列表")
+        self._close_btn.clicked.connect(self.close_requested.emit)
+        layout.addWidget(self._close_btn, 0, Qt.AlignmentFlag.AlignLeft)
+
+    def update_stale(self, items: list) -> None:
+        """Late-arriving staleness results (computed off the GUI thread)."""
+        if self._view is None:
+            return
+        self._view.stale_items = list(items or [])
+        self._view.stale_count = len(self._view.stale_items)
+        self._fill_list_card(
+            self._stale_card.body,
+            [
+                f"{getattr(item, 'stage', '')} · {item.version_id[:14]}…"
+                + (" · pinned" if getattr(item, "pinned", False) else "")
+                for item in self._view.stale_items[:8]
+            ]
+            + (
+                [f"…另有 {self._view.stale_count - 8} 项"]
+                if self._view.stale_count > 8
+                else []
+            )
+            or ["无过期成果"],
+        )
+
+    # ------------------------------------------------------------------
+
+    def set_view(self, view: Any) -> None:
+        """Render a WellDataView (pass None to reset)."""
+        self._view = view
+        if view is None:
+            self._title.setText("井数据视图")
+            self._subtitle.setText("")
+            self._roles_table.setRowCount(0)
+            for card in (self._stale_card, self._edits_card, self._missing_card):
+                self._clear_layout(card.body)
+            return
+        well = getattr(view, "well", None) or getattr(view, "survey", None)
+        if well is None:
+            return
+        uwi = getattr(well, "uwi", "") or ""
+        self._title.setText(well.name)
+        self._subtitle.setText(f"UWI: {uwi}" if uwi else "")
+
+        from paleo_workbench.project.roles import role_definition
+
+        slots = [
+            (role, slot)
+            for role, slot in view.slots.items()
+            if slot.members or slot.unresolved
+        ]
+        # Empty roles shown at the end as "missing" rows (data completeness).
+        empty = [
+            (role, slot) for role, slot in view.slots.items() if not slot.members
+        ]
+        self._roles_table.setRowCount(len(slots))
+        for row, (role, slot) in enumerate(slots):
+            display = role_definition(role).display or role
+            role_item = QTableWidgetItem(display)
+            role_item.setData(Qt.ItemDataRole.UserRole, role)
+            self._roles_table.setItem(row, 0, role_item)
+            names = "、".join(m.name for m in slot.members[:4])
+            if len(slot.members) > 4:
+                names += f" …(+{len(slot.members) - 4})"
+            self._roles_table.setItem(row, 1, QTableWidgetItem(names))
+            primary = slot.primary
+            self._roles_table.setItem(
+                row, 2, QTableWidgetItem("✓" if primary and primary.is_primary else "")
+            )
+            current_id = primary.current_version_id if primary else None
+            self._roles_table.setItem(
+                row, 3,
+                QTableWidgetItem(
+                    f"{current_id[:14]}…" if current_id else "—"
+                ),
+            )
+            version_sum = sum(m.version_count for m in slot.members)
+            self._roles_table.setItem(row, 4, QTableWidgetItem(str(version_sum)))
+
+        self._fill_list_card(
+            self._stale_card.body,
+            [
+                (
+                    f"{item.stage} · {item.version_id}"
+                    + (" · pinned" if item.pinned else "")
+                )
+                for item in (view.stale_items or [])[:8]
+            ] or ["无过期成果"],
+        )
+        self._fill_list_card(
+            self._edits_card.body,
+            [
+                f"{edit.state} · {edit.source_version_id}"
+                for edit in (getattr(view, "uncommitted_edits", None) or [])[:8]
+            ] or ["无未提交编辑"],
+        )
+        from paleo_workbench.project.roles import role_definition
+
+        missing_lines = [
+            f"角色缺失: {role_definition(role).display or role}"
+            for role, _ in empty
+            if role != "other"
+        ]
+        missing_lines += [
+            f"源文件缺失: {asset_id}"
+            for asset_id in (getattr(view, "missing_source_asset_ids", None) or [])[:4]
+        ]
+        self._fill_list_card(self._missing_card.body, missing_lines or ["—"])
+
+    @staticmethod
+    def _clear_layout(layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _fill_list_card(self, layout, lines: list[str]) -> None:
+        self._clear_layout(layout)
+        for line in lines:
+            label = QLabel(line)
+            label.setWordWrap(True)
+            layout.addWidget(label)
