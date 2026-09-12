@@ -117,6 +117,15 @@ class PwbVertexTool : public PwbEditPickTool {
       std::function<QgsVectorLayer*()> provider) {
     edit_layer_provider_ = std::move(provider);
   }
+  // M2（§4 全部层档）：档位（true = 全部层）与发现候选层（同 CRS 过滤
+  // 在手势时做）。未注入 = 恒当前层档（M1 行为）。
+  void setScopeProvider(std::function<bool()> all_layers) {
+    scope_provider_ = std::move(all_layers);
+  }
+  void setCandidateLayersProvider(
+      std::function<std::vector<QgsVectorLayer*>()> provider) {
+    candidate_layers_provider_ = std::move(provider);
+  }
 
  private:
   // hover 状态：顶点命中（Delete 删点）或段命中（双击插点，insert_before 为
@@ -130,8 +139,10 @@ class PwbVertexTool : public PwbEditPickTool {
     QgsPointXY segment_point;
   };
 
-  // v2：共享节点引用（map CRS 下 1e-8 精确重合集，§2 不变式）。
+  // v2：共享节点引用（map CRS 下 1e-8 精确重合集，§2 不变式）。M2 起带
+  // 所属层（全部层档 = 跨层联合集）。
   struct VertexRef {
+    QgsVectorLayer* layer = nullptr;
     QgsFeatureId fid = FID_NULL;
     QgsVertexId vid;
     QgsPointXY pos;
@@ -148,26 +159,49 @@ class PwbVertexTool : public PwbEditPickTool {
   void updateHoverMarker();
   void clearHover();
 
-  // -- v2（当前层档；仅 editLayer() 非空时启用）--------------------------
+  // -- v2（原生会话；仅 editLayer() 非空时启用）----------------------------
   QgsVectorLayer* editLayer() const;
+  bool allLayersScope() const { return scope_provider_ && scope_provider_(); }
+  // 全部层档的发现候选（pwb 镜像线/面层；同 CRS 过滤在手势时做）。
+  std::vector<QgsVectorLayer*> candidateLayers() const;
   // 层内与 center 距离 <= radius 的全部顶点（getFeatures 合并编辑缓冲——
-  // 共享节点发现的事实源）。线性扫描：当前层档要素量级下确定可接受。
+  // 共享节点发现的事实源）。线性扫描：相图层素量级下确定可接受。
   static std::vector<VertexRef> verticesNear(QgsVectorLayer* layer,
                                              const QgsPointXY& center,
                                              double radius);
-  void beginSharedDrag(const QgsPointXY& anchor,
-                       std::vector<VertexRef> shared);
-  void finishSharedDrag(QgsVectorLayer* layer, const QgsPointXY& target);
+  // 全部层档按下发现：跨候选层取最近顶点为锚 → 1e-8 联合集；对未在
+  // 会话中的伙伴层同步发 "join_requested"（宿主门禁复查入集，§3）。
+  std::vector<VertexRef> discoverAllLayers(const QgsPointXY& mapPoint,
+                                           double pick_radius);
+  void beginSharedDrag(const QgsPointXY& anchor, std::vector<VertexRef> shared);
+  // 多层落位：每层恰一宏（顶点移动 + 几何避免重叠 + 同层拓扑点），
+  // 散布目标层各一宏（bbox 预查）；一次 edit_gesture 回调（多层序列）。
+  void finishSharedDrag(const QgsPointXY& target);
+  // 同 finishSharedDrag 的删除版（同要素闭合环重复点去重 + 最小顶点守卫）。
+  void finishSharedDeleteAt(const QgsPointXY& at);
+  // 一层一宏的顶点几何应用：moveVertex + avoidIntersectionsV2 + 自层
+  // addTopologicalPoints；返回该层受影响要素（空 = 无变更，不开宏）。
+  std::vector<QgsFeatureId> applyVertexMoves(
+      QgsVectorLayer* layer, const QgsPointXY& target,
+      const std::vector<VertexRef>& refs);
+  // 把散布点写进目标层自己的宏（画布工程 topologicalEditing 开 + bbox 预查）。
+  void scatterTopologicalPoints(
+      const QgsPointXY& anchor, const QgsPointXY& target,
+      const std::vector<QgsVectorLayer*>& extra_layers);
+  // 避免重叠层集（QgsProject 模式 → 层表；Allow → 空）。
+  QList<QgsVectorLayer*> avoidLayersFor(QgsVectorLayer* edited) const;
   void clearSharedMarkers();
-  void emitGesture(const char* gesture, const char* undo_text,
-                   QgsVectorLayer* layer,
-                   const std::vector<QgsFeatureId>& fids) const;
+  void emitGestureMulti(const char* gesture, const char* undo_text,
+                        const std::vector<QgsVectorLayer*>& layers,
+                        const std::vector<QgsFeatureId>& fids) const;
 
   QgsVertexId vertex_id_;
   HoverState hover_;
   std::unique_ptr<QgsVertexMarker> hover_marker_;
   // v2 状态：拖动中的共享节点集（含框选扩展）与高亮 marker。
   std::function<QgsVectorLayer*()> edit_layer_provider_;
+  std::function<bool()> scope_provider_;
+  std::function<std::vector<QgsVectorLayer*>()> candidate_layers_provider_;
   std::vector<VertexRef> shared_drag_;
   QgsPointXY drag_anchor_;
   std::vector<std::unique_ptr<QgsVertexMarker>> shared_markers_;
@@ -176,12 +210,30 @@ class PwbVertexTool : public PwbEditPickTool {
 class PwbMoveTool : public PwbEditPickTool {
  public:
   using PwbEditPickTool::PwbEditPickTool;
+  ~PwbMoveTool() override;
   void canvasPressEvent(QgsMapMouseEvent* e) override;
   void canvasMoveEvent(QgsMapMouseEvent* e) override;
   void canvasReleaseEvent(QgsMapMouseEvent* e) override;
 
+  // M2（§4 避免重叠：顶点/移动复刻）：移动工具的原生模式——目标层处于
+  // 原生会话时整要素平移直写缓冲（一宏 + 避免重叠 + 拓扑点散布）。
+  void setEditLayerProvider(std::function<QgsVectorLayer*()> provider) {
+    edit_layer_provider_ = std::move(provider);
+  }
+
  private:
+  QgsVectorLayer* editLayer() const;
+  // 原生落位（一宏 + 避免重叠 + 拓扑点）与手势回调。
+  void finishNativeMove(double dx, double dy);
+  void emitGestureFrom(QgsVectorLayer* layer, const char* gesture,
+                       const char* undo_text,
+                       const std::vector<QgsFeatureId>& fids) const;
   QgsPointXY origin_;
+  std::function<QgsVectorLayer*()> edit_layer_provider_;
+  // 原生模式拖动中的目标（层 + 要素）。
+  QPointer<QgsVectorLayer> native_layer_;
+  QgsFeatureId native_fid_ = FID_NULL;
+  bool native_dragging_ = false;
 };
 
 // 原生选择工具（M3 Task 4）：QgsMapToolSelectionHandler 承载

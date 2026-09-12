@@ -538,6 +538,8 @@ class CompositeEditController(QObject):
     content_changed = Signal(str)
     # 会话已提交 / 回滚（数据进入图层权威，宿主须立即同步工程文档）。
     sessions_committed = Signal()
+    # M2 §3：全部层档手势波及邻层被门禁拒绝（场景 7——状态条提示）。
+    native_join_refused = Signal(str)
     # 选择 / 编辑态 / 撤销栈等纯状态变化（驱动工具条使能）。
     state_changed = Signal()
     # V8 M3：跨图层复合撤销被拒绝的用户可读原因（不静默——原子性受损时
@@ -572,6 +574,11 @@ class CompositeEditController(QObject):
         )
 
         self.native_editing = NativeEditSessionController()
+        # M2 §4 三开关：顶点档位（默认当前层）/ 避免重叠（默认开，裁切
+        # 范围 = 当前编辑层）/ 追踪（默认关）——随编辑会话持久化。
+        self.vertex_all_layers: bool = False
+        self.avoid_intersections_enabled: bool = True
+        self.tracing_enabled: bool = False
         # 宿主注入的多图层识别回调（Identify Results 面板）；缺省单图层命中。
         self.identify_delegate: Any = None
         # 修订键控的序列化缓存：数字化点击只重组变化图层，不整层重编码
@@ -709,23 +716,9 @@ class CompositeEditController(QObject):
         self._canvas = canvas
         canvas.set_map_tool_controller(self.tools)
         canvas.set_overlay_provider(self.overlay_state)
-        # V9 W7：digitize commit 的 CRS 守卫钩子（原生画布才有该面）。
-        set_crs_provider = getattr(canvas, "set_capture_layer_crs_provider", None)
-        if callable(set_crs_provider):
-            set_crs_provider(self._capture_layer_crs)
         self._push_snapping_config()
+        self._push_native_edit_toggles()
 
-    def _capture_layer_crs(self, tool) -> str:
-        """采点工具会话所属图层的存储 CRS（找不到层 = ""，不比对）。"""
-        session = getattr(tool, "session", None)
-        if session is None:
-            return ""
-        for layer in self._layers.values():
-            if layer.edit_session is session:
-                # V10 M-B：未声明层以工程 CRS 为有效存储帧（会话几何按
-                # 工程帧读写——比空串更早暴露画布/存储帧分歧）。
-                return str(layer.crs or self.project_crs or "")
-        return ""
 
     # -- 图层 CRUD -------------------------------------------------------------
 
@@ -990,6 +983,12 @@ class CompositeEditController(QObject):
                 dict((project.mapping_workspace or {}).get("snapping") or {}))
         except Exception:
             pass
+        # M2 §4 开关恢复（缺键 = 默认）。
+        topo = dict((project.mapping_workspace or {}).get("topo_editing") or {})
+        self.vertex_all_layers = bool(topo.get("vertex_all_layers", False))
+        self.avoid_intersections_enabled = bool(
+            topo.get("avoid_intersections", True))
+        self.tracing_enabled = bool(topo.get("tracing", False))
         self._push_snapping_config()
         self.layers_changed.emit()
         self.state_changed.emit()
@@ -1037,6 +1036,13 @@ class CompositeEditController(QObject):
         try:
             workspace = project.mapping_workspace
             workspace["snapping"] = self._snapping.snapshot_state()
+            # M2 §4：三开关随编辑会话持久化（避免重叠默认开/追踪默认关/
+            # 顶点档位默认当前层——restore 缺键回落默认）。
+            workspace["topo_editing"] = {
+                "vertex_all_layers": self.vertex_all_layers,
+                "avoid_intersections": self.avoid_intersections_enabled,
+                "tracing": self.tracing_enabled,
+            }
         except Exception:
             pass
 
@@ -1282,13 +1288,76 @@ class CompositeEditController(QObject):
             layer_ids=[layer.id])
         return True
 
+    def join_native_layers(self, doc_ids) -> None:
+        """M2 §3 按需生长：全部层档手势波及邻层 → 门禁复查入集（同步，
+        press 期间完成——release 时该层即可编辑）；拒绝层不参与并提示。"""
+        refused = []
+        for doc_id in doc_ids or ():
+            doc_id = str(doc_id)
+            if self.native_editing.is_open(doc_id):
+                continue
+            layer = self.layer(doc_id)
+            if layer is None:
+                refused.append(f"{doc_id}（图层不存在）")
+                continue
+            ok, reason = self.native_editing.open(
+                self._canvas.stack, layer,
+                gate=self.can_edit_layer,
+                canvas_address=getattr(self._canvas, "canvas_address", 0))
+            if not ok:
+                refused.append(f"「{layer.name}」{reason}")
+        if refused:
+            self.native_join_refused.emit(
+                "邻层未参与编辑：" + "；".join(refused))
+        self.state_changed.emit()
+
+    def set_vertex_scope(self, all_layers: bool) -> None:
+        """M2 §4 顶点档位：False = 当前层（默认）；True = 全部层。"""
+        self.vertex_all_layers = bool(all_layers)
+        self._push_native_edit_toggles()
+
+    def set_avoid_intersections(self, enabled: bool) -> None:
+        """M2 §4 避免重叠开关（默认开；裁切范围默认 = 当前编辑层）。"""
+        self.avoid_intersections_enabled = bool(enabled)
+        self._push_snapping_config()
+        self.state_changed.emit()
+
+    def set_tracing(self, enabled: bool) -> None:
+        """M2 §4 追踪开关（默认关；QgsMapCanvasTracer 注册即全体捕获
+        工具免费获得）。"""
+        self.tracing_enabled = bool(enabled)
+        self._push_native_edit_toggles()
+        self.state_changed.emit()
+
+    def _push_native_edit_toggles(self) -> None:
+        """档位/追踪推送到原生画布（避免重叠走 snapping 配置通道）。"""
+        canvas = self._canvas
+        if canvas is None:
+            return
+        scope = getattr(canvas, "set_vertex_edit_scope", None)
+        if callable(scope):
+            try:
+                scope(self.vertex_all_layers)
+            except Exception:
+                pass
+        tracing = getattr(canvas, "set_tracing_enabled", None)
+        if callable(tracing):
+            try:
+                tracing(self.tracing_enabled)
+            except Exception:
+                pass
+
     def record_native_gesture(self, payload: Mapping[str, object]) -> None:
-        """桥 edit_gesture 回调记账（§2 手势管理器 = 审计源）。"""
+        """桥 edit_gesture 回调记账（§2 手势管理器 = 审计源）。M2 起手势
+        可跨层（payload["layers"] 有序层表；单层回落 layer_doc_id）。"""
         gesture_id = str(payload.get("gesture_id") or new_feature_id("g"))
+        layer_ids = [str(doc) for doc in (payload.get("layers") or [])]
+        if not layer_ids:
+            layer_ids = [str(payload.get("layer_doc_id") or "")]
         self.native_editing.gestures.finish(
             gesture_id,
             undo_text=str(payload.get("undo_text") or ""),
-            layer_ids=[str(payload.get("layer_doc_id") or "")])
+            layer_ids=layer_ids)
 
     def rollback_edits(self) -> None:
         layer = self.active_layer
@@ -1809,6 +1878,10 @@ class CompositeEditController(QObject):
         # 仍是权威（两层同向，无双真源）。
         if "snapping_topological_editing" in features:
             config["topological_editing"] = bool(self._topology.enabled)
+        # M2 §4 避免重叠：enabled 无层表 = 当前编辑层（默认语义）。
+        config["avoid_intersections"] = {
+            "enabled": self.avoid_intersections_enabled,
+        }
         if not snapping.current_layer_only:
             layers: dict[str, dict[str, object]] = {}
             for layer_id in self._layers:

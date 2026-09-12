@@ -1061,6 +1061,9 @@ class CompositeDocument(QWidget):
         self.edit_controller.sessions_committed.connect(
             lambda *_: self._sync_composition(immediate=True)
         )
+        # M2 §3：邻层入集被拒（场景 7）——状态条提示。
+        self.edit_controller.native_join_refused.connect(
+            self.status_message.emit)
         self.edit_controller.state_changed.connect(self._sync_action_state)
         # V8 M3：复合撤销被拒（冲突/顺序）必须可见——接状态消息通道，
         # 不静默半组回退（review-1 P1 处置的 UI 面）。
@@ -2179,6 +2182,26 @@ class CompositeDocument(QWidget):
                     self.edit_controller.start_editing()
         elif command_id == "save_edits":
             self._save_edits_with_feedback()
+        elif command_id == "vertex_scope":
+            # M2 §4 顶点档位取反（当前层 ⇄ 全部层）。
+            enabling = not self.edit_controller.vertex_all_layers
+            self.edit_controller.set_vertex_scope(enabling)
+            self.status_message.emit(
+                "顶点工具：全部层档（跨层共享节点，同 CRS）" if enabling
+                else "顶点工具：当前层档")
+        elif command_id == "avoid_intersections":
+            # M2 §4 避免重叠开关取反（默认开；裁切范围 = 当前编辑层）。
+            enabling = not self.edit_controller.avoid_intersections_enabled
+            self.edit_controller.set_avoid_intersections(enabling)
+            self.status_message.emit(
+                "避免重叠已开启" if enabling else "避免重叠已关闭")
+            self._sync_status_bar()
+        elif command_id == "tracing":
+            # M2 §4 追踪开关取反（默认关；随编辑会话持久化）。
+            enabling = not self.edit_controller.tracing_enabled
+            self.edit_controller.set_tracing(enabling)
+            self.status_message.emit(
+                "追踪已开启（沿现有边数字化）" if enabling else "追踪已关闭")
         elif command_id == "rollback":
             self.edit_controller.rollback_edits()
         elif command_id in {"undo", "redo", "delete_selected", "duplicate_selected"}:

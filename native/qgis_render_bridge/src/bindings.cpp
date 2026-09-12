@@ -443,10 +443,13 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // canvas_output_dpi / mirror_provider_facts / mirror_style_json /
     // upsert scale-range channel / explicit current-layer clear / honest
     // digitize scratch CRS.
+    // 0.8.0a0 (topo-editing M2): vertex all-layers scope, topological
+    // point scatter, avoid-intersections (config + vertex/move
+    // replication), canvas tracer.
     // 0.7.0a0 (topo-editing M1): mirror-layer native editing (start/
     // commit/rollback/undo/redo), committed delta callback, add mirror
     // feature, mirror_features_json unlimited readback (limit<=0).
-    module.attr("__version__") = "0.7.0a0";
+    module.attr("__version__") = "0.8.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -902,6 +905,22 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              &pwb::qgis_render::QgisMapStack::redoMirrorEdit,
              py::arg("doc_id"),
              "M1 topo-editing: redo one edit-command macro.")
+        .def("set_vertex_edit_scope",
+             [](pwb::qgis_render::QgisMapStack& self,
+                std::uintptr_t canvas, bool all_layers) {
+               self.setVertexEditScope(canvas, all_layers);
+             },
+             py::arg("canvas"), py::arg("all_layers"),
+             "M2 topo-editing: vertex tool scope (false = current layer, "
+             "true = all layers; cross-layer shared nodes, same-CRS only).")
+        .def("set_tracing_enabled",
+             [](pwb::qgis_render::QgisMapStack& self,
+                std::uintptr_t canvas, bool enabled) {
+               self.setTracingEnabled(canvas, enabled);
+             },
+             py::arg("canvas"), py::arg("enabled"),
+             "M2 topo-editing: register QgsMapCanvasTracer on the canvas and "
+             "toggle tracing (all capture tools pick it up for free).")
         .def("add_mirror_feature",
              &pwb::qgis_render::QgisMapStack::addMirrorFeature,
              py::arg("doc_id"), py::arg("geojson_feature"),

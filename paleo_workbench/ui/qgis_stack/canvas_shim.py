@@ -783,6 +783,26 @@ class QgisCanvasShim(QWidget):
         """V10：桥 manifest 特性查询（进程级缓存；无桥 = False 诚实降级）。"""
         return bool(_bridge_features().get(name))
 
+    def set_vertex_edit_scope(self, all_layers: bool) -> None:
+        """M2 §4 顶点档位推送到桥（缺面 = 旧桥诚实跳过）。"""
+        setter = getattr(self.stack, "set_vertex_edit_scope", None)
+        if not callable(setter) or self._shutdown_done:
+            return
+        try:
+            setter(self.canvas_address, bool(all_layers))
+        except Exception:
+            pass
+
+    def set_tracing_enabled(self, enabled: bool) -> None:
+        """M2 §4 追踪开关推送到桥（QgsMapCanvasTracer 注册 + QAction）。"""
+        setter = getattr(self.stack, "set_tracing_enabled", None)
+        if not callable(setter) or self._shutdown_done:
+            return
+        try:
+            setter(self.canvas_address, bool(enabled))
+        except Exception:
+            pass
+
     def set_current_layer(self, doc_id: str) -> None:
         """画布当前图层（原生选择/identify 的目标图层）。
 
@@ -1228,6 +1248,19 @@ class QgisCanvasShim(QWidget):
             if action == "pick_miss":
                 return
             controller = getattr(shim, "_tool_controller", None)
+            if action == "join_requested":
+                # M2 §3 按需生长：全部层档手势波及邻层 → 宿主门禁复查
+                # （同步——release 时入集层即可编辑；拒绝层不参与并提示）。
+                joiner = getattr(controller, "join_native_layers", None)
+                if callable(joiner):
+                    try:
+                        joiner((payload.get("layer_doc_ids")
+                                if (payload := json.loads(payload_json))
+                                else []) or [])
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "native layer join failed")
+                return
             if action == "edit_gesture":
                 # M1：原生手势记账（编辑发生在镜像缓冲——数据回调只有
                 # 手势事实，无 Python 提交）。

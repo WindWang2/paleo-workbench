@@ -309,6 +309,11 @@ public:
   // Feature（properties.__pwb_fid = 宿主 id）；一宏可撤（"Added feature"）。
   std::string addMirrorFeature(const std::string& doc_id,
                                const std::string& geojson_feature);
+  // M2 §4 全部层档：顶点工具档位（false = 当前层（默认），true = 全部层）。
+  void setVertexEditScope(std::uintptr_t canvas_addr, bool all_layers);
+  // M2 §4 追踪：QgsMapCanvasTracer 注册 + 开关（false 默认；全体捕获
+  // 工具免费获得；图随缩放/层编辑自动重建）。
+  void setTracingEnabled(std::uintptr_t canvas_addr, bool enabled);
   // committed 增量回传（per-canvas；commit 期间同步触发）：
   // payload = {doc_id, added[], removed[], geometry_changes[],
   // attribute_changes[]}（feature_id 全为宿主 id）。

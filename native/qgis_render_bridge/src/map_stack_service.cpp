@@ -94,6 +94,8 @@
 #include <qgssymbol.h>
 #include <qgsunittypes.h>
 #include <qgsvectorlayer.h>
+#include <qgsmapcanvastracer.h>  // M2 §4 追踪
+#include <QAction>
 #include <qgswkbtypes.h>
 #include <qgsvectorlayerlabeling.h>
 #include <qgsvectorlayerproperties.h>
@@ -1077,6 +1079,12 @@ struct QgisMapStack::Impl {
   // fid 表重建依据）。
   std::unordered_map<std::string, std::vector<std::string>>
       pending_added_host_ids;
+  // M2：曾把 avoid/topological 状态同步到 QgsProject::instance()（GUI
+  // 捕获基类读单例）——shutdown 必须复位，防跨栈悬垂层指针。
+  bool touched_singleton_state = false;
+  // M2 §4：顶点档位（true = 全部层）与追踪开关（per-canvas）。
+  std::unordered_map<std::uintptr_t, bool> vertex_all_scope;
+  std::unordered_map<std::uintptr_t, QPointer<class QAction>> trace_actions;
   // committed 增量回传（per-canvas，防悬垂同 digitize 模式）。
   std::unordered_map<std::uintptr_t,
                      std::function<void(const std::string&, const std::string&)>>
@@ -1401,6 +1409,16 @@ void QgisMapStack::shutdown() {
   impl_->tree_menu_callbacks.clear();
   impl_->orphan_tree_callbacks.clear();
   impl_->orphan_tree_menu_callbacks.clear();
+  // M2：单例状态复位（GUI 捕获基类共享进程单例——层指针随本栈销毁，
+  // 残留 = 跨栈悬垂）。
+  if (impl_->touched_singleton_state && QgsProject::instance() != nullptr
+      && QgsProject::instance() != project()) {
+    QgsProject::instance()->setAvoidIntersectionsMode(
+        Qgis::AvoidIntersectionsMode::AllowIntersections);
+    QgsProject::instance()->setAvoidIntersectionsLayers({});
+    QgsProject::instance()->setTopologicalEditing(false);
+    impl_->touched_singleton_state = false;
+  }
   impl_->orphan_digitize_callbacks.clear();
   impl_->orphan_committed_callbacks.clear();
   impl_->orphan_edit_pick_callbacks.clear();
@@ -1410,9 +1428,17 @@ void QgisMapStack::shutdown() {
     for (auto& kv : impl_->canvas_refs) {
       if (kv.second.isNull()) continue;
       QgsMapCanvas* c = kv.second;
+      // M2：先于画布销毁删除 tracer——其析构经 sTracers->remove(mCanvas)
+      // 注销注册表键；画布先亡会把 mCanvas 置空（destroyed 槽），残留
+      // 死键在画布地址复用时返回悬垂 tracer（跨栈序列必崩）。
+      // M2 顺序修正：先卸工具（deactivate 会恢复 currentLayer 并触发
+      // QgsMapCanvasSnappingUtils 的 cast——此时层/工程必须仍然完整，
+      // 否则悬垂 → segfault），再摘层、摘工程，最后删 tracer。
+      if (QgsMapTool* tool = c->mapTool()) c->unsetMapTool(tool);
       c->setLayers(QList<QgsMapLayer*>());
       c->setProject(nullptr);
-      if (QgsMapTool* tool = c->mapTool()) c->unsetMapTool(tool);
+      // tracer 不显式删除（canvas widget 生命周期由宿主持有——显式删
+      // 在跨栈序列中腐蚀堆；注册表键随画布地址存续，画布存活期间有效）。
     }
   }
   {
@@ -3334,6 +3360,12 @@ std::string QgisMapStack::addMirrorFeature(const std::string& doc_id,
   for (const QgsFeature& record : parsed) {
     QgsFeature copy = record;  // addFeature 取非 const 引用（FeatureSink 契约）
     added = layer->addFeature(copy) || added;
+    // M2 §4 拓扑点散布：工程拓扑开关开时，新要素顶点散布进本层既有要素
+    // （共享边闭合——与数字化避免重叠（gui 免费裁切）配套）。
+    if (added && record.hasGeometry()
+        && project()->topologicalEditing()) {
+      layer->addTopologicalPoints(record.geometry());
+    }
   }
   if (!added) {
     layer->destroyEditCommand();
@@ -3778,8 +3810,61 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
   // digitizer keep shared boundaries while capturing. Absent key = untouched
   // (old-bridge hosts that never send it see no behavior change).
   if (obj.contains(QStringLiteral("topological_editing"))) {
-    project()->setTopologicalEditing(
-        obj.value(QStringLiteral("topological_editing")).toBool(false));
+    const bool topological =
+        obj.value(QStringLiteral("topological_editing")).toBool(false);
+    project()->setTopologicalEditing(topological);
+    // M2：GUI 捕获基类（避免重叠）与 edit_tools（拓扑点散布）读的是
+    // **单例** QgsProject::instance()，栈自有工程不背锅——双侧同步。
+    if (QgsProject::instance() != nullptr
+        && QgsProject::instance() != project()) {
+      QgsProject::instance()->setTopologicalEditing(topological);
+      impl_->touched_singleton_state = true;
+    }
+  }
+  // M2 §4 避免重叠：{"enabled": bool, "layer_doc_ids": [..]}——
+  // enabled 且无层表 = 当前编辑层裁切（默认）；带层表 = Advanced 扩层。
+  if (obj.contains(QStringLiteral("avoid_intersections"))) {
+    const QJsonObject avoid =
+        obj.value(QStringLiteral("avoid_intersections")).toObject();
+    const bool enabled =
+        avoid.value(QStringLiteral("enabled")).toBool(false);
+    // 同步单例（GUI 数字化基类读 instance——见上注）。
+    const auto sync_mode = [this](Qgis::AvoidIntersectionsMode mode) {
+      project()->setAvoidIntersectionsMode(mode);
+      if (QgsProject::instance() != nullptr
+          && QgsProject::instance() != project()) {
+        QgsProject::instance()->setAvoidIntersectionsMode(mode);
+        impl_->touched_singleton_state = true;
+      }
+    };
+    const auto sync_layers = [this](const QList<QgsVectorLayer*>& layers) {
+      project()->setAvoidIntersectionsLayers(layers);
+      if (QgsProject::instance() != nullptr
+          && QgsProject::instance() != project()) {
+        QgsProject::instance()->setAvoidIntersectionsLayers(layers);
+        impl_->touched_singleton_state = true;
+      }
+    };
+    if (!enabled) {
+      sync_mode(Qgis::AvoidIntersectionsMode::AllowIntersections);
+    } else {
+      const QJsonArray ids =
+          avoid.value(QStringLiteral("layer_doc_ids")).toArray();
+      if (ids.isEmpty()) {
+        sync_mode(Qgis::AvoidIntersectionsMode::
+                      AvoidIntersectionsCurrentLayer);
+      } else {
+        QList<QgsVectorLayer*> layers;
+        for (const QJsonValue& value : ids) {
+          QgsMapLayer* map_layer = findMirrorByDocId(
+              project(), value.toString().toStdString());
+          auto* layer = qobject_cast<QgsVectorLayer*>(map_layer);
+          if (layer != nullptr) layers.append(layer);
+        }
+        sync_layers(layers);
+        sync_mode(Qgis::AvoidIntersectionsMode::AvoidIntersectionsLayers);
+      }
+    }
   }
   const bool hasLayers = obj.contains(QStringLiteral("layers"));
   const QString mode =
@@ -3923,7 +4008,35 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
   }
   if (kind == "addPoint" || kind == "addLine" || kind == "addPolygon") {
     const int slot = kind == "addPoint" ? 0 : kind == "addLine" ? 1 : 2;
-    canvas->setMapTool(digitizeToolFor(canvas_addr, canvas, slot));
+    QgsMapToolDigitizeFeature* tool =
+        digitizeToolFor(canvas_addr, canvas, slot);
+    // M2 §4：数字化目标层跟随会话当前层（避免重叠「当前层」裁切 +
+    // 追踪层选择都依赖工具层）；非会话 / 异 CRS 回落 scratch。
+    {
+      auto* current_vector =
+          qobject_cast<QgsVectorLayer*>(canvas->currentLayer());
+      const bool in_native_session = current_vector != nullptr
+          && !current_vector->customProperty(
+                  QStringLiteral("pwb/doc_id")).toString().isEmpty()
+          && impl_->mirror_edit_connections.count(
+                 current_vector->customProperty(
+                     QStringLiteral("pwb/doc_id")).toString().toStdString())
+                 > 0;
+      const bool same_crs =
+          current_vector != nullptr
+          && current_vector->crs()
+                 == canvas->mapSettings().destinationCrs();
+      if (in_native_session && same_crs) {
+        tool->setLayer(current_vector);
+      } else {
+        auto kit_it = impl_->capture_kits.find(canvas_addr);
+        if (kit_it != impl_->capture_kits.end()
+            && kit_it->second.scratch[slot]) {
+          tool->setLayer(kit_it->second.scratch[slot].get());
+        }
+      }
+    }
+    canvas->setMapTool(tool);
     return;
   }
   if (kind == "vertex" || kind == "move") {
@@ -4138,13 +4251,86 @@ QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
         return impl_->mirror_edit_connections.count(doc_id) > 0 ? layer
                                                                : nullptr;
       });
+      // M2 §4 全部层档：档位 + 发现候选层（全部 pwb 镜像线/面层——
+      // 同 CRS 过滤在手势时做）。
+      slot->setScopeProvider([this, canvas_addr]() -> bool {
+        if (impl_ == nullptr) return false;
+        auto it = impl_->vertex_all_scope.find(canvas_addr);
+        return it != impl_->vertex_all_scope.end() && it->second;
+      });
+      slot->setCandidateLayersProvider(
+          [this, alive]() -> std::vector<QgsVectorLayer*> {
+            std::vector<QgsVectorLayer*> out;
+            if (alive.expired() || impl_ == nullptr) return out;
+            for (const auto& [doc_id, qgis_id] : impl_->mirror_by_doc) {
+              (void)doc_id;
+              QgsMapLayer* map_layer =
+                  project()->mapLayer(QString::fromStdString(qgis_id));
+              auto* layer = qobject_cast<QgsVectorLayer*>(map_layer);
+              if (layer == nullptr) continue;
+              const auto gt = layer->geometryType();
+              if (gt != Qgis::GeometryType::Line
+                  && gt != Qgis::GeometryType::Polygon) {
+                continue;
+              }
+              out.push_back(layer);
+            }
+            return out;
+          });
     }
     return slot;
   }
-  auto& slot = impl_->move_tools[canvas_addr];
-  if (slot == nullptr)
-    slot = new PwbMoveTool(canvas, std::move(cb), std::move(resolver));
-  return slot;
+  {
+    auto& slot = impl_->move_tools[canvas_addr];
+    if (slot == nullptr) {
+      slot = new PwbMoveTool(canvas, std::move(cb), std::move(resolver));
+      // M2 §4 移动复刻：与会话当前层的原生模式。
+      slot->setEditLayerProvider([this, alive,
+                                  canvas]() -> QgsVectorLayer* {
+        if (alive.expired() || impl_ == nullptr || canvas == nullptr)
+          return nullptr;
+        QgsMapLayer* current = canvas->currentLayer();
+        QgsVectorLayer* layer = qobject_cast<QgsVectorLayer*>(current);
+        if (layer == nullptr) return nullptr;
+        const std::string doc_id = layer->customProperty(
+                                       QStringLiteral("pwb/doc_id"))
+                                       .toString()
+                                       .toStdString();
+        if (doc_id.empty()) return nullptr;
+        return impl_->mirror_edit_connections.count(doc_id) > 0 ? layer
+                                                               : nullptr;
+      });
+    }
+    return slot;
+  }
+}
+
+void QgisMapStack::setVertexEditScope(std::uintptr_t canvas_addr,
+                                      bool all_layers) {
+  ensureNotStale(canvas_addr);
+  canvasOrThrow(canvas_addr);
+  impl_->vertex_all_scope[canvas_addr] = all_layers;
+}
+
+void QgisMapStack::setTracingEnabled(std::uintptr_t canvas_addr,
+                                      bool enabled) {
+  ensureNotStale(canvas_addr);
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  // M2 §4 追踪：QgsMapCanvasTracer 注册进 canvas 全局表（全体捕获工具
+  // 免费获得；图随缩放/层编辑自动重建）。开关 = checkable QAction
+  // （无 action = 恒开——工具语义见 qgsmaptoolcapture.cpp tracingEnabled）。
+  QgsMapCanvasTracer* tracer = QgsMapCanvasTracer::tracerForCanvas(canvas);
+  if (tracer == nullptr) {
+    tracer = new QgsMapCanvasTracer(canvas);
+    tracer->setMaxFeatureCount(10000);  // 可见范围级图规模
+  }
+  QPointer<QAction>& action = impl_->trace_actions[canvas_addr];
+  if (action.isNull()) {
+    action = new QAction(QStringLiteral("pwb tracing"), canvas);
+    action->setCheckable(true);
+    tracer->setActionEnableTracing(action.data());
+  }
+  action->setChecked(enabled);
 }
 
 void QgisMapStack::setEditPickCallback(
