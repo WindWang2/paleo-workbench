@@ -216,6 +216,27 @@ def _ledger_key(stack, layer_id: str) -> tuple[int, str]:
     return (stack_id, str(layer_id))
 
 
+#: V11（O(changed) delta 路径）：逐要素签名缓存——(stack, layer,
+#: data_revision) → (fid → signature)。同修订重发布命中时零重算；
+#: 修订变化时缓存旧值作旧签基线（触及要素重签确认），发布成功后刷新。
+_SIGNATURE_CACHE: dict[tuple[int, str, int], dict[str, tuple]] = {}
+
+
+class _RasterLedgerEntry:
+    """栅格镜像台账条目（V11）：tokens 全等 → 零桥调用。"""
+
+    __slots__ = ("tokens", "qgis_id")
+
+    def __init__(self, tokens: tuple, qgis_id: str):
+        self.tokens = tokens
+        self.qgis_id = qgis_id
+
+
+#: V11 raster ledger：(stack, layer) → 条目。数据修订/样式/显隐/透明度/
+#: 名称/源路径任一变化即下推（C++ 侧 style-only 快道接住纯样式变化）。
+_RASTER_LEDGER: dict[tuple[int, str], _RasterLedgerEntry] = {}
+
+
 def reset_publish_ledger() -> None:
     """Clear the publish ledger (stack re-created / project switched)."""
     _MIRROR_LEDGER.clear()
@@ -353,6 +374,9 @@ def _layer_ledger_tokens(layer) -> dict:
     }
     # V10：栈 id 登记一并清（防长期进程里 False 标记累积）。
     _STACK_ID_REFS.clear()
+    # V11：签名缓存 + raster 台账一并清（project 切换后旧签全部失效）。
+    _SIGNATURE_CACHE.clear()
+    _RASTER_LEDGER.clear()
 
 
 def _doc_declares(method, *names: str) -> bool:
@@ -553,11 +577,16 @@ def _verify_published_style(stack, doc_id: str, renderer_xml: str, _sink) -> Non
 
 
 def mirror_snapshot_to_stack(
-    stack, canvas_address, snapshot, diags=None, *, groups: bool = False
+    stack, canvas_address, snapshot, diags=None, *, groups: bool = False,
+    changed_hints: dict[str, set[str]] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     """Mirror vector layers into the QGIS project (incremental reconcile).
 
     Returns ``(mirrored_qgis_ids, seen_doc_ids, failures)``.
+
+    ``changed_hints``（V11）：``layer_id → touched feature ids``——宿主
+    从编辑会话 journal 提取；命中时差分只重签提示集内的要素（O(touched)），
+    其余复用台账旧签。None = 无提示，回落全量签名比较（正确性不变）。
 
     #1164: failures are collected and surfaced to the host instead of being
     swallowed — a dropped layer or a failed remove/order/refresh previously
@@ -655,6 +684,33 @@ def mirror_snapshot_to_stack(
                                 f"layer {layer.id}: empty raster source payload")
                             _sink(layer.id, "empty raster source payload")
                             continue
+                    # V11 raster ledger：数据修订 + 样式签 + 显隐 + 透明度 +
+                    # 名称全未动 → 零桥调用（此前每次发布都重调 upsert，
+                    # C++ 侧虽有 style-only 快道，Python↔C++ 调用本身仍是
+                    # N 次/发布；style-only 变化仍下推，由桥走 renderer 通道）。
+                    raster_entry = _RASTER_LEDGER.get(
+                        _ledger_key(stack, layer.id))
+                    try:
+                        raster_revision = int(
+                            getattr(layer, "data_revision", 0) or 0)
+                    except (TypeError, ValueError):
+                        raster_revision = 0
+                    raster_style = _style_signature(
+                        payload.get("renderer_xml") or "", "", None)
+                    raster_live = (
+                        raster_revision,
+                        raster_style,
+                        bool(layer.visible),
+                        float(layer.opacity),
+                        str(layer.name or layer.id),
+                        str(payload.get("source_path") or ""),
+                    )
+                    if (raster_entry is not None
+                            and raster_entry.tokens == raster_live):
+                        _sink(layer.id, "publish:no-op")
+                        seen.append(layer.id)
+                        mirrored_qgis_ids.append(raster_entry.qgis_id)
+                        continue
                     qgis_id = stack.upsert_raster_mirror_layer(
                         layer.id, layer.name or layer.id,
                         payload["source_path"],
@@ -662,6 +718,8 @@ def mirror_snapshot_to_stack(
                         payload["renderer_xml"],
                         bool(layer.visible), float(layer.opacity),
                     )
+                    _RASTER_LEDGER[_ledger_key(stack, layer.id)] = \
+                        _RasterLedgerEntry(raster_live, qgis_id)
                 except Exception as exc:
                     failures.append(f"layer {layer.id}: {exc}")
                     _sink(layer.id, str(exc))
@@ -775,6 +833,13 @@ def mirror_snapshot_to_stack(
                 _sink(layer.id, "publish:edit-window (data frozen)")
                 seen.append(layer.id)
                 continue
+            # V11：同修订缓存命中检查（ledger_active 确定后）。
+            cache_key = (id(stack), str(layer.id), int(layer_revision)) \
+                if ledger_active else None
+            cached_signatures = _SIGNATURE_CACHE.get(cache_key) \
+                if cache_key is not None else None
+            if cached_signatures is not None and len(cached_signatures) != len(features):
+                cached_signatures = None  # 要素增删 → 缓存作废，全签重建
             unchanged = (
                 entry is not None
                 and entry.data_revision == layer_revision
@@ -791,6 +856,12 @@ def mirror_snapshot_to_stack(
                 continue
 
             delta_json = ""
+            # V11：本次发布确认的新签（fid → signature）——发布成功后直接
+            # 进缓存。changed_hints（宿主 session journal 的 touched fids）
+            # 命中时，未提示的要素免签（旧签即新签）；无提示时回落全量比较。
+            fresh_signatures: dict[str, tuple] = {}
+            layer_hints = (changed_hints.get(str(layer.id))
+                           if changed_hints else None)
             if (entry is not None and entry.data_revision != layer_revision
                     and _stack_supports_delta(stack) and features):
                 changed: list | None = []
@@ -803,7 +874,14 @@ def mirror_snapshot_to_stack(
                         break
                     seen_ids.add(fid)
                     previous = entry.features_by_id.get(fid)
+                    if (layer_hints is not None and fid not in layer_hints
+                            and previous is not None):
+                        # 宿主保证未触及 → 旧签即新签（零 json.dumps）。
+                        fresh_signatures[fid] = previous
+                        continue
                     signature = _feature_signature(feature)
+                    if fid:
+                        fresh_signatures[fid] = signature
                     if previous is None or previous != signature:
                         changed.append(feature)
                 if changed is not None:
@@ -901,12 +979,31 @@ def mirror_snapshot_to_stack(
                     _sink(layer.id, str(exc))
                     continue
             if ledger_active:
+                # V11：发布后刷新缓存——优先级：差分确认新签（fresh，已算
+                # 过）> 同修订旧缓存 > 重签。旧修订条目逐出防无界增长。
+                post_signatures: dict[str, tuple] = {}
+                cached_now = (_SIGNATURE_CACHE.get(cache_key)
+                              if cache_key is not None else None)
+                for f in features:
+                    fid = str((f.get("properties") or {}).get("__pwb_fid")
+                              or (f.get("properties") or {}).get("id") or "")
+                    if fid in fresh_signatures:
+                        post_signatures[fid] = fresh_signatures[fid]
+                    elif cached_now is not None and fid in cached_now:
+                        post_signatures[fid] = cached_now[fid]
+                    else:
+                        post_signatures[fid] = _feature_signature(f)
+                _SIGNATURE_CACHE[cache_key] = dict(post_signatures) \
+                    if cache_key is not None else post_signatures
+                if cache_key is not None:
+                    for old_key in [key_ for key_ in _SIGNATURE_CACHE
+                                    if key_[0] == cache_key[0]
+                                    and key_[1] == cache_key[1]
+                                    and key_[2] != cache_key[2]]:
+                        del _SIGNATURE_CACHE[old_key]
                 _MIRROR_LEDGER[_ledger_key(stack, layer.id)] = _LedgerEntry(
                     layer_revision, style_sig, bool(layer.visible),
-                    float(layer.opacity), geom,
-                    {str((f.get("properties") or {}).get("__pwb_fid")
-                     or (f.get("properties") or {}).get("id") or ""):
-                     _feature_signature(f) for f in features},
+                    float(layer.opacity), geom, dict(post_signatures),
                     name=str(layer.name or layer.id),
                     scale_range=scale_token)
             seen.append(layer.id)

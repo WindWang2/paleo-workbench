@@ -1374,8 +1374,12 @@ class QgisCanvasShim(QWidget):
             pass
 
     # --- 图层镜像 ------------------------------------------------------
-    def set_layer_snapshot(self, snapshot) -> None:
+    def set_layer_snapshot(self, snapshot, changed_hints=None) -> None:
         """Mirror snapshot vector layers into the QGIS project (incremental).
+
+        ``changed_hints``（V11）：``layer_id → touched fids``——宿主 settle
+        的 session journal 提示；差分只重签提示集（O(touched)）。None =
+        无提示（回落全量比较，正确性不变）。
 
         Note (M2): reconcile by ``pwb/doc_id`` — unchanged layers keep their
         QgsVectorLayer object, tree state and renderer across publishes.
@@ -1394,7 +1398,8 @@ class QgisCanvasShim(QWidget):
             self._project_crs_hint = ""
         mirrored_qgis_ids, seen, failures = mirror_snapshot_to_stack(
             self.stack, self.canvas_address, snapshot,
-            groups=bool(getattr(self, "layer_groups_enabled", False)))
+            groups=bool(getattr(self, "layer_groups_enabled", False)),
+            changed_hints=changed_hints)
         # B8：保留最近快照供矢量导出（export_svg/export_pdf 经桥级
         # export_vector 以同一份快照离屏渲染，见 _export_vector）。
         self._last_snapshot = snapshot

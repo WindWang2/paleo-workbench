@@ -637,6 +637,8 @@ class CompositeEditController(QObject):
         # records dict)。session 身份入键：同一 data_revision 下的新会话 /
         # 回滚不会误用旧会话的增量基线。
         self._records_cache: dict[str, tuple[int, Any, tuple, tuple, dict]] = {}
+        # V11 发布提示：layer_id → (snapshot revision, touched fids)。
+        self._changed_hints: dict[str, tuple[int, frozenset]] = {}
         self._persist_cache: dict[str, tuple[int, list]] = {}
         # RAW/锁定门禁（宿主注入；单点 = CompositeDocument._role_allows_editing）。
         # 所有会话起点（start_editing / ensure_layer_session / 修复）与
@@ -1184,6 +1186,11 @@ class CompositeEditController(QObject):
             previous.id,
             f"数字化进行中：捕获目标保持为「{previous.name}」"
             "（编辑目标与会话锁定直至手势完成）")
+
+    def snapshot_changed_hints(self) -> dict[str, set[str]]:
+        """最近一次 settle 的逐层 touched fids（发布差分提示；副本）。"""
+        return {layer_id: set(fids)
+                for layer_id, (_, fids) in self._changed_hints.items()}
 
     @property
     def last_switch_block_reason(self) -> tuple[str, str] | None:
@@ -2892,6 +2899,18 @@ class CompositeEditController(QObject):
                     extent = _feature_extent(records.values())
                 features = tuple(records.values())
                 self._records_cache[layer_id] = (revision, session, features, extent, records)
+                # V11（O(changed) 发布）：本修订触及的 fids（journal 展开；
+                # 无会话 = 基线全量，无提示）。
+                if session is not None:
+                    touched: set[str] = set()
+                    if base_revision is not None:
+                        entries = session.changes_since(base_revision)
+                        if entries is not None:
+                            for ids in entries:
+                                touched.update(ids)
+                    self._changed_hints[layer_id] = (revision, frozenset(touched))
+                else:
+                    self._changed_hints.pop(layer_id, None)
             previous = display.get(layer_id)
             if previous is not None:
                 # 面板显示态回写为图层权威，供持久化还原。
