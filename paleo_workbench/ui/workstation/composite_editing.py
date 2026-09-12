@@ -531,6 +531,33 @@ def _ring_vertices(rings: Any) -> Iterable[tuple[tuple[float, float], tuple[int,
                 yield (float(node[0]), float(node[1])), (ring_index, point_index)
 
 
+@dataclass(frozen=True)
+class EditTargetSnapshot:
+    """V11 五目标模型（07-active-edit-state）的只读快照。
+
+    selected_tree_node：QGIS 树选中节点（信息性；来自面板回写）。
+    active_map_layer：画布/面板的当前图层（原生 select/identify 目标）。
+    edit_target_layer：唯一编辑目标（捕获手势进行中 = 会话层；否则跟随
+        活动图层——阶段控制器的 active_layer_id 语义不变）。
+    tool_target_layer：活动工具实际写入层（会话工具持有会话时 = 该会话
+        的图层；无会话工具 = 活动图层）。
+    selection_layer：属性表/选择集上下文（当前 = 活动图层；表格可钉定
+        其它层，属于既有能力，不在此重复建模）。
+    不变式（test_edit_targets_v11 钉死）：无手势时四层目标一致；
+    手势进行中 tool/edit target 锁定会话层且 UI 必须呈现分歧。
+    """
+
+    selected_tree_node: str | None = None
+    active_map_layer: str | None = None
+    edit_target_layer: str | None = None
+    tool_target_layer: str | None = None
+    selection_layer: str | None = None
+
+    @property
+    def divergent(self) -> bool:
+        return self.tool_target_layer != self.active_map_layer
+
+
 class CompositeEditController(QObject):
     """综合编修文档的用户矢量图层与数字化会话。"""
 
@@ -564,6 +591,8 @@ class CompositeEditController(QObject):
         self._layer_roles: dict[str, str] = {}
         # 图层管理面板的显示态（可见性 / 不透明度），供持久化还原。
         self._display: dict[str, tuple[bool, float]] = {}
+        self._tree_selection: str | None = None
+        self._last_switch_block_reason: tuple[str, str] | None = None
         self._active_layer_id: str | None = None
         self._active_tool_action = "pan"
         self._canvas = None
@@ -1099,6 +1128,9 @@ class CompositeEditController(QObject):
             layer_id = None
         if layer_id == self._active_layer_id:
             return
+        previous = self.active_layer
+        if previous is not None and previous.edit_session is not None:
+            self._retire_session_on_target_switch(previous)
         self._active_layer_id = layer_id
         self._rebind_active_tool()
         # M3：原生选择/identify 工具的目标图层 = 活动图层（QGIS currentLayer 语义）
@@ -1109,6 +1141,61 @@ class CompositeEditController(QObject):
             except Exception:
                 pass
         self.state_changed.emit()
+
+    def _retire_session_on_target_switch(self, previous: "VectorLayer") -> None:
+        """#1268 收敛（V11 07-active-edit-state）：切换目标时的诚实分歧记录。
+
+        V10 review #1 钉死语义：armed 捕获工具持有的会话跨目标切换保持
+        （同步链瞬时切层不劫持数字化；测试
+        test_layer_switch_mid_capture_kind_mismatch_falls_back 钉死）。
+        V11 的收敛不改变该行为，而是**建模并呈现**它：
+        * tool/edit 目标 = 会话层（edit_targets() 快照锁定）；
+        * divergent=True（tool_target ≠ active_map_layer）——状态条/工具
+          条据此显示「数字化目标 A（树选中 B）」，绝不呈现为 B；
+        * last_switch_block_reason 记录信息性说明（非阻断）。
+        无工具持有旧会话 → 无操作（切割线等跨层工作流依赖会话跨切换存活，
+        统一提交仍走 flush_edit_sessions 的门禁路径）。
+        """
+        session = previous.edit_session
+        if session is None:
+            return
+        active_tool = getattr(self.tools, "active_tool", None)
+        if getattr(active_tool, "session", None) is not session:
+            self._last_switch_block_reason = None
+            return
+        self._last_switch_block_reason = (
+            previous.id,
+            f"数字化进行中：捕获目标保持为「{previous.name}」"
+            "（编辑目标与会话锁定直至手势完成）")
+
+    @property
+    def last_switch_block_reason(self) -> tuple[str, str] | None:
+        """最近一次目标切换的会话处置阻断（layer_id, 原因）；None = 无。"""
+        return getattr(self, "_last_switch_block_reason", None)
+
+    def note_tree_selection(self, node_id: str | None) -> None:
+        """记录树选中节点（信息性；五目标快照的 selected_tree_node）。"""
+        self._tree_selection = str(node_id) if node_id else None
+
+    def edit_targets(self) -> EditTargetSnapshot:
+        """五目标只读快照（07-active-edit-state 的唯一查询入口）。"""
+        active_tool = getattr(self.tools, "active_tool", None)
+        session = getattr(active_tool, "session", None)
+        tool_target: str | None = None
+        if session is not None:
+            for layer_id, layer in self._layers.items():
+                if layer.edit_session is session:
+                    tool_target = layer_id
+                    break
+        active = self._active_layer_id
+        target = tool_target or active
+        return EditTargetSnapshot(
+            selected_tree_node=getattr(self, "_tree_selection", None),
+            active_map_layer=active,
+            edit_target_layer=target,
+            tool_target_layer=target,
+            selection_layer=active,
+        )
 
     def start_editing(self) -> None:
         layer = self.active_layer
