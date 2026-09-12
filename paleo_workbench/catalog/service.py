@@ -61,6 +61,7 @@ from paleo_workbench.catalog.models import (
     CatalogError,
     Model,
     ModelVersion,
+    RunPort,
     Tag,
 )
 from paleo_workbench.catalog.queries import IntegrityReport
@@ -2595,12 +2596,16 @@ class DataCatalogService(DataFabricV11Mixin):
         type: str | None = None,
         format: str | None = None,
         metadata: dict[str, Any] | None = None,
+        input_ports: Iterable[RunPort | dict[str, Any]] | None = None,
+        output_port_role: str | None = None,
     ) -> DataVersion:
         """Create a new DERIVED asset+version from *parent_version_ids*.
 
         When *operation* is given, a DataRun is registered linking the input
         and output versions, so the result answers the full provenance set:
         parents, run, parameters, generator, time, hash, and payload location.
+        ``input_ports`` / ``output_port_role`` (V11 typed lineage, optional)
+        annotate the run's endpoints with roles.
         """
         parents = [self._version_or_raise(pid) for pid in parent_version_ids]
         parent_type = None
@@ -2628,6 +2633,11 @@ class DataCatalogService(DataFabricV11Mixin):
                 parameters=dict(parameters or {}),
                 generator=generator,
             )
+            if input_ports is not None:
+                run.input_ports = self._coerce_ports(input_ports, "input")
+                for port in run.input_ports:
+                    if port.version_id not in run.input_version_ids:
+                        run.input_version_ids.append(port.version_id)
         with self._payload_staging_lease(
             self._staging_target(DataStage.DERIVED, asset.id)
         ):
@@ -2639,6 +2649,10 @@ class DataCatalogService(DataFabricV11Mixin):
             )
             if run is not None:
                 run.output_version_ids = [version.id]
+                if output_port_role:
+                    run.output_ports = [
+                        RunPort(role=output_port_role, version_id=version.id)
+                    ]
             # Commit under the lock (#517); the payload copy/hash above stays
             # outside so the lock is never held across disk I/O.
             with self._lock:
@@ -2672,6 +2686,8 @@ class DataCatalogService(DataFabricV11Mixin):
         generator: str = "",
         status: str = "completed",
         model_ref: dict[str, Any] | None = None,
+        input_ports: Iterable[RunPort | dict[str, Any]] | None = None,
+        output_ports: Iterable[RunPort | dict[str, Any]] | None = None,
     ) -> DataRun:
         run = DataRun(
             operation=operation,
@@ -2682,6 +2698,16 @@ class DataCatalogService(DataFabricV11Mixin):
             status=status,
             model_ref=dict(model_ref) if model_ref else None,
         )
+        if input_ports is not None:
+            run.input_ports = self._coerce_ports(input_ports, "input")
+            for port in run.input_ports:
+                if port.version_id not in run.input_version_ids:
+                    run.input_version_ids.append(port.version_id)
+        if output_ports is not None:
+            run.output_ports = self._coerce_ports(output_ports, "output")
+            for port in run.output_ports:
+                if port.version_id not in run.output_version_ids:
+                    run.output_version_ids.append(port.version_id)
         self._add_run(run)
         try:
             self._save(DirtySet(runs={run.id: None}))

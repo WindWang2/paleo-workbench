@@ -503,6 +503,8 @@ class CoreCatalogAdapter:
         generator_version: str | None = None,
         domain_task_id: str | None = None,
         input_snapshot_hash: str | None = None,
+        input_ports: list[dict[str, Any]] | None = None,
+        output_ports: list[dict[str, Any]] | None = None,
     ) -> DataRunRef:
         params = dict(parameters or {})
         if domain_task_id is not None:
@@ -515,8 +517,21 @@ class CoreCatalogAdapter:
             parameters=params,
             generator=generator_version or "",
             status="running",
+            input_ports=input_ports,
+            output_ports=output_ports,
         )
         return self._run_ref(run)
+
+    def set_run_ports(
+        self,
+        run_id: str,
+        *,
+        input_ports: list[dict[str, Any]] | None = None,
+        output_ports: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._service.set_run_ports(
+            run_id, input_ports=input_ports, output_ports=output_ports
+        )
 
     def complete_run(self, run_id: str, *, status: str = "complete") -> DataRunRef:
         run = self._service.update_run_status(

@@ -70,8 +70,16 @@ class CatalogPort(Protocol):
         generator_version: str | None = None,
         domain_task_id: str | None = None,
         input_snapshot_hash: str | None = None,
+        input_ports: list[dict[str, Any]] | None = None,
+        output_ports: list[dict[str, Any]] | None = None,
     ) -> DataRunRef:
-        """Open a processing run consuming the given input versions."""
+        """Open a processing run consuming the given input versions.
+
+        ``input_ports`` / ``output_ports`` (V11 typed lineage, optional):
+        role-annotated bindings ``{"role", "version_id", "ordinal",
+        "required", "entity_type", "entity_id", "note"}`` over the flat id
+        lists. Backends without typed-port support ignore them gracefully.
+        """
         ...
 
     def complete_run(
@@ -81,6 +89,19 @@ class CatalogPort(Protocol):
         status: str = "complete",
     ) -> DataRunRef:
         """Mark a run finished (``complete`` / ``failed``)."""
+        ...
+
+    def set_run_ports(
+        self,
+        run_id: str,
+        *,
+        input_ports: list[dict[str, Any]] | None = None,
+        output_ports: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Replace a run's typed port bindings (V11 typed lineage).
+
+        Backends without typed-port support accept and ignore the call.
+        """
         ...
 
     # -------------------------------------------------------------- producers

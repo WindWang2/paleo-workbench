@@ -260,18 +260,26 @@ def roles_for_entity_type(entity_type: str) -> tuple[str, ...]:
     return ("other",)
 
 
-def infer_role_for_type(resource_type: str, *, file_suffix: str = "") -> str | None:
+def infer_role_for_type(
+    resource_type: str,
+    *,
+    file_suffix: str = "",
+    file_name: str = "",
+) -> str | None:
     """Best registry role for a scanner-classified resource type.
 
-    Uses only the type the scanner already established plus an optional
-    extension hint — this maps *known* classifications onto the role
-    vocabulary; it never guesses scientific meaning from a filename.
+    Uses only the type the scanner already established plus optional
+    extension / well-known-filename hints — this maps *known*
+    classifications onto the role vocabulary; it never guesses identity.
+    Filename patterns only fire for generically-typed files (the ingest
+    plan surfaces every proposal for user confirmation before executing).
     Returns None when no mapping applies (caller keeps its legacy default).
     """
     rtype = str(resource_type or "").strip().lower()
     suffix = str(file_suffix or "").strip().lower()
     if suffix and not suffix.startswith("."):
         suffix = f".{suffix}"
+    stem = str(file_name or "").rsplit(".", 1)[0].lower()
     if rtype in {"well_head"}:
         return "well_head"
     if rtype in {"well_log", "las", "dlis", "lis"}:
@@ -290,13 +298,25 @@ def infer_role_for_type(resource_type: str, *, file_suffix: str = "") -> str | N
         return "time_depth"
     if rtype in {"core"}:
         return "core"
+    # Well-known filename patterns for generically-typed files (spreadsheet/
+    # tabular/csv): these are presentation conventions of the domain, not
+    # identity claims — the plan always asks for confirmation.
+    if rtype in {"table", "tabular", "spreadsheet", "csv", "unknown", "document"}:
+        if any(token in stem for token in ("deviation", "trajectory", "survey_", "wellpath")):
+            return "trajectory"
+        if any(token in stem for token in ("tops", "marker", "formation")):
+            return "tops"
+        if any(token in stem for token in ("checkshot", "check_shot", "td_table", "timedepth", "time_depth")):
+            return "time_depth"
+        if any(token in stem for token in ("core",)):
+            return "core"
     # Format-only hints for types the scanner reports generically.
-    if rtype in {"table", "spreadsheet", "csv", "unknown"}:
+    if rtype in {"table", "tabular", "spreadsheet", "csv", "unknown"}:
         for role, definition in ROLE_DEFINITIONS.items():
             if definition.entity_types and suffix in definition.format_hints:
-                if role == "trajectory" and rtype not in {"trajectory", "deviation"}:
+                if role == "trajectory":
                     # A bare .xlsx/.csv is far more often tops than deviation;
-                    # only claim trajectory when the scanner said so.
+                    # only claim trajectory when the scanner/filename said so.
                     continue
                 return role
     return None
