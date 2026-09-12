@@ -1073,9 +1073,6 @@ class CompositeDocument(QWidget):
         self.edit_controller.native_join_refused.connect(
             self.status_message.emit)
         self.edit_controller.state_changed.connect(self._sync_action_state)
-        # V8 M3：复合撤销被拒（冲突/顺序）必须可见——接状态消息通道，
-        # 不静默半组回退（review-1 P1 处置的 UI 面）。
-        self.edit_controller.topology_conflict.connect(self.status_message.emit)
         self.canvas.tool_operation.connect(self._on_tool_operation)
         # V10 M7：画布右键菜单（§20）——复用 action_controller 的已求值
         # QAction（enabled/visible/禁用原因与工具条同源；执行仍经

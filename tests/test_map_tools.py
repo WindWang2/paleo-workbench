@@ -151,18 +151,14 @@ def test_vertex_tool_commit_vertex_move_from_native_drag() -> None:
         )],
     )
     session = layer.start_editing()
-    committed = []
     tool = VertexTool(
         session,
         identify_vertex=lambda _p: None,
-        on_vertex_committed=lambda fid, path, origin, point: committed.append(
-            (fid, path, origin, point)),
     )
 
     assert tool.commit_vertex_move("p1", (0, 1), (9.0, 5.0)) is True
     ring = session.feature("p1").geometry["coordinates"][0]
     assert list(ring[1]) == [9.0, 5.0]
-    assert committed == [("p1", (0, 1), (8.0, 5.0), (9.0, 5.0))]
     assert session.undo() is True
     assert list(session.feature("p1").geometry["coordinates"][0][1]) == [8.0, 5.0]
     # 未知要素 / 无效路径拒绝

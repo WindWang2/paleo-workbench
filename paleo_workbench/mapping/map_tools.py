@@ -48,34 +48,14 @@ def _commit_vertex(
     feature_id: str,
     path: tuple[int, ...],
     point,
-    on_vertex_committed=None,
     *,
     source_suffix: str,
 ) -> bool:
-    """顶点提交公共实现（V8 M3 修订：传播钩子在宏关闭后触发）。
-
-    主编辑由 begin/end_edit_command 合成单命令；传播回调随后运行——
-    同会话传播不再并入宏，而是由 TopologyService 的复合撤销组承载
-    原子性（一次用户动作 = 一次 undo，跨图层/同图层同语义）。此前
-    回调在宏内触发，复合组恒拒绝登记（宏打开降级），生产路径退化为
-    V7 非原子——review-2 P0 修复。失败路径绝不留下打开的 compound；
-    传播失败不吞主编辑（warning 可诊断）。
-    """
-    origin: Point | None = None
+    """顶点提交公共实现。主编辑由 begin/end_edit_command 合成单命令。"""
     try:
         feature = session.feature(str(feature_id))
     except Exception:
         return False
-    try:
-        current = feature.geometry["coordinates"]
-        if not path and feature.geometry["type"] == "Point":
-            origin = (float(current[0]), float(current[1]))
-        elif path:
-            for index in path:
-                current = current[index]
-            origin = (float(current[0]), float(current[1]))
-    except Exception:
-        origin = None
 
     session.begin_edit_command()
     try:
@@ -86,11 +66,6 @@ def _commit_vertex(
         _logger.debug("vertex commit rejected: %s", exc)
         return False
     session.end_edit_command()
-    if origin is not None and on_vertex_committed is not None:
-        try:
-            on_vertex_committed(feature.feature_id, path, origin, point)
-        except Exception as exc:  # 传播失败不吞主编辑，但必须可诊断
-            _logger.warning("vertex propagation failed: %s", exc)
     return True
 
 
@@ -552,12 +527,10 @@ class VertexTool(MapTool):
         session: VectorEditSession,
         *,
         identify_vertex: Callable[[Point], tuple[str, tuple[int, ...]] | None],
-        on_vertex_committed: Callable[[str, tuple[int, ...], Point, Point], None] | None = None,
     ) -> None:
         super().__init__()
         self.session = session
         self._identify_vertex = identify_vertex
-        self._on_vertex_committed = on_vertex_committed
         self._target: tuple[str, tuple[int, ...]] | None = None
         self._origin: Point | None = None
 
@@ -585,7 +558,6 @@ class VertexTool(MapTool):
         self._origin = None
         return _commit_vertex(
             self.session, feature_id, path, point,
-            on_vertex_committed=self._on_vertex_committed,
             source_suffix="python-fallback",
         )
 
@@ -601,15 +573,12 @@ class VertexTool(MapTool):
         """QGIS 原生顶点工具拖动完成落会话（M3）。
 
         feature 不在本会话 / 路径无效 / 几何校验失败均拒绝（返回 False）。
-        on_vertex_committed 钩子与鼠标路径语义对齐（origin 为改动前坐标）；
-        主编辑 + 同会话传播合成单个 undo 命令（P1-4）。
         """
         return _commit_vertex(
             self.session,
             str(feature_id),
             tuple(int(i) for i in path),
             point,
-            on_vertex_committed=self._on_vertex_committed,
             source_suffix="native",
         )
 
@@ -618,9 +587,8 @@ class VertexTool(MapTool):
     ) -> bool:
         """V10 原生双击段上插点落会话（native-only，无 fallback 输入路径）。
 
-        一个手势 = 一个宏 = 一个 undo 单元；insert 不做跨层共享顶点传播
-        （TopologyService 传播语义目前仅覆盖 move——见 V10 known limitations）。
-        最少顶点守卫在 session（权威），失败即拒绝（False）。
+        一个手势 = 一个宏 = 一个 undo 单元。最少顶点守卫在 session，
+        失败即拒绝（False）。
         """
         try:
             self.session.begin_edit_command()

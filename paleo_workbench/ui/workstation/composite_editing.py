@@ -587,9 +587,6 @@ class CompositeEditController(QObject):
     native_join_refused = Signal(str)
     # 选择 / 编辑态 / 撤销栈等纯状态变化（驱动工具条使能）。
     state_changed = Signal()
-    # V8 M3：跨图层复合撤销被拒绝的用户可读原因（不静默——原子性受损时
-    # 用户必须知道为什么这次 undo 没有发生）。
-    topology_conflict = Signal(str)
 
     def __init__(self, *, project_crs: str = "", parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -920,8 +917,6 @@ class CompositeEditController(QObject):
             return
         if layer.edit_session is not None:
             layer.edit_session.rollback_changes()
-        # V8 M3：触及该图层的复合撤销组随层作废（命令身份已无处解析）。
-        self._topology.discard_compounds([layer_id])
         # V9 W2：错误计数缓存随层清理（防跨工程泄漏）。
         self._topology.forget_error_count([layer_id])
         self._kinds.pop(layer_id, None)
@@ -1435,8 +1430,8 @@ class CompositeEditController(QObject):
     def save_edits(self) -> str | None:
         """提交活动图层编辑会话；返回 None 表示成功，否则为阻断原因。
 
-        拓扑编辑开启时执行与编图页一致的校验门禁（TopologyService）：
-        无效几何阻断保存并给出原因，修复（make-valid）后可再保存。
+        拓扑编辑开启时执行校验门禁（桥检查器优先，无桥回落 validate）：
+        无效几何阻断保存并给出原因，修复后可再保存。
         """
         layer = self.active_layer
         if layer is None or layer.edit_session is None:
@@ -1461,9 +1456,6 @@ class CompositeEditController(QObject):
                     f"{details}{more}"
                 )
         layer.edit_session.commit_changes()
-        # V8 M3：会话终结（提交）——涉及本层的复合撤销组作废（撤销历史
-        # 随会话关闭消失，与单层 undo 语义一致）。
-        self._topology.discard_compounds([layer.id])
         self.content_changed.emit(layer.id)
         # 会话已被图层收回：活动工具若持有旧 session 缓冲必须立刻重绑
         # （回落 pan），否则继续数字化会写进已脱钩的缓冲（review #1）。
@@ -1620,7 +1612,6 @@ class CompositeEditController(QObject):
             if not ok:
                 logging.getLogger(__name__).warning("原生会话回滚失败：%s",
                                                     reason)
-            self._topology.discard_compounds([layer.id])
             self._topology.forget_error_count([layer.id])
             self._rebind_active_tool()
             self.sessions_committed.emit()
@@ -1629,7 +1620,6 @@ class CompositeEditController(QObject):
         if layer.edit_session is None:
             return
         layer.edit_session.rollback_changes()
-        self._topology.discard_compounds([layer.id])
         # 会话终结：计数缓存随会话作废（cached 读以会话身份判定，这里
         # 显式清理防同 id 复用误读）。
         self._topology.forget_error_count([layer.id])
@@ -1725,10 +1715,6 @@ class CompositeEditController(QObject):
             committed_ids.append(layer.id)
             self.content_changed.emit(layer.id)
         if committed:
-            # V8 M3：被提交会话的复合组作废（撤销历史随会话终结消失）。
-            self._topology.discard_compounds(
-                [layer.id for layer in self._layers.values() if layer.edit_session is None]
-            )
             self._rebind_active_tool()
             self.sessions_committed.emit()
             self.state_changed.emit()
@@ -1851,47 +1837,6 @@ class CompositeEditController(QObject):
         applier = self._make_part_applier(session, feature_id)
         return bool(applier and applier(part_geometry))
 
-    def _propagate_shared_vertex(
-        self,
-        feature_id: str,
-        path: tuple[int, ...],
-        origin: tuple[float, float],
-        replacement: tuple[float, float],
-    ) -> None:
-        """顶点提交后的 opt-in 拓扑传播（与编图页同语义，V7 工作站接线）。
-
-        只向门禁放行的图层传播：传播会在共享节点图层上开启编辑会话，
-        RAW/锁定图层绝不能因此获得脏会话。
-        """
-        layer = self.active_layer
-        if layer is None:
-            return
-        allowed_layers = [
-            candidate
-            for candidate in self._layers.values()
-            if self.can_edit_layer(candidate.id)[0]
-        ]
-        self._topology.propagate_shared_vertex(
-            allowed_layers,
-            origin=origin,
-            replacement=replacement,
-            skip=(layer.id, str(feature_id), tuple(path)),
-        )
-        # 传播可能为其它图层新开编辑会话——统一注入引擎溯源 token（P2-6）。
-        for candidate in allowed_layers:
-            opened = candidate.edit_session
-            if opened is not None and (
-                not opened.qgis_capability_token
-                or opened.qgis_capability_token == "unavailable"
-            ):
-                opened.qgis_capability_token = self.qgis_capability_token
-        if len(allowed_layers) > 1:
-            self.content_changed.emit(layer.id)
-
-    def _pending_compound_redo(self, session) -> object | None:
-        """该会话最近一个处于已撤销态的复合组（redo 入口，委托拓扑服务）。"""
-        return self._topology.pending_compound_redo(session)
-
     # -- 工具装配 ---------------------------------------------------------------
 
     def _tolerance(self) -> float:
@@ -1979,10 +1924,6 @@ class CompositeEditController(QObject):
                     tool = VertexTool(
                         session,
                         identify_vertex=lambda point: index.identify_vertex(point, self._tolerance()),
-                        # 拓扑传播与编图页（mapping_page._on_unified_vertex_committed）
-                        # 同语义：顶点提交后按 opt-in 传播共享节点（V7 修复
-                        # 工作站断线——两条路径行为不得漂移）。
-                        on_vertex_committed=self._propagate_shared_vertex,
                     )
                 elif action_id == "reshape":
                     # V7：native-only 工具——非原生画布（ReshapeTool 无鼠标
@@ -2831,13 +2772,6 @@ class CompositeEditController(QObject):
         self._rebind_active_tool()
         self.state_changed.emit()
 
-    def _refresh_topology_counts(self, layer_ids: Iterable[str]) -> None:
-        """复合撤销/重做触及的层刷新错误计数（V9 W2 刷新点）。"""
-        for layer_id in layer_ids:
-            layer = self._layers.get(str(layer_id))
-            if layer is not None and layer.edit_session is not None:
-                self._topology.refresh_error_count(layer)
-
     def edit_command(self, command_id: str) -> bool:
         """执行编辑命令；返回 True 表示图层内容已变（宿主需重组快照）。"""
         layer = self.active_layer
@@ -2854,20 +2788,6 @@ class CompositeEditController(QObject):
                 self.state_changed.emit()
             return done
         if command_id == "undo" and session is not None:
-            # V8 M3：栈顶是复合组 origin（顶点编辑 + 共享节点传播）时，
-            # undo 必须整组原子撤销；不可安全撤销则拒绝并给出原因（信号
-            # 上报，不静默半组回滚）。
-            group = self._topology.pending_compound(session)
-            if group is not None:
-                result = self._topology.undo_compound(group)
-                if result.ok:
-                    self._refresh_topology_counts(result.undone_layer_ids)
-                    for changed_layer_id in result.undone_layer_ids:
-                        self.content_changed.emit(changed_layer_id)
-                    self.state_changed.emit()
-                    return True
-                self.topology_conflict.emit(result.reason)
-                return False
             if session.undo():
                 self._topology.refresh_error_count(layer)
                 self.content_changed.emit(layer.id)
@@ -2875,26 +2795,6 @@ class CompositeEditController(QObject):
                 return True
             return False
         if command_id == "redo" and session is not None:
-            # 复合组的重做同样整组：栈顶 redo 不是入口（组命令寄存在组里），
-            # 以"最近被整组撤销且无后续编辑"的组为准。
-            group = self._pending_compound_redo(session)
-            if group is not None:
-                result = self._topology.redo_compound(group)
-                if result.ok:
-                    self._refresh_topology_counts(result.undone_layer_ids)
-                    for changed_layer_id in result.undone_layer_ids:
-                        self.content_changed.emit(changed_layer_id)
-                    self.state_changed.emit()
-                    return True
-                # 组拒绝（撤销后有新编辑）：线性历史上更晚被单层撤销的
-                # 命令仍可 redo——回退单层路径，不吞掉入口（review-1 P1-3）。
-                self.topology_conflict.emit(result.reason)
-                if session.redo():
-                    self._topology.refresh_error_count(layer)
-                    self.content_changed.emit(layer.id)
-                    self.state_changed.emit()
-                    return True
-                return False
             if session.redo():
                 self._topology.refresh_error_count(layer)
                 self.content_changed.emit(layer.id)
@@ -3180,12 +3080,8 @@ class CompositeEditController(QObject):
             "dirty": bool(session is not None and session.is_dirty),
             "edit_gate_open": bool(gate_allowed),
             "edit_gate_reason": str(gate_reason or ""),
-            "can_undo": bool(
-                session and (session.undo_stack or self._topology.pending_compound(session))
-            ),
-            "can_redo": bool(
-                session and (session.redo_stack or self._topology.pending_compound_redo(session))
-            ),
+            "can_undo": bool(session and session.undo_stack),
+            "can_redo": bool(session and session.redo_stack),
             "selection_count": len(layer.selection) if layer is not None else 0,
             "selection_geometry_types": tuple(kinds_among_selection),
             "compatible_polygon_count": (

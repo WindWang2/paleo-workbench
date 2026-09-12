@@ -179,73 +179,13 @@ class TestEditDeltaWorkstationFlow:
 
 
 class TestTopologyPropagationWiring:
-    def test_vertex_commit_propagates_to_shared_neighbor(self, qtbot, tmp_path):
-        document = _document(qtbot, tmp_path)
-        controller = document.edit_controller
-        controller.set_topology(True)
-        layer = controller.create_layer("相邻相带", "polygon")
-        controller.start_editing()
-        session = layer.edit_session
-        upper = [
-            [0.0, 0.0],
-            [4.0, 0.0],
-            [4.0, 4.0],
-            [0.0, 4.0],
-            [0.0, 0.0],
-        ]
-        below = [[0.0, -4.0], [4.0, -4.0], [4.0, 0.0], [0.0, 0.0], [0.0, -4.0]]
-        session.add_feature(VectorFeature("a", {"type": "Polygon", "coordinates": [upper]}, {}))
-        session.add_feature(
-            VectorFeature("b", {"type": "Polygon", "coordinates": [below]}, {})
+    def test_python_shared_vertex_propagation_retired(self):
+        """M5：工作站不再暴露 Python 共享节点传播入口。"""
+        from paleo_workbench.ui.workstation.composite_editing import (
+            CompositeEditController,
         )
-        controller.activate_tool("vertex")
-        tool = controller.tools.active_tool
-        assert tool._on_vertex_committed is not None  # V7 wiring present
 
-        # a 的 (0,0)（path (0,0)）与 b 的 (0,0)（path (0,3)）共享——
-        # 原生顶点提交入口完成主编辑 + 传播（两个 move_vertex delta）。
-        assert tool.commit_vertex_move("a", (0, 0), (-1.0, 0.0))
-        geom_b = session.feature("b").as_record()["geometry"]
-        assert [-1.0, 0.0] in geom_b["coordinates"][0]
-
-        ops = [d.operation for d in session.deltas()]
-        assert ops.count("move_vertex") >= 2
-        sources = {d.source_tool for d in session.deltas()}
-        assert "vertex(native)" in sources
-        # V8 M3（review-2 P0 修复后语义）：传播回调在宏外运行，主编辑与
-        # 同会话传播不再并入一个宏命令，原子性由复合撤销组承载——
-        # 栈 = 2 个 add_feature + 主 set_vertex + 每个共享节点（含闭合
-        # 重合点）的传播 set_vertex；一次用户级 undo（复合组）整体回退。
-        undo_steps_before = len(session.undo_stack)
-        assert undo_steps_before >= 4  # 2 adds + origin + ≥1 propagation
-        group = controller._topology.pending_compound(session)
-        assert group is not None, "生产路径（_commit_vertex → 回调）必须登记复合组"
-        assert controller.edit_command("undo")
-        geom_a = session.feature("a").as_record()["geometry"]
-        geom_b2 = session.feature("b").as_record()["geometry"]
-        assert [0.0, 0.0] in geom_a["coordinates"][0]
-        assert [-1.0, 0.0] not in geom_b2["coordinates"][0]
-        # 复合 redo 同样整组可达（can_redo 由组喂给）。
-        assert controller.edit_command("redo")
-        geom_a2 = session.feature("a").as_record()["geometry"]
-        assert [-1.0, 0.0] in geom_a2["coordinates"][0]
-        assert [-1.0, 0.0] in session.feature("b").as_record()["geometry"]["coordinates"][0]
-
-    def test_propagation_respects_edit_gate(self, qtbot, tmp_path):
-        document = _document(qtbot, tmp_path)
-        controller = document.edit_controller
-        controller.set_topology(True)
-        layer = controller.create_layer("相邻相带", "polygon")
-        controller.start_editing()
-        session = layer.edit_session
-        session.add_feature(_polygon("a"))
-        controller.set_edit_gate(lambda layer_id: (False, "锁定"))
-
-        controller._propagate_shared_vertex("a", (0, 1), (4.0, 0.0), (5.0, 0.0))
-        geom = session.feature("a").as_record()["geometry"]
-        # Locked layer keeps its geometry (no dirty writes from propagation).
-        assert [4.0, 0.0] in geom["coordinates"][0]
-        controller.set_edit_gate(document._role_allows_editing)
+        assert not hasattr(CompositeEditController, "_propagate_shared_vertex")
 
 
 class TestCapabilityTokenInjection:

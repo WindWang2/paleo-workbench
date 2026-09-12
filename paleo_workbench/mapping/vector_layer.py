@@ -844,45 +844,6 @@ class VectorEditSession:
         self.layer._selection.intersection_update(self._working)
         return True
 
-    def pop_command(self, command: EditCommand) -> bool:
-        """按身份从 undo 栈中弹出任意命令并回滚其效果（复合事务用）。
-
-        与 :meth:`undo` 的区别：命令不进 redo 栈——跨图层复合事务把整组
-        撤销的历史寄存在事务本身（TopologyService.CompoundUndoGroup），
-        单层 redo 不能绕过组重新应用半组编辑。弹出序由调用方（事务）
-        保证；不可用（宏打开 / 命令不在栈上）时返回 False。
-        """
-        if self._open_command is not None:
-            return False
-        # 身份匹配（review-2 P2-3）：EditCommand 是 frozen dataclass，==
-        # 按值比较——快照相同的两条命令会错位互配；组语义要求对象同一。
-        index = next(
-            (i for i, item in enumerate(self.undo_stack) if item is command), -1
-        )
-        if index < 0:
-            return False
-        del self.undo_stack[index]
-        command.revert(self._working)
-        self.redo_stack.clear()
-        self._bump_revision(command.feature_ids)
-        self.layer._selection.intersection_update(self._working)
-        return True
-
-    def push_command_back(self, command: EditCommand) -> bool:
-        """重新应用一个被 :meth:`pop_command` 弹出的命令（复合事务重做）。
-
-        应用效果并把命令追加回 undo 栈顶（redo 栈语义仍由事务组持有，
-        单层路径不可见）；宏打开时拒绝。
-        """
-        if self._open_command is not None:
-            return False
-        command.apply(self._working)
-        self.undo_stack.append(command)
-        self.redo_stack.clear()
-        self._bump_revision(command.feature_ids)
-        self.layer._selection.intersection_update(self._working)
-        return True
-
     def commit_changes(self) -> None:
         if self._open_command is not None:
             raise RuntimeError("cannot commit while an edit command is open")
