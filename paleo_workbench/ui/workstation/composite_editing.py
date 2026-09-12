@@ -905,7 +905,7 @@ class CompositeEditController(QObject):
         """
         committed, blocked = self.flush_edit_sessions()
         remaining = [layer for layer in self._layers.values() if layer.edit_session is not None]
-        if remaining:
+        if remaining or self.native_editing.session_layer_ids():
             return False
         for layer in self._layers.values():
             if layer.edit_session is not None:
@@ -989,11 +989,12 @@ class CompositeEditController(QObject):
         self._rebind_active_tool()
         try:
             self._snapping.restore_state(
-                dict((project.mapping_workspace or {}).get("snapping") or {}))
+                dict(workspace.get("snapping") or {}) if isinstance(workspace, Mapping) else {})
         except Exception:
             pass
         # M2 §4 开关恢复（缺键 = 默认）。
-        topo = dict((project.mapping_workspace or {}).get("topo_editing") or {})
+        topo = dict(
+            (workspace.get("topo_editing") or {}) if isinstance(workspace, Mapping) else {})
         self.vertex_all_layers = bool(topo.get("vertex_all_layers", False))
         self.avoid_intersections_enabled = bool(
             topo.get("avoid_intersections", True))
@@ -1133,6 +1134,11 @@ class CompositeEditController(QObject):
             logging.getLogger(__name__).warning(
                 "原生编辑会话开启失败，回落 Python 会话：%s", reason)
         self._open_session(layer)
+        # V10：新会话开启后 kind-bound 工具的失配重绑（此前只在切层/内容同步
+        # 链上触发——"add_line 激活 → 切到面层 → 开始编辑"会把线捕获工具留在
+        # 面图层上）。
+        self._rebind_active_tool()
+        self.state_changed.emit()
 
     def _native_session_eligible(self, layer: VectorLayer) -> bool:
         """M1 原生会话资格：相图草稿先行 = polygon 层 + 原生画布 + 桥能力。"""
@@ -1145,11 +1151,6 @@ class CompositeEditController(QObject):
         if self._kinds.get(layer.id) != "polygon":
             return False
         return self.native_editing.bridge_supports(stack)
-        # V10：新会话开启后 kind-bound 工具的失配重绑（此前只在切层/内容同步
-        # 链上触发——"add_line 激活 → 切到面层 → 开始编辑"会把线捕获工具留在
-        # 面图层上）。
-        self._rebind_active_tool()
-        self.state_changed.emit()
 
     def ensure_layer_session(self, layer_id: str):
         """门禁下的会话获取：返回 ``(session, reason)``。
