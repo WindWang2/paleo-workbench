@@ -22,13 +22,21 @@ class LayerRef:
     layer_id: str
     #: 可选 stage membership 附加说明（调试/诊断；显隐在 StageViewState）。
     note: str = ""
+    #: V11 稳定排序键（layer_order；空 = 未键化 legacy 节点，迁移时定宽派生）。
+    order_key: str = ""
 
     def to_dict(self) -> dict:
-        return {"type": "layer", "id": self.layer_id}
+        out = {"type": "layer", "id": self.layer_id}
+        if self.order_key:
+            out["order_key"] = self.order_key
+        return out
 
     @classmethod
     def from_dict(cls, data: dict) -> "LayerRef":
-        return cls(layer_id=str(data.get("id") or ""))
+        return cls(
+            layer_id=str(data.get("id") or ""),
+            order_key=str(data.get("order_key") or ""),
+        )
 
 
 @dataclass(frozen=True)
@@ -49,6 +57,9 @@ class GroupNode:
     locked: bool = False
     #: 组可见性（QGIS 组勾选态的领域侧最近已知值）。
     visible: bool = True
+    #: V11 稳定排序键（layer_order；空 = 未键化 legacy 节点。系统组键由
+    #: 模板带派生（不可用户覆盖）；用户组键持久化拖拽序）。
+    order_key: str = ""
 
     def iter_layers(self):
         for child in self.children:
@@ -85,7 +96,7 @@ class GroupNode:
         return None
 
     def to_dict(self) -> dict:
-        return {
+        out = {
             "type": "group",
             "id": self.group_id,
             "name": self.name,
@@ -95,6 +106,9 @@ class GroupNode:
             "visible": self.visible,
             "children": [child.to_dict() for child in self.children],
         }
+        if self.order_key:
+            out["order_key"] = self.order_key
+        return out
 
     @classmethod
     def from_dict(cls, data: dict) -> "GroupNode":
@@ -114,6 +128,7 @@ class GroupNode:
             expanded=bool(data.get("expanded", True)),
             locked=bool(data.get("locked", False)),
             visible=bool(data.get("visible", True)),
+            order_key=str(data.get("order_key") or ""),
         )
 
 
@@ -224,7 +239,10 @@ def tree_from_nodes(nodes: list[dict]) -> LayerTreeSnapshot:
 def _group_from_bridge_node(node: dict) -> GroupNode:
     children = tuple(
         _group_from_bridge_node(child) if isinstance(child, dict) and child.get("type") == "group"
-        else LayerRef(layer_id=str(child.get("id") or ""))
+        else LayerRef(
+            layer_id=str(child.get("id") or ""),
+            order_key=str(child.get("order_key") or ""),
+        )
         for child in node.get("children") or ()
         if isinstance(child, dict)
     )
@@ -237,4 +255,5 @@ def _group_from_bridge_node(node: dict) -> GroupNode:
         expanded=bool(node.get("expanded", True)),
         locked=bool(node.get("locked", False)),
         visible=bool(node.get("visible", True)),
+        order_key=str(node.get("order_key") or ""),
     )

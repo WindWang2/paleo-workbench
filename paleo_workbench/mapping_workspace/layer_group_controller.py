@@ -20,7 +20,6 @@ from typing import Any, Callable, Iterable
 
 from paleo_workbench.mapping_workspace.layer_groups import (
     BASE_REFERENCE_GROUP_ID,
-    FACTOR_CHILD_ORDER,
     FACTOR_ROOT_GROUP_ID,
     SYSTEM_GROUP_TEMPLATES,
     classify_layer_for_migration,
@@ -30,12 +29,20 @@ from paleo_workbench.mapping_workspace.layer_groups import (
     movable_into_system_group,
     system_group_template,
 )
+from paleo_workbench.mapping_workspace.layer_order import assign_keys_for_order
 from paleo_workbench.mapping_workspace.layer_roles import LayerRole
 from paleo_workbench.mapping_workspace.layer_tree import (
     GroupNode,
     LayerRef,
     LayerTreeSnapshot,
     tree_from_nodes,
+)
+from paleo_workbench.mapping_workspace.layer_tree_plan import (
+    LayerTreePlanInput,
+    PlanLayerRecord,
+    PlanUserGroup,
+    build_plan,
+    effective_home_group,
 )
 from paleo_workbench.mapping_workspace.stage_profiles import stage_profile
 from paleo_workbench.mapping_workspace.stage_state import (
@@ -77,8 +84,11 @@ class LayerGroupController:
         self.expand_states: dict[str, dict[str, bool]] = {}
         # 运行时放置表：layer_id → group_id（"" = root），从持久化树恢复。
         self._placements: dict[str, str] = {}
-        self._group_orders: dict[str, list[str]] = {}   # group_id → [layer_id]
+        # 混合子序表：group_id（""=root）→ [node_id]（图层与嵌套用户组）。
+        self._group_orders: dict[str, list[str]] = {}
         self._root_order: list[str] = []
+        # V11 稳定排序键：node_id（layer/group）→ key（持久化于 state.tree）。
+        self._order_keys: dict[str, str] = {}
         self._user_groups: dict[str, GroupNode] = {}
         # V6：宿主推送的新鲜度索引（artifact_key → ArtifactFreshness）。
         self._freshness: dict[str, Any] = {}
@@ -144,12 +154,13 @@ class LayerGroupController:
         self._last_group_visibility = {}
 
     def _load_placements_from_state(self) -> None:
-        """从持久化树恢复放置表（layer→group / 组内顺序 / 用户组）。"""
+        """从持久化树恢复放置表（layer→group / 组内顺序 / 排序键 / 用户组）。"""
         tree_data = self.state.tree or {}
         snapshot = LayerTreeSnapshot.from_dict(tree_data) if tree_data else None
         self._placements.clear()
         self._group_orders.clear()
         self._root_order = []
+        self._order_keys.clear()
         self._user_groups.clear()
         if snapshot is None:
             return
@@ -161,6 +172,20 @@ class LayerGroupController:
                 if child.kind == "user":
                     self._user_groups[child.group_id] = child
                 self._collect_group(child, child.group_id)
+        self._collect_keys(snapshot)
+
+    def _collect_keys(self, snapshot: LayerTreeSnapshot) -> None:
+        """收集快照内所有节点的排序键（layer/group 混合命名空间）。"""
+        def walk(children) -> None:
+            for child in children:
+                if child.order_key:
+                    node_id = (child.layer_id if isinstance(child, LayerRef)
+                               else child.group_id)
+                    self._order_keys[node_id] = child.order_key
+                if isinstance(child, GroupNode):
+                    walk(child.children)
+
+        walk(snapshot.children)
 
     def _collect_group(self, group: GroupNode, group_id: str) -> None:
         order: list[str] = []
@@ -169,8 +194,10 @@ class LayerGroupController:
                 self._placements[child.layer_id] = group_id
                 order.append(child.layer_id)
             else:
+                # V11：嵌套用户组计入父组混合子序（系统/factor 组不嵌套）。
                 if child.kind == "user":
                     self._user_groups[child.group_id] = child
+                    order.append(child.group_id)
                 self._collect_group(child, child.group_id)
         self._group_orders[group_id] = order
 
@@ -228,118 +255,60 @@ class LayerGroupController:
     # -- 期望树构建 ---------------------------------------------------------------
 
     def build_desired_tree(self, layer_snapshots: Iterable) -> LayerTreeSnapshot:
-        """由模板 + 成员资格 + 用户放置构建期望树（纯函数式，不触碰桥）。"""
+        """由模板 + 成员资格 + 用户放置构建期望树（纯函数式，不触碰桥）。
+
+        V11：委托 :mod:`layer_tree_plan`（顺序 = 观察序 + 稳定排序键，
+        杜绝快照序覆盖用户重排；QC/辅助按创建阶段路由；用户组可嵌套）。
+        """
         layers = list(layer_snapshots)
-        known_ids = [str(getattr(l, "id", "") or "") for l in layers]
-        # group_id → [layer_id]（快照序，组内保持稳定顺序）
-        buckets: dict[str, list[str]] = {}
-        root_layers: list[str] = []
-        for layer_id in known_ids:
-            placement = self._placements.get(layer_id, None)
-            if placement is None:
-                record = self.state.membership(layer_id)
-                if record is None:
-                    placement = ""  # 未注册图层留 root（ensure_memberships 先行）
-                else:
-                    placement = home_group_for_role(
-                        record.role,
-                        stage=None,
-                        factor_task_id=record.factor_task_id,
-                    )
-            if placement and (system_group_template(placement)
-                              or placement in self._user_groups
-                              or placement.startswith("factor.")
-                              or placement in self._group_orders):
-                buckets.setdefault(placement, []).append(layer_id)
-            elif placement == "":
-                root_layers.append(layer_id)
-            else:
-                # 指向不存在组的放置（组已删）→ 回 home 组
-                record = self.state.membership(layer_id)
-                home = home_group_for_role(
-                    record.role, factor_task_id=record.factor_task_id or "") if record else ""
-                buckets.setdefault(home or "", []).append(layer_id)
-
-        # factor 组内按 FACTOR_CHILD_ORDER 角色排序。
-        for group_id, order in list(buckets.items()):
-            if group_id.startswith("factor."):
-                role_rank = {}
-                for layer_id in order:
-                    record = self.state.membership(layer_id)
-                    role = record.role if record else None
-                    rank = (FACTOR_CHILD_ORDER.index(role)
-                            if role in FACTOR_CHILD_ORDER else len(FACTOR_CHILD_ORDER))
-                    role_rank[layer_id] = rank
-                buckets[group_id] = sorted(
-                    order, key=lambda lid: (role_rank[lid], known_ids.index(lid)))
-
-        def group_children(group_id: str) -> tuple:
-            children: list[GroupNode | LayerRef] = []
-            # factor 子组（factor.<task_id>）统一挂在 FACTOR_ROOT 下；
-            # 它们是动态系统组（不在 SYSTEM_GROUP_TEMPLATES 里，经
-            # factor_titles / 成员资格发现），按任务 id 稳定排序。
-            if group_id == FACTOR_ROOT_GROUP_ID:
-                factor_ids = sorted({
-                    gid for gid in buckets
-                    if gid.startswith("factor.")
-                } | {
-                    gid for gid in self._group_orders if gid.startswith("factor.")
-                })
-                for factor_id in factor_ids:
-                    children.append(make_group(factor_id))
-            for layer_id in buckets.get(group_id, []):
-                children.append(LayerRef(layer_id=layer_id))
-            # 用户组挂在 root（V5 首版：用户组仅 root 级）
-            if group_id == "":
-                for user_group in self._user_groups.values():
-                    children.append(user_group)
-            return tuple(children)
-
-        def make_group(group_id: str) -> GroupNode:
-            template = system_group_template(group_id)
-            if template is not None:
-                return GroupNode(
-                    group_id=group_id,
-                    name=template.title,
-                    kind="system",
-                    children=group_children(group_id),
-                )
-            if group_id.startswith("factor."):
-                task_id = factor_task_of_group(group_id) or ""
-                title = self.factor_titles.get(task_id, task_id or group_id)
-                return GroupNode(
-                    group_id=group_id, name=title, kind="system",
-                    children=group_children(group_id))
-            user = self._user_groups.get(group_id)
-            if user is not None:
-                return GroupNode(
-                    group_id=group_id, name=user.name, kind="user",
-                    children=tuple(
-                        LayerRef(layer_id=lid) for lid in self._group_orders.get(group_id, [])
-                    ))
-            return GroupNode(group_id=group_id, name=group_id, kind="user",
-                             children=())
-
-        roots: list[GroupNode | LayerRef] = []
-        current = self.state.current_stage
-        for template in SYSTEM_GROUP_TEMPLATES:
-            group = make_group(template.group_id)
-            # 当前阶段的组（即使还空）保留，形成可展开的树；其它阶段的空组
-            # 不占位，避免把工区「基础与参考」压没。工区组始终保留。
-            if not group.children:
-                if template.group_id == BASE_REFERENCE_GROUP_ID:
-                    roots.append(group)
-                    continue
-                if template.stage_visible(current):
-                    roots.append(group)
-                    continue
+        records: list[PlanLayerRecord] = []
+        for sub_order, layer in enumerate(layers):
+            layer_id = str(getattr(layer, "id", "") or "")
+            if not layer_id:
                 continue
-            roots.append(group)
-        for user_group in self._user_groups.values():
-            roots.append(user_group)
-        for layer_id in root_layers:
-            roots.append(LayerRef(layer_id=layer_id))
-        return LayerTreeSnapshot(children=tuple(roots), source="domain")
+            record = self.state.membership(layer_id)
+            records.append(PlanLayerRecord(
+                layer_id=layer_id,
+                role=record.role if record is not None else None,
+                factor_task_id=(record.factor_task_id if record is not None else ""),
+                constraint_kind=(record.constraint_kind if record is not None else ""),
+                created_stage=(record.created_stage if record is not None
+                               else self.state.current_stage.value),
+                sub_order=sub_order,
+            ))
+        plan_input = LayerTreePlanInput(
+            records=tuple(records),
+            stage=self.state.current_stage,
+            user_placements=dict(self._placements),
+            container_orders={gid: list(order)
+                              for gid, order in self._group_orders.items()}
+            | {"": list(self._root_order)},
+            user_groups=self._plan_user_groups(),
+            order_keys=dict(self._order_keys),
+            factor_titles=dict(self.factor_titles),
+        )
+        snapshot, _facts = build_plan(plan_input)
+        return snapshot
+
+    def _plan_user_groups(self) -> dict[str, PlanUserGroup]:
+        """_user_groups（GroupNode 树）→ PlanUserGroup 平表（带父指针）。"""
+        parent_of: dict[str, str] = {}
+
+        def walk(children, parent_id: str) -> None:
+            for child in children:
+                if isinstance(child, GroupNode) and child.kind == "user":
+                    parent_of[child.group_id] = parent_id
+                    walk(child.children, child.group_id)
+
+        walk(self._user_groups.values(), "")
+        return {
+            group_id: PlanUserGroup(
+                group_id=group_id,
+                name=group.name,
+                parent_group_id=parent_of.get(group_id, ""),
+            )
+            for group_id, group in self._user_groups.items()
+        }
 
     # -- 增量 reconcile ----------------------------------------------------------
 
@@ -379,7 +348,7 @@ class LayerGroupController:
         else:
             self._place_delta(last, desired)
 
-        # 3) 更新运行时放置表。
+        # 3) 更新运行时放置表 + 排序键（期望树是唯一事实源）。
         self._placements.clear()
         self._group_orders.clear()
         self._root_order = []
@@ -388,7 +357,11 @@ class LayerGroupController:
                 self._placements[child.layer_id] = ""
                 self._root_order.append(child.layer_id)
             else:
+                if child.kind == "user":
+                    self._user_groups[child.group_id] = child
                 self._collect_group(child, child.group_id)
+        self._order_keys.clear()
+        self._collect_keys(desired)
 
     def _placements_of(self, desired: LayerTreeSnapshot) -> list[dict]:
         """期望树 → 扁平放置指令（node/parent/index，深度优先）。"""
@@ -523,12 +496,26 @@ class LayerGroupController:
 
     # -- 用户组管理 ---------------------------------------------------------------
 
-    def create_user_group(self, name: str) -> str:
+    def create_user_group(self, name: str, parent_group_id: str = "") -> str:
+        """创建用户组（V11：parent 可为另一用户组——嵌套用户组）。
+
+        parent 必须是用户组或 root（系统组/factor 组不可承载用户子组）。
+        返回新组 id；父组非法时组创建在 root（保守回退，不抛）。
+        """
         import time
 
+        parent = str(parent_group_id or "")
+        if parent and (parent.startswith(("phase", "factor"))
+                       or system_group_template(parent) is not None
+                       or parent not in self._user_groups):
+            parent = ""
         group_id = f"user.{int(time.time() * 1000) & 0xffffffff:08x}"
         self._user_groups[group_id] = GroupNode(
             group_id=group_id, name=name or "新建组", kind="user")
+        if parent:
+            self._group_orders.setdefault(parent, []).append(group_id)
+        else:
+            self._root_order.append(group_id)
         return group_id
 
     def rename_user_group(self, group_id: str, name: str) -> None:
@@ -541,19 +528,34 @@ class LayerGroupController:
             try:
                 self._stack.rename_group(group_id, name)
             except Exception:
-                pass
+                logger.debug("rename_group failed for %s", group_id, exc_info=True)
 
     def remove_user_group(self, group_id: str, *, keep_layers: bool = True) -> None:
-        """删除用户组；keep_layers=True 时图层上提到 root（绝不删层）。"""
+        """删除用户组；子图层与嵌套用户组上提一级（绝不删层/删组内容）。"""
         group = self._user_groups.pop(group_id, None)
         if group is None:
             return
-        moved = list(self._group_orders.get(group_id, []))
-        self._group_orders.pop(group_id, None)
-        for layer_id in moved:
-            self._placements[layer_id] = ""
-            if layer_id not in self._root_order:
-                self._root_order.append(layer_id)
+        # 找父容器（root 或嵌套父组）。
+        parent_id = ""
+        for candidate_id, order in self._group_orders.items():
+            if group_id in order:
+                parent_id = candidate_id
+                break
+        moved = list(self._group_orders.pop(group_id, []))
+        target_order = (self._root_order if parent_id == ""
+                        else self._group_orders.setdefault(parent_id, []))
+        insert_at = target_order.index(group_id) if group_id in target_order else len(target_order)
+        target_order[insert_at:insert_at + 1] = moved
+        for node_id in moved:
+            if node_id in self._user_groups:
+                continue  # 嵌套用户组整体上提（其成员表不动）
+            self._placements[node_id] = parent_id
+        self._order_keys.pop(group_id, None)
+        for order in self._group_orders.values():
+            if group_id in order:
+                order.remove(group_id)
+        if group_id in self._root_order:
+            self._root_order.remove(group_id)
 
     # -- 用户树事件回写 -------------------------------------------------------------
 
@@ -562,6 +564,8 @@ class LayerGroupController:
 
         返回 True 表示变更被接受；False 表示存在非法放置（角色路由冲突，
         期望树保持原状——下一次 reconcile 会把 QGIS 树拉回正确位置）。
+        V11：观察序直接转化为稳定排序键（LIS 保键 + 中点插入）；非法
+        放置携带 (layer_id, group_id) 反馈，不再丢 id。
         """
         observed = tree_from_nodes(nodes)
         # 用户组发现：观察树中不在系统模板/factor 集中的组 → 用户组。
@@ -574,23 +578,28 @@ class LayerGroupController:
                     and gid not in self._user_groups:
                 discovered_user_groups[gid] = GroupNode(
                     group_id=gid, name=group.name or gid, kind="user")
-        # 放置回写（含角色校验）。
-        rejected = False
+        # 放置回写（含角色校验 + 非法放置 id 捕获）。
+        rejected_with: tuple[str, str] | None = None
         placements: dict[str, str] = {}
         orders: dict[str, list[str]] = {}
         root_order: list[str] = []
 
         def walk(children, parent_id):
-            nonlocal rejected
+            nonlocal rejected_with
             for child in children:
                 if isinstance(child, GroupNode):
+                    if parent_id:
+                        orders.setdefault(parent_id, []).append(child.group_id)
+                    else:
+                        root_order.append(child.group_id)
                     walk(child.children, child.group_id)
                 else:
                     layer_id = child.layer_id
                     record = self.state.membership(layer_id)
                     if parent_id and parent_id in system_ids and record is not None:
                         if not movable_into_system_group(record.role, parent_id):
-                            rejected = True
+                            if rejected_with is None:
+                                rejected_with = (layer_id, parent_id)
                             continue
                     placements[layer_id] = parent_id
                     if parent_id:
@@ -599,11 +608,11 @@ class LayerGroupController:
                         root_order.append(layer_id)
 
         walk(observed.children, "")
-        if rejected:
+        if rejected_with is not None:
             self.last_observe_rejected = True
             if self.on_invalid_move is not None:
                 try:
-                    self.on_invalid_move("", "")
+                    self.on_invalid_move(*rejected_with)
                 except Exception:
                     pass
             return False
@@ -612,6 +621,10 @@ class LayerGroupController:
         self._placements = placements
         self._group_orders = orders
         self._root_order = root_order
+        # 观察序 → 键（含嵌套用户组混合序；最小扰动，用户拖动只改少数键）。
+        self._order_keys.update(assign_keys_for_order(root_order, self._order_keys))
+        for order in orders.values():
+            self._order_keys.update(assign_keys_for_order(order, self._order_keys))
         # 用户组内成员同步到用户组节点（保持 group_orders 为准）。
         if self.on_structure_changed is not None:
             try:
@@ -629,20 +642,28 @@ class LayerGroupController:
     # -- 查询 ---------------------------------------------------------------------
 
     def placement_of(self, layer_id: str) -> str:
-        """图层归属组（运行时放置表 → 成员资格路由兜底，degraded 同样有效）。"""
+        """图层归属组（运行时放置表 → 成员资格路由兜底，degraded 同样有效）。
+
+        V11：路由统一走 :func:`effective_home_group`（QC/辅助按创建阶段
+        aux 路由）——树构建、呈现与编辑门禁同源，杜绝 D1-ws 分叉。
+        """
         layer_id = str(layer_id)
         if layer_id in self._placements:
             return self._placements[layer_id]
         record = self.state.membership(layer_id)
         if record is not None:
-            return home_group_for_role(
-                record.role, factor_task_id=record.factor_task_id)
+            return effective_home_group(
+                record.role,
+                created_stage=record.created_stage,
+                factor_task_id=record.factor_task_id,
+            )
         return ""
 
     def _group_members(self, group_id: str) -> list[str]:
         """组成员（reconcile 序 + 未观察到的成员资格派生；fallback 画布
-        无 reconcile 时聚合仍真实）。"""
-        order = list(self._group_orders.get(group_id, []))
+        无 reconcile 时聚合仍真实）。V11：混合子序表过滤嵌套组 id。"""
+        order = [nid for nid in self._group_orders.get(group_id, [])
+                 if nid not in self._user_groups]
         seen = set(order)
         for layer_id in self.state.memberships:
             if layer_id not in seen and self.placement_of(layer_id) == group_id:
