@@ -37,6 +37,9 @@
 #include <QTimer>
 #include <QUuid>
 #include <QWidget>
+#include <qgscurve.h>
+#include <qgsvectorlayereditutils.h>
+#include <qgswkbtypes.h>
 
 #include <qgsapplication.h>
 #include <qgstextformat.h>
@@ -3375,6 +3378,277 @@ std::string QgisMapStack::addMirrorFeature(const std::string& doc_id,
     return "addFeature rejected by edit buffer";
   }
   layer->endEditCommand();
+  return "";
+}
+
+namespace {
+
+QStringList parseHostIdList(const std::string& json_text) {
+  if (json_text.empty()) return {};
+  QJsonParseError err{};
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(json_text), &err);
+  if (err.error != QJsonParseError::NoError || !doc.isArray()) return {};
+  QStringList ids;
+  for (const QJsonValue& value : doc.array()) {
+    const QString id = value.toString();
+    if (!id.isEmpty()) ids.append(id);
+  }
+  return ids;
+}
+
+QgsFeatureId fidForHostId(
+    const std::unordered_map<long long, std::string>& table,
+    const QString& host_id) {
+  const std::string key = host_id.toStdString();
+  for (const auto& [fid, host] : table) {
+    if (host == key) return static_cast<QgsFeatureId>(fid);
+  }
+  bool ok = false;
+  const qlonglong numeric = host_id.toLongLong(&ok);
+  if (ok) return static_cast<QgsFeatureId>(numeric);
+  return FID_NULL;
+}
+
+QgsGeometry curveGeometryFromJson(const std::string& curve_geojson) {
+  QJsonParseError err{};
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(curve_geojson), &err);
+  QByteArray geometry_bytes = QByteArray::fromStdString(curve_geojson);
+  if (err.error == QJsonParseError::NoError && doc.isObject()) {
+    const QJsonObject obj = doc.object();
+    if (obj.value(QStringLiteral("type")).toString() == QLatin1String("Feature")) {
+      geometry_bytes = QJsonDocument(obj.value(QStringLiteral("geometry")).toObject())
+                           .toJson(QJsonDocument::Compact);
+    }
+  }
+  return QgsJsonUtils::geometryFromGeoJson(QString::fromUtf8(geometry_bytes));
+}
+
+std::string splitResultMessage(Qgis::GeometryOperationResult result) {
+  switch (result) {
+    case Qgis::GeometryOperationResult::Success:
+      return "";
+    case Qgis::GeometryOperationResult::NothingHappened:
+      return "no features were split";
+    case Qgis::GeometryOperationResult::GeometryEngineError:
+      return "cut edges detected; the line must split features into multiple parts";
+    case Qgis::GeometryOperationResult::InvalidBaseGeometry:
+      return "invalid geometry; repair before splitting";
+    case Qgis::GeometryOperationResult::InvalidInputGeometryType:
+      return "split curve must be a line";
+    case Qgis::GeometryOperationResult::LayerNotEditable:
+      return "layer is not editable";
+    default:
+      return "split failed";
+  }
+}
+
+}  // namespace
+
+std::string QgisMapStack::splitMirrorFeatures(
+    const std::string& doc_id, const std::string& curve_geojson,
+    const std::string& feature_ids_json) {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "layer not in an edit session: " + doc_id;
+  QgsGeometry curve_geom = curveGeometryFromJson(curve_geojson);
+  if (curve_geom.isNull() || curve_geom.type() != Qgis::GeometryType::Line) {
+    return "curve must be a LineString";
+  }
+  const QgsCurve* curve = qgsgeometry_cast<const QgsCurve*>(curve_geom.constGet());
+  if (curve == nullptr) return "curve must be a LineString";
+
+  const QStringList host_ids = parseHostIdList(feature_ids_json);
+  if (!host_ids.isEmpty()) {
+    QgsFeatureIds selected;
+    auto table = impl_->mirror_feature_fids.find(doc_id);
+    const std::unordered_map<long long, std::string> empty;
+    const auto& lookup = table == impl_->mirror_feature_fids.end() ? empty : table->second;
+    for (const QString& host_id : host_ids) {
+      const QgsFeatureId fid = fidForHostId(lookup, host_id);
+      if (fid != FID_NULL) selected.insert(fid);
+    }
+    if (selected.isEmpty()) return "no matching features to split";
+    layer->selectByIds(selected);
+  }
+
+  QgsProject* proj = project();  // 画布挂载工程，禁止读 QgsProject::instance()
+  const QgsFeatureIds before_ids = layer->allFeatureIds();
+
+  layer->beginEditCommand(QStringLiteral("Features split"));
+  QgsPointSequence topology_test_points;
+  // 规格 §4：splitFeatures(..., topologicalEditing=true) + 邻层拓扑点循环。
+  const Qgis::GeometryOperationResult result =
+      layer->splitFeatures(curve, topology_test_points, true, true);
+  if (result != Qgis::GeometryOperationResult::Success) {
+    layer->destroyEditCommand();  // 空结果不留痕（规格 §4）
+    return splitResultMessage(result);
+  }
+
+  const QgsFeatureIds after_ids = layer->allFeatureIds();
+  QList<QgsFeatureId> added;
+  for (QgsFeatureId fid : after_ids) {
+    if (!before_ids.contains(fid)) added.append(fid);
+  }
+  std::sort(added.begin(), added.end());
+  for (QgsFeatureId fid : added) {
+    const std::string host =
+        "split-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+    impl_->pending_added_host_ids[doc_id].push_back(host);
+    impl_->mirror_feature_fids[doc_id][static_cast<long long>(fid)] = host;
+  }
+  layer->endEditCommand();
+
+  std::vector<std::string> affected{doc_id};
+  if (!topology_test_points.isEmpty() && proj != nullptr) {
+    const QgsCoordinateReferenceSystem crs = layer->crs();
+    const QMap<QString, QgsMapLayer*> layers = proj->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+      QgsVectorLayer* other = qobject_cast<QgsVectorLayer*>(it.value());
+      if (other == nullptr || other == layer || !other->isEditable()
+          || !other->isSpatial()) {
+        continue;
+      }
+      if (other->geometryType() != Qgis::GeometryType::Line
+          && other->geometryType() != Qgis::GeometryType::Polygon) {
+        continue;
+      }
+      if (other->crs() != crs) continue;
+      const QString other_doc =
+          other->customProperty(QStringLiteral("pwb/doc_id")).toString();
+      if (other_doc.isEmpty()) continue;  // 跳过非镜像（scratch 等）
+      other->beginEditCommand(
+          QStringLiteral("Topological points from Features split"));
+      const int inserted = other->addTopologicalPoints(topology_test_points);
+      if (inserted == 0) {
+        other->endEditCommand();
+        affected.push_back(other_doc.toStdString());
+      } else {
+        other->destroyEditCommand();
+      }
+    }
+  }
+
+  QJsonObject payload;
+  payload.insert(QStringLiteral("layer_doc_id"), QString::fromStdString(doc_id));
+  QJsonArray layer_docs;
+  for (const std::string& id : affected) {
+    layer_docs.append(QString::fromStdString(id));
+  }
+  payload.insert(QStringLiteral("layers"), layer_docs);
+  payload.insert(QStringLiteral("gesture"), QStringLiteral("features_split"));
+  payload.insert(QStringLiteral("undo_text"), QStringLiteral("Features split"));
+  const std::string payload_json =
+      QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  for (auto& kv : impl_->edit_pick_callbacks) {
+    if (kv.second) kv.second("edit_gesture", payload_json);
+  }
+  return "";
+}
+
+std::string QgisMapStack::mergeMirrorFeatures(
+    const std::string& doc_id, const std::string& feature_ids_json,
+    const std::string& attrs_json) {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "layer not in an edit session: " + doc_id;
+  const QStringList host_ids = parseHostIdList(feature_ids_json);
+  if (host_ids.size() < 2) return "merging requires at least two features";
+
+  auto table = impl_->mirror_feature_fids.find(doc_id);
+  const std::unordered_map<long long, std::string> empty;
+  const auto& lookup = table == impl_->mirror_feature_fids.end() ? empty : table->second;
+  QgsFeatureIds merge_ids;
+  std::unordered_map<std::string, QgsFeatureId> host_to_fid;
+  for (const QString& host_id : host_ids) {
+    const QgsFeatureId fid = fidForHostId(lookup, host_id);
+    if (fid == FID_NULL) return "unknown feature id: " + host_id.toStdString();
+    merge_ids.insert(fid);
+    host_to_fid[host_id.toStdString()] = fid;
+  }
+
+  QJsonParseError err{};
+  QJsonObject attrs_obj;
+  if (!attrs_json.empty()) {
+    const QJsonDocument doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString(attrs_json), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+      return "invalid attrs_json";
+    }
+    attrs_obj = doc.object();
+  }
+
+  QgsFeatureId target_fid = FID_NULL;
+  const QString target_host = attrs_obj.value(QStringLiteral("target_id")).toString();
+  if (!target_host.isEmpty()) {
+    auto found = host_to_fid.find(target_host.toStdString());
+    if (found != host_to_fid.end()) target_fid = found->second;
+  }
+  if (target_fid == FID_NULL) {
+    double best_area = -1.0;
+    for (QgsFeatureId fid : merge_ids) {
+      const QgsFeature feat = layer->getFeature(fid);
+      if (!feat.isValid() || !feat.hasGeometry()) continue;
+      const double area = feat.geometry().area();
+      if (area > best_area) {
+        best_area = area;
+        target_fid = fid;
+      }
+    }
+  }
+  if (target_fid == FID_NULL) return "no valid target feature to merge into";
+
+  QgsGeometry union_geom;
+  for (QgsFeatureId fid : merge_ids) {
+    const QgsFeature feat = layer->getFeature(fid);
+    if (!feat.isValid() || !feat.hasGeometry()) continue;
+    if (union_geom.isNull()) union_geom = QgsGeometry(feat.geometry());
+    else union_geom = union_geom.combine(feat.geometry());
+  }
+  if (union_geom.isNull()) return "union produced empty geometry";
+  if (!QgsWkbTypes::isMultiType(layer->wkbType())) {
+    if ((union_geom.constGet() != nullptr && union_geom.constGet()->partCount() > 1)
+        || !union_geom.convertToSingleType()) {
+      return "resulting geometry type (multipart) is incompatible with layer type";
+    }
+  }
+
+  const QgsFeature target = layer->getFeature(target_fid);
+  if (!target.isValid()) {
+    return "target feature disappeared";
+  }
+  QgsAttributes merged = target.attributes();
+  const QJsonObject attr_map = attrs_obj.value(QStringLiteral("attributes")).toObject();
+  const QgsFields fields = layer->fields();
+  if (!attr_map.isEmpty()) {
+    for (auto it = attr_map.begin(); it != attr_map.end(); ++it) {
+      const int index = fields.indexOf(it.key());
+      if (index < 0) continue;
+      QVariant value = it.value().toVariant();
+      fields.at(index).convertCompatible(value);
+      merged[index] = value;
+    }
+  }
+
+  QgsVectorLayerEditUtils utils(layer);
+  QString error_message;
+  // mergeFeatures 自己 begin/end "Merged features" 一宏。
+  if (!utils.mergeFeatures(target_fid, merge_ids, merged, union_geom, error_message)) {
+    return error_message.isEmpty() ? "merge failed" : error_message.toStdString();
+  }
+  // 不从 fid 表抹掉被删要素：undo 会按原 QgsFeatureId 复活，宿主 id
+  // 映射必须还在。commit 时 handleCommittedRemoved 按现值出表。
+
+  QJsonObject payload;
+  payload.insert(QStringLiteral("layer_doc_id"), QString::fromStdString(doc_id));
+  payload.insert(QStringLiteral("layers"),
+                 QJsonArray{QString::fromStdString(doc_id)});
+  payload.insert(QStringLiteral("gesture"), QStringLiteral("features_merge"));
+  payload.insert(QStringLiteral("undo_text"), QStringLiteral("Merged features"));
+  const std::string payload_json =
+      QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  for (auto& kv : impl_->edit_pick_callbacks) {
+    if (kv.second) kv.second("edit_gesture", payload_json);
+  }
   return "";
 }
 

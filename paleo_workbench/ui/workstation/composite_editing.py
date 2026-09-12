@@ -579,6 +579,9 @@ class CompositeEditController(QObject):
         self.vertex_all_layers: bool = False
         self.avoid_intersections_enabled: bool = True
         self.tracing_enabled: bool = False
+        # M3：原生分割切线手势——geometry_command("split") 打开 addLine，
+        # digitize completed 经 commit_native_capture 拦截进 split_mirror_features。
+        self._pending_native_split: str | None = None
         # 宿主注入的多图层识别回调（Identify Results 面板）；缺省单图层命中。
         self.identify_delegate: Any = None
         # 修订键控的序列化缓存：数字化点击只重组变化图层，不整层重编码
@@ -714,6 +717,12 @@ class CompositeEditController(QObject):
     def attach_canvas(self, canvas) -> None:
         """绑定鸭子类型画布（UnifiedMapCanvas / QgisCanvasShim）：工具控制器与 overlay 提供者。"""
         self._canvas = canvas
+        # shim 只持有 tools：把原生会话路由挂到工具栈上，数字化/手势/
+        # 邻层入集回调才能找到 CompositeEditController 的方法。
+        self.tools.commit_native_capture = self.commit_native_capture
+        self.tools.record_native_gesture = self.record_native_gesture
+        self.tools.join_native_layers = self.join_native_layers
+        self.tools.cancel_native_capture = self.cancel_native_capture
         canvas.set_map_tool_controller(self.tools)
         canvas.set_overlay_provider(self.overlay_state)
         self._push_snapping_config()
@@ -1266,6 +1275,8 @@ class CompositeEditController(QObject):
         stack = self.native_editing.stack_for(layer.id)
         if stack is None:
             return False
+        if self._pending_native_split:
+            return self._commit_native_split(geometry)
         host_id = new_feature_id("feature")
         feature = {
             "type": "Feature",
@@ -1287,6 +1298,10 @@ class CompositeEditController(QObject):
             new_feature_id("gesture"), undo_text="Added feature",
             layer_ids=[layer.id])
         return True
+
+    def cancel_native_capture(self) -> None:
+        """数字化取消（Esc/空右键）时丢掉 pending 分割切线。"""
+        self._pending_native_split = None
 
     def join_native_layers(self, doc_ids) -> None:
         """M2 §3 按需生长：全部层档手势波及邻层 → 门禁复查入集（同步，
@@ -2064,9 +2079,9 @@ class CompositeEditController(QObject):
     def geometry_command(self, command_id: str) -> tuple[bool, str]:
         """执行 split / merge；返回 (是否成功, 用户可读消息)。
 
-        几何计算走 ``geometry_service``（QGIS 桥可用时）或 ``vector_operations``
-        的 shapely 兜底；结果一律落为 ``VectorEditSession`` 命令——undo/redo/
-        commit/project 版本链保持完整，QGIS 从不直接改工程数据。
+        几何计算：Python 会话走 ``geometry_service`` / ``vector_operations``
+        并落 ``VectorEditSession``；原生会话走桥 ``split_mirror_features`` /
+        ``merge_mirror_features``（镜像缓冲一宏，手势由桥 ``edit_gesture`` 记账）。
         """
         from paleo_workbench.mapping.vector_operations import (
             merge_selected_polygons,
@@ -2078,6 +2093,8 @@ class CompositeEditController(QObject):
             return False, "没有活动的矢量图层"
         session = layer.edit_session
         if session is None:
+            if self.native_editing.is_open(layer.id):
+                return self._native_geometry_command(command_id, layer)
             return False, "请先开始编辑（几何操作需要编辑会话）"
         mutated_layers: list = [layer]
         try:
@@ -2127,6 +2144,138 @@ class CompositeEditController(QObject):
                     except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
                         pass
         return False, f"未知几何命令 {command_id}"
+
+    def _native_geometry_command(self, command_id: str, layer) -> tuple[bool, str]:
+        """原生会话 split/merge：切线走画布数字化，合并走确认对话框。"""
+        stack = self.native_editing.stack_for(layer.id)
+        if stack is None:
+            return False, "该图层没有进行中的原生编辑会话"
+        if command_id == "merge":
+            return self._native_merge(layer, stack)
+        if command_id == "split":
+            return self._native_split_begin(layer, stack)
+        return False, (
+            "该图层处于原生编辑会话——请先保存或回滚编辑")
+
+    def _selected_native_records(self, layer, stack) -> list[dict]:
+        selected = {str(fid) for fid in layer.selection}
+        records: list[dict] = []
+        try:
+            raw = stack.mirror_features_json(layer.id, 0)
+            payload = raw if isinstance(raw, dict) else json.loads(str(raw))
+        except (TypeError, ValueError):
+            payload = {}
+        for feature in (payload.get("features") or []) if isinstance(payload, dict) else []:
+            if not isinstance(feature, dict):
+                continue
+            feature_id = str(feature.get("id") or "")
+            if feature_id not in selected:
+                continue
+            records.append({
+                "id": feature_id,
+                "geometry": feature.get("geometry") or {},
+                "properties": feature.get("properties") or {},
+            })
+        if records:
+            return records
+        for feature_id in selected:
+            try:
+                feature = layer.feature(feature_id)
+            except KeyError:
+                continue
+            records.append({
+                "id": feature_id,
+                "geometry": dict(feature.geometry),
+                "properties": dict(feature.attributes),
+            })
+        return records
+
+    def _confirm_merge_attributes(self, records):
+        """弹出合并确认框；取消返回 None。测试可 monkeypatch。"""
+        from PySide6.QtWidgets import QDialog
+
+        from paleo_workbench.ui.workstation.merge_features_dialog import (
+            MergeFeaturesDialog,
+        )
+
+        parent = self._canvas if self._canvas is not None else None
+        dialog = MergeFeaturesDialog(records, parent=parent)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dialog.result_payload()
+
+    def _native_merge(self, layer, stack) -> tuple[bool, str]:
+        if len(layer.selection) < 2:
+            return False, "请先选择要合并的要素"
+        if not callable(getattr(stack, "merge_mirror_features", None)):
+            return False, "当前 QGIS 桥不支持原生合并（需重建桥扩展）"
+        records = self._selected_native_records(layer, stack)
+        if len(records) < 2:
+            return False, "请先选择要合并的要素"
+        payload = self._confirm_merge_attributes(records)
+        if payload is None:
+            return False, "已取消合并"
+        try:
+            error = str(stack.merge_mirror_features(
+                layer.id,
+                json.dumps(sorted(layer.selection)),
+                json.dumps(payload),
+            ) or "")
+        except Exception as exc:
+            return False, f"合并失败：{exc}"
+        if error:
+            return False, error
+        # 手势记账走桥 edit_gesture → record_native_gesture（含邻层序列）。
+        target = str(payload.get("target_id") or "")
+        if target:
+            layer.set_selection((target,))
+        self.state_changed.emit()
+        return True, "已合并所选要素"
+
+    def _native_split_begin(self, layer, stack) -> tuple[bool, str]:
+        if not layer.selection:
+            return False, "请先选择要分割的要素"
+        if not callable(getattr(stack, "split_mirror_features", None)):
+            return False, "当前 QGIS 桥不支持原生分割（需重建桥扩展）"
+        self._pending_native_split = layer.id
+        canvas = self._canvas
+        address = getattr(canvas, "canvas_address", 0) if canvas is not None else 0
+        try:
+            stack.set_map_tool(address, "addLine")
+        except Exception:
+            setter = getattr(canvas, "set_map_tool", None) if canvas is not None else None
+            if callable(setter):
+                try:
+                    setter("addLine")
+                except Exception:
+                    pass
+        return True, "请在画布上绘制切线后右键确认"
+
+    def _commit_native_split(self, geometry) -> bool:
+        layer_id = str(self._pending_native_split or "")
+        self._pending_native_split = None
+        layer = self._layers.get(layer_id)
+        if layer is None:
+            return True  # pending 已消耗，勿把切线当成新要素
+        stack = self.native_editing.stack_for(layer_id)
+        if stack is None or not callable(getattr(stack, "split_mirror_features", None)):
+            return True
+        curve = dict(geometry) if isinstance(geometry, dict) else {}
+        if curve.get("type") == "Feature":
+            curve = dict(curve.get("geometry") or {})
+        try:
+            error = str(stack.split_mirror_features(
+                layer_id, json.dumps(curve),
+                json.dumps(sorted(layer.selection))) or "")
+        except Exception:
+            logging.getLogger(__name__).exception("native split failed")
+            return True
+        if error:
+            logging.getLogger(__name__).warning("原生分割失败：%s", error)
+            return True
+        # 手势记账走桥 edit_gesture → record_native_gesture（含邻层序列）。
+        self.state_changed.emit()
+        return True
 
     def _explode_selected_multipart(self, layer, session) -> tuple[bool, str]:
         """V10 拆分多部件：每个选中的 multipart 要素按部件拆为 N 个要素。
@@ -2734,12 +2883,17 @@ class CompositeEditController(QObject):
                 if layer is not None and session is not None and self._kinds.get(layer.id) == "polygon"
                 else 0
             ),
-            "split_ready": self._split_inputs() is not None,
+            "split_ready": self._split_inputs() is not None or (
+                layer is not None
+                and self.native_editing.is_open(layer.id)
+                and self._kinds.get(layer.id) == "polygon"
+                and bool(layer.selection)
+            ),
             "merge_ready": (
                 layer is not None
-                and session is not None
                 and self._kinds.get(layer.id) == "polygon"
                 and len(layer.selection) >= 2
+                and (session is not None or self.native_editing.is_open(layer.id))
             ),
             "reshape_ready": (
                 layer is not None

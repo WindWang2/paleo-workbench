@@ -1199,8 +1199,23 @@ class QgisCanvasShim(QWidget):
                 # M3 Task 5：canceled（Esc/右键空取消）时工具条状态回流，
                 # 工具保持激活——只是本次捕捉作废。
                 shim.tool_operation.emit(False)
+                controller = getattr(shim, "_tool_controller", None)
+                cancel = getattr(controller, "cancel_native_capture", None)
+                if callable(cancel):
+                    cancel()
                 return
             controller = getattr(shim, "_tool_controller", None)
+            # 原生路由必须先于 Python commit_geometry：分割切线走 addLine
+            # 但不激活 kind-bound 的 Python 加线工具，active_tool 可能没有
+            # commit_geometry——若先 return 则切线永远到不了 split_mirror_features。
+            native_route = getattr(controller, "commit_native_capture", None)
+            if callable(native_route):
+                try:
+                    if native_route(json.loads(geom_json)):
+                        shim.tool_operation.emit(True)
+                        return
+                except Exception:
+                    pass  # 路由失败回落 Python 工具提交
             tool = getattr(controller, "active_tool", None) if controller is not None else None
             commit = getattr(tool, "commit_geometry", None)
             if commit is None:
@@ -1211,14 +1226,6 @@ class QgisCanvasShim(QWidget):
             # 重复查。RAW/角色/成熟度保护同样在进前段由宿主门禁把守。
             # M1：活动层处于原生会话时数字化直写镜像缓冲（宿主路由，
             # add_mirror_feature 一宏），不经 Python 工具提交。
-            native_route = getattr(controller, "commit_native_capture", None)
-            if callable(native_route):
-                try:
-                    if native_route(json.loads(geom_json)):
-                        shim.tool_operation.emit(True)
-                        return
-                except Exception:
-                    pass  # 路由失败回落 Python 工具提交
             # ADV-2：commit 被拒（坏几何/重复 id/脱钩会话）必须让用户感知，
             # 不得静默吞掉一次完成的采点。
             try:

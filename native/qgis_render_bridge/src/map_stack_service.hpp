@@ -309,6 +309,18 @@ public:
   // Feature（properties.__pwb_fid = 宿主 id）；一宏可撤（"Added feature"）。
   std::string addMirrorFeature(const std::string& doc_id,
                                const std::string& geojson_feature);
+  // M3 §4 无缝分割：curve_geojson = LineString（或 Feature 包一层）；
+  // feature_ids_json = 宿主 id 数组（空 = 走 QGIS 当前选择 / 相交要素）。
+  // 邻层只插拓扑点不分割；空结果 destroyEditCommand 不留痕。
+  std::string splitMirrorFeatures(const std::string& doc_id,
+                                  const std::string& curve_geojson,
+                                  const std::string& feature_ids_json = "");
+  // M3 §4 无缝合并：feature_ids_json = 宿主 id 数组（≥2）；
+  // attrs_json = {"target_id": 宿主 id, "attributes": {字段: 值}}。
+  // target 缺省 = 面积最大；一宏 "Merged features"。
+  std::string mergeMirrorFeatures(const std::string& doc_id,
+                                  const std::string& feature_ids_json,
+                                  const std::string& attrs_json);
   // M2 §4 全部层档：顶点工具档位（false = 当前层（默认），true = 全部层）。
   void setVertexEditScope(std::uintptr_t canvas_addr, bool all_layers);
   // M2 §4 追踪：QgsMapCanvasTracer 注册 + 开关（false 默认；全体捕获

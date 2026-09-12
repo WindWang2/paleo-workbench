@@ -449,7 +449,10 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // 0.7.0a0 (topo-editing M1): mirror-layer native editing (start/
     // commit/rollback/undo/redo), committed delta callback, add mirror
     // feature, mirror_features_json unlimited readback (limit<=0).
-    module.attr("__version__") = "0.8.0a0";
+    // 0.9.0a0 (topo-editing M3): split_mirror_features /
+    // merge_mirror_features (native buffer split/merge + attribute
+    // inheritance; neighbor topo-points on split).
+    module.attr("__version__") = "0.9.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -926,6 +929,19 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              py::arg("doc_id"), py::arg("geojson_feature"),
              "M1 topo-editing: add one GeoJSON feature into the edit buffer "
              "(digitize routing); one undoable macro 'Added feature'.")
+        .def("split_mirror_features",
+             &pwb::qgis_render::QgisMapStack::splitMirrorFeatures,
+             py::arg("doc_id"), py::arg("curve_geojson"),
+             py::arg("feature_ids_json") = "",
+             "M3 topo-editing: split selected (or listed) features by a "
+             "LineString curve; topologicalEditing + neighbor topo points; "
+             "one undoable macro 'Features split'.")
+        .def("merge_mirror_features",
+             &pwb::qgis_render::QgisMapStack::mergeMirrorFeatures,
+             py::arg("doc_id"), py::arg("feature_ids_json"),
+             py::arg("attrs_json") = "",
+             "M3 topo-editing: merge listed features (union + attributes); "
+             "one undoable macro 'Merged features'.")
         .def("set_edit_pick_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
                 py::function f) {
