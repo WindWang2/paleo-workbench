@@ -321,6 +321,9 @@ class DataPage(QWidget):
         self._export_job = OwnedWorkerJob(self)
         self._verify_job = OwnedWorkerJob(self)
         self._domain_bind_job = OwnedWorkerJob(self)
+        # V11 entity detail: late staleness worker + active entity tracking.
+        self._stale_job: OwnedWorkerJob | None = None
+        self._active_detail_entity: tuple[str, str] | None = None
         # #931: heavy catalog copy/hash actions (派生副本/纳管/新建版本/提升)
         # run off the GUI thread like import/rescan/delivery/export.
         self._catalog_copy_job = OwnedWorkerJob(self)
@@ -464,6 +467,9 @@ class DataPage(QWidget):
         self.navigation_tree.delete_well_requested.connect(self.delete_well)
         # V11: double-click on a well/survey row → per-entity data view.
         self.navigation_tree.entity_activated.connect(self.open_entity_detail)
+        self.workspace.well_detail_panel.close_requested.connect(
+            self.close_entity_detail
+        )
         self._sync_toolbar_toggle_state()
 
         # Wire inspector panel interactive signals
@@ -863,6 +869,7 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
+        self._refresh_active_entity_detail()
         # A model reset rebuilds every row view; a stale selection object
         # (e.g. the pre-edit AssetView of a catalog-only row) would keep
         # feeding the inspector old data. Re-point the selection at the
@@ -2228,44 +2235,83 @@ class DataPage(QWidget):
     def open_entity_detail(self, entity_id: str) -> None:
         """V11 entity data view: assemble the per-well/per-survey view.
 
-        The view is assembled synchronously from the read facade — the cost
-        is bounded by ONE entity's links plus batched point lookups (never a
-        catalog full materialization), so the GUI thread stays responsive
-        even at 100k assets. Non-well/survey ids fall back to the table.
+        Slot assembly is synchronous (batched point reads over ONE entity's
+        links). Staleness is computed off-thread and delivered late — the
+        first full staleness walk is a budgeted project-wide computation and
+        must not block the GUI thread (docs 09 §3).
         """
         service = self._catalog_service()
         if service is None:
             return
-        well = next(
-            (w for w in self.project.wells if w.id == entity_id), None
-        )
-        if well is not None:
-            from paleo_workbench.catalog.entity_views import EntityViewService
+        from paleo_workbench.catalog.entity_views import EntityViewService
 
-            view = EntityViewService(service, self.project).well_view(
-                entity_id, with_stale=True
-            )
-            if view is not None:
-                self.workspace.well_detail_panel.set_view(view)
-                self.workspace.show_well_detail(True)
-                return
-        survey = next(
-            (s for s in self.project.seismic_surveys if s.id == entity_id), None
+        views = EntityViewService(service, self.project)
+        entity_type = None
+        if any(w.id == entity_id for w in self.project.wells):
+            entity_type = "well"
+        elif any(s.id == entity_id for s in self.project.seismic_surveys):
+            entity_type = "seismic_survey"
+        if entity_type is None:
+            self.workspace.show_well_detail(False)
+            return
+        view = (
+            views.well_view(entity_id)
+            if entity_type == "well"
+            else views.survey_view(entity_id)
         )
-        if survey is not None:
-            from paleo_workbench.catalog.entity_views import EntityViewService
+        if view is None:
+            self.workspace.show_well_detail(False)
+            return
+        self._active_detail_entity = (entity_type, entity_id)
+        self.workspace.well_detail_panel.set_view(view)
+        self.workspace.show_well_detail(True)
+        self._refresh_entity_staleness(entity_type, entity_id)
 
-            view = EntityViewService(service, self.project).survey_view(
-                entity_id, with_stale=True
-            )
-            if view is not None:
-                self.workspace.well_detail_panel.set_view(view)
-                self.workspace.show_well_detail(True)
-                return
-        self.workspace.show_well_detail(False)
+    def _refresh_entity_staleness(self, entity_type: str, entity_id: str) -> None:
+        """Compute entity staleness off-thread; update the panel late."""
+        service = self._catalog_service()
+        if service is None:
+            return
+        project = self.project
+
+        class _StaleWorker(QObject):
+            done = Signal(object)
+
+            @Slot()
+            def run(self):  # pragma: no cover - threaded body
+                from paleo_workbench.catalog.impact import ImpactService
+
+                self.done.emit(
+                    ImpactService(service).entity_staleness(
+                        project, entity_type, entity_id
+                    )
+                )
+
+        worker = _StaleWorker()
+        if self._stale_job is not None and self._stale_job.is_running:
+            return  # one staleness computation at a time
+        self._stale_job = OwnedWorkerJob(self)
+        self._stale_job.start(
+            worker,
+            terminal_signals=(worker.done,),
+            result_connections=[(worker.done, self._on_entity_stale_ready)],
+        )
+
+    def _on_entity_stale_ready(self, items) -> None:
+        self.workspace.well_detail_panel.update_stale(items)
+
+    def _refresh_active_entity_detail(self) -> None:
+        """Domain refresh hook: keep a visible detail page current."""
+        if (
+            self.workspace.well_detail_visible()
+            and self._active_detail_entity is not None
+        ):
+            entity_type, entity_id = self._active_detail_entity
+            self.open_entity_detail(entity_id)
 
     def close_entity_detail(self) -> None:
         """Return the center column to the asset table."""
+        self._active_detail_entity = None
         self.workspace.show_well_detail(False)
 
     def _catalog_bridge(self, resource: object):

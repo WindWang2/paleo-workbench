@@ -87,6 +87,10 @@ class SurveyDataView:
     slots: dict[str, RoleSlot]
     stale_count: int = 0
     stale_items: list[Any] = field(default_factory=list)
+    # Status fields shared with WellDataView so the detail panel can render
+    # both shapes uniformly (defaults keep survey views cheap).
+    missing_source_asset_ids: list[str] = field(default_factory=list)
+    uncommitted_edits: list[WorkingCopyLite] = field(default_factory=list)
 
 
 @dataclass
@@ -216,12 +220,13 @@ class EntityViewService:
             return None
         slots = self._slots_for_entity("seismic_survey", survey_id)
         view = SurveyDataView(survey=survey, slots=slots)
-        if with_stale:
-            stale = self._impact_service().entity_staleness(
-                self._project, "seismic_survey", survey_id
-            )
-            view.stale_items = stale
-            view.stale_count = len(stale)
+        self._attach_status(
+            [m for slot in slots.values() for m in slot.members],
+            view,
+            with_stale=with_stale,
+            entity_type="seismic_survey",
+            entity_id=survey_id,
+        )
         return view
 
     def _slots_for_entity(self, entity_type: str, entity_id: str) -> dict[str, RoleSlot]:

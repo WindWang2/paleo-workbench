@@ -869,11 +869,13 @@ class CompositionPanel(QFrame):
         Best-effort — the save itself must never fail because provenance
         registration did (the same contract as every record_export caller).
         """
-        provider = getattr(self, "project_provider", None)
-        project = provider() if callable(provider) else None
-        if project is None:
-            return
         try:
+            provider = getattr(self, "project_provider", None)
+            project = provider() if callable(provider) else None
+            if project is None:
+                return
+        except Exception:
+            return  # a raising provider must never break the save path
             from paleo_workbench.project.artifacts import record_export
 
             record_export(

@@ -263,25 +263,34 @@ class DataFabricV11Mixin:
                 f" split the directory or import as separate assets"
             )
         # P1-4: member names are the version-scoped identity (SQLite PK) —
-        # duplicates would silently drop rows in the index. Auto names take
-        # the rel path when the bare filename collides; explicit specs may
-        # never collide.
+        # duplicates would silently drop rows in the index. ONE unified
+        # used-name pool across spec names, bare names and rel-path
+        # fallbacks (disjoint pools are how collisions sneaked through),
+        # with a final hard assertion as the backstop.
+        used_names: set[str] = set()
         auto_names: dict[str, str] = {}
-        bare_names: set[str] = set()
-        spec_names: set[str] = set()
         for rel in sorted(source_files):
             spec = spec_by_rel.get(rel)
             if spec is not None:
-                if spec.name in spec_names:
+                if spec.name in used_names:
                     raise CatalogError(
                         f"Duplicate member name {spec.name!r} in specs"
                     )
-                spec_names.add(spec.name)
+                used_names.add(spec.name)
                 continue
-            bare = Path(rel).name
-            name = bare if bare not in bare_names else rel
-            bare_names.add(bare)
-            auto_names[rel] = name
+            for candidate in (Path(rel).name, rel):
+                if candidate and candidate not in used_names:
+                    used_names.add(candidate)
+                    auto_names[rel] = candidate
+                    break
+            if rel not in auto_names:
+                # bare name AND rel path both taken: numeric suffix
+                base = Path(rel).name
+                suffix = 2
+                while f"{base}~{suffix}" in used_names:
+                    suffix += 1
+                auto_names[rel] = f"{base}~{suffix}"
+                used_names.add(auto_names[rel])
         with self._lock:
             asset = self._asset_or_raise(asset_id)
             if run_id is not None:
@@ -338,6 +347,11 @@ class DataFabricV11Mixin:
                         sha256=digest,
                         size_bytes=size,
                     )
+                )
+            member_names = [m.name for m in members]
+            if len(set(member_names)) != len(member_names):
+                raise CatalogError(
+                    "Bundle member names are not unique (internal error)"
                 )
             version.members = members
             version.path = version_dir_rel

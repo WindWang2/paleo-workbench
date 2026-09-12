@@ -250,3 +250,117 @@ def test_well_view_missing_probe_is_bounded(tmp_path):
         assert view.missing_source_asset_ids == []
     finally:
         svc.close()
+
+
+# Round-2 P1s ---------------------------------------------------------------
+
+
+def test_survey_detail_panel_renders(tmp_path):
+    """SurveyDataView carries the status fields the detail panel reads."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from paleo_workbench.catalog.entity_views import EntityViewService
+    from paleo_workbench.project.domain import (
+        SeismicSurveyEntity,
+        upsert_entity_asset_link,
+    )
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.pages.well_detail_panel import WellDetailPanel
+
+    _ = Qt  # keep import symmetric with other UI tests
+    project_file = tmp_path / "p.paleo.json"
+    project_file.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_file)
+    try:
+        doc = ProjectDocument.new("p")
+        survey = SeismicSurveyEntity(name="S3D")
+        doc.seismic_surveys.append(survey)
+        src = tmp_path / "v.sgy"
+        src.write_bytes(b"segy")
+        v = svc.import_raw(src, name="v.sgy", type="seismic")
+        asset = svc.get_version(v.id).asset_id
+        upsert_entity_asset_link(
+            doc, entity_type="seismic_survey", entity_id=survey.id,
+            asset_id=asset, role="seismic_volume", is_primary=True,
+        )
+        view = EntityViewService(svc, doc).survey_view(survey.id)
+        assert view is not None
+        app = QApplication.instance() or QApplication([])
+        panel = WellDetailPanel()
+        panel.set_view(view)  # must not raise (the round-2 P1 crash)
+        assert panel._title.text() == "S3D"
+        assert panel._roles_table.rowCount() == 1
+    finally:
+        svc.close()
+
+
+def test_member_name_collision_nested_vs_top_level(service, tmp_path):
+    """Nested file whose bare name equals a top-level file's still yields
+    unique member names (the three-pool collision hole)."""
+    asset = _make_asset(service, "coll")
+    src = tmp_path / "coll"
+    (src / "sub").mkdir(parents=True)
+    (src / "sub" / "data.csv").write_bytes(b"nested")  # sorts FIRST
+    (src / "data.csv").write_bytes(b"top")
+    version = service.register_bundle_version(asset.id, src, DataStage.RAW)
+    names = [m.name for m in version.members]
+    assert len(names) == len(set(names)) == 2
+    # and the store agrees with the document after reopen
+    project_path = service.project_path
+    service.close()
+    reopened_svc = DataCatalogService.open(project_path)
+    try:
+        reopened = reopened_svc.get_version(version.id)
+        assert sorted(m.name for m in reopened.members) == sorted(names)
+    finally:
+        reopened_svc.close()
+
+
+def test_spec_name_vs_auto_name_collision_disambiguated(service, tmp_path):
+    """An explicit spec name wins; the colliding AUTO name gets suffixed
+    (never a silent PK drop)."""
+    from paleo_workbench.catalog.models import VersionMember
+
+    asset = _make_asset(service, "spec")
+    src = tmp_path / "spec"
+    src.mkdir()
+    (src / "x.csv").write_bytes(b"x")
+    (src / "sub").mkdir()
+    (src / "sub" / "y.csv").write_bytes(b"y")
+    version = service.register_bundle_version(
+        asset.id, src, DataStage.RAW,
+        member_specs=[VersionMember(name="x.csv", rel_path="sub/y.csv")],
+    )
+    by_rel = {m.rel_path: m.name for m in version.members}
+    assert by_rel["sub/y.csv"] == "x.csv"  # spec intent honored
+    assert by_rel["x.csv"] != "x.csv"  # auto name disambiguated
+    names = [m.name for m in version.members]
+    assert len(names) == len(set(names))
+
+
+def test_multi_source_same_content_not_auto_skipped(tmp_path):
+    """Content imported from two different paths stays distinct; the second
+    path's item is NOT a duplicate (catalog identity is source+sha)."""
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.resources.ingest_plan import build_ingest_plan
+
+    project_file = tmp_path / "p.paleo.json"
+    project_file.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_file)
+    doc = ProjectDocument.new("p")
+    try:
+        first = tmp_path / "first.las"
+        first.write_text("~W\nWELL: A\n", encoding="utf-8")
+        svc.import_raw(first, name="first.las", type="well_log")
+        # same CONTENT, different path
+        plan_root = tmp_path / "plan"
+        plan_root.mkdir()
+        (plan_root / "second.las").write_text("~W\nWELL: A\n", encoding="utf-8")
+        plan = build_ingest_plan(plan_root, doc, service=svc)
+        item = plan.items[0]
+        assert item.duplicate_of_version is None
+        assert item.decision == "pending"
+    finally:
+        svc.close()

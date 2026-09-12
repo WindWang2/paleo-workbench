@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -53,6 +54,9 @@ class _SectionCard(QFrame):
 
 class WellDetailPanel(QWidget):
     """Center-stack page showing one well's full data view."""
+
+    # User asked to leave the detail page (back to the asset table).
+    close_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -92,6 +96,31 @@ class WellDetailPanel(QWidget):
         for card in (self._stale_card, self._edits_card, self._missing_card):
             self._status_row.addWidget(card, 1)
         layout.addLayout(self._status_row, 1)
+
+        self._close_btn = QPushButton("← 返回资产列表")
+        self._close_btn.clicked.connect(self.close_requested.emit)
+        layout.addWidget(self._close_btn, 0, Qt.AlignmentFlag.AlignLeft)
+
+    def update_stale(self, items: list) -> None:
+        """Late-arriving staleness results (computed off the GUI thread)."""
+        if self._view is None:
+            return
+        self._view.stale_items = list(items or [])
+        self._view.stale_count = len(self._view.stale_items)
+        self._fill_list_card(
+            self._stale_card.body,
+            [
+                f"{getattr(item, 'stage', '')} · {item.version_id[:14]}…"
+                + (" · pinned" if getattr(item, "pinned", False) else "")
+                for item in self._view.stale_items[:8]
+            ]
+            + (
+                [f"…另有 {self._view.stale_count - 8} 项"]
+                if self._view.stale_count > 8
+                else []
+            )
+            or ["无过期成果"],
+        )
 
     # ------------------------------------------------------------------
 
@@ -137,10 +166,11 @@ class WellDetailPanel(QWidget):
             self._roles_table.setItem(
                 row, 2, QTableWidgetItem("✓" if primary and primary.is_primary else "")
             )
+            current_id = primary.current_version_id if primary else None
             self._roles_table.setItem(
                 row, 3,
                 QTableWidgetItem(
-                    (primary.current_version_id or "—") if primary else "—"
+                    f"{current_id[:14]}…" if current_id else "—"
                 ),
             )
             version_sum = sum(m.version_count for m in slot.members)
@@ -160,13 +190,19 @@ class WellDetailPanel(QWidget):
             self._edits_card.body,
             [
                 f"{edit.state} · {edit.source_version_id}"
-                for edit in (view.uncommitted_edits or [])[:8]
+                for edit in (getattr(view, "uncommitted_edits", None) or [])[:8]
             ] or ["无未提交编辑"],
         )
-        missing_lines = [f"角色缺失: {role}" for role, _ in empty if role != "other"]
+        from paleo_workbench.project.roles import role_definition
+
+        missing_lines = [
+            f"角色缺失: {role_definition(role).display or role}"
+            for role, _ in empty
+            if role != "other"
+        ]
         missing_lines += [
             f"源文件缺失: {asset_id}"
-            for asset_id in (view.missing_source_asset_ids or [])[:4]
+            for asset_id in (getattr(view, "missing_source_asset_ids", None) or [])[:4]
         ]
         self._fill_list_card(self._missing_card.body, missing_lines or ["—"])
 
