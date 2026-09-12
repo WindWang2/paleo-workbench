@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
-from typing import Iterable, Mapping
 
 __all__ = ["TopologyChecker", "ignore_key"]
 

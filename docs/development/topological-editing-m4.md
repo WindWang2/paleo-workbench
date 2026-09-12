@@ -19,8 +19,8 @@
 
 ## 验收证据
 
-- `tests/test_qgis_topo_m4_checker.py`（4 项，真桥）：场景 12（余量高亮 + 导航不改几何）、重叠检测、is_valid + makeValid、场景 14（全部修复清空重叠 + 一次 undo 回退）。
-- `tests/test_topo_m4_checker.py`（5 项，宿主）：场景 13（忽略放行 / 恢复再阻断）、双豁免持久化、面板灰显+缩放信号、场景 16（台账 authoritative + 审计手势）、检查器门禁 API。
+- `tests/test_qgis_topo_m4_checker.py`（6 项，真桥）：场景 12（余量高亮 + 导航不改几何）、重叠检测、is_valid + makeValid、场景 14（全部修复清空重叠 + 一次 undo 回退）、内部缝隙、场景 16 提交后宿主 fid 仍在。
+- `tests/test_topo_m4_checker.py`（8 项，宿主）：场景 13（忽略放行 / 恢复再阻断）、双豁免持久化、面板灰显+缩放/徽章/右键方法、场景 16（台账 authoritative + 审计手势）、Python `save_edits` 走检查器门禁、工区边界写入 checker.workspace。
 - M3/M2/M1 真桥回归：`test_qgis_topo_m{1,2,3,4}_*` **20 过 / 0 失败**。
 - 宿主回归：M0/M1/M3 + inspector/dock/shell/composite_editing 绿。
 

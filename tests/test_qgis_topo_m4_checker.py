@@ -226,3 +226,47 @@ def test_scenario14_fix_all_overlaps_and_single_undo(qtbot, stack):
         assert len(_errors_of(payload_after_undo, "overlap")) >= 2
     finally:
         _cleanup(stack, addr, "draft")
+
+
+def test_internal_gap_is_reported(qtbot, stack):
+    """面缝隙：被面包围的洞由 QgsGeometryGapCheck 抓到。"""
+    addr, _view = _canvas(qtbot, stack)
+    try:
+        donut = {
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [
+                [[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0], [0.0, 0.0]],
+                [[3.0, 3.0], [3.0, 5.0], [5.0, 5.0], [5.0, 3.0], [3.0, 3.0]],
+            ]},
+            "properties": {"__pwb_fid": "donut", "facies": "砂岩"},
+        }
+        _upsert(stack, "draft", [donut])
+        stack.set_canvas_extent(addr, -1.0, -1.0, 9.0, 9.0)
+        payload = _run(stack, addr, ["draft"])
+        gaps = _errors_of(payload, "gap")
+        assert gaps, payload["errors"]
+        methods = gaps[0].get("methods") or []
+        assert methods, gaps[0]
+    finally:
+        _cleanup(stack, addr, "draft")
+
+
+def test_scenario16_commit_keeps_host_fids(qtbot, stack):
+    """场景 16：保存成功后镜像仍按宿主 fid 读回（反查表重建）。"""
+    addr, _view = _canvas(qtbot, stack)
+    try:
+        _upsert(stack, "draft", [
+            _square("fa", 0.0, 0.0, size=3.0, facies="砂岩"),
+            _square("fb", 5.0, 5.0, size=3.0, facies="泥岩"),
+        ])
+        stack.set_canvas_extent(addr, 0.0, 0.0, 10.0, 10.0)
+        assert stack.start_mirror_layer_editing("draft") == ""
+        payload = _run(stack, addr, ["draft"])
+        assert _errors_of(payload, "overlap") == []
+        assert stack.commit_mirror_layer("draft") == ""
+        features = _readback(stack, "draft")
+        ids = {str(f.get("id")) for f in features}
+        assert ids == {"fa", "fb"}
+        assert stack.mirror_layer_editing("draft") is False
+    finally:
+        _cleanup(stack, addr, "draft")

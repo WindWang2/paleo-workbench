@@ -180,7 +180,7 @@ def test_scenario13_ignore_exemption_allows_save_restore_blocks():
     """场景 13：忽略重叠保存放行；恢复后再次阻断。"""
     from paleo_workbench.mapping.topology_checker import TopologyChecker
 
-    stack, controller, layer_a, layer_b = _two_layer_setup()
+    stack, controller, _layer_a, _layer_b = _two_layer_setup()
     stack.check_errors = [dict(_OVERLAP_ERROR)]
     topology = TopologyService(enabled=True)
     assert isinstance(topology.checker, TopologyChecker)
@@ -269,7 +269,7 @@ def test_scenario16_commit_aligns_ledger_and_records_gesture_audit():
         align_publish_ledger_for_layer,
     )
 
-    stack, controller, layer_a, layer_b = _two_layer_setup()
+    stack, controller, layer_a, _layer_b = _two_layer_setup()
     stack.check_errors = []
     topology = TopologyService(enabled=True)
     controller.gestures.finish(
@@ -311,14 +311,100 @@ def test_scenario16_commit_aligns_ledger_and_records_gesture_audit():
     )
 
 
-def test_save_edits_python_path_uses_checker_when_present():
+def test_save_edits_python_path_uses_checker_when_present(qapp):
     """Python 会话 save_edits 与原生 commit_all 共用检查器门禁。"""
-    from paleo_workbench.mapping.topology_checker import TopologyChecker
+    from paleo_workbench.ui.workstation.composite_editing import (
+        CompositeEditController,
+    )
 
-    topology = TopologyService(enabled=True)
-    topology.checker.last_errors = [dict(_OVERLAP_ERROR)]
-    issues = topology.checker.blocking_errors()
-    assert issues and issues[0]["rule"] == "overlap"
-    topology.checker.ignore(_OVERLAP_ERROR, reason="skip")
-    assert topology.checker.blocking_errors() == []
-    assert isinstance(topology.checker, TopologyChecker)
+    stack = FakeCheckerStack()
+    canvas = type("Canvas", (), {})()
+    canvas.canvas_address = 1
+    canvas.stack = stack
+    canvas.set_map_tool_controller = lambda tools: None
+    canvas.set_overlay_provider = lambda overlay: None
+
+    controller = CompositeEditController()
+    layer = controller.create_layer("相带线", "line")
+    stack.check_errors = [{
+        **_OVERLAP_ERROR, "layer_id": layer.id, "feature_id": "x",
+    }]
+    controller.attach_canvas(canvas)
+    controller.set_topology(True)
+    controller.start_editing()
+    assert layer.edit_session is not None
+
+    reason = controller.save_edits()
+    assert reason and "拓扑" in reason, reason
+    assert layer.edit_session is not None
+
+    controller.topology.checker.ignore(
+        stack.check_errors[0], reason="accepted")
+    assert controller.save_edits() is None
+    assert layer.edit_session is None
+
+
+def test_panel_badge_shows_count_and_timestamp(qapp):
+    """徽章 = 上次未忽略条数 + 时间。"""
+    from paleo_workbench.ui.workstation.topology_checker_panel import (
+        TopologyCheckerPanel,
+    )
+
+    panel = TopologyCheckerPanel()
+    assert "尚未检查" in panel.badge.text()
+    panel.set_errors(
+        [_OVERLAP_ERROR],
+        ignored_keys=set(),
+        last_run_at="2026-09-12T12:00:00+00:00",
+    )
+    text = panel.badge.text()
+    assert "1 处未忽略" in text
+    assert "2026-09-12" in text
+    panel.set_errors(
+        [_OVERLAP_ERROR],
+        ignored_keys={("overlap", "draft-b", "fb", "fa")},
+    )
+    assert "0 处未忽略" in panel.badge.text()
+    panel.close()
+
+
+def test_panel_context_menu_emits_declared_fix_method(qapp):
+    """单条右键出 check 声明的方法列表并按所选 method id 修复。"""
+    from paleo_workbench.ui.workstation.topology_checker_panel import (
+        TopologyCheckerPanel,
+    )
+
+    panel = TopologyCheckerPanel()
+    fixes = []
+    panel.fix_requested.connect(lambda eid, mid: fixes.append((eid, mid)))
+    panel.set_errors([_OVERLAP_ERROR])
+    menu = panel.menu_for(_OVERLAP_ERROR)
+    labels = [action.text() for action in menu.actions()]
+    assert labels, "右键应列出 check 声明的修复方法"
+    assert any("Subtract" in text or "裁" in text or "重叠" in text
+               for text in labels)
+    menu.actions()[0].trigger()
+    assert fixes == [("0", 0)]
+    panel.close()
+
+
+def test_load_from_project_copies_workarea_into_checker(qapp):
+    """工区余量用工程工区边界（规格：工区边界图层，缺则兜底）。"""
+    from paleo_workbench.project.domain import ensure_workarea
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_editing import (
+        CompositeEditController,
+    )
+
+    project = ProjectDocument.new("工区")
+    workarea = ensure_workarea(project)
+    workarea.boundary = [
+        [0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0],
+    ]
+    controller = CompositeEditController()
+    controller.load_from_project(project)
+    workspace = controller.topology.checker.workspace
+    assert workspace and workspace.get("type") == "Polygon"
+    ring = workspace["coordinates"][0]
+    assert ring[0] == [0.0, 0.0]
+    assert ring[-1] == [0.0, 0.0]

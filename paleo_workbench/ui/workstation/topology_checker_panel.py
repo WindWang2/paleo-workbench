@@ -157,16 +157,8 @@ class TopologyCheckerPanel(QWidget):
             return
         self.check_requested.emit()
 
-    def _on_menu(self, pos) -> None:
-        error = self._current_error()
-        if error is None:
-            item = self.error_list.itemAt(pos)
-            if item is not None:
-                self.error_list.setCurrentItem(item)
-                payload = item.data(Qt.ItemDataRole.UserRole)
-                error = dict(payload) if isinstance(payload, dict) else None
-        if error is None:
-            return
+    def menu_for(self, error: dict) -> QMenu:
+        """单条右键：check 声明的方法列表（含预览描述）。"""
         menu = QMenu(self)
         methods = error.get("methods") or [{"id": 0, "name": "修复"}]
         for method in methods:
@@ -179,7 +171,19 @@ class TopologyCheckerPanel(QWidget):
             action.triggered.connect(
                 lambda *_, eid=error_id, mid=method_id:
                     self.fix_requested.emit(eid, mid))
-        menu.exec(self.error_list.mapToGlobal(pos))
+        return menu
+
+    def _on_menu(self, pos) -> None:
+        error = self._current_error()
+        if error is None:
+            item = self.error_list.itemAt(pos)
+            if item is not None:
+                self.error_list.setCurrentItem(item)
+                payload = item.data(Qt.ItemDataRole.UserRole)
+                error = dict(payload) if isinstance(payload, dict) else None
+        if error is None:
+            return
+        self.menu_for(error).exec(self.error_list.mapToGlobal(pos))
 
     def _on_fix(self) -> None:
         error = self._current_error()
