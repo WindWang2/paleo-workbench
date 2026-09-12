@@ -14,6 +14,7 @@ one well issues batched point lookups only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from paleo_workbench.project.roles import (
@@ -117,7 +118,8 @@ class EntityViewService:
         full-materialization."""
         wells = list(getattr(self._project, "wells", None) or ())
         links = list(getattr(self._project, "entity_asset_links", None) or ())
-        live_assets = None  # lazy trashed filter set
+        # Link counting is live-only by construction: the trash flow removes
+        # entity links when it removes the asset.
         per_well: dict[str, dict[str, int]] = {w.id: {} for w in wells}
         unresolved: dict[str, int] = {w.id: 0 for w in wells}
         for link in links:
@@ -147,7 +149,6 @@ class EntityViewService:
                 for well_id in asset_to_wells.get(asset_id, ()):
                     stale_per_well[well_id] = stale_per_well.get(well_id, 0) + count
             stale_counts = stale_per_well
-        del live_assets
         return [
             WellIndexEntry(
                 well_id=well.id,
@@ -307,13 +308,10 @@ class EntityViewService:
         entity_id: str,
     ) -> None:
         asset_ids = [m.asset_id for m in members]
-        # missing sources (payloads that no longer resolve on disk)
-        try:
-            missing = self._service.find_missing_sources()
-        except Exception:
-            missing = []
-        missing_ids = {entry.asset_id for entry in getattr(missing, "entries", ())}
-        view.missing_source_asset_ids = [a for a in asset_ids if a in missing_ids]
+        # Missing sources: BOUNDED first-rung probe over the view's own
+        # member assets only (F7 — the full find_missing_sources scan is
+        # O(all versions) filesystem stats and must not run per expansion).
+        view.missing_source_asset_ids = self._probe_missing_members(asset_ids)
         # uncommitted edits on the entity's asset versions
         try:
             copies = self._service.list_working_copies()
@@ -340,6 +338,33 @@ class EntityViewService:
             )
             view.stale_items = stale
             view.stale_count = len(stale)
+
+    def _probe_missing_members(self, asset_ids: list[str]) -> list[str]:
+        """First-rung existence probe for the current versions of *asset_ids*.
+
+        Mirrors sources._probe_path's cheap rungs (project-join + recorded
+        absolute) without the relocation/identity-hash rungs — bounded to
+        the view's assets, never the whole catalog.
+        """
+        maps = self._service._ensure_maps()
+        project_dir = (
+            Path(self._service.project_path).expanduser().resolve().parent
+        )
+        missing: list[str] = []
+        for asset_id in asset_ids:
+            version = maps.version_by_id.get(
+                maps.asset_by_id.get(asset_id).current_version_id
+            ) if maps.asset_by_id.get(asset_id) is not None else None
+            if version is None or version.trashed:
+                continue
+            if version.managed:
+                candidate = project_dir / version.path
+            else:
+                raw = Path(version.path)
+                candidate = raw if raw.is_absolute() else project_dir / raw
+            if not candidate.exists():
+                missing.append(asset_id)
+        return missing
 
     def _impact_service(self):
         if self._impact is None:

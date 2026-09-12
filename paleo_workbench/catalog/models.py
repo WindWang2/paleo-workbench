@@ -62,10 +62,12 @@ class VersionMember(BaseModel):
 def aggregate_member_sha256(members: list[VersionMember]) -> str | None:
     """Version-level integrity credential over ordered member checksums.
 
-    ``sha256( "name:sha256" lines of the ordinally sorted members )`` —
+    ``sha256( "rel_path:sha256" lines of the ordinally sorted members )`` —
     recomputable from the member table alone, stable under member insertion
-    order changes, and sensitive to any member path/content change. Returns
-    None when no member carries a checksum (nothing to aggregate honestly).
+    order changes, and sensitive to any member PATH or CONTENT change
+    (keying by rel_path, not the display name, so renames/relocations of a
+    member always move the aggregate). Returns None when no member carries a
+    checksum (nothing to aggregate honestly).
     """
     import hashlib
 
@@ -73,7 +75,7 @@ def aggregate_member_sha256(members: list[VersionMember]) -> str | None:
     for member in sorted(members, key=lambda m: (m.ordinal, m.name)):
         if not member.sha256:
             return None
-        lines.append(f"{member.name}:{member.sha256}")
+        lines.append(f"{member.rel_path}:{member.sha256}")
     if not lines:
         return None
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()

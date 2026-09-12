@@ -88,36 +88,63 @@ class DataFabricV11Mixin:
           refinement of the flat lists, never a divergence);
         - port counts stay within :data:`MAX_RUN_PORTS`.
 
-        Only one of the two directions may be given; the other is left
-        untouched.
+        Either or both directions may be given; a direction that is omitted
+        keeps its existing ports untouched.
         """
         with self._lock:
             run = self.get_run(run_id)  # raises CatalogError when unknown
-            maps = self._ensure_maps()
-            new_inputs = self._coerce_ports(input_ports, "input")
-            new_outputs = self._coerce_ports(output_ports, "output")
-            if len(new_inputs) + len(new_outputs) > MAX_RUN_PORTS:
-                raise CatalogError(
-                    f"Run {run_id} exceeds the port budget"
-                    f" ({len(new_inputs) + len(new_outputs)} > {MAX_RUN_PORTS})"
-                )
-            for port in (*new_inputs, *new_outputs):
-                if port.version_id not in maps.version_by_id:
-                    raise CatalogError(
-                        f"Port references unknown version {port.version_id}"
-                    )
-            if input_ports is not None:
-                run.input_ports = new_inputs
-                for port in new_inputs:
-                    if port.version_id not in run.input_version_ids:
-                        run.input_version_ids.append(port.version_id)
-            if output_ports is not None:
-                run.output_ports = new_outputs
-                for port in new_outputs:
-                    if port.version_id not in run.output_version_ids:
-                        run.output_version_ids.append(port.version_id)
+            self._apply_run_ports(
+                run,
+                input_ports=input_ports,
+                output_ports=output_ports,
+                validate_versions=True,
+            )
             self._save(DirtySet(runs={run.id: None}))
             return run
+
+    def _apply_run_ports(
+        self: "DataCatalogService",
+        run: DataRun,
+        *,
+        input_ports: Iterable[RunPort | dict[str, Any]] | None,
+        output_ports: Iterable[RunPort | dict[str, Any]] | None,
+        validate_versions: bool,
+    ) -> None:
+        """The ONE port-assignment core shared by every write entry
+        (``set_run_ports``, ``register_run``, ``create_derived``).
+
+        Maintains ports ⊆ flat io lists and the total port budget; version
+        existence is validated when the ids come from callers (True) and
+        skipped for freshly-built versions not yet in the maps (False).
+        Only the directions actually given are replaced.
+        """
+        maps = self._ensure_maps() if validate_versions else None
+        new_inputs = self._coerce_ports(input_ports, "input")
+        new_outputs = self._coerce_ports(output_ports, "output")
+        total = len(new_inputs) + len(new_outputs)
+        if input_ports is None:
+            total += len(run.input_ports)
+        if output_ports is None:
+            total += len(run.output_ports)
+        if total > MAX_RUN_PORTS:
+            raise CatalogError(
+                f"Run {run.id} exceeds the port budget ({total} > {MAX_RUN_PORTS})"
+            )
+        for port in (*new_inputs, *new_outputs):
+            if maps is not None and port.version_id not in maps.version_by_id:
+                raise CatalogError(
+                    f"Port references unknown version {port.version_id}"
+                )
+        if input_ports is not None:
+            run.input_ports = new_inputs
+            for port in new_inputs:
+                if port.version_id not in run.input_version_ids:
+                    run.input_version_ids.append(port.version_id)
+        if output_ports is not None:
+            run.output_ports = new_outputs
+            for port in new_outputs:
+                if port.version_id not in run.output_version_ids:
+                    run.output_version_ids.append(port.version_id)
 
     @staticmethod
     def _coerce_ports(
@@ -135,6 +162,38 @@ class DataFabricV11Mixin:
                 }))
             else:
                 raise CatalogError(f"Invalid port spec: {item!r}")
+        return out
+
+    def inputs_by_role(
+        self: "DataCatalogService",
+        run_id: str,
+        role: str,
+    ) -> list[RunPort]:
+        """Ordered input port bindings for one role (docs 06 §4)."""
+        ports = self.ports_for_run(run_id)
+        return [p for p in ports["input"] if p.role == role]
+
+    def runs_consuming(
+        self: "DataCatalogService",
+        *,
+        role: str | None = None,
+        version_id: str | None = None,
+    ) -> list[DataRun]:
+        """Runs whose INPUT ports match the role and/or version (docs 06 §4)."""
+        maps = self._ensure_maps()
+        out = []
+        for run in maps.run_by_id.values():
+            ports = list(run.input_ports)
+            if not ports and version_id is not None and version_id in run.input_version_ids:
+                out.append(run)  # legacy untyped run still counts as consuming
+                continue
+            for port in ports:
+                if role is not None and port.role != role:
+                    continue
+                if version_id is not None and port.version_id != version_id:
+                    continue
+                out.append(run)
+                break
         return out
 
     def ports_for_run(self: "DataCatalogService", run_id: str) -> dict[str, list[RunPort]]:
@@ -197,11 +256,41 @@ class DataFabricV11Mixin:
         unexpected = sorted(set(spec_by_rel) - source_files)
         if unexpected:
             raise CatalogError(f"Member specs reference missing files: {unexpected}")
+        if len(source_files) > MAX_BUNDLE_MEMBERS:
+            raise CatalogError(
+                f"Bundle exceeds member budget"
+                f" ({len(source_files)} > {MAX_BUNDLE_MEMBERS});"
+                f" split the directory or import as separate assets"
+            )
+        # P1-4: member names are the version-scoped identity (SQLite PK) —
+        # duplicates would silently drop rows in the index. Auto names take
+        # the rel path when the bare filename collides; explicit specs may
+        # never collide.
+        auto_names: dict[str, str] = {}
+        bare_names: set[str] = set()
+        spec_names: set[str] = set()
+        for rel in sorted(source_files):
+            spec = spec_by_rel.get(rel)
+            if spec is not None:
+                if spec.name in spec_names:
+                    raise CatalogError(
+                        f"Duplicate member name {spec.name!r} in specs"
+                    )
+                spec_names.add(spec.name)
+                continue
+            bare = Path(rel).name
+            name = bare if bare not in bare_names else rel
+            bare_names.add(bare)
+            auto_names[rel] = name
         with self._lock:
             asset = self._asset_or_raise(asset_id)
             if run_id is not None:
                 self.get_run(run_id)  # raises before any payload is placed
-        from paleo_workbench.catalog.storage import STAGE_DIRS, place_managed_tree
+        from paleo_workbench.catalog.storage import (
+            STAGE_DIRS,
+            ensure_catalog_layout,
+            place_managed_tree,
+        )
 
         with self._payload_staging_lease(self._staging_target(stage, asset_id)):
             version = DataVersion(
@@ -215,29 +304,33 @@ class DataFabricV11Mixin:
                 run_id=run_id,
                 metadata=dict(metadata or {}),
             )
+            # Copy-then-delete (P1-2): a failed commit must leave the user's
+            # source directory intact — move semantics that unlink during
+            # placement destroy uncommitted edits when the metadata commit
+            # is refused (e.g. the #411 cross-instance stale-write guard).
             placed = place_managed_tree(
                 source_dir, self.project_path, stage, asset.id, version.id,
-                keep_source=not move,
+                keep_source=True,
             )
-            if len(placed) > MAX_BUNDLE_MEMBERS:
-                shutil.rmtree(
-                    Path(self.project_path).expanduser().resolve().parent
-                    / placed[0][0].rsplit("/", 1)[0],
-                    ignore_errors=True,
-                )
-                raise CatalogError(
-                    f"Bundle exceeds member budget ({len(placed)} > {MAX_BUNDLE_MEMBERS})"
-                )
-            # The version payload path is the member DIRECTORY (all placed
-            # files share the {stage}/{asset}/{version} prefix).
-            version_dir_rel = placed[0][0].rsplit("/", 1)[0]
+            # The version payload path is the member DIRECTORY, derived from
+            # the authoritative layout — NEVER from the sorted file list
+            # (P1-1: the alphabetically-first member can live in a
+            # subdirectory, which used to corrupt every derived path).
+            project_dir = Path(self.project_path).expanduser().resolve().parent
+            version_dir_rel = (
+                ensure_catalog_layout(Path(self.project_path))
+                / STAGE_DIRS[stage]
+                / asset.id
+                / version.id
+            ).relative_to(project_dir).as_posix()
+            prefix = version_dir_rel + "/"
             members: list[VersionMember] = []
             for ordinal, (file_rel, digest, size) in enumerate(placed):
-                member_rel = file_rel[len(version_dir_rel) + 1:]
+                member_rel = file_rel[len(prefix):]
                 spec = spec_by_rel.get(member_rel)
                 members.append(
                     VersionMember(
-                        name=spec.name if spec else Path(member_rel).name,
+                        name=spec.name if spec else auto_names.get(member_rel, Path(member_rel).name),
                         rel_path=member_rel,
                         member_role=spec.member_role if spec else "",
                         ordinal=spec.ordinal if spec else ordinal,
@@ -288,6 +381,10 @@ class DataFabricV11Mixin:
                     asset.current_version_id = previous_current
                     self._rollback_bundle(version_dir_rel)
                     raise
+                if move:
+                    # Only now (metadata committed) is it safe to consume the
+                    # source directory — the copy-then-delete half of P1-2.
+                    shutil.rmtree(source_dir, ignore_errors=True)
                 return version
 
     def _rollback_bundle(self: "DataCatalogService", version_dir_rel: str) -> None:
@@ -392,7 +489,6 @@ class DataFabricV11Mixin:
             dst = target_dir / member.rel_path
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dst)
-        total_size = sum(m.size_bytes or 0 for m in version.members)
         try:
             rel = target_dir.relative_to(project_dir).as_posix()
             self._index.register_working_copy(
@@ -400,7 +496,10 @@ class DataFabricV11Mixin:
                 path=rel,
                 display_name=target_dir.name,
                 payload_mtime_ns=None,
-                source_size_bytes=total_size,
+                # Directory stat size is metadata noise, not payload size —
+                # leaving source_size_bytes None keeps the registry's dirty
+                # hint from crying wolf on every bundle checkout.
+                source_size_bytes=None,
             )
         except Exception:
             pass  # registry is lifecycle bookkeeping, never a checkout gate
@@ -608,3 +707,62 @@ class DataFabricV11Mixin:
             "dependent_run_count": len(dependent_runs),
             "downstream_count": len(maps.children_by_parent.get(version.id, ())),
         }
+
+    # ------------------------------------------------------------------
+    # Heuristic port backfill (docs 06 §5 / 10 §3.2)
+    # ------------------------------------------------------------------
+
+    # Operation → output port role. ONLY output roles are derivable from
+    # operation semantics; which historical input played sonic vs density is
+    # NOT recoverable, so inputs stay anonymous (honesty over completeness).
+    _OPERATION_OUTPUT_ROLES = {
+        "prediction": "prediction",
+        "factor_map": "factor_grid",
+        "factor_fusion": "fusion_result",
+        "map_compile": "map_product",
+        "time_depth_calibration": "calibrated_td",
+        "stratigraphic_correlation": "correlation",
+        "fault_interpretation": "interpretation",
+        "horizon_interpretation": "interpretation",
+        "qc": "qc_report",
+        "export": "export",
+    }
+
+    def migrate_run_ports(self: "DataCatalogService") -> dict[str, int]:
+        """One-time, idempotent output-port backfill for pre-V11 runs.
+
+        Deterministic: a run's output role comes from a fixed
+        operation→role table over the run's own metadata. Runs that already
+        carry ports are untouched; unknown operations are left anonymous.
+        Returns counts ({"runs_annotated": n, "ports_added": m}).
+        """
+        annotated = 0
+        added = 0
+        with self._lock:
+            maps = self._ensure_maps()
+            touched: list[DataRun] = []
+            for run in maps.run_by_id.values():
+                if run.output_ports:
+                    continue
+                role = self._OPERATION_OUTPUT_ROLES.get(run.operation)
+                if role is None:
+                    continue
+                known_outputs = [
+                    vid for vid in run.output_version_ids
+                    if vid in maps.version_by_id
+                ]
+                if not known_outputs:
+                    continue
+                run.output_ports = [
+                    RunPort(role=role, version_id=vid, ordinal=ordinal)
+                    for ordinal, vid in enumerate(known_outputs)
+                ]
+                annotated += 1
+                added += len(run.output_ports)
+                touched.append(run)
+            if touched:
+                dirty = DirtySet()
+                for run in touched:
+                    dirty.mark_runs(run.id)
+                self._save(dirty)
+        return {"runs_annotated": annotated, "ports_added": added}

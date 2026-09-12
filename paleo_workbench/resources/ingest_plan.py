@@ -371,35 +371,86 @@ def _match_duplicates(plan: IngestPlan, service: "DataCatalogService") -> None:
     maps = service._ensure_maps()
     sha_index: dict[str, tuple[str, str]] = {}  # sha -> (asset_id, version_id)
     path_index: dict[str, tuple[str, str]] = {}
+    external_index: dict[str, tuple[str, str]] = {}
     for version in maps.version_by_id.values():
-        if version.trashed or not version.managed:
+        if version.trashed:
+            continue
+        if not version.managed:
+            # External (unmanaged link) RAW: identity is the recorded path
+            # (docs 08: external duplicates match by path).
+            if version.path:
+                try:
+                    key = Path(version.path).resolve().as_posix()
+                except OSError:
+                    continue
+                external_index.setdefault(key, (version.asset_id, version.id))
             continue
         if version.stage.value != "raw":
             continue
         if version.sha256:
             sha_index.setdefault(version.sha256, (version.asset_id, version.id))
         if version.source_uri:
-            path_index.setdefault(
-                Path(version.source_uri).name, (version.asset_id, version.id)
-            )
+            try:
+                path_index.setdefault(
+                    Path(version.source_uri).resolve().as_posix(),
+                    (version.asset_id, version.id),
+                )
+            except OSError:
+                pass
     for item in plan.items:
         if item.decision != "pending":
             continue
         hit = None
-        if item.sha256:
-            hit = sha_index.get(item.sha256)
-        if hit is None:
-            # Same-basename heuristic ONLY flags a possible duplicate for the
-            # user; the decision stays theirs (no silent skip).
-            same_name = path_index.get(item.path.name)
+        try:
+            source_key = item.path.resolve().as_posix()
+        except OSError:
+            source_key = ""
+        if item.sha256 and source_key:
+            # Duplicate = same content AND same source location — the
+            # catalog's own (source_uri, sha) managed-RAW identity. Same
+            # content from a DIFFERENT source is a legitimately distinct
+            # RAW (F6: content alone never auto-skips nor cross-binds).
+            candidate = path_index.get(source_key)
+            if candidate is not None and sha_index.get(item.sha256) == candidate:
+                hit = candidate
+        if hit is None and source_key and external_index.get(source_key):
+            hit = external_index[source_key]
+        if hit is None and source_key:
+            # Same-source-location heuristic ONLY flags a possible duplicate
+            # for the user; the decision stays theirs (no silent skip).
+            same_name = path_index.get(source_key)
             if same_name is not None and _same_size(maps, same_name[1], item.size_bytes):
                 item.note = (item.note + " " if item.note else "") + (
-                    f"同名已导入资产 {same_name[0]}（内容未验证）"
+                    f"同源已导入资产 {same_name[0]}（内容未验证）"
                 )
         if hit is not None:
             item.duplicate_of_asset, item.duplicate_of_version = hit
             item.decision = "skip"
-            item.note = (item.note + " " if item.note else "") + "内容与已导入 RAW 相同"
+            item.note = (item.note + " " if item.note else "") + "内容与来源均与已导入 RAW 相同"
+
+
+def _find_registered_duplicate(
+    service: "DataCatalogService", item: PlannedItem
+) -> str | None:
+    """Existing asset id for the item's (source path, sha) RAW, or None."""
+    if not item.sha256:
+        return None
+    try:
+        source_key = item.path.resolve().as_posix()
+    except OSError:
+        return None
+    maps = service._ensure_maps()
+    for version in maps.version_by_id.values():
+        if (
+            not version.trashed
+            and version.managed
+            and version.stage.value == "raw"
+            and version.sha256 == item.sha256
+            and version.source_uri
+            and Path(version.source_uri).resolve().as_posix() == source_key
+        ):
+            return version.asset_id
+    return None
 
 
 def _same_size(maps: Any, version_id: str, size: int | None) -> bool:
@@ -454,21 +505,33 @@ def execute_ingest_plan(
     chunk_size: int = 64,
     cancel: Callable[[], bool] | None = None,
     progress: Callable[[int, int], None] | None = None,
+    execute_unconfirmed: bool = False,
 ) -> IngestExecuteReport:
     """Execute the (user-confirmed) plan: import → bind → primary.
 
-    Idempotent on re-run: a path whose content is already registered (the
-    catalog's managed-RAW dedup) resolves to the existing version and is
-    recorded as skipped-with-reference rather than imported twice.
+    Idempotent on re-run: before each import the catalog is re-checked for
+    the item's (resolved source path, sha) — an already-registered pair
+    resolves to the existing asset and is recorded as skipped-with-reference
+    instead of importing a duplicate (the interrupted-ingest recovery
+    contract). ``pending`` items execute only with ``execute_unconfirmed``
+    — a plan is meant to be confirmed before it mutates anything.
     """
     report = IngestExecuteReport()
 
-    pending = [
-        item for item in plan.items
-        if item.decision in ("accept", "pending") or (
-            item.decision == "skip" and item.duplicate_of_version
-        )
-    ]
+    if execute_unconfirmed:
+        pending = [
+            item for item in plan.items
+            if item.decision in ("accept", "pending") or (
+                item.decision == "skip" and item.duplicate_of_version
+            )
+        ]
+    else:
+        pending = [
+            item for item in plan.items
+            if item.decision == "accept" or (
+                item.decision == "skip" and item.duplicate_of_version
+            )
+        ]
     total = len(pending)
     done = 0
     staged_bindings: list[tuple[PlannedItem, str]] = []  # (item, asset_id)
@@ -488,6 +551,14 @@ def execute_ingest_plan(
                     if item.duplicate_of_asset:
                         report.asset_id_by_path[str(item.path)] = item.duplicate_of_asset
                         staged_bindings.append((item, item.duplicate_of_asset))
+                    continue
+                # F5: idempotency — an interrupted earlier execution may
+                # have imported this very (source, content) already.
+                existing = _find_registered_duplicate(service, item)
+                if existing is not None:
+                    report.skipped.append(str(item.path))
+                    report.asset_id_by_path[str(item.path)] = existing
+                    staged_bindings.append((item, existing))
                     continue
                 try:
                     version = service.import_raw(

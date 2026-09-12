@@ -103,7 +103,8 @@ class ExplainService:
         # --- upstream closure (entity context + dependency view) ----------
         from paleo_workbench.catalog.impact import ImpactService
 
-        upstream = ImpactService(service).upstream_impact(version_id)
+        impact = ImpactService(service)
+        upstream = impact.upstream_impact(version_id)
 
         # --- entity context ---------------------------------------------
         if project is not None:
@@ -144,21 +145,11 @@ class ExplainService:
         explanation.delete_blockers = eligibility["blockers"]
 
         # staleness of THIS version (is it built on evolved inputs?)
-        from paleo_workbench.catalog.impact import ImpactService
-
-        impact = ImpactService(service)
-        nearest = impact._nearest_changed_ancestor(
-            version_id,
-            maps.version_by_id,
-            maps.children_by_parent,
-            maps.asset_by_id,
-            triggers=frozenset(),
-        )
-        if nearest is not None:
+        stale, stale_reason = impact.is_stale(version_id)
+        if stale:
             explanation.stale = True
-            explanation.stale_reason = (
-                f"上游 {nearest[0]} 已演进（{nearest[1]} → {nearest[2]}），"
-                + ("该下游版本被 pin 固定在旧输入。" if explanation.pinned else "建议重算。")
+            explanation.stale_reason = stale_reason + (
+                "该下游版本被 pin 固定在旧输入。" if explanation.pinned else "建议重算。"
             )
         return explanation
 

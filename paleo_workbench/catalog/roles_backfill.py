@@ -32,8 +32,11 @@ def backfill_role_primaries(project: Any) -> dict[str, int]:
             continue
         if any(m.is_primary for m in members):
             continue  # already governed
-        if len(members) != 1:
-            continue  # ambiguous → human decision
-        members[0].is_primary = True
+        # Unresolved bindings are ambiguous identity claims — promoting one
+        # to primary would silently canonize it (10-migration §2).
+        candidates = [m for m in members if not m.unresolved]
+        if len(candidates) != 1:
+            continue  # zero or multiple → human decision
+        candidates[0].is_primary = True
         promoted[role] = promoted.get(role, 0) + 1
     return promoted

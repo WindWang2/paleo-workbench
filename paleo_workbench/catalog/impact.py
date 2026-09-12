@@ -111,9 +111,17 @@ class ImpactService:
         try:
             serial = int(getattr(service, "mutation_serial", 0) or 0)
             revision = service.document.catalog_revision
+            import hashlib as _hashlib
+
+            fingerprint = (
+                _hashlib.sha256(
+                    "\n".join(sorted(changed)).encode("utf-8")
+                ).hexdigest()
+                if changed else ""
+            )
             cache_key = (
                 id(service.document), revision, serial,
-                tuple(sorted(changed))[:64], include_trashed,
+                fingerprint, include_trashed,
             )
             hit = _STALE_CACHE.get(cache_key)
             if hit is not None and hit[0] is service.document:
@@ -286,6 +294,28 @@ class ImpactService:
                 queue.append((parent_id, d + 1))
         return best[1] if best else None
 
+    def is_stale(self, version_id: str) -> tuple[bool, str]:
+        """Is THIS version built on evolved/trashed inputs? (reason included).
+
+        Public surface for explain/UI — the same nearest-ancestor logic the
+        staleness walk uses, scoped to one version.
+        """
+        maps = self._service._ensure_maps()
+        nearest = self._nearest_changed_ancestor(
+            version_id,
+            maps.version_by_id,
+            maps.children_by_parent,
+            maps.asset_by_id,
+            triggers=frozenset(),
+        )
+        if nearest is None:
+            return False, ""
+        asset_id, old_id, current_id = nearest
+        return True, (
+            f"上游 {asset_id} 已演进（{old_id} → {current_id}），"
+            "本版本仍基于旧输入"
+        )
+
     # ------------------------------------------------------------------
     # upstream / delete impact
     # ------------------------------------------------------------------
@@ -299,8 +329,14 @@ class ImpactService:
         queue = deque(version_by_id[version_id].parent_version_ids)
         seen.update(queue)
         runs: set[str] = set()
+        walked = 0
+        truncated_upstream = False
         while queue:
+            if walked > MAX_IMPACT_NODES:
+                truncated_upstream = True
+                break
             node = queue.popleft()
+            walked += 1
             version = version_by_id.get(node)
             if version is None:
                 impact.missing_ancestors.append(node)
@@ -322,6 +358,10 @@ class ImpactService:
             if any(v in seen for v in run.input_version_ids):
                 runs.add(run.id)
         impact.runs_involved = sorted(runs)
+        if truncated_upstream:
+            impact.ancestor_version_ids.append(
+                f"<truncated: upstream closure exceeded {MAX_IMPACT_NODES} nodes>"
+            )
         impact.ancestor_version_ids = sorted(set(impact.ancestor_version_ids))
         impact.ancestor_asset_ids = sorted(set(impact.ancestor_asset_ids))
         return impact
@@ -360,8 +400,12 @@ class ImpactService:
         for t in target_set:
             depth[t] = 0
         broken_edges = 0
+        walked_delete = 0
         while queue:
+            if walked_delete > MAX_IMPACT_NODES:
+                break  # bounded: report is informational, not exhaustive
             node, d = queue.popleft()
+            walked_delete += 1
             for child in maps.children_by_parent.get(node, ()):
                 broken_edges += 1 if child.id not in depth else 0
                 if child.id in depth:
@@ -433,8 +477,13 @@ class ImpactService:
     def entity_staleness(
         self, project: Any, entity_type: str, entity_id: str
     ) -> list[StaleItem]:
-        """Staleness scoped to one well/survey: the stale items whose nearest
-        changed ancestor belongs to an asset linked to the entity."""
+        """Staleness scoped to one well/survey.
+
+        An item counts when ANY of its evolved ancestors belongs to an asset
+        linked to the entity — not merely the nearest one (a well's log
+        evolution still matters when some other input evolved more
+        recently).
+        """
         from paleo_workbench.project.domain import asset_ids_for_entity
 
         asset_ids = set(
@@ -442,9 +491,33 @@ class ImpactService:
         )
         if not asset_ids:
             return []
+        maps = self._service._ensure_maps()
         stale = self.downstream_stale()
         scoped: list[StaleItem] = []
         for item in stale:
-            if item.nearest_changed_ancestor and item.nearest_changed_ancestor[0] in asset_ids:
+            if self._has_ancestor_in_assets(item.version_id, asset_ids, maps):
                 scoped.append(item)
         return scoped
+
+    def _has_ancestor_in_assets(
+        self, version_id: str, asset_ids: set[str], maps: Any, *, _budget: int = 4096
+    ) -> bool:
+        """True when any ancestor of *version_id* belongs to *asset_ids*."""
+        seen = {version_id}
+        stack = [version_id]
+        walked = 0
+        while stack:
+            node = stack.pop()
+            walked += 1
+            if walked > _budget:
+                return False  # bounded probe; pessimistic-quiet on huge closures
+            version = maps.version_by_id.get(node)
+            if version is None:
+                continue
+            if version.asset_id in asset_ids:
+                return True
+            for parent in version.parent_version_ids:
+                if parent not in seen:
+                    seen.add(parent)
+                    stack.append(parent)
+        return False

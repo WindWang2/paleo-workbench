@@ -2633,11 +2633,8 @@ class DataCatalogService(DataFabricV11Mixin):
                 parameters=dict(parameters or {}),
                 generator=generator,
             )
-            if input_ports is not None:
-                run.input_ports = self._coerce_ports(input_ports, "input")
-                for port in run.input_ports:
-                    if port.version_id not in run.input_version_ids:
-                        run.input_version_ids.append(port.version_id)
+            self._apply_run_ports(run, input_ports=input_ports, output_ports=None,
+                                  validate_versions=False)
         with self._payload_staging_lease(
             self._staging_target(DataStage.DERIVED, asset.id)
         ):
@@ -2698,16 +2695,12 @@ class DataCatalogService(DataFabricV11Mixin):
             status=status,
             model_ref=dict(model_ref) if model_ref else None,
         )
-        if input_ports is not None:
-            run.input_ports = self._coerce_ports(input_ports, "input")
-            for port in run.input_ports:
-                if port.version_id not in run.input_version_ids:
-                    run.input_version_ids.append(port.version_id)
-        if output_ports is not None:
-            run.output_ports = self._coerce_ports(output_ports, "output")
-            for port in run.output_ports:
-                if port.version_id not in run.output_version_ids:
-                    run.output_version_ids.append(port.version_id)
+        # Single port-assignment core (budget + ⊆ invariant); versions may
+        # legitimately not exist yet when the outputs are registered later.
+        self._apply_run_ports(
+            run, input_ports=input_ports, output_ports=output_ports,
+            validate_versions=False,
+        )
         self._add_run(run)
         try:
             self._save(DirtySet(runs={run.id: None}))

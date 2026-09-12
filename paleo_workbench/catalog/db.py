@@ -1125,7 +1125,12 @@ class CatalogIndex:
             try:
                 conn.execute(ddl)
             except sqlite3.Error:
-                break  # store not initialized yet (or locked): _SCHEMA_DDL covers it on rebuild
+                # Each statement is an independent IF NOT EXISTS — one
+                # transient failure (locked store mid-open) must not skip
+                # the rest (the V11 tables sit at the END of this list; a
+                # break here is how a healthy store ends up without them).
+                # _SCHEMA_DDL still covers everything on rebuild.
+                continue
         # WAL is safe here: writes are single-writer (the service serializes
         # saves under its lock) and WAL gives readers a consistent snapshot
         # without blocking. ``reset()`` cleans up -wal/-shm files.
@@ -1615,9 +1620,18 @@ class CatalogIndex:
                 "SELECT * FROM versions ORDER BY rowid"
             ).fetchall()
             versions = [_version_model_from_row(row) for row in version_rows]
-            members_by_version = _members_for_versions(
-                conn, [row["id"] for row in version_rows]
-            )
+            # V11 tables may be absent on a store whose connect-time DDL
+            # loop broke early (missing table ⇒ empty collections — a
+            # pre-V11 store is semantically identical). Unguarded SELECTs
+            # would raise here, load_document would return None, and open()
+            # would misclassify a HEALTHY store as corrupt (the exact
+            # data-loss path the no-version-bump decision exists to avoid).
+            if self._table_exists(conn, "version_members"):
+                members_by_version = _members_for_versions(
+                    conn, [row["id"] for row in version_rows]
+                )
+            else:
+                members_by_version = {}
             for version in versions:
                 _attach_version_members(version, members_by_version.get(version.id, ()))
             inputs_by_run: dict[str, list[str]] = {}
@@ -1635,7 +1649,10 @@ class CatalogIndex:
                 )
                 for row in run_rows
             ]
-            ports_by_run = _ports_for_runs(conn, [row["id"] for row in run_rows])
+            if self._table_exists(conn, "run_ports"):
+                ports_by_run = _ports_for_runs(conn, [row["id"] for row in run_rows])
+            else:
+                ports_by_run = {}
             for run in runs:
                 _attach_run_ports(run, ports_by_run.get(run.id, ()))
             tags = [
@@ -1779,7 +1796,7 @@ class CatalogIndex:
         run = _run_model_from_row(rows[0], inputs, outputs)
         if self.db_path.is_file():
             conn = self._connect()
-            if self._schema_present(conn):
+            if self._table_exists(conn, "run_ports"):
                 _attach_run_ports(run, _ports_for_runs(conn, [run_id]).get(run_id, ()))
         return run
 
@@ -1823,7 +1840,7 @@ class CatalogIndex:
         if not self.db_path.is_file():
             return runs
         conn = self._connect()
-        if self._schema_present(conn):
+        if self._table_exists(conn, "run_ports"):
             ports_by_run = _ports_for_runs(conn, [row["id"] for row in rows])
             for run in runs:
                 _attach_run_ports(run, ports_by_run.get(run.id, ()))
@@ -1850,7 +1867,7 @@ class CatalogIndex:
         if not versions or not self.db_path.is_file():
             return
         conn = self._connect()
-        if not self._schema_present(conn):
+        if not self._table_exists(conn, "version_members"):
             return
         members_by_version = _members_for_versions(
             conn, [version.id for version in versions]
@@ -2174,6 +2191,7 @@ class CatalogIndex:
     ) -> None:
         conn.execute("DELETE FROM versions WHERE id = ?", (version_id,))
         conn.execute("DELETE FROM version_tags WHERE version_id = ?", (version_id,))
+        conn.execute(_VERSION_MEMBERS_DDL)  # tolerate stores whose connect DDL broke early
         conn.execute(
             "DELETE FROM version_members WHERE version_id = ?", (version_id,)
         )
@@ -2237,6 +2255,7 @@ class CatalogIndex:
         conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
         conn.execute("DELETE FROM run_inputs WHERE run_id = ?", (run_id,))
         conn.execute("DELETE FROM run_outputs WHERE run_id = ?", (run_id,))
+        conn.execute(_RUN_PORTS_DDL)  # tolerate stores whose connect DDL broke early
         conn.execute("DELETE FROM run_ports WHERE run_id = ?", (run_id,))
         for parent, child in io_pairs:
             if self._version_owns_edge(conn, parent, child):
@@ -2363,28 +2382,37 @@ class CatalogIndex:
         # V11 derived-collection drift: typed ports and bundle members are
         # owned by their parent record, so their rows diff against the same
         # parent's dirty mark (apply_changes rewrites both with the row).
-        if self._table_exists(conn, "run_ports"):
-            db_ports: dict[str, set[tuple]] = {}
+        has_ports_table = self._table_exists(conn, "run_ports")
+        db_ports: dict[str, set[tuple]] = {}
+        if has_ports_table:
             for row in conn.execute(
                 "SELECT run_id, direction, role, version_id, ordinal, required,"
                 " entity_type, entity_id, note FROM run_ports"
             ):
                 db_ports.setdefault(row[0], set()).add(tuple(row[1:]))
-            for run in document.runs:
-                expected_ports = {row[1:] for row in _run_port_rows(run)}
-                if db_ports.get(run.id, set()) != expected_ports:
-                    dirty.mark_runs(run.id)
-        if self._table_exists(conn, "version_members"):
-            db_members: dict[str, set[tuple]] = {}
+        for run in document.runs:
+            expected_ports = {row[1:] for row in _run_port_rows(run)}
+            if expected_ports and not has_ports_table:
+                # Table absent but the document carries ports: the store is
+                # the one needing repair — mark so apply_changes recreates it
+                # (the write path CREATEs defensively).
+                dirty.mark_runs(run.id)
+            elif db_ports.get(run.id, set()) != expected_ports:
+                dirty.mark_runs(run.id)
+        has_members_table = self._table_exists(conn, "version_members")
+        db_members: dict[str, set[tuple]] = {}
+        if has_members_table:
             for row in conn.execute(
                 "SELECT version_id, name, rel_path, member_role, ordinal,"
                 " required, sha256, size_bytes FROM version_members"
             ):
                 db_members.setdefault(row[0], set()).add(tuple(row[1:]))
-            for version in document.versions:
-                expected_members = {row[1:] for row in _version_member_rows(version)}
-                if db_members.get(version.id, set()) != expected_members:
-                    dirty.mark_versions(version.id)
+        for version in document.versions:
+            expected_members = {row[1:] for row in _version_member_rows(version)}
+            if expected_members and not has_members_table:
+                dirty.mark_versions(version.id)
+            elif db_members.get(version.id, set()) != expected_members:
+                dirty.mark_versions(version.id)
 
         if dirty.is_empty():
             # Still refresh the revision stamp (the caller bumped it) — under

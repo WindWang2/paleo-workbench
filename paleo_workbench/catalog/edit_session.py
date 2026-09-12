@@ -62,7 +62,6 @@ def open_edit_session(
     contract). When the role has no primary yet but exactly one member,
     that member is used; empty roles raise a honest error.
     """
-    from paleo_workbench.catalog.entity_views import EntityViewService
     from paleo_workbench.project.domain import links_for_entity
 
     links = [
@@ -87,8 +86,13 @@ def open_edit_session(
         if not versions:
             raise CatalogError(f"资产 {asset.name} 没有任何版本")
         version_id = versions[-1].id
-    working_path = service.create_working_copy(version_id)
-    _ = EntityViewService  # (facade available for callers; not needed here)
+    # Bundle versions check out as whole directories; single-file versions
+    # as plain file copies (both registries share the working_copies table).
+    version = service.get_version(version_id)
+    if version.members:
+        working_path = service.create_bundle_working_copy(version_id)
+    else:
+        working_path = service.create_working_copy(version_id)
     return EditSession(
         service=service,
         entity_type=entity_type,
@@ -176,13 +180,23 @@ class EditSession:
         self._refresh_registry_state()
         for checkout in self.checkouts:
             try:
-                version = self._service.commit_working_copy(
-                    checkout.path,
-                    asset_id=None if as_new_asset else checkout.asset_id,
-                    name=new_name or checkout.asset_name,
-                    stage=self.stage,
-                    parent_version_ids=[checkout.source_version_id],
-                )
+                source_version = self._service.get_version(checkout.source_version_id)
+                if source_version is not None and source_version.members:
+                    version = self._service.commit_bundle_working_copy(
+                        checkout.path,
+                        asset_id=None if as_new_asset else checkout.asset_id,
+                        name=new_name or checkout.asset_name,
+                        stage=self.stage,
+                        parent_version_ids=[checkout.source_version_id],
+                    )
+                else:
+                    version = self._service.commit_working_copy(
+                        checkout.path,
+                        asset_id=None if as_new_asset else checkout.asset_id,
+                        name=new_name or checkout.asset_name,
+                        stage=self.stage,
+                        parent_version_ids=[checkout.source_version_id],
+                    )
                 report.committed_version_ids.append(version.id)
             except CatalogError as exc:
                 report.issues.append(
