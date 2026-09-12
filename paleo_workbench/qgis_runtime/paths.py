@@ -9,24 +9,33 @@ Resolution order (first wins):
 * vendor root — ``PALEO_QGIS_BUILD_DIR`` (if it is a directory), else the
   repo-relative ``native/qgis_render_bridge/build/qgis-vendor`` checkout
   default.
-* deps prefix — ``PALEO_QGIS_DEPS_DIR``, else the conda-layout default that
-  ``tests/conftest.py`` has documented since V8 (Windows only; the conda
-  recipe is an explicit opt-in, so a machine default is only consulted when
-  an operator asked for that recipe).
+* deps prefix — ``PALEO_QGIS_DEPS_DIR``, else the repo-relative
+  ``native/qgis_render_bridge/build/qgis-deps`` default (the same
+  "build next to the bridge" convention as the vendor root). V10 review
+  follow-up（#1263）：这里**不再**硬编码开发者本机绝对路径——旧实现
+  ``C:\\Users\\<developer>\\paleo-qgis-deps`` 只在作者机器上成立，换机/
+  换账号时静默返回 ``None``，真实病因（deps 前缀缺失）被掩盖成
+  "qgis_render_bridge 不可导入"。
 * PySide6 package dir — via ``importlib.util.find_spec`` WITHOUT importing
   PySide6 (importing it loads the wheel's Qt DLLs, which the conda recipe
   must not do before its own preload; V7 loader bisection).
+
+``deps_prefix()`` 在两条通道都落空时返回 ``None`` 并记一条可操作的警告
+（"设 PALEO_QGIS_DEPS_DIR 或走默认 build 目录"），不再静默。
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
-# Windows conda-unification default (mirrors tests/conftest.py:72-85; only
-# consulted when PALEO_QGIS_CONDA_QT selects that recipe — see loader.py).
-_WINDOWS_CONDA_DEPS_DEFAULT = r"C:\Users\wangj.KEVIN\paleo-qgis-deps"
+logger = logging.getLogger(__name__)
+
+#: 仓库内 deps 前缀约定（与 vendor_root 的 build/ 同级；仅 Windows 的
+#: conda-统一配方会用到，见 loader.py）。
+_DEPS_BUILD_SUBDIR = ("native", "qgis_render_bridge", "build", "qgis-deps")
 
 
 def _env_dir(name: str) -> Path | None:
@@ -52,14 +61,25 @@ def vendor_root() -> Path | None:
 
 
 def deps_prefix() -> Path | None:
-    """Conda deps prefix (Windows layout: ``<prefix>/Library/bin``)."""
+    """Conda deps prefix (Windows layout: ``<prefix>/Library/bin``).
+
+    V10 review follow-up（#1263）：两条通道都是**可移植**的——显式
+    ``PALEO_QGIS_DEPS_DIR``，或仓库内 ``build/qgis-deps`` 约定。都落空时
+    返回 ``None`` 并给出可操作警告（不静默失败、不含任何本机绝对路径）。
+    """
     override = _env_dir("PALEO_QGIS_DEPS_DIR")
     if override is not None:
         return override
     if os.name == "nt":
-        default = Path(_WINDOWS_CONDA_DEPS_DEFAULT)
+        default = repo_root().joinpath(*_DEPS_BUILD_SUBDIR)
         if default.is_dir():
             return default
+        logger.warning(
+            "未找到 QGIS deps 前缀：PALEO_QGIS_DEPS_DIR 未设置（或指向非目录），"
+            "且默认位置 %s 不存在——conda-统一配方将无法解析依赖。"
+            "请设置 PALEO_QGIS_DEPS_DIR，或把 deps 前缀放到该默认路径。",
+            default,
+        )
     return None
 
 

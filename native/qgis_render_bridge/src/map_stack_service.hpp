@@ -335,6 +335,11 @@ private:
   bool applyMirrorFeatureDelta(QgsVectorLayer& layer, const std::string& doc_id,
                                const std::string& delta_json,
                                std::uint64_t new_revision);
+  /// V10（review-5 #1257）：镜像要素几何变更后失效各画布上该层的
+  /// QgsPointLocator 索引（provider 级 truncate/add/delete 不发 layer
+  /// dataChanged，定位器会拿着过期几何继续服务捕捉）。仅处理已建索引的
+  /// 定位器；未预热层不在发布热路径上构建索引。幂等。
+  void invalidateLocators(const QgsVectorLayer& layer);
   std::unique_ptr<Impl> impl_;
   QgsProject* project() const;
   void syncCanvasLayers(std::uintptr_t canvas);

@@ -1828,6 +1828,25 @@ void QgisMapStack::clearProjectLayers() {
   removeMirrorLayersExcept(empty);
 }
 
+// V10（review-4 #3b / review-5 #1257）：镜像 provider 的几何变更（全量
+// truncate+add 或 delta 的 delete+re-add）都不发 layer dataChanged 信号，
+// 已建索引的 QgsPointLocator 会持续命中过期几何——捕捉会吸附到已删除或
+// 已移动的顶点。凡改动镜像要素的路径都必须在末尾走本函数：对每个画布上
+// 该层已建索引的定位器失效并同步重建（仅 hasIndex() 的层：未预热的层留给
+// 下次 set_snapping_config，不在发布热路径上做无谓的索引构建）。
+void QgisMapStack::invalidateLocators(const QgsVectorLayer& layer) {
+  for (const auto& kv : impl_->canvas_refs) {
+    QgsMapCanvas* cv = kv.second.data();
+    if (cv == nullptr || cv->snappingUtils() == nullptr) continue;
+    QgsPointLocator* loc = cv->snappingUtils()->locatorForLayer(
+        const_cast<QgsVectorLayer*>(&layer));
+    if (loc != nullptr && loc->hasIndex()) {
+      loc->setExtent(nullptr);  // 销毁索引
+      loc->init(-1, false);     // 同步重建（参与捕捉的层保持确定性可用）
+    }
+  }
+}
+
 bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
                                            const std::string& doc_id,
                                            const std::string& delta_json,
@@ -1933,20 +1952,7 @@ bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
     impl_->mirror_data_revisions.erase(doc_id);
   }
   layer.updateExtents();
-  // V10（review-4 #3b）：镜像几何已变更——QgsPointLocator 索引只在
-  // layer dataChanged 信号时失效，而 provider 级 add/delete 不发该信号，
-  // 捕捉会持续命中过期几何。这里对已建索引的定位器失效并同步重建
-  // （仅 hasIndex() 的层：未预热的层留给下次 set_snapping_config）。
-  for (const auto& kv : impl_->canvas_refs) {
-    QgsMapCanvas* cv = kv.second.data();
-    if (cv == nullptr) continue;
-    QgsPointLocator* loc =
-        cv->snappingUtils()->locatorForLayer(&layer);
-    if (loc != nullptr && loc->hasIndex()) {
-      loc->setExtent(nullptr);  // 销毁索引
-      loc->init(-1, false);     // 同步重建（参与捕捉的层保持确定性可用）
-    }
-  }
+  invalidateLocators(layer);
   impl_->mirror_data_revisions[doc_id] = new_revision;
   return true;
 }
@@ -2301,12 +2307,19 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       } else {
         impl_->mirror_data_revisions.erase(doc_id);
       }
+      // V10（review-5 #1257）：全量 truncate+add 同样绕过 layer dataChanged，
+      // 定位器必须显式失效——否则一次全量重发（新建层角色化、undo/redo、
+      // schema 漂移）之后捕捉会一直吸附到重建前的旧几何。放在本分支内而非
+      // 分支外，避免在 delta 已自失效（applyMirrorFeatureDelta）时重复重建。
+      invalidateLocators(*existing);
     }
     existing->updateExtents();
     // V10 P0（review-4）：镜像层建 provider 空间索引——无索引时编辑工具的
     // bbox 拾取（pickFeature）是全表线性扫描（100k 层 10-30ms/移动）。memory
     // provider 在后续 provider 增量 add/delete 时自行维护索引。
-    existing->dataProvider()->createSpatialIndex();
+    if (existing->dataProvider() != nullptr) {
+      existing->dataProvider()->createSpatialIndex();
+    }
     std::string new_sig = makeStyleSig(renderer_xml, labeling_xml, legacy_style_json);
     auto sigIt = impl_->mirror_style_sig.find(doc_id);
     bool sig_changed = (sigIt == impl_->mirror_style_sig.end() || sigIt->second != new_sig);

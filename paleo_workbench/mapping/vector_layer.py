@@ -472,6 +472,12 @@ class VectorEditSession:
         self._open_command = None
         # Discarded compounds discard their deltas too (nothing happened).
         self._pending_deltas = None
+        if not touched:
+            # 空宏（begin 后命令全部抛异常、未记录任何命令）：什么都没发生。
+            # bump 会污染 revision 水位线，使 changes_since(旧水位) 返回 ()
+            # 而消费方据此认为"零变更"——一次被拒手势本不该产生任何可观测
+            # 变更。工作副本亦未被改动（revert 循环为空），无需通知。
+            return
         self._bump_revision(touched)
 
     @contextmanager

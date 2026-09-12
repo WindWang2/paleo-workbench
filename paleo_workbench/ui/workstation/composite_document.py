@@ -1389,10 +1389,21 @@ class CompositeDocument(QWidget):
             if facts and facts.get("exists"):
                 provider_name = str(facts.get("provider") or "")
                 capability = facts.get("capability") or {}
-                provider_writable = bool(
-                    capability.get("add_features")
-                    and capability.get("change_geometries")
-                    and capability.get("change_attribute_values"))
+                # V10（#1260）："是否可写"采信桥给的权威结论
+                # （QgsVectorLayer::supportsEditing）——此前宿主用三个
+                # capability 位自造合取重新推断，会用"只读数据源"这种失实
+                # 判词硬拦支持编辑但属性只读的 provider。只有桥未提供该位
+                # （旧桥）时才回落到三位合取，并按近似判据记录。
+                declared = facts.get("supports_editing")
+                if declared is None:
+                    provider_writable = bool(
+                        capability.get("add_features")
+                        and capability.get("change_geometries")
+                        and capability.get("change_attribute_values"))
+                    provider_writable_approximate = True
+                else:
+                    provider_writable = bool(declared)
+                    provider_writable_approximate = False
         inputs["provider_writable"] = provider_writable
         inputs["provider_name"] = provider_name
         return build_tool_context(

@@ -1,6 +1,9 @@
 """V10 review 修复的回归钉（R1–R5 findings；见 12-review-findings.md）。"""
 from __future__ import annotations
 
+import inspect
+import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,6 +14,8 @@ from paleo_workbench.mapping_workspace.layer_roles import LayerRole
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.map_status_bar import _format_scale
 from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+
+REPO = Path(__file__).resolve().parents[1]
 
 
 def _project(tmp_path: Path) -> ProjectDocument:
@@ -199,3 +204,195 @@ def test_cancel_survives_unknown_stage():
     assert verdict.enabled and verdict.visible
     # 同阶段下 snapping toggle 仍按组隐藏（fail-closed 只豁免 cancel）。
     assert not evaluate_tool("snapping", ctx).visible
+
+
+def _seeded_polygon(doc, name, count, select=True):
+    """建一个含 ``count`` 个不重叠三角形要素的已编辑层（全部选中）。"""
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    layer = doc.edit_controller.create_layer(name, "polygon")
+    _register_role(doc, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+    doc.edit_controller.set_active_layer(layer.id)
+    doc.edit_controller.start_editing()
+    # 种子本身包成一条宏，基线固定 1 个 undo 单元（edit_source 只打标、不开
+    # 宏——拿它当宏会让断言读错基线）。
+    layer.edit_session.begin_edit_command()
+    for index in range(count):
+        x = float(index * 10)
+        layer.edit_session.add_feature(VectorFeature(
+            f"f{index}",
+            {"type": "Polygon", "coordinates": [[
+                [x, 0.0], [x + 5.0, 0.0], [x + 5.0, 5.0], [x, 0.0]]]},
+            {}))
+    layer.edit_session.end_edit_command()
+    if select:
+        layer.set_selection([f"f{index}" for index in range(count)])
+    return layer
+
+
+# #1259：多选 delete/duplicate = 单一 undo 单元（07 §B.1）。
+def test_multi_select_delete_is_single_undo_unit(doc):
+    layer = _seeded_polygon(doc, "del", 3)
+    session = layer.edit_session
+    assert len(session.undo_stack) == 1  # seed 宏
+    assert doc.edit_controller.edit_command("delete_selected") is True
+    assert len(session.undo_stack) == 2, "N 选删除必须是单一 undo 单元"
+    assert session.features() == ()
+    assert session.undo()
+    assert {f.feature_id for f in session.features()} == {"f0", "f1", "f2"}
+
+
+def test_multi_select_duplicate_is_single_undo_unit(doc):
+    layer = _seeded_polygon(doc, "dup", 3)
+    session = layer.edit_session
+    assert doc.edit_controller.edit_command("duplicate_selected") is True
+    assert len(session.undo_stack) == 2, "N 选复制必须是单一 undo 单元"
+    assert len(session.features()) == 6
+    assert session.undo()
+    assert len(session.features()) == 3
+
+
+# #1264：add_ring / add_part 挂上拓扑计数刷新点。
+def test_ring_and_part_appliers_refresh_topology_count(doc, monkeypatch):
+    """V10 新增命令族与同族命令共用刷新点（否则门禁读到过期计数）。"""
+    import json as _json
+    import types
+
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    layer = doc.edit_controller.create_layer("ring", "polygon")
+    _register_role(doc, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+    doc.edit_controller.set_active_layer(layer.id)
+    doc.edit_controller.start_editing()
+    session = layer.edit_session
+    with session.edit_source("seed"):
+        session.add_feature(VectorFeature(
+            "f0",
+            {"type": "Polygon", "coordinates": [
+                [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]]},
+            {}))
+
+    calls = []
+
+    class _TopologyStub:
+        def refresh_error_count(self, target):
+            calls.append(target.id)
+            return 0
+
+    controller = doc.edit_controller
+    monkeypatch.setattr(controller, "_topology", _TopologyStub())
+
+    # add_ring：内环顶点须落在目标面外环内（含性守卫）。
+    assert controller._apply_captured_ring(session, "f0", {
+        "type": "Polygon",
+        "coordinates": [[[2, 2], [4, 2], [4, 4], [2, 2]]]}) is True
+    assert calls == [layer.id], "add_ring 未刷新拓扑错误计数"
+
+    # add_part：桥面用替身（宿主侧只验刷新点是否挂上）。
+    def _fake_add_part(target_json, part_json):
+        target = _json.loads(target_json)
+        part = _json.loads(part_json)
+        return _json.dumps({"type": "MultiPolygon",
+                            "coordinates": [target["coordinates"],
+                                            part["coordinates"]]})
+
+    bridge_stub = types.ModuleType("qgis_render_bridge")
+    bridge_stub.geometry = types.SimpleNamespace(add_part=_fake_add_part)
+    monkeypatch.setitem(sys.modules, "qgis_render_bridge", bridge_stub)
+
+    calls.clear()
+    applier = controller._make_part_applier(session, "f0")
+    assert applier is not None, "替身桥未生效"
+    assert applier({"type": "Polygon",
+                    "coordinates": [[[20, 20], [21, 20], [21, 21], [20, 20]]]}) is True
+    assert calls == [layer.id], "add_part 未刷新拓扑错误计数"
+
+
+# -- #1258：edit-pick 回执必须落到 shim 分发层 ----------------------------------
+
+class _Recorder:
+    """``Signal.emit`` 的最小替身（分发器只调 emit）。"""
+
+    def __init__(self):
+        self.values = []
+
+    def emit(self, value):
+        self.values.append(value)
+
+
+class _ShimStub:
+    def __init__(self):
+        self.commit_rejected = _Recorder()
+        self.tool_operation = _Recorder()
+        self.snap_feedback = _Recorder()
+
+
+_EDIT_PICK_ACTIONS = re.compile(
+    r'callback_\("((?:pick_miss|vertex_[a-z_]+|feature_moved|snap_feedback))"')
+
+
+def test_vertex_delete_rejected_reaches_shim():
+    """C++ 的 vertex_delete_rejected 在 shim 层有消费方（#1258）。
+
+    修复前该 action 落空：既不 emit commit_rejected 也不 emit
+    tool_operation(False)，Delete 键在守卫拒绝时完全无声。
+    """
+    from paleo_workbench.ui.qgis_stack.canvas_shim import dispatch_edit_pick
+
+    class _Tool:
+        def commit_vertex_delete(self, feature_id, path):
+            raise AssertionError("拒绝回执不应进入提交路径")
+
+    shim = _ShimStub()
+    assert dispatch_edit_pick(shim, _Tool(), "vertex_delete_rejected", {}) is False
+    assert len(shim.commit_rejected.values) == 1, "拒绝回执未上浮 → 无声死键"
+    assert shim.tool_operation.values == [False]
+
+
+def test_edit_pick_dispatch_success_and_rejection():
+    """提交成功发 tool_operation(True)；提交被拒发 rejected + False。"""
+    from paleo_workbench.ui.qgis_stack.canvas_shim import dispatch_edit_pick
+
+    class _Accepting:
+        def commit_vertex_moved(self, *a):  # 名字故意不匹配，走不到
+            raise AssertionError
+
+        def commit_vertex_move(self, feature_id, path, point):
+            return True
+
+    class _Rejecting:
+        def commit_vertex_delete(self, feature_id, path):
+            return False
+
+    shim = _ShimStub()
+    assert dispatch_edit_pick(
+        shim, _Accepting(), "vertex_moved",
+        {"feature_id": "f1", "path": [0, 1], "x": 1.0, "y": 2.0}) is True
+    assert shim.tool_operation.values == [True]
+    assert not shim.commit_rejected.values
+
+    shim = _ShimStub()
+    assert dispatch_edit_pick(
+        shim, _Rejecting(), "vertex_deleted",
+        {"feature_id": "f1", "path": [0, 1]}) is False
+    assert len(shim.commit_rejected.values) == 1
+    assert shim.tool_operation.values == [False]
+
+
+def test_every_edit_pick_callback_has_shim_consumer():
+    """C++ edit-pick 回执族 ⊆ shim 分发层已处理集（源码扫描，#1258）。
+
+    把"C++ 发出回执"与"shim 已消费"钉成一对：将来 C++ 新增回执而 Python
+    未接线时本测试即红（此前 vertex_delete_rejected 正是这样漏掉的，而裸
+    回调测试绕开分发层，显示通过）。
+    """
+    from paleo_workbench.ui.qgis_stack.canvas_shim import dispatch_edit_pick
+
+    source = (REPO / "native" / "qgis_render_bridge" / "src" / "edit_tools.cpp")
+    emitted = set(_EDIT_PICK_ACTIONS.findall(source.read_text(encoding="utf-8")))
+    assert emitted, "未解析到 edit-pick 回执——断言失去意义"
+    handled = set(re.findall(
+        r'action == "([a-z_]+)"', inspect.getsource(dispatch_edit_pick)))
+    # pick_miss 在 _on_edit_pick 里显式提前返回（无回执语义），不进分发器。
+    unhandled = emitted - handled - {"pick_miss"}
+    assert not unhandled, f"C++ 回执在 shim 分发层无消费方: {sorted(unhandled)}"
