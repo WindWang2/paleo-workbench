@@ -314,16 +314,21 @@ class LayerGroupController:
         return snapshot
 
     def _plan_user_groups(self) -> dict[str, PlanUserGroup]:
-        """_user_groups（GroupNode 树）→ PlanUserGroup 平表（带父指针）。"""
+        """_user_groups → PlanUserGroup 平表（带父指针）。
+
+        父指针从混合子序表（_group_orders / _root_order）推导——_user_groups
+        本身是扁平注册表（发现节点的 children 为空），嵌套结构只活在序表
+        里（observe 回写 / _collect_group 维护）。旧 walk 版把嵌套组全挂
+        root，导致同组双挂载 + diff 重复 move。
+        """
         parent_of: dict[str, str] = {}
-
-        def walk(children, parent_id: str) -> None:
-            for child in children:
-                if isinstance(child, GroupNode) and child.kind == "user":
-                    parent_of[child.group_id] = parent_id
-                    walk(child.children, child.group_id)
-
-        walk(self._user_groups.values(), "")
+        for container_id, order in self._group_orders.items():
+            for node_id in order:
+                if node_id in self._user_groups:
+                    parent_of[node_id] = container_id
+        for node_id in self._root_order:
+            if node_id in self._user_groups:
+                parent_of[node_id] = ""
         return {
             group_id: PlanUserGroup(
                 group_id=group_id,
