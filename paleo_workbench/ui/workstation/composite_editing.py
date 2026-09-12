@@ -531,6 +531,23 @@ def _ring_vertices(rings: Any) -> Iterable[tuple[tuple[float, float], tuple[int,
                 yield (float(node[0]), float(node[1])), (ring_index, point_index)
 
 
+def _iter_layer_coords(layer):
+    """图层要素几何的坐标流（CRS 域门禁的包围盒输入）。"""
+    for feature in layer.features():
+        geometry = getattr(feature, "geometry", None) or {}
+        coords = geometry.get("coordinates") if isinstance(geometry, dict) else None
+        if coords is None:
+            continue
+        stack = [coords]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, (list, tuple)):
+                if item and all(isinstance(v, (int, float)) for v in item):
+                    yield item
+                else:
+                    stack.extend(item)
+
+
 @dataclass(frozen=True)
 class EditTargetSnapshot:
     """V11 五目标模型（07-active-edit-state）的只读快照。
@@ -1206,6 +1223,11 @@ class CompositeEditController(QObject):
         allowed, _reason = self.can_edit_layer(layer.id)
         if not allowed:
             return  # 原因由调用方（门禁入口）负责呈现
+        # V11 M0（#1285 进前段）：CRS 声明域校验——失配阻止进入编辑，
+        # 引导修复（改本地/清除）后重试。
+        ok_crs, _crs_reason = self._crs_domain_gate(layer)
+        if not ok_crs:
+            return
         # M1：polygon 草稿层 + 原生画布 + 桥能力 → 原生编辑会话
         # （进前门禁已由 composite_document 的角色/CRS 门把守；controller
         # 内部再复查角色门禁——拒绝则不开 startEditing）。
@@ -1258,9 +1280,59 @@ class CompositeEditController(QObject):
         if not allowed:
             return None, reason
         if layer.edit_session is None:
+            ok_crs, crs_reason = self._crs_domain_gate(layer)
+            if not ok_crs:
+                return None, crs_reason
             self._open_session(layer)
             self.state_changed.emit()
         return layer.edit_session, ""
+
+    def _crs_domain_gate(self, layer: "VectorLayer") -> tuple[bool, str]:
+        """进前段 CRS 域门禁（#1285）：声明地理域 vs 数据实际范围。
+
+        失配 → 阻止进入编辑；检测结果（含修复选项）挂在
+        ``last_crs_gate_check`` 供宿主引导对话框消费；修复经
+        ``apply_crs_fix``（改本地/清除 → 层声明清空，本地坐标语义）。
+        """
+        from paleo_workbench.mapping_workspace.crs_gate import (
+            feature_bounds,
+            validate_crs_domain,
+        )
+
+        # 只校验层级声明（#1285 引导对话框修复的正是它）：层声明清空后
+        # 即本地坐标语义，修复即放行（工程级声明是地图上下文，不为层级
+        # 失配背书——层级失配是唯一已知的缓冲污染形态）。
+        declared = str(getattr(layer, "crs", "") or "")
+        check = validate_crs_domain(declared, feature_bounds(_iter_layer_coords(layer)))
+        self._last_crs_gate_check = check
+        if check.ok:
+            return True, ""
+        return False, check.reason
+
+    @property
+    def last_crs_gate_check(self):
+        """最近一次 CRS 域门禁结果（宿主引导对话框消费）。"""
+        return getattr(self, "_last_crs_gate_check", None)
+
+    def apply_crs_fix(self, layer_id: str, mode: str) -> bool:
+        """引导式一键修复（#1285）：declare_local / clear → 清空层声明。"""
+        layer = self._layers.get(str(layer_id))
+        if layer is None or mode not in ("declare_local", "clear"):
+            return False
+        layer.crs = ""
+        self._last_crs_gate_check = None
+        self.state_changed.emit()
+        return True
+
+    def apply_project_crs(self, crs: str) -> tuple[bool, str]:
+        """会话内 CRS 冻结（#1285）：编辑会话打开期间拒绝改声明。"""
+        crs = str(crs or "")
+        if not crs or crs == self.project_crs:
+            return True, ""
+        if any(layer.edit_session is not None for layer in self._layers.values()):
+            return False, "编辑会话进行中：CRS 声明被冻结（先保存或回滚）"
+        self.project_crs = crs
+        return True, ""
 
     def import_layer_features(self, layer_id: str, features: list) -> None:
         """可信导入通道：向（通常是 RAW 角色的）图层写入初始要素。
@@ -1501,10 +1573,10 @@ class CompositeEditController(QObject):
         （可回滚 / 可修复），不把无效几何写进工程。返回
         (提交数, 被阻断图层的用户可读原因)。
         """
-        committed = 0
         blocked: list[str] = []
+        committed = 0
         # M1 原生会话整集合先行（§3 全或无）：被拒 → 全集合保持会话、
-        # 原因进 blocked（与 Python 会话的逐层语义并存在同一返回面）。
+        # 不提交 Python 会话（全或无跨两类会话）。
         if self.native_editing.session_layer_ids():
             ok, reason = self.native_editing.commit_all(
                 gate=self.can_edit_layer,
@@ -1513,11 +1585,13 @@ class CompositeEditController(QObject):
             )
             if ok:
                 committed += 1
-                self._rebind_active_tool()
-                self.sessions_committed.emit()
-                self.state_changed.emit()
             else:
                 blocked.append(reason)
+                return 0, blocked
+        # V11 M0（#1283 全或无）：两阶段——先对全部 Python 会话判定门禁
+        # （角色 + 拓扑），任一门禁失败则一个都不提交；全过才逐层提交；
+        # 提交中途异常 → 剩余层回滚，不留半手势。
+        pending: list = []
         for layer in self._layers.values():
             session = layer.edit_session
             if session is None:
@@ -1538,7 +1612,24 @@ class CompositeEditController(QObject):
                         f"未通过拓扑检查（该图层编辑未提交）：{first.get('message', '')}"
                     )
                     continue
-            session.commit_changes()
+            pending.append((layer, session))
+        if blocked:
+            # 阶段 1 未全过 → Python 会话全体保持打开，一个都不提交。
+            # 原生会话若已提交，计入 committed（无法撤回那一拍）。
+            return committed, blocked
+        for index, (layer, session) in enumerate(pending):
+            try:
+                session.commit_changes()
+            except Exception:
+                # 提交中途失败 → 剩余（含本层，未提交成功）整体回滚。
+                for remaining_layer, remaining_session in pending[index:]:
+                    try:
+                        remaining_session.rollback_changes()
+                    except Exception:
+                        pass
+                    blocked.append(
+                        f"图层「{remaining_layer.name}」提交失败已回滚（全或无保存）")
+                break
             committed += 1
             self.content_changed.emit(layer.id)
         if committed:
