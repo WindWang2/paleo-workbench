@@ -157,6 +157,7 @@ def _qgis_core_include_dirs(build_dir: Path) -> list[str]:
         str(build_dir),
         str(build_dir / "src" / "core"),
         str(build_dir / "src" / "gui"),
+        str(build_dir / "src" / "analysis"),
         # uic-generated ui_*_base.h headers for the symbology dialogs.
         str(build_dir / "src" / "ui"),
         *_dependency_include_dirs(),

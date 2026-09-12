@@ -1048,6 +1048,12 @@ class CompositeEditController(QObject):
         self.avoid_intersections_enabled = bool(
             topo.get("avoid_intersections", True))
         self.tracing_enabled = bool(topo.get("tracing", False))
+        try:
+            self._topology.checker.restore_state(
+                dict(workspace.get("topo_checker") or {}) if isinstance(workspace, Mapping) else {})
+        except Exception:
+            pass
+        self._sync_checker_workspace(project)
         self._push_snapping_config()
         self.layers_changed.emit()
         self.state_changed.emit()
@@ -1102,8 +1108,25 @@ class CompositeEditController(QObject):
                 "avoid_intersections": self.avoid_intersections_enabled,
                 "tracing": self.tracing_enabled,
             }
+            workspace["topo_checker"] = self._topology.checker.persist()
         except Exception:
             pass
+
+    def _sync_checker_workspace(self, project) -> None:
+        """工区余量用工程工区边界（缺则不传，桥兜底工程/画布范围）。"""
+        workarea = getattr(project, "workarea", None)
+        boundary = list(getattr(workarea, "boundary", None) or []) if workarea else []
+        if len(boundary) < 3:
+            return
+        ring = [list(point[:2]) for point in boundary if isinstance(point, (list, tuple)) and len(point) >= 2]
+        if len(ring) < 3:
+            return
+        if ring[0] != ring[-1]:
+            ring.append(list(ring[0]))
+        self._topology.checker.workspace = {
+            "type": "Polygon",
+            "coordinates": [ring],
+        }
 
     # -- 活动图层与编辑会话 -------------------------------------------------------
 
@@ -1132,6 +1155,45 @@ class CompositeEditController(QObject):
     def topology(self):
         """拓扑校验服务（只读公共访问；stage_actions QA 等宿主消费）。"""
         return self._topology
+
+    def _checker_stack(self):
+        canvas = self._canvas
+        stack = getattr(canvas, "stack", None) if canvas is not None else None
+        if stack is None:
+            return None, 0
+        if not callable(getattr(stack, "run_geometry_checks", None)):
+            return None, 0
+        return stack, getattr(canvas, "canvas_address", 0)
+
+    def _gate_topology_issues(self, layer) -> list[dict[str, object]]:
+        """M4：桥检查器优先，与 save_edits / commit_all 共用一份结果。"""
+        stack, canvas = self._checker_stack()
+        if stack is not None:
+            return self._topology.checker.run_for_commit(
+                stack, canvas, [layer.id])
+        return self._topology.validate([layer])
+
+    def run_topology_checks(self) -> list[dict[str, object]]:
+        """面板「检查」：全量跑桥检查器（含已忽略），刷新 last_errors。"""
+        stack, canvas = self._checker_stack()
+        layer_ids = list(self.native_editing.session_layer_ids())
+        if not layer_ids:
+            layer_ids = [
+                layer_id for layer_id, layer in self._layers.items()
+                if getattr(layer, "edit_session", None) is not None
+            ]
+        if not layer_ids and self.active_layer is not None:
+            layer_ids = [self.active_layer.id]
+        if stack is None or not layer_ids:
+            issues: list[dict[str, object]] = []
+            for layer_id in layer_ids:
+                layer = self._layers.get(layer_id)
+                if layer is None:
+                    continue
+                issues.extend(self._topology.validate([layer]))
+            self._topology.checker.last_errors = issues
+            return issues
+        return self._topology.checker.run(stack, canvas, layer_ids)
 
     @property
     def editing(self) -> bool:
@@ -1382,7 +1444,7 @@ class CompositeEditController(QObject):
                 return None
             return self._commit_native_sessions()
         if self._topology.enabled:
-            issues = self._topology.validate([layer])
+            issues = self._gate_topology_issues(layer)
             # V9 W2：保存校验结论进运行时计数缓存（merge 门禁事实源）。
             self._topology.record_validation(layer, len(issues))
             if issues:
@@ -1621,7 +1683,7 @@ class CompositeEditController(QObject):
                 continue
             if self._topology.enabled:
                 try:
-                    issues = self._topology.validate([layer])
+                    issues = self._gate_topology_issues(layer)
                 except Exception as exc:
                     blocked.append(
                         f"图层「{layer.name}」拓扑校验异常（该图层编辑未提交）: {exc}")
@@ -2193,6 +2255,24 @@ class CompositeEditController(QObject):
         每层显式校验并回写运行时计数缓存；返回合并问题清单（空 = 全部
         通过）。活动层校验（save 门禁）仍走 validate_active_layer_topology。
         """
+        stack, canvas = self._checker_stack()
+        native_ids = list(self.native_editing.session_layer_ids())
+        python_ids = [
+            layer_id for layer_id, layer in self._layers.items()
+            if getattr(layer, "edit_session", None) is not None
+        ]
+        if stack is not None and (native_ids or python_ids):
+            errors = self._topology.checker.run(
+                stack, canvas, native_ids or python_ids)
+            issues = self._topology.checker.blocking_errors(errors)
+            for layer_id in (native_ids or python_ids):
+                layer = self._layers.get(layer_id)
+                if layer is None:
+                    continue
+                count = sum(1 for issue in issues
+                            if str(issue.get("layer_id") or "") == layer_id)
+                self._topology.record_validation(layer, count)
+            return issues
         issues: list[dict[str, object]] = []
         for layer_id in list(self._layers):
             layer = self._layers[layer_id]
@@ -2210,7 +2290,7 @@ class CompositeEditController(QObject):
         layer = self.active_layer
         if layer is None:
             return []
-        issues = self._topology.validate([layer])
+        issues = self._gate_topology_issues(layer)
         self._topology.record_validation(layer, len(issues))
         return issues
 

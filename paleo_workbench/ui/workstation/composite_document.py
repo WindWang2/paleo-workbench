@@ -1008,6 +1008,13 @@ class CompositeDocument(QWidget):
         self.identify_results.setMaximumHeight(200)
         self.identify_results.result_activated.connect(self._locate_identify_result)
         layout.addWidget(self.identify_results)
+        from paleo_workbench.ui.workstation.topology_checker_panel import (
+            TopologyCheckerPanel,
+        )
+        self.topology_panel = TopologyCheckerPanel(self)
+        self.topology_panel.setMaximumHeight(220)
+        self.topology_panel.hide()
+        layout.addWidget(self.topology_panel)
         self.status_bar = MapStatusBar(self)
         layout.addWidget(self.status_bar)
         # V10 §15：拓扑问题 chip 的进入路径（显式校验 + 首问题定位反馈）；
@@ -1036,6 +1043,7 @@ class CompositeDocument(QWidget):
         )
         self.edit_controller.attach_canvas(self.canvas)
         self.edit_controller.identify_delegate = self._identify_with_results
+        self._wire_topology_checker_panel()
         # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，
         # 源文件永不修改；工程只保存引用描述）。合成顺序固定为
         # 基础工区 → 引用参考 → 编修图层（参考永远垫底）。
@@ -2350,6 +2358,87 @@ class CompositeDocument(QWidget):
         if error:
             self.status_message.emit(error)
 
+    def _wire_topology_checker_panel(self) -> None:
+        """M4：拓扑检查器面板接到编修控制器与画布。"""
+        panel = getattr(self, "topology_panel", None)
+        controller = self.edit_controller
+        if panel is None:
+            return
+        panel.bind(controller)
+
+        def _zoom(bbox):
+            canvas = getattr(controller, "_canvas", None)
+            if canvas is None or len(bbox) < 4:
+                return
+            setter = getattr(canvas, "set_extent", None)
+            if callable(setter):
+                setter(tuple(bbox[:4]))
+                return
+            stack = getattr(canvas, "stack", None)
+            addr = getattr(canvas, "canvas_address", 0)
+            if stack is not None and callable(getattr(stack, "set_canvas_extent", None)):
+                pad = max(bbox[2] - bbox[0], bbox[3] - bbox[1], 0.5) * 0.1
+                stack.set_canvas_extent(
+                    addr, bbox[0] - pad, bbox[1] - pad,
+                    bbox[2] + pad, bbox[3] + pad)
+
+        def _highlight(error_id):
+            import json
+            canvas = getattr(controller, "_canvas", None)
+            stack = getattr(canvas, "stack", None) if canvas is not None else None
+            addr = getattr(canvas, "canvas_address", 0) if canvas is not None else 0
+            if stack is not None and callable(
+                    getattr(stack, "highlight_checker_errors", None)):
+                stack.highlight_checker_errors(addr, json.dumps([str(error_id)]))
+
+        def _fix(error_id, method):
+            canvas = getattr(controller, "_canvas", None)
+            stack = getattr(canvas, "stack", None) if canvas is not None else None
+            addr = getattr(canvas, "canvas_address", 0) if canvas is not None else 0
+            if stack is None:
+                return
+            checker = controller.topology.checker
+            error = next((e for e in checker.last_errors
+                          if str(e.get("id")) == str(error_id)), None)
+            checker.fix(stack, addr, error_id, method)
+            if error and str(error.get("rule")) == "workspace_remainder":
+                bbox = error.get("bbox") or []
+                if len(bbox) >= 4:
+                    _zoom(list(bbox))
+            panel.set_errors(checker.last_errors,
+                             ignored_keys=checker.ignored_keys())
+
+        def _fix_all():
+            canvas = getattr(controller, "_canvas", None)
+            stack = getattr(canvas, "stack", None) if canvas is not None else None
+            addr = getattr(canvas, "canvas_address", 0) if canvas is not None else 0
+            if stack is None:
+                return
+            checker = controller.topology.checker
+            ids = [str(e.get("id")) for e in checker.blocking_errors()
+                   if e.get("rule") == "overlap" and e.get("fixable")]
+            if ids:
+                checker.fix_all(stack, addr, ids, 0)
+            panel.set_errors(checker.last_errors,
+                             ignored_keys=checker.ignored_keys())
+
+        def _ignore(error):
+            controller.topology.checker.ignore(error, reason="user")
+            panel.set_errors(controller.topology.checker.last_errors,
+                             ignored_keys=controller.topology.checker.ignored_keys())
+
+        def _restore(error):
+            controller.topology.checker.restore(error)
+            panel.set_errors(controller.topology.checker.last_errors,
+                             ignored_keys=controller.topology.checker.ignored_keys())
+
+        panel.zoom_requested.connect(_zoom)
+        panel.highlight_requested.connect(_highlight)
+        panel.fix_requested.connect(_fix)
+        panel.fix_all_requested.connect(_fix_all)
+        panel.ignore_requested.connect(_ignore)
+        panel.restore_requested.connect(_restore)
+
     def _on_topology_issue_activated(self) -> None:
         """拓扑问题 chip：显式校验 + 首问题定位反馈（V10 §15 / R4-3）。
 
@@ -2357,6 +2446,13 @@ class CompositeDocument(QWidget):
         只校验活动层：多会话时点击永远报「通过」而计数不清零）。
         """
         issues = self.edit_controller.validate_open_session_topology()
+        panel = getattr(self, "topology_panel", None)
+        if panel is not None:
+            checker = self.edit_controller.topology.checker
+            panel.set_errors(checker.last_errors or issues,
+                             ignored_keys=checker.ignored_keys(),
+                             last_run_at=checker.last_run_at)
+            panel.setVisible(True)
         if not issues:
             self.status_message.emit("拓扑校验通过（问题计数已刷新）")
             self._sync_action_state()

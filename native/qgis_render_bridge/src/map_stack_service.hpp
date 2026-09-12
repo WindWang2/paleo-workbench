@@ -344,6 +344,17 @@ public:
   std::string mergeMirrorFeatures(const std::string& doc_id,
                                   const std::string& feature_ids_json,
                                   const std::string& attrs_json);
+  // M4 §5 拓扑检查器：analysis 检查（overlap/gap/is_valid）+ 工区余量。
+  // config_json: {layer_ids, rules, precision, workspace, allowed_gaps,
+  // gap_threshold, max_overlap_area}。返回 {errors:[...]}。
+  std::string runGeometryChecks(std::uintptr_t canvas_addr,
+                                const std::string& config_json);
+  std::string fixGeometryError(std::uintptr_t canvas_addr,
+                               const std::string& error_id, int method);
+  std::string fixGeometryErrors(std::uintptr_t canvas_addr,
+                                const std::string& error_ids_json, int method);
+  void highlightCheckerErrors(std::uintptr_t canvas_addr,
+                              const std::string& error_ids_json);
   // M2 §4 全部层档：顶点工具档位（false = 当前层（默认），true = 全部层）。
   void setVertexEditScope(std::uintptr_t canvas_addr, bool all_layers);
   // M2 §4 追踪：QgsMapCanvasTracer 注册 + 开关（false 默认；全体捕获
@@ -437,6 +448,11 @@ private:
   void handleCommittedAttributes(const std::string& doc_id,
                                  const QgsChangedAttributesMap& changes);
   void endEditSessionState(const std::string& doc_id);
+  std::string serializeCheckerSession() const;
+  bool applyCheckerFix(const std::string& error_id, int method,
+                       std::vector<std::string>* touched_docs, std::string* error);
+  void fireCheckerGesture(const std::vector<std::string>& docs,
+                          const std::string& undo_text);
   void fireCommittedDelta(const std::string& doc_id);
   void ensureNotStale(std::uintptr_t canvas_addr);
   void eraseMirrorByQgisId(const std::string& qgis_id);

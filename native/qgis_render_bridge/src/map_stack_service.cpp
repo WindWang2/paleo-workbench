@@ -117,6 +117,17 @@
 #include <qgsrasterrenderer.h>
 #include "edit_tools.hpp"
 
+#include <qgsfeedback.h>
+#include <qgsgeometrycheckcontext.h>
+#include <qgsgeometrycheckerror.h>
+#include <qgsgeometrygapcheck.h>
+#include <qgsgeometryisvalidcheck.h>
+#include <qgsgeometryoverlapcheck.h>
+#include <qgsvectorlayerfeaturepool.h>
+#include <qgsgeometrycheck.h>
+#include <qgsgeometrycheckresolutionmethod.h>
+#include <QHash>
+
 namespace pwb::qgis_render {
 
 #ifdef PALEO_QGIS_PREFIX_PATH
@@ -1103,6 +1114,45 @@ struct QgisMapStack::Impl {
       committed_callbacks;
   std::vector<std::function<void(const std::string&, const std::string&)>>
       orphan_committed_callbacks;
+  // M4 §5：检查器会话（错误对象生命周期绑在栈上，下次 run/shutdown 释放）。
+  struct CheckerSession {
+    std::unique_ptr<QgsGeometryCheckContext> context;
+    QMap<QString, QgsFeaturePool*> pools;
+    QList<QgsGeometryCheck*> checks;
+    QList<QgsGeometryCheckError*> native_errors;
+    struct Remainder {
+      QString id;
+      QString layer_doc_id;
+      QgsGeometry geometry;
+      QgsRectangle bbox;
+    };
+    std::vector<Remainder> remainders;
+    QHash<QString, int> native_by_id;
+    QPointer<QgsVectorLayer> allowed_gaps;
+    std::uintptr_t canvas = 0;
+    QJsonObject last_config;
+    QStringList last_layer_docs;
+
+    ~CheckerSession() { reset(nullptr); }
+
+    void reset(QgsProject* project) {
+      qDeleteAll(native_errors);
+      native_errors.clear();
+      native_by_id.clear();
+      qDeleteAll(checks);
+      checks.clear();
+      qDeleteAll(pools);
+      pools.clear();
+      context.reset();
+      remainders.clear();
+      last_layer_docs.clear();
+      if (allowed_gaps && project != nullptr) {
+        project->removeMapLayer(allowed_gaps.data());
+      }
+      allowed_gaps.clear();
+      canvas = 0;
+    }
+  } checker;
 
   void eraseMirrorByQgisId(const std::string& qgis_id) {
     for (auto it = mirror_by_doc.begin(); it != mirror_by_doc.end(); ) {
@@ -1441,6 +1491,11 @@ void QgisMapStack::shutdown() {
   impl_->orphan_edit_pick_callbacks.clear();
   impl_->orphan_selection_callbacks.clear();
   impl_->orphan_measure_callbacks.clear();
+  for (auto& kv : impl_->canvas_refs) {
+    if (kv.second.isNull()) continue;
+    if (QgsMapTool* tool = kv.second->mapTool()) kv.second->unsetMapTool(tool);
+  }
+  impl_->checker.reset(project());
   if (impl_->owned_project) {
     for (auto& kv : impl_->canvas_refs) {
       if (kv.second.isNull()) continue;
@@ -5936,6 +5991,642 @@ std::string QgisMapStack::layoutExport(const std::string& spec_json,
   report.insert(QStringLiteral("items"), item_count);
   report.insert(QStringLiteral("page_mm"), QJsonArray{page_w, page_h});
   return QJsonDocument(report).toJson(QJsonDocument::Compact).toStdString();
+}
+
+namespace {
+
+QString checkerRuleId(const QgsGeometryCheck* check) {
+  if (check == nullptr) return QString();
+  const QString id = check->id();
+  if (id.contains(QLatin1String("Overlap"))) return QStringLiteral("overlap");
+  if (id.contains(QLatin1String("Gap"))) return QStringLiteral("gap");
+  if (id.contains(QLatin1String("Valid"))) return QStringLiteral("is_valid");
+  return id;
+}
+
+QJsonValue geometryToJsonValue(const QgsGeometry& geom) {
+  if (geom.isNull() || geom.isEmpty()) return QJsonValue();
+  QJsonParseError err{};
+  const QJsonDocument doc = QJsonDocument::fromJson(geom.asJson().toUtf8(), &err);
+  if (err.error != QJsonParseError::NoError) return QJsonValue();
+  if (doc.isObject()) return doc.object();
+  if (doc.isArray()) return doc.array();
+  return QJsonValue();
+}
+
+QJsonArray bboxToJson(const QgsRectangle& box) {
+  return QJsonArray{box.xMinimum(), box.yMinimum(), box.xMaximum(), box.yMaximum()};
+}
+
+class PwbLayerFeaturePool : public QgsVectorLayerFeaturePool {
+ public:
+  explicit PwbLayerFeaturePool(QgsVectorLayer* layer)
+      : QgsVectorLayerFeaturePool(layer) {
+    const QgsFeatureIds ids = getFeatures(QgsFeatureRequest());
+    setFeatureIds(ids);
+  }
+};
+
+QJsonArray methodsToJson(const QgsGeometryCheck* check, const QString& rule) {
+  QJsonArray methods;
+  if (check != nullptr) {
+    const auto listed = check->availableResolutionMethods();
+    for (const QgsGeometryCheckResolutionMethod& method : listed) {
+      QJsonObject item;
+      item.insert(QStringLiteral("id"), method.id());
+      item.insert(QStringLiteral("name"), method.name());
+      item.insert(QStringLiteral("description"), method.description());
+      item.insert(QStringLiteral("stable"), method.isStable());
+      methods.append(item);
+    }
+  }
+  if (methods.isEmpty() && rule == QLatin1String("is_valid")) {
+    QJsonObject item;
+    item.insert(QStringLiteral("id"), 0);
+    item.insert(QStringLiteral("name"), QStringLiteral("makeValid"));
+    item.insert(QStringLiteral("description"),
+                QStringLiteral("Repair invalid geometry"));
+    item.insert(QStringLiteral("stable"), true);
+    methods.append(item);
+  }
+  if (rule == QLatin1String("workspace_remainder")) {
+    QJsonObject item;
+    item.insert(QStringLiteral("id"), 0);
+    item.insert(QStringLiteral("name"), QStringLiteral("navigate"));
+    item.insert(QStringLiteral("description"),
+                QStringLiteral("Zoom to unassigned area"));
+    item.insert(QStringLiteral("stable"), true);
+    methods.append(item);
+  }
+  return methods;
+}
+
+}  // namespace
+
+std::string QgisMapStack::serializeCheckerSession() const {
+  QJsonArray errors;
+  auto hostFid = [this](const std::string& doc, QgsFeatureId fid) -> QString {
+    auto table = impl_->mirror_feature_fids.find(doc);
+    if (table != impl_->mirror_feature_fids.end()) {
+      auto it = table->second.find(static_cast<long long>(fid));
+      if (it != table->second.end()) return QString::fromStdString(it->second);
+    }
+    return QString::number(static_cast<long long>(fid));
+  };
+  auto docOfLayer = [](QgsVectorLayer* layer) -> std::string {
+    if (layer == nullptr) return {};
+    return layer->customProperty(QStringLiteral("pwb/doc_id")).toString().toStdString();
+  };
+
+  for (auto it = impl_->checker.native_by_id.constBegin();
+       it != impl_->checker.native_by_id.constEnd(); ++it) {
+    const int index = it.value();
+    if (index < 0 || index >= impl_->checker.native_errors.size()) continue;
+    QgsGeometryCheckError* error = impl_->checker.native_errors.at(index);
+    if (error == nullptr) continue;
+    QgsVectorLayer* layer = qobject_cast<QgsVectorLayer*>(
+        project()->mapLayer(error->layerId()));
+    const std::string doc = docOfLayer(layer);
+    const QString rule = checkerRuleId(error->check());
+    QJsonObject item;
+    item.insert(QStringLiteral("id"), it.key());
+    item.insert(QStringLiteral("rule"), rule);
+    item.insert(QStringLiteral("layer_id"), QString::fromStdString(doc));
+    item.insert(QStringLiteral("feature_id"),
+                error->featureId() == FID_NULL ? QString()
+                                               : hostFid(doc, error->featureId()));
+    if (auto* overlap = dynamic_cast<QgsGeometryOverlapCheckError*>(error)) {
+      const auto& other = overlap->overlappedFeature();
+      QgsVectorLayer* other_layer = qobject_cast<QgsVectorLayer*>(
+          project()->mapLayer(other.layerId()));
+      const std::string other_doc = docOfLayer(other_layer);
+      item.insert(QStringLiteral("other_feature_id"),
+                  hostFid(other_doc, other.featureId()));
+    }
+    item.insert(QStringLiteral("message"), error->description());
+    item.insert(QStringLiteral("value"), QJsonValue::fromVariant(error->value()));
+    const QgsGeometry geom = error->geometry();
+    const QJsonValue geom_json = geometryToJsonValue(geom);
+    if (!geom_json.isNull()) item.insert(QStringLiteral("geometry"), geom_json);
+    QgsRectangle box = error->affectedAreaBBox();
+    if (box.isNull() || box.isEmpty()) box = geom.boundingBox();
+    if (!box.isNull()) item.insert(QStringLiteral("bbox"), bboxToJson(box));
+    item.insert(QStringLiteral("location"),
+                QJsonArray{error->location().x(), error->location().y()});
+    const bool fixable = rule != QLatin1String("workspace_remainder");
+    item.insert(QStringLiteral("fixable"), fixable);
+    item.insert(QStringLiteral("methods"), methodsToJson(error->check(), rule));
+    QString status = QStringLiteral("pending");
+    if (error->status() == QgsGeometryCheckError::StatusFixed)
+      status = QStringLiteral("fixed");
+    else if (error->status() == QgsGeometryCheckError::StatusFixFailed)
+      status = QStringLiteral("failed");
+    else if (error->status() == QgsGeometryCheckError::StatusObsolete)
+      status = QStringLiteral("obsolete");
+    item.insert(QStringLiteral("status"), status);
+    if (status == QLatin1String("pending")) errors.append(item);
+  }
+  for (const auto& rem : impl_->checker.remainders) {
+    QJsonObject item;
+    item.insert(QStringLiteral("id"), rem.id);
+    item.insert(QStringLiteral("rule"), QStringLiteral("workspace_remainder"));
+    item.insert(QStringLiteral("layer_id"), rem.layer_doc_id);
+    item.insert(QStringLiteral("feature_id"), QString());
+    item.insert(QStringLiteral("message"),
+                QStringLiteral("Unassigned area inside workarea"));
+    const QJsonValue geom_json = geometryToJsonValue(rem.geometry);
+    if (!geom_json.isNull()) item.insert(QStringLiteral("geometry"), geom_json);
+    item.insert(QStringLiteral("bbox"), bboxToJson(rem.bbox));
+    item.insert(QStringLiteral("fixable"), false);
+    item.insert(QStringLiteral("methods"),
+                methodsToJson(nullptr, QStringLiteral("workspace_remainder")));
+    item.insert(QStringLiteral("status"), QStringLiteral("pending"));
+    errors.append(item);
+  }
+  QJsonObject payload;
+  payload.insert(QStringLiteral("errors"), errors);
+  if (impl_->checker.allowed_gaps) {
+    QJsonArray gaps;
+    QgsFeature feature;
+    QgsFeatureIterator it = impl_->checker.allowed_gaps->getFeatures();
+    while (it.nextFeature(feature)) {
+      if (!feature.hasGeometry()) continue;
+      const QJsonValue geom = geometryToJsonValue(feature.geometry());
+      if (!geom.isNull()) gaps.append(geom);
+    }
+    payload.insert(QStringLiteral("allowed_gaps"), gaps);
+  }
+  return QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+}
+
+void QgisMapStack::fireCheckerGesture(const std::vector<std::string>& docs,
+                                      const std::string& undo_text) {
+  QJsonObject payload;
+  QJsonArray layers;
+  for (const std::string& doc : docs)
+    layers.append(QString::fromStdString(doc));
+  payload.insert(QStringLiteral("layers"), layers);
+  payload.insert(QStringLiteral("gesture"), QStringLiteral("geometry_fix"));
+  payload.insert(QStringLiteral("undo_text"), QString::fromStdString(undo_text));
+  const std::string json =
+      QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  for (auto& kv : impl_->edit_pick_callbacks) {
+    if (kv.second) kv.second("edit_gesture", json);
+  }
+}
+
+bool QgisMapStack::applyCheckerFix(const std::string& error_id, int method,
+                                   std::vector<std::string>* touched_docs,
+                                   std::string* error) {
+  const QString id = QString::fromStdString(error_id);
+  for (const auto& rem : impl_->checker.remainders) {
+    if (rem.id != id) continue;
+    std::uintptr_t canvas = impl_->checker.canvas;
+    if (canvas == 0) {
+      for (auto& kv : impl_->canvas_refs) {
+        if (!kv.second.isNull()) {
+          canvas = kv.first;
+          break;
+        }
+      }
+    }
+    if (canvas != 0) {
+      QgsRectangle box = rem.bbox;
+      const double pad = std::max({box.width(), box.height(), 0.5}) * 0.1;
+      setCanvasExtent(canvas, box.xMinimum() - pad, box.yMinimum() - pad,
+                      box.xMaximum() + pad, box.yMaximum() + pad);
+    }
+    return true;
+  }
+  auto found = impl_->checker.native_by_id.find(id);
+  if (found == impl_->checker.native_by_id.end()) {
+    if (error) *error = "unknown error id: " + error_id;
+    return false;
+  }
+  const int index = found.value();
+  if (index < 0 || index >= impl_->checker.native_errors.size()) {
+    if (error) *error = "stale error id: " + error_id;
+    return false;
+  }
+  QgsGeometryCheckError* check_error = impl_->checker.native_errors.at(index);
+  const QString rule = checkerRuleId(check_error->check());
+  QgsVectorLayer* layer = qobject_cast<QgsVectorLayer*>(
+      project()->mapLayer(check_error->layerId()));
+  if (layer == nullptr) {
+    if (error) *error = "error layer is gone";
+    return false;
+  }
+  if (!layer->isEditable()) {
+    if (error) *error = "layer is not in an edit session";
+    return false;
+  }
+  const std::string doc =
+      layer->customProperty(QStringLiteral("pwb/doc_id")).toString().toStdString();
+  if (touched_docs && !doc.empty()
+      && std::find(touched_docs->begin(), touched_docs->end(), doc)
+          == touched_docs->end())
+    touched_docs->push_back(doc);
+
+  if (rule == QLatin1String("is_valid")) {
+    QgsFeature feature = layer->getFeature(check_error->featureId());
+    if (!feature.isValid() || !feature.hasGeometry()) {
+      if (error) *error = "feature missing for makeValid";
+      return false;
+    }
+    QgsGeometry valid = feature.geometry().makeValid();
+    if (valid.isNull() || valid.isEmpty()) {
+      if (error) *error = "makeValid produced empty geometry";
+      return false;
+    }
+    if (!layer->changeGeometry(check_error->featureId(), valid)) {
+      if (error) *error = "changeGeometry failed";
+      return false;
+    }
+    return true;
+  }
+
+  QgsGeometryCheck::Changes changes;
+  check_error->check()->fixError(
+      impl_->checker.pools, check_error, method,
+      QMap<QString, int>(), changes);
+  if (check_error->status() == QgsGeometryCheckError::StatusFixFailed) {
+    if (error) *error = check_error->resolutionMessage().toStdString();
+    return false;
+  }
+  return true;
+}
+
+std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
+                                            const std::string& config_json) {
+  QgsMapCanvas* canvas = nullptr;
+  if (canvas_addr != 0) {
+    canvas = canvasOrThrow(canvas_addr);
+  } else {
+    for (auto& kv : impl_->canvas_refs) {
+      if (!kv.second.isNull()) {
+        canvas = kv.second.data();
+        canvas_addr = kv.first;
+        break;
+      }
+    }
+  }
+  QJsonParseError parse_error{};
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(config_json), &parse_error);
+  if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
+    throw std::invalid_argument("run_geometry_checks config must be a JSON object");
+  }
+  const QJsonObject config = doc.object();
+  impl_->checker.reset(project());
+  impl_->checker.last_config = config;
+  impl_->checker.canvas = canvas_addr;
+
+  QStringList layer_docs;
+  if (config.value(QStringLiteral("layer_ids")).isArray()) {
+    for (const QJsonValue& value : config.value(QStringLiteral("layer_ids")).toArray()) {
+      const QString id = value.toString();
+      if (!id.isEmpty()) layer_docs.append(id);
+    }
+  }
+  QList<QgsVectorLayer*> layers;
+  if (layer_docs.isEmpty()) {
+    for (const auto& kv : impl_->mirror_by_doc) {
+      QgsVectorLayer* layer = findMirrorByDocId(project(), kv.first);
+      if (layer != nullptr && layer->isSpatial()) {
+        layers.append(layer);
+        layer_docs.append(QString::fromStdString(kv.first));
+      }
+    }
+  } else {
+    for (const QString& id : layer_docs) {
+      QgsVectorLayer* layer = findMirrorByDocId(project(), id.toStdString());
+      if (layer != nullptr) layers.append(layer);
+    }
+  }
+  impl_->checker.last_layer_docs = layer_docs;
+  if (layers.isEmpty()) {
+    return serializeCheckerSession();
+  }
+
+  QgsCoordinateReferenceSystem map_crs;
+  if (canvas != nullptr) map_crs = canvas->mapSettings().destinationCrs();
+  if (!map_crs.isValid()) map_crs = project()->crs();
+  if (!map_crs.isValid()) map_crs = layers.front()->crs();
+  const int precision = std::max(1, config.value(QStringLiteral("precision")).toInt(8));
+  impl_->checker.context = std::make_unique<QgsGeometryCheckContext>(
+      precision, map_crs, project()->transformContext(), project());
+
+  QSet<QString> rules;
+  if (config.value(QStringLiteral("rules")).isArray()) {
+    for (const QJsonValue& value : config.value(QStringLiteral("rules")).toArray()) {
+      rules.insert(value.toString());
+    }
+  }
+  if (rules.isEmpty()) {
+    rules.insert(QStringLiteral("overlap"));
+    rules.insert(QStringLiteral("gap"));
+    rules.insert(QStringLiteral("is_valid"));
+    rules.insert(QStringLiteral("workspace_remainder"));
+  }
+
+  if (config.value(QStringLiteral("allowed_gaps")).isObject()
+      && rules.contains(QStringLiteral("gap"))) {
+    const QJsonObject gaps_obj = config.value(QStringLiteral("allowed_gaps")).toObject();
+    QString crs_id = map_crs.authid();
+    if (crs_id.isEmpty()) crs_id = QStringLiteral("EPSG:4326");
+    auto* gaps = new QgsVectorLayer(
+        QStringLiteral("Polygon?crs=%1").arg(crs_id),
+        QStringLiteral("pwb-allowed-gaps"), QStringLiteral("memory"));
+    QgsFeatureList features = parseGeoJsonFeatures(
+        QString::fromUtf8(QJsonDocument(gaps_obj).toJson(QJsonDocument::Compact)),
+        gaps->fields());
+    if (!features.isEmpty()) {
+      QgsVectorDataProvider* provider = gaps->dataProvider();
+      if (provider != nullptr) provider->addFeatures(features);
+    }
+    project()->addMapLayer(gaps, false);
+    impl_->checker.allowed_gaps = gaps;
+  }
+
+  for (QgsVectorLayer* layer : layers) {
+    impl_->checker.pools.insert(layer->id(), new PwbLayerFeaturePool(layer));
+  }
+
+  QVariantMap overlap_config;
+  overlap_config.insert(
+      QStringLiteral("maxOverlapArea"),
+      config.value(QStringLiteral("max_overlap_area")).toDouble(0.0));
+  QVariantMap gap_config;
+  gap_config.insert(
+      QStringLiteral("gapThreshold"),
+      config.value(QStringLiteral("gap_threshold")).toDouble(0.0));
+  if (impl_->checker.allowed_gaps) {
+    gap_config.insert(QStringLiteral("allowedGapsEnabled"), true);
+    gap_config.insert(QStringLiteral("allowedGapsLayer"),
+                      impl_->checker.allowed_gaps->id());
+    gap_config.insert(QStringLiteral("allowedGapsBuffer"), 0.0);
+  }
+
+  // 有效性先跑：重叠/缝隙在坏几何上可能抛 GEOS，不能挡住 is_valid。
+  if (rules.contains(QStringLiteral("is_valid"))) {
+    impl_->checker.checks.append(
+        new QgsGeometryIsValidCheck(impl_->checker.context.get(), QVariantMap()));
+  }
+  if (rules.contains(QStringLiteral("overlap"))) {
+    impl_->checker.checks.append(
+        new QgsGeometryOverlapCheck(impl_->checker.context.get(), overlap_config));
+  }
+  if (rules.contains(QStringLiteral("gap"))) {
+    auto* gap = new QgsGeometryGapCheck(impl_->checker.context.get(), gap_config);
+    gap->prepare(impl_->checker.context.get(), gap_config);
+    impl_->checker.checks.append(gap);
+  }
+
+  QgsFeedback feedback;
+  QStringList messages;
+  for (QgsGeometryCheck* check : impl_->checker.checks) {
+    try {
+      check->collectErrors(impl_->checker.pools, impl_->checker.native_errors,
+                           messages, &feedback);
+    } catch (const std::exception&) {
+      continue;
+    } catch (...) {
+      continue;
+    }
+  }
+  for (int i = 0; i < impl_->checker.native_errors.size(); ++i) {
+    impl_->checker.native_by_id.insert(QString::number(i), i);
+  }
+
+  if (rules.contains(QStringLiteral("workspace_remainder"))) {
+    QgsGeometry work;
+    if (config.value(QStringLiteral("workspace")).isObject()) {
+      const QJsonObject ws = config.value(QStringLiteral("workspace")).toObject();
+      work = QgsJsonUtils::geometryFromGeoJson(
+          QString::fromUtf8(QJsonDocument(ws).toJson(QJsonDocument::Compact)));
+    } else if (canvas != nullptr) {
+      work = QgsGeometry::fromRect(canvas->extent());
+    }
+    if (!work.isEmpty()) {
+      QgsGeometry combined;
+      bool first = true;
+      for (QgsVectorLayer* layer : layers) {
+        if (layer->geometryType() != Qgis::GeometryType::Polygon) continue;
+        QgsFeature feature;
+        QgsFeatureIterator iterator = layer->getFeatures();
+        while (iterator.nextFeature(feature)) {
+          if (!feature.hasGeometry() || feature.geometry().isEmpty()) continue;
+          QgsGeometry geom = feature.geometry();
+          if (first) {
+            combined = geom;
+            first = false;
+          } else {
+            combined = combined.combine(geom);
+          }
+        }
+      }
+      QgsGeometry remainder;
+      try {
+        remainder = first ? work : work.difference(combined);
+      } catch (...) {
+        remainder = QgsGeometry();
+      }
+      const double min_area = impl_->checker.context->reducedTolerance;
+      if (!remainder.isEmpty() && remainder.area() > min_area) {
+        QgisMapStack::Impl::CheckerSession::Remainder rem;
+        rem.id = QStringLiteral("ws-0");
+        rem.layer_doc_id = layer_docs.isEmpty() ? QString() : layer_docs.front();
+        rem.geometry = remainder;
+        rem.bbox = remainder.boundingBox();
+        impl_->checker.remainders.push_back(std::move(rem));
+      }
+    }
+  }
+  return serializeCheckerSession();
+}
+
+std::string QgisMapStack::fixGeometryError(std::uintptr_t canvas_addr,
+                                           const std::string& error_id,
+                                           int method) {
+  if (canvas_addr != 0) canvasOrThrow(canvas_addr);
+  std::vector<std::string> touched;
+  std::string failure;
+  const QString id = QString::fromStdString(error_id);
+  bool is_remainder = false;
+  for (const auto& rem : impl_->checker.remainders) {
+    if (rem.id == id) {
+      is_remainder = true;
+      break;
+    }
+  }
+  QgsVectorLayer* command_layer = nullptr;
+  if (!is_remainder) {
+    auto found = impl_->checker.native_by_id.find(id);
+    if (found != impl_->checker.native_by_id.end()
+        && found.value() >= 0
+        && found.value() < impl_->checker.native_errors.size()) {
+      QgsGeometryCheckError* check_error =
+          impl_->checker.native_errors.at(found.value());
+      command_layer = qobject_cast<QgsVectorLayer*>(
+          project()->mapLayer(check_error->layerId()));
+    }
+  }
+  if (command_layer != nullptr && command_layer->isEditable()) {
+    command_layer->beginEditCommand(QStringLiteral("Fix geometry error"));
+  }
+  const bool ok = applyCheckerFix(error_id, method, &touched, &failure);
+  if (command_layer != nullptr && command_layer->isEditable()) {
+    if (ok) command_layer->endEditCommand();
+    else command_layer->destroyEditCommand();
+  }
+  if (!ok) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("ok"), false);
+    payload.insert(QStringLiteral("message"), QString::fromStdString(failure));
+    payload.insert(QStringLiteral("errors"),
+                   QJsonDocument::fromJson(
+                       QByteArray::fromStdString(serializeCheckerSession()))
+                       .object()
+                       .value(QStringLiteral("errors")));
+    return QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  }
+  if (!is_remainder && !touched.empty()) {
+    fireCheckerGesture(touched, "Fix geometry error");
+  }
+  QJsonObject payload;
+  if (!is_remainder) {
+    const QJsonObject saved = impl_->checker.last_config;
+    const std::uintptr_t saved_canvas = impl_->checker.canvas;
+    payload = QJsonDocument::fromJson(QByteArray::fromStdString(runGeometryChecks(
+        saved_canvas,
+        QJsonDocument(saved).toJson(QJsonDocument::Compact).toStdString()))).object();
+  } else {
+    payload = QJsonDocument::fromJson(
+        QByteArray::fromStdString(serializeCheckerSession())).object();
+  }
+  payload.insert(QStringLiteral("ok"), true);
+  return QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+}
+
+std::string QgisMapStack::fixGeometryErrors(std::uintptr_t canvas_addr,
+                                            const std::string& error_ids_json,
+                                            int method) {
+  if (canvas_addr != 0) canvasOrThrow(canvas_addr);
+  QJsonParseError parse_error{};
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(error_ids_json), &parse_error);
+  if (parse_error.error != QJsonParseError::NoError || !doc.isArray()) {
+    throw std::invalid_argument("fix_geometry_errors ids must be a JSON array");
+  }
+  QStringList ids;
+  for (const QJsonValue& value : doc.array()) {
+    const QString id = value.toString();
+    if (!id.isEmpty()) ids.append(id);
+  }
+  QSet<QgsVectorLayer*> command_layers;
+  for (const QString& id : ids) {
+    auto found = impl_->checker.native_by_id.find(id);
+    if (found == impl_->checker.native_by_id.end()) continue;
+    if (found.value() < 0 || found.value() >= impl_->checker.native_errors.size())
+      continue;
+    QgsGeometryCheckError* check_error =
+        impl_->checker.native_errors.at(found.value());
+    QgsVectorLayer* layer = qobject_cast<QgsVectorLayer*>(
+        project()->mapLayer(check_error->layerId()));
+    if (layer != nullptr && layer->isEditable()) command_layers.insert(layer);
+  }
+  for (QgsVectorLayer* layer : command_layers) {
+    layer->beginEditCommand(QStringLiteral("Fix geometry errors"));
+  }
+  std::vector<std::string> touched;
+  QStringList pending = ids;
+  for (int round = 0; round < 8 && !pending.isEmpty(); ++round) {
+    for (const QString& id : pending) {
+      std::string one_error;
+      applyCheckerFix(id.toStdString(), method, &touched, &one_error);
+    }
+    const QJsonObject saved = impl_->checker.last_config;
+    const std::uintptr_t saved_canvas = impl_->checker.canvas;
+    runGeometryChecks(
+        saved_canvas,
+        QJsonDocument(saved).toJson(QJsonDocument::Compact).toStdString());
+    pending.clear();
+    const QJsonObject after =
+        QJsonDocument::fromJson(
+            QByteArray::fromStdString(serializeCheckerSession())).object();
+    for (const QJsonValue& value : after.value(QStringLiteral("errors")).toArray()) {
+      const QJsonObject err = value.toObject();
+      if (err.value(QStringLiteral("rule")).toString() == QLatin1String("overlap")
+          && err.value(QStringLiteral("fixable")).toBool()) {
+        pending.append(err.value(QStringLiteral("id")).toString());
+      }
+    }
+  }
+  for (QgsVectorLayer* layer : command_layers) {
+    layer->endEditCommand();
+  }
+  if (!touched.empty()) {
+    fireCheckerGesture(touched, "Fix geometry errors");
+  }
+  QJsonObject payload =
+      QJsonDocument::fromJson(
+          QByteArray::fromStdString(serializeCheckerSession())).object();
+  payload.insert(QStringLiteral("ok"), true);
+  return QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+}
+
+void QgisMapStack::highlightCheckerErrors(std::uintptr_t canvas_addr,
+                                          const std::string& error_ids_json) {
+  ensureNotStale(canvas_addr);
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  clearHighlights(canvas_addr);
+  QJsonParseError parse_error{};
+  const QJsonDocument doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(error_ids_json), &parse_error);
+  if (parse_error.error != QJsonParseError::NoError || !doc.isArray()) {
+    throw std::invalid_argument("highlight_checker_errors ids must be a JSON array");
+  }
+  QgsVectorLayer* style_layer = nullptr;
+  if (!impl_->checker.last_layer_docs.isEmpty()) {
+    style_layer = findMirrorByDocId(
+        project(), impl_->checker.last_layer_docs.front().toStdString());
+  }
+  auto& bucket = impl_->highlights[canvas_addr];
+  for (const QJsonValue& value : doc.array()) {
+    const QString id = value.toString();
+    QgsGeometry geom;
+    QgsVectorLayer* layer = style_layer;
+    auto found = impl_->checker.native_by_id.find(id);
+    if (found != impl_->checker.native_by_id.end()
+        && found.value() >= 0
+        && found.value() < impl_->checker.native_errors.size()) {
+      QgsGeometryCheckError* check_error =
+          impl_->checker.native_errors.at(found.value());
+      geom = check_error->geometry();
+      layer = qobject_cast<QgsVectorLayer*>(
+          project()->mapLayer(check_error->layerId()));
+      if (layer == nullptr) layer = style_layer;
+    } else {
+      for (const auto& rem : impl_->checker.remainders) {
+        if (rem.id == id) {
+          geom = rem.geometry;
+          if (!rem.layer_doc_id.isEmpty()) {
+            QgsVectorLayer* named = findMirrorByDocId(
+                project(), rem.layer_doc_id.toStdString());
+            if (named != nullptr) layer = named;
+          }
+          break;
+        }
+      }
+    }
+    if (geom.isNull() || geom.isEmpty() || layer == nullptr) continue;
+    auto* highlight = new QgsHighlight(canvas, geom, layer);
+    highlight->setColor(QColor(220, 40, 40));
+    QColor fill(220, 40, 40, 70);
+    highlight->setFillColor(fill);
+    bucket.emplace_back(highlight);
+  }
+  canvas->refresh();
 }
 
 }  // namespace pwb::qgis_render

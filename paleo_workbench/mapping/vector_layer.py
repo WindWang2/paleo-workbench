@@ -384,9 +384,14 @@ class VectorLayer:
                 self._staged_selection = set()
         return self.edit_session
 
+    def commit_audit(self) -> list[dict[str, object]]:
+        """原生提交审计流（M1 写回 + M4 手势溯源）。"""
+        return list(self._commit_journal)
+
     def apply_committed_delta(
         self, delta: Mapping[str, object], *, session_id: str,
         source_tool: str,
+        gestures=None,
     ) -> list[dict[str, object]]:
         """吸收一次原生编辑提交增量（拓扑编辑迁移 M1 §2 回写通道）。
 
@@ -400,12 +405,15 @@ class VectorLayer:
         touched: set[str] = set()
 
         def _record(command_type: str, feature_ids) -> None:
-            records.append({
+            entry = {
                 "command_type": command_type,
                 "feature_ids": [str(fid) for fid in feature_ids],
                 "session_id": session_id,
                 "source_tool": source_tool,
-            })
+            }
+            if gestures:
+                entry["gestures"] = list(gestures)
+            records.append(entry)
 
         for change in delta.get("geometry_changes") or ():
             feature_id = str(change.get("feature_id") or "")
