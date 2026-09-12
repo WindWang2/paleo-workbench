@@ -324,6 +324,9 @@ class VectorLayer:
             raise KeyError(f"unknown feature {feature_id!r}") from exc
 
     def _selectable_feature_ids(self) -> set[str]:
+        # V11（save-intent）：会话打开时可选中集=会话视图（进行中的新增
+        # 要素立即可选，independent verification 的契约），_selection 本体
+        # 仍是基线视图的 ids 子集——提交/回滚时自动 cross-check。
         session = self.edit_session
         return {
             feature.feature_id
@@ -357,9 +360,28 @@ class VectorLayer:
             feature_id for feature_id in self._selectable_feature_ids() if feature_id not in self._selection
         )
 
+    def set_staged_selection(self, feature_ids: Iterable[str]) -> None:
+        """会话期意图登记（V11 save-intent）：会话打开时，这些意图按当前
+        可选中视图结转到``_selection``（对不存在的 id 宽容丢弃并诚实报告）。
+
+        不会立即改变实时选择——实时选择是事件/手势权威（QGIS 选择信号 /
+        Python 手势的落点）。返回 None；意图本身经 :meth:`staged_selection`
+        可读（UI 徽标呈现依据）。
+        """
+        self._staged_selection = {str(feature_id) for feature_id in feature_ids}
+
+    def staged_selection(self) -> set[str]:
+        """尚未结转的会话期意图。"""
+        return set(getattr(self, "_staged_selection", set()))
+
     def start_editing(self) -> "VectorEditSession":
         if self.edit_session is None:
             self.edit_session = VectorEditSession(self)
+            staged = set(getattr(self, "_staged_selection", set()))
+            if staged:
+                selectable = self._selectable_feature_ids()
+                self._selection = {fid for fid in staged if fid in selectable}
+                self._staged_selection = set()
         return self.edit_session
 
     def apply_committed_delta(

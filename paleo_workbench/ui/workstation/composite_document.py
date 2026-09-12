@@ -1162,6 +1162,9 @@ class CompositeDocument(QWidget):
         )
         self.layer_manager.active_layer_changed.connect(
             self._on_user_active_layer_changed)
+        # V11 五目标：树选中节点信息性记录（07-active-edit-state）。
+        self.layer_manager.active_layer_changed.connect(
+            self.edit_controller.note_tree_selection)
         self.layer_manager.attribute_table_requested.connect(
             self._open_attribute_table
         )
@@ -1744,7 +1747,25 @@ class CompositeDocument(QWidget):
         块，不是禁用判词（判词永远原样来自 evaluator）。
         """
         blocks: dict[str, str] = {}
-        if ctx.has_active_layer:
+        # V11（#1268 收敛）：数字化进行中（tool 目标 ≠ 树选中）时，捕获类
+        # 工具的状态块必须显示**工具实际写入层**，绝不把树选中层呈现成
+        # 编辑目标（07-active-edit-state 的 divergent 呈现义务）。
+        targets = getattr(self.edit_controller, "edit_targets", None)
+        snapshot = targets() if callable(targets) else None
+        if snapshot is not None and snapshot.divergent:
+            tool_layer = self.edit_controller._layers.get(
+                snapshot.tool_target_layer or "")
+            tool_name = (tool_layer.name if tool_layer is not None
+                         else snapshot.tool_target_layer)
+            divergent_note = (
+                f"数字化目标：{tool_name}"
+                f"（树选中 {ctx.layer_name or ctx.active_layer_id}；"
+                "手势完成后随目标切换）")
+            for tool_id in ("add_point", "add_line", "add_polygon",
+                            "move_feature", "vertex", "toggle_editing",
+                            "delete_selected", "split", "merge", "reshape"):
+                blocks[tool_id] = divergent_note
+        elif ctx.has_active_layer:
             from paleo_workbench.mapping.tool_availability import LAYER_CAPTION
 
             target = f"当前编辑目标：{ctx.layer_name or ctx.active_layer_id}"
@@ -4055,6 +4076,11 @@ class CompositeDocument(QWidget):
             if tree_host is not None and self.uses_native_stack:
                 self.stage_controller.group_controller.attach_tree_view(
                     tree_host.tree_view_address)
+            # V11（D2-ws）：factor 组标题随组成同步（此前
+            # sync_factor_titles 无生产调用方，factor 组显示裸任务 id）。
+            factor_tasks = getattr(self._project, "factor_map_tasks", None) or []
+            self.stage_controller.group_controller.sync_factor_titles({
+                str(task.id): str(task.name) for task in factor_tasks})
             self.stage_controller.sync_composition()
             expand = getattr(self.layer_manager, "expand_layer_groups", None)
             if callable(expand):

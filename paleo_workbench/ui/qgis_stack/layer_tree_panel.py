@@ -310,7 +310,14 @@ class QgisLayerTreePanel(QWidget):
             return
         self._publishing = True
         try:
-            self._canvas.set_layer_snapshot(self._make_snapshot())
+            # V11：宿主 settle 的 journal 提示随快照下推（O(changed) 差分）；
+            # 无宿主/无提示 = None（回落全量比较）。parent 即宿主
+            # CompositeDocument（_create_layer_manager 构造约定）。
+            host = self.parent()
+            edit_controller = getattr(host, "edit_controller", None)
+            hints = edit_controller.snapshot_changed_hints()                 if hasattr(edit_controller, "snapshot_changed_hints") else None
+            self._canvas.set_layer_snapshot(
+                self._make_snapshot(), changed_hints=hints)
         finally:
             self._publishing = False
 
@@ -586,6 +593,10 @@ class QgisLayerTreePanel(QWidget):
         group_touched = False
         if self._group_controller is not None:
             controller = self._group_controller
+            # V11：过期回声（revision ≤ 已应用值）不进领域写回——程序化
+            # 变更的迟到回显/窗口内竞态由修订号门控（旧桥 revision=0 恒通过）。
+            if controller.echo_is_stale(batch.revision):
+                return
             if batch.tree:
                 controller.observe_tree_nodes(list(batch.tree))
                 group_touched = True

@@ -1,81 +1,79 @@
-# Task Plan — QGIS Geological Layer & Cartography Platform V7 (feat/qgis-geolayer-cartography-v7)
+# Task Plan — QGIS Cartography Runtime V11 (qgis-runtime-v11)
 
 ## Goal
-Establish Paleo Workbench's QGIS geological layer & professional cartography
-platform. Generic GIS (layers, vector ops, geometry, rendering, layout) must be
-built on QGIS; Paleo only adds geological semantics, science, factor maps,
-compilation, versioning, QC, product lifecycle. NO parallel generic-GIS stack.
+Build the QGIS Cartography Runtime Control Plane V11: native layer tree as the
+single runtime authority, formal layer ordering engine, minimal tree diff,
+native tree transactions, bidirectional sync, active/edit/tool-target split,
+stage union-tree semantics, mirror lifecycle, layout/legend consistency, and
+topology editing M0 per #1278 spec (#1279–#1286 decisions). QGIS = 2D GIS
+runtime; Paleo = geology semantics only. NO parallel GIS engine, NO qgis_app.
 
-Primary rules:
-- Evidence before modification; find existing authority before creating new.
-- Reuse QGIS/existing services; no second GIS kernel.
-- Every capability has probe/unavailable/degraded semantics; no fake success,
-  no silent fallback, no swallowed exceptions.
-- Public-contract changes migrate ALL in-repo callers + tests.
-- HARD EXCLUSION: no 100GB seismic support/benchmark/optimization.
+Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench-qgis-runtime-v11
+Branch: qgis-runtime-v11 (off main 6c08fb7d)
+Docs: docs/development/qgis-cartography-runtime-v11/
 
-## Current Phase
-PHASE 2/3 — implementation (P0 fixes → GeologicalLayerSpec)
-PHASE 1 — DONE (audit-*.md + 00..03 docs committed)
+## Locked decisions
+1. Base = main 6c08fb7d. PR #1267 (v10-review-fixes) and #1277
+   (review-convergence) own their fixes — V11 MUST NOT duplicate them;
+   00-overlap-audit.md records file-level ownership.
+2. Parallel V11 lines to avoid: data-fabric-v11 (catalog/well/data page),
+   workbench-ux-v11 (generic UI design system; stacked on #1277).
+3. Topology: #1279–#1286 decision issues are the authority; the referenced
+   docs/specs/topological-editing-migration-spec.md DID NOT EXIST on main or
+   any branch — V11 materialized it (docs/specs/, assembly view).
+4. Vendor QGIS build at C:\Users\wangj.KEVIN\paleo-qgis-build\qgis-vendor
+   (survives); bridge rebuilt in worktree via PALEO_QGIS_REUSE_VENDOR=1.
+5. Test recipe: PALEO_QGIS_BUILD_DIR=neutral vendor + PALEO_QGIS_CONDA_QT=1
+   + QT_QPA_PLATFORM=offscreen; conftest auto-preps loader.
+6. No CI waiting; local targeted verification. Windows/GitBash; explicit cd
+   in every shell (background shells reset cwd to main checkout).
 
 ## Phases
-- [x] PHASE 0: Setup — worktree `.worktrees/qgis-geolayer-cartography-v7`,
-      branch `feat/qgis-geolayer-cartography-v7` off main (db21f6cf);
-      submodules geo-viz-engine (40ebd168) + well-log-engine (f845e7ab);
-      uv venv cp312 + geoviz editables; baseline test run (pending baseline)
-- [x] PHASE 1: Deep audit (§2) — mapping/mapping_workspace/workflow factor+map/
-      ui.qgis_stack/native qgis_render_bridge/composer; 4 matrices
-      (Layer Authority, Geometry Operation, Rendering, Layout) → 00-baseline.md
-- [ ] PHASE 2: GeologicalLayerSpec V2 (§3) — QGIS-driven layer spec covering
-      15 roles; QgsFields/constraints/domains/defaults mapping; single authority
-- [ ] PHASE 3: Vector spatial ops on QGIS (§4) — buffer/clip/intersect/union/
-      difference/dissolve/multi<->single/simplify/densify/validate/repair/
-      polygonize/linemerge/spatial index/CRS/area-length/nearest/PIP/topology
-- [ ] PHASE 4: QGIS raster/scalar factor layers (§5) — FactorGridResult →
-      scalar raster → single-band pseudocolor renderer, ramps, nodata/unit/
-      ranges/modes/reverse/opacity/uncertainty/provenance, serialization,
-      project reopen; styling never rewrites science values
-- [ ] PHASE 5: Geological Symbology V2 (§6) — fault/facies/provenance/boundary
-      styles, QGIS renderer XML/style DB, versioned binding, role compat check
-- [ ] PHASE 6: Layer Tree V7 (§7) + LayerPresentationState (§8) — system
-      groups, factor nested groups, stable ids, ordering, protection,
-      roundtrip; presentation state from existing domains
-- [ ] PHASE 7: Incremental QGIS mirror / delta publish (§9) — content/style/
-      placement/visibility tokens; no-op ≈ O(changed); benchmarks 50/200/500/1000
-- [ ] PHASE 8: Stage workflows (§10–12) — Stage1 facies RAW/draft/overlays/
-      lock; Stage2 constraint QGIS layers + factor products group; Stage3
-      integrated compilation + QA + publish gate
-- [ ] PHASE 9: QGIS Layout/Cartography V7 (§13) + cartographic QA (§14) —
-      component graph → QgsPrintLayout; 13+ item kinds; screen=export parity;
-      QA rules with layer/feature/rule/severity localization
-- [ ] PHASE 10: Performance (§15) — 1000 layers/100k features/10k wells/
-      500×500×50 fusion/contour/mirror/renderer/layout/save-reopen; off-GUI
-      thread + cancellation capability
-- [ ] PHASE 11: 3 review rounds (§19) + P0/P1 fixes + regression tests
-- [ ] PHASE 12: Docs 00–08, atomic commits, PR to main (§20)
-
-## Decisions (locked)
-1. Build on QGIS as the only generic-GIS authority; Paleo = geology only.
-2. No 100GB seismic (synthetic/small/medium interface checks only).
-3. Resource: reuse vendored QGIS build; -j2 C++ compiles, serial heavy tests,
-   bounded benchmarks with explicit size/memory caps.
-4. Windows/GitBash; worktree-local .venv (root .venv points at main checkout —
-   never use it).
-5. Don't touch ui/workstation, ui/components, qgis_render_bridge/edit_tools.*
-   (owned by parallel QGIS Authoring branch) except via narrow adapters;
-   record cross-branch contracts.
-
-## Blocked Items
-(none)
+- [x] PHASE 0: Setup — worktree + branch + submodules + venv + bridge 0.7.0a0
+- [x] PHASE 1: State sync → 00-overlap-audit.md
+- [x] PHASE 2: Deep audit → 01-current-qgis-runtime.md (4 parallel audits)
+- [x] PHASE 3: Architecture 02-authority-model + 03-layer-tree-plan + 04-ordering
+- [x] PHASE 4: Core runtime — layer_order + LayerTreePlan + controller rewire
+      (9a2657fa; D1-ws/D3-ws closed; nested user groups; 36 tests)
+- [x] PHASE 5: TreeDiff keyed-LCS + diff-driven reconcile + call-count tests
+      (0b65621c; 1000层插入=1 move; 22 tests)
+- [x] PHASE 6: Native tree transaction (bridge 0.7.0a0: begin/end window +
+      tree_revision + runtime_facts counters) + echo gate (d6164860, 1cae67f2;
+      10+8 native tests; 50 upserts=1 sync; 1000-layer publish=1 sync)
+- [x] PHASE 7: Five-target edit state (d4dc6b45; EditTargetSnapshot +
+      divergent status presentation; V10 review #1 semantics preserved)
+- [x] PHASE 8: Stage fixes — empty-group materialization (D11-ws), ghost
+      membership pruning (D13-ws), factor titles (D2-ws) (9006c98f)
+- [x] PHASE 11: Layout/legend/tree one order source (62157cc9; P0-1 closed:
+      mirrorTreeOrderTopFirst; flat top-first reversal + parity tests)
+- [x] PHASE 12-M0: Topology spec materialized (docs/specs/) + CRS gate
+      (#1285) + two-phase all-or-nothing Python save (#1283 partial)
+- [x] PHASE 9: Save-intent channel + O(changed) signatures (changed_hints)
+      + raster ledger + lifecycle docs 09 (42146767, 1b228914)
+- [x] PHASE 10: Nested groups (plan + controller + single-mount regression)
+      + restore semantics (order keys persisted; expand-state migration noted
+      in 13-known-limitations as deferred)
+- [x] PHASE 13: Scale structural suite (test_runtime_scale_v11, 8 tests) +
+      docs 12-scale.md
+- [x] PHASE 14: 8 review rounds (4 parallel agents R1–R4 + R5 CRS / R6
+      fallback / R7 scale / R8 final) — P0×7 + P1/P2 batch fixed (40b8c2e6)
+- [x] PHASE 15: Docs 00–14 complete (15 files) + milestone commits + PR
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| well-log-engine clone --reference failed (shallow ref) | 1 | plain local clone, checkout pinned f845e7ab — OK |
+| vendor build thought lost (V7 worktree deleted) | 1 | neutral copy survives at paleo-qgis-build\qgis-vendor |
+| uv install geoviz_common missing | 1 | geo-viz-engine submodule not inited; local clone + pin 08851951f |
+| PySide6 6.8.3 vs conda Qt 6.11.2 mismatch | 1 | corrected to 6.11.2 |
+| sed replace over-reached into own syncCanvasesAll impl | 1 | infinite recursion → probe4 hang; fixed + rebuilt |
+| tree_transaction tests hung (teardown) | 1 | json.loads(dict) bug in MY test; C++ shutdown window reset added |
+| worktree well-log-engine dirty on arrival | 1 | restored to pinned f845e7ab (not mine) |
+| flush all-or-nothing: gate failure still committed others | 1 | phase-1 gate aborts whole save; fixed |
+| CRS gate: layer-cleared decl still blocked by project CRS | 1 | layer-only declaration check per #1285 guided-fix semantics |
 
 ## Environment facts
-- Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench\.worktrees\qgis-geolayer-cartography-v7
-- Parallel worktree exists: .worktrees/workstation-ux-v7 (feat/workstation-ux-v7) — avoid C++ file collisions (esp. qgis_render_bridge/edit_tools)
-- Submodules: geo-viz-engine 40ebd168, well-log-engine f845e7ab (NOT third_party/gdal|proj — vendored builds only)
-- venv: .venv (cp312.13) with geoviz editables OK
-- Pre-existing main failures (from V6 session, NOT to fix silently): test_integrity_guard tautologies, test_native_backend map_edit version (env), test_native_factor_map (needs native build), test_mapping_document_io malformed-coords, hard crash test_lod_render_path (Windows)
+- VS2022 cmake + MSVC 14.38; Qt6 = paleo-qgis-deps\Library (6.11.2)
+- Vendor build: C:\Users\wangj.KEVIN\paleo-qgis-build\qgis-vendor
+- Venv .venv cp312 (PySide6 6.11.2); bridge 0.7.0a0 built in worktree
+- Pre-existing env failures: test_mapping_stage_ui multi-test AV (main too);
+  test_authoring_ux registry-flags (owned by #1267/#1255)

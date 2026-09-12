@@ -49,7 +49,12 @@ def _extent_fits_crs(crs: str, extent) -> bool:
 def _qgis_crs_for_layer(layer, snapshot, *, on_drop=None) -> str:
     auth = _normalize_auth_id(
         getattr(layer, "crs", "") or getattr(snapshot, "project_crs", "") or "")
-    if auth and not _extent_fits_crs(auth, getattr(layer, "extent", None)):
+    extent = getattr(layer, "extent", None)
+    if auth and _geographic_auth(auth) and (not extent or len(extent) < 4):
+        # R5（CRS review）：extent 缺失时回退到要素包围盒——空 extent 不得
+        # 直接放行地理 CRS（本地坐标层 + 地理工程 CRS 的污染形态）。
+        extent = _feature_extent_of_records(getattr(layer, "features", None) or ())
+    if auth and not _extent_fits_crs(auth, extent):
         # V9 W3: a dropped CRS is a degraded mirror state, not a silent one.
         if on_drop is not None:
             on_drop(
@@ -58,6 +63,27 @@ def _qgis_crs_for_layer(layer, snapshot, *, on_drop=None) -> str:
             )
         return ""
     return auth
+
+
+def _feature_extent_of_records(features) -> tuple | None:
+    """发布记录流的包围盒（extent 缺失时的 CRS 域校验回退）。"""
+    try:
+        from paleo_workbench.mapping_workspace.crs_gate import feature_bounds
+
+        def _coords():
+            stack = [f.get("geometry", {}).get("coordinates")
+                     if isinstance(f, dict) else None for f in features]
+            while stack:
+                item = stack.pop()
+                if isinstance(item, (list, tuple)):
+                    if item and all(isinstance(v, (int, float)) for v in item):
+                        yield item
+                    else:
+                        stack.extend(item)
+
+        return feature_bounds(_coords())
+    except Exception:
+        return None
 
 
 def _qgis_crs_for_snapshot(snapshot, *, on_drop=None) -> str:
@@ -216,6 +242,27 @@ def _ledger_key(stack, layer_id: str) -> tuple[int, str]:
     return (stack_id, str(layer_id))
 
 
+#: V11（O(changed) delta 路径）：逐要素签名缓存——(stack, layer,
+#: data_revision) → (fid → signature)。同修订重发布命中时零重算；
+#: 修订变化时缓存旧值作旧签基线（触及要素重签确认），发布成功后刷新。
+_SIGNATURE_CACHE: dict[tuple[int, str, int], dict[str, tuple]] = {}
+
+
+class _RasterLedgerEntry:
+    """栅格镜像台账条目（V11）：tokens 全等 → 零桥调用。"""
+
+    __slots__ = ("tokens", "qgis_id")
+
+    def __init__(self, tokens: tuple, qgis_id: str):
+        self.tokens = tokens
+        self.qgis_id = qgis_id
+
+
+#: V11 raster ledger：(stack, layer) → 条目。数据修订/样式/显隐/透明度/
+#: 名称/源路径任一变化即下推（C++ 侧 style-only 快道接住纯样式变化）。
+_RASTER_LEDGER: dict[tuple[int, str], _RasterLedgerEntry] = {}
+
+
 def reset_publish_ledger() -> None:
     """Clear the publish ledger (stack re-created / project switched)."""
     _MIRROR_LEDGER.clear()
@@ -353,6 +400,9 @@ def _layer_ledger_tokens(layer) -> dict:
     }
     # V10：栈 id 登记一并清（防长期进程里 False 标记累积）。
     _STACK_ID_REFS.clear()
+    # V11：签名缓存 + raster 台账一并清（project 切换后旧签全部失效）。
+    _SIGNATURE_CACHE.clear()
+    _RASTER_LEDGER.clear()
 
 
 def _doc_declares(method, *names: str) -> bool:
@@ -553,11 +603,18 @@ def _verify_published_style(stack, doc_id: str, renderer_xml: str, _sink) -> Non
 
 
 def mirror_snapshot_to_stack(
-    stack, canvas_address, snapshot, diags=None, *, groups: bool = False
+    stack, canvas_address, snapshot, diags=None, *, groups: bool = False,
+    changed_hints: dict[str, set[str]] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     """Mirror vector layers into the QGIS project (incremental reconcile).
 
     Returns ``(mirrored_qgis_ids, seen_doc_ids, failures)``.
+
+    ``changed_hints``（V11）：``layer_id → (snapshot 修订, 数据修订,
+    touched fids)``——宿主从编辑会话 journal 提取。双修订一致才信任
+    （任一不一致 → 该层全量比较）；命中时差分只重签提示集内要素
+    （O(touched)），其余复用台账旧签。None = 无提示，回落全量比较。
+    R3-P0：部分信任不存在——提示要么整体有效，要么整体作废。
 
     #1164: failures are collected and surfaced to the host instead of being
     swallowed — a dropped layer or a failed remove/order/refresh previously
@@ -614,335 +671,428 @@ def mirror_snapshot_to_stack(
             failures.append(f"layer {dup}: duplicate layer id in snapshot")
             _sink(dup, "duplicate layer id in snapshot; publishing first occurrence only")
     seen: list[str] = []
-    mirrored_qgis_ids: list[str] = []
-    data_cache = _scalar_data_cache()
-    # M0 §3 停发窗口：编辑会话集合（绑定本发布栈时）整体短路数据重发。
-    # 未开启会话 / 会话绑定其他栈 → 空集合，发布行为与 M0 之前逐字节一致。
-    from paleo_workbench.mapping.edit_session_set import SESSION_SET
+    # V11 树事务窗口（桥 begin/end_tree_update）：N 次镜像 upsert + 清理 +
+    # 平铺序共享一个原生窗口——零中间画布同步；旧桥透明降级。
+    from paleo_workbench.mapping_workspace.tree_transaction import tree_transaction
+    with tree_transaction(stack):
+        mirrored_qgis_ids: list[str] = []
+        data_cache = _scalar_data_cache()
+        # M0 §3 停发窗口：编辑会话集合（绑定本发布栈时）整体短路数据重发。
+        # 未开启会话 / 会话绑定其他栈 → 空集合，发布行为与 M0 之前逐字节一致。
+        from paleo_workbench.mapping.edit_session_set import SESSION_SET
 
-    edit_window = set(SESSION_SET.active_layer_ids(stack))
-    for layer in snapshot.layers:
-        if layer.id in duplicate_ids and layer.id in seen:
-            # 重复 id：首个已发布，后续出现跳过（不再静默塌缩）。
-            continue
-        if layer.layer_type in ("scalar_grid", "raster_source"):
-            try:
-                from paleo_workbench.mapping.scalar_publish import (
-                    build_scalar_qgis_payload,
-                    raster_source_qgis_payload,
-                )
+        edit_window = set(SESSION_SET.active_layer_ids(stack))
+        for layer in snapshot.layers:
+            if layer.id in duplicate_ids and layer.id in seen:
+                # 重复 id：首个已发布，后续出现跳过（不再静默塌缩）。
+                continue
+            if layer.layer_type in ("scalar_grid", "raster_source"):
+                try:
+                    from paleo_workbench.mapping.scalar_publish import (
+                        build_scalar_qgis_payload,
+                        raster_source_qgis_payload,
+                    )
 
-                if layer.layer_type == "scalar_grid":
-                    payload = None
-                    if data_cache is not None:
-                        payload = build_scalar_qgis_payload(layer, data_cache)
-                    if payload is None:
-                        failures.append(
-                            f"layer {layer.id}: scalar raster mirror "
-                            "unavailable (bridge/gdal); layer not mirrored")
-                        _sink(layer.id, "scalar data pipeline unavailable")
+                    if layer.layer_type == "scalar_grid":
+                        payload = None
+                        if data_cache is not None:
+                            payload = build_scalar_qgis_payload(layer, data_cache)
+                        if payload is None:
+                            failures.append(
+                                f"layer {layer.id}: scalar raster mirror "
+                                "unavailable (bridge/gdal); layer not mirrored")
+                            _sink(layer.id, "scalar data pipeline unavailable")
+                            continue
+                    else:
+                        payload = raster_source_qgis_payload(layer)
+                        if payload is None:
+                            # R3-7: an empty reference payload is a real problem
+                            # (the layer vanishes from the mirror), not a skip.
+                            failures.append(
+                                f"layer {layer.id}: empty raster source payload")
+                            _sink(layer.id, "empty raster source payload")
+                            continue
+                    # V11 raster ledger：数据修订 + 样式签 + 显隐 + 透明度 +
+                    # 名称 + 源路径 + CRS 全未动 → 零桥调用（此前每次发布都
+                    # 重调 upsert，C++ 侧虽有 style-only 快道，Python↔C++ 调用
+                    # 本身仍是 N 次/发布；style-only 变化仍下推，由桥走
+                    # renderer 通道）。R3-P1：CRS 入 token（发布用 CRS 变
+                    # 更必须下推，否则镜像 CRS 永久过期）。
+                    raster_entry = _RASTER_LEDGER.get(
+                        _ledger_key(stack, layer.id))
+                    try:
+                        raster_revision = int(
+                            getattr(layer, "data_revision", 0) or 0)
+                    except (TypeError, ValueError):
+                        raster_revision = 0
+                    raster_style = _style_signature(
+                        payload.get("renderer_xml") or "", "", None)
+                    raster_live = (
+                        raster_revision,
+                        raster_style,
+                        bool(layer.visible),
+                        float(layer.opacity),
+                        str(layer.name or layer.id),
+                        str(payload.get("source_path") or ""),
+                        str(layer.crs or snapshot.project_crs or ""),
+                    )
+                    if (raster_entry is not None
+                            and raster_entry.tokens == raster_live):
+                        _sink(layer.id, "publish:no-op")
+                        seen.append(layer.id)
+                        mirrored_qgis_ids.append(raster_entry.qgis_id)
                         continue
+                    qgis_id = stack.upsert_raster_mirror_layer(
+                        layer.id, layer.name or layer.id,
+                        payload["source_path"],
+                        layer.crs or snapshot.project_crs,
+                        payload["renderer_xml"],
+                        bool(layer.visible), float(layer.opacity),
+                    )
+                    _RASTER_LEDGER[_ledger_key(stack, layer.id)] = \
+                        _RasterLedgerEntry(raster_live, qgis_id)
+                except Exception as exc:
+                    failures.append(f"layer {layer.id}: {exc}")
+                    _sink(layer.id, str(exc))
+                    continue
+                seen.append(layer.id)
+                mirrored_qgis_ids.append(qgis_id)
+                continue
+            if layer.layer_type != "vector":
+                continue
+            features = []
+            for f in layer.features:
+                props = dict(f.get("properties") or {})
+                # M3：文档 feature_id 随镜像下推（C++ 拾取工具据此回写权威
+                # 会话；memory provider 不落属性字段，桥侧自建 fid 映射表）。
+                fid = f.get("id")
+                if fid is not None:
+                    props.setdefault("__pwb_fid", str(fid))
+                features.append({"type": "Feature",
+                                 "geometry": f.get("geometry"),
+                                 "properties": props})
+            # 零要素图层同样上树（QGIS memory layer 零要素合法）——否则新建
+            # 图层在首次数字化前从图层树消失（M2 终局审查 I1）。几何类型改由
+            # metadata.geometry_kind 兜底（点/线/面），无则 Point。
+            metadata = getattr(layer, "metadata", None) or {}
+            if features:
+                geom_raw = features[0].get("geometry") if isinstance(features[0], dict) else None
+                geom_type = str(geom_raw.get("type", "")) if isinstance(geom_raw, dict) else ""
+                geom = _GEOMETRY_TYPE.get(geom_type, "Point")
+            else:
+                _KIND_GEOM = {"point": "Point", "line": "LineString", "polygon": "Polygon"}
+                geom = _KIND_GEOM.get(str(metadata.get("geometry_kind") or ""), "Point")
+            style_raw = getattr(layer, "style", None) or {}
+            if not isinstance(style_raw, dict):
+                try:
+                    style_raw = dict(style_raw)
+                except Exception:
+                    style_raw = {}
+            # v7 R2-F4: spec-authored field schema (fields_json) reaches the
+            # mirror when the layer declares its role; absent roles keep the
+            # legacy property-only path (honest, no fake enforcement). Unknown
+            # roles surface a diagnostic (V9 W6) instead of vanishing.
+            fields_json = _fields_json_for_metadata(
+                metadata,
+                on_skip=lambda _ignored, message, _lid=layer.id: _sink(_lid, message),
+            )
+            qgis_style = style_raw.get("qgis_style") if isinstance(style_raw, dict) else None
+            has_qgis_renderer = False
+            has_qgis_labeling = False
+            renderer_xml = ""
+            labeling_xml = ""
+            legacy_style = None
+            if isinstance(qgis_style, dict):
+                renderer_xml = str(qgis_style.get("renderer_xml") or "")
+                labeling_xml = str(qgis_style.get("labeling_xml") or "")
+                has_qgis_renderer = bool(renderer_xml.strip())
+                has_qgis_labeling = bool(labeling_xml.strip())
+                if has_qgis_renderer or has_qgis_labeling:
+                    legacy_style = None
                 else:
-                    payload = raster_source_qgis_payload(layer)
-                    if payload is None:
-                        # R3-7: an empty reference payload is a real problem
-                        # (the layer vanishes from the mirror), not a skip.
-                        failures.append(
-                            f"layer {layer.id}: empty raster source payload")
-                        _sink(layer.id, "empty raster source payload")
+                    legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"}
+                    if not legacy_style:
+                        legacy_style = None
+            else:
+                legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} if isinstance(style_raw, dict) else None
+                if legacy_style is not None and not legacy_style:
+                    legacy_style = None
+            if (not has_qgis_renderer and isinstance(legacy_style, dict)
+                    and legacy_style.get("fill_patterns")
+                    and str(legacy_style.get("renderer") or "") == "categorized"
+                    and geom in ("Polygon", "MultiPolygon")):
+                try:
+                    from paleo_workbench.mapping.facies_renderer_xml import (
+                        categorized_fill_renderer_xml,
+                    )
+                    from paleo_workbench.mapping.map_styles import VectorStyle
+
+                    parsed = VectorStyle.from_dict(legacy_style)
+                    if parsed.field and parsed.categories:
+                        generated = categorized_fill_renderer_xml(
+                            field=parsed.field,
+                            categories=parsed.categories,
+                            fill_patterns=dict(legacy_style.get("fill_patterns") or {}),
+                        )
+                        if generated.strip():
+                            renderer_xml = generated
+                            legacy_style = None
+                except Exception as exc:
+                    _sink(layer.id, f"facies pattern renderer skipped: {exc}")
+            # v7 §9: consult the publish ledger — ship only what changed.
+            # Duck-typed layers (SimpleNamespace, legacy producers) may not
+            # carry revisions: 0 = unknown, ledger disabled, delta channel off.
+            style_sig = _style_signature(renderer_xml, labeling_xml, legacy_style)
+            entry = _MIRROR_LEDGER.get(_ledger_key(stack, layer.id))
+            try:
+                layer_revision = int(getattr(layer, "data_revision", 0) or 0)
+            except (TypeError, ValueError):
+                layer_revision = 0
+            ledger_active = layer_revision != 0
+            if not ledger_active:
+                entry = None
+            if layer.id in edit_window:
+                # M0 §3 停发窗口：集合内层数据重发短路（镜像即编辑发生地——
+                # M1 起编辑直接发生在镜像层上，宿主重发会覆盖编辑缓冲）。
+                # 台账冻结（不记新基线，窗口关闭/对齐前的变更全部待发）。
+                if renderer_xml:
+                    # 样式读回验证照跑（诊断；集合内检出漂移只记录，修复顺延
+                    # 到窗口关闭——此时重发/重建会毁掉编辑缓冲）。
+                    _verify_published_style(stack, layer.id, renderer_xml, _sink)
+                if entry is None:
+                    _sink(layer.id, "edit window: layer not yet mirrored; publish deferred")
+                _sink(layer.id, "publish:edit-window (data frozen)")
+                seen.append(layer.id)
+                continue
+            # V11：同修订缓存命中检查（ledger_active 确定后）。
+            cache_key = (id(stack), str(layer.id), int(layer_revision)) \
+                if ledger_active else None
+            cached_signatures = _SIGNATURE_CACHE.get(cache_key) \
+                if cache_key is not None else None
+            if cached_signatures is not None and len(cached_signatures) != len(features):
+                cached_signatures = None  # 要素增删 → 缓存作废，全签重建
+            unchanged = (
+                entry is not None
+                and entry.data_revision == layer_revision
+                and entry.style_sig == style_sig
+                and entry.visible == bool(layer.visible)
+                and entry.opacity == float(layer.opacity)
+                and entry.geom_kind == geom
+                and entry.name == str(layer.name or layer.id)
+                and _scale_range_token(layer) == entry.scale_range)
+            if unchanged:
+                # no-op publish for this layer: tokens unchanged, nothing ships
+                _sink(layer.id, "publish:no-op")
+                seen.append(layer.id)
+                continue
+
+            delta_json = ""
+            # V11：本次发布确认的新签（fid → signature）——发布成功后直接
+            # 进缓存。changed_hints 命中（双修订一致）时，未提示要素免签
+            # （旧签即新签）；任一不一致/无提示 → 全量比较。
+            fresh_signatures: dict[str, tuple] = {}
+            layer_hints: set[str] | None = None
+            if changed_hints:
+                hint = changed_hints.get(str(layer.id))
+                if (isinstance(hint, (tuple, list)) and len(hint) == 3
+                        and hint[1] == int(layer_revision)):
+                    layer_hints = set(hint[2])
+                # 数据修订不一致/格式非法 → hints 作废（全量比较，不抛）。
+                # 快照修订（hint[0]）宿主侧自洽，发布侧以数据修订为准。
+            if (entry is not None and entry.data_revision != layer_revision
+                    and _stack_supports_delta(stack) and features):
+                changed: list | None = []
+                seen_ids = set()
+                for feature in features:
+                    fid = str((feature.get("properties") or {}).get("__pwb_fid")
+                              or (feature.get("properties") or {}).get("id") or "")
+                    if not fid:
+                        changed = None  # un-id'd payloads cannot delta safely
+                        break
+                    seen_ids.add(fid)
+                    previous = entry.features_by_id.get(fid)
+                    if (layer_hints is not None and fid not in layer_hints
+                            and previous is not None):
+                        # 宿主保证未触及 → 旧签即新签（零 json.dumps）。
+                        fresh_signatures[fid] = previous
                         continue
-                qgis_id = stack.upsert_raster_mirror_layer(
-                    layer.id, layer.name or layer.id,
-                    payload["source_path"],
-                    layer.crs or snapshot.project_crs,
-                    payload["renderer_xml"],
+                    signature = _feature_signature(feature)
+                    if fid:
+                        fresh_signatures[fid] = signature
+                    if previous is None or previous != signature:
+                        changed.append(feature)
+                if changed is not None:
+                    removed = [fid for fid in entry.features_by_id
+                               if fid not in seen_ids]
+                    if (changed or removed) and len(changed) < len(features):
+                        delta_json = json.dumps({
+                            "base_revision": entry.data_revision,
+                            "changed": changed,
+                            "removed_ids": removed,
+                        })
+            delta_supported = _stack_supports_delta(stack)
+            shipped_empty_delta = bool(delta_json and delta_supported)
+            if shipped_empty_delta:
+                # C++ ignores the FeatureCollection when delta_applied (#1272).
+                # Empty payload is only safe on that path; failed-delta and
+                # TypeError retries must ship the real collection or C++
+                # truncates the mirror to empty.
+                full_collection = _EMPTY_FEATURE_COLLECTION
+            else:
+                full_collection = _feature_collection_json(features)
+            upsert_kwargs = {
+                "is_reference": metadata.get("reference") == "true",
+                "is_editable": metadata.get("editable") == "true",
+                "reference_snap": metadata.get("snap") == "true",
+            }
+            if delta_supported:
+                upsert_kwargs["data_revision"] = layer_revision
+                if delta_json:
+                    upsert_kwargs["delta"] = delta_json
+            elif delta_json:
+                # delta computed but the bridge cannot consume it: full ship
+                # (documented in diags, never silent).
+                _sink(layer.id, "delta unsupported by bridge; full ship")
+                delta_json = ""
+            if fields_json and _stack_supports_fields_json(stack):
+                upsert_kwargs["fields_json"] = fields_json
+            # V10 M-O：比例尺可见域通道（桥有面才推；语义 = QGIS 分母，
+            # 0 一侧不限）。
+            scale_token = _scale_range_token(layer)
+            if scale_token is not None and _stack_supports_scale_range(stack):
+                upsert_kwargs["min_scale"] = scale_token[0]
+                upsert_kwargs["max_scale"] = scale_token[1]
+            crs_auth = _qgis_crs_for_layer(layer, snapshot, on_drop=_sink)
+            try:
+                qgis_id = stack.upsert_mirror_layer(
+                    layer.id, layer.name or layer.id, geom, crs_auth,
+                    full_collection,
+                    renderer_xml, labeling_xml, legacy_style,
                     bool(layer.visible), float(layer.opacity),
+                    **upsert_kwargs,
+                )
+            except TypeError:
+                # signature drift despite the probes — retry once with the
+                # minimal legacy kwargs (R3-1: never a blind second full upsert).
+                for drop in ("delta", "fields_json", "data_revision",
+                             "min_scale", "max_scale"):
+                    upsert_kwargs.pop(drop, None)
+                delta_json = ""
+                if fields_json:
+                    # V9 W6: the retry silently published without the spec
+                    # schema before — now the drift is on the record.
+                    _sink(layer.id, "fields_json dropped on signature drift — published un-schematized")
+                full_collection = _feature_collection_json(features)
+                qgis_id = stack.upsert_mirror_layer(
+                    layer.id, layer.name or layer.id, geom, crs_auth,
+                    full_collection,
+                    renderer_xml, labeling_xml, legacy_style,
+                    bool(layer.visible), float(layer.opacity),
+                    **upsert_kwargs,
                 )
             except Exception as exc:
-                failures.append(f"layer {layer.id}: {exc}")
-                _sink(layer.id, str(exc))
-                continue
+                retried = False
+                if shipped_empty_delta:
+                    try:
+                        retry_kwargs = dict(upsert_kwargs)
+                        retry_kwargs.pop("delta", None)
+                        qgis_id = stack.upsert_mirror_layer(
+                            layer.id, layer.name or layer.id, geom, crs_auth,
+                            _feature_collection_json(features),
+                            renderer_xml, labeling_xml, legacy_style,
+                            bool(layer.visible), float(layer.opacity),
+                            **retry_kwargs,
+                        )
+                        _sink(layer.id, f"delta not applied; full ship ({exc})")
+                        retried = True
+                    except Exception:
+                        retried = False
+                if not retried:
+                    if has_qgis_renderer or has_qgis_labeling:
+                        msg = str(exc).lower()
+                        if "renderer" in msg or "labeling" in msg or "invalid" in msg:
+                            raise
+                    failures.append(f"layer {layer.id}: {exc}")
+                    _sink(layer.id, str(exc))
+                    continue
+            if ledger_active:
+                # V11：发布后刷新缓存——优先级：差分确认新签（fresh，已算
+                # 过）> 同修订旧缓存 > 重签。旧修订条目逐出防无界增长。
+                post_signatures: dict[str, tuple] = {}
+                cached_now = (_SIGNATURE_CACHE.get(cache_key)
+                              if cache_key is not None else None)
+                for f in features:
+                    fid = str((f.get("properties") or {}).get("__pwb_fid")
+                              or (f.get("properties") or {}).get("id") or "")
+                    if fid in fresh_signatures:
+                        post_signatures[fid] = fresh_signatures[fid]
+                    elif cached_now is not None and fid in cached_now:
+                        post_signatures[fid] = cached_now[fid]
+                    else:
+                        post_signatures[fid] = _feature_signature(f)
+                _SIGNATURE_CACHE[cache_key] = dict(post_signatures) \
+                    if cache_key is not None else post_signatures
+                if cache_key is not None:
+                    for old_key in [key_ for key_ in _SIGNATURE_CACHE
+                                    if key_[0] == cache_key[0]
+                                    and key_[1] == cache_key[1]
+                                    and key_[2] != cache_key[2]]:
+                        del _SIGNATURE_CACHE[old_key]
+                _MIRROR_LEDGER[_ledger_key(stack, layer.id)] = _LedgerEntry(
+                    layer_revision, style_sig, bool(layer.visible),
+                    float(layer.opacity), geom, dict(post_signatures),
+                    name=str(layer.name or layer.id),
+                    scale_range=scale_token)
             seen.append(layer.id)
             mirrored_qgis_ids.append(qgis_id)
-            continue
-        if layer.layer_type != "vector":
-            continue
-        features = []
-        for f in layer.features:
-            props = dict(f.get("properties") or {})
-            # M3：文档 feature_id 随镜像下推（C++ 拾取工具据此回写权威
-            # 会话；memory provider 不落属性字段，桥侧自建 fid 映射表）。
-            fid = f.get("id")
-            if fid is not None:
-                props.setdefault("__pwb_fid", str(fid))
-            features.append({"type": "Feature",
-                             "geometry": f.get("geometry"),
-                             "properties": props})
-        # 零要素图层同样上树（QGIS memory layer 零要素合法）——否则新建
-        # 图层在首次数字化前从图层树消失（M2 终局审查 I1）。几何类型改由
-        # metadata.geometry_kind 兜底（点/线/面），无则 Point。
-        metadata = getattr(layer, "metadata", None) or {}
-        if features:
-            geom_raw = features[0].get("geometry") if isinstance(features[0], dict) else None
-            geom_type = str(geom_raw.get("type", "")) if isinstance(geom_raw, dict) else ""
-            geom = _GEOMETRY_TYPE.get(geom_type, "Point")
-        else:
-            _KIND_GEOM = {"point": "Point", "line": "LineString", "polygon": "Polygon"}
-            geom = _KIND_GEOM.get(str(metadata.get("geometry_kind") or ""), "Point")
-        style_raw = getattr(layer, "style", None) or {}
-        if not isinstance(style_raw, dict):
-            try:
-                style_raw = dict(style_raw)
-            except Exception:
-                style_raw = {}
-        # v7 R2-F4: spec-authored field schema (fields_json) reaches the
-        # mirror when the layer declares its role; absent roles keep the
-        # legacy property-only path (honest, no fake enforcement). Unknown
-        # roles surface a diagnostic (V9 W6) instead of vanishing.
-        fields_json = _fields_json_for_metadata(
-            metadata,
-            on_skip=lambda _ignored, message, _lid=layer.id: _sink(_lid, message),
-        )
-        qgis_style = style_raw.get("qgis_style") if isinstance(style_raw, dict) else None
-        has_qgis_renderer = False
-        has_qgis_labeling = False
-        renderer_xml = ""
-        labeling_xml = ""
-        legacy_style = None
-        if isinstance(qgis_style, dict):
-            renderer_xml = str(qgis_style.get("renderer_xml") or "")
-            labeling_xml = str(qgis_style.get("labeling_xml") or "")
-            has_qgis_renderer = bool(renderer_xml.strip())
-            has_qgis_labeling = bool(labeling_xml.strip())
-            if has_qgis_renderer or has_qgis_labeling:
-                legacy_style = None
-            else:
-                legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"}
-                if not legacy_style:
-                    legacy_style = None
-        else:
-            legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} if isinstance(style_raw, dict) else None
-            if legacy_style is not None and not legacy_style:
-                legacy_style = None
-        if (not has_qgis_renderer and isinstance(legacy_style, dict)
-                and legacy_style.get("fill_patterns")
-                and str(legacy_style.get("renderer") or "") == "categorized"
-                and geom in ("Polygon", "MultiPolygon")):
-            try:
-                from paleo_workbench.mapping.facies_renderer_xml import (
-                    categorized_fill_renderer_xml,
-                )
-                from paleo_workbench.mapping.map_styles import VectorStyle
-
-                parsed = VectorStyle.from_dict(legacy_style)
-                if parsed.field and parsed.categories:
-                    generated = categorized_fill_renderer_xml(
-                        field=parsed.field,
-                        categories=parsed.categories,
-                        fill_patterns=dict(legacy_style.get("fill_patterns") or {}),
-                    )
-                    if generated.strip():
-                        renderer_xml = generated
-                        legacy_style = None
-            except Exception as exc:
-                _sink(layer.id, f"facies pattern renderer skipped: {exc}")
-        # v7 §9: consult the publish ledger — ship only what changed.
-        # Duck-typed layers (SimpleNamespace, legacy producers) may not
-        # carry revisions: 0 = unknown, ledger disabled, delta channel off.
-        style_sig = _style_signature(renderer_xml, labeling_xml, legacy_style)
-        entry = _MIRROR_LEDGER.get(_ledger_key(stack, layer.id))
-        try:
-            layer_revision = int(getattr(layer, "data_revision", 0) or 0)
-        except (TypeError, ValueError):
-            layer_revision = 0
-        ledger_active = layer_revision != 0
-        if not ledger_active:
-            entry = None
-        if layer.id in edit_window:
-            # M0 §3 停发窗口：集合内层数据重发短路（镜像即编辑发生地——
-            # M1 起编辑直接发生在镜像层上，宿主重发会覆盖编辑缓冲）。
-            # 台账冻结（不记新基线，窗口关闭/对齐前的变更全部待发）。
+            # V9 W6：本次发布了 fields_json 的层做发布后验证（漂移可诊断，
+            # 不再静默）。桥无自省面（旧版本）时 probe 缺席 = 跳过（诚实）。
+            if fields_json and upsert_kwargs.get("fields_json"):
+                _verify_published_schema(stack, layer.id, fields_json, _sink)
+            # V10 M-K：renderer/labeling 同样读回验证（语义签名比对——渲染器
+            # 类型 + 符号数 + categorized 字段；逐字节比对会被 QGIS 的 XML
+            # 规范化噪声淹没）。
             if renderer_xml:
-                # 样式读回验证照跑（诊断；集合内检出漂移只记录，修复顺延
-                # 到窗口关闭——此时重发/重建会毁掉编辑缓冲）。
                 _verify_published_style(stack, layer.id, renderer_xml, _sink)
-            if entry is None:
-                _sink(layer.id, "edit window: layer not yet mirrored; publish deferred")
-            _sink(layer.id, "publish:edit-window (data frozen)")
-            seen.append(layer.id)
-            continue
-        unchanged = (
-            entry is not None
-            and entry.data_revision == layer_revision
-            and entry.style_sig == style_sig
-            and entry.visible == bool(layer.visible)
-            and entry.opacity == float(layer.opacity)
-            and entry.geom_kind == geom
-            and entry.name == str(layer.name or layer.id)
-            and _scale_range_token(layer) == entry.scale_range)
-        if unchanged:
-            # no-op publish for this layer: tokens unchanged, nothing ships
-            _sink(layer.id, "publish:no-op")
-            seen.append(layer.id)
-            continue
-
-        delta_json = ""
-        if (entry is not None and entry.data_revision != layer_revision
-                and _stack_supports_delta(stack) and features):
-            changed: list | None = []
-            seen_ids = set()
-            for feature in features:
-                fid = str((feature.get("properties") or {}).get("__pwb_fid")
-                          or (feature.get("properties") or {}).get("id") or "")
-                if not fid:
-                    changed = None  # un-id'd payloads cannot delta safely
-                    break
-                seen_ids.add(fid)
-                previous = entry.features_by_id.get(fid)
-                signature = _feature_signature(feature)
-                if previous is None or previous != signature:
-                    changed.append(feature)
-            if changed is not None:
-                removed = [fid for fid in entry.features_by_id
-                           if fid not in seen_ids]
-                if (changed or removed) and len(changed) < len(features):
-                    delta_json = json.dumps({
-                        "base_revision": entry.data_revision,
-                        "changed": changed,
-                        "removed_ids": removed,
-                    })
-        delta_supported = _stack_supports_delta(stack)
-        shipped_empty_delta = bool(delta_json and delta_supported)
-        if shipped_empty_delta:
-            # C++ ignores the FeatureCollection when delta_applied (#1272).
-            # Empty payload is only safe on that path; failed-delta and
-            # TypeError retries must ship the real collection or C++
-            # truncates the mirror to empty.
-            full_collection = _EMPTY_FEATURE_COLLECTION
-        else:
-            full_collection = _feature_collection_json(features)
-        upsert_kwargs = {
-            "is_reference": metadata.get("reference") == "true",
-            "is_editable": metadata.get("editable") == "true",
-            "reference_snap": metadata.get("snap") == "true",
-        }
-        if delta_supported:
-            upsert_kwargs["data_revision"] = layer_revision
-            if delta_json:
-                upsert_kwargs["delta"] = delta_json
-        elif delta_json:
-            # delta computed but the bridge cannot consume it: full ship
-            # (documented in diags, never silent).
-            _sink(layer.id, "delta unsupported by bridge; full ship")
-            delta_json = ""
-        if fields_json and _stack_supports_fields_json(stack):
-            upsert_kwargs["fields_json"] = fields_json
-        # V10 M-O：比例尺可见域通道（桥有面才推；语义 = QGIS 分母，
-        # 0 一侧不限）。
-        scale_token = _scale_range_token(layer)
-        if scale_token is not None and _stack_supports_scale_range(stack):
-            upsert_kwargs["min_scale"] = scale_token[0]
-            upsert_kwargs["max_scale"] = scale_token[1]
-        crs_auth = _qgis_crs_for_layer(layer, snapshot, on_drop=_sink)
+        # v7 §9: ledger follows the mirror registry — entries for layers no
+        # longer published are dropped so a re-added layer ships fully.
+        # R3-P1：三表同剪（签名缓存 + raster 台账与主台账同命运——否则重加
+        # 同 token 栅格会复活已删除的 qgis_id）。
+        keep_keys = {_ledger_key(stack, doc_id) for doc_id in seen} | {
+            _ledger_key(stack, layer.id) for layer in snapshot.layers
+            if layer.layer_type == "raster_source"}
+        for stale_key in [key for key in _MIRROR_LEDGER
+                          if key[0] == id(stack) and key not in keep_keys]:
+            del _MIRROR_LEDGER[stale_key]
+        for stale_key in [key for key in _SIGNATURE_CACHE
+                          if key[0] == id(stack)
+                          and (key[0], key[1]) not in keep_keys]:
+            del _SIGNATURE_CACHE[stale_key]
+        for stale_key in [key for key in _RASTER_LEDGER
+                          if key[0] == id(stack) and key not in keep_keys]:
+            del _RASTER_LEDGER[stale_key]
+        if _SCALAR_DATA_CACHE is not None:
+            _SCALAR_DATA_CACHE.retain_layer_ids({
+                layer.id for layer in snapshot.layers
+                if layer.layer_type == "scalar_grid"})
+            _SCALAR_DATA_CACHE.release_stale()
         try:
-            qgis_id = stack.upsert_mirror_layer(
-                layer.id, layer.name or layer.id, geom, crs_auth,
-                full_collection,
-                renderer_xml, labeling_xml, legacy_style,
-                bool(layer.visible), float(layer.opacity),
-                **upsert_kwargs,
-            )
-        except TypeError:
-            # signature drift despite the probes — retry once with the
-            # minimal legacy kwargs (R3-1: never a blind second full upsert).
-            for drop in ("delta", "fields_json", "data_revision",
-                         "min_scale", "max_scale"):
-                upsert_kwargs.pop(drop, None)
-            delta_json = ""
-            if fields_json:
-                # V9 W6: the retry silently published without the spec
-                # schema before — now the drift is on the record.
-                _sink(layer.id, "fields_json dropped on signature drift — published un-schematized")
-            full_collection = _feature_collection_json(features)
-            qgis_id = stack.upsert_mirror_layer(
-                layer.id, layer.name or layer.id, geom, crs_auth,
-                full_collection,
-                renderer_xml, labeling_xml, legacy_style,
-                bool(layer.visible), float(layer.opacity),
-                **upsert_kwargs,
-            )
+            stack.remove_mirror_layers_except(seen)
         except Exception as exc:
-            retried = False
-            if shipped_empty_delta:
-                try:
-                    retry_kwargs = dict(upsert_kwargs)
-                    retry_kwargs.pop("delta", None)
-                    qgis_id = stack.upsert_mirror_layer(
-                        layer.id, layer.name or layer.id, geom, crs_auth,
-                        _feature_collection_json(features),
-                        renderer_xml, labeling_xml, legacy_style,
-                        bool(layer.visible), float(layer.opacity),
-                        **retry_kwargs,
-                    )
-                    _sink(layer.id, f"delta not applied; full ship ({exc})")
-                    retried = True
-                except Exception:
-                    retried = False
-            if not retried:
-                if has_qgis_renderer or has_qgis_labeling:
-                    msg = str(exc).lower()
-                    if "renderer" in msg or "labeling" in msg or "invalid" in msg:
-                        raise
-                failures.append(f"layer {layer.id}: {exc}")
-                _sink(layer.id, str(exc))
-                continue
-        if ledger_active:
-            _MIRROR_LEDGER[_ledger_key(stack, layer.id)] = _LedgerEntry(
-                layer_revision, style_sig, bool(layer.visible),
-                float(layer.opacity), geom,
-                {str((f.get("properties") or {}).get("__pwb_fid")
-                 or (f.get("properties") or {}).get("id") or ""):
-                 _feature_signature(f) for f in features},
-                name=str(layer.name or layer.id),
-                scale_range=scale_token)
-        seen.append(layer.id)
-        mirrored_qgis_ids.append(qgis_id)
-        # V9 W6：本次发布了 fields_json 的层做发布后验证（漂移可诊断，
-        # 不再静默）。桥无自省面（旧版本）时 probe 缺席 = 跳过（诚实）。
-        if fields_json and upsert_kwargs.get("fields_json"):
-            _verify_published_schema(stack, layer.id, fields_json, _sink)
-        # V10 M-K：renderer/labeling 同样读回验证（语义签名比对——渲染器
-        # 类型 + 符号数 + categorized 字段；逐字节比对会被 QGIS 的 XML
-        # 规范化噪声淹没）。
-        if renderer_xml:
-            _verify_published_style(stack, layer.id, renderer_xml, _sink)
-    # v7 §9: ledger follows the mirror registry — entries for layers no
-    # longer published are dropped so a re-added layer ships fully.
-    keep_keys = {_ledger_key(stack, doc_id) for doc_id in seen} | {
-        _ledger_key(stack, layer.id) for layer in snapshot.layers
-        if layer.layer_type == "raster_source"}
-    for stale_key in [key for key in _MIRROR_LEDGER
-                      if key[0] == id(stack) and key not in keep_keys]:
-        del _MIRROR_LEDGER[stale_key]
-    if _SCALAR_DATA_CACHE is not None:
-        _SCALAR_DATA_CACHE.retain_layer_ids({
-            layer.id for layer in snapshot.layers
-            if layer.layer_type == "scalar_grid"})
-        _SCALAR_DATA_CACHE.release_stale()
-    try:
-        stack.remove_mirror_layers_except(seen)
-    except Exception as exc:
-        failures.append(f"remove_stale: {exc}")
-        _sink("<tail>", str(exc))
-    if not groups:
-        try:
-            stack.set_mirror_layer_order(seen)
-        except Exception as exc:
-            failures.append(f"set_order: {exc}")
+            failures.append(f"remove_stale: {exc}")
             _sink("<tail>", str(exc))
-    try:
-        stack.refresh_canvas(canvas_address)
-    except Exception as exc:
-        failures.append(f"refresh: {exc}")
-        _sink("<tail>", str(exc))
+        if not groups:
+            try:
+                # V11 顺序约定统一（04-ordering §5）：组装序自下而上，
+                # 桥约定 top-first——显式反转，原生平铺画布与 fallback
+                # 画笔（后绘在上）对同一快照渲染出相同堆叠（平价测试钉死）。
+                stack.set_mirror_layer_order(list(reversed(seen)))
+            except Exception as exc:
+                failures.append(f"set_order: {exc}")
+                _sink("<tail>", str(exc))
+        try:
+            stack.refresh_canvas(canvas_address)
+        except Exception as exc:
+            failures.append(f"refresh: {exc}")
+            _sink("<tail>", str(exc))
     return mirrored_qgis_ids, seen, failures

@@ -531,6 +531,50 @@ def _ring_vertices(rings: Any) -> Iterable[tuple[tuple[float, float], tuple[int,
                 yield (float(node[0]), float(node[1])), (ring_index, point_index)
 
 
+def _iter_layer_coords(layer):
+    """图层要素几何的坐标流（CRS 域门禁的包围盒输入）。"""
+    for feature in layer.features():
+        geometry = getattr(feature, "geometry", None) or {}
+        coords = geometry.get("coordinates") if isinstance(geometry, dict) else None
+        if coords is None:
+            continue
+        stack = [coords]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, (list, tuple)):
+                if item and all(isinstance(v, (int, float)) for v in item):
+                    yield item
+                else:
+                    stack.extend(item)
+
+
+@dataclass(frozen=True)
+class EditTargetSnapshot:
+    """V11 五目标模型（07-active-edit-state）的只读快照。
+
+    selected_tree_node：QGIS 树选中节点（信息性；来自面板回写）。
+    active_map_layer：画布/面板的当前图层（原生 select/identify 目标）。
+    edit_target_layer：唯一编辑目标（捕获手势进行中 = 会话层；否则跟随
+        活动图层——阶段控制器的 active_layer_id 语义不变）。
+    tool_target_layer：活动工具实际写入层（会话工具持有会话时 = 该会话
+        的图层；无会话工具 = 活动图层）。
+    selection_layer：属性表/选择集上下文（当前 = 活动图层；表格可钉定
+        其它层，属于既有能力，不在此重复建模）。
+    不变式（test_edit_targets_v11 钉死）：无手势时四层目标一致；
+    手势进行中 tool/edit target 锁定会话层且 UI 必须呈现分歧。
+    """
+
+    selected_tree_node: str | None = None
+    active_map_layer: str | None = None
+    edit_target_layer: str | None = None
+    tool_target_layer: str | None = None
+    selection_layer: str | None = None
+
+    @property
+    def divergent(self) -> bool:
+        return self.tool_target_layer != self.active_map_layer
+
+
 class CompositeEditController(QObject):
     """综合编修文档的用户矢量图层与数字化会话。"""
 
@@ -564,6 +608,8 @@ class CompositeEditController(QObject):
         self._layer_roles: dict[str, str] = {}
         # 图层管理面板的显示态（可见性 / 不透明度），供持久化还原。
         self._display: dict[str, tuple[bool, float]] = {}
+        self._tree_selection: str | None = None
+        self._last_switch_block_reason: tuple[str, str] | None = None
         self._active_layer_id: str | None = None
         self._active_tool_action = "pan"
         self._canvas = None
@@ -591,6 +637,8 @@ class CompositeEditController(QObject):
         # records dict)。session 身份入键：同一 data_revision 下的新会话 /
         # 回滚不会误用旧会话的增量基线。
         self._records_cache: dict[str, tuple[int, Any, tuple, tuple, dict]] = {}
+        # V11 发布提示：layer_id → (snapshot 修订, 数据修订, touched)。
+        self._changed_hints: dict[str, tuple[int, int, frozenset]] = {}
         self._persist_cache: dict[str, tuple[int, list]] = {}
         # RAW/锁定门禁（宿主注入；单点 = CompositeDocument._role_allows_editing）。
         # 所有会话起点（start_editing / ensure_layer_session / 修复）与
@@ -1099,6 +1147,9 @@ class CompositeEditController(QObject):
             layer_id = None
         if layer_id == self._active_layer_id:
             return
+        previous = self.active_layer
+        if previous is not None and previous.edit_session is not None:
+            self._retire_session_on_target_switch(previous)
         self._active_layer_id = layer_id
         self._rebind_active_tool()
         # M3：原生选择/identify 工具的目标图层 = 活动图层（QGIS currentLayer 语义）
@@ -1110,6 +1161,71 @@ class CompositeEditController(QObject):
                 pass
         self.state_changed.emit()
 
+    def _retire_session_on_target_switch(self, previous: "VectorLayer") -> None:
+        """#1268 收敛（V11 07-active-edit-state）：切换目标时的诚实分歧记录。
+
+        V10 review #1 钉死语义：armed 捕获工具持有的会话跨目标切换保持
+        （同步链瞬时切层不劫持数字化；测试
+        test_layer_switch_mid_capture_kind_mismatch_falls_back 钉死）。
+        V11 的收敛不改变该行为，而是**建模并呈现**它：
+        * tool/edit 目标 = 会话层（edit_targets() 快照锁定）；
+        * divergent=True（tool_target ≠ active_map_layer）——状态条/工具
+          条据此显示「数字化目标 A（树选中 B）」，绝不呈现为 B；
+        * last_switch_block_reason 记录信息性说明（非阻断）。
+        无工具持有旧会话 → 无操作（切割线等跨层工作流依赖会话跨切换存活，
+        统一提交仍走 flush_edit_sessions 的门禁路径）。
+        """
+        session = previous.edit_session
+        if session is None:
+            return
+        active_tool = getattr(self.tools, "active_tool", None)
+        if getattr(active_tool, "session", None) is not session:
+            self._last_switch_block_reason = None
+            return
+        self._last_switch_block_reason = (
+            previous.id,
+            f"数字化进行中：捕获目标保持为「{previous.name}」"
+            "（编辑目标与会话锁定直至手势完成）")
+
+    def snapshot_changed_hints(self) -> dict[str, tuple[int, int, set[str]]]:
+        """最近一次 settle 的逐层提示（snapshot 修订, 数据修订, touched）。
+
+        R3-P0：发布侧必须校验 (snapshot revision, data_revision) 与待发
+        布记录一致——任一不一致 → 提示作废（全量比较），绝不部分信任。
+        """
+        return {layer_id: (snap_rev, data_rev, set(fids))
+                for layer_id, (snap_rev, data_rev, fids)
+                in self._changed_hints.items()}
+
+    @property
+    def last_switch_block_reason(self) -> tuple[str, str] | None:
+        """最近一次目标切换的会话处置阻断（layer_id, 原因）；None = 无。"""
+        return getattr(self, "_last_switch_block_reason", None)
+
+    def note_tree_selection(self, node_id: str | None) -> None:
+        """记录树选中节点（信息性；五目标快照的 selected_tree_node）。"""
+        self._tree_selection = str(node_id) if node_id else None
+
+    def edit_targets(self) -> EditTargetSnapshot:
+        """五目标只读快照（07-active-edit-state 的唯一查询入口）。"""
+        active_tool = getattr(self.tools, "active_tool", None)
+        session = getattr(active_tool, "session", None)
+        tool_target: str | None = None
+        if session is not None:
+            for layer_id, layer in self._layers.items():
+                if layer.edit_session is session:
+                    tool_target = layer_id
+                    break
+        active = self._active_layer_id
+        target = tool_target or active
+        return EditTargetSnapshot(
+            selected_tree_node=getattr(self, "_tree_selection", None),
+            active_map_layer=active,
+            edit_target_layer=target,
+            tool_target_layer=target,
+            selection_layer=active,
+        )
+
     def start_editing(self) -> None:
         layer = self.active_layer
         if layer is None or layer.edit_session is not None:
@@ -1119,6 +1235,11 @@ class CompositeEditController(QObject):
         allowed, _reason = self.can_edit_layer(layer.id)
         if not allowed:
             return  # 原因由调用方（门禁入口）负责呈现
+        # V11 M0（#1285 进前段）：CRS 声明域校验——失配阻止进入编辑，
+        # 引导修复（改本地/清除）后重试。
+        ok_crs, _crs_reason = self._crs_domain_gate(layer)
+        if not ok_crs:
+            return
         # M1：polygon 草稿层 + 原生画布 + 桥能力 → 原生编辑会话
         # （进前门禁已由 composite_document 的角色/CRS 门把守；controller
         # 内部再复查角色门禁——拒绝则不开 startEditing）。
@@ -1171,9 +1292,59 @@ class CompositeEditController(QObject):
         if not allowed:
             return None, reason
         if layer.edit_session is None:
+            ok_crs, crs_reason = self._crs_domain_gate(layer)
+            if not ok_crs:
+                return None, crs_reason
             self._open_session(layer)
             self.state_changed.emit()
         return layer.edit_session, ""
+
+    def _crs_domain_gate(self, layer: "VectorLayer") -> tuple[bool, str]:
+        """进前段 CRS 域门禁（#1285）：声明地理域 vs 数据实际范围。
+
+        失配 → 阻止进入编辑；检测结果（含修复选项）挂在
+        ``last_crs_gate_check`` 供宿主引导对话框消费；修复经
+        ``apply_crs_fix``（改本地/清除 → 层声明清空，本地坐标语义）。
+        """
+        from paleo_workbench.mapping_workspace.crs_gate import (
+            feature_bounds,
+            validate_crs_domain,
+        )
+
+        # 只校验层级声明（#1285 引导对话框修复的正是它）：层声明清空后
+        # 即本地坐标语义，修复即放行（工程级声明是地图上下文，不为层级
+        # 失配背书——层级失配是唯一已知的缓冲污染形态）。
+        declared = str(getattr(layer, "crs", "") or "")
+        check = validate_crs_domain(declared, feature_bounds(_iter_layer_coords(layer)))
+        self._last_crs_gate_check = check
+        if check.ok:
+            return True, ""
+        return False, check.reason
+
+    @property
+    def last_crs_gate_check(self):
+        """最近一次 CRS 域门禁结果（宿主引导对话框消费）。"""
+        return getattr(self, "_last_crs_gate_check", None)
+
+    def apply_crs_fix(self, layer_id: str, mode: str) -> bool:
+        """引导式一键修复（#1285）：declare_local / clear → 清空层声明。"""
+        layer = self._layers.get(str(layer_id))
+        if layer is None or mode not in ("declare_local", "clear"):
+            return False
+        layer.crs = ""
+        self._last_crs_gate_check = None
+        self.state_changed.emit()
+        return True
+
+    def apply_project_crs(self, crs: str) -> tuple[bool, str]:
+        """会话内 CRS 冻结（#1285）：编辑会话打开期间拒绝改声明。"""
+        crs = str(crs or "")
+        if not crs or crs == self.project_crs:
+            return True, ""
+        if any(layer.edit_session is not None for layer in self._layers.values()):
+            return False, "编辑会话进行中：CRS 声明被冻结（先保存或回滚）"
+        self.project_crs = crs
+        return True, ""
 
     def import_layer_features(self, layer_id: str, features: list) -> None:
         """可信导入通道：向（通常是 RAW 角色的）图层写入初始要素。
@@ -1414,10 +1585,10 @@ class CompositeEditController(QObject):
         （可回滚 / 可修复），不把无效几何写进工程。返回
         (提交数, 被阻断图层的用户可读原因)。
         """
-        committed = 0
         blocked: list[str] = []
+        committed = 0
         # M1 原生会话整集合先行（§3 全或无）：被拒 → 全集合保持会话、
-        # 原因进 blocked（与 Python 会话的逐层语义并存在同一返回面）。
+        # 不提交 Python 会话（全或无跨两类会话）。
         if self.native_editing.session_layer_ids():
             ok, reason = self.native_editing.commit_all(
                 gate=self.can_edit_layer,
@@ -1426,23 +1597,35 @@ class CompositeEditController(QObject):
             )
             if ok:
                 committed += 1
-                self._rebind_active_tool()
-                self.sessions_committed.emit()
-                self.state_changed.emit()
             else:
                 blocked.append(reason)
+                return 0, blocked
+        # V11 M0（#1283 全或无）：两阶段——先对全部 Python 会话判定门禁
+        # （角色 + 拓扑），任一门禁失败则一个都不提交；全过才逐层提交；
+        # 提交中途异常 → 剩余层回滚，不留半手势。
+        pending: list = []
         for layer in self._layers.values():
             session = layer.edit_session
             if session is None:
                 continue
-            # 角色门禁复查（V6 B-P0-1）：历史旁路开启的 RAW 会话绝不提交；
-            # 会话保持打开（可回滚），原因进 blocked。
-            allowed, gate_reason = self.can_edit_layer(layer.id)
+            # R3-P1：门禁判定异常同样进 blocked（不抛——调用方期望 tuple；
+            # 会话保持打开 + 可诊断，不走崩溃路径）。
+            try:
+                allowed, gate_reason = self.can_edit_layer(layer.id)
+            except Exception as exc:
+                blocked.append(
+                    f"图层「{layer.name}」门禁判定异常（该图层编辑未提交）: {exc}")
+                continue
             if not allowed:
                 blocked.append(f"图层「{layer.name}」{gate_reason}（该图层编辑未提交）")
                 continue
             if self._topology.enabled:
-                issues = self._topology.validate([layer])
+                try:
+                    issues = self._topology.validate([layer])
+                except Exception as exc:
+                    blocked.append(
+                        f"图层「{layer.name}」拓扑校验异常（该图层编辑未提交）: {exc}")
+                    continue
                 self._topology.record_validation(layer, len(issues))
                 if issues:
                     first = issues[0]
@@ -1451,8 +1634,33 @@ class CompositeEditController(QObject):
                         f"未通过拓扑检查（该图层编辑未提交）：{first.get('message', '')}"
                     )
                     continue
-            session.commit_changes()
+            pending.append((layer, session))
+        if blocked:
+            # 阶段 1 未全过 → Python 会话全体保持打开，一个都不提交。
+            # 原生会话若已提交，计入 committed（无法撤回那一拍）。
+            return committed, blocked
+        committed_ids: list[str] = []
+        for index, (layer, session) in enumerate(pending):
+            try:
+                session.commit_changes()
+            except Exception:
+                # R3-P1（诚实语义）：阶段 2 中途失败无法真正全或无（已提交
+                # 无法撤回）——已提交保留 + 剩余回滚 + blocked 明确区分两者，
+                # 不再谎称「全或无」。调用方据 blocked 提示用户核对。
+                for remaining_layer, remaining_session in pending[index:]:
+                    try:
+                        remaining_session.rollback_changes()
+                    except Exception:
+                        pass
+                    blocked.append(
+                        f"图层「{remaining_layer.name}」提交失败已回滚")
+                if committed_ids:
+                    blocked.append(
+                        "已提交图层（保留，未回滚）: "
+                        + "、".join(f"「{lid}」" for lid in committed_ids))
+                break
             committed += 1
+            committed_ids.append(layer.id)
             self.content_changed.emit(layer.id)
         if committed:
             # V8 M3：被提交会话的复合组作废（撤销历史随会话终结消失）。
@@ -2714,6 +2922,26 @@ class CompositeEditController(QObject):
                     extent = _feature_extent(records.values())
                 features = tuple(records.values())
                 self._records_cache[layer_id] = (revision, session, features, extent, records)
+                # V11（O(changed) 发布）：本修订触及的 fids（journal 展开；
+                # 无会话 = 基线全量，无提示）。R3-P0：提示绑定 (snapshot
+                # revision, data_revision)——发布侧校验一致才信任。
+                if session is not None:
+                    touched: set[str] = set()
+                    journal_ok = False
+                    if base_revision is not None:
+                        entries = session.changes_since(base_revision)
+                        if entries is not None:
+                            journal_ok = True
+                            for ids in entries:
+                                touched.update(ids)
+                    if journal_ok:
+                        self._changed_hints[layer_id] = (
+                            revision, layer.data_revision, frozenset(touched))
+                    else:
+                        # journal 不可恢复（trim/rollback）→ 无提示（全量比较）。
+                        self._changed_hints.pop(layer_id, None)
+                else:
+                    self._changed_hints.pop(layer_id, None)
             previous = display.get(layer_id)
             if previous is not None:
                 # 面板显示态回写为图层权威，供持久化还原。

@@ -408,7 +408,9 @@ setup(
     # 0.6.0a0 (V10): runtime facts / project CRS push / map-settings facts /
     # provider introspection / style read-back / mirror scale range /
     # explicit current-layer clear / honest digitize scratch CRS.
-    version="0.6.0a0",
+    # 0.7.0a0 (V11): tree update window (begin/end + revision + runtime
+    # facts counters), expand-preserving placements.
+    version="0.7.0a0",
     description="Optional narrow C++ QGIS renderer bridge for paleo-workbench",
     ext_modules=[_extension()] if _enabled() else [],
     cmdclass={"build_ext": build_ext},

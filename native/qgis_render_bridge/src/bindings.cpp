@@ -419,7 +419,10 @@ py::dict capability_manifest() {
           "digitize_progress",
           "runtime_facts", "project_crs_push", "map_settings_facts",
           "provider_introspection", "style_readback", "layer_scale_range",
-          "current_layer_clear", "digitize_scratch_honest_crs"}) {
+          "current_layer_clear", "digitize_scratch_honest_crs",
+          // 0.7.0a0 (V11): 树事务窗口（begin/end_tree_update + 修订号 +
+          // runtime_facts 结构性计数）；expand-preserving placements。
+          "tree_update_window"}) {
         features.append(feature);
     }
     manifest["features"] = features;
@@ -443,12 +446,14 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // canvas_output_dpi / mirror_provider_facts / mirror_style_json /
     // upsert scale-range channel / explicit current-layer clear / honest
     // digitize scratch CRS.
-    // 0.8.0a0 (topo-editing M2): vertex all-layers scope, topological
-    // point scatter, avoid-intersections (config + vertex/move
-    // replication), canvas tracer.
     // 0.7.0a0 (topo-editing M1): mirror-layer native editing (start/
     // commit/rollback/undo/redo), committed delta callback, add mirror
     // feature, mirror_features_json unlimited readback (limit<=0).
+    // 0.7.0a0 (V11, same slot historically): tree-update window
+    // (begin/end_tree_update + revision).
+    // 0.8.0a0 (topo-editing M2): vertex all-layers scope, topological
+    // point scatter, avoid-intersections (config + vertex/move
+    // replication), canvas tracer.
     // 0.9.0a0 (topo-editing M3): split_mirror_features /
     // merge_mirror_features (native buffer split/merge + attribute
     // inheritance; neighbor topo-points on split).
@@ -854,6 +859,12 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("set_mirror_layer_order", &pwb::qgis_render::QgisMapStack::setMirrorLayerOrder)
         .def("set_mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::setMirrorLayerVisibility)
         .def("mirror_order_top_first", &pwb::qgis_render::QgisMapStack::mirrorOrderTopFirst)
+        // V11：全树（含组）自上而下 doc 序——顺序一致性的统一来源。
+        .def("mirror_tree_order_top_first",
+             &pwb::qgis_render::QgisMapStack::mirrorTreeOrderTopFirst)
+        // V11-R4P1：布局 map 图层集诊断（导出装配同源）。
+        .def("layout_map_layer_order",
+             &pwb::qgis_render::QgisMapStack::layoutMapLayerOrder)
         .def("mirror_layer_visibility", &pwb::qgis_render::QgisMapStack::mirrorLayerVisibility)
         .def("tree_echo_suppressed", &pwb::qgis_render::QgisMapStack::treeEchoSuppressed)
         .def("set_map_tool", &pwb::qgis_render::QgisMapStack::setMapTool)
@@ -1087,6 +1098,11 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         .def("apply_tree_placements",
              &pwb::qgis_render::QgisMapStack::applyTreePlacements,
              py::arg("placements_json"))
+        // V11 树事务窗口：批量树变更 = 挂起同步 + 收口一次 sync/refresh。
+        .def("begin_tree_update", &pwb::qgis_render::QgisMapStack::beginTreeUpdate)
+        .def("end_tree_update", &pwb::qgis_render::QgisMapStack::endTreeUpdate,
+             py::arg("token"))
+        .def("tree_revision", &pwb::qgis_render::QgisMapStack::treeRevision)
         .def("set_group_expanded",
              &pwb::qgis_render::QgisMapStack::setGroupExpanded)
         .def("zoom_to_layer", &pwb::qgis_render::QgisMapStack::zoomToLayer)
