@@ -1050,7 +1050,7 @@ class CompositeEditController(QObject):
         self.tracing_enabled = bool(topo.get("tracing", False))
         try:
             self._topology.checker.restore_state(
-                dict((project.mapping_workspace or {}).get("topo_checker") or {}))
+                dict(workspace.get("topo_checker") or {}) if isinstance(workspace, Mapping) else {})
         except Exception:
             pass
         self._sync_checker_workspace(project)
