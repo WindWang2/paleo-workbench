@@ -18,13 +18,25 @@ from paleo_workbench.mapping_workspace.stage_state import (
 
 
 class RecordingStack:
-    """duck-type 桥：记录每次调用（name, args）。"""
+    """duck-type 桥：记录每次调用（name, args）。
+
+    白名单方法集（模拟 0.6.x 旧桥——无树事务窗口，验证降级路径与
+    调用计数；窗口行为由 native 测试覆盖）。
+    """
+
+    _METHODS = (
+        "upsert_group", "remove_groups_except", "rename_group",
+        "move_group", "move_layer_to_group", "set_group_visibility",
+        "tree_snapshot_json", "apply_tree_placements",
+    )
 
     def __init__(self):
         self.calls: list[tuple[str, tuple]] = []
 
     def __getattr__(self, name):
-        self.calls  # ensure initialized path
+        if name.startswith("_") or name not in RecordingStack._METHODS:
+            raise AttributeError(name)
+
         def _record(*args, **kwargs):
             self.calls.append((name, args))
             if name == "apply_tree_placements":
@@ -156,3 +168,29 @@ class TestReconcileCallCounts:
                                        "move_layer_to_group", "move_group",
                                        "rename_group")]
         assert structure_calls == []
+
+
+class TestEchoRevisionGate:
+    def test_echo_is_stale_semantics(self, controller, state):
+        # 未应用过（applied=0）→ 任何回声不过期（旧桥兼容，revision 恒 0）
+        assert controller.echo_is_stale(0) is False
+        assert controller.echo_is_stale(5) is False
+        controller.note_applied_tree_revision(10)
+        assert controller._applied_tree_revision == 10
+        # 过期：revision ≤ 已应用值（自身程序化变更的迟到回显）
+        assert controller.echo_is_stale(9) is True
+        assert controller.echo_is_stale(10) is True
+        # 新鲜：窗口之后的用户编辑
+        assert controller.echo_is_stale(11) is False
+
+    def test_revision_only_moves_forward(self, controller, state):
+        controller.note_applied_tree_revision(10)
+        controller.note_applied_tree_revision(4)  # 乱序/旧值不回退
+        assert controller._applied_tree_revision == 10
+
+    def test_reconcile_records_window_revision(self, controller, state):
+        layers = [_LayerLike("a")]
+        _register(state, "a")
+        controller.reconcile(layers)
+        # RecordingStack 无 begin/end（旧桥）→ revision 保持 0（不过期语义）
+        assert controller._applied_tree_revision == 0

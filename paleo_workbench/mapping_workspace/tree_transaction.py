@@ -29,9 +29,12 @@ def tree_transaction(stack: Any) -> Iterator[dict]:
         # failure 由调用方经 revision / diff 对账。
         import json as _json
 
-        payload = _json.loads(end(token))
-        handle["revision"] = payload.get("revision")
-        handle["deferred_sync"] = payload.get("deferred_sync")
+        payload = end(token)
+        if isinstance(payload, str) and payload:
+            parsed = _json.loads(payload)
+            if isinstance(parsed, dict):
+                handle["revision"] = parsed.get("revision")
+                handle["deferred_sync"] = parsed.get("deferred_sync")
 
 
 def tree_transaction_supported(stack: Any) -> bool:

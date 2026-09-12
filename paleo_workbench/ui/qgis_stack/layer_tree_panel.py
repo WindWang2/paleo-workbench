@@ -586,6 +586,10 @@ class QgisLayerTreePanel(QWidget):
         group_touched = False
         if self._group_controller is not None:
             controller = self._group_controller
+            # V11：过期回声（revision ≤ 已应用值）不进领域写回——程序化
+            # 变更的迟到回显/窗口内竞态由修订号门控（旧桥 revision=0 恒通过）。
+            if controller.echo_is_stale(batch.revision):
+                return
             if batch.tree:
                 controller.observe_tree_nodes(list(batch.tree))
                 group_touched = True

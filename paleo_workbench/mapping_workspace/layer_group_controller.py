@@ -91,6 +91,8 @@ class LayerGroupController:
         self._root_order: list[str] = []
         # V11 稳定排序键：node_id（layer/group）→ key（持久化于 state.tree）。
         self._order_keys: dict[str, str] = {}
+        # V11 已应用的树修订号（回声过期判定；0 = 未知/旧桥）。
+        self._applied_tree_revision: int = 0
         self._user_groups: dict[str, GroupNode] = {}
         # V6：宿主推送的新鲜度索引（artifact_key → ArtifactFreshness）。
         self._freshness: dict[str, Any] = {}
@@ -324,8 +326,11 @@ class LayerGroupController:
             return
         desired = self.build_desired_tree(layer_snapshots)
         try:
-            with tree_transaction(self._stack):
+            with tree_transaction(self._stack) as window:
                 self._apply_tree(desired, force=force)
+            revision = window.get("revision")
+            if isinstance(revision, int) and revision > 0:
+                self._applied_tree_revision = revision
             self._last_applied = desired
             self.state.tree = desired.to_dict()
         except Exception:
@@ -333,6 +338,22 @@ class LayerGroupController:
             # 下一次 reconcile 重试（V5 §78 error handling）。
             logger.exception("layer group reconcile failed")
             raise
+
+    def note_applied_tree_revision(self, revision: int) -> None:
+        """记录程序化应用后的树修订号（回声过期判定的基准）。"""
+        if isinstance(revision, int) and revision > self._applied_tree_revision:
+            self._applied_tree_revision = revision
+
+    def echo_is_stale(self, revision: int) -> bool:
+        """回声是否过期（≤ 已应用修订号；0 = 旧桥无修订号 → 永不过期）。
+
+        02-authority-model 不变式 3：程序化应用携带修订号，用户回声携带
+        事件时修订号；Python 丢弃 revision ≤ 已应用值的回声——这是语义
+        级回声抑制（SuppressGuard 之外的第二道防线 + 窗口内竞态检测）。
+        """
+        if revision <= 0 or self._applied_tree_revision <= 0:
+            return False
+        return revision <= self._applied_tree_revision
 
     def _apply_tree(self, desired: LayerTreeSnapshot, *, force: bool = False) -> None:
         """diff 驱动的增量应用（V11：keyed LCS 最小操作集）。

@@ -64,6 +64,8 @@ class TreeChangeBatch:
     #: 结构快照节点数组（结构变化时非空）：
     #: [{"type": "group"|"layer", "id": ..., "children": [...]}]。
     tree: tuple[dict, ...] = ()
+    #: V11 树修订号（桥 0.7.0a0+ 携带；0 = 旧桥无修订号——不过期）。
+    revision: int = 0
 
     @property
     def empty(self) -> bool:
@@ -130,8 +132,13 @@ def parse_tree_events(payload: str) -> TreeChangeBatch:
     tree = tuple(
         node for node in (data.get("tree") or ()) if isinstance(node, dict)
     )
+    try:
+        revision = int(data.get("tree_revision") or 0)
+    except (TypeError, ValueError):
+        revision = 0
     return TreeChangeBatch(
         changes=parse_tree_change(payload),
         events=tuple(events),
         tree=tree,
+        revision=revision,
     )
