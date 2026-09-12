@@ -4076,6 +4076,11 @@ class CompositeDocument(QWidget):
             if tree_host is not None and self.uses_native_stack:
                 self.stage_controller.group_controller.attach_tree_view(
                     tree_host.tree_view_address)
+            # V11（D2-ws）：factor 组标题随组成同步（此前
+            # sync_factor_titles 无生产调用方，factor 组显示裸任务 id）。
+            factor_tasks = getattr(self._project, "factor_map_tasks", None) or []
+            self.stage_controller.group_controller.sync_factor_titles({
+                str(task.id): str(task.name) for task in factor_tasks})
             self.stage_controller.sync_composition()
             expand = getattr(self.layer_manager, "expand_layer_groups", None)
             if callable(expand):

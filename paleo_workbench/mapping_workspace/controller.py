@@ -109,6 +109,8 @@ class MappingStageController(QObject):
         if target == self.state.current_stage:
             return False
         self.state.set_current_stage(target)
+        # V11（D11-ws）：新阶段的空系统组物化（diff 最小：仅空组创建）。
+        self.group_controller.rematerialize_for_stage()
         # 组可见性增量（profile 默认 + 用户覆盖）。
         self.group_controller.apply_stage_visibility(target)
         # 编辑目标重指派：绝不跨阶段继承（P0/P1 业务风险，V5 §88）。

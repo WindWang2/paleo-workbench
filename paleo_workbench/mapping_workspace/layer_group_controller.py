@@ -93,6 +93,8 @@ class LayerGroupController:
         self._order_keys: dict[str, str] = {}
         # V11 已应用的树修订号（回声过期判定；0 = 未知/旧桥）。
         self._applied_tree_revision: int = 0
+        # V11 最近一次 reconcile 的组成快照（阶段切换时空组重物化用）。
+        self._last_snapshots: list | None = None
         self._user_groups: dict[str, GroupNode] = {}
         # V6：宿主推送的新鲜度索引（artifact_key → ArtifactFreshness）。
         self._freshness: dict[str, Any] = {}
@@ -210,10 +212,27 @@ class LayerGroupController:
     def ensure_memberships(self, layer_snapshots: Iterable) -> list[str]:
         """为缺少成员资格的图层做保守归类（旧工程迁移 / 新图层）。
 
-        返回新增 membership 的 layer_id 列表。
+        返回新增 membership 的 layer_id 列表。V11（D13-ws）：组成里已
+        消失的图层成员资格在此清理（非空组成才清理——空组成=加载中，
+        不能误删），幽灵成员不再膨胀组计数。
         """
         added: list[str] = []
-        for layer in layer_snapshots:
+        snapshots = list(layer_snapshots)
+        if snapshots:
+            live_ids = {
+                str(getattr(layer, "id", "") or "") for layer in snapshots}
+            stale = [layer_id for layer_id in self.state.memberships
+                     if layer_id and layer_id not in live_ids]
+            for layer_id in stale:
+                self.state.drop_membership(layer_id)
+                self._placements.pop(layer_id, None)
+                self._order_keys.pop(layer_id, None)
+                if layer_id in self._root_order:
+                    self._root_order.remove(layer_id)
+                for order in self._group_orders.values():
+                    if layer_id in order:
+                        order.remove(layer_id)
+        for layer in snapshots:
             layer_id = str(getattr(layer, "id", "") or "")
             if not layer_id or self.state.membership(layer_id) is not None:
                 continue
@@ -324,6 +343,7 @@ class LayerGroupController:
         """
         if self._stack is None or not self.groups_available:
             return
+        self._last_snapshots = list(layer_snapshots)
         desired = self.build_desired_tree(layer_snapshots)
         try:
             with tree_transaction(self._stack) as window:
@@ -338,6 +358,22 @@ class LayerGroupController:
             # 下一次 reconcile 重试（V5 §78 error handling）。
             logger.exception("layer group reconcile failed")
             raise
+
+    def rematerialize_for_stage(self) -> bool:
+        """V11（D11-ws）：阶段切换后重物化空系统组。
+
+        期望树的空组显隐按**当前阶段**评估（当前阶段的组即使空也物化，
+        形成可展开树），而 set_stage 本身不 reconcile——旧工程切换进
+        「组全空」的阶段时看不到组，直到下一次组成变更。这里用最近一次
+        的组成快照重算期望树：差异 = 新阶段的空组创建（diff 最小操作集，
+        组内无 move）。无组成基线时诚实 False（首次 sync 后可用）。
+        """
+        if self._stack is None or not self.groups_available:
+            return False
+        if not self._last_snapshots:
+            return False
+        self.reconcile(self._last_snapshots)
+        return True
 
     def note_applied_tree_revision(self, revision: int) -> None:
         """记录程序化应用后的树修订号（回声过期判定的基准）。"""
