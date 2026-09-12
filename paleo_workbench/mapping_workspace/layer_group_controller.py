@@ -44,6 +44,7 @@ from paleo_workbench.mapping_workspace.layer_tree_plan import (
     build_plan,
     effective_home_group,
 )
+from paleo_workbench.mapping_workspace.layer_tree_diff import diff_trees
 from paleo_workbench.mapping_workspace.stage_profiles import stage_profile
 from paleo_workbench.mapping_workspace.stage_state import (
     LayerMembershipRecord,
@@ -328,27 +329,53 @@ class LayerGroupController:
             raise
 
     def _apply_tree(self, desired: LayerTreeSnapshot, *, force: bool = False) -> None:
+        """diff 驱动的增量应用（V11：keyed LCS 最小操作集）。
+
+        组集合（create/rename）→ keep-set 清理 → 放置（批量子集，一次
+        桥调用；旧桥回落逐 move）。组显隐/展开不在本路径（分别由
+        ``apply_stage_visibility``/``apply_group_expanded`` 专职管理，
+        避免双写对抗）。
+        """
         stack = self._stack
         last = self._last_applied
+        current = (last if last is not None and not force
+                   else LayerTreeSnapshot(children=(), source="qgis"))
+        tree_diff = diff_trees(current, desired)
 
-        # 1) 组集合增量：upsert 全部期望组（幂等：重命名/挂载校验内含），
-        #    remove 未列组（子图层自动上提，绝不删层）。
-        desired_groups = {g.group_id: g for g in desired.iter_groups()}
-        for group_id, group in desired_groups.items():
-            template = system_group_template(group_id)
-            parent = template.parent_id if template is not None else (
-                FACTOR_ROOT_GROUP_ID if group_id.startswith("factor.") else "")
-            stack.upsert_group(group_id, group.name, parent)
+        # 1) 组创建（拓扑序：父先于子）与重命名。
+        for op in tree_diff.group_creates:
+            stack.upsert_group(op.group_id, op.name, op.parent)
+        for op in tree_diff.group_renames:
+            stack.rename_group(op.group_id, op.new_name)
+
+        # 2) keep-set 清理（幂等自愈：一次性桥调用；子图层自动上提）。
         keep_ids = sorted({g.group_id for g in desired.iter_groups()})
         stack.remove_groups_except(keep_ids)
 
-        # 2) 组间顺序（root 级）与组内放置增量。
-        if last is None or force:
-            self._place_all(desired)
-        else:
-            self._place_delta(last, desired)
+        # 3) 放置：diff 的 move 集（子集批应用，O(changed)）。
+        if tree_diff.group_moves or tree_diff.layer_moves:
+            batch = getattr(stack, "apply_tree_placements", None)
+            if callable(batch):
+                import json as _json
 
-        # 3) 更新运行时放置表 + 排序键（期望树是唯一事实源）。
+                placements = [
+                    {"node": f"group:{op.group_id}", "parent": op.new_parent,
+                     "index": op.new_index}
+                    for op in tree_diff.group_moves
+                ] + [
+                    {"node": op.layer_id, "parent": op.new_parent,
+                     "index": op.new_index}
+                    for op in tree_diff.layer_moves
+                ]
+                batch(_json.dumps(placements))
+            else:
+                for op in tree_diff.group_moves:
+                    stack.move_group(op.group_id, op.new_parent, op.new_index)
+                for op in tree_diff.layer_moves:
+                    stack.move_layer_to_group(
+                        op.layer_id, op.new_parent, op.new_index)
+
+        # 4) 更新运行时放置表 + 排序键（期望树是唯一事实源）。
         self._placements.clear()
         self._group_orders.clear()
         self._root_order = []
@@ -362,76 +389,6 @@ class LayerGroupController:
                 self._collect_group(child, child.group_id)
         self._order_keys.clear()
         self._collect_keys(desired)
-
-    def _placements_of(self, desired: LayerTreeSnapshot) -> list[dict]:
-        """期望树 → 扁平放置指令（node/parent/index，深度优先）。"""
-        placements: list[dict] = []
-
-        def walk(children, parent_id):
-            for index, child in enumerate(children):
-                if isinstance(child, GroupNode):
-                    placements.append({
-                        "node": f"group:{child.group_id}",
-                        "parent": parent_id,
-                        "index": index,
-                    })
-                    walk(child.children, child.group_id)
-                else:
-                    placements.append({
-                        "node": child.layer_id,
-                        "parent": parent_id,
-                        "index": index,
-                    })
-
-        walk(desired.children, "")
-        return placements
-
-    def _place_all(self, desired: LayerTreeSnapshot) -> None:
-        # 批量放置（桥 O(N) 路径）；旧桥回落逐个 move（兼容，规模小可接受）。
-        batch = getattr(self._stack, "apply_tree_placements", None)
-        if callable(batch):
-            import json as _json
-
-            batch(_json.dumps(self._placements_of(desired)))
-            return
-        root_children = list(desired.children)
-        for index, child in enumerate(root_children):
-            if isinstance(child, GroupNode):
-                self._stack.move_group(child.group_id, "", index)
-                self._place_group_children(child)
-            else:
-                self._stack.move_layer_to_group(child.layer_id, "", index)
-
-    def _place_group_children(self, group: GroupNode) -> None:
-        for index, child in enumerate(group.children):
-            if isinstance(child, GroupNode):
-                self._stack.move_group(child.group_id, group.group_id, index)
-                self._place_group_children(child)
-            else:
-                self._stack.move_layer_to_group(
-                    child.layer_id, group.group_id, index)
-
-    def _place_delta(self, last: LayerTreeSnapshot, desired: LayerTreeSnapshot) -> None:
-        def walk(last_group_children, desired_group_children, group_id):
-            last_ids = [c.group_id if isinstance(c, GroupNode) else c.layer_id
-                        for c in last_group_children]
-            desired_ids = [c.group_id if isinstance(c, GroupNode) else c.layer_id
-                           for c in desired_group_children]
-            if last_ids != desired_ids:
-                for index, child in enumerate(desired_group_children):
-                    if isinstance(child, GroupNode):
-                        self._stack.move_group(child.group_id, group_id, index)
-                        self._place_group_children(child)  # 子树全量校正（低频）
-                    else:
-                        self._stack.move_layer_to_group(child.layer_id, group_id, index)
-            else:
-                for last_child, desired_child in zip(last_group_children,
-                                                     desired_group_children):
-                    if isinstance(desired_child, GroupNode):
-                        walk(getattr(last_child, "children", ()),
-                             desired_child.children, desired_child.group_id)
-
-        walk(list(last.children), list(desired.children), "")
 
     # -- 组可见性（阶段 profile + 用户覆盖） ---------------------------------------
 
