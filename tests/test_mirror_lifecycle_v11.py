@@ -133,7 +133,7 @@ class TestFeatureSignatureCache:
         monkeypatch.setattr(qgis_mirror, "_feature_signature", counting)
         qgis_mirror.mirror_snapshot_to_stack(
             stack, 0, _snapshot([layer2]), groups=True,
-            changed_hints={"L": {"f7"}})
+            changed_hints={"L": (2, 2, {"f7"})})
         # 重签 = 触及要素数（1），绝非 O(N) 全量
         assert calls["n"] == 1
 
@@ -289,3 +289,48 @@ class TestRasterLedger:
             stack, 0, _snapshot([layer2]), groups=True)
         rasters = stack.kinds("raster")
         assert [r[1][2] for r in rasters] == ["/vsimem/r1.tif", "/vsimem/r2.tif"]
+
+
+class TestHintsSafety:
+    """R3-P0 回归：过期/错位提示永不导致漏发（全量回落）。"""
+
+    def test_stale_revision_hints_ignored(self, monkeypatch):
+        stack = _ProbeStack()
+        features = [_feature(f"f{i}", float(i)) for i in range(20)]
+        qgis_mirror.mirror_snapshot_to_stack(
+            stack, 0, _snapshot([_vector_layer("L", features, 1)]), groups=True)
+        touched = list(features)
+        touched[3] = _feature("f3", 333.0)
+        touched[5] = _feature("f5", 555.0)
+        calls = {"n": 0}
+        real = qgis_mirror._feature_signature
+
+        def counting(feature):
+            calls["n"] += 1
+            return real(feature)
+
+        monkeypatch.setattr(qgis_mirror, "_feature_signature", counting)
+        # 过期修订的提示（rev 1，实际 rev 2）→ 作废，全量比较
+        qgis_mirror.mirror_snapshot_to_stack(
+            stack, 0, _snapshot([_vector_layer("L", touched, 2)]), groups=True,
+            changed_hints={"L": (1, 1, {"f3"})})
+        assert calls["n"] == 20  # 全量重签（正确性优先）
+        upserts = stack.kinds("upsert")
+        delta = json.loads(upserts[-1][2]["delta"])
+        changed_fids = {c["properties"]["__pwb_fid"] for c in delta["changed"]}
+        assert changed_fids == {"f3", "f5"}  # f5 未漏（提示作废后全量发现）
+
+    def test_malformed_hints_ignored(self):
+        stack = _ProbeStack()
+        features = [_feature(f"f{i}", float(i)) for i in range(10)]
+        qgis_mirror.mirror_snapshot_to_stack(
+            stack, 0, _snapshot([_vector_layer("L", features, 1)]), groups=True)
+        touched = list(features)
+        touched[3] = _feature("f3", 333.0)
+        qgis_mirror.mirror_snapshot_to_stack(
+            stack, 0, _snapshot([_vector_layer("L", touched, 2)]), groups=True,
+            changed_hints={"L": "garbage"})
+        upserts = stack.kinds("upsert")
+        delta = json.loads(upserts[-1][2]["delta"])
+        changed_fids = {c["properties"]["__pwb_fid"] for c in delta["changed"]}
+        assert changed_fids == {"f3"}

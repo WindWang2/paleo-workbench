@@ -284,6 +284,9 @@ public:
   // == layout」顺序一致性的唯一来源；root-only 的 mirrorOrderTopFirst 仅
   // 保留给 legacy 平铺 order 事件。
   std::vector<std::string> mirrorTreeOrderTopFirst() const;
+  // V11-R4P1：布局 map 图层集诊断——返回导出时赋给 QgsLayoutItemMap 的
+  // doc 序（bottom-first 应用序的逆序）。测试与对账用，不参与渲染。
+  std::string layoutMapLayerOrder() const;
   bool mirrorLayerVisibility(const std::string& doc_id) const;
   bool treeEchoSuppressed() const noexcept;
   // ✏ 编辑态图层指示器（M2 移交项：QGIS 桌面经图层指示器呈现编辑态）；

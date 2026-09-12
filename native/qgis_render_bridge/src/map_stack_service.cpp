@@ -2455,9 +2455,8 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
     if (node) node->setItemVisibilityChecked(visible);
     impl_->known_layer_visibility[doc_id] = visible;
     impl_->owned_layers.insert(existing_id);
-    for (auto& kv : impl_->canvas_refs) {
-      if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-    }
+    // V11-R4P0：快道同样走窗口感知同步（窗口内挂起 + revision 递增）。
+    syncCanvasesAll();
     return existing_id;
   }
   const QString uri = QStringLiteral("%1?crs=%2")
@@ -2601,9 +2600,8 @@ std::string QgisMapStack::upsertRasterMirrorLayer(
       node->setItemVisibilityChecked(visible);
     }
     impl_->known_layer_visibility[doc_id] = visible;
-    for (auto& kv : impl_->canvas_refs) {
-      if (!kv.second.isNull()) syncCanvasLayers(kv.first);
-    }
+    // V11-R4P0：栅格快道同样走窗口感知同步。
+    syncCanvasesAll();
     return existing_id;
   }
 
@@ -2817,6 +2815,27 @@ std::vector<std::string> QgisMapStack::mirrorTreeOrderTopFirst() const {
   return result;
 }
 
+std::string QgisMapStack::layoutMapLayerOrder() const {
+  // 与 layoutExport 的 map 图层装配同源（mirror_by_doc 解析 + 全树走查
+  // 反转）；任一处改装配逻辑必须同步改这里（注释交叉引用）。
+  const std::vector<std::string> order = mirrorTreeOrderTopFirst();
+  QJsonArray array;
+  for (auto it = order.rbegin(); it != order.rend(); ++it) {
+    QgsMapLayer* layer = nullptr;
+    auto mapIt = impl_->mirror_by_doc.find(*it);
+    if (mapIt != impl_->mirror_by_doc.end()) {
+      layer = project()->mapLayer(QString::fromStdString(mapIt->second));
+    }
+    if (layer == nullptr) {
+      layer = findMapMirrorByDocId(project(), *it);
+    }
+    if (layer != nullptr) {
+      array.append(QString::fromStdString(*it));
+    }
+  }
+  return QJsonDocument(array).toJson(QJsonDocument::Compact).toStdString();
+}
+
 bool QgisMapStack::mirrorLayerVisibility(const std::string& doc_id) const {
   QgsMapLayer* layer = nullptr;
   auto it = impl_->mirror_by_doc.find(doc_id);
@@ -2870,8 +2889,22 @@ std::string QgisMapStack::endTreeUpdate(std::uint64_t token) {
         "end_tree_update without a matching begin_tree_update");
   }
   if (token != impl_->tree_update_token) {
+    // V11-R4P1：token 失配是调用方配对错误——抛错前必须复位窗口深度，
+    // 否则桥永久挂起后续同步（deferred-forever）。已应用的变更保留
+    // （partial 语义与正常收口一致），pending 同步立即执行防丢帧。
+    impl_->tree_update_depth = 0;
+    if (impl_->pending_canvas_sync) {
+      impl_->pending_canvas_sync = false;
+      ++impl_->canvas_sync_count;
+      for (const auto& kv : impl_->canvas_refs) {
+        if (kv.second.isNull()) continue;
+        syncCanvasLayers(kv.first);
+        kv.second->refresh();
+      }
+    }
     throw std::runtime_error(
-        "tree update token mismatch: unbalanced begin/end nesting");
+        "tree update token mismatch: unbalanced begin/end nesting "
+        "(window reset, applied changes kept)");
   }
   --impl_->tree_update_depth;
   QJsonObject result;
@@ -5134,7 +5167,8 @@ void QgisMapStack::onTreeOrderChanged(std::uintptr_t tree_addr, bool structure) 
   if (viewIt == impl_->tree_views.end() || viewIt->second.isNull()) return;
   auto& pending = impl_->tree_pending[tree_addr];
   pending.order.clear();
-  for (const auto& doc : mirrorOrderTopFirst()) {
+  // V11-R4P2：回声 order 走全树走查（root-only 会丢组内层重排）。
+  for (const auto& doc : mirrorTreeOrderTopFirst()) {
     pending.order.push_back(QString::fromStdString(doc));
   }
   if (structure) {
@@ -5641,10 +5675,19 @@ std::string QgisMapStack::layoutExport(const std::string& spec_json,
       // (grouped layers included — root-only walk silently dropped them);
       // QgsLayoutItemMap consumes bottom-first draw order.
       QList<QgsMapLayer*> ordered;
+      // V11-R4P1：doc_id 经 mirror_by_doc 解析为 QGIS layer id（旧代码
+      // 把 doc_id 直接喂给 mapLayer()——键空间错误，ordered 恒空，setLayers
+      // 从未执行，导出退回 composer 默认层集）。
       const std::vector<std::string> order = mirrorTreeOrderTopFirst();
       for (auto it = order.rbegin(); it != order.rend(); ++it) {
-        QgsMapLayer* layer = project()->mapLayer(
-            QString::fromStdString(*it));
+        QgsMapLayer* layer = nullptr;
+        auto mapIt = impl_->mirror_by_doc.find(*it);
+        if (mapIt != impl_->mirror_by_doc.end()) {
+          layer = project()->mapLayer(QString::fromStdString(mapIt->second));
+        }
+        if (layer == nullptr) {
+          layer = findMapMirrorByDocId(project(), *it);
+        }
         if (layer) ordered.append(layer);
       }
       if (!ordered.isEmpty()) {

@@ -26,15 +26,19 @@ def tree_transaction(stack: Any) -> Iterator[dict]:
         yield handle
     finally:
         # end 总会执行（含窗口内异常）：已应用的变更保留，partial
-        # failure 由调用方经 revision / diff 对账。
-        import json as _json
+        # failure 由调用方经 revision / diff 对账。R2-P2：收口解析失败
+        # 不得掩盖窗口内原异常（也不得阻断 _last_applied 更新）。
+        try:
+            import json as _json
 
-        payload = end(token)
-        if isinstance(payload, str) and payload:
-            parsed = _json.loads(payload)
-            if isinstance(parsed, dict):
-                handle["revision"] = parsed.get("revision")
-                handle["deferred_sync"] = parsed.get("deferred_sync")
+            payload = end(token)
+            if isinstance(payload, str) and payload:
+                parsed = _json.loads(payload)
+                if isinstance(parsed, dict):
+                    handle["revision"] = parsed.get("revision")
+                    handle["deferred_sync"] = parsed.get("deferred_sync")
+        except Exception:
+            pass
 
 
 def tree_transaction_supported(stack: Any) -> bool:

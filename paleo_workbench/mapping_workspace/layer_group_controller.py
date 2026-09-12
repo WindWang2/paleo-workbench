@@ -93,6 +93,8 @@ class LayerGroupController:
         self._order_keys: dict[str, str] = {}
         # V11 已应用的树修订号（回声过期判定；0 = 未知/旧桥）。
         self._applied_tree_revision: int = 0
+        # R6 降级原因（None = 可用；宿主呈现持久状态）。
+        self._last_degraded_reason: str | None = None
         # V11 最近一次 reconcile 的组成快照（阶段切换时空组重物化用）。
         self._last_snapshots: list | None = None
         self._user_groups: dict[str, GroupNode] = {}
@@ -372,13 +374,24 @@ class LayerGroupController:
         「组全空」的阶段时看不到组，直到下一次组成变更。这里用最近一次
         的组成快照重算期望树：差异 = 新阶段的空组创建（diff 最小操作集，
         组内无 move）。无组成基线时诚实 False（首次 sync 后可用）。
+
+        R2-P1：快照按 live 成员资格剪枝（已删图层不复活）；调用方
+        （set_stage）必须 try 保护——桥 throw 不得中断阶段切换。
         """
         if self._stack is None or not self.groups_available:
             return False
         if not self._last_snapshots:
             return False
-        self.reconcile(self._last_snapshots)
+        live_ids = set(self.state.memberships)
+        pruned = [layer for layer in self._last_snapshots
+                  if str(getattr(layer, "id", "") or "") in live_ids]
+        self.reconcile(pruned if pruned else self._last_snapshots)
         return True
+
+    @property
+    def last_degraded_reason(self) -> str | None:
+        """最近一次降级原因（None = 可用；R6 fallback honesty）。"""
+        return self._last_degraded_reason
 
     def note_applied_tree_revision(self, revision: int) -> None:
         """记录程序化应用后的树修订号（回声过期判定的基准）。"""
@@ -421,6 +434,8 @@ class LayerGroupController:
         stack.remove_groups_except(keep_ids)
 
         # 3) 放置：diff 的 move 集（子集批应用，O(changed)）。
+        # R2-P0：批量返回 skipped>0 必须抛——否则 _last_applied 宣称已应用、
+        # 后续 diff 对跳过的 move 永久失明（静默漂移，只能 force 恢复）。
         if tree_diff.group_moves or tree_diff.layer_moves:
             batch = getattr(stack, "apply_tree_placements", None)
             if callable(batch):
@@ -435,7 +450,20 @@ class LayerGroupController:
                      "index": op.new_index}
                     for op in tree_diff.layer_moves
                 ]
-                batch(_json.dumps(placements))
+                result = batch(_json.dumps(placements))
+                try:
+                    import json as _json2
+
+                    report = _json2.loads(result) if isinstance(
+                        result, str) else {}
+                    skipped = int(report.get("skipped", 0))
+                except (TypeError, ValueError):
+                    skipped = 0
+                if skipped:
+                    raise RuntimeError(
+                        f"apply_tree_placements skipped {skipped} of "
+                        f"{len(placements)} placements — reconcile aborted, "
+                        "baseline unchanged (retry will re-diff)")
             else:
                 for op in tree_diff.group_moves:
                     stack.move_group(op.group_id, op.new_parent, op.new_index)
@@ -461,9 +489,17 @@ class LayerGroupController:
     # -- 组可见性（阶段 profile + 用户覆盖） ---------------------------------------
 
     def apply_stage_visibility(self, stage: MappingStage) -> dict[str, bool]:
-        """应用阶段有效组显隐（profile 默认 + 用户覆盖）→ 返回有效值表。"""
+        """应用阶段有效组显隐（profile 默认 + 用户覆盖）→ 返回有效值表。
+
+        R6（fallback honesty）：降级时返回 {} 但记录原因——宿主据
+        ``last_degraded_reason`` 呈现持久状态，而非一次性提示后静默。
+        """
         if self._stack is None or not self.groups_available:
+            self._last_degraded_reason = (
+                "无 QGIS 桥" if self._stack is None
+                else "桥无 group API（旧桥）")
             return {}
+        self._last_degraded_reason = None
         profile = stage_profile(stage)
         view_state = self.state.view_state(stage)
         effective = view_state.effective_group_visibility(profile.group_visibility)
@@ -613,6 +649,12 @@ class LayerGroupController:
             nonlocal rejected_with
             for child in children:
                 if isinstance(child, GroupNode):
+                    # R2-P2：用户组拖入系统组同样非法（create_user_group
+                    # 禁止的嵌套经拖拽也不得建立）——携带组 id 反馈。
+                    if parent_id and parent_id in system_ids:
+                        if rejected_with is None:
+                            rejected_with = (child.group_id, parent_id)
+                        continue
                     if parent_id:
                         orders.setdefault(parent_id, []).append(child.group_id)
                     else:

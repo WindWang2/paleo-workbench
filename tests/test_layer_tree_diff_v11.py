@@ -18,7 +18,7 @@ from paleo_workbench.mapping_workspace.layer_tree_diff import (
 
 
 def _snap(*children) -> LayerTreeSnapshot:
-    return LayerTreeSnapshot(children=tuple(children), source="qgis" if False else "domain")
+    return LayerTreeSnapshot(children=tuple(children), source="domain")
 
 
 def _group(gid: str, *children, name: str | None = None, visible=True, expanded=True,
@@ -37,10 +37,14 @@ class TestLcsIndices:
         assert lcs_indices(["a", "b", "c"], ["a", "b", "c"]) == [0, 1, 2]
 
     def test_typical(self):
-        # LCS(a,b,c,d vs a,c,b,d) 长度 3（a,?,d）
-        keep = lcs_indices(["a", "b", "c", "d"], ["a", "c", "b", "d"])
+        # LCS(a,b,c,d vs a,c,b,d) 长度 3；保持 a 序列下标升序且对应子序列
+        a = ["a", "b", "c", "d"]
+        b = ["a", "c", "b", "d"]
+        keep = lcs_indices(a, b)
         assert len(keep) == 3
-        assert keep == sorted(keep)
+        assert [a[i] for i in keep] == [x for x in b if x in {a[i] for i in keep}]
+        assert [b.index(a[i]) for i in keep] == sorted(
+            b.index(a[i]) for i in keep)
 
     def test_disjoint(self):
         assert lcs_indices([], ["x"]) == []

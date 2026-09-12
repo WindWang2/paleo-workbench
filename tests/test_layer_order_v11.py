@@ -79,7 +79,10 @@ class TestKeyPrimitives:
             keys.append(mid)
             low = mid  # 连续同点插入：键长增长
         assert all(valid_key(k) for k in keys)
-        assert any(key_needs_rebalance(keys[i:1]) or len(k) > 8 for i, k in enumerate(keys[:1])) or True
+        # 同点连续插入键长单调增长；40 次后必超重排阈值（64）。
+        lengths = [len(k) for k in keys]
+        assert lengths == sorted(lengths)
+        assert all(lengths[i] <= lengths[i + 1] for i in range(len(lengths) - 1))
         assert key_needs_rebalance(keys[40:])
 
 

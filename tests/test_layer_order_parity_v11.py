@@ -84,6 +84,9 @@ class TestFlatParityWithFallbackPainter:
 
 class TestLayoutExportWithGroups:
     def test_layout_export_includes_grouped_layers(self, stack, qapp, tmp_path):
+        # R4-P1：装配验证（非输入断言）——layout_map_layer_order 与导出
+        # 装配同源（注释交叉引用），组内层必须在列（旧代码 doc_id 直喂
+        # mapLayer()，ordered 恒空，setLayers 从未执行）。
         canvas = stack.create_canvas()
         stack.upsert_mirror_layer("in_group", "组内层", "Point", "EPSG:4326",
                                   _fc(1.0), "", "", "", True, 1.0)
@@ -102,6 +105,9 @@ class TestLayoutExportWithGroups:
         out = tmp_path / "layout_with_groups.png"
         stack.layout_export(json.dumps(spec), str(out), "png", 96)
         assert out.exists() and out.stat().st_size > 0
-        # 顺序来源包含组内层（导出 map 图层集 = mirror_tree_order_top_first
-        # 反转——同一走查，不再丢层）
-        assert "in_group" in stack.mirror_tree_order_top_first()
+        order = json.loads(stack.layout_map_layer_order())
+        # 组内层在导出 map 集内（bottom-first 应用序：树顶 at_root 后画，
+        # 故组内 in_group 先画——与 mirror_tree_order_top_first 反转一致）
+        assert "in_group" in order and "at_root" in order
+        tree_top_first = stack.mirror_tree_order_top_first()
+        assert order == list(reversed(tree_top_first))[:len(order)]

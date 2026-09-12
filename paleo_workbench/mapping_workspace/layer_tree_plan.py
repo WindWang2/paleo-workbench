@@ -159,6 +159,9 @@ def build_plan(plan_input: LayerTreePlanInput) -> tuple[LayerTreeSnapshot, Layer
     # 1) 成员路由：用户放置（容器存在时）→ 创建阶段 home → root。
     containers: dict[str, list[PlanLayerRecord]] = {}
     root_layers: list[PlanLayerRecord] = []
+    # R1-P0：容器存在性只认三类真源（系统模板 / user_groups 注册表 /
+    # factor 命名空间）。container_orders 是顺序提示，不是存在性证明——
+    # 幽灵键（拼写错误/过期组）不得创建无挂载容器吞层。
     for record in plan_input.records:
         placement = plan_input.user_placements.get(record.layer_id)
         if placement is None:
@@ -172,7 +175,6 @@ def build_plan(plan_input: LayerTreePlanInput) -> tuple[LayerTreeSnapshot, Layer
             or placement in system_ids
             or placement in plan_input.user_groups
             or placement.startswith("factor.")
-            or placement in plan_input.container_orders
         )
         if not known:
             placement = effective_home_group(
@@ -210,31 +212,68 @@ def build_plan(plan_input: LayerTreePlanInput) -> tuple[LayerTreeSnapshot, Layer
     )
 
     # 4) 用户组树（嵌套）：子序 = 观察混合序（嵌套组 + 图层，键统一分配）。
+    # R1-P0：parent 指针消毒——自环/成环/未知父一律回 root（否则无限递归）；
+    # 观察序挂载只认「本组路由成员 + 已消毒的子组」，系统组内层/已删 id
+    # 一律不过滤进用户组（防双挂载 + 幽灵）。
+    member_of: dict[str, set[str]] = {}
+    for group_id, members in containers.items():
+        if group_id in plan_input.user_groups:
+            member_of[group_id] = {record.layer_id for record in members}
+    safe_parents: dict[str, str] = {}
+    for group_id, info in plan_input.user_groups.items():
+        parent = info.parent_group_id or ""
+        if parent == group_id or parent not in plan_input.user_groups:
+            # 自环 / 未知父（含系统组 id）→ root；成环由下面的访问集兜底。
+            parent = ""
+        safe_parents[group_id] = parent
     user_children_of: dict[str, list[str]] = {}
-    for group in plan_input.user_groups.values():
-        user_children_of.setdefault(group.parent_group_id, []).append(group.group_id)
+    for group_id, parent in safe_parents.items():
+        if parent != group_id:
+            user_children_of.setdefault(parent, []).append(group_id)
     for parent, children in user_children_of.items():
         children.sort(key=lambda gid: keys.get(gid, gid))
+    # 成环组（从 root 不可达）提升到 root——结构保留、可展开，不消失。
+    reachable: set[str] = set()
+    frontier = list(user_children_of.get("", []))
+    while frontier:
+        node = frontier.pop()
+        if node in reachable:
+            continue
+        reachable.add(node)
+        frontier.extend(user_children_of.get(node, []))
+    for group_id in sorted(set(safe_parents) - reachable):
+        user_children_of.setdefault("", []).append(group_id)
+        safe_parents[group_id] = ""
+    user_children_of.get("", []).sort(key=lambda gid: keys.get(gid, gid))
 
-    def make_user_group(group_id: str) -> GroupNode:
+    def make_user_group(group_id: str, _visiting: frozenset = frozenset()) -> GroupNode:
         info = plan_input.user_groups[group_id]
+        if group_id in _visiting:
+            # 成环兜底：环边不再展开（该组挂空，结构不断）。
+            return GroupNode(group_id=group_id, name=info.name or group_id,
+                             kind="user", children=(),
+                             order_key=keys.get(group_id, ""))
+        visiting = _visiting | {group_id}
         observed = plan_input.container_orders.get(group_id) or ()
+        allowed_layers = member_of.get(group_id, set())
         placed: set[str] = set()
         children: list[GroupNode | LayerRef] = []
         for node_id in observed:
             if node_id in plan_input.user_groups:
-                if node_id != group_id:
-                    children.append(make_user_group(node_id))
+                if node_id != group_id and safe_parents.get(node_id) == group_id \
+                        and node_id not in placed:
+                    children.append(make_user_group(node_id, visiting))
                     placed.add(node_id)
-            else:
-                # 观察序中的非组节点 = 图层成员。
+                # 非本组子组 / 自环 → 丢弃（不挂载，不幽灵）。
+            elif node_id in allowed_layers and node_id not in placed:
+                # 本组路由成员才挂载（系统组内层/已删 id 不进用户组）。
                 children.append(LayerRef(
                     layer_id=node_id, order_key=keys.get(node_id, "")))
                 placed.add(node_id)
         # 观察序未覆盖的成员：嵌套组（键序）+ 新图层（默认序）补齐。
         for child in user_children_of.get(group_id, []):
             if child not in placed:
-                children.append(make_user_group(child))
+                children.append(make_user_group(child, visiting))
                 placed.add(child)
         member_ids = orders.get(group_id, [])
         for layer_id in member_ids:

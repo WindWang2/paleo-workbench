@@ -133,22 +133,22 @@ class TestExpandPreservation:
 
 class TestEchoRevision:
     def test_user_tree_edit_payload_carries_revision(self, stack, qapp, monkeypatch):
+        # R4-P1：空断言修复——回声必须到达（非空），且携带递增修订号。
         canvas = stack.create_canvas()
         _upsert(stack, "e1")
+        tree = stack.create_layer_tree_view(canvas)
         events: list[str] = []
         stack.set_tree_change_callback(
-            stack.create_layer_tree_view(canvas),
-            lambda payload: events.append(payload))
+            tree, lambda payload: events.append(payload))
         r0 = stack.tree_revision()
         # 模拟用户树编辑：treeViewSetRowChecked 走用户路径
-        tree = stack.create_layer_tree_view(canvas)
         # 找到行 0 并勾选（触发 visibility 变更批次）
         stack.tree_view_set_row_checked(tree, 0, False)
         # 批次经 QTimer(0) —— qapp.processEvents 触发
         qapp.processEvents()
-        if events:
-            payload = json.loads(events[-1])
-            assert payload.get("tree_revision", 0) > r0
+        assert events, "user tree edit must flush exactly one echo batch"
+        payload = json.loads(events[-1])
+        assert payload.get("tree_revision", 0) > r0
 
 
 class TestScaleStructural:

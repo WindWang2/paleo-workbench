@@ -637,8 +637,8 @@ class CompositeEditController(QObject):
         # records dict)。session 身份入键：同一 data_revision 下的新会话 /
         # 回滚不会误用旧会话的增量基线。
         self._records_cache: dict[str, tuple[int, Any, tuple, tuple, dict]] = {}
-        # V11 发布提示：layer_id → (snapshot revision, touched fids)。
-        self._changed_hints: dict[str, tuple[int, frozenset]] = {}
+        # V11 发布提示：layer_id → (snapshot 修订, 数据修订, touched)。
+        self._changed_hints: dict[str, tuple[int, int, frozenset]] = {}
         self._persist_cache: dict[str, tuple[int, list]] = {}
         # RAW/锁定门禁（宿主注入；单点 = CompositeDocument._role_allows_editing）。
         # 所有会话起点（start_editing / ensure_layer_session / 修复）与
@@ -1187,10 +1187,15 @@ class CompositeEditController(QObject):
             f"数字化进行中：捕获目标保持为「{previous.name}」"
             "（编辑目标与会话锁定直至手势完成）")
 
-    def snapshot_changed_hints(self) -> dict[str, set[str]]:
-        """最近一次 settle 的逐层 touched fids（发布差分提示；副本）。"""
-        return {layer_id: set(fids)
-                for layer_id, (_, fids) in self._changed_hints.items()}
+    def snapshot_changed_hints(self) -> dict[str, tuple[int, int, set[str]]]:
+        """最近一次 settle 的逐层提示（snapshot 修订, 数据修订, touched）。
+
+        R3-P0：发布侧必须校验 (snapshot revision, data_revision) 与待发
+        布记录一致——任一不一致 → 提示作废（全量比较），绝不部分信任。
+        """
+        return {layer_id: (snap_rev, data_rev, set(fids))
+                for layer_id, (snap_rev, data_rev, fids)
+                in self._changed_hints.items()}
 
     @property
     def last_switch_block_reason(self) -> tuple[str, str] | None:
@@ -1603,14 +1608,24 @@ class CompositeEditController(QObject):
             session = layer.edit_session
             if session is None:
                 continue
-            # 角色门禁复查（V6 B-P0-1）：历史旁路开启的 RAW 会话绝不提交；
-            # 会话保持打开（可回滚），原因进 blocked。
-            allowed, gate_reason = self.can_edit_layer(layer.id)
+            # R3-P1：门禁判定异常同样进 blocked（不抛——调用方期望 tuple；
+            # 会话保持打开 + 可诊断，不走崩溃路径）。
+            try:
+                allowed, gate_reason = self.can_edit_layer(layer.id)
+            except Exception as exc:
+                blocked.append(
+                    f"图层「{layer.name}」门禁判定异常（该图层编辑未提交）: {exc}")
+                continue
             if not allowed:
                 blocked.append(f"图层「{layer.name}」{gate_reason}（该图层编辑未提交）")
                 continue
             if self._topology.enabled:
-                issues = self._topology.validate([layer])
+                try:
+                    issues = self._topology.validate([layer])
+                except Exception as exc:
+                    blocked.append(
+                        f"图层「{layer.name}」拓扑校验异常（该图层编辑未提交）: {exc}")
+                    continue
                 self._topology.record_validation(layer, len(issues))
                 if issues:
                     first = issues[0]
@@ -1624,20 +1639,28 @@ class CompositeEditController(QObject):
             # 阶段 1 未全过 → Python 会话全体保持打开，一个都不提交。
             # 原生会话若已提交，计入 committed（无法撤回那一拍）。
             return committed, blocked
+        committed_ids: list[str] = []
         for index, (layer, session) in enumerate(pending):
             try:
                 session.commit_changes()
             except Exception:
-                # 提交中途失败 → 剩余（含本层，未提交成功）整体回滚。
+                # R3-P1（诚实语义）：阶段 2 中途失败无法真正全或无（已提交
+                # 无法撤回）——已提交保留 + 剩余回滚 + blocked 明确区分两者，
+                # 不再谎称「全或无」。调用方据 blocked 提示用户核对。
                 for remaining_layer, remaining_session in pending[index:]:
                     try:
                         remaining_session.rollback_changes()
                     except Exception:
                         pass
                     blocked.append(
-                        f"图层「{remaining_layer.name}」提交失败已回滚（全或无保存）")
+                        f"图层「{remaining_layer.name}」提交失败已回滚")
+                if committed_ids:
+                    blocked.append(
+                        "已提交图层（保留，未回滚）: "
+                        + "、".join(f"「{lid}」" for lid in committed_ids))
                 break
             committed += 1
+            committed_ids.append(layer.id)
             self.content_changed.emit(layer.id)
         if committed:
             # V8 M3：被提交会话的复合组作废（撤销历史随会话终结消失）。
@@ -2900,15 +2923,23 @@ class CompositeEditController(QObject):
                 features = tuple(records.values())
                 self._records_cache[layer_id] = (revision, session, features, extent, records)
                 # V11（O(changed) 发布）：本修订触及的 fids（journal 展开；
-                # 无会话 = 基线全量，无提示）。
+                # 无会话 = 基线全量，无提示）。R3-P0：提示绑定 (snapshot
+                # revision, data_revision)——发布侧校验一致才信任。
                 if session is not None:
                     touched: set[str] = set()
+                    journal_ok = False
                     if base_revision is not None:
                         entries = session.changes_since(base_revision)
                         if entries is not None:
+                            journal_ok = True
                             for ids in entries:
                                 touched.update(ids)
-                    self._changed_hints[layer_id] = (revision, frozenset(touched))
+                    if journal_ok:
+                        self._changed_hints[layer_id] = (
+                            revision, layer.data_revision, frozenset(touched))
+                    else:
+                        # journal 不可恢复（trim/rollback）→ 无提示（全量比较）。
+                        self._changed_hints.pop(layer_id, None)
                 else:
                     self._changed_hints.pop(layer_id, None)
             previous = display.get(layer_id)

@@ -49,7 +49,12 @@ def _extent_fits_crs(crs: str, extent) -> bool:
 def _qgis_crs_for_layer(layer, snapshot, *, on_drop=None) -> str:
     auth = _normalize_auth_id(
         getattr(layer, "crs", "") or getattr(snapshot, "project_crs", "") or "")
-    if auth and not _extent_fits_crs(auth, getattr(layer, "extent", None)):
+    extent = getattr(layer, "extent", None)
+    if auth and _geographic_auth(auth) and (not extent or len(extent) < 4):
+        # R5（CRS review）：extent 缺失时回退到要素包围盒——空 extent 不得
+        # 直接放行地理 CRS（本地坐标层 + 地理工程 CRS 的污染形态）。
+        extent = _feature_extent_of_records(getattr(layer, "features", None) or ())
+    if auth and not _extent_fits_crs(auth, extent):
         # V9 W3: a dropped CRS is a degraded mirror state, not a silent one.
         if on_drop is not None:
             on_drop(
@@ -58,6 +63,27 @@ def _qgis_crs_for_layer(layer, snapshot, *, on_drop=None) -> str:
             )
         return ""
     return auth
+
+
+def _feature_extent_of_records(features) -> tuple | None:
+    """发布记录流的包围盒（extent 缺失时的 CRS 域校验回退）。"""
+    try:
+        from paleo_workbench.mapping_workspace.crs_gate import feature_bounds
+
+        def _coords():
+            stack = [f.get("geometry", {}).get("coordinates")
+                     if isinstance(f, dict) else None for f in features]
+            while stack:
+                item = stack.pop()
+                if isinstance(item, (list, tuple)):
+                    if item and all(isinstance(v, (int, float)) for v in item):
+                        yield item
+                    else:
+                        stack.extend(item)
+
+        return feature_bounds(_coords())
+    except Exception:
+        return None
 
 
 def _qgis_crs_for_snapshot(snapshot, *, on_drop=None) -> str:
@@ -584,9 +610,11 @@ def mirror_snapshot_to_stack(
 
     Returns ``(mirrored_qgis_ids, seen_doc_ids, failures)``.
 
-    ``changed_hints``（V11）：``layer_id → touched feature ids``——宿主
-    从编辑会话 journal 提取；命中时差分只重签提示集内的要素（O(touched)），
-    其余复用台账旧签。None = 无提示，回落全量签名比较（正确性不变）。
+    ``changed_hints``（V11）：``layer_id → (snapshot 修订, 数据修订,
+    touched fids)``——宿主从编辑会话 journal 提取。双修订一致才信任
+    （任一不一致 → 该层全量比较）；命中时差分只重签提示集内要素
+    （O(touched)），其余复用台账旧签。None = 无提示，回落全量比较。
+    R3-P0：部分信任不存在——提示要么整体有效，要么整体作废。
 
     #1164: failures are collected and surfaced to the host instead of being
     swallowed — a dropped layer or a failed remove/order/refresh previously
@@ -685,9 +713,11 @@ def mirror_snapshot_to_stack(
                             _sink(layer.id, "empty raster source payload")
                             continue
                     # V11 raster ledger：数据修订 + 样式签 + 显隐 + 透明度 +
-                    # 名称全未动 → 零桥调用（此前每次发布都重调 upsert，
-                    # C++ 侧虽有 style-only 快道，Python↔C++ 调用本身仍是
-                    # N 次/发布；style-only 变化仍下推，由桥走 renderer 通道）。
+                    # 名称 + 源路径 + CRS 全未动 → 零桥调用（此前每次发布都
+                    # 重调 upsert，C++ 侧虽有 style-only 快道，Python↔C++ 调用
+                    # 本身仍是 N 次/发布；style-only 变化仍下推，由桥走
+                    # renderer 通道）。R3-P1：CRS 入 token（发布用 CRS 变
+                    # 更必须下推，否则镜像 CRS 永久过期）。
                     raster_entry = _RASTER_LEDGER.get(
                         _ledger_key(stack, layer.id))
                     try:
@@ -704,6 +734,7 @@ def mirror_snapshot_to_stack(
                         float(layer.opacity),
                         str(layer.name or layer.id),
                         str(payload.get("source_path") or ""),
+                        str(layer.crs or snapshot.project_crs or ""),
                     )
                     if (raster_entry is not None
                             and raster_entry.tokens == raster_live):
@@ -857,11 +888,17 @@ def mirror_snapshot_to_stack(
 
             delta_json = ""
             # V11：本次发布确认的新签（fid → signature）——发布成功后直接
-            # 进缓存。changed_hints（宿主 session journal 的 touched fids）
-            # 命中时，未提示的要素免签（旧签即新签）；无提示时回落全量比较。
+            # 进缓存。changed_hints 命中（双修订一致）时，未提示要素免签
+            # （旧签即新签）；任一不一致/无提示 → 全量比较。
             fresh_signatures: dict[str, tuple] = {}
-            layer_hints = (changed_hints.get(str(layer.id))
-                           if changed_hints else None)
+            layer_hints: set[str] | None = None
+            if changed_hints:
+                hint = changed_hints.get(str(layer.id))
+                if (isinstance(hint, (tuple, list)) and len(hint) == 3
+                        and hint[1] == int(layer_revision)):
+                    layer_hints = set(hint[2])
+                # 数据修订不一致/格式非法 → hints 作废（全量比较，不抛）。
+                # 快照修订（hint[0]）宿主侧自洽，发布侧以数据修订为准。
             if (entry is not None and entry.data_revision != layer_revision
                     and _stack_supports_delta(stack) and features):
                 changed: list | None = []
@@ -1019,12 +1056,21 @@ def mirror_snapshot_to_stack(
                 _verify_published_style(stack, layer.id, renderer_xml, _sink)
         # v7 §9: ledger follows the mirror registry — entries for layers no
         # longer published are dropped so a re-added layer ships fully.
+        # R3-P1：三表同剪（签名缓存 + raster 台账与主台账同命运——否则重加
+        # 同 token 栅格会复活已删除的 qgis_id）。
         keep_keys = {_ledger_key(stack, doc_id) for doc_id in seen} | {
             _ledger_key(stack, layer.id) for layer in snapshot.layers
             if layer.layer_type == "raster_source"}
         for stale_key in [key for key in _MIRROR_LEDGER
                           if key[0] == id(stack) and key not in keep_keys]:
             del _MIRROR_LEDGER[stale_key]
+        for stale_key in [key for key in _SIGNATURE_CACHE
+                          if key[0] == id(stack)
+                          and (key[0], key[1]) not in keep_keys]:
+            del _SIGNATURE_CACHE[stale_key]
+        for stale_key in [key for key in _RASTER_LEDGER
+                          if key[0] == id(stack) and key not in keep_keys]:
+            del _RASTER_LEDGER[stale_key]
         if _SCALAR_DATA_CACHE is not None:
             _SCALAR_DATA_CACHE.retain_layer_ids({
                 layer.id for layer in snapshot.layers

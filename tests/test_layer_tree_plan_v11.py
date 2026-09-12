@@ -258,3 +258,56 @@ class TestSystemGroupKeyStability:
         expected = [t.group_id for t in SYSTEM_GROUP_TEMPLATES
                     if t.stage_visible(MappingStage.INTEGRATED_COMPILATION)]
         assert group_ids == expected
+
+
+class TestReviewHardening:
+    """R1 review 回归：幽灵容器/自环/未过滤挂载不再丢层或递归。"""
+
+    def test_ghost_container_does_not_swallow_layers(self):
+        records = _records(("l1", LayerRole.INITIAL_FACIES_DRAFT, "phase1"))
+        snap, _ = build_plan(LayerTreePlanInput(
+            records=records, stage=MappingStage.FACIES_CALIBRATION,
+            user_placements={"l1": "typo-group"},
+            container_orders={"typo-group": ["l1"]}))
+        # 幽灵容器不创建无挂载容器 → l1 回 home 组
+        assert "typo-group" not in snap.group_ids()
+        parent = snap.find_layer_parent("l1")
+        assert parent is not None and parent.group_id == "phase1.interpretation"
+
+    def test_self_parent_group_mounts_at_root(self):
+        users = {"user.x": PlanUserGroup("user.x", "X", "user.x")}
+        snap, _ = build_plan(LayerTreePlanInput(
+            records=(), stage=MappingStage.FACIES_CALIBRATION,
+            user_groups=users))
+        group = snap.find_group("user.x")
+        assert group is not None  # 自环不递归
+        root_ids = [getattr(c, "group_id", "") for c in snap.children]
+        assert "user.x" in root_ids  # 回 root
+
+    def test_two_cycle_groups_do_not_recurse(self):
+        users = {
+            "user.a": PlanUserGroup("user.a", "A", "user.b"),
+            "user.b": PlanUserGroup("user.b", "B", "user.a"),
+        }
+        snap, _ = build_plan(LayerTreePlanInput(
+            records=(), stage=MappingStage.FACIES_CALIBRATION,
+            user_groups=users))  # 不抛 RecursionError
+        assert snap.find_group("user.a") is not None
+        assert snap.find_group("user.b") is not None
+
+    def test_observed_foreign_layer_not_mounted_in_user_group(self):
+        records = _records(
+            ("sys1", LayerRole.FACIES_BOUNDARY, "phase2"),
+            ("u1", LayerRole.USER_GENERAL, "phase1"),
+        )
+        snap, _ = build_plan(LayerTreePlanInput(
+            records=records, stage=MappingStage.CONSTRAINT_FACTOR,
+            user_placements={"u1": "user.g"},
+            user_groups={"user.g": PlanUserGroup("user.g", "G", "")},
+            container_orders={"user.g": ["sys1", "u1"]}))
+        group = snap.find_group("user.g")
+        ids = [c.layer_id for c in group.children if hasattr(c, "layer_id")]
+        assert ids == ["u1"]  # 系统组内层不被用户组观察序劫持
+        # sys1 仍在其 home 组（无双挂载）
+        home = snap.find_layer_parent("sys1")
+        assert home is not None and home.group_id == "phase2.constraints"

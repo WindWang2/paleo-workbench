@@ -131,7 +131,12 @@ def key_after(a: str) -> str:
 
 
 def key_before(b: str) -> str:
-    """小于 ``b`` 的近邻键（用于无下界插入；紧邻时抛耗尽）。"""
+    """小于 ``b`` 的近邻键（用于无下界插入；紧邻时抛耗尽）。
+
+    R1-P2 说明：调用方（_flush_pending）在相邻对上收到 KeySpaceExhausted
+    时整表重排——这是设计内路径（assign_keys_for_order 捕获并
+    rebalanced_keys），不是缺陷。
+    """
     if not b:
         raise ValueError("key_before requires a non-empty upper bound")
     return _str_below(b)
@@ -179,10 +184,13 @@ def assign_keys_for_order(
     if not ids:
         return {}
     prior = existing or {}
-    if not any(prior.get(node_id) for node_id in ids):
+    # R1-P2：None 值显式按无键处理（str(None)="None" 会注入非法键）。
+    clean = {node_id: key for node_id, key in prior.items()
+             if isinstance(key, str) and key}
+    if not any(clean.get(node_id) for node_id in ids):
         # 全新容器：直接定宽默认键（键长 O(1)，而非中点链线性增长）。
         return rebalanced_keys(ids)
-    present = [str(prior.get(node_id, "")) for node_id in ids]
+    present = [clean.get(node_id, "") for node_id in ids]
     keyed_positions = [j for j, k in enumerate(present) if k]
     keep = (
         _longest_increasing_indices([present[j] for j in keyed_positions])
@@ -279,15 +287,15 @@ ROLE_BANDS: dict[str, int] = {
     "paleo_shoreline": 83,
     "interpolation_boundary": 84,
     "mask_boundary": 85,
-    # 090 factor 矢量（井点/分级区）
+    # 090–100 factor 管道序（R1-P1：与 FACTOR_CHILD_ORDER 同序——
+    # input→grid→contour→classification→uncertainty→QC；渲染堆叠 =
+    # 管道下游在上，与 factor 组内科学序一致）。
     "factor_input": 90,
-    "factor_classification": 92,
-    # 100 factor 等值线
-    "factor_contour": 100,
-    # 110 factor 栅格
-    "factor_grid": 110,
-    "factor_uncertainty": 112,
-    "factor_qc": 114,
+    "factor_grid": 92,
+    "factor_contour": 94,
+    "factor_classification": 96,
+    "factor_uncertainty": 98,
+    "factor_qc": 100,
     # 120 预测层
     "well_facies_prediction": 120,
     "well_facies_confidence": 122,
