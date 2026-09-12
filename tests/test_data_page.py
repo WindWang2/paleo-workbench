@@ -1876,7 +1876,9 @@ def test_file_leaf_filters_grid_and_selects_asset(qtbot):
     tree = page.navigation_tree
     tree.set_project(doc)
     well_item = tree._well_group_item.child(0)
-    leaf = well_item.child(0)
+    # V11: file leaves live under their role group (井身/井位 …)
+    role_group = well_item.child(0)
+    leaf = role_group.child(0)
     tree.setCurrentItem(leaf)
     QApplication.processEvents()
 

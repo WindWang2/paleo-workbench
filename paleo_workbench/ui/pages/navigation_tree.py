@@ -101,6 +101,8 @@ class NavigationTree(QTreeWidget):
     manage_tags_requested = Signal()
     # Right-click on one concrete WorkArea/reference well row.
     delete_well_requested = Signal(str)  # canonical Well.id
+    # V11: double-click on an entity row (well/survey) → per-entity data view.
+    entity_activated = Signal(str)  # entity id
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -129,6 +131,7 @@ class NavigationTree(QTreeWidget):
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.currentItemChanged.connect(self._on_current_changed)
         self.itemClicked.connect(self._on_item_clicked)
+        self.itemActivated.connect(self._on_item_activated)
         self._build_tree()
         # follow theme switches instead of baking a light-only sheet (#1047)
         from paleo_workbench.ui.theme import theme_manager
@@ -493,31 +496,70 @@ class NavigationTree(QTreeWidget):
             child.setData(0, Qt.ItemDataRole.UserRole + 1, f"entity:{entity.id}")
             child.setToolTip(0, getattr(entity, "uwi", "") or entity.name)
             if well_links:
-                # 下一层：该井的具体数据文件（可折叠，点击过滤到单个资产）
-                file_links = sorted(
-                    well_links.get(entity.id, []),
-                    key=lambda link: (self._asset_label(link.asset_id), link.asset_id),
+                # V11 role grouping: per-well files group under their link
+                # role (测井曲线/井斜/分层/时深…) — a well is a data role
+                # matrix, not a flat file list. Unknown roles get a live
+                # synthetic group; nothing is dropped.
+                from paleo_workbench.project.roles import (
+                    role_definition,
+                    roles_for_entity_type,
                 )
-                for link in file_links[:MAX_WELL_FILE_CHILDREN]:
-                    label = self._asset_label(link.asset_id)
-                    file_child = QTreeWidgetItem(child, [f"▤ {label}"])
-                    file_child.setData(
-                        0,
-                        Qt.ItemDataRole.UserRole,
-                        FilterQuery(
-                            node_type=ENTITY_NODE,
-                            node_value=entity.id,
-                            asset_id=link.asset_id,
+
+                role_order = {
+                    r: i for i, r in enumerate(roles_for_entity_type("well"))
+                }
+                by_role: dict[str, list] = {}
+                for link in well_links.get(entity.id, []):
+                    by_role.setdefault(link.role or "other", []).append(link)
+                ordered_roles = sorted(
+                    by_role,
+                    key=lambda r: (role_order.get(r, len(role_order)), r),
+                )
+                rendered = 0
+                total_files = sum(len(v) for v in by_role.values())
+                for role in ordered_roles:
+                    remaining = MAX_WELL_FILE_CHILDREN - rendered
+                    if remaining <= 0:
+                        break
+                    links = sorted(
+                        by_role[role],
+                        key=lambda link: (
+                            self._asset_label(link.asset_id), link.asset_id
                         ),
+                    )[:remaining]
+                    display = role_definition(role).display or role
+                    role_child = QTreeWidgetItem(
+                        child, [f"◧ {display} ({len(by_role[role])})"]
                     )
-                    file_child.setData(
-                        0, Qt.ItemDataRole.UserRole + 1, f"asset:{link.asset_id}"
+                    role_child.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole + 1,
+                        f"role:{entity.id}:{role}",
                     )
-                    file_child.setToolTip(0, label)
-                if len(file_links) > MAX_WELL_FILE_CHILDREN:
+                    role_child.setFlags(
+                        role_child.flags() & ~Qt.ItemFlag.ItemIsSelectable
+                    )
+                    for link in links:
+                        label = self._asset_label(link.asset_id)
+                        file_child = QTreeWidgetItem(role_child, [f"▤ {label}"])
+                        file_child.setData(
+                            0,
+                            Qt.ItemDataRole.UserRole,
+                            FilterQuery(
+                                node_type=ENTITY_NODE,
+                                node_value=entity.id,
+                                asset_id=link.asset_id,
+                            ),
+                        )
+                        file_child.setData(
+                            0, Qt.ItemDataRole.UserRole + 1, f"asset:{link.asset_id}"
+                        )
+                        file_child.setToolTip(0, label)
+                        rendered += 1
+                if rendered < total_files:
                     overflow = QTreeWidgetItem(
                         child,
-                        [f"…另有 {len(file_links) - MAX_WELL_FILE_CHILDREN} 个文件"],
+                        [f"…另有 {total_files - rendered} 个文件"],
                     )
                     overflow.setFlags(
                         overflow.flags() & ~Qt.ItemFlag.ItemIsSelectable
@@ -552,6 +594,16 @@ class NavigationTree(QTreeWidget):
         group_key = item.data(0, _ROLE_SHOW_MORE)
         if group_key is not None:
             self._activate_next_entity_page(str(group_key))
+
+    def _on_item_activated(self, item: QTreeWidgetItem, _column: int) -> None:
+        """Double-click/activation on an ENTITY row opens its data view."""
+        query = item.data(0, Qt.ItemDataRole.UserRole)
+        if (
+            query is not None
+            and getattr(query, "node_type", "") == ENTITY_NODE
+            and not getattr(query, "asset_id", None)
+        ):
+            self.entity_activated.emit(str(query.node_value))
 
     def _materialize_entity_page_for(self, group_key: str, entity_id: str) -> None:
         """Render pages until *entity_id* is materialized (Map → Data)."""

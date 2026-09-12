@@ -217,10 +217,24 @@ _GEOLOGICAL_ROLE_DEFS: tuple[RoleDefinition, ...] = (
     ),
 )
 
-ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
-    definition.role: definition
+# Definitions keyed by (entity_type, role) — role names deliberately repeat
+# across entity types (tops for wells AND geological entities, horizon for
+# surveys AND geological entities…), so the authoritative index is scoped.
+ROLE_DEFINITIONS_BY_TYPE: dict[tuple[str, str], RoleDefinition] = {
+    (definition.entity_types[0], definition.role): definition
     for definition in (*_WELL_ROLE_DEFS, *_SURVEY_ROLE_DEFS, *_GEOLOGICAL_ROLE_DEFS)
+    if definition.entity_types
 }
+
+# Bare-role lookup index: FIRST definition seen for a role wins, with the
+# well vocabulary first in the build order (the most common lookup surface).
+ROLE_DEFINITIONS: dict[str, RoleDefinition] = {}
+for _definition in (
+    *_WELL_ROLE_DEFS,
+    *_SURVEY_ROLE_DEFS,
+    *_GEOLOGICAL_ROLE_DEFS,
+):
+    ROLE_DEFINITIONS.setdefault(_definition.role, _definition)
 
 # Historical tuples, derived and order-preserving ("other" last).
 WELL_ROLES: tuple[str, ...] = tuple(d.role for d in _WELL_ROLE_DEFS)
@@ -236,12 +250,21 @@ FALLBACK_ROLE_DEFINITION = RoleDefinition(
 )
 
 
-def role_definition(role: str) -> RoleDefinition:
+def role_definition(role: str, entity_type: str = "") -> RoleDefinition:
     """The definition for *role*; unknown roles get the permissive fallback.
 
-    Unknown never raises: the registry is guidance, not an admission gate.
+    ``entity_type`` (optional) selects the per-entity definition when the
+    role name repeats across vocabularies (e.g. ``tops`` exists for wells
+    and geological entities); without it the well-vocabulary definition
+    wins (first in build order). Unknown never raises: the registry is
+    guidance, not an admission gate.
     """
-    return ROLE_DEFINITIONS.get(str(role or ""), FALLBACK_ROLE_DEFINITION)
+    role = str(role or "")
+    if entity_type:
+        scoped = ROLE_DEFINITIONS_BY_TYPE.get((str(entity_type), role))
+        if scoped is not None:
+            return scoped
+    return ROLE_DEFINITIONS.get(role, FALLBACK_ROLE_DEFINITION)
 
 
 def known_role(role: str) -> bool:

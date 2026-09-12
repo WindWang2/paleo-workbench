@@ -162,11 +162,16 @@ def test_well_node_expands_to_file_leaves(qtbot):
     assert group is not None
     well_item = group.child(0)
     assert well_item is not None
-    assert well_item.childCount() == 2
+    # V11: 井下文件按角色分组（两个链接都是 well_head → 一个角色组）
+    assert well_item.childCount() == 1
+    role_group = well_item.child(0)
+    assert role_group.text(0).startswith("◧ 井身/井位 (2)")
 
-    leaf_texts = sorted(well_item.child(i).text(0) for i in range(2))
+    leaf_texts = sorted(
+        role_group.child(i).text(0) for i in range(role_group.childCount())
+    )
     assert leaf_texts == ["▤ A1.las", "▤ A1_head.dat"]
-    leaf = well_item.child(0)
+    leaf = role_group.child(0)
     query = leaf.data(0, Qt.ItemDataRole.UserRole)
     assert query is not None
     assert query.node_type == ENTITY_NODE
@@ -189,7 +194,11 @@ def test_well_file_leaf_falls_back_to_asset_id(qtbot):
     group = tree._well_group_item
     well_item = group.child(0)
     assert well_item is not None
-    texts = [well_item.child(i).text(0) for i in range(well_item.childCount())]
+    # V11: 文件叶在角色组下；无 provider 时显示原始 asset_id
+    role_group = well_item.child(0)
+    texts = [
+        role_group.child(i).text(0) for i in range(role_group.childCount())
+    ]
     assert any("asset_las" in text for text in texts)
 
 
@@ -214,9 +223,21 @@ def test_well_file_leaves_capped(qtbot):
 
     group = tree._well_group_item
     well_item = group.child(0)
-    #  capped leaves + 1 overflow row
-    assert well_item.childCount() == MAX_WELL_FILE_CHILDREN + 1
-    overflow = well_item.child(MAX_WELL_FILE_CHILDREN)
+    # V11: capped leaves live under role groups; the overflow row stays a
+    # direct child of the well node (after the role groups).
+    file_leaves = []
+    overflow = None
+    for role_index in range(well_item.childCount()):
+        node = well_item.child(role_index)
+        if node.data(0, Qt.ItemDataRole.UserRole + 1) is None and not node.text(0).startswith("◧"):
+            overflow = node
+            continue
+        if node.text(0).startswith("◧"):
+            file_leaves.extend(
+                node.child(i) for i in range(node.childCount())
+            )
+    assert len(file_leaves) == MAX_WELL_FILE_CHILDREN
+    assert overflow is not None
     assert "另有" in overflow.text(0)
     assert not (overflow.flags() & Qt.ItemFlag.ItemIsSelectable)
 

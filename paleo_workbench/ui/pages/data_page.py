@@ -462,6 +462,8 @@ class DataPage(QWidget):
         self.data_toolbar.tag_manager_requested.connect(self._open_tag_manager)
         self.navigation_tree.manage_tags_requested.connect(self._open_tag_manager)
         self.navigation_tree.delete_well_requested.connect(self.delete_well)
+        # V11: double-click on a well/survey row → per-entity data view.
+        self.navigation_tree.entity_activated.connect(self.open_entity_detail)
         self._sync_toolbar_toggle_state()
 
         # Wire inspector panel interactive signals
@@ -2222,6 +2224,49 @@ class DataPage(QWidget):
     def _catalog_service(self):
         """The active Core DataCatalogService, or None (no project catalog)."""
         return self._lifecycle.catalog_service()
+
+    def open_entity_detail(self, entity_id: str) -> None:
+        """V11 entity data view: assemble the per-well/per-survey view.
+
+        The view is assembled synchronously from the read facade — the cost
+        is bounded by ONE entity's links plus batched point lookups (never a
+        catalog full materialization), so the GUI thread stays responsive
+        even at 100k assets. Non-well/survey ids fall back to the table.
+        """
+        service = self._catalog_service()
+        if service is None:
+            return
+        well = next(
+            (w for w in self.project.wells if w.id == entity_id), None
+        )
+        if well is not None:
+            from paleo_workbench.catalog.entity_views import EntityViewService
+
+            view = EntityViewService(service, self.project).well_view(
+                entity_id, with_stale=True
+            )
+            if view is not None:
+                self.workspace.well_detail_panel.set_view(view)
+                self.workspace.show_well_detail(True)
+                return
+        survey = next(
+            (s for s in self.project.seismic_surveys if s.id == entity_id), None
+        )
+        if survey is not None:
+            from paleo_workbench.catalog.entity_views import EntityViewService
+
+            view = EntityViewService(service, self.project).survey_view(
+                entity_id, with_stale=True
+            )
+            if view is not None:
+                self.workspace.well_detail_panel.set_view(view)
+                self.workspace.show_well_detail(True)
+                return
+        self.workspace.show_well_detail(False)
+
+    def close_entity_detail(self) -> None:
+        """Return the center column to the asset table."""
+        self.workspace.show_well_detail(False)
 
     def _catalog_bridge(self, resource: object):
         """Resolve a legacy ResourceItem to ``(service, DataVersionRef)``.
