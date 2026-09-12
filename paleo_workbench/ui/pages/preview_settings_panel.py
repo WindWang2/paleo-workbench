@@ -15,11 +15,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.pages.preview_settings import (
     PreviewSettings,
     PreviewSettingsStore,
 )
+
+
+def _panel_qss() -> str:
+    pal = style.palette()
+    return (
+        f"QFrame#PreviewSettingsPanel {{ background: {pal['BG_SIDEBAR']};"
+        f" border: 1px solid {pal['BORDER']}; border-radius: {tokens.RADIUS_CARD}px; }}"
+    )
+
+
+def _title_qss() -> str:
+    return f"color: {style.palette()['TEXT_PRIMARY']}; font-weight: 600;"
 
 
 _MODE_CATEGORY = {
@@ -52,10 +64,7 @@ class PreviewSettingsPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("PreviewSettingsPanel")
         self._store = store or PreviewSettingsStore()
-        self.setStyleSheet(
-            f"QFrame#PreviewSettingsPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER}; border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
+        style.bind(self, _panel_qss)  # E1: theme-switch re-render
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
@@ -63,7 +72,7 @@ class PreviewSettingsPanel(QFrame):
 
         heading = QHBoxLayout()
         title = QLabel("预览内容设置")
-        title.setStyleSheet(f"color: {tokens.TEXT_PRIMARY}; font-weight: 600;")
+        style.bind(title, _title_qss)
         heading.addWidget(title)
         heading.addStretch()
         self.category_combo = QComboBox()

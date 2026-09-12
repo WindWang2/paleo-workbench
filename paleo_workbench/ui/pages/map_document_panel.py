@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
 
 from paleo_workbench.ui import style, tokens
+from paleo_workbench.ui.modelview.reconcile import reconcile_widget_items
 from paleo_workbench.viz.mapping_helpers import active_map_document, field_value
 
 
@@ -77,6 +78,8 @@ class MapDocumentPanel(QFrame):
         self.document_list = QListWidget()
         style.bind(self.document_list, _list_qss)
         layout.addWidget(self.document_list, 1)
+        # reconcile 回调按键回查文档对象（update_state 每次刷新）。
+        self._documents: list = []
 
     def _add_value(self, layout: QVBoxLayout, label_text: str, value_text: str) -> QLabel:
         label = QLabel(label_text)
@@ -89,6 +92,7 @@ class MapDocumentPanel(QFrame):
 
     def update_state(self, map_documents: list | tuple | None) -> None:
         documents = list(map_documents or [])
+        self._documents = documents
         document = active_map_document(documents)
         name = field_value(document, "name", "") or "未选择古地理图"
         horizon = field_value(document, "linked_target_horizon", "") or "未设置"
@@ -100,8 +104,29 @@ class MapDocumentPanel(QFrame):
         self.polygon_count_value.setText(f"{len(polygons)} 个相带")
         self.well_count_value.setText(f"{len(wells)} 口井")
 
-        self.document_list.clear()
-        for item in documents:
-            item_name = field_value(item, "name", "") or "未命名图件"
-            item_horizon = field_value(item, "linked_target_horizon", "") or "未设置"
-            self.document_list.addItem(f"{item_name} · {item_horizon}")
+        # V11 D2 ⑮：clear+rebuild → 键差分（键 = 图档 id）——项身份/选中/
+        # 滚动位置在状态刷新间保持，标签原地更新。
+        reconcile_widget_items(
+            self.document_list,
+            [self._document_key(item) for item in documents],
+            make_item=lambda _key: QListWidgetItem(""),
+            update_item=self._update_document_list_item,
+        )
+
+    @staticmethod
+    def _document_key(item) -> str:
+        doc_id = str(field_value(item, "id", "") or "")
+        return doc_id if doc_id else f"doc@{id(item)}"
+
+    def _update_document_list_item(self, list_item: QListWidgetItem, key: str) -> None:
+        source = next(
+            (item for item in self._documents if self._document_key(item) == key),
+            None,
+        )
+        if source is None:
+            return
+        item_name = field_value(source, "name", "") or "未命名图件"
+        item_horizon = field_value(source, "linked_target_horizon", "") or "未设置"
+        label = f"{item_name} · {item_horizon}"
+        if list_item.text() != label:
+            list_item.setText(label)

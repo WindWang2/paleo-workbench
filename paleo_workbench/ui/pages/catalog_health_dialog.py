@@ -5,7 +5,14 @@ audit_catalog`): entity statistics, issue counts per severity, and the issue
 list. 快速检查 (structural + payload existence) runs on a worker thread; 深度检查
 additionally re-hashes every managed payload. The catalog is NEVER mutated by
 an audit — findings are reported for the user to act on.
+
+V11 Model/View 迁移（goal §8 / 01-ui-audit D2）：问题表改
+``QTableView + ObjectTableModel``（此前 setRowCount+setItem 逐格重建），
+页内手写表格 QSS 移除（统一走全局 QSS + :func:`bind_table_defaults`）；
+级别着色经 ``ColumnSpec.foreground_role`` 返回 token 名（高→ERROR_RED、
+中→WARNING），无问题时表上覆盖统一空态。
 """
+
 from __future__ import annotations
 
 import threading
@@ -16,17 +23,22 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QProgressBar,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
 )
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.components.states import PwbEmptyState, PwbLoadingState
+from paleo_workbench.ui.modelview import (
+    ColumnSpec,
+    ObjectTableModel,
+    bind_table_defaults,
+)
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 
 _SEVERITY_LABELS = {"high": "高", "medium": "中", "low": "低"}
+_SEVERITY_TOKENS = {"high": "ERROR_RED", "medium": "WARNING"}
 
 
 class _AuditWorker(QObject):
@@ -44,6 +56,35 @@ class _AuditWorker(QObject):
             self.failed.emit(f"{exc.__class__.__name__}: {exc}")
             return
         self.finished.emit(report)
+
+
+class _IssueCellProxy:
+    """Test-facing cell handle: ``item(row, col).text()`` without QTableWidgetItem."""
+
+    def __init__(self, model, row: int, column: int) -> None:
+        self._model = model
+        self._row = row
+        self._column = column
+
+    def text(self) -> str:
+        value = self._model.data(self._model.index(self._row, self._column))
+        return "" if value is None else str(value)
+
+
+class _IssueTableView(QTableView):
+    """QTableView + QTableWidget 兼容访问器（差分测试沿用 widget 式断言）。"""
+
+    def rowCount(self) -> int:  # noqa: N802
+        model = self.model()
+        return 0 if model is None else model.rowCount()
+
+    def item(self, row: int, column: int):
+        model = self.model()
+        if model is None:
+            return None
+        if row < 0 or column < 0 or row >= model.rowCount() or column >= model.columnCount():
+            return None
+        return _IssueCellProxy(model, row, column)
 
 
 class CatalogHealthDialog(QDialog):
@@ -66,23 +107,46 @@ class CatalogHealthDialog(QDialog):
 
         self.summary_label = QLabel("尚未运行检查")
         self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {tokens.TEXT_PRIMARY};"
-        )
+        self.summary_label.setObjectName("WorkstationPanelTitle")
         layout.addWidget(self.summary_label)
 
-        self.issues_table = QTableWidget(0, 4)
-        self.issues_table.setHorizontalHeaderLabels(["级别", "类型", "对象", "详情"])
+        self._model = ObjectTableModel(
+            columns=[
+                ColumnSpec(
+                    "severity",
+                    "级别",
+                    lambda pair: (
+                        f"{_SEVERITY_LABELS.get(pair[1].severity, pair[1].severity)}"
+                        f" ({pair[1].severity})"
+                    ),
+                    foreground_role=lambda pair: _SEVERITY_TOKENS.get(pair[1].severity),
+                ),
+                ColumnSpec("kind", "类型", lambda pair: pair[1].kind),
+                ColumnSpec("ref", "对象", lambda pair: pair[1].ref_id),
+                ColumnSpec("detail", "详情", lambda pair: pair[1].detail),
+            ],
+            key_of=lambda pair: pair[0],
+            parent=self,
+        )
+        self.issues_table = _IssueTableView()
+        self.issues_table.setModel(self._model)
+        bind_table_defaults(self.issues_table)
         self.issues_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
-        self.issues_table.verticalHeader().setVisible(False)
-        self.issues_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.issues_table.setAlternatingRowColors(True)
         layout.addWidget(self.issues_table, 1)
 
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
+        # 无问题时的统一空态（覆盖在表上，词汇与任务中心一致）。
+        self._empty_state = PwbEmptyState("未发现目录健康问题", "可定期运行深度检查复核数据校验和。", parent=self)
+        self._empty_state.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._empty_state.setParent(self.issues_table)
+        self._empty_state.hide()
+        self._model.modelReset.connect(self._update_empty_state)
+        self._model.rowsInserted.connect(self._update_empty_state)
+        self._model.rowsRemoved.connect(self._update_empty_state)
+
+        # 共享加载态（indeterminate）：快速/深度检查期间统一进行中面。
+        self.progress = PwbLoadingState("正在检查…", parent=self)
         self.progress.hide()
         layout.addWidget(self.progress)
 
@@ -122,6 +186,9 @@ class CatalogHealthDialog(QDialog):
         cancel_event = threading.Event()
         self._cancel_event = cancel_event
         self._set_running(True)
+        self.progress.set_text(
+            "正在深度检查全部数据校验和..." if deep else "正在检查目录结构与数据完整性..."
+        )
         self.summary_label.setText(
             "正在深度检查全部数据校验和..." if deep else "正在检查目录结构与数据完整性..."
         )
@@ -182,7 +249,7 @@ class CatalogHealthDialog(QDialog):
         summary = (
             f"资产 {checked.get('assets', 0)} · 版本 {checked.get('versions', 0)} · "
             f"运行 {checked.get('runs', 0)} · 标签 {checked.get('tags', 0)}　|　"
-            f"问题: 高 {stats.get('issues_high', 0)} / "
+            f"问题 {len(report.issues)} 项: 高 {stats.get('issues_high', 0)} / "
             f"中 {stats.get('issues_medium', 0)} / "
             f"低 {stats.get('issues_low', 0)}"
         )
@@ -194,16 +261,23 @@ class CatalogHealthDialog(QDialog):
             report.issues,
             key=lambda i: ("high", "medium", "low").index(i.severity),
         )
-        self.issues_table.setRowCount(len(issues))
-        for row, issue in enumerate(issues):
-            severity = QTableWidgetItem(
-                f"{_SEVERITY_LABELS.get(issue.severity, issue.severity)} ({issue.severity})"
-            )
-            if issue.severity == "high":
-                severity.setForeground(Qt.GlobalColor.red)
-            elif issue.severity == "medium":
-                severity.setForeground(Qt.GlobalColor.darkYellow)
-            self.issues_table.setItem(row, 0, severity)
-            self.issues_table.setItem(row, 1, QTableWidgetItem(issue.kind))
-            self.issues_table.setItem(row, 2, QTableWidgetItem(issue.ref_id))
-            self.issues_table.setItem(row, 3, QTableWidgetItem(issue.detail))
+        # 行对象包一层 (稳定键, issue)：AuditIssue 无业务 id，键由
+        # 确定性序号+内容构成，重复审计同一目录时走 set_rows 差分路径。
+        self._model.set_rows(
+            [(f"{i}:{issue.kind}:{issue.ref_id}", issue) for i, issue in enumerate(issues)]
+        )
+
+    # -- empty state overlay ------------------------------------------------------
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self._empty_state.isVisible():
+            self._empty_state.setGeometry(self.issues_table.viewport().rect())
+
+    def _update_empty_state(self, *_args) -> None:
+        if self._model.rowCount() == 0:
+            self._empty_state.setGeometry(self.issues_table.viewport().rect())
+            self._empty_state.show()
+            self._empty_state.raise_()
+        else:
+            self._empty_state.hide()

@@ -14,9 +14,13 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
+    QComboBox,
+    QDoubleSpinBox,
     QLineEdit,
     QPlainTextEdit,
+    QSpinBox,
     QTextBrowser,
     QTextEdit,
     QWidget,
@@ -76,9 +80,22 @@ def focus_in_text_input() -> bool:
 
     V7：QTextBrowser 并入清单（旧 shortcuts.py 守卫漏掉、app_shell 侧
     自带清单包含——两处不一致；统一到本函数后 app_shell 复用）。
+    V11（01-ui-audit F2）：QSpinBox/QDoubleSpinBox/可编辑 QComboBox/
+    视图内联编辑器并入——裸数字 1-5 页导航此前会在这些控件里抢键。
     """
     focus = QApplication.focusWidget()
-    return isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit, QTextBrowser))
+    if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit, QTextBrowser)):
+        return True
+    if isinstance(focus, (QSpinBox, QDoubleSpinBox)):
+        return True
+    if isinstance(focus, QComboBox) and focus.isEditable():
+        return True
+    if isinstance(focus, QAbstractItemView):
+        return (
+            focus.state() == QAbstractItemView.State.EditingState
+            or isinstance(focus.focusWidget(), QLineEdit)
+        )
+    return False
 
 
 def register_meta(spec: ShortcutSpec) -> None:

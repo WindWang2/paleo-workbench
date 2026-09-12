@@ -132,11 +132,13 @@ class CommandPalette(QFrame):
         text = (text or "").strip()
         self.result_list.clear()
         # V6 §4：有上下文时按适用性过滤/标注（禁用命令保留可发现性）。
+        # V11：提高取数上限——命令注册数已超 50（导航+阶段+编图工具），
+        # 截断会让「过滤后条数 < 总数」的收敛性失效（test_app_shell 抓到）。
         context = self._context_provider() if self._context_provider else None
         specs = (
-            command_registry.find(text, context=context)
+            command_registry.find(text, context=context, limit=300)
             if text
-            else command_registry.find("", context=context)
+            else command_registry.find("", context=context, limit=300)
         )
         if not text:
             # 空查询时最近使用置顶
@@ -158,9 +160,38 @@ class CommandPalette(QFrame):
                     item.setFlags(
                         item.flags() & ~Qt.ItemFlag.ItemIsEnabled
                     )
+                # V11（01-ui-audit A5）：编图工具命令挂全量解释（需求/影响/
+                # 缺失前提）——action_help.format_details 此前无任何 UI 消费方。
+                if spec.id.startswith("map:") and context is not None:
+                    details = self._tool_details(spec.id[4:], context)
+                    if details:
+                        item.setToolTip(details)
             self.result_list.addItem(item)
         if self.result_list.count():
             self.result_list.setCurrentRow(0)
+
+    @staticmethod
+    def _tool_details(tool_id: str, context) -> str:
+        if not tool_id:
+            return ""
+        try:
+            from paleo_workbench.ui.workstation.action_help import (
+                TOOL_HELP,
+                explain,
+                format_details,
+            )
+            from paleo_workbench.ui.workstation.tool_surface import (
+                tool_context_from_ui_snapshot,
+            )
+
+            if tool_id not in TOOL_HELP:
+                return ""
+            explanation = explain(
+                tool_id, tool_context_from_ui_snapshot(context)
+            )
+            return format_details(explanation)
+        except Exception:  # noqa: BLE001 — 解释层失败不阻断 palette
+            return ""
 
     def _activate_item(self, item: QListWidgetItem) -> None:
         spec = item.data(Qt.ItemDataRole.UserRole)
@@ -292,6 +323,11 @@ class AppShell(QWidget):
         self.view_coordination = ViewCoordinationController(
             self.selection_context, self.coordinate_hub, parent=self
         )
+        # V11 统一操作注册表：随 shell 销毁即清理（上一 shell 的记录与
+        # 跳转回调不跨工程残留）。
+        from paleo_workbench.ui.operations import bind_registry_to_shell
+
+        self.operations = bind_registry_to_shell(self)
         self.project = project or ProjectDocument.new("Untitled Project")
         self._well_location_state_store = WellLocationPreviewStateStore()
         self._fade_anim: QPropertyAnimation | None = None
@@ -526,6 +562,32 @@ class AppShell(QWidget):
                 subkey=key,
             )
 
+    def _refresh_current_page(self) -> None:
+        """F5：刷新当前激活页面（无破坏性，重取状态）。"""
+        page = self._current_page_widget()
+        if page is None:
+            return
+        refresh = getattr(page, "_refresh", None) or getattr(page, "update_state", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except TypeError:
+                # update_state 需要参数的页面：跳过（保守不崩）。
+                pass
+
+    def _current_page_widget(self):
+        stack = self.page_stack
+        widget = stack.currentWidget() if stack is not None else None
+        return widget
+
+    def _show_context_help(self) -> None:
+        """F1：当前上下文的简短帮助（palette/工具解释，goal §18）。
+
+        打开命令面板——其中编图工具条目携带 requirements/impact 详情
+        tooltip；这是统一帮助入口（不弹大段教学窗口）。
+        """
+        self._toggle_command_palette()
+
     def _setup_shortcuts(self) -> None:
         """V5：hub (1-5)、子模块 (Alt+1~3)、Ctrl+K 经中央快捷键注册表创建。
 
@@ -564,6 +626,17 @@ class AppShell(QWidget):
             ShortcutSpec(id="core:density.toggle", key="Ctrl+Alt+D", label="切换密度"),
             self.theme_manager.toggle_density,
         )
+        # V11（01-ui-audit F3）：F5 刷新当前页 / F1 上下文帮助。
+        register_shortcut(
+            self,
+            ShortcutSpec(id="core:page.refresh", key="F5", label="刷新当前页面"),
+            self._refresh_current_page,
+        )
+        register_shortcut(
+            self,
+            ShortcutSpec(id="core:help.context", key="F1", label="上下文帮助"),
+            self._show_context_help,
+        )
         self._register_commands()
 
     def _wire_ui_context(self) -> None:
@@ -585,6 +658,15 @@ class AppShell(QWidget):
         svc.set_provider(
             "mapping_stage_label", lambda: stage_controller.current_stage.label
         )
+
+        def _running_operation_provider():
+            def _read():
+                registry = getattr(self, "operations", None)
+                if registry is None:
+                    return None
+                return registry.active_label()
+
+            return _read
 
         # V7 R2-F2 / V8 M1：palette 上下文的图层字段全部从 composite 的
         # 图层能力呈现快照单一推导（canonical ToolContext 的图层事实同源）。
@@ -681,6 +763,31 @@ class AppShell(QWidget):
         svc.set_provider(
             "active_interpretation_id", lambda: selection.active_interpretation_id
         )
+        # V11 UIContext 槽位投影（权威在 SelectionContext / OperationRegistry）。
+        svc.set_provider(
+            "selected_layer_id", lambda: selection.selected_layer_id
+        )
+        svc.set_provider(
+            "edit_target_layer_id", lambda: selection.edit_target_layer_id
+        )
+        svc.set_provider(
+            "selected_asset_id", lambda: selection.selected_asset_id
+        )
+        svc.set_provider(
+            "selected_version_id", lambda: selection.selected_version_id
+        )
+        svc.set_provider(
+            "active_survey_id", lambda: selection.active_survey_id
+        )
+        svc.set_provider(
+            "active_task_id", lambda: selection.active_task_id
+        )
+        svc.set_provider(
+            "workflow_stage", lambda: selection.workflow_stage
+        )
+        svc.set_provider(
+            "running_operation", _running_operation_provider()
+        )
 
         svc.set_provider(
             "qgis_bridge_available", lambda: composite.uses_native_stack
@@ -722,6 +829,45 @@ class AppShell(QWidget):
         self.workstation.task_center.active_count_changed.connect(
             lambda *_: svc.refresh()
         )
+        # V11：操作注册表接入任务中心（页面级操作同表呈现 + 跳转）。
+        self.workstation.task_center.attach_registry(self.operations)
+        # V11：操作注册表变化 → running_operation 投影刷新。批量操作逐文件
+        # tick 高频；与任务中心同用 100ms 合并定时器（评审 P1-2）。
+        self._operation_context_timer = QTimer(self)
+        self._operation_context_timer.setSingleShot(True)
+        self._operation_context_timer.setInterval(100)
+        self._operation_context_timer.timeout.connect(svc.refresh)
+        self.operations.operation_changed.connect(
+            lambda _op: self._operation_context_timer.start()
+        )
+        # 阶段与编辑目标变化 → 同步总线槽位（workflow_stage /
+        # edit_target_layer_id，bus 是这些上下文的单一事实源）。
+        stage_controller.current_stage_changed.connect(
+            lambda stage: self.view_coordination.publish_stage(
+                getattr(stage, "value", stage),
+                source=self.view_coordination.SOURCE_STAGE,
+            )
+        )
+        stage_controller.active_target_changed.connect(
+            lambda layer_id: self.view_coordination.publish_edit_target(
+                layer_id, source=self.view_coordination.SOURCE_STAGE
+            )
+        )
+        # V11：编辑控制器的活动层（QGIS 语义的 active layer）→ 总线；带
+        # 变更守卫避免 state_changed 高频重发同一层。
+        _last_active_layer: list[str | None] = [None]
+
+        def _publish_active_layer(*_args) -> None:
+            layer_id = composite.edit_controller.active_layer_id
+            if layer_id == _last_active_layer[0]:
+                return
+            _last_active_layer[0] = layer_id
+            self.view_coordination.publish_active_layer(
+                layer_id, source=self.view_coordination.SOURCE_WORKSTATION
+            )
+
+        composite.edit_controller.state_changed.connect(_publish_active_layer)
+        _publish_active_layer()
 
         # V6 §5：状态条工作台段（阶段 · 编辑目标 · 后端 · 任务）。
         def _update_workbench_status(snap) -> None:
@@ -741,6 +887,50 @@ class AppShell(QWidget):
                 pass  # 拆壳期迟到信号：C++ 对象已销毁
 
         svc.context_changed.connect(_update_workbench_status)
+        # V11（goal §7）：阶段面板动作行与 palette 同因禁用 + 原因
+        # （01-ui-audit「stage panel buttons are never disabled」）。执行侧
+        # re-gate 兜底不变。
+        # 评审 P1-3：鼠标移动级 context_changed（光标/深度发布）不得触发
+        # 阶段动作重估——只比较阶段动作实际消费的字段。
+        _stage_availability_last: list[tuple] = [()]
+
+        def _stage_availability_signature(snap) -> tuple:
+            return (
+                snap.project_open,
+                snap.mapping_stage,
+                snap.workflow_stage,
+                snap.active_layer_id,
+                snap.edit_target_layer_id,
+                snap.active_layer_role,
+                snap.active_layer_kind,
+                snap.active_layer_maturity,
+                snap.active_layer_frozen,
+                snap.editing_active,
+                snap.editing_dirty,
+                snap.selection_count,
+                snap.write_granted,
+                snap.native_canvas_available,
+                snap.blocking_task,
+            )
+
+        def _update_stage_command_availability(snap) -> None:
+            try:
+                signature = _stage_availability_signature(snap)
+                if signature == _stage_availability_last[0]:
+                    return  # 与阶段动作无关的变化（光标/深度等）不重估
+                _stage_availability_last[0] = signature
+                from paleo_workbench.ui.workstation.mapping_stage_panel import (
+                    evaluate_stage_commands,
+                )
+
+                stage = stage_controller.current_stage.value
+                self.workstation.mapping_stage_panel.set_action_availability(
+                    evaluate_stage_commands(stage, snap)
+                )
+            except RuntimeError:
+                pass  # 拆壳期迟到信号
+
+        svc.context_changed.connect(_update_stage_command_availability)
         svc.refresh()
 
     def _register_commands(self) -> None:
@@ -1014,6 +1204,13 @@ class AppShell(QWidget):
         highlight_interp = getattr(geo_page, "highlight_interpretation", None)
         if callable(highlight_interp):
             self.view_coordination.set_horizon_sink(highlight_interp)
+        # V11：Data 页资产选择发布到总线（C2 修复——选择不再对全应用不可见）。
+        self.data_page._view_coordination = self.view_coordination
+        # V11：Data 页长操作登记到**本 shell** 的注册表（评审 P2-5：全局
+        # 访问器在双 shell 窗口期会指向新 shell 的注册表）。
+        self.data_page._operations_registry = self.operations
+        # V11：shell 侧持有引用，teardown 时显式清空 registry（P2）。
+        self.workstation._operations_registry_ref = self.operations
 
     # --- page accessors (concrete pages inside the hubs) -----------------
 

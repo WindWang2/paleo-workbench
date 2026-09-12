@@ -48,7 +48,9 @@ def test_explorer_selection_publishes_to_shared_context(qtbot, tmp_path):
 
     ws._publish_explorer_selection({"kind": "layer", "layer_id": "lyr-1"})
     snapshot = shell.view_coordination.selection_context.snapshot()
-    assert snapshot.active_layer_id == "lyr-1"
+    # V11（01-ui-audit C3）：explorer 点选写入 selected_layer_id（注意力
+    # 焦点）；active_layer_id 是编辑控制器权威的活动层——两个概念分离。
+    assert snapshot.selected_layer_id == "lyr-1"
 
 
 def test_explorer_garbage_payload_is_not_published(qtbot, tmp_path):

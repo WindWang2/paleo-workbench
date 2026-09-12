@@ -5,9 +5,26 @@ from PySide6.QtWidgets import QFrame, QLabel, QStackedLayout, QVBoxLayout
 
 from geoviz import PaleoMapCanvas
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.native_map_canvas import NativeMapCanvas
 from paleo_workbench.viz.mapping_helpers import preview_payload_from_document
+
+
+def _host_qss() -> str:
+    pal = style.palette()
+    return (
+        f"QFrame {{ background: {pal['BG_BODY']};"
+        f" border: 1px solid {pal['BORDER_LIGHT']};"
+        f" border-radius: {tokens.RADIUS_CARD}px; }}"
+    )
+
+
+def _empty_qss() -> str:
+    return (
+        f"color: {style.palette()['TEXT_SECONDARY']};"
+        " background: transparent; border: none;"
+        f" font-size: {tokens.FONT_SIZE_TITLE}; padding: 32px;"
+    )
 
 
 class MapCanvasPanel(QFrame):
@@ -27,21 +44,14 @@ class MapCanvasPanel(QFrame):
 
         host = QFrame()
         host.setObjectName("MapCanvasHost")
-        host.setStyleSheet(
-            f"QFrame {{ background: {tokens.BG_BODY};"
-            f" border: 1px solid {tokens.BORDER_LIGHT};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
+        style.bind(host, _host_qss)  # E1: theme-switch re-render
         self.stack = QStackedLayout(host)
         self.stack.setContentsMargins(0, 0, 0, 0)
 
         self.empty_label = QLabel("未选择古地理图")
         self.empty_label.setObjectName("EmptyStateLabel")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; background: transparent; border: none;"
-            f" font-size: {tokens.FONT_SIZE_TITLE}; padding: 32px;"
-        )
+        style.bind(self.empty_label, _empty_qss)
         self.stack.addWidget(self.empty_label)
 
         self.canvas = PaleoMapCanvas()

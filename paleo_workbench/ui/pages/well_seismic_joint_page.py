@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench import tokens
+from paleo_workbench.ui import style
 from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.viz.joint_host import WellSeismicJointHost
@@ -50,8 +51,13 @@ class WellSeismicJointPage(QWidget):
 
         header = QHBoxLayout()
         self._title = QLabel("井震联合分析")
-        self._title.setStyleSheet(
-            f"font-size: 16px; font-weight: 600; color: {tokens.TEXT_PRIMARY};"
+        # E1：16px 页级标题（无刻度 token，字面量 ratchet 登记）；色经 bind 重取。
+        style.bind(
+            self._title,
+            lambda: (
+                f"font-size: 16px; font-weight: 600;"
+                f" color: {style.palette()['TEXT_PRIMARY']};"
+            ),
         )
         header.addWidget(self._title)
         header.addStretch()
@@ -81,7 +87,10 @@ class WellSeismicJointPage(QWidget):
 
         self._status = QLabel("就绪")
         self._status.setWordWrap(True)
-        self._status.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; padding: 4px;")
+        style.bind(
+            self._status,
+            lambda: f"color: {style.palette()['TEXT_SECONDARY']}; padding: 4px;",
+        )
         outer.addWidget(self._status)
 
         ensure_geoviz_on_path()

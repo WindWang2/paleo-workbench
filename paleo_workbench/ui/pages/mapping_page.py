@@ -332,6 +332,7 @@ class MappingPage(QWidget):
         panels_button.setIcon(panel_icon("panel-manager"))
         panels_button.setIconSize(QSize(18, 18))
         panels_button.setToolTip("面板")
+        panels_button.setAccessibleName("面板")  # icon-only (audit F4)
         panels_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         panels_button.setMenu(self.dock_manager.panels_menu(panels_button))
         toolbar_layout.addWidget(panels_button, 0)
@@ -419,6 +420,56 @@ class MappingPage(QWidget):
         for float_key in FLOAT_KEYS:
             self.float_controller.restore_saved(float_key)
         self._emit_mapping_context()
+        self._setup_accessible_names()
+        self._setup_tab_order()
+
+    def _setup_accessible_names(self) -> None:
+        """Name every icon-only button on the page (audit F4, v11).
+
+        Icon-only buttons carry no text for assistive tech: the dock rail
+        toggles (created by MapDockManager with title tooltips) and the
+        command strip's action buttons (auto-created by QToolBar from
+        QActions — named from their action label when Qt didn't).
+        """
+        for key, entry in self.dock_manager._panels.items():
+            button = entry["button"]
+            if not button.accessibleName():
+                button.setAccessibleName(entry["title"])
+        for button in self.map_toolbars.findChildren(QToolButton):
+            if button.accessibleName():
+                continue
+            action = button.defaultAction()
+            label = (action.text() if action is not None else "").strip()
+            if label and not button.text():
+                button.setAccessibleName(label)
+
+    def _setup_tab_order(self) -> None:
+        """Explicit tab chain for the page's primary interactive controls.
+
+        Visual order (audit F1, v11): 面板 menu (toolbar strip) → left dock
+        rail + layer tree → right dock rails → bottom rail → attribute table
+        (search → feature selector → grid). The map canvas/edit view are
+        canvases; the hidden legacy MapEditToolbar is skipped.
+        """
+        panels_button = self.findChild(QToolButton, "MapPanelsMenuButton")
+        chain: list[QWidget] = []
+        if panels_button is not None:
+            chain.append(panels_button)
+        chain.append(self.dock_manager.panel_button("layers"))
+        chain.append(self.layer_tree.tree)
+        chain.extend(
+            self.dock_manager.panel_button(key)
+            for key in ("reference", "chrome", "composer", "bottom")
+        )
+        chain.extend(
+            (
+                self.attribute_table.feature_search,
+                self.attribute_table.feature_combo,
+                self.attribute_table.table,
+            )
+        )
+        for earlier, later in zip(chain, chain[1:]):
+            QWidget.setTabOrder(earlier, later)
 
     def ribbon_panel_entries(self) -> list[dict]:
         """Ribbon 右键面板菜单：侧栏面板（图层/属性等）的显隐与浮动。"""

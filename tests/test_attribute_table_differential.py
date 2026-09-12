@@ -398,6 +398,11 @@ def test_mapping_page_single_edit_at_2000_features_under_bound(qtbot, monkeypatc
     assert elapsed < 2.0, f"2000 要素下单要素同步耗时 {elapsed:.3f}s"
     assert calls["n"] == 1
     assert spy.inserts == 0 and spy.removes == 0
+    # V11 D2 ②：选择器是有界窗口（≤ _MAX_VISIBLE 条）——窗口外的 f01500
+    # 不再物化下拉条目，改名经绑定记录断言；搜索框输入后该要素回到窗口
+    # 内，标签仍为差量更新后的值。
+    assert page.attribute_table._layer_features["f01500"]["name"] == "renamed"
+    page.attribute_table.feature_search.setText("f01500")
     assert (
         page.attribute_table.feature_combo.itemText(
             page.attribute_table.feature_combo.findData("f01500")

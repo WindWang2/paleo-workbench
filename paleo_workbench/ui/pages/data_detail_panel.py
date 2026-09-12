@@ -379,7 +379,7 @@ class DataDetailPanel(QFrame):
             lambda: (
                 f"color: {style.palette()['TEXT_SECONDARY']};"
                 f" font-size: {tokens.FONT_SIZE_BASE};"
-                " font-family: Consolas, 'Courier New', monospace;"
+                f" font-family: {tokens.FONT_FAMILY_MONO};"
             ),
         )
         self.preview_layout.addWidget(item)

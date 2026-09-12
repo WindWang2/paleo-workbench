@@ -451,10 +451,14 @@ class SeismicViewPanel(QFrame):
         from paleo_workbench.ui import style as _style
 
         badge = QLabel("Inline 剖面")
-        pal = _style.palette()
-        badge.setStyleSheet(
-            f"color: {pal['ERROR_RED']}; font-weight: bold;"
-            " font-size: 11px; padding: 0 4px;"
+        # 导航徽章（非错误态）：用 PRIMARY 而非 ERROR_RED（V11 §E）；
+        # 经 style.bind 主题切换重渲染。
+        _style.bind(
+            badge,
+            lambda: (
+                f"color: {_style.palette()['PRIMARY']}; font-weight: bold;"
+                f" font-size: {tokens.FONT_SIZE_STATUS}; padding: 0 4px;"
+            ),
         )
         return badge
 

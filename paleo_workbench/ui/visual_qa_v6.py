@@ -229,7 +229,11 @@ def _command_palette_checks(window) -> list[CheckResult]:
         f"disabled={len(disabled_specs)}",
     ))
     # 2. 禁用项文本包含人类可读原因，且 spec 确为阶段限定。
-    reason_ok = any("不可用" in text for text, _ in disabled_specs)
+    # V11：措辞对齐 V10 M10 单一真源 stage_whitelist_reason（「当前阶段
+    # 不允许该操作（限 …）」——旧期望「不可用」在 base 上已过时）。
+    reason_ok = any(
+        ("不允许" in text or "不可用" in text) for text, _ in disabled_specs
+    )
     results.append(_check("disabled_item_shows_reason", reason_ok, ""))
     stage_scoped = any(
         getattr(spec, "stages", ()) for _, spec in disabled_specs)

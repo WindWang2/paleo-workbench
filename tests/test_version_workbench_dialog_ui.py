@@ -233,10 +233,11 @@ def test_promote_trash_restore_roundtrip_updates_service_and_emits(
     assert trashed.trashed is True
     assert dialog.versions_table.rowCount() == 4  # trashed rows stay visible
     assert dialog.versions_table.item(0, 1).text() == "已删除"
-    # Reload cleared the selection: nothing actionable until a row is picked.
+    # V11 D2 ④（StableSelection）：reload 按版本 id 恢复选择——被删除的
+    # 行仍被选中，门控立即翻转（不能提升/再删，可还原）。
     assert not dialog.promote_btn.isEnabled()
-    assert not dialog.restore_btn.isEnabled()
-    # Re-select the trashed row: gating flips — cannot promote/trash, can restore.
+    assert not dialog.trash_btn.isEnabled()
+    assert dialog.restore_btn.isEnabled()
     dialog.versions_table.selectRow(0)
     assert not dialog.promote_btn.isEnabled()
     assert not dialog.trash_btn.isEnabled()

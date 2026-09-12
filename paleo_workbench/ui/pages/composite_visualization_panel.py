@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from paleo_workbench.ui import tokens
+from paleo_workbench.ui import style, tokens
 from paleo_workbench.viz.facies_hierarchy_service import AUTO_LEVEL, level_choices
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.hosts.cross_well_host import CrossWellHost
@@ -80,9 +80,14 @@ class VisualizationWorkspace(QFrame):
         self.tabs = QTabWidget()
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tabs.setMinimumSize(100, 100)
-        self.tabs.setStyleSheet(
-            f"QTabWidget::pane {{ border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; background: {tokens.BG_SIDEBAR}; }}"
+        # E1：pane 底/描边经 style.bind 按当前主题重渲染。
+        style.bind(
+            self.tabs,
+            lambda: (
+                f"QTabWidget::pane {{ border: 1px solid {style.palette()['BORDER']};"
+                f" border-radius: {tokens.RADIUS_BUTTON}px;"
+                f" background: {style.palette()['BG_SIDEBAR']}; }}"
+            ),
         )
 
         self._project = None

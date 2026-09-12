@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListWidget, QListWid
 
 from paleo_workbench.project.models import MapReferenceLayer
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.modelview.reconcile import reconcile_widget_items
 
 
 class MapReferencePanel(QFrame):
@@ -50,22 +51,40 @@ class MapReferencePanel(QFrame):
         self._view_state = dict(state)
 
     def set_layers(self, layers: list[MapReferenceLayer]) -> None:
+        # V11 D2 ⑮：clear+rebuild → 键差分（键 = 参考层 id）——项身份/
+        # 选中在刷新间保持，标签/勾选态/tooltip 原地更新。
         self._suppress = True
-        self._layers = {layer.id: layer for layer in layers}
-        self.layer_list.clear()
-        for layer in layers:
-            item = QListWidgetItem(self._layer_label(layer))
-            item.setData(Qt.ItemDataRole.UserRole, layer.id)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked)
-            if layer.status != "ready":
-                item.setToolTip(layer.error_message or layer.status)
-            self.layer_list.addItem(item)
-        self.status_label.setText(self._status_summary(layers))
-        if layers:
-            self.layer_list.setCurrentRow(0)
-            self.opacity_slider.setValue(round(layers[0].opacity * 100))
-        self._suppress = False
+        try:
+            self._layers = {layer.id: layer for layer in layers}
+            reconcile_widget_items(
+                self.layer_list,
+                [layer.id for layer in layers],
+                make_item=lambda _key: QListWidgetItem(""),
+                update_item=self._update_layer_item,
+            )
+            self.status_label.setText(self._status_summary(layers))
+            if layers:
+                self.layer_list.setCurrentRow(0)
+                self.opacity_slider.setValue(round(layers[0].opacity * 100))
+        finally:
+            self._suppress = False
+
+    def _update_layer_item(self, item: QListWidgetItem, key: str) -> None:
+        layer = self._layers.get(key)
+        if layer is None:
+            return
+        label = self._layer_label(layer)
+        if item.text() != label:
+            item.setText(label)
+        item.setData(Qt.ItemDataRole.UserRole, layer.id)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(
+            Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
+        )
+        # 就绪状态清掉旧错误 tooltip，非就绪展示错误/状态（与旧重建行为一致）。
+        item.setToolTip(
+            (layer.error_message or layer.status) if layer.status != "ready" else ""
+        )
 
     @staticmethod
     def _layer_label(layer: MapReferenceLayer) -> str:

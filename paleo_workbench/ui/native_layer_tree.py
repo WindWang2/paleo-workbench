@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import math
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QAbstractItemModel, QMimeData, QModelIndex, Qt, Signal
@@ -25,12 +24,11 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench.ui import tokens
 
-_ICONS_DIR = Path(__file__).parent / "assets" / "icons" / "map"
-
 
 def _tree_icon(name: str) -> QIcon:
-    path = _ICONS_DIR / f"{name}.svg"
-    return QIcon(str(path)) if path.exists() else QIcon()
+    """Tree toolbar icon via the theme-aware tint factory (E2); missing → empty."""
+    from paleo_workbench.ui.workstation.common import tinted_map_icon  # 懒加载（E2）：避免拉起 workstation shell 导入链
+    return tinted_map_icon(name)
 
 # ``layer_model_core`` is an opt-in C++ build. Importing it at module scope made
 # this module — and every parent up to ``AppShell`` and the ``paleo-workbench``

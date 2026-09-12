@@ -83,6 +83,19 @@ class UIContextSnapshot:
     active_horizon_id: str | None = None
     active_fault_id: str | None = None
     active_interpretation_id: str | None = None
+    # V11 UIContext 槽位摘要（goal §6；权威仍在 SelectionContext /
+    # DataPage / MappingWorkspaceController，这里只是派生投影）：
+    selected_layer_id: str | None = None
+    edit_target_layer_id: str | None = None
+    selected_asset_id: str | None = None
+    selected_version_id: str | None = None
+    active_survey_id: str | None = None
+    active_task_id: str | None = None
+    # 工作流阶段（与 mapping_stage 同源的权威值；provider 从 stage
+    # controller 取，避免两处各自解析）
+    workflow_stage: str | None = None
+    # V11：当前运行操作标签（OperationRegistry 权威；None = 无前台操作）
+    running_operation: str | None = None
     # 后端能力 / 降级路径
     qgis_bridge_available: bool | None = None
     # V7 §3：能力三态（native/degraded/unavailable）与原因（比单 bool 更

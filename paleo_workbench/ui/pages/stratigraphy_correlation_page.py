@@ -87,6 +87,8 @@ class PanelFloatButton(QToolButton):
         self.setObjectName("PanelFloatButton")
         self.setText("⇱")
         self.setToolTip("浮动面板 (Float panel)")
+        # Icon-glyph text carries no semantics for assistive tech (audit F4).
+        self.setAccessibleName("浮动面板")
         self.setFixedSize(18, 18)
         self.clicked.connect(lambda: self._controller.toggle(self._key))
         panel.installEventFilter(self)
@@ -420,6 +422,37 @@ class StratigraphyCorrelationPage(QWidget):
 
         self._probe_engine()
         self._sync_backend_stack()
+        self._setup_tab_order()
+
+    def _setup_tab_order(self) -> None:
+        """Explicit tab chain for the page's primary interactive controls.
+
+        Visual order (audit F1, v11): left well picker → center status/backend
+        row → center correlation toolbar → right action panel. The CrossWell /
+        engine canvases and the spacing slider's non-item neighbors are
+        skipped; QSlider is not a chainable primary control per the audit.
+        """
+        QWidget.setTabOrder(self.well_list, self.load_btn)
+        QWidget.setTabOrder(self.load_btn, self.select_bound_btn)
+        QWidget.setTabOrder(self.select_bound_btn, self.backend_combo)
+        QWidget.setTabOrder(self.backend_combo, self.browse_btn)
+        QWidget.setTabOrder(self.browse_btn, self.pick_btn)
+        QWidget.setTabOrder(self.pick_btn, self.link_btn)
+        QWidget.setTabOrder(self.link_btn, self.formation_combo)
+        QWidget.setTabOrder(self.formation_combo, self.snap_combo)
+        QWidget.setTabOrder(self.snap_combo, self.dtw_btn)
+        QWidget.setTabOrder(self.dtw_btn, self.undo_btn)
+        QWidget.setTabOrder(self.undo_btn, self.redo_btn)
+        QWidget.setTabOrder(self.redo_btn, self.auto_link_btn)
+        QWidget.setTabOrder(self.auto_link_btn, self.tops_visible_box)
+        QWidget.setTabOrder(self.tops_visible_box, self.track_list)
+        QWidget.setTabOrder(self.track_list, self.export_btn)
+        QWidget.setTabOrder(self.export_btn, self.export_tops_btn)
+        QWidget.setTabOrder(self.export_tops_btn, self.save_interp_btn)
+        QWidget.setTabOrder(self.save_interp_btn, self.open_interp_btn)
+        QWidget.setTabOrder(self.open_interp_btn, self.restore_interp_btn)
+        QWidget.setTabOrder(self.restore_interp_btn, self.link_edit_btn)
+        QWidget.setTabOrder(self.link_edit_btn, self.clear_btn)
 
 
     def ribbon_panel_entries(self) -> list[dict]:

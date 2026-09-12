@@ -47,6 +47,12 @@ class ViewCoordinationController(QObject):
     SOURCE_WELL_LOG = "well_log_prediction"
     SOURCE_SEISMIC = "seismic_cursor"
     SOURCE_WORKSTATION = "workstation_explorer"
+    # V11 UIContext 槽位发布源（goal §6）
+    SOURCE_DATA_PAGE = "data_page"
+    SOURCE_INSPECTOR = "inspector"
+    SOURCE_SEISMIC_PANEL = "seismic_panel"
+    SOURCE_TASK = "task_panel"
+    SOURCE_STAGE = "mapping_stage"
 
     def __init__(
         self,
@@ -61,6 +67,11 @@ class ViewCoordinationController(QObject):
         self._well_log_page = None
         self._last_snapshot = None
         self._bound_well_ids: set[str] = set()
+        # V11 井身份索引（01-ui-audit C1）：bus 的跨视图键是井**名**（#1029
+        # 既有约定），但 Data 井位图 / 3D fence 路径发布的是实体 **id**。
+        # 索引让 publish 侧把任意标识规范化成规范名，消费者不再静默失配。
+        self._well_name_by_id: dict[str, str] = {}
+        self._well_id_by_name: dict[str, str] = {}
         # Scenario sinks. Pages register callables; the controller owns no
         # page references it was not handed, and a missing sink is a no-op
         # (never an error) so views stay optional.
@@ -92,6 +103,7 @@ class ViewCoordinationController(QObject):
         """
         self.clear_project()
         for well in list(getattr(project, "wells", None) or []):
+            self._index_well_identity(well)
             self._register_project_well(well)
         survey = self._first_seismic_survey(project)
         if survey is not None:
@@ -257,6 +269,8 @@ class ViewCoordinationController(QObject):
         a previous project is just as much cross-project residue as wells.
         """
         self._bound_well_ids.clear()
+        self._well_name_by_id.clear()
+        self._well_id_by_name.clear()
         removed = self.coordinate_hub.clear_all_wells()
         self._link_cursor_set = False
         try:
@@ -268,6 +282,31 @@ class ViewCoordinationController(QObject):
         self.selection_context.clear()
         if removed:
             logger.debug("clear_project: unregistered %d well(s)", removed)
+
+    def _index_well_identity(self, well) -> None:
+        """登记 name↔entity_id 双向映射（bind_project 全量重建）。"""
+        name = str(getattr(well, "name", "") or "").strip()
+        entity_id = str(getattr(well, "id", "") or "").strip()
+        if name and entity_id:
+            self._well_name_by_id[entity_id] = name
+            self._well_id_by_name[name] = entity_id
+
+    def resolve_well_key(self, value: str) -> tuple[str | None, str | None]:
+        """把任意井标识（名或实体 id）规范化为 ``(canonical_name, entity_id)``。
+
+        * 名字命中 → ``(name, id)``；
+        * 实体 id 命中 → ``(name, id)``（修复 id 发布者让名字消费者静默
+          失配的问题）；
+        * 都不命中 → ``(None, None)``（诚实未知，不猜）。
+        """
+        text = str(value or "").strip()
+        if not text:
+            return None, None
+        if text in self._well_id_by_name:
+            return text, self._well_id_by_name[text]
+        if text in self._well_name_by_id:
+            return self._well_name_by_id[text], text
+        return None, None
 
     def _register_project_well(self, well) -> None:
         """Register one ``WellEntity`` (surface coords, KB, TD, optional stations).
@@ -489,6 +528,10 @@ class ViewCoordinationController(QObject):
     def publish_well_selection(self, well_id: str, *, source: str) -> None:
         if not well_id:
             return
+        # V11 身份规范化：接受井名或实体 id（Data 井位图发布 id、其它视图
+        # 发布名——C1）。规范化失败（未知标识）按原值发布，不吞选择。
+        canonical, entity_id = self.resolve_well_key(well_id)
+        key = canonical if canonical is not None else str(well_id)
         # Duplicate dispatch guard: selecting a task re-enters the row
         # signal once through the panel's own update_state loop, and echo
         # guards elsewhere rely on source tags — an identical (well, source)
@@ -496,12 +539,17 @@ class ViewCoordinationController(QObject):
         # fanning the same selection out twice.
         current = self.selection_context.snapshot()
         if (
-            getattr(current, "active_well_id", None) == well_id
+            getattr(current, "active_well_id", None) == key
             and getattr(current, "source_widget_id", None) == source
         ):
             return
+        attrs = dict(current.custom_attributes or {})
+        if entity_id:
+            attrs["well_entity_id"] = entity_id
+        else:
+            attrs.pop("well_entity_id", None)
         self.selection_context.update(
-            active_well_id=str(well_id), source_widget_id=source
+            active_well_id=key, source_widget_id=source, custom_attributes=attrs
         )
 
     def publish_seismic_cursor(self, il: int, xl: int, twt: float) -> None:
@@ -551,21 +599,81 @@ class ViewCoordinationController(QObject):
         )
 
     def publish_layer_selection(self, layer_id: str, *, source: str) -> None:
-        """Publish the active map/composite layer (workstation explorer, B11).
+        """Publish the layer the user highlighted in a tree (V11 语义修正)。
 
-        SelectionState carries ``active_layer_id``; the duplicate guard keeps
-        the explorer's re-emissions from fanning identical updates out.
+        V11 起该槽位写入 ``selected_layer_id``（注意力焦点），不再冒充
+        「活动层」——active 层（工具作用对象，编辑控制器权威）经
+        :meth:`publish_active_layer` 单独发布，两个概念禁止混写
+        （01-ui-audit C3）。重复发布守卫保留。
         """
         if not layer_id:
             return
         current = self.selection_context.snapshot()
         if (
-            getattr(current, "active_layer_id", None) == layer_id
+            getattr(current, "selected_layer_id", None) == layer_id
             and getattr(current, "source_widget_id", None) == source
         ):
             return
         self.selection_context.update(
-            active_layer_id=str(layer_id), source_widget_id=source
+            selected_layer_id=str(layer_id), source_widget_id=source
+        )
+
+    def publish_active_layer(self, layer_id: str | None, *, source: str) -> None:
+        """Publish the true active layer (edit-controller authority, QGIS 语义)."""
+        self.selection_context.update(
+            active_layer_id=str(layer_id) if layer_id else None,
+            source_widget_id=source,
+        )
+
+    def publish_edit_target(self, layer_id: str | None, *, source: str) -> None:
+        """Publish the stage controller's edit-target layer (角色解析结果)."""
+        self.selection_context.update(
+            edit_target_layer_id=str(layer_id) if layer_id else None,
+            source_widget_id=source,
+        )
+
+    def publish_asset_selection(
+        self, asset_id: str | None, *, version_id: str | None = None, source: str
+    ) -> None:
+        """Publish the Data-page asset (and optional version) selection.
+
+        V11 之前 DataPage 选择对全应用不可见（死信号 data_context_changed，
+        01-ui-audit C2）；统一走总线后 Inspector / 状态条 / palette 适用性
+        与 Data 页同源。带 (资产, 版本, 源) 重复守卫——摘要重算等触发的
+        重发布不再风扇 selection_changed（评审 P2）。
+        """
+        current = self.selection_context.snapshot()
+        if (
+            getattr(current, "selected_asset_id", None) == asset_id
+            and getattr(current, "selected_version_id", None) == version_id
+            and getattr(current, "source_widget_id", None) == source
+        ):
+            return
+        self.selection_context.update(
+            selected_asset_id=str(asset_id) if asset_id else None,
+            selected_version_id=str(version_id) if version_id else None,
+            source_widget_id=source,
+        )
+
+    def publish_survey_selection(self, survey_id: str | None, *, source: str) -> None:
+        """Publish the active seismic survey (stable resource id)."""
+        self.selection_context.update(
+            active_survey_id=str(survey_id) if survey_id else None,
+            source_widget_id=source,
+        )
+
+    def publish_task_selection(self, task_id: str | None, *, source: str) -> None:
+        """Publish the active prediction/computation task (stable id)."""
+        self.selection_context.update(
+            active_task_id=str(task_id) if task_id else None,
+            source_widget_id=source,
+        )
+
+    def publish_stage(self, stage: str | None, *, source: str) -> None:
+        """Publish the workflow stage (MappingStage.value)."""
+        self.selection_context.update(
+            workflow_stage=str(stage) if stage else None,
+            source_widget_id=source,
         )
 
     def publish_depth_cursor(self, well_id: str, md: float, *, source: str) -> bool:

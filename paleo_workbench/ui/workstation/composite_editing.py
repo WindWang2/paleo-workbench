@@ -61,6 +61,7 @@ from paleo_workbench.mapping.map_tools import (
 from paleo_workbench.mapping.topology import TopologyService
 from paleo_workbench.mapping.vector_layer import VectorFeature, VectorLayer
 from paleo_workbench.project.models import UserVectorFeature, UserVectorLayer
+from paleo_workbench import tokens as _ui_tokens
 
 __all__ = [
     "CompositeEditController",
@@ -219,7 +220,7 @@ GEO_TEMPLATES: tuple[GeoTemplate, ...] = (
     ),
     GeoTemplate(
         "source", "物源线", "line",
-        VectorStyle(fill="transparent", stroke="#d62728", stroke_width=2.5),
+        VectorStyle(fill="transparent", stroke=_ui_tokens.CANVAS_EDIT, stroke_width=2.5),
         fields=(
             _field("source_type", "物源类型", kind="choice",
                    choices=("点物源", "多物源", "侧向物源", "未知")),
@@ -232,7 +233,7 @@ GEO_TEMPLATES: tuple[GeoTemplate, ...] = (
         "spreading", "展布线", "line",
         VectorStyle(
             fill="transparent",
-            stroke="#1c7ed6",
+            stroke=_ui_tokens.CANVAS_SNAP,
             stroke_width=2.0,
             line_pattern=LinePattern.DASH,
         ),
@@ -246,7 +247,7 @@ GEO_TEMPLATES: tuple[GeoTemplate, ...] = (
         "break", "打断线", "line",
         VectorStyle(
             fill="transparent",
-            stroke="#868e96",
+            stroke=_ui_tokens.CANVAS_INK,
             stroke_width=1.5,
             line_pattern=LinePattern.DASH,
         ),
@@ -258,7 +259,7 @@ GEO_TEMPLATES: tuple[GeoTemplate, ...] = (
     ),
     GeoTemplate(
         "direction", "方向线", "line",
-        VectorStyle(fill="transparent", stroke="#2f9e44", stroke_width=2.0),
+        VectorStyle(fill="transparent", stroke=_ui_tokens.CANVAS_CURSOR, stroke_width=2.0),
         fields=(
             _field("direction", "方向（如 NE45°）", required=True),
             _field("horizon", "层位"),

@@ -27,7 +27,7 @@ EXCLUDED_DIRS = {"prototypes"}
 ALLOWED_VIOLATIONS: dict[str, int] = {
     "ui/unified_map_canvas.py": 4,
     "ui/workstation/composite_document.py": 8,
-    "ui/workstation/composite_editing.py": 4,
+    # V11 §E2：composite_editing 四条模板线已迁 CANVAS_* token（预算归零移出）。
     "ui/pages/lithology_crossplot_dialog.py": 3,
     "ui/pages/mapping_page.py": 3,
     "ui/pages/ai_check_advisor_dialog.py": 2,
@@ -35,6 +35,10 @@ ALLOWED_VIOLATIONS: dict[str, int] = {
     "ui/workstation/common.py": 1,
     "ui/status_bar.py": 1,
     "ui/map_layer_properties.py": 1,
+    # 领域语义科学色（D10）：stage_actions 的未知相回退调色板（哈希分类）
+    # 与 categorized/空白相默认矢量样式 stroke/fill —— QGIS 地质图层样式，
+    # 非 UI chrome 色，不并入 tokens。
+    "ui/workstation/stage_actions.py": 4,
 }
 
 _HEX_LITERAL = re.compile(
@@ -122,40 +126,23 @@ def test_ratchet_only_shrinks() -> None:
 FONT_SIZE_BUDGETS: dict[str, int] = {
     "ui/map_layer_properties.py": 2,
     "ui/page_placeholder.py": 1,
-    "ui/pages/action_header.py": 1,
-    "ui/pages/activity_card.py": 3,
-    "ui/pages/catalog_health_dialog.py": 1,
+    "ui/pages/activity_card.py": 1,  # V11 §E3：12.5px 历史微调值（无刻度 token）
     "ui/pages/data_reader_panel.py": 2,
-    "ui/pages/filter_chips_bar.py": 1,
-    "ui/pages/governance_dialog.py": 2,
     "ui/pages/lithology_crossplot_dialog.py": 1,
-    "ui/pages/map_chrome_panel.py": 1,
-    "ui/pages/map_document_panel.py": 2,
+    "ui/pages/map_document_panel.py": 1,
     "ui/pages/module_relationship.py": 5,
-    "ui/pages/new_project_wizard.py": 2,
-    "ui/pages/relink_dialog.py": 2,
-    "ui/pages/resource_summary.py": 5,
-    "ui/pages/seismic_view_panel.py": 1,
-    "ui/pages/start_guide_card.py": 2,
     "ui/pages/summary_table_preview_widget.py": 3,
-    "ui/pages/well_seismic_joint_page.py": 1,
-    "ui/pages/well_table_panel.py": 1,
-    "ui/pages/workflow_contract_panel.py": 2,
+    "ui/pages/well_seismic_joint_page.py": 1,  # V11 §E3：16px 页级标题（无刻度 token）
 }
 
 FIXED_SIZE_BUDGETS: dict[str, int] = {
     "ui/components/views.py": 1,
-    "ui/pages/map_document_panel.py": 1,
     "ui/pages/map_edit_toolbar.py": 1,
     "ui/pages/prediction_evidence_panel.py": 1,
-    "ui/pages/seismic_attribute_panel.py": 1,
-    "ui/pages/seismic_control_panel.py": 1,
+    # 剖面模式下收起引擎剖面行头（0 高折叠机械，恢复走 maximumHeight 栈）
     "ui/pages/seismic_view_panel.py": 1,
     "ui/pages/stratigraphy_correlation_page.py": 1,
     "ui/pages/tag_widgets.py": 1,
-    "ui/pages/task_panel_base.py": 1,
-    "ui/pages/visualization_summary_panel.py": 1,
-    "viz/hosts/well_location_preview.py": 1,
 }
 
 _FONT_LITERAL = re.compile(r"font-size:\s*\d+(?:\.\d+)?px")

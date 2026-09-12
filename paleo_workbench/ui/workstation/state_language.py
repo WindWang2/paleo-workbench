@@ -67,6 +67,9 @@ _VOCABULARY: dict[str, dict[str, StateToken]] = {
         "cancelled": StateToken("■", "已取消", "muted"),
         "failed": StateToken("✕", "失败", "error"),
         "done": StateToken("✓", "完成", "ok"),
+        # V11：降级完成（完成但有警示——OperationRegistry.WARNING 与遗留
+        # warning 态的统一去处；任务中心「降级完成」同义）。
+        "degraded": StateToken("!", "降级完成", "warn"),
     },
     "backend": {
         "native": StateToken("◆", "原生", "ok"),

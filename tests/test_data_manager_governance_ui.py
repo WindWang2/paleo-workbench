@@ -90,12 +90,20 @@ def _seed_chain(tmp_path: Path, catalog: DataCatalogService, page: DataPage):
 # --- lineage tree --------------------------------------------------------------
 
 
+def _await_async_lineage(qtbot, page, timeout: int = 4000) -> None:
+    """V11（01-ui-audit D1）：血缘链在 worker 线程遍历，选择后等待异步投递。"""
+    qtbot.waitUntil(lambda: not page._lineage_query.is_pending, timeout=timeout)
+    # 投递回调在 GUI 事件循环排队；再泵一拍让 update_lineage 落地。
+    qtbot.wait(50)
+
+
 def test_inspector_lineage_tree_shows_full_chain(qtbot, tmp_path, catalog):
     page = _page(qtbot, catalog)
     raw, inter, out = _seed_chain(tmp_path, catalog, page)
     resource = page.project.resources[0]
     page._set_selected_asset(resource)
     page._update_inspector(resource)
+    _await_async_lineage(qtbot, page)
 
     tree = page.inspector_panel.lineage_tree.tree
     texts = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
@@ -122,6 +130,7 @@ def test_lineage_node_double_click_emits_activation(qtbot, tmp_path, catalog):
     raw, inter, out = _seed_chain(tmp_path, catalog, page)
     page._set_selected_asset(page.project.resources[0])
     page._update_inspector(page.project.resources[0])
+    _await_async_lineage(qtbot, page)
 
     tree = page.inspector_panel.lineage_tree.tree
     with qtbot.waitSignal(

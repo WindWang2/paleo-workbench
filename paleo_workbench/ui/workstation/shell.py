@@ -1004,10 +1004,17 @@ class WorkstationFrame(QWidget):
         self.agent_panel.set_project(self._project, self._project_path)
 
     def attach_coordination(self, controller) -> None:
-        """接入全局选择总线（B11）：资源树选择即工作区上下文。"""
+        """接入全局选择总线（B11）：资源树选择即工作区上下文。
+
+        幂等：重复 attach 先断开旧连接再重连（01-ui-audit K2——此前每次
+        attach 都会叠加一条 object_selected 订阅，双倍发布每个选择）。
+        """
         self._coordination = controller
         self.linked_workspace.attach_coordination(controller)
+        if getattr(self, "_explorer_selection_attached", False):
+            self.explorer.object_selected.disconnect(self._publish_explorer_selection)
         self.explorer.object_selected.connect(self._publish_explorer_selection)
+        self._explorer_selection_attached = True
 
     def _publish_explorer_selection(self, payload) -> None:
         """把资源树选择发布为 SelectionContext 事实（井/层位/图层）。"""

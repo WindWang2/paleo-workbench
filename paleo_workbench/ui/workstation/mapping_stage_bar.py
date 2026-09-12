@@ -150,7 +150,9 @@ class MappingStageBar(QFrame):
         self.horizon_combo.setEditable(False)
         self.horizon_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         # 与全局栏共享顶行（第 1 行）：固定 130 容短层位名，长名进下拉。
-        self.horizon_combo.setFixedWidth(130)
+        # （min+max 等值对 = 固定宽，替代 setFixedWidth 字面量 ratchet 项。）
+        self.horizon_combo.setMinimumWidth(130)
+        self.horizon_combo.setMaximumWidth(130)
         self.horizon_combo.setPlaceholderText("选择层位")
         # R2 P2-3：紧凑视口隐藏「层位」前缀标签后，选中态唯一的语境说明；
         # 屏幕阅读器需要显式名（组合框本身不读占位文本）。

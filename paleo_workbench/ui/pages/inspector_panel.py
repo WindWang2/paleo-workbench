@@ -22,9 +22,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
+    QTableView,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -32,6 +31,12 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.ui import style, tokens
+from paleo_workbench.ui.modelview.object_table import (
+    ColumnSpec,
+    ObjectTableModel,
+    StableSelection,
+    bind_table_defaults,
+)
 
 
 def _small_button_size() -> object:
@@ -109,6 +114,58 @@ def _fit_key_value_table(
         table.setMinimumHeight(min(height, max_height))
 
 
+class _VersionsTableView(QTableView):
+    """版本表（V11 D2 ⑦：QTableWidget → 虚拟模型）+ 旧访问面兼容。
+
+    既有测试经 ``columnCount`` / ``horizontalHeaderItem(c).text()`` /
+    ``item(r, c).text()`` / ``selectRow`` / ``currentRow`` 读表——虚拟
+    模型下以 QModelIndex 代理满足同一契约（模式取自综合编修属性表）。
+    """
+
+    def rowCount(self) -> int:  # noqa: N802 — QTableWidget 兼容
+        model = self.model()
+        return 0 if model is None else model.rowCount()
+
+    def columnCount(self) -> int:  # noqa: N802 — QTableWidget 兼容
+        model = self.model()
+        return 0 if model is None else model.columnCount()
+
+    def currentRow(self) -> int:  # noqa: N802 — QTableWidget 兼容
+        return self.currentIndex().row()
+
+    def item(self, row: int, column: int):
+        model = self.model()
+        if model is None:
+            return None
+        if row < 0 or column < 0 or row >= model.rowCount() or column >= model.columnCount():
+            return None
+
+        class _CellText:
+            def __init__(self, text: str) -> None:
+                self._text = text
+
+            def text(self) -> str:
+                return self._text
+
+        return _CellText(str(model.data(model.index(row, column)) or ""))
+
+    def horizontalHeaderItem(self, column: int):  # noqa: N802 — QTableWidget 兼容
+        model = self.model()
+        if model is None or column < 0 or column >= model.columnCount():
+            return None
+
+        class _Header:
+            def __init__(self, text: str) -> None:
+                self._text = text
+
+            def text(self) -> str:
+                return self._text
+
+        return _Header(
+            str(model.headerData(column, Qt.Orientation.Horizontal) or "")
+        )
+
+
 class LineageTreeWidget(QWidget):
     """Full-chain lineage view: 上游追溯 (to RAW) + 下游衍生 as a tree with
     interleaved run nodes; selection shows version/run details."""
@@ -144,6 +201,12 @@ class LineageTreeWidget(QWidget):
         self.tree.clear()
         self._selected_payload = None
         self.detail_label.setText(message or "原始导入资产 / 无上游依赖")
+
+    def show_loading(self, message: str = "正在加载血缘链…") -> None:
+        """V11（D1）：血缘后台遍历时的占位（选择即刻反馈，不再 GUI 线程阻塞）。"""
+        self.tree.clear()
+        self._selected_payload = None
+        self.detail_label.setText(message)
 
     def load_chains(self, view: AssetView, upstream, downstream) -> None:
         """Populate from :class:`LineageChain` objects (upstream ancestors +
@@ -474,18 +537,39 @@ class InspectorPanel(QFrame):
         version_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         version_layout.setSpacing(tokens.SPACE_1)
 
-        self.versions_table = QTableWidget()
-        self.versions_table.setColumnCount(5)
-        self.versions_table.setHorizontalHeaderLabels(
-            ["版本", "生命阶段", "校验和", "时间", "标签"]
+        # V11 D2 ⑦：版本表 QTableWidget → QTableView + ObjectTableModel
+        # （键 = version id，零 item-per-cell）；刷新经 set_rows 差分重置，
+        # StableSelection 按版本 id 恢复选中——版本标签控件在资产刷新后
+        # 仍指向同一版本。
+        self._versions_model = ObjectTableModel(
+            columns=[
+                ColumnSpec(
+                    "version",
+                    "版本",
+                    lambda ver: f"★ {ver.version_id}" if ver.is_current else ver.version_id,
+                ),
+                ColumnSpec("stage", "生命阶段", lambda ver: stage_label(ver.stage)),
+                ColumnSpec("checksum", "校验和", lambda ver: ver.checksum_display),
+                ColumnSpec("created", "时间", lambda ver: ver.created_at),
+                ColumnSpec(
+                    "tags", "标签", lambda ver: "、".join(ver.tags) if ver.tags else "—"
+                ),
+            ],
+            key_of=lambda ver: ver.version_id,
+            parent=self,
         )
-        self.versions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.versions_table.verticalHeader().setVisible(False)
+        self.versions_table = _VersionsTableView()
+        self.versions_table.setModel(self._versions_model)
+        bind_table_defaults(self.versions_table)
+        self.versions_table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.versions_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         self.versions_table.verticalHeader().setDefaultSectionSize(28)
-        self.versions_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.versions_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.versions_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.versions_table.itemSelectionChanged.connect(self._on_version_selection_changed)
+        self.versions_table.selectionModel().selectionChanged.connect(
+            self._on_version_selection_changed
+        )
+        self._versions_selection = StableSelection(self.versions_table)
         # 表高贴合内容：版本少时不向下拖出大片空白网格。
         version_layout.addWidget(self.versions_table, 0)
 
@@ -592,6 +676,19 @@ class InspectorPanel(QFrame):
         self._populate_versions(view)
         self._populate_lineage(view, lineage_up, lineage_down)
         self._populate_integrity(view)
+
+    def show_lineage_loading(self) -> None:
+        """V11（D1）：血缘在后台遍历时的占位（选择切换即刻可见）。"""
+        if self._current_view is None:
+            return
+        self.lineage_tree.show_loading()
+
+    def update_lineage(self, lineage_up: object | None, lineage_down: object | None) -> None:
+        """V11（D1）：血缘异步返回后仅刷新血缘 tab（不重建其余页签）。"""
+        view = self._current_view
+        if view is None:
+            return
+        self._populate_lineage(view, lineage_up, lineage_down)
 
     def _populate_overview(self, view: AssetView) -> None:
         rows = [
@@ -704,18 +801,17 @@ class InspectorPanel(QFrame):
 
     def _populate_versions(self, view: AssetView) -> None:
         self._selected_version = None
-        self.versions_table.setRowCount(len(view.versions))
-        for r, ver in enumerate(view.versions):
-            curr_str = f"★ {ver.version_id}" if ver.is_current else ver.version_id
-            self.versions_table.setItem(r, 0, QTableWidgetItem(curr_str))
-            self.versions_table.setItem(r, 1, QTableWidgetItem(stage_label(ver.stage)))
-            self.versions_table.setItem(r, 2, QTableWidgetItem(ver.checksum_display))
-            self.versions_table.setItem(r, 3, QTableWidgetItem(ver.created_at))
-            tags_text = "、".join(ver.tags) if ver.tags else "—"
-            self.versions_table.setItem(r, 4, QTableWidgetItem(tags_text))
-        # Re-filling the table does not emit itemSelectionChanged when the
-        # same row index stays current — re-derive the selection so the
-        # version-tag controls keep working after a refresh.
+        # 差分重置（键 = version id）+ 按键恢复选择：同资产刷新（如加完
+        # 版本标签回来）时同一版本仍被选中；换资产时键全换、自然清空。
+        keys = self._versions_selection.capture()
+        current_key = self._versions_model.key_for_index(
+            self.versions_table.currentIndex()
+        )
+        self._versions_model.set_rows(view.versions)
+        self._versions_selection.restore(keys, current_key=current_key)
+        # Re-filling the table does not re-emit selection when the same key
+        # stays current — re-derive the selection so the version-tag controls
+        # keep working after a refresh.
         row = self.versions_table.currentRow()
         if 0 <= row < len(view.versions):
             self._selected_version = view.versions[row]

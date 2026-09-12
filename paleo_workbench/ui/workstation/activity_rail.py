@@ -30,6 +30,17 @@ class ActivityRail(QFrame):
         ("workspaces", "工作区", "visualization.svg"),
     )
 
+    # V11（01-ui-audit B1）：rail 是资源管理器的视图模式，不是页面导航。
+    # tooltip 必须说清按钮做什么，避免「按了数据却到了资源树」的期望落差。
+    _MODE_TOOLTIPS = {
+        "project": "资源管理器 · 项目总览（井/工区/工程实体）",
+        "data": "资源管理器 · 数据资源（按类型浏览数据资产）",
+        "layers": "资源管理器 · 图层（编图文档与图层）",
+        "search": "资源管理器 · 搜索（全工程资源检索）",
+        "history": "资源管理器 · 历史（最近使用的资源）",
+        "workspaces": "聚焦编图工作区（中央画布）",
+    }
+
     def _apply_density_metrics(self) -> None:
         """密度切换：重设 rail 宽度与全部按钮尺寸（bind_metrics 回调）。"""
         self.setFixedWidth(tokens.rail_width(_current_density()))
@@ -61,7 +72,8 @@ class ActivityRail(QFrame):
             button.setIcon(workstation_icon(icon_name))
             button.setIconSize(QSize(18, 18))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            button.setToolTip(label)
+            button.setToolTip(self._MODE_TOOLTIPS.get(key, label))
+            button.setAccessibleName(self._MODE_TOOLTIPS.get(key, label))
             button.setFixedSize(_rail_button_size())
             button.clicked.connect(lambda _checked=False, mode=key: self.mode_requested.emit(mode))
             self.group.addButton(button, index)

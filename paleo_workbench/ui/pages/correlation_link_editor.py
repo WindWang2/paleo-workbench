@@ -12,13 +12,18 @@ A modal editor over the working :class:`CorrelationInterpretationDraft`:
 Every mutation goes through the copy-on-edit session ops
 (:func:`add_manual_link` / :func:`remove_link` / :func:`edit_link`) — the
 dialog never constructs links or bumps the draft by hand.
+
+V11 D2 ⑥：两张表是只读展示 + 独立编辑对话框（NoEditTriggers），迁移到
+QTableView + ObjectTableModel 虚拟行模型——顶点表可达 井×层位 数万行，
+不再按 cell 物化 QTableWidgetItem；行对象就是 draft 里的
+FormationTop/CorrelationLink，``_rebuild_tables`` 语义保持（编辑/增删后
+整表 set_rows，键 = 业务 id，StableSelection 跨重建保住当前行）。
 """
 
 from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -30,12 +35,17 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
 
+from paleo_workbench.ui.modelview.object_table import (
+    ColumnSpec,
+    ObjectTableModel,
+    StableSelection,
+    bind_table_defaults,
+)
 from paleo_workbench.workflow.correlation_session import (
     add_manual_link,
     edit_link,
@@ -51,6 +61,7 @@ _METHOD_LABELS = {
     CorrelationMethod.CURVE_SHAPE_ASSISTED: "曲线形态辅助",
     CorrelationMethod.IMPORTED: "导入",
 }
+
 _STATUS_LABELS = ("active", "tentative", "rejected")
 
 
@@ -59,6 +70,21 @@ def _method_label(method) -> str:
         return _METHOD_LABELS.get(CorrelationMethod(method), str(method))
     except ValueError:
         return str(method)
+
+
+class _CompatTableView(QTableView):
+    """QTableView + 旧 QTableWidget 访问面（rowCount/currentRow/item）。
+
+    差分测试经 ``item(row, col).text()`` / ``rowCount()`` 读表——虚拟模型
+    下以 QModelIndex 代理满足同一契约（模式取自综合编修属性表）。
+    """
+
+    def rowCount(self) -> int:  # noqa: N802 — QTableWidget 兼容
+        model = self.model()
+        return 0 if model is None else model.rowCount()
+
+    def currentRow(self) -> int:  # noqa: N802 — QTableWidget 兼容
+        return self.currentIndex().row()
 
 
 class CorrelationLinkEditor(QDialog):
@@ -70,21 +96,72 @@ class CorrelationLinkEditor(QDialog):
         root = QVBoxLayout(self)
         # NOTE: _top_by_id is REBUILT in _rebuild_tables — a DTW worker can
         # finish while this modal dialog is open and extend the draft's tops
-        # through the nested event loop (review R3-M3).
+        # through the nested event loop (review R3-M3). 列取值闭包经
+        # self._top_by_id **延迟**取顶点（链接行的 层位/井对 依赖顶点表），
+        # 换新 dict 后模型取值自动看到新映射。
         self._top_by_id = {t.id: t for t in draft.payload.tops}
 
-        root.addWidget(QLabel("井间相关链接（保存后进入解释版本）"))
-        self.link_table = QTableWidget(0, 5)
-        self.link_table.setHorizontalHeaderLabels(
-            ["层位", "井 A → 井 B", "方法", "邻接", "备注"]
+        self._link_model = ObjectTableModel(
+            columns=[
+                ColumnSpec(
+                    "marker",
+                    "层位",
+                    lambda ln: (
+                        self._top_by_id[ln.top_a_id].marker
+                        if self._top_by_id.get(ln.top_a_id)
+                        else "?"
+                    ),
+                ),
+                ColumnSpec(
+                    "pair",
+                    "井 A → 井 B",
+                    lambda ln: "{a} → {b}".format(
+                        a=(
+                            self._top_by_id[ln.top_a_id].well_name
+                            if self._top_by_id.get(ln.top_a_id)
+                            else "?"
+                        ),
+                        b=(
+                            self._top_by_id[ln.top_b_id].well_name
+                            if self._top_by_id.get(ln.top_b_id)
+                            else "?"
+                        ),
+                    ),
+                ),
+                ColumnSpec("method", "方法", lambda ln: _method_label(ln.method)),
+                ColumnSpec(
+                    "adjacent", "邻接", lambda ln: "是" if ln.adjacent_only else "否"
+                ),
+                ColumnSpec("notes", "备注", lambda ln: ln.notes),
+            ],
+            key_of=lambda ln: ln.id,
+            parent=self,
         )
+        self._top_model = ObjectTableModel(
+            columns=[
+                ColumnSpec("well", "井", lambda t: t.well_name),
+                ColumnSpec("marker", "层位", lambda t: t.marker),
+                ColumnSpec(
+                    "depth",
+                    "深度",
+                    lambda t: f"{t.depth:.2f} {t.depth_domain.value}",
+                ),
+                ColumnSpec("method", "方法", lambda t: _method_label(t.method)),
+                ColumnSpec("confidence", "置信度", lambda t: t.confidence or "—"),
+            ],
+            key_of=lambda t: t.id,
+            parent=self,
+        )
+
+        root.addWidget(QLabel("井间相关链接（保存后进入解释版本）"))
+        self.link_table = _CompatTableView()
+        self.link_table.setModel(self._link_model)
+        # 表头文案由 ColumnSpec.title 经模型 headerData 提供。
         self.link_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
-        self.link_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.link_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        bind_table_defaults(self.link_table)
+        self._link_selection = StableSelection(self.link_table)
         root.addWidget(self.link_table, 2)
 
         link_buttons = QHBoxLayout()
@@ -101,17 +178,13 @@ class CorrelationLinkEditor(QDialog):
         root.addLayout(link_buttons)
 
         root.addWidget(QLabel("顶点属性（方法 / 置信度 / 状态 / 备注）"))
-        self.top_table = QTableWidget(0, 5)
-        self.top_table.setHorizontalHeaderLabels(
-            ["井", "层位", "深度", "方法", "置信度"]
-        )
+        self.top_table = _CompatTableView()
+        self.top_table.setModel(self._top_model)
         self.top_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
-        self.top_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.top_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        bind_table_defaults(self.top_table)
+        self._top_selection = StableSelection(self.top_table)
         root.addWidget(self.top_table, 2)
 
         top_buttons = QHBoxLayout()
@@ -135,55 +208,32 @@ class CorrelationLinkEditor(QDialog):
     # -- tables ----------------------------------------------------------------
 
     def _rebuild_tables(self) -> None:
+        """整表 set_rows（键 = 链接/顶点 id）；选择跨重建保持。"""
         self._top_by_id = {t.id: t for t in self._draft.payload.tops}
-        top_by_id = self._top_by_id
         links = sorted(
             self._draft.payload.links,
             key=lambda ln: (ln.top_a_id, ln.top_b_id, ln.id),
         )
-        self.link_table.setRowCount(len(links))
-        for row, ln in enumerate(links):
-            a = top_by_id.get(ln.top_a_id)
-            b = top_by_id.get(ln.top_b_id)
-            marker = a.marker if a else "?"
-            pair = f"{(a.well_name if a else '?')} → {(b.well_name if b else '?')}"
-            values = [
-                marker,
-                pair,
-                _method_label(ln.method),
-                "是" if ln.adjacent_only else "否",
-                ln.notes,
-            ]
-            for col, text in enumerate(values):
-                item = QTableWidgetItem(str(text))
-                item.setData(Qt.ItemDataRole.UserRole, ln.id)
-                self.link_table.setItem(row, col, item)
-
         tops = sorted(
             self._draft.payload.tops,
             key=lambda t: (t.well_name, t.marker, t.depth),
         )
-        self.top_table.setRowCount(len(tops))
-        for row, top in enumerate(tops):
-            values = [
-                top.well_name,
-                top.marker,
-                f"{top.depth:.2f} {top.depth_domain.value}",
-                _method_label(top.method),
-                top.confidence or "—",
-            ]
-            for col, text in enumerate(values):
-                item = QTableWidgetItem(text)
-                item.setData(Qt.ItemDataRole.UserRole, top.id)
-                self.top_table.setItem(row, col, item)
+        for view, model, selection, rows in (
+            (self.link_table, self._link_model, self._link_selection, links),
+            (self.top_table, self._top_model, self._top_selection, tops),
+        ):
+            keys = selection.capture()
+            current_key = model.key_for_index(view.currentIndex())
+            model.set_rows(rows)
+            selection.restore(keys, current_key=current_key)
 
     def _selected_link_id(self) -> str | None:
-        item = self.link_table.item(self.link_table.currentRow(), 0)
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
+        row = self._link_model.row_at(self.link_table.currentRow())
+        return row.id if row is not None else None
 
     def _selected_top_id(self) -> str | None:
-        item = self.top_table.item(self.top_table.currentRow(), 0)
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
+        row = self._top_model.row_at(self.top_table.currentRow())
+        return row.id if row is not None else None
 
     # -- link operations ---------------------------------------------------------
 

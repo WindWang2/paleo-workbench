@@ -175,6 +175,10 @@ class WorkstationInspector(QFrame):
             self.show_factor(payload)
         elif kind == "map_product":
             self.show_map_product(payload)
+        elif kind == "version":
+            self.show_version(payload)
+        elif kind == "run":
+            self.show_run(payload)
         else:
             # 未知 kind：通用键值表，不丢弃（B4）。
             self.show_generic(payload)
@@ -222,10 +226,22 @@ class WorkstationInspector(QFrame):
         x = getattr(well, "project_x", None)
         y = getattr(well, "project_y", None)
         self.properties_form.addRow("井名", self._readonly(name))
+        # V11（goal §11 Well）：实体 id 入面板——稳定标识可复制可追溯。
+        self.properties_form.addRow(
+            "井 ID", self._readonly(str(getattr(well, "id", "") or "") or None)
+        )
         self.properties_form.addRow("坐标 X", self._readonly("—" if x is None else f"{x:,.2f}"))
         self.properties_form.addRow("坐标 Y", self._readonly("—" if y is None else f"{y:,.2f}"))
         self.properties_form.addRow("KB 高程", self._readonly(getattr(well, "kb", None) or "—", unit="m"))
         self.properties_form.addRow("总深度", self._readonly(getattr(well, "td", None) or "—", unit="m"))
+        # V11（goal §11 Well）：关联数据角色概要（缓存口径，见 _well_asset_roles）。
+        roles = self._well_asset_roles(well)
+        roles_text = (
+            " / ".join(f"{role}×{count}" for role, count in sorted(roles.items()))
+            if roles
+            else None
+        )
+        self.properties_form.addRow("关联数据", self._readonly(roles_text))
         self.interpretation_form.addRow("活动层位", self._readonly(self._target_horizon()))
         # 联动状态只反映传入数据里真实存在的成分（坐标/轨迹），不编造。
         self.interpretation_form.addRow("联动状态", self._readonly(self._well_link_state(well)))
@@ -553,6 +569,115 @@ class WorkstationInspector(QFrame):
             self.interpretation_form.addRow("发布就绪", self._readonly(readiness))
         self._set_history([f"MapProduct {getattr(record, 'id', '—')}"])
 
+    def show_version(self, payload) -> None:
+        """版本检查（goal §11 Version：阶段/来源/哈希/父版本/run/下游）。
+
+        ``payload``：``{"kind": "version", "object": 版本对象或 dict}``。
+        字段缺席 →「—」（诚实未知）；版本对象可以是 catalog 的 Version 记录
+        或 explorer/血缘树提供的 dict 投影。
+        """
+        payload = payload if isinstance(payload, dict) else {}
+        obj = payload.get("object") or payload
+        # 读取口径：object 包装（文档契约）优先，回落扁平 payload（既定
+        # 调用方契约）——两者都支持（评审 P2-1）。
+        get = (lambda key, default=None: obj.get(key, default)) if isinstance(
+            obj, dict
+        ) else (lambda key, default=None: getattr(obj, key, default))
+        name = str(get("asset_name") or get("name") or "版本")
+        number = get("version_number", None)
+        self.header.setText(f"检查器 · 版本 · {name}" + (f" v{number}" if number else ""))
+        self._clear_form(self.properties_form)
+        self._clear_form(self.interpretation_form)
+        self.properties_form.addRow("资产", self._readonly(name))
+        if number is not None:
+            self.properties_form.addRow("版本号", self._readonly(f"v{number}"))
+        stage = str(get("stage") or get("life_stage") or "")
+        self._add_state_row(self.properties_form, "阶段", "maturity", stage or None)
+        created = get("created_at", None)
+        if created:
+            self.properties_form.addRow("创建时间", self._readonly(str(created)))
+        checksum = str(get("checksum") or get("sha256") or "")
+        self.properties_form.addRow(
+            "SHA-256",
+            self._readonly(checksum[:12] + "…" if len(checksum) > 12 else (checksum or None)),
+        )
+        parents = list(get("parent_ids") or get("parent_version_ids") or [])
+        self.properties_form.addRow(
+            "父版本", self._readonly(f"{len(parents)} 项" if parents else "源头（无父版本）"))
+        run_id = get("run_id", None)
+        self.properties_form.addRow("生成 Run", self._readonly(run_id))
+        source = get("source") or get("source_kind")
+        self.interpretation_form.addRow("来源", self._readonly(source))
+        downstream = get("downstream_count", None)
+        if downstream is not None:
+            self.interpretation_form.addRow(
+                "下游", self._readonly(f"{downstream} 项" if downstream else "无"))
+        trashed = get("trashed", None)
+        if trashed:
+            self.interpretation_form.addRow("回收站", self._readonly("已在回收站"))
+        self._set_history([f"版本 {get('version_id') or get('id') or '—'}"])
+
+    def show_run(self, payload) -> None:
+        """Run 检查（goal §11 Run：输入/输出/参数/模型/状态）。
+
+        ``payload``：``{"kind": "run", "object": Run 记录或 dict}``——
+        catalog 血链中的 run 节点、任务中心详情均可投递此 kind。
+        """
+        payload = payload if isinstance(payload, dict) else {}
+        obj = payload.get("object") or payload
+        # 读取口径：object 包装（文档契约）优先，回落扁平 payload（既定
+        # 调用方契约）——两者都支持（评审 P2-1）。
+        get = (lambda key, default=None: obj.get(key, default)) if isinstance(
+            obj, dict
+        ) else (lambda key, default=None: getattr(obj, key, default))
+        run_id = str(get("run_id") or get("id") or "Run")
+        self.header.setText(f"检查器 · Run · {run_id[:16]}")
+        self._clear_form(self.properties_form)
+        self._clear_form(self.interpretation_form)
+        self.properties_form.addRow("Run ID", self._readonly(run_id))
+        operation = get("operation", None)
+        self.properties_form.addRow("操作", self._readonly(operation))
+        status = str(get("status") or "")
+        self._add_state_row(
+            self.properties_form, "状态", "task",
+            {"complete": "done", "completed": "done", "pending": "queued",
+             "running": "running", "failed": "failed",
+             "warning": "degraded"}.get(status, status or None),
+        )
+        inputs = list(get("input_version_ids") or get("inputs") or [])
+        outputs = list(get("output_version_ids") or get("outputs") or [])
+        self.properties_form.addRow(
+            "输入版本", self._readonly(f"{len(inputs)} 项" if inputs else None))
+        self.properties_form.addRow(
+            "输出版本", self._readonly(f"{len(outputs)} 项" if outputs else None))
+        model = get("model") or get("model_type")
+        self.interpretation_form.addRow("模型", self._readonly(model))
+        parameters = get("parameters", None)
+        if parameters:
+            self.interpretation_form.addRow("参数", self._readonly(self._compact_text(parameters)))
+        started = get("started_at", None)
+        finished = get("finished_at", None)
+        if started:
+            elapsed = ""
+            if finished:
+                try:
+                    elapsed = f"（耗时 {max(0.0, float(finished) - float(started)):.1f}s）"
+                except (TypeError, ValueError):
+                    elapsed = ""
+            self.interpretation_form.addRow(
+                "开始", self._readonly(f"{started}{elapsed}"))
+        self._set_history([f"Run {run_id}"])
+
+    def _add_state_row(self, form, label: str, category: str, value) -> None:
+        """状态行经 state_language 词表渲染（未知 → 诚实「—」）。"""
+        from paleo_workbench.ui.workstation.state_language import state_token
+
+        if value in (None, ""):
+            form.addRow(label, self._readonly(None))
+            return
+        token = state_token(category, str(value))
+        form.addRow(label, self._readonly(f"{token.glyph} {token.label}"))
+
     def show_layer(self, layer_type: str, obj=None, payload: dict | None = None) -> None:
         self._current = obj or layer_type
         self.header.setText(f"检查器 · {layer_type}")
@@ -701,14 +826,46 @@ class WorkstationInspector(QFrame):
 
     def _well_has_trajectory(self, well) -> bool:
         well_id = str(getattr(well, "id", "") or "")
-        for link in list(getattr(self._project, "entity_asset_links", None) or []):
-            if (
-                str(getattr(link, "entity_id", "") or "") == well_id
-                and str(getattr(link, "role", "") or "") == "trajectory"
-            ):
-                return True
+        # V11（01-ui-audit D3）：entity_asset_links 索引按工程对象缓存一次
+        # ——此前每次渲染全量扫描（万链接工程里选井即卡）。
+        if well_id and well_id in self._well_trajectory_ids():
+            return True
         metadata = getattr(well, "metadata", None) or {}
         return bool(metadata.get("has_trajectory") or metadata.get("trajectory"))
+
+    def _well_trajectory_ids(self) -> frozenset[str]:
+        links = list(getattr(self._project, "entity_asset_links", None) or [])
+        cache_key = (id(self._project), len(links))
+        cache = getattr(self, "_trajectory_cache", None)
+        if cache is not None and cache[0] == cache_key:
+            return cache[1]
+        ids = frozenset(
+            str(getattr(link, "entity_id", "") or "")
+            for link in links
+            if str(getattr(link, "role", "") or "") == "trajectory"
+        )
+        # 缓存键含 links 长度：追加/移除即失效（就地改写单条 role 的极端
+        # 情况不覆盖——展示层口径，权威仍在工程模型）。
+        self._trajectory_cache = (cache_key, ids)
+        return ids
+
+    def _well_asset_roles(self, well) -> dict[str, int]:
+        """井的关联资产角色计数（同一缓存口径；展示用，非权威）。"""
+        links = list(getattr(self._project, "entity_asset_links", None) or [])
+        cache_key = (id(self._project), len(links))
+        cache = getattr(self, "_well_roles_cache", None)
+        if cache is None or cache[0] != cache_key:
+            roles: dict[str, dict[str, int]] = {}
+            for link in links:
+                entity_id = str(getattr(link, "entity_id", "") or "")
+                role = str(getattr(link, "role", "") or "")
+                if entity_id and role:
+                    well_roles = roles.setdefault(entity_id, {})
+                    well_roles[role] = well_roles.get(role, 0) + 1
+            cache = (cache_key, roles)
+            self._well_roles_cache = cache
+        well_id = str(getattr(well, "id", "") or "")
+        return dict(cache[1].get(well_id, {}))
 
     def _survey_for(self, obj, label: str):
         """资源/名称 → 匹配的 SeismicSurveyEntity（找不到返回 None）。"""

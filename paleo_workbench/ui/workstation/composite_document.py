@@ -1262,9 +1262,17 @@ class CompositeDocument(QWidget):
             return UnifiedMapCanvas(parent=self), False
 
     def _create_layer_manager(self) -> QWidget:
-        """图层管理面板跟随画布形态（两套面板请求信号同构，见类 docstring）。"""
+        """图层管理面板跟随画布形态（两套面板请求信号同构，见类 docstring）。
+
+        V11 Goal §7（A1）：两套面板消费同一 evaluator 探针——同一图层在
+        原生树/回退树的编辑·修复·删除可用性与判词一致。
+        """
         if self.uses_native_stack:
-            return QgisLayerTreePanel(self)
+            return QgisLayerTreePanel(
+                self,
+                repair_probe=self._layer_repair_availability,
+                menu_probe=self.layer_menu_facts,
+            )
         return LayerManagerPanel(
             self,
             repair_probe=self._layer_repair_availability,

@@ -60,33 +60,22 @@ _DRIFT_COLOR_TOKEN = re.compile(
 
 #: snapshot of remaining raw setStyleSheet+token-color sites (2026-09-10,
 #: after the V9 migration of the 9 worst offender files). Ratchet: no growth.
+#: V11 §8 Model/View 迁移移除了 well_table_panel / relink_dialog /
+#: catalog_health_dialog / resource_table 的重复表格 QSS（预算归零移出）。
+#: V11 §E1 静态样式迁移（workbench-ux）：activity_card / action_header /
+#: map_canvas_panel / map_chrome_panel / preview_settings_panel /
+#: start_guide_card / well_seismic_joint_page / composite_visualization_panel /
+#: data_asset_table / filter_chips_bar / governance_dialog / home_page /
+#: map_edit_view / workflow_contract_panel 全部改走 style.bind（归零移出）。
 DRIFTED_STYLESHEET_SNAPSHOT: dict[str, int] = {
-    "paleo_workbench/ui/map_status_bar.py": 3,
-    "paleo_workbench/ui/pages/activity_card.py": 3,
-    "paleo_workbench/ui/pages/action_header.py": 2,
-    "paleo_workbench/ui/pages/map_canvas_panel.py": 2,
-    "paleo_workbench/ui/pages/map_chrome_panel.py": 2,
-    "paleo_workbench/ui/pages/preview_settings_panel.py": 2,
-    "paleo_workbench/ui/pages/relink_dialog.py": 2,
-    "paleo_workbench/ui/pages/start_guide_card.py": 2,
-    "paleo_workbench/ui/pages/well_seismic_joint_page.py": 2,
-    "paleo_workbench/ui/pages/well_table_panel.py": 2,
-    "paleo_workbench/viz/hosts/well_log_host.py": 1,
-    "paleo_workbench/ui/pages/catalog_health_dialog.py": 1,
-    "paleo_workbench/ui/pages/composite_visualization_panel.py": 1,
-    "paleo_workbench/ui/pages/data_asset_table.py": 1,
+    "paleo_workbench/ui/map_status_bar.py": 2,
     "paleo_workbench/ui/pages/data_toolbar.py": 1,
-    "paleo_workbench/ui/pages/filter_chips_bar.py": 1,
-    "paleo_workbench/ui/pages/governance_dialog.py": 1,
-    "paleo_workbench/ui/pages/home_page.py": 1,
-    "paleo_workbench/ui/pages/map_edit_view.py": 1,
     "paleo_workbench/ui/pages/map_reference_panel.py": 1,
     "paleo_workbench/ui/pages/module_relationship.py": 1,
     "paleo_workbench/ui/pages/pdf_preview_widget.py": 1,
-    "paleo_workbench/ui/pages/resource_table.py": 1,
     "paleo_workbench/ui/pages/seismic_view_panel.py": 1,
     "paleo_workbench/ui/pages/well_log_canvas_panel.py": 1,
-    "paleo_workbench/ui/pages/workflow_contract_panel.py": 1,
+    "paleo_workbench/viz/hosts/well_log_host.py": 1,
 }
 
 #: snapshot of sanctioned exceptions. Keys are repo-relative posix paths.

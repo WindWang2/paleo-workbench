@@ -17,13 +17,14 @@ from PySide6.QtWidgets import (
 from paleo_workbench.ui import style, tokens
 from paleo_workbench.ui.components.badges import PwbBadge
 
-# 任务状态 → PwbBadge tone（词汇与 tokens.TASK_STATUS_COLORS 一致）
-_STATUS_TONES = {
-    "complete": "success",
-    "pending": "neutral",
-    "running": "primary",
-    "failed": "error",
-}
+# V11（01-ui-audit G3）：状态→tone 统一经 state_language 词表桥
+# （tone_to_badge），面板不再维护私有映射。complete→done、pending→queued。
+from paleo_workbench.ui.workstation.state_language import state_token, tone_to_badge
+
+
+def _task_badge(status: str) -> PwbBadge:
+    token = state_token("task", {"complete": "done", "pending": "queued"}.get(status, status))
+    return PwbBadge(token.label, tone=tone_to_badge(token.tone))
 
 
 class FactorTaskPanel(QFrame):
@@ -78,10 +79,7 @@ class FactorTaskPanel(QFrame):
             style.bind(wrap, lambda: "border: none; background: transparent;")
             layout.addWidget(wrap, 1)
 
-            status_key = tokens.TASK_STATUS_LABELS.get(task.status, task.status)
-            self.status_badge = PwbBadge(
-                status_key, tone=_STATUS_TONES.get(task.status, "neutral")
-            )
+            self.status_badge = _task_badge(task.status)
             layout.addWidget(self.status_badge)
 
     def __init__(self, parent=None):
