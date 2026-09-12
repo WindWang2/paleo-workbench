@@ -159,10 +159,10 @@ class _LedgerEntry:
     # setName 得以执行；此前 no-op 判定漏掉名字，镜像树残留旧名。
     # V10 M-O：scale_range token —— 比例尺可见域变化重新发布。
     __slots__ = ("data_revision", "style_sig", "visible", "opacity",
-                 "geom_kind", "features_by_id", "name", "scale_range")
+                 "geom_kind", "features_by_id", "name", "scale_range", "authoritative")
 
     def __init__(self, data_revision, style_sig, visible, opacity,
-                 geom_kind, features_by_id, name="", scale_range=None):
+                 geom_kind, features_by_id, name="", scale_range=None, authoritative=False):
         self.data_revision = data_revision
         self.style_sig = style_sig
         self.visible = visible
@@ -171,6 +171,9 @@ class _LedgerEntry:
         self.features_by_id = features_by_id
         self.name = name
         self.scale_range = scale_range
+        # M0 §3 台账对齐：authoritative 标记「镜像=真源」——commit 后经
+        # align_publish_ledger 直跳新基线的条目置 True（编辑权威已在镜像侧）。
+        self.authoritative = bool(authoritative)
 
 
 # R2-F8/R3: the ledger is keyed by (stack identity, layer id) — a fresh
@@ -216,6 +219,138 @@ def _ledger_key(stack, layer_id: str) -> tuple[int, str]:
 def reset_publish_ledger() -> None:
     """Clear the publish ledger (stack re-created / project switched)."""
     _MIRROR_LEDGER.clear()
+
+
+def align_publish_ledger(stack, layer) -> bool:
+    """M0 §3 台账对齐：commit 后镜像即编辑发生地，无需重发。
+
+    台账直接对齐新基线：``data_revision`` 跳到图层当前修订、
+    style/可见性等 token 按当前图层状态重算，条目标记
+    ``authoritative``（镜像=真源）。对齐后的下一次发布对数据判 no-op。
+
+    前提：该层此前已发布过（镜像上确有数据——从未发布的层对齐会把
+    「镜像缺数据」冻结成 no-op）。无既有条目或修订不可用 → False，
+    调用方走正常发布路径。
+
+    fid 反查表：桥侧 fid 表按 provider 现值重建由 M1 committed* 回写
+    接线（全量重发路径本就重建）；M0 交付宿主侧对齐机制。
+    """
+    key = _ledger_key(stack, getattr(layer, "id", ""))
+    entry = _MIRROR_LEDGER.get(key)
+    if entry is None:
+        return False
+    try:
+        layer_revision = int(getattr(layer, "data_revision", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if layer_revision == 0:
+        return False
+    tokens = _layer_ledger_tokens(layer)
+    _MIRROR_LEDGER[key] = _LedgerEntry(
+        layer_revision, tokens["style_sig"], bool(layer.visible),
+        float(layer.opacity), tokens["geom_kind"],
+        tokens["features_by_id"], name=str(layer.name or layer.id),
+        scale_range=tokens["scale_range"], authoritative=True)
+    return True
+
+
+def align_publish_ledger_for_layer(stack, layer, *, metadata=None) -> bool:
+    """M1 便捷面：把宿主 ``VectorLayer``（真源）适配成台账 token 形状后
+    调 :func:`align_publish_ledger`（commit 后直跳新基线）。
+
+    ``metadata`` 只需 ``role``（fields_json 同源）——与快照发布循环的
+    token 公式一致（token 公式见 ``_layer_ledger_tokens``）。
+    """
+    from types import SimpleNamespace
+
+    visible = getattr(layer, "visible", True)
+    adapter = SimpleNamespace(
+        id=layer.id,
+        name=layer.name,
+        data_revision=layer.data_revision,
+        style=layer.style,
+        visible=bool(visible),
+        opacity=float(getattr(layer, "opacity", 1.0) or 1.0),
+        features=[feature.as_record() for feature in layer.features()],
+        metadata=metadata or {},
+    )
+    return align_publish_ledger(stack, adapter)
+
+
+def _layer_ledger_tokens(layer) -> dict:
+    """按发布循环同构的公式重算一层台账 token（align 专用）。
+
+    与 ``mirror_snapshot_to_stack`` 循环内语义保持一致（qgis_style →
+    legacy 回落 → 相图填充 renderer 生成；geom 首要素/类型兜底）——
+    偏差表现为对齐后首次发布多一次重发（安全回落），不是静默漂移。
+    """
+    features = []
+    for f in layer.features:
+        props = dict(f.get("properties") or {})
+        fid = f.get("id")
+        if fid is not None:
+            props.setdefault("__pwb_fid", str(fid))
+        features.append({"type": "Feature",
+                         "geometry": f.get("geometry"),
+                         "properties": props})
+    metadata = getattr(layer, "metadata", None) or {}
+    if features:
+        geom_raw = features[0].get("geometry") if isinstance(features[0], dict) else None
+        geom_type = str(geom_raw.get("type", "")) if isinstance(geom_raw, dict) else ""
+        geom = _GEOMETRY_TYPE.get(geom_type, "Point")
+    else:
+        _KIND_GEOM = {"point": "Point", "line": "LineString", "polygon": "Polygon"}
+        geom = _KIND_GEOM.get(str(metadata.get("geometry_kind") or ""), "Point")
+    style_raw = getattr(layer, "style", None) or {}
+    if not isinstance(style_raw, dict):
+        try:
+            style_raw = dict(style_raw)
+        except Exception:
+            style_raw = {}
+    qgis_style = style_raw.get("qgis_style") if isinstance(style_raw, dict) else None
+    renderer_xml = ""
+    labeling_xml = ""
+    legacy_style = None
+    if isinstance(qgis_style, dict):
+        renderer_xml = str(qgis_style.get("renderer_xml") or "")
+        labeling_xml = str(qgis_style.get("labeling_xml") or "")
+        if not (renderer_xml.strip() or labeling_xml.strip()):
+            legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} or None
+    else:
+        legacy_style = {k: v for k, v in style_raw.items() if k != "qgis_style"} if isinstance(style_raw, dict) else None
+        if legacy_style is not None and not legacy_style:
+            legacy_style = None
+    if (not renderer_xml.strip() and isinstance(legacy_style, dict)
+            and legacy_style.get("fill_patterns")
+            and str(legacy_style.get("renderer") or "") == "categorized"
+            and geom in ("Polygon", "MultiPolygon")):
+        try:
+            from paleo_workbench.mapping.facies_renderer_xml import (
+                categorized_fill_renderer_xml,
+            )
+            from paleo_workbench.mapping.map_styles import VectorStyle
+
+            parsed = VectorStyle.from_dict(legacy_style)
+            if parsed.field and parsed.categories:
+                generated = categorized_fill_renderer_xml(
+                    field=parsed.field,
+                    categories=parsed.categories,
+                    fill_patterns=dict(legacy_style.get("fill_patterns") or {}),
+                )
+                if generated.strip():
+                    renderer_xml = generated
+                    legacy_style = None
+        except Exception:
+            pass  # 发布循环同位置只诊断不阻断；对齐回落 = 多一次重发
+    return {
+        "style_sig": _style_signature(renderer_xml, labeling_xml, legacy_style),
+        "geom_kind": geom,
+        "features_by_id": {
+            str((f.get("properties") or {}).get("__pwb_fid")
+             or (f.get("properties") or {}).get("id") or ""):
+            _feature_signature(f) for f in features},
+        "scale_range": _scale_range_token(layer),
+    }
     # V10：栈 id 登记一并清（防长期进程里 False 标记累积）。
     _STACK_ID_REFS.clear()
 
@@ -481,6 +616,11 @@ def mirror_snapshot_to_stack(
     seen: list[str] = []
     mirrored_qgis_ids: list[str] = []
     data_cache = _scalar_data_cache()
+    # M0 §3 停发窗口：编辑会话集合（绑定本发布栈时）整体短路数据重发。
+    # 未开启会话 / 会话绑定其他栈 → 空集合，发布行为与 M0 之前逐字节一致。
+    from paleo_workbench.mapping.edit_session_set import SESSION_SET
+
+    edit_window = set(SESSION_SET.active_layer_ids(stack))
     for layer in snapshot.layers:
         if layer.id in duplicate_ids and layer.id in seen:
             # 重复 id：首个已发布，后续出现跳过（不再静默塌缩）。
@@ -618,6 +758,19 @@ def mirror_snapshot_to_stack(
         ledger_active = layer_revision != 0
         if not ledger_active:
             entry = None
+        if layer.id in edit_window:
+            # M0 §3 停发窗口：集合内层数据重发短路（镜像即编辑发生地——
+            # M1 起编辑直接发生在镜像层上，宿主重发会覆盖编辑缓冲）。
+            # 台账冻结（不记新基线，窗口关闭/对齐前的变更全部待发）。
+            if renderer_xml:
+                # 样式读回验证照跑（诊断；集合内检出漂移只记录，修复顺延
+                # 到窗口关闭——此时重发/重建会毁掉编辑缓冲）。
+                _verify_published_style(stack, layer.id, renderer_xml, _sink)
+            if entry is None:
+                _sink(layer.id, "edit window: layer not yet mirrored; publish deferred")
+            _sink(layer.id, "publish:edit-window (data frozen)")
+            seen.append(layer.id)
+            continue
         unchanged = (
             entry is not None
             and entry.data_revision == layer_revision

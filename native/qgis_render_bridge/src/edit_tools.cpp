@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <limits>
+#include <set>
 
 #include <QKeyEvent>
 
@@ -18,6 +19,7 @@
 #include <qgssnappingutils.h>
 #include <qgssnapindicator.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectorlayereditutils.h>  // M1 v2：moveVertex/deleteVertex/insertVertex
 #include <qgsvertexmarker.h>
 #include <qgswkbtypes.h>
 
@@ -245,8 +247,157 @@ std::string PwbEditPickTool::basePayload(const Pick& pick) const {
 
 PwbVertexTool::~PwbVertexTool() = default;
 
+// -- v2（M1 §4 当前层档；editLayer() 非空时启用）-----------------------------
+
+QgsVectorLayer* PwbVertexTool::editLayer() const {
+  if (!edit_layer_provider_) return nullptr;
+  QgsVectorLayer* layer = edit_layer_provider_();
+  if (layer == nullptr || !layer->isEditable()) return nullptr;
+  return layer;
+}
+
+std::vector<PwbVertexTool::VertexRef> PwbVertexTool::verticesNear(
+    QgsVectorLayer* layer, const QgsPointXY& center, double radius) {
+  std::vector<VertexRef> out;
+  if (layer == nullptr) return out;
+  QgsFeature feature;
+  QgsFeatureIterator cursor = layer->getFeatures();  // 合并编辑缓冲
+  while (cursor.nextFeature(feature)) {
+    if (!feature.hasGeometry()) continue;
+    const QgsGeometry geometry = feature.geometry();
+    const QgsAbstractGeometry* raw = geometry.constGet();
+    if (raw == nullptr) continue;
+    const int total = static_cast<int>(raw->vertexCount());
+    for (int nr = 0; nr < total; ++nr) {
+      QgsVertexId vid;
+      if (!geometry.vertexIdFromVertexNr(nr, vid) || !vid.isValid()) continue;
+      const QgsPoint point = raw->vertexAt(vid);
+      if (std::hypot(point.x() - center.x(), point.y() - center.y())
+          <= radius) {
+        out.push_back({feature.id(), vid, QgsPointXY(point.x(), point.y())});
+      }
+    }
+  }
+  return out;
+}
+
+void PwbVertexTool::clearSharedMarkers() {
+  shared_markers_.clear();
+}
+
+void PwbVertexTool::beginSharedDrag(const QgsPointXY& anchor,
+                                    std::vector<VertexRef> shared) {
+  shared_drag_ = std::move(shared);
+  drag_anchor_ = anchor;
+  dragging_ = true;
+  clearHover();
+  hideSnapIndicator();
+  // 公共节点高亮（§4）：拖动集合 = 全部同位置节点（视觉区分「拓扑同步」）。
+  for (const VertexRef& ref : shared_drag_) {
+    auto marker = std::make_unique<QgsVertexMarker>(canvas());
+    marker->setCenter(ref.pos);
+    marker->setIconType(QgsVertexMarker::ICON_CIRCLE);
+    marker->setIconSize(8);
+    marker->setColor(QColor(255, 140, 0, 220));
+    marker->setPenWidth(2);
+    shared_markers_.push_back(std::move(marker));
+  }
+  rubber_ = std::make_unique<QgsRubberBand>(canvas(), Qgis::GeometryType::Point);
+  rubber_->setColor(QColor(255, 0, 0, 200));
+  rubber_->setWidth(2);
+  rubber_->addPoint(anchor);
+}
+
+void PwbVertexTool::finishSharedDrag(QgsVectorLayer* layer,
+                                     const QgsPointXY& target) {
+  const std::vector<VertexRef> refs = std::move(shared_drag_);
+  cancelDrag();
+  clearSharedMarkers();
+  const QgsPointXY anchor = drag_anchor_;
+  // 零位移抑制（v1 同语义）：单击不是拖动。
+  const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+  if (std::hypot(target.x() - anchor.x(), target.y() - anchor.y())
+      < kTolerancePx * mup) {
+    return;
+  }
+  // 每层每手势恰一宏（§2 不变式）：全部共享节点一次移动、一条撤销记录。
+  layer->beginEditCommand(refs.size() > 1 ? QStringLiteral("Moved vertices")
+                                          : QStringLiteral("Moved vertex"));
+  QgsVectorLayerEditUtils utils(layer);
+  bool moved = false;
+  std::vector<QgsFeatureId> touched;
+  for (const VertexRef& ref : refs) {
+    QgsFeature feature;
+    if (!layer->getFeatures(QgsFeatureRequest(ref.fid)).nextFeature(feature)
+        || !feature.hasGeometry()) {
+      continue;
+    }
+    const int nr = feature.geometry().vertexNrFromVertexId(ref.vid);
+    if (nr < 0) continue;
+    if (utils.moveVertex(target.x(), target.y(), ref.fid, nr)) {
+      moved = true;
+      touched.push_back(ref.fid);
+    }
+  }
+  if (!moved) {
+    layer->destroyEditCommand();
+    return;
+  }
+  layer->endEditCommand();
+  emitGesture(refs.size() > 1 ? "vertex_move_multi" : "vertex_move",
+              refs.size() > 1 ? "Moved vertices" : "Moved vertex", layer,
+              touched);
+}
+
+void PwbVertexTool::emitGesture(const char* gesture, const char* undo_text,
+                                QgsVectorLayer* layer,
+                                const std::vector<QgsFeatureId>& fids) const {
+  const QString doc_id =
+      layer->customProperty(QStringLiteral("pwb/doc_id")).toString();
+  std::string payload = "{\"layer_doc_id\":\"" + doc_id.toStdString()
+      + "\",\"gesture\":\"" + gesture + "\",\"undo_text\":\"" + undo_text
+      + "\",\"features\":[";
+  // 闭合环的重复闭合点会命中多个 vertex——宿主 id 去重保序。
+  std::vector<std::string> host_ids;
+  for (const QgsFeatureId fid : fids) {
+    std::string host_id = resolver_
+        ? resolver_(layer, fid)
+        : std::to_string(static_cast<long long>(fid));
+    if (std::find(host_ids.begin(), host_ids.end(), host_id)
+        != host_ids.end()) {
+      continue;
+    }
+    host_ids.push_back(std::move(host_id));
+  }
+  for (size_t i = 0; i < host_ids.size(); ++i) {
+    if (i > 0) payload += ",";
+    payload += "\"" + host_ids[i] + "\"";
+  }
+  payload += "]}";
+  callback_("edit_gesture", payload);
+}
+
 void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (e->button() != Qt::LeftButton) return;
+  if (QgsVectorLayer* layer = editLayer()) {
+    // v2 当前层档：拾取容差内找层内顶点 → 1e-8 精确重合集 = 共享节点。
+    const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+    const std::vector<VertexRef> picked =
+        verticesNear(layer, e->mapPoint(), kTolerancePx * mup);
+    if (picked.empty()) {
+      callback_("pick_miss", "{}");
+      return;
+    }
+    const QgsPointXY anchor = picked.front().pos;
+    std::vector<VertexRef> shared =
+        verticesNear(layer, anchor, kSharedNodeEpsilon);
+    if (shared.empty()) {
+      callback_("pick_miss", "{}");
+      return;
+    }
+    beginSharedDrag(anchor, std::move(shared));
+    return;
+  }
   Pick pick;
   QgsVertexId vid;
   if (!pickFeature(e->mapPoint(), pick) || !nearestVertex(pick, e->mapPoint(), vid)) {
@@ -282,6 +433,15 @@ void PwbVertexTool::canvasMoveEvent(QgsMapMouseEvent* e) {
 void PwbVertexTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   if (!dragging_ || e->button() != Qt::LeftButton) return;
   const QgsPointXY p = snapOrRaw(e->mapPoint());
+  if (!shared_drag_.empty()) {
+    // v2：共享节点集整体落位（每层每手势恰一宏）。
+    if (QgsVectorLayer* layer = editLayer()) {
+      finishSharedDrag(layer, p);
+      return;
+    }
+    shared_drag_.clear();
+    clearSharedMarkers();
+  }
   const Pick pick = current_;
   const QgsVertexId vid = vertex_id_;
   // 零位移抑制（review-5 #5）：press→release 顶点位移小于拖动阈值（拾取容差
@@ -307,12 +467,33 @@ void PwbVertexTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
 void PwbVertexTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
   if (dragging_) {
     cancelDrag();
+    clearSharedMarkers();
     return;
   }
   updateHover(e->mapPoint());
   if (!hover_.has_segment) return;
   const auto flat = QgsWkbTypes::flatType(hover_.pick.geometry.wkbType());
   if (flat == Qgis::WkbType::Point || flat == Qgis::WkbType::MultiPoint) return;
+  if (QgsVectorLayer* layer = editLayer();
+      layer != nullptr && hover_.pick.layer == layer
+      && hover_.pick.geometry.constGet() != nullptr) {
+    // v2：段上插点直写缓冲（一宏「Added vertex」）。
+    const QgsVertexId at = hover_.insert_before;
+    const QgsPointXY p = hover_.segment_point;
+    const int before = hover_.pick.geometry.vertexNrFromVertexId(at);
+    clearHover();
+    if (before < 0) return;
+    layer->beginEditCommand(QStringLiteral("Added vertex"));
+    QgsVectorLayerEditUtils utils(layer);
+    if (!utils.insertVertex(p.x(), p.y(), hover_.pick.fid, before)) {
+      layer->destroyEditCommand();
+      return;
+    }
+    layer->endEditCommand();
+    emitGesture("vertex_insert", "Added vertex", layer, {hover_.pick.fid});
+    e->accept();
+    return;
+  }
   const Pick pick = hover_.pick;
   const QgsVertexId at = hover_.insert_before;
   const QgsPointXY p = hover_.segment_point;
@@ -327,6 +508,88 @@ void PwbVertexTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
 
 void PwbVertexTool::keyPressEvent(QKeyEvent* e) {
   if (e->key() == Qt::Key_Delete && !dragging_) {
+    if (QgsVectorLayer* layer = editLayer()) {
+      // v2 联合删除：hover 顶点位置的同位置节点集（1e-8）整体删除；
+      // 任一要素低于最少顶点 → 整手势拒绝（原子语义）。
+      if (hover_.has_vertex && hover_.pick.layer == layer
+          && hover_.pick.geometry.constGet() != nullptr) {
+        const QgsPoint hover_point =
+            hover_.pick.geometry.constGet()->vertexAt(hover_.vertex);
+        std::vector<VertexRef> shared = verticesNear(
+            layer, QgsPointXY(hover_point.x(), hover_point.y()),
+            kSharedNodeEpsilon);
+        // 闭合环的重复闭合点与自身「共享」——同要素只删一个节点
+        // （QGIS deleteVertex 自持 ring 闭合不变量）。
+        {
+          std::vector<VertexRef> deduped;
+          std::set<QgsFeatureId> seen;
+          for (const VertexRef& ref : shared) {
+            if (seen.insert(ref.fid).second) deduped.push_back(ref);
+          }
+          shared = std::move(deduped);
+        }
+        bool guarded = !shared.empty();
+        for (const VertexRef& ref : shared) {
+          QgsFeature feature;
+          if (!layer->getFeatures(QgsFeatureRequest(ref.fid))
+                   .nextFeature(feature) || !feature.hasGeometry()) {
+            guarded = false;
+            break;
+          }
+          Pick probe;
+          probe.layer = layer;
+          probe.fid = ref.fid;
+          probe.geometry = feature.geometry();
+          probe.docId = layer->customProperty(
+              QStringLiteral("pwb/doc_id")).toString().toStdString();
+          probe.featureId = resolver_
+              ? resolver_(layer, ref.fid)
+              : std::to_string(static_cast<long long>(ref.fid));
+          if (!minVerticesAfterDelete(probe, ref.vid)) {
+            guarded = false;
+            break;
+          }
+        }
+        if (!guarded) {
+          callback_("vertex_delete_rejected", "{}");
+          e->accept();
+          return;
+        }
+        clearHover();
+        layer->beginEditCommand(shared.size() > 1
+                                    ? QStringLiteral("Deleted vertices")
+                                    : QStringLiteral("Deleted vertex"));
+        QgsVectorLayerEditUtils utils(layer);
+        bool deleted = false;
+        std::vector<QgsFeatureId> touched;
+        for (const VertexRef& ref : shared) {
+          QgsFeature feature;
+          if (!layer->getFeatures(QgsFeatureRequest(ref.fid))
+                   .nextFeature(feature) || !feature.hasGeometry()) {
+            continue;
+          }
+          const int nr = feature.geometry().vertexNrFromVertexId(ref.vid);
+          if (nr < 0) continue;
+          if (utils.deleteVertex(ref.fid, nr) != Qgis::VectorEditResult::Success) {
+            continue;
+          }
+          deleted = true;
+          touched.push_back(ref.fid);
+        }
+        if (!deleted) {
+          layer->destroyEditCommand();
+          callback_("vertex_delete_rejected", "{}");
+          e->accept();
+          return;
+        }
+        layer->endEditCommand();
+        emitGesture("vertex_delete", "Deleted vertex", layer, touched);
+      } else {
+        callback_("vertex_delete_rejected", "{}");
+      }
+      e->accept();
+      return;
+    }
     if (hover_.has_vertex && minVerticesAfterDelete(hover_.pick, hover_.vertex)) {
       const Pick pick = hover_.pick;
       const QgsVertexId vid = hover_.vertex;
@@ -347,6 +610,8 @@ void PwbVertexTool::keyPressEvent(QKeyEvent* e) {
 
 void PwbVertexTool::deactivate() {
   clearHover();
+  clearSharedMarkers();
+  shared_drag_.clear();
   hideSnapIndicator();
   PwbEditPickTool::deactivate();
 }
@@ -411,6 +676,14 @@ QgsPointLocator::Match PwbVertexTool::updateHoverMatch(const QgsPointXY& mapPoin
         }
       }
     }
+  }
+  if (editLayer() != nullptr
+      && (hover_.has_vertex || hover_.has_segment)
+      && hover_.pick.layer != nullptr
+      && hover_.pick.layer != editLayer()) {
+    // v2 当前层档：hover 只认编辑目标层（其他层命中 = 无操作——
+    // 删除/插点不越层写缓冲）。
+    hover_ = HoverState();
   }
   updateHoverMarker();
   return m;
@@ -556,54 +829,6 @@ void PwbSelectTool::keyReleaseEvent(QKeyEvent* e) {
 void PwbSelectTool::deactivate() {
   handler_->deactivate();
   PwbEditPickTool::deactivate();
-}
-
-void PwbSelectTool::onGeometryChanged(Qt::KeyboardModifiers modifiers) {
-  QStringList ids;
-  std::string docId;
-  auto* vl = qobject_cast<QgsVectorLayer*>(canvas()->currentLayer());
-  const QgsGeometry g = handler_->selectedGeometry();
-  if (vl != nullptr && !g.isEmpty()) {
-    docId = vl->customProperty(QStringLiteral("pwb/doc_id")).toString().toStdString();
-    if (!docId.empty()) {
-      const double mup = canvas()->mapSettings().mapUnitsPerPixel();
-      const double tol = kTolerancePx * mup;
-      QgsFeature f;
-      if (g.type() == Qgis::GeometryType::Point) {
-        const QgsPointXY p = g.asPoint();
-        const QgsRectangle rect(p.x() - tol, p.y() - tol, p.x() + tol,
-                                p.y() + tol);
-        const QgsGeometry probe = QgsGeometry::fromPointXY(p);
-        auto it = vl->getFeatures(QgsFeatureRequest(rect));
-        while (it.nextFeature(f)) {
-          if (f.hasGeometry() && f.geometry().distance(probe) <= tol)
-            ids << QString::fromStdString(
-                resolver_ ? resolver_(vl, f.id())
-                          : std::to_string(static_cast<long long>(f.id())));
-        }
-      } else {
-        auto it = vl->getFeatures(QgsFeatureRequest(g.boundingBox()));
-        while (it.nextFeature(f)) {
-          if (f.hasGeometry() && g.intersects(f.geometry()))
-            ids << QString::fromStdString(
-                resolver_ ? resolver_(vl, f.id())
-                          : std::to_string(static_cast<long long>(f.id())));
-        }
-      }
-    }
-  }
-  QStringList mods;
-  if (modifiers & Qt::ControlModifier) mods << QStringLiteral("ctrl");
-  if (modifiers & Qt::ShiftModifier) mods << QStringLiteral("shift");
-  QStringList quoted;
-  for (const QString& id : ids) quoted << "\"" + id + "\"";
-  QStringList quotedMods;
-  for (const QString& m : mods) quotedMods << "\"" + m + "\"";
-  const std::string payload =
-      std::string("{\"layer_doc_id\":\"") + docId + "\",\"feature_ids\":[" +
-      quoted.join(QStringLiteral(",")).toStdString() + "],\"modifiers\":[" +
-      quotedMods.join(QStringLiteral(",")).toStdString() + "]}";
-  callback_("selection", payload);
 }
 
 // -- 测距（V7）---------------------------------------------------------------

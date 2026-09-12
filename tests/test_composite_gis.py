@@ -315,10 +315,15 @@ def test_merge_selected_polygons_via_composite(qtbot, tmp_path):
     assert session.redo()
 
 
-def test_split_polygon_by_selected_line(qtbot, tmp_path):
+def test_split_polygon_by_selected_line(qtbot, tmp_path, monkeypatch):
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    # M1 拓扑编辑迁移：相带（polygon）层在原生画布上默认翻转为原生编辑
+    # 会话。本测试钉的是 **Python 会话路径** 的分割几何语义（M3 才把
+    # 分割接进原生缓冲）——显式禁用原生翻转，聚焦既有行为。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     polygons = controller.create_layer("相带", "polygon", template="facies")
     lines = controller.create_layer("打断线", "line", template="break")
     controller.set_active_layer(polygons.id)
@@ -1118,6 +1123,9 @@ def test_reference_import_without_gdal_reports_actionably(qtbot, tmp_path, monke
 
     monkeypatch.setattr(ReferenceLayerService, "import_layer", _no_gdal)
     project = _project(tmp_path)
+    # M0 §6：新工程默认未声明 CRS（本地帧）——本测试钉「GDAL 错误可操作
+    # 上报」，声明 CRS 让导入走到 GDAL 路径；未声明拒绝路径另有钉子。
+    project.coordinate.project_crs = "EPSG:4326"
     doc = CompositeDocument(project)
     qtbot.addWidget(doc)
     log = _MessageLog(doc)
@@ -1189,3 +1197,18 @@ def test_reference_withheld_on_project_crs_change_until_refresh(qtbot, tmp_path)
         layer for layer in doc.layer_manager._layers if layer.id == reference_id
     )
     assert len(restored.features) == 2
+
+
+def test_reference_import_refused_while_project_crs_undeclared(qtbot, tmp_path):
+    """V9 W3 策略（M0 默认下仍成立）：工程 CRS 未声明拒绝参考导入并说明。"""
+    project = _project(tmp_path)
+    assert project.coordinate.project_crs == ""  # M0 新工程默认本地帧
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    log = _MessageLog(doc)
+    source = tmp_path / "refs.geojson"
+    _write_reference_points_geojson(source)
+    assert doc.import_reference_layers([str(source)]) == 0
+    assert doc._reference_layers == []
+    assert any(
+        "声明坐标系" in message for message in log.messages), log.messages

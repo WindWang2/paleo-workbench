@@ -641,6 +641,38 @@ def crs_equivalent(left: str, right: str) -> bool:
         return left.strip().casefold() == right.strip().casefold()
 
 
+def crs_domain_issues(project: Any) -> list[str]:
+    """打开工程的 CRS 域兜底检测（拓扑编辑迁移 M0 §6，决议 #1285）。
+
+    旧工程可能在「声明地理 CRS + 数据本地坐标」状态下保存——同一检测
+    在进入编辑的进前段拦截并引导修复；这里给出打开时的全景（用户可读
+    事实清单，供 load 路径告警呈现）。纯函数，无 Qt/IO。
+    """
+    from paleo_workbench.mapping.crs_contract import (  # noqa: PLC0415
+        coordinate_domain_mismatch,
+    )
+    from paleo_workbench.mapping.geometry_planar import (  # noqa: PLC0415
+        extent_of_geometries,
+    )
+
+    declared = str(
+        getattr(getattr(project, "coordinate", None), "project_crs", "") or "")
+    issues: list[str] = []
+    for layer in getattr(project, "user_vector_layers", None) or []:
+        effective = str(getattr(layer, "crs", "") or "") or declared
+        if not effective:
+            continue
+        try:
+            extent = extent_of_geometries(
+                [feature.geometry for feature in layer.features])
+        except ValueError:
+            continue  # 空层：无数据范围可校验
+        mismatch = coordinate_domain_mismatch(effective, extent)
+        if mismatch is not None:
+            issues.append(f"图层「{getattr(layer, 'name', '')}」：{mismatch.describe()}")
+    return issues
+
+
 def domain_signature(project: Any) -> tuple:
     """Cheap change key covering every domain field the UI renders.
 

@@ -2,12 +2,17 @@
 
 // M3 Task 3：薄编辑工具（顶点编辑 / 要素移动）。
 // QgsVertexTool / QgsMapToolMoveFeature 是 app 层（APP_EXPORT）不可链接，
-// 这里自实现裁剪版：snapToMap 无关的独立拾取 + QgsRubberBand 拖动预览；
-// 数据变更一律经回调交 Python 权威会话（VectorEditSession），镜像层只读。
+// 这里自实现裁剪版：snapToMap 无关的独立拾取 + QgsRubberBand 拖动预览。
+// 数据变更双模（拓扑编辑迁移 M1 §2 编辑权迁移）：
+// - v1（默认，无原生编辑会话）：回调交 Python 权威会话，镜像层只读；
+// - v2（当前层处于 M1 原生会话，setEditLayerProvider 解析）：直接编辑
+//   镜像层缓冲——每手势恰一宏（begin/endEditCommand），共享节点
+//   （1e-8 精确重合）联合拖动/联合删除，手势经 edit_gesture 回调记账。
 
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <QPointer>
 
@@ -47,6 +52,8 @@ class PwbEditPickTool : public QgsMapTool {
 
  protected:
   static constexpr double kTolerancePx = 10.0;
+  // 共享节点判定（M1 §2 不变式）：map CRS 下 1e-8 精确重合（≠吸附容差）。
+  static constexpr double kSharedNodeEpsilon = 1e-8;
 
   struct Pick {
     QPointer<QgsVectorLayer> layer;
@@ -103,6 +110,14 @@ class PwbVertexTool : public PwbEditPickTool {
   void keyPressEvent(QKeyEvent* e) override;
   void deactivate() override;
 
+  // 拓扑编辑迁移 M1（§4 顶点工具 v2 当前层档）：原生编辑目标解析器——
+  // 返回处于 M1 原生会话的画布当前层（无会话 → nullptr = v1 回调模式，
+  // 行为与 V10 完全一致）。QgisMapStack 在工具创建时注入。
+  void setEditLayerProvider(
+      std::function<QgsVectorLayer*()> provider) {
+    edit_layer_provider_ = std::move(provider);
+  }
+
  private:
   // hover 状态：顶点命中（Delete 删点）或段命中（双击插点，insert_before 为
   // 段终点 QgsVertexId——Python insert 语义 = parent.insert(index, point)）。
@@ -113,6 +128,13 @@ class PwbVertexTool : public PwbEditPickTool {
     QgsVertexId vertex;
     QgsVertexId insert_before;
     QgsPointXY segment_point;
+  };
+
+  // v2：共享节点引用（map CRS 下 1e-8 精确重合集，§2 不变式）。
+  struct VertexRef {
+    QgsFeatureId fid = FID_NULL;
+    QgsVertexId vid;
+    QgsPointXY pos;
   };
 
   // 刷新 hover（snapping locator 优先；关闭时容差拾取回退）。返回是否有命中。
@@ -126,9 +148,29 @@ class PwbVertexTool : public PwbEditPickTool {
   void updateHoverMarker();
   void clearHover();
 
+  // -- v2（当前层档；仅 editLayer() 非空时启用）--------------------------
+  QgsVectorLayer* editLayer() const;
+  // 层内与 center 距离 <= radius 的全部顶点（getFeatures 合并编辑缓冲——
+  // 共享节点发现的事实源）。线性扫描：当前层档要素量级下确定可接受。
+  static std::vector<VertexRef> verticesNear(QgsVectorLayer* layer,
+                                             const QgsPointXY& center,
+                                             double radius);
+  void beginSharedDrag(const QgsPointXY& anchor,
+                       std::vector<VertexRef> shared);
+  void finishSharedDrag(QgsVectorLayer* layer, const QgsPointXY& target);
+  void clearSharedMarkers();
+  void emitGesture(const char* gesture, const char* undo_text,
+                   QgsVectorLayer* layer,
+                   const std::vector<QgsFeatureId>& fids) const;
+
   QgsVertexId vertex_id_;
   HoverState hover_;
   std::unique_ptr<QgsVertexMarker> hover_marker_;
+  // v2 状态：拖动中的共享节点集（含框选扩展）与高亮 marker。
+  std::function<QgsVectorLayer*()> edit_layer_provider_;
+  std::vector<VertexRef> shared_drag_;
+  QgsPointXY drag_anchor_;
+  std::vector<std::unique_ptr<QgsVertexMarker>> shared_markers_;
 };
 
 class PwbMoveTool : public PwbEditPickTool {
@@ -160,6 +202,7 @@ class PwbSelectTool : public PwbEditPickTool {
 
   std::unique_ptr<QgsMapToolSelectionHandler> handler_;
 };
+
 
 // 原生测距工具（V7）：折线采点 + QgsDistanceArea 距离测算。
 // 地理坐标系 + 椭球体配置时自动走椭球测算（修正 Python math.dist 在

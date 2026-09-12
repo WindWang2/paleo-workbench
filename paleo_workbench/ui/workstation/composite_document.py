@@ -2173,7 +2173,9 @@ class CompositeDocument(QWidget):
                     self.edit_controller.active_layer_id)
                 if not allowed:
                     self.status_message.emit(reason)
-                else:
+                elif self._apply_crs_entry_guidance(
+                        self.edit_controller.active_layer_id):
+                    # 引导框被取消/未修复时不进入编辑（门内已发状态消息）。
                     self.edit_controller.start_editing()
         elif command_id == "save_edits":
             self._save_edits_with_feedback()
@@ -3059,6 +3061,126 @@ class CompositeDocument(QWidget):
             return False, f"图层所在组「{title}」在本阶段为证据锁定——不可编辑"
         return True, ""
 
+    # -- 编辑进前段 CRS 门（拓扑编辑迁移 M0 §6，决议 #1285）---------------------
+
+    def _layer_crs_facts(self):
+        """编辑控制器全部层的 CRS 事实（声明 CRS + 数据实际坐标范围）。"""
+        from paleo_workbench.mapping.crs_chain import LayerCrsFacts
+        from paleo_workbench.mapping.geometry_planar import extent_of_geometries
+
+        facts = []
+        for layer_id in self.edit_controller.layer_ids():
+            layer = self.edit_controller.layer(str(layer_id))
+            if layer is None:
+                continue
+            try:
+                extent = extent_of_geometries(
+                    [feature.geometry for feature in layer.features()])
+            except ValueError:
+                extent = None  # 空层：无数据范围可校验
+            facts.append(LayerCrsFacts(
+                layer_id=str(layer_id), crs=str(layer.crs or ""),
+                extent=extent))
+        return facts
+
+    def _crs_entry_gate(self, layer_id) -> tuple[object, list]:
+        """进前段 CRS 门：返回 (verdict, 受影响 (layer_id, 显示名) 序列)。
+
+        会话集合候选 = {活动层}（§3 进入编辑 = {活动层}）；域失配的
+        「受影响层」全景取工程全部层（引导对话框数据源）。
+        """
+        from paleo_workbench.mapping import crs_chain
+
+        facts = self._layer_crs_facts()
+        candidate = [fact for fact in facts if fact.layer_id == str(layer_id or "")]
+        canvas = self.canvas
+        destination_crs = getattr(canvas, "destination_crs", None)
+        canvas_crs = ""
+        if callable(destination_crs):
+            try:
+                canvas_crs = str(destination_crs() or "")
+            except Exception:
+                canvas_crs = ""
+        project_crs = str(getattr(self.edit_controller, "project_crs", "") or "")
+        if not project_crs and self._project is not None:
+            project_crs = str(
+                getattr(self._project.coordinate, "project_crs", "") or "")
+        verdict = crs_chain.evaluate_edit_entry(
+            candidate,
+            canvas_crs=canvas_crs,
+            project_crs=project_crs,
+            all_layers=facts,
+            runtime_crs_capable=crs_chain.runtime_crs_capable(),
+        )
+        affected = []
+        if verdict.mismatches:
+            from paleo_workbench.mapping.crs_contract import (
+                coordinate_domain_mismatch,
+            )
+            for fact in facts:
+                effective = fact.effective_crs(verdict.declared_crs)
+                if coordinate_domain_mismatch(effective, fact.extent) is not None:
+                    layer = self.edit_controller.layer(fact.layer_id)
+                    affected.append((
+                        fact.layer_id,
+                        str(layer.name) if layer is not None else fact.layer_id))
+        return verdict, affected
+
+    def _apply_crs_entry_guidance(self, layer_id) -> bool:
+        """进前 CRS 门被拒时的一次性引导（§6）。
+
+        一键修复（清除声明 → 画布切本地坐标 → 重试进入编辑）返回
+        True；用户取消返回 False。
+        """
+        verdict, affected = self._crs_entry_gate(layer_id)
+        if verdict.allowed:
+            return True  # 通过（或无事实可比对）：交回常规进入路径
+        from paleo_workbench.ui.crs_guidance import CrsGuidanceDialog
+
+        dialog = CrsGuidanceDialog(verdict, affected_layers=affected, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.cleared:
+            self.status_message.emit(f"未进入编辑：{verdict.reason}")
+            return False
+        self._clear_crs_declaration()
+        # 修复即入编辑（§6）：清除声明后画布以本地坐标渲染，重查通过。
+        verdict, affected = self._crs_entry_gate(layer_id)
+        if not verdict.allowed:
+            self.status_message.emit(f"仍无法进入编辑：{verdict.reason}")
+            return False
+        return True
+
+    def _clear_crs_declaration(self) -> None:
+        """一键修复：工程 CRS 声明改为本地（清除）并重推画布。
+
+        层自身声明了**可证明与数据失配** CRS 的一并清除（新建层会把
+        工程声明烙进 layer.crs——只清工程声明会让这些层继续拦在门上）；
+        声明可验证无误的层不动。
+        """
+        from paleo_workbench.mapping.crs_contract import (
+            coordinate_domain_mismatch,
+        )
+        from paleo_workbench.mapping.geometry_planar import extent_of_geometries
+
+        for layer_id in self.edit_controller.layer_ids():
+            layer = self.edit_controller.layer(str(layer_id))
+            if layer is None or not str(layer.crs or ""):
+                continue
+            try:
+                extent = extent_of_geometries(
+                    [feature.geometry for feature in layer.features()])
+            except ValueError:
+                continue
+            if coordinate_domain_mismatch(layer.crs, extent) is not None:
+                layer.crs = ""
+        if self._project is not None:
+            from paleo_workbench.project.domain import sync_workarea_with_coordinate
+
+            self._project.coordinate.project_crs = ""
+            sync_workarea_with_coordinate(self._project)
+        self.edit_controller.project_crs = ""
+        self._sync_composition_now()
+        self.status_message.emit("工程 CRS 声明已清除——画布按本地坐标渲染")
+
     def _layer_lock_classes(self, layer_id: str) -> tuple[bool, bool]:
         """(raw_locked, stage_locked) 分类（review-3 UX-5）。
 
@@ -3102,6 +3224,10 @@ class CompositeDocument(QWidget):
         if self.edit_controller.editing:
             self._save_edits_with_feedback()
         else:
+            # M0 §6：树面板入口同样过进前段 CRS 门（一次性引导修复）。
+            if not self._apply_crs_entry_guidance(str(layer_id)):
+                self._sync_action_state()
+                return
             self.edit_controller.start_editing()
         self._sync_action_state()
 

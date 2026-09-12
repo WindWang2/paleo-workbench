@@ -1060,6 +1060,29 @@ struct QgisMapStack::Impl {
       std::unordered_map<std::string, std::uint64_t> mirror_data_revisions;
   std::unordered_map<std::string, std::string> mirror_style_sig;
   int suppress_tree_callbacks = 0;
+  // 拓扑编辑迁移 M1（§2）：镜像层原生编辑会话状态。
+  // doc_id → 编辑信号连接（startEditing 时挂、commit/rollback 收）。
+  std::unordered_map<std::string, std::vector<QMetaObject::Connection>>
+      mirror_edit_connections;
+  // doc_id → commit 期间的 committed* 增量捕获（layerId → doc 由表查询）。
+  struct CommitCapture {
+    QJsonArray added;               // geojson Feature（含 __pwb_fid）
+    QJsonArray removed;             // 宿主 feature_id（字符串）
+    QJsonArray geometry_changes;    // {feature_id, geometry}
+    QJsonArray attribute_changes;   // {feature_id, changes{}}
+  };
+  std::unordered_map<std::string, CommitCapture> commit_capture;
+  // addMirrorFeature 的宿主 id 序列（M1：数字化经宿主生成 id；commit 的
+  // committedFeaturesAdded 按序配对——schema 层不落 __pwb_fid 字段时的
+  // fid 表重建依据）。
+  std::unordered_map<std::string, std::vector<std::string>>
+      pending_added_host_ids;
+  // committed 增量回传（per-canvas，防悬垂同 digitize 模式）。
+  std::unordered_map<std::uintptr_t,
+                     std::function<void(const std::string&, const std::string&)>>
+      committed_callbacks;
+  std::vector<std::function<void(const std::string&, const std::string&)>>
+      orphan_committed_callbacks;
 
   void eraseMirrorByQgisId(const std::string& qgis_id) {
     for (auto it = mirror_by_doc.begin(); it != mirror_by_doc.end(); ) {
@@ -1070,6 +1093,7 @@ struct QgisMapStack::Impl {
         known_layer_visibility.erase(it->first);
         mirror_feature_fids.erase(it->first);
         mirror_data_revisions.erase(it->first);
+        dropEditSessionState(it->first);
         it = mirror_by_doc.erase(it);
       } else {
         ++it;
@@ -1086,6 +1110,7 @@ struct QgisMapStack::Impl {
     known_layer_visibility.erase(doc_id);
     mirror_feature_fids.erase(doc_id);
     mirror_data_revisions.erase(doc_id);
+    dropEditSessionState(doc_id);
   }
 
   void eraseMirrorByDocIdIfQgisMatches(const std::string& doc_id,
@@ -1099,9 +1124,37 @@ struct QgisMapStack::Impl {
       known_layer_visibility.erase(doc_id);
       mirror_feature_fids.erase(doc_id);
     mirror_data_revisions.erase(doc_id);
+    dropEditSessionState(doc_id);
     }
   }
+
+  // M1：层销毁/替换时解除 committed* 连接并丢弃会话残余状态。
+  void dropEditSessionState(const std::string& doc_id) {
+    auto conns = mirror_edit_connections.find(doc_id);
+    if (conns != mirror_edit_connections.end()) {
+      for (const QMetaObject::Connection& connection : conns->second)
+        QObject::disconnect(connection);
+      mirror_edit_connections.erase(conns);
+    }
+    commit_capture.erase(doc_id);
+    pending_added_host_ids.erase(doc_id);
+  }
 };
+
+// M1：doc → 镜像矢量层（不检查编辑态；editingLayerFor 的底层）。
+using MirrorByDocTable = std::unordered_map<std::string, std::string>;
+QgsVectorLayer* mirrorLayerByDoc(
+    QgsProject* project, const MirrorByDocTable& mirror_by_doc,
+    const std::string& doc_id) {
+  auto it = mirror_by_doc.find(doc_id);
+  if (it != mirror_by_doc.end()) {
+    if (auto* layer = qobject_cast<QgsVectorLayer*>(
+            project->mapLayer(QString::fromStdString(it->second)))) {
+      return layer;
+    }
+  }
+  return findMirrorByDocId(project, doc_id);
+}
 
 namespace {
 struct SuppressGuard {
@@ -1349,6 +1402,7 @@ void QgisMapStack::shutdown() {
   impl_->orphan_tree_callbacks.clear();
   impl_->orphan_tree_menu_callbacks.clear();
   impl_->orphan_digitize_callbacks.clear();
+  impl_->orphan_committed_callbacks.clear();
   impl_->orphan_edit_pick_callbacks.clear();
   impl_->orphan_selection_callbacks.clear();
   impl_->orphan_measure_callbacks.clear();
@@ -1595,6 +1649,11 @@ void QgisMapStack::reapCanvasTables(std::uintptr_t canvas_addr) {
         it != impl_->digitize_callbacks.end()) {
       impl_->orphan_digitize_callbacks.push_back(std::move(it->second));
       impl_->digitize_callbacks.erase(it);
+    }
+    if (auto it = impl_->committed_callbacks.find(canvas_addr);
+        it != impl_->committed_callbacks.end()) {
+      impl_->orphan_committed_callbacks.push_back(std::move(it->second));
+      impl_->committed_callbacks.erase(it);
     }
     if (auto it = impl_->edit_pick_callbacks.find(canvas_addr);
         it != impl_->edit_pick_callbacks.end()) {
@@ -3059,11 +3118,35 @@ std::string QgisMapStack::mirrorFeaturesJson(const std::string& doc_id,
   out.insert(QStringLiteral("exists"), true);
   QJsonArray features;
   int emitted = 0;
+  // M1：limit <= 0 = 不限（编辑缓冲读回 = 全量事实）。
+  const int cap = limit > 0 ? limit : std::numeric_limits<int>::max();
   QgsFeature stored;
   QgsFeatureIterator cursor = layer->getFeatures();
   while (cursor.nextFeature(stored)) {
-    if (emitted++ >= std::max(1, limit)) break;
+    if (emitted >= cap) break;
+    ++emitted;
     QJsonObject feature_json;
+    // M1：注入宿主 id（fid 表 = 镜像 fid → 文档 feature_id 的权威；
+    // memory provider 不落 __pwb_fid 属性字段，见 Impl 注释）——
+    // 编辑缓冲读回（拓扑门禁/写回配对）按宿主 id 可寻址。
+    {
+      const std::string edit_doc = layer->customProperty(
+                                       QStringLiteral("pwb/doc_id"))
+                                       .toString()
+                                       .toStdString();
+      auto table = impl_->mirror_feature_fids.find(edit_doc);
+      std::string host_id;
+      if (table != impl_->mirror_feature_fids.end()) {
+        auto entry = table->second.find(
+            static_cast<long long>(stored.id()));
+        if (entry != table->second.end()) host_id = entry->second;
+      }
+      if (host_id.empty()) {
+        host_id = std::to_string(static_cast<long long>(stored.id()));
+      }
+      feature_json.insert(QStringLiteral("id"),
+                          QString::fromStdString(host_id));
+    }
     if (stored.hasGeometry()) {
       feature_json.insert(QStringLiteral("geometry"),
                           QJsonDocument::fromJson(
@@ -3098,6 +3181,290 @@ std::string QgisMapStack::mirrorFeaturesJson(const std::string& doc_id,
   }
   out.insert(QStringLiteral("features"), features);
   return QJsonDocument(out).toJson(QJsonDocument::Compact).toStdString();
+}
+
+// -- 拓扑编辑迁移 M1（§2）：镜像层原生编辑会话 -------------------------------
+
+QgsVectorLayer* QgisMapStack::editingLayerFor(const std::string& doc_id) const {
+  if (!impl_ || !impl_->initialized) return nullptr;
+  QgsVectorLayer* layer = mirrorLayerByDoc(project(), impl_->mirror_by_doc, doc_id);
+  if (layer == nullptr || !layer->isEditable()) return nullptr;
+  if (impl_->mirror_edit_connections.find(doc_id)
+      == impl_->mirror_edit_connections.end()) {
+    return nullptr;  // 非 M1 会话（如采点 scratch 复用同层则不可能——层不同）
+  }
+  return layer;
+}
+
+std::string QgisMapStack::startMirrorLayerEditing(const std::string& doc_id) {
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  QgsVectorLayer* layer = mirrorLayerByDoc(project(), impl_->mirror_by_doc, doc_id);
+  if (layer == nullptr) return "mirror layer not found: " + doc_id;
+  if (impl_->mirror_edit_connections.find(doc_id)
+      != impl_->mirror_edit_connections.end()) {
+    return "";  // 幂等：会话已开
+  }
+  if (!layer->startEditing()) {
+    return "failed to start editing on mirror layer " + doc_id;
+  }
+  // committed* 捕获（QGIS 4 名字：committedGeometriesChanges）：context =
+  // layer（层销毁自动断连）；alive token 防 QgisMapStack 先亡。
+  std::weak_ptr<char> alive = alive_token_;
+  std::vector<QMetaObject::Connection> connections;
+  connections.push_back(QObject::connect(
+      layer, &QgsVectorLayer::committedFeaturesAdded, layer,
+      [this, alive, doc_id](const QString&, const QgsFeatureList& added) {
+        if (alive.expired()) return;
+        handleCommittedAdded(doc_id, added);
+      }));
+  connections.push_back(QObject::connect(
+      layer, &QgsVectorLayer::committedFeaturesRemoved, layer,
+      [this, alive, doc_id](const QString&, const QgsFeatureIds& removed) {
+        if (alive.expired()) return;
+        handleCommittedRemoved(doc_id, removed);
+      }));
+  connections.push_back(QObject::connect(
+      layer, &QgsVectorLayer::committedGeometriesChanges, layer,
+      [this, alive, doc_id](const QString&, const QgsGeometryMap& changes) {
+        if (alive.expired()) return;
+        handleCommittedGeometries(doc_id, changes);
+      }));
+  connections.push_back(QObject::connect(
+      layer, &QgsVectorLayer::committedAttributeValuesChanges, layer,
+      [this, alive, doc_id](const QString&,
+                            const QgsChangedAttributesMap& changes) {
+        if (alive.expired()) return;
+        handleCommittedAttributes(doc_id, changes);
+      }));
+  impl_->mirror_edit_connections[doc_id] = std::move(connections);
+  return "";
+}
+
+void QgisMapStack::endEditSessionState(const std::string& doc_id) {
+  auto conns = impl_->mirror_edit_connections.find(doc_id);
+  if (conns != impl_->mirror_edit_connections.end()) {
+    for (const QMetaObject::Connection& connection : conns->second)
+      QObject::disconnect(connection);
+    impl_->mirror_edit_connections.erase(conns);
+  }
+  impl_->pending_added_host_ids.erase(doc_id);
+}
+
+std::string QgisMapStack::commitMirrorLayer(const std::string& doc_id) {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "layer not in an edit session: " + doc_id;
+  impl_->commit_capture[doc_id] = Impl::CommitCapture{};
+  const bool ok = layer->commitChanges(true);
+  if (!ok) {
+    // 失败保持会话（缓冲未清——宿主门禁拒绝/修复后重试的同语义）。
+    impl_->commit_capture.erase(doc_id);
+    QStringList errors = layer->commitErrors();
+    errors.removeAll(QString());
+    if (errors.isEmpty()) errors << QStringLiteral("commit failed");
+    return errors.join(QStringLiteral("; ")).toStdString();
+  }
+  // 成功：fid 表已按 committed 信号增量重建（added 按序配对 / removed
+  // 擦除）；组 delta 回传宿主（§2 回写通道）。
+  fireCommittedDelta(doc_id);
+  endEditSessionState(doc_id);
+  impl_->commit_capture.erase(doc_id);
+  return "";
+}
+
+std::string QgisMapStack::rollBackMirrorLayer(const std::string& doc_id) {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "layer not in an edit session: " + doc_id;
+  layer->rollBack(true);  // 复位到会话开启时快照基线（§2 易失会话）
+  endEditSessionState(doc_id);
+  impl_->commit_capture.erase(doc_id);
+  return "";
+}
+
+bool QgisMapStack::mirrorLayerEditing(const std::string& doc_id) const {
+  return editingLayerFor(doc_id) != nullptr;
+}
+
+std::string QgisMapStack::undoMirrorEdit(const std::string& doc_id) {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "layer not in an edit session: " + doc_id;
+  layer->undoStack()->undo();
+  return "";
+}
+
+std::string QgisMapStack::redoMirrorEdit(const std::string& doc_id) {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "layer not in an edit session: " + doc_id;
+  layer->undoStack()->redo();
+  return "";
+}
+
+std::string QgisMapStack::addMirrorFeature(const std::string& doc_id,
+                                           const std::string& geojson_feature) {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "layer not in an edit session: " + doc_id;
+  // 单 Feature → FeatureCollection 包装后走既有解析（几何 + schema 属性）。
+  const QByteArray raw = QByteArray::fromStdString(geojson_feature);
+  QJsonParseError parse_error{};
+  const QJsonDocument document = QJsonDocument::fromJson(raw, &parse_error);
+  if (parse_error.error != QJsonParseError::NoError || !document.isObject()) {
+    return "invalid geojson feature: " + parse_error.errorString().toStdString();
+  }
+  const QJsonObject feature = document.object();
+  const QString host_id = feature.value(QStringLiteral("properties"))
+                              .toObject()
+                              .value(QStringLiteral("__pwb_fid"))
+                              .toString();
+  QJsonObject collection;
+  collection.insert(QStringLiteral("type"),
+                    QStringLiteral("FeatureCollection"));
+  collection.insert(QStringLiteral("features"),
+                    QJsonArray{feature});
+  const QgsFeatureList parsed = parseGeoJsonFeatures(
+      QString::fromUtf8(QJsonDocument(collection).toJson(
+          QJsonDocument::Compact)),
+      layer->fields());
+  if (parsed.isEmpty()) return "geojson feature parsed to nothing";
+  if (!host_id.isEmpty()) {
+    impl_->pending_added_host_ids[doc_id].push_back(host_id.toStdString());
+  }
+  layer->beginEditCommand(QStringLiteral("Added feature"));
+  bool added = false;
+  for (const QgsFeature& record : parsed) {
+    QgsFeature copy = record;  // addFeature 取非 const 引用（FeatureSink 契约）
+    added = layer->addFeature(copy) || added;
+  }
+  if (!added) {
+    layer->destroyEditCommand();
+    if (!host_id.isEmpty() && !impl_->pending_added_host_ids[doc_id].empty()) {
+      impl_->pending_added_host_ids[doc_id].pop_back();
+    }
+    return "addFeature rejected by edit buffer";
+  }
+  layer->endEditCommand();
+  return "";
+}
+
+void QgisMapStack::setCommittedCallback(
+    std::uintptr_t canvas_addr,
+    std::function<void(const std::string&, const std::string&)> callback) {
+  ensureNotStale(canvas_addr);
+  canvasOrThrow(canvas_addr);
+  impl_->committed_callbacks[canvas_addr] = std::move(callback);
+}
+
+void QgisMapStack::handleCommittedAdded(const std::string& doc_id,
+                                        const QgsFeatureList& added) {
+  auto capture = impl_->commit_capture.find(doc_id);
+  if (capture == impl_->commit_capture.end()) return;
+  auto& host_ids = impl_->pending_added_host_ids[doc_id];
+  const QgsJsonExporter exporter;  // 导出含 __pwb_fid 属性的 geojson Feature
+  size_t paired = 0;
+  for (const QgsFeature& feature : added) {
+    // fid 表按 provider 现值重建：addMirrorFeature 的宿主 id 按序配对。
+    std::string host_id;
+    if (paired < host_ids.size()) host_id = host_ids[paired];
+    ++paired;
+    if (host_id.empty()) {
+      host_id = std::to_string(static_cast<long long>(feature.id()));
+    }
+    impl_->mirror_feature_fids[doc_id][static_cast<long long>(feature.id())] =
+        host_id;
+    QVariantMap extra;
+    extra.insert(QStringLiteral("__pwb_fid"), QString::fromStdString(host_id));
+    const QString feature_json = exporter.exportFeature(feature, extra);
+    capture->second.added.append(QJsonDocument::fromJson(
+        feature_json.toUtf8()).object());
+  }
+  host_ids.clear();
+}
+
+void QgisMapStack::handleCommittedRemoved(const std::string& doc_id,
+                                          const QgsFeatureIds& removed) {
+  auto capture = impl_->commit_capture.find(doc_id);
+  if (capture == impl_->commit_capture.end()) return;
+  auto table = impl_->mirror_feature_fids.find(doc_id);
+  for (const QgsFeatureId fid : removed) {
+    std::string host_id = std::to_string(static_cast<long long>(fid));
+    if (table != impl_->mirror_feature_fids.end()) {
+      auto entry = table->second.find(static_cast<long long>(fid));
+      if (entry != table->second.end()) {
+        host_id = entry->second;
+        table->second.erase(entry);  // fid 表按现值重建：已删要素出表
+      }
+    }
+    capture->second.removed.append(QString::fromStdString(host_id));
+  }
+}
+
+void QgisMapStack::handleCommittedGeometries(const std::string& doc_id,
+                                             const QgsGeometryMap& changes) {
+  auto capture = impl_->commit_capture.find(doc_id);
+  if (capture == impl_->commit_capture.end()) return;
+  auto table = impl_->mirror_feature_fids.find(doc_id);
+  for (auto it = changes.constBegin(); it != changes.constEnd(); ++it) {
+    std::string host_id = std::to_string(static_cast<long long>(it.key()));
+    if (table != impl_->mirror_feature_fids.end()) {
+      auto entry = table->second.find(static_cast<long long>(it.key()));
+      if (entry != table->second.end()) host_id = entry->second;
+    }
+    QJsonObject change;
+    change.insert(QStringLiteral("feature_id"),
+                  QString::fromStdString(host_id));
+    change.insert(QStringLiteral("geometry"), QJsonDocument::fromJson(
+        it.value().asJson().toUtf8()).object());
+    capture->second.geometry_changes.append(change);
+  }
+}
+
+void QgisMapStack::handleCommittedAttributes(
+    const std::string& doc_id, const QgsChangedAttributesMap& changes) {
+  auto capture = impl_->commit_capture.find(doc_id);
+  if (capture == impl_->commit_capture.end()) return;
+  // commit 中段层可能已停止编辑——按 doc 直查，不经 editingLayerFor。
+  QgsVectorLayer* layer = mirrorLayerByDoc(project(), impl_->mirror_by_doc, doc_id);
+  if (layer == nullptr) return;
+  auto table = impl_->mirror_feature_fids.find(doc_id);
+  for (auto it = changes.constBegin(); it != changes.constEnd(); ++it) {
+    std::string host_id = std::to_string(static_cast<long long>(it.key()));
+    if (table != impl_->mirror_feature_fids.end()) {
+      auto entry = table->second.find(static_cast<long long>(it.key()));
+      if (entry != table->second.end()) host_id = entry->second;
+    }
+    QJsonObject values;
+    for (auto field_it = it.value().constBegin();
+         field_it != it.value().constEnd(); ++field_it) {
+      const int index = field_it.key();
+      if (index < 0 || index >= layer->fields().count()) continue;
+      values.insert(layer->fields().at(index).name(),
+                    QJsonValue::fromVariant(field_it.value()));
+    }
+    if (values.isEmpty()) continue;
+    QJsonObject change;
+    change.insert(QStringLiteral("feature_id"),
+                  QString::fromStdString(host_id));
+    change.insert(QStringLiteral("changes"), values);
+    capture->second.attribute_changes.append(change);
+  }
+}
+
+void QgisMapStack::fireCommittedDelta(const std::string& doc_id) {
+  auto capture = impl_->commit_capture.find(doc_id);
+  if (capture == impl_->commit_capture.end()) return;
+  QJsonObject delta;
+  delta.insert(QStringLiteral("doc_id"), QString::fromStdString(doc_id));
+  delta.insert(QStringLiteral("added"), capture->second.added);
+  delta.insert(QStringLiteral("removed"), capture->second.removed);
+  delta.insert(QStringLiteral("geometry_changes"),
+               capture->second.geometry_changes);
+  delta.insert(QStringLiteral("attribute_changes"),
+               capture->second.attribute_changes);
+  const std::string payload = QJsonDocument(delta).toJson(
+      QJsonDocument::Compact).toStdString();
+  for (const auto& entry : impl_->committed_callbacks) {
+    if (entry.second) entry.second(doc_id, payload);
+  }
 }
 
 void QgisMapStack::setGroupExpanded(std::uintptr_t tree_view,
@@ -3751,8 +4118,27 @@ QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
   PwbEditPickTool::FeatureIdResolver resolver = fidResolver();
   if (vertex) {
     auto& slot = impl_->vertex_tools[canvas_addr];
-    if (slot == nullptr)
+    if (slot == nullptr) {
       slot = new PwbVertexTool(canvas, std::move(cb), std::move(resolver));
+      // 拓扑编辑迁移 M1（§4 顶点 v2 当前层档）：编辑目标 = 画布当前层
+      // 且处于 M1 原生会话（无会话 → nullptr → 工具保持 v1 回调模式）。
+      // 工具 parent=画布，画布亡则工具亡——canvas 裸指针安全。
+      slot->setEditLayerProvider([this, alive,
+                                  canvas]() -> QgsVectorLayer* {
+        if (alive.expired() || impl_ == nullptr || canvas == nullptr)
+          return nullptr;
+        QgsMapLayer* current = canvas->currentLayer();
+        QgsVectorLayer* layer = qobject_cast<QgsVectorLayer*>(current);
+        if (layer == nullptr) return nullptr;
+        const std::string doc_id = layer->customProperty(
+                                       QStringLiteral("pwb/doc_id"))
+                                       .toString()
+                                       .toStdString();
+        if (doc_id.empty()) return nullptr;
+        return impl_->mirror_edit_connections.count(doc_id) > 0 ? layer
+                                                               : nullptr;
+      });
+    }
     return slot;
   }
   auto& slot = impl_->move_tools[canvas_addr];

@@ -142,9 +142,13 @@ class TestEditDeltaWorkstationFlow:
         # Engine provenance token is honest on the fallback stack.
         assert deltas[0].qgis_capability == "unavailable"
 
-    def test_split_merge_commands_tagged(self, qtbot, tmp_path):
+    def test_split_merge_commands_tagged(self, qtbot, tmp_path, monkeypatch):
         document = _document(qtbot, tmp_path)
         controller = document.edit_controller
+        # M1 拓扑编辑迁移：polygon 层默认翻转原生会话；本测试钉 Python
+        # 会话的 split/merge 命令审计语义（M3 才接原生缓冲）。
+        monkeypatch.setattr(
+            controller, "_native_session_eligible", lambda _layer: False)
         polygons = controller.create_layer("相带", "polygon")
         lines = controller.create_layer("切割线", "line")
         controller.set_active_layer(polygons.id)

@@ -13,7 +13,10 @@ def test_project_defaults_include_crs_and_empty_workflow():
 
     assert project.meta.name == "HZ26 Demo"
     assert project.meta.region == "惠州26区"
-    assert project.coordinate.project_crs == "EPSG:4326 / WGS84"
+    # 拓扑编辑迁移 M0 §6：新工程不预设地理 CRS——未声明即按本地坐标，
+    # 首次导入数据按坐标范围推断（crs_contract.infer_crs_from_extent）。
+    assert project.coordinate.project_crs == ""
+    assert not project.coordinate.crs_locked
     assert project.coordinate.display_crs == "EPSG:4326 / WGS84"
     assert project.resources == []
     assert project.compilation_runs == []

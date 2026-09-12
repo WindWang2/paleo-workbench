@@ -393,8 +393,6 @@ class QgisCanvasShim(QWidget):
         self._shutdown_done = False
         _LIVE_SHIMS.add(self)
         self._tool_controller = None
-        # V9 W7：digitize commit CRS 守卫钩子（set_capture_layer_crs_provider）。
-        self._capture_layer_crs_provider = None
         # V10 M-B：最近一次镜像发布的工程 CRS（crs_chain_facts 投影用）。
         self._project_crs_hint: str = ""
         self._pending_programmatic = 0
@@ -1045,16 +1043,6 @@ class QgisCanvasShim(QWidget):
             runtime_crs_capable=crs_chain.runtime_crs_capable(),
         )
 
-    def set_capture_layer_crs_provider(self, provider) -> None:
-        """V9 W7：digitize commit 的 CRS 守卫钩子（宿主提供 tool→层 CRS）。
-
-        原生采点几何以画布目标 CRS 落地；宿主会话层存储 CRS 由本钩子
-        查询。两者可证不同时 commit 拒绝（fail-closed）——防止镜像侧
-        destination CRS 被降级丢弃后，度数坐标静默写进米制图层。
-        无钩子/查不到层 = 不比对（与 V8 行为一致，不新增假失败）。
-        """
-        self._capture_layer_crs_provider = provider
-
     def set_map_tool_controller(self, controller) -> None:
         """Host 工具控制器绑定：pan/zoom/编辑工具映射到 QGIS 原生工具。
 
@@ -1197,26 +1185,20 @@ class QgisCanvasShim(QWidget):
             commit = getattr(tool, "commit_geometry", None)
             if commit is None:
                 return
-            # V9 W7 → V10 M-B 收敛：画布目标 CRS 与捕获层存储 CRS 的比对
-            # 收敛到 mapping.crs_chain.evaluate_commit_guard（单一判定表）。
-            # V9 的「任一侧未知 = 不比对」只对 CRS 无能运行时保留；proj 链
-            # 健康（qgis_runtime.health 判定）时画布未知 = 真实故障 → 拒绝。
-            from paleo_workbench.mapping import crs_chain
-
-            canvas_crs = shim.destination_crs()
-            provider = getattr(shim, "_capture_layer_crs_provider", None)
-            layer_crs = provider(tool) if (provider is not None and tool is not None) else ""
-            verdict = crs_chain.evaluate_commit_guard(
-                canvas_crs,
-                layer_crs,
-                runtime_crs_capable=crs_chain.runtime_crs_capable(),
-            )
-            if not verdict.allowed:
-                shim.commit_rejected.emit(
-                    f"要素未写入：{verdict.reason}（请检查工程 CRS/"
-                    "图层 CRS/PROJ 运行链状态）")
-                shim.tool_operation.emit(False)
-                return
+            # 拓扑编辑迁移 M0（§6 决议 #1285）：旧 digitize-commit CRS 门
+            # （crs_chain.evaluate_commit_guard）退休——CRS 校验并入三段式
+            # 「进前段」（进入编辑时拦截，会话期间 CRS 冻结），提交前不
+            # 重复查。RAW/角色/成熟度保护同样在进前段由宿主门禁把守。
+            # M1：活动层处于原生会话时数字化直写镜像缓冲（宿主路由，
+            # add_mirror_feature 一宏），不经 Python 工具提交。
+            native_route = getattr(controller, "commit_native_capture", None)
+            if callable(native_route):
+                try:
+                    if native_route(json.loads(geom_json)):
+                        shim.tool_operation.emit(True)
+                        return
+                except Exception:
+                    pass  # 路由失败回落 Python 工具提交
             # ADV-2：commit 被拒（坏几何/重复 id/脱钩会话）必须让用户感知，
             # 不得静默吞掉一次完成的采点。
             try:
@@ -1246,6 +1228,19 @@ class QgisCanvasShim(QWidget):
             if action == "pick_miss":
                 return
             controller = getattr(shim, "_tool_controller", None)
+            if action == "edit_gesture":
+                # M1：原生手势记账（编辑发生在镜像缓冲——数据回调只有
+                # 手势事实，无 Python 提交）。
+                recorder = getattr(controller, "record_native_gesture", None)
+                if callable(recorder):
+                    try:
+                        recorder(json.loads(payload_json))
+                        shim.tool_operation.emit(True)
+                    except Exception:
+                        # 手势漏记会让撤销计划与桥 undoStack 失同步——可诊断。
+                        logging.getLogger(__name__).exception(
+                            "native edit gesture recording failed")
+                return
             tool = getattr(controller, "active_tool", None) if controller is not None else None
             if tool is None:
                 return

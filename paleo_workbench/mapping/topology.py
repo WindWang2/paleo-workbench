@@ -181,6 +181,22 @@ class TopologyService:
 
     def validate(self, layers: Iterable[VectorLayer]) -> list[dict[str, object]]:
         issues: list[dict[str, object]] = []
+        for layer in layers:
+            session = layer.edit_session
+            features = session.features() if session is not None else layer.features()
+            issues.extend(self.validate_records(
+                layer.id,
+                [{"feature_id": feature.feature_id,
+                  "geometry": feature.as_record()["geometry"]}
+                 for feature in features]))
+        return issues
+
+    def validate_records(
+        self, layer_id: str, records: Iterable[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        """校验 (feature_id, geometry) 记录集（拓扑编辑迁移 M1：原生编辑
+        会话的几何事实从镜像读回，无 Python 会话/图层对象可用）。"""
+        issues: list[dict[str, object]] = []
         # 探测单次提升（review-2 P2-6）：逐要素重复 import 探测是 O(N) 开销。
         bridge_validate = self._bridge_validate_fn()
         shapely_ok = self._shapely_available()
@@ -188,54 +204,54 @@ class TopologyService:
             return [
                 {
                     "severity": "error",
-                    "layer_id": "",
+                    "layer_id": layer_id,
                     "feature_id": "",
                     "code": "validator_unavailable",
                     "message": "拓扑检查需要 QGIS 桥或 Shapely/GEOS，当前均不可用",
                 }
             ]
         bridge_failed = False
-        for layer in layers:
-            session = layer.edit_session
-            features = session.features() if session is not None else layer.features()
-            for feature in features:
-                geometry = feature.as_record()["geometry"]
-                if geometry["type"] in {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}:
-                    messages: list[str] | None
-                    if bridge_validate is not None and not bridge_failed:
-                        try:
-                            errors = bridge_validate(geometry)
-                            messages = [str(entry.get("message") or "invalid geometry") for entry in errors]
-                        except Exception as exc:
-                            # 桥路径失败必须可诊断（P2-2）且只报一次（P2-6）。
-                            _logger.warning("QGIS 几何校验失败，后续回退 Shapely：%s", exc)
-                            bridge_failed = True
-                            messages = None
-                    else:
+        for record in records:
+            feature_id = str(record.get("feature_id") or "")
+            geometry = record.get("geometry") or {}
+            if not isinstance(geometry, dict):
+                continue
+            if geometry.get("type") in {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}:
+                messages: list[str] | None
+                if bridge_validate is not None and not bridge_failed:
+                    try:
+                        errors = bridge_validate(geometry)
+                        messages = [str(entry.get("message") or "invalid geometry") for entry in errors]
+                    except Exception as exc:
+                        # 桥路径失败必须可诊断（P2-2）且只报一次（P2-6）。
+                        _logger.warning("QGIS 几何校验失败，后续回退 Shapely：%s", exc)
+                        bridge_failed = True
                         messages = None
-                    if messages is None:
-                        messages = self._shapely_messages(geometry)
-                    for message in messages:
+                else:
+                    messages = None
+                if messages is None:
+                    messages = self._shapely_messages(geometry)
+                for message in messages:
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "layer_id": layer_id,
+                            "feature_id": feature_id,
+                            "message": message,
+                        }
+                    )
+            if geometry.get("type") == "Polygon":
+                for ring_index, ring in enumerate(geometry.get("coordinates") or []):
+                    points = [point for point, _path in _vertices(ring)]
+                    if len(points) < 4 or points[0] != points[-1]:
                         issues.append(
                             {
                                 "severity": "error",
-                                "layer_id": layer.id,
-                                "feature_id": feature.feature_id,
-                                "message": message,
+                                "layer_id": layer_id,
+                                "feature_id": feature_id,
+                                "message": f"polygon ring {ring_index} is not closed",
                             }
                         )
-                if geometry["type"] == "Polygon":
-                    for ring_index, ring in enumerate(geometry["coordinates"]):
-                        points = [point for point, _path in _vertices(ring)]
-                        if len(points) < 4 or points[0] != points[-1]:
-                            issues.append(
-                                {
-                                    "severity": "error",
-                                    "layer_id": layer.id,
-                                    "feature_id": feature.feature_id,
-                                    "message": f"polygon ring {ring_index} is not closed",
-                                }
-                            )
         return issues
 
     @staticmethod
