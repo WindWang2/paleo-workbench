@@ -27,12 +27,17 @@ import logging
 from dataclasses import dataclass
 
 __all__ = [
+    "CRSInference",
     "CRSResolution",
-    "panel_publish_crs",
+    "DomainMismatch",
+    "coordinate_domain_mismatch",
     "crs_axis_unit_metres",
+    "crs_coordinate_domain",
     "crs_is_geographic",
     "geod_for_crs",
+    "infer_crs_from_extent",
     "normalize_crs",
+    "panel_publish_crs",
     "resolve_crs",
     "scale_denominator_from_pixels",
 ]
@@ -220,3 +225,158 @@ def geod_for_crs(crs: object):
             return Geod("WGS84")
         except Exception:
             return None
+
+
+# ---------------------------------------------------------------------------
+# 坐标域契约（拓扑编辑迁移 M0 §6：进前域校验 + 推断锁定）
+# ---------------------------------------------------------------------------
+
+# 地理 CRS 的轴域是解析定义（经纬度全域），不是经验值。
+_GEOGRAPHIC_DEGREE_DOMAIN = (-180.0, -90.0, 180.0, 90.0)
+# 变换/面积比较的容差：投影域边界按面积适用范围给出，贴边数据不算失配。
+_DOMAIN_EPSILON = 1e-9
+# 投影 CRS 的 area_of_use 角点变换是近似框——域外扩比例（贴边真实数据
+# 不误拦；明显域外数据仍失配）。
+_PROJECTED_DOMAIN_SLACK = 0.02
+
+
+def crs_coordinate_domain(crs: object) -> tuple[float, float, float, float] | None:
+    """声明 CRS 的有效坐标域（CRS 自身坐标单位）；不可推导 → None。
+
+    - 地理 CRS → 经纬度全域（轴定义，精确）。
+    - 投影 CRS → pyproj ``area_of_use``（适用范围的经纬度框）变换回该 CRS
+      的坐标单位；无 area_of_use / 无 pyproj / 变换失败 → None（诚实：
+      无法验证 ≠ 通过）。
+    - 未声明 → None（没有可校验的域）。
+    """
+    text = normalize_crs(crs)
+    if not text:
+        return None
+    if crs_is_geographic(text) is True:
+        return _GEOGRAPHIC_DEGREE_DOMAIN
+    try:
+        from pyproj import CRS, Transformer
+
+        parsed = CRS.from_user_input(text)
+        usage = parsed.area_of_use
+        if usage is None or usage.west is None or usage.south is None \
+                or usage.east is None or usage.north is None:
+            return None
+        forward = Transformer.from_crs(
+            CRS.from_epsg(4326), parsed, always_xy=True)
+        corners = [
+            (usage.west, usage.south), (usage.east, usage.south),
+            (usage.east, usage.north), (usage.west, usage.north),
+        ]
+        xs: list[float] = []
+        ys: list[float] = []
+        for lon, lat in corners:
+            x, y = forward.transform(lon, lat)
+            # 采样点落在变换定义域外（反常的 area_of_use）→ 无法给出
+            # 可信域，而不是拿 inf 当边界。
+            if not (abs(x) < 1e12 and abs(y) < 1e12):
+                return None
+            xs.append(x)
+            ys.append(y)
+        # 投影域是 area_of_use 角点变换的近似框：外扩 2% 容差，贴着适用
+        # 范围边缘的真实数据（跨带边界/赤道边）不算失配；地理域是轴
+        # 定义，不外扩。
+        minx, maxx = min(xs), max(xs)
+        miny, maxy = min(ys), max(ys)
+        slack_x = (maxx - minx) * _PROJECTED_DOMAIN_SLACK
+        slack_y = (maxy - miny) * _PROJECTED_DOMAIN_SLACK
+        return (minx - slack_x, miny - slack_y, maxx + slack_x, maxy + slack_y)
+    except Exception:
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class DomainMismatch:
+    """一次「声明 CRS 坐标域 vs 数据实际坐标范围」失配的事实。"""
+
+    crs: str
+    extent: tuple[float, float, float, float]
+    domain: tuple[float, float, float, float]
+
+    def describe(self) -> str:
+        return (
+            f"声明 CRS {self.crs} 的有效坐标域为 "
+            f"x[{self.domain[0]:g}, {self.domain[2]:g}] / "
+            f"y[{self.domain[1]:g}, {self.domain[3]:g}]，"
+            f"数据实际坐标范围为 x[{self.extent[0]:g}, {self.extent[2]:g}] / "
+            f"y[{self.extent[1]:g}, {self.extent[3]:g}]"
+        )
+
+
+def coordinate_domain_mismatch(
+    crs: object,
+    extent: object,
+) -> DomainMismatch | None:
+    """数据范围未完全落在声明 CRS 的有效坐标域内 → 失配事实；否则 None。
+
+    无法推导坐标域（未声明/投影无 area_of_use/pyproj 缺席）→ None：
+    域校验只拦截**可证明**的失配（fail-open 与镜像层 extent 检查同约定）。
+    """
+    if extent is None:
+        return None
+    try:
+        xmin, ymin, xmax, ymax = (float(v) for v in tuple(extent)[:4])
+    except (TypeError, ValueError):
+        return None
+    if not (xmin <= xmax and ymin <= ymax):
+        return None
+    domain = crs_coordinate_domain(crs)
+    if domain is None:
+        return None
+    dminx, dminy, dmaxx, dmaxy = domain
+    eps = _DOMAIN_EPSILON * max(1.0, abs(dmaxx - dminx), abs(dmaxy - dminy))
+    fits = (
+        xmin >= dminx - eps and xmax <= dmaxx + eps
+        and ymin >= dminy - eps and ymax <= dmaxy + eps
+    )
+    if fits:
+        return None
+    return DomainMismatch(
+        crs=normalize_crs(crs) or str(crs or ""),
+        extent=(xmin, ymin, xmax, ymax),
+        domain=domain,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CRSInference:
+    """按数据坐标范围对工程 CRS 声明的推断结论（§6 推断锁定）。
+
+    ``suggested_crs`` 为空 = 保持本地（不声明）；非空 = 可识别的 CRS，
+    由用户确认后写入声明并锁定。``basis`` 是推断依据（诊断/对话文案用）。
+    """
+
+    suggested_crs: str
+    basis: str
+
+    @property
+    def suggests_declaration(self) -> bool:
+        return bool(self.suggested_crs)
+
+
+def infer_crs_from_extent(extent: object) -> CRSInference:
+    """首次导入数据的坐标范围推断（§6）。
+
+    - 完全落在经纬度域内 → 数据本身是地理坐标，建议声明 EPSG:4326。
+    - 超出经纬度域 → 本地/投影坐标，从范围无法识别具体投影 → 保持本地
+      （未声明）；声明留待用户手动指定。
+    - 范围不可用（空层/无效）→ 不推断，保持本地。
+    """
+    if extent is None:
+        return CRSInference("", "数据坐标范围不可用——不推断")
+    try:
+        bounds = tuple(float(v) for v in tuple(extent)[:4])
+        if not (bounds[0] <= bounds[2] and bounds[1] <= bounds[3]):
+            return CRSInference("", "数据坐标范围不可用——不推断")
+    except (TypeError, ValueError, IndexError):
+        return CRSInference("", "数据坐标范围不可用——不推断")
+    mismatch = coordinate_domain_mismatch("EPSG:4326", extent)
+    if mismatch is None:
+        return CRSInference(
+            "EPSG:4326", "数据坐标完全落在经纬度域内（地理坐标）")
+    return CRSInference("", "数据坐标超出经纬度域（本地/投影坐标）——保持本地")

@@ -38,7 +38,13 @@ class ProjectMeta(BaseModel):
 
 
 class CoordinateReference(BaseModel):
-    project_crs: str = "EPSG:4326 / WGS84"
+    # M0 §6（决议 #1285）：新工程不预设地理 CRS——未声明即按本地坐标
+    # 呈现/编辑；首次导入数据按坐标范围推断（crs_contract.infer_crs_
+    # from_extent），用户确认后写入声明并置 crs_locked（锁定后不再自动
+    # 推断，非编辑会话中可手动改）。
+    project_crs: str = ""
+    # 声明是否已经用户确认锁定（推断不再改写；手改不受限）。
+    crs_locked: bool = False
     target_crs: str | None = None
     display_crs: str = "EPSG:4326 / WGS84"
     transform_history: list[dict[str, Any]] = Field(default_factory=list)

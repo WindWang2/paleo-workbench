@@ -54,6 +54,10 @@ def _point(value: object) -> tuple[float, float]:
     return x, y
 
 
+# 原生提交审计流上限（M1 §2；与 EditDelta journal 同量级）。
+_COMMIT_JOURNAL_LIMIT = 1024
+
+
 def _freeze(value: object) -> object:
     if isinstance(value, Mapping):
         return {str(key): _freeze(item) for key, item in value.items()}
@@ -303,6 +307,9 @@ class VectorLayer:
             self._features[feature.feature_id] = feature
         self._selection: set[str] = set()
         self.edit_session: VectorEditSession | None = None
+        # 原生编辑提交的审计流（M1 §2：EditCommand 同族记录；
+        # 无 Python 会话——QGIS commit 后不可撤销，与镜像 undo 栈同语义）。
+        self._commit_journal: list[dict[str, object]] = []
 
     def feature_ids(self) -> tuple[str, ...]:
         return tuple(self._features)
@@ -354,6 +361,74 @@ class VectorLayer:
         if self.edit_session is None:
             self.edit_session = VectorEditSession(self)
         return self.edit_session
+
+    def apply_committed_delta(
+        self, delta: Mapping[str, object], *, session_id: str,
+        source_tool: str,
+    ) -> list[dict[str, object]]:
+        """吸收一次原生编辑提交增量（拓扑编辑迁移 M1 §2 回写通道）。
+
+        镜像侧已 commitChanges（QGIS undo 栈随之清空），宿主同语义：直接
+        更新已提交状态，**不可撤销**；审计记录与 EditCommand 同族
+        （``command_type`` + ``feature_ids`` + ``source_tool``），存于层
+        级提交审计流。几何信任 QGIS 输出（闭合环等不变量由原生
+        编辑保证）。返回本次产生的审计记录列表。
+        """
+        records: list[dict[str, object]] = []
+        touched: set[str] = set()
+
+        def _record(command_type: str, feature_ids) -> None:
+            records.append({
+                "command_type": command_type,
+                "feature_ids": [str(fid) for fid in feature_ids],
+                "session_id": session_id,
+                "source_tool": source_tool,
+            })
+
+        for change in delta.get("geometry_changes") or ():
+            feature_id = str(change.get("feature_id") or "")
+            before = self._features.get(feature_id)
+            if before is None:
+                continue
+            self._features[feature_id] = VectorFeature(
+                feature_id, change.get("geometry") or {}, before.attributes)
+            touched.add(feature_id)
+            _record("set_geometry", [feature_id])
+        for change in delta.get("attribute_changes") or ():
+            feature_id = str(change.get("feature_id") or "")
+            before = self._features.get(feature_id)
+            if before is None:
+                continue
+            merged = dict(before.attributes)
+            merged.update(change.get("changes") or {})
+            self._features[feature_id] = VectorFeature(
+                feature_id, before.geometry, merged)
+            touched.add(feature_id)
+            _record("change_attribute", [feature_id])
+        removed = [str(fid) for fid in delta.get("removed") or ()]
+        for feature_id in removed:
+            if self._features.pop(feature_id, None) is not None:
+                touched.add(feature_id)
+        if removed:
+            _record("delete_feature", removed)
+        for feature in delta.get("added") or ():
+            properties = dict(feature.get("properties") or {})
+            feature_id = str(properties.pop("__pwb_fid", "")
+                             or feature.get("id") or "")
+            if not feature_id or feature_id in self._features:
+                continue
+            self._features[feature_id] = VectorFeature(
+                feature_id, feature.get("geometry") or {}, properties)
+            touched.add(feature_id)
+            _record("add_feature", [feature_id])
+        if touched:
+            self.data_revision += 1
+            self._selection.intersection_update(self._features)
+            self._commit_journal.extend(records)
+            if len(self._commit_journal) > _COMMIT_JOURNAL_LIMIT:
+                del self._commit_journal[:len(self._commit_journal)
+                                          - _COMMIT_JOURNAL_LIMIT]
+        return records
 
     def _commit(self, features: Mapping[str, VectorFeature]) -> None:
         self._features = dict(features)

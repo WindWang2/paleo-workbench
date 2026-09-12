@@ -314,7 +314,11 @@ def test_regate_blocking_task_before_shortcut(doc):
     doc.edit_controller.blocking_task_label = ""
 
 
-def test_regate_selection_disappears_before_merge(doc):
+def test_regate_selection_disappears_before_merge(doc, monkeypatch):
+    # M1：相带 polygon 层默认翻转原生会话；本测试钉 Python 工具路径的
+    # re-gate 语义——显式禁用原生翻转。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     layer_id = _polygon_doc(doc)
     doc.edit_controller.start_editing()
     controller = doc.edit_controller
@@ -342,7 +346,10 @@ def test_regate_selection_disappears_before_merge(doc):
     assert any("不可用" in m for m in messages)
 
 
-def test_regate_session_closed_before_capture(doc):
+def test_regate_session_closed_before_capture(doc, monkeypatch):
+    # M1：同上——钉 Python 会话路径。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     layer_id = _polygon_doc(doc)
     controller = doc.edit_controller
     controller.start_editing()

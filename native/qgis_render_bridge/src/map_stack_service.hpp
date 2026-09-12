@@ -6,6 +6,10 @@
 #include <memory>
 #include <string>
 #include <vector>
+// M1 原生编辑会话声明需要 committed* 信号的全部值类型。
+#include <qgsfeature.h>
+#include <qgsgeometry.h>
+#include <qgsvectorlayer.h>
 
 class QgsMapCanvas;
 class QgsLayerTreeView;
@@ -285,8 +289,49 @@ public:
   // Inspector/handshake 接入为后续（能力事实面，非展示规则）。
   std::string mirrorLayerSchemaJson(const std::string& doc_id) const;
   // V8 M1 自省面（数据侧）：镜像层真实存储的要素 + typed 属性
-  // （GeoJSON FeatureCollection，limit 截断）。
+  // （GeoJSON FeatureCollection，limit 截断；limit <= 0 = 不限——
+  // 拓扑编辑迁移 M1 的编辑缓冲读回用）。
   std::string mirrorFeaturesJson(const std::string& doc_id, int limit = 16) const;
+  // 拓扑编辑迁移 M1（§2 编辑权迁移 QGIS）：镜像层原生编辑会话。
+  // startEditing → 原生工具直接编辑镜像缓冲；commit 时 committed* 信号
+  // 捕获为增量（fid 表按 provider 现值重建）并回传宿主；rollback 复位到
+  // 会话开启时快照基线。错误语义：返回 "" 成功，否则用户可读原因
+  // （commit 失败保持会话——缓冲未清）。
+  std::string startMirrorLayerEditing(const std::string& doc_id);
+  std::string commitMirrorLayer(const std::string& doc_id);
+  std::string rollBackMirrorLayer(const std::string& doc_id);
+  bool mirrorLayerEditing(const std::string& doc_id) const;
+  // 层内撤销/重做 = QgsVectorLayer undoStack 宏（每层每手势恰一条，由
+  // 编辑工具的 begin/endEditCommand 保证）；手势级编排（跨层逆序）在宿主。
+  std::string undoMirrorEdit(const std::string& doc_id);
+  std::string redoMirrorEdit(const std::string& doc_id);
+  // 编辑会话中向镜像缓冲加要素（数字化路由，M1）：geojson = 单个
+  // Feature（properties.__pwb_fid = 宿主 id）；一宏可撤（"Added feature"）。
+  std::string addMirrorFeature(const std::string& doc_id,
+                               const std::string& geojson_feature);
+  // M3 §4 无缝分割：curve_geojson = LineString（或 Feature 包一层）；
+  // feature_ids_json = 宿主 id 数组（空 = 走 QGIS 当前选择 / 相交要素）。
+  // 邻层只插拓扑点不分割；空结果 destroyEditCommand 不留痕。
+  std::string splitMirrorFeatures(const std::string& doc_id,
+                                  const std::string& curve_geojson,
+                                  const std::string& feature_ids_json = "");
+  // M3 §4 无缝合并：feature_ids_json = 宿主 id 数组（≥2）；
+  // attrs_json = {"target_id": 宿主 id, "attributes": {字段: 值}}。
+  // target 缺省 = 面积最大；一宏 "Merged features"。
+  std::string mergeMirrorFeatures(const std::string& doc_id,
+                                  const std::string& feature_ids_json,
+                                  const std::string& attrs_json);
+  // M2 §4 全部层档：顶点工具档位（false = 当前层（默认），true = 全部层）。
+  void setVertexEditScope(std::uintptr_t canvas_addr, bool all_layers);
+  // M2 §4 追踪：QgsMapCanvasTracer 注册 + 开关（false 默认；全体捕获
+  // 工具免费获得；图随缩放/层编辑自动重建）。
+  void setTracingEnabled(std::uintptr_t canvas_addr, bool enabled);
+  // committed 增量回传（per-canvas；commit 期间同步触发）：
+  // payload = {doc_id, added[], removed[], geometry_changes[],
+  // attribute_changes[]}（feature_id 全为宿主 id）。
+  void setCommittedCallback(
+      std::uintptr_t canvas_addr,
+      std::function<void(const std::string&, const std::string&)> callback);
   // V10 M-A: one-shot runtime facts as JSON — QGIS/PROJ/GDAL versions,
   // prefix/data/svg paths, provider registry, CRS probes (EPSG:4326/4490/
   // 4214/4610) and a 4326→4490 transform probe. Headless (no canvas);
@@ -356,6 +401,20 @@ private:
                           bool vertex);
   // 文档 feature_id 解析器（镜像 fid 映射表）；供 select/identify 共用。
   std::function<std::string(QgsVectorLayer*, QgsFeatureId)> fidResolver();
+  // M1 原生编辑内部：doc → 编辑会话中的镜像层（无会话 → nullptr）。
+  QgsVectorLayer* editingLayerFor(const std::string& doc_id) const;
+  // committed* 信号捕获（连接于 startMirrorLayerEditing；layerId 参数
+  // 忽略——doc 已闭包）。fid→宿主 id 经 mirror_feature_fids。
+  void handleCommittedAdded(const std::string& doc_id,
+                            const QgsFeatureList& added);
+  void handleCommittedRemoved(const std::string& doc_id,
+                              const QgsFeatureIds& removed);
+  void handleCommittedGeometries(const std::string& doc_id,
+                                 const QgsGeometryMap& changes);
+  void handleCommittedAttributes(const std::string& doc_id,
+                                 const QgsChangedAttributesMap& changes);
+  void endEditSessionState(const std::string& doc_id);
+  void fireCommittedDelta(const std::string& doc_id);
   void ensureNotStale(std::uintptr_t canvas_addr);
   void eraseMirrorByQgisId(const std::string& qgis_id);
   void eraseMirrorByDocId(const std::string& doc_id);

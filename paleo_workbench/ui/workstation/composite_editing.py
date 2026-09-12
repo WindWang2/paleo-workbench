@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
@@ -537,6 +538,8 @@ class CompositeEditController(QObject):
     content_changed = Signal(str)
     # 会话已提交 / 回滚（数据进入图层权威，宿主须立即同步工程文档）。
     sessions_committed = Signal()
+    # M2 §3：全部层档手势波及邻层被门禁拒绝（场景 7——状态条提示）。
+    native_join_refused = Signal(str)
     # 选择 / 编辑态 / 撤销栈等纯状态变化（驱动工具条使能）。
     state_changed = Signal()
     # V8 M3：跨图层复合撤销被拒绝的用户可读原因（不静默——原子性受损时
@@ -563,6 +566,22 @@ class CompositeEditController(QObject):
         self._active_layer_id: str | None = None
         self._active_tool_action = "pan"
         self._canvas = None
+        # 拓扑编辑迁移 M1（§2）：原生编辑会话（镜像层编辑权威 + 宿主同步
+        # 方）。相图草稿先行——polygon 草稿层在原生画布上走原生会话，
+        # 其余层保持 Python 会话（数字化等完整工具面）。
+        from paleo_workbench.mapping.native_edit_session import (
+            NativeEditSessionController,
+        )
+
+        self.native_editing = NativeEditSessionController()
+        # M2 §4 三开关：顶点档位（默认当前层）/ 避免重叠（默认开，裁切
+        # 范围 = 当前编辑层）/ 追踪（默认关）——随编辑会话持久化。
+        self.vertex_all_layers: bool = False
+        self.avoid_intersections_enabled: bool = True
+        self.tracing_enabled: bool = False
+        # M3：原生分割切线手势——geometry_command("split") 打开 addLine，
+        # digitize completed 经 commit_native_capture 拦截进 split_mirror_features。
+        self._pending_native_split: str | None = None
         # 宿主注入的多图层识别回调（Identify Results 面板）；缺省单图层命中。
         self.identify_delegate: Any = None
         # 修订键控的序列化缓存：数字化点击只重组变化图层，不整层重编码
@@ -698,25 +717,17 @@ class CompositeEditController(QObject):
     def attach_canvas(self, canvas) -> None:
         """绑定鸭子类型画布（UnifiedMapCanvas / QgisCanvasShim）：工具控制器与 overlay 提供者。"""
         self._canvas = canvas
+        # shim 只持有 tools：把原生会话路由挂到工具栈上，数字化/手势/
+        # 邻层入集回调才能找到 CompositeEditController 的方法。
+        self.tools.commit_native_capture = self.commit_native_capture
+        self.tools.record_native_gesture = self.record_native_gesture
+        self.tools.join_native_layers = self.join_native_layers
+        self.tools.cancel_native_capture = self.cancel_native_capture
         canvas.set_map_tool_controller(self.tools)
         canvas.set_overlay_provider(self.overlay_state)
-        # V9 W7：digitize commit 的 CRS 守卫钩子（原生画布才有该面）。
-        set_crs_provider = getattr(canvas, "set_capture_layer_crs_provider", None)
-        if callable(set_crs_provider):
-            set_crs_provider(self._capture_layer_crs)
         self._push_snapping_config()
+        self._push_native_edit_toggles()
 
-    def _capture_layer_crs(self, tool) -> str:
-        """采点工具会话所属图层的存储 CRS（找不到层 = ""，不比对）。"""
-        session = getattr(tool, "session", None)
-        if session is None:
-            return ""
-        for layer in self._layers.values():
-            if layer.edit_session is session:
-                # V10 M-B：未声明层以工程 CRS 为有效存储帧（会话几何按
-                # 工程帧读写——比空串更早暴露画布/存储帧分歧）。
-                return str(layer.crs or self.project_crs or "")
-        return ""
 
     # -- 图层 CRUD -------------------------------------------------------------
 
@@ -894,7 +905,7 @@ class CompositeEditController(QObject):
         """
         committed, blocked = self.flush_edit_sessions()
         remaining = [layer for layer in self._layers.values() if layer.edit_session is not None]
-        if remaining:
+        if remaining or self.native_editing.session_layer_ids():
             return False
         for layer in self._layers.values():
             if layer.edit_session is not None:
@@ -978,9 +989,16 @@ class CompositeEditController(QObject):
         self._rebind_active_tool()
         try:
             self._snapping.restore_state(
-                dict((project.mapping_workspace or {}).get("snapping") or {}))
+                dict(workspace.get("snapping") or {}) if isinstance(workspace, Mapping) else {})
         except Exception:
             pass
+        # M2 §4 开关恢复（缺键 = 默认）。
+        topo = dict(
+            (workspace.get("topo_editing") or {}) if isinstance(workspace, Mapping) else {})
+        self.vertex_all_layers = bool(topo.get("vertex_all_layers", False))
+        self.avoid_intersections_enabled = bool(
+            topo.get("avoid_intersections", True))
+        self.tracing_enabled = bool(topo.get("tracing", False))
         self._push_snapping_config()
         self.layers_changed.emit()
         self.state_changed.emit()
@@ -1028,6 +1046,13 @@ class CompositeEditController(QObject):
         try:
             workspace = project.mapping_workspace
             workspace["snapping"] = self._snapping.snapshot_state()
+            # M2 §4：三开关随编辑会话持久化（避免重叠默认开/追踪默认关/
+            # 顶点档位默认当前层——restore 缺键回落默认）。
+            workspace["topo_editing"] = {
+                "vertex_all_layers": self.vertex_all_layers,
+                "avoid_intersections": self.avoid_intersections_enabled,
+                "tracing": self.tracing_enabled,
+            }
         except Exception:
             pass
 
@@ -1062,7 +1087,10 @@ class CompositeEditController(QObject):
     @property
     def editing(self) -> bool:
         layer = self.active_layer
-        return layer is not None and layer.edit_session is not None
+        if layer is None:
+            return False
+        return (layer.edit_session is not None
+                or self.native_editing.is_open(layer.id))
 
     def set_active_layer(self, layer_id: str | None) -> None:
         layer_id = str(layer_id) if layer_id else None
@@ -1085,15 +1113,44 @@ class CompositeEditController(QObject):
         layer = self.active_layer
         if layer is None or layer.edit_session is not None:
             return
+        if self.native_editing.is_open(layer.id):
+            return
         allowed, _reason = self.can_edit_layer(layer.id)
         if not allowed:
             return  # 原因由调用方（门禁入口）负责呈现
+        # M1：polygon 草稿层 + 原生画布 + 桥能力 → 原生编辑会话
+        # （进前门禁已由 composite_document 的角色/CRS 门把守；controller
+        # 内部再复查角色门禁——拒绝则不开 startEditing）。
+        if self._native_session_eligible(layer):
+            stack = self._canvas.stack
+            address = getattr(self._canvas, "canvas_address", 0)
+            ok, reason = self.native_editing.open(
+                stack, layer, gate=self.can_edit_layer,
+                canvas_address=address)
+            if ok:
+                self._rebind_active_tool()
+                self.state_changed.emit()
+                return
+            logging.getLogger(__name__).warning(
+                "原生编辑会话开启失败，回落 Python 会话：%s", reason)
         self._open_session(layer)
         # V10：新会话开启后 kind-bound 工具的失配重绑（此前只在切层/内容同步
         # 链上触发——"add_line 激活 → 切到面层 → 开始编辑"会把线捕获工具留在
         # 面图层上）。
         self._rebind_active_tool()
         self.state_changed.emit()
+
+    def _native_session_eligible(self, layer: VectorLayer) -> bool:
+        """M1 原生会话资格：相图草稿先行 = polygon 层 + 原生画布 + 桥能力。"""
+        canvas = self._canvas
+        stack = getattr(canvas, "stack", None)
+        if stack is None:
+            return False
+        if not hasattr(canvas, "canvas_address"):
+            return False  # 回退画布（UnifiedMapCanvas）无原生面
+        if self._kinds.get(layer.id) != "polygon":
+            return False
+        return self.native_editing.bridge_supports(stack)
 
     def ensure_layer_session(self, layer_id: str):
         """门禁下的会话获取：返回 ``(session, reason)``。
@@ -1105,6 +1162,10 @@ class CompositeEditController(QObject):
         layer = self._layers.get(str(layer_id))
         if layer is None:
             return None, "图层不存在"
+        if self.native_editing.is_open(layer.id):
+            # M1：原生会话期间不开第二（Python）会话——编辑权威在镜像缓冲；
+            # 属性写入在提交后可用（提交增量带 attribute_changes）。
+            return None, "该图层处于原生编辑会话——请先保存或回滚编辑"
         allowed, reason = self.can_edit_layer(layer.id)
         if not allowed:
             return None, reason
@@ -1145,7 +1206,9 @@ class CompositeEditController(QObject):
         """
         layer = self.active_layer
         if layer is None or layer.edit_session is None:
-            return None
+            if layer is None or not self.native_editing.is_open(layer.id):
+                return None
+            return self._commit_native_sessions()
         if self._topology.enabled:
             issues = self._topology.validate([layer])
             # V9 W2：保存校验结论进运行时计数缓存（merge 门禁事实源）。
@@ -1175,9 +1238,161 @@ class CompositeEditController(QObject):
         self.state_changed.emit()
         return None
 
+    def _commit_native_sessions(self) -> str | None:
+        """M1 原生会话整集合提交（§3 全或无）；成功返回 None。"""
+        ok, reason = self.native_editing.commit_all(
+            gate=self.can_edit_layer,
+            topology=self._topology,
+            on_committed=self._on_native_committed,
+        )
+        if not ok:
+            return reason
+        self._rebind_active_tool()
+        self.sessions_committed.emit()
+        self.state_changed.emit()
+        return None
+
+    def _on_native_committed(self, layer: VectorLayer) -> None:
+        """每层提交后：台账直跳新基线（M0 align——镜像即编辑发生地，
+        无需重发）+ content_changed 通知（工程持久化链照常）。"""
+        from paleo_workbench.mapping.qgis_mirror import (
+            align_publish_ledger_for_layer,
+        )
+
+        stack = self.native_editing.stack_for(layer.id)
+        if stack is not None:
+            align_publish_ledger_for_layer(
+                stack, layer,
+                metadata={"role": self._layer_roles.get(layer.id, "")})
+        self.content_changed.emit(layer.id)
+
+    def commit_native_capture(self, geometry: Mapping[str, object]) -> bool:
+        """M1 数字化路由：活动层处于原生会话时，采点几何直接进镜像缓冲
+        （宿主生成 feature id → 桥 add_mirror_feature 一宏）。返回
+        True = 已处理（canvas_shim 据此跳过 Python 工具提交）。"""
+        layer = self.active_layer
+        if layer is None or not self.native_editing.is_open(layer.id):
+            return False
+        stack = self.native_editing.stack_for(layer.id)
+        if stack is None:
+            return False
+        if self._pending_native_split:
+            return self._commit_native_split(geometry)
+        host_id = new_feature_id("feature")
+        feature = {
+            "type": "Feature",
+            "geometry": dict(geometry),
+            "properties": {"__pwb_fid": host_id},
+        }
+        try:
+            error = str(stack.add_mirror_feature(
+                layer.id, json.dumps(feature)) or "")
+        except Exception as exc:
+            error = str(exc)
+        if error:
+            logging.getLogger(__name__).warning("原生数字化写入失败：%s",
+                                                error)
+            return False
+        # §2 两级撤销的手势记账：数字化也是一宏（"Added feature"）——
+        # 不记账则 Ctrl+Z 无法经手势管理器到达桥侧 undoStack。
+        self.native_editing.gestures.finish(
+            new_feature_id("gesture"), undo_text="Added feature",
+            layer_ids=[layer.id])
+        return True
+
+    def cancel_native_capture(self) -> None:
+        """数字化取消（Esc/空右键）时丢掉 pending 分割切线。"""
+        self._pending_native_split = None
+
+    def join_native_layers(self, doc_ids) -> None:
+        """M2 §3 按需生长：全部层档手势波及邻层 → 门禁复查入集（同步，
+        press 期间完成——release 时该层即可编辑）；拒绝层不参与并提示。"""
+        refused = []
+        for doc_id in doc_ids or ():
+            doc_id = str(doc_id)
+            if self.native_editing.is_open(doc_id):
+                continue
+            layer = self.layer(doc_id)
+            if layer is None:
+                refused.append(f"{doc_id}（图层不存在）")
+                continue
+            ok, reason = self.native_editing.open(
+                self._canvas.stack, layer,
+                gate=self.can_edit_layer,
+                canvas_address=getattr(self._canvas, "canvas_address", 0))
+            if not ok:
+                refused.append(f"「{layer.name}」{reason}")
+        if refused:
+            self.native_join_refused.emit(
+                "邻层未参与编辑：" + "；".join(refused))
+        self.state_changed.emit()
+
+    def set_vertex_scope(self, all_layers: bool) -> None:
+        """M2 §4 顶点档位：False = 当前层（默认）；True = 全部层。"""
+        self.vertex_all_layers = bool(all_layers)
+        self._push_native_edit_toggles()
+
+    def set_avoid_intersections(self, enabled: bool) -> None:
+        """M2 §4 避免重叠开关（默认开；裁切范围默认 = 当前编辑层）。"""
+        self.avoid_intersections_enabled = bool(enabled)
+        self._push_snapping_config()
+        self.state_changed.emit()
+
+    def set_tracing(self, enabled: bool) -> None:
+        """M2 §4 追踪开关（默认关；QgsMapCanvasTracer 注册即全体捕获
+        工具免费获得）。"""
+        self.tracing_enabled = bool(enabled)
+        self._push_native_edit_toggles()
+        self.state_changed.emit()
+
+    def _push_native_edit_toggles(self) -> None:
+        """档位/追踪推送到原生画布（避免重叠走 snapping 配置通道）。"""
+        canvas = self._canvas
+        if canvas is None:
+            return
+        scope = getattr(canvas, "set_vertex_edit_scope", None)
+        if callable(scope):
+            try:
+                scope(self.vertex_all_layers)
+            except Exception:
+                pass
+        tracing = getattr(canvas, "set_tracing_enabled", None)
+        if callable(tracing):
+            try:
+                tracing(self.tracing_enabled)
+            except Exception:
+                pass
+
+    def record_native_gesture(self, payload: Mapping[str, object]) -> None:
+        """桥 edit_gesture 回调记账（§2 手势管理器 = 审计源）。M2 起手势
+        可跨层（payload["layers"] 有序层表；单层回落 layer_doc_id）。"""
+        gesture_id = str(payload.get("gesture_id") or new_feature_id("g"))
+        layer_ids = [str(doc) for doc in (payload.get("layers") or [])]
+        if not layer_ids:
+            layer_ids = [str(payload.get("layer_doc_id") or "")]
+        self.native_editing.gestures.finish(
+            gesture_id,
+            undo_text=str(payload.get("undo_text") or ""),
+            layer_ids=layer_ids)
+
     def rollback_edits(self) -> None:
         layer = self.active_layer
-        if layer is None or layer.edit_session is None:
+        if layer is None:
+            return
+        if layer.edit_session is None and self.native_editing.is_open(layer.id):
+            # M1：镜像缓冲 rollBack 复位快照基线；真源未动（编辑期间
+            # Python 不动）→ 台账冻结在基线 → 关窗后发布判 no-op。
+            ok, reason = self.native_editing.rollback(layer.id)
+            if not ok:
+                logging.getLogger(__name__).warning("原生会话回滚失败：%s",
+                                                    reason)
+            self._topology.discard_compounds([layer.id])
+            self._topology.forget_error_count([layer.id])
+            self._rebind_active_tool()
+            self.sessions_committed.emit()
+            self.state_changed.emit()
+            return
+        if layer.edit_session is None:
             return
         layer.edit_session.rollback_changes()
         self._topology.discard_compounds([layer.id])
@@ -1200,6 +1415,21 @@ class CompositeEditController(QObject):
         """
         committed = 0
         blocked: list[str] = []
+        # M1 原生会话整集合先行（§3 全或无）：被拒 → 全集合保持会话、
+        # 原因进 blocked（与 Python 会话的逐层语义并存在同一返回面）。
+        if self.native_editing.session_layer_ids():
+            ok, reason = self.native_editing.commit_all(
+                gate=self.can_edit_layer,
+                topology=self._topology,
+                on_committed=self._on_native_committed,
+            )
+            if ok:
+                committed += 1
+                self._rebind_active_tool()
+                self.sessions_committed.emit()
+                self.state_changed.emit()
+            else:
+                blocked.append(reason)
         for layer in self._layers.values():
             session = layer.edit_session
             if session is None:
@@ -1453,8 +1683,8 @@ class CompositeEditController(QObject):
                 tool = RectangleSelectTool(layer, select_rectangle=index.select_rectangle)
             else:
                 session = layer.edit_session
-                if session is None:
-                    return
+                if session is None and not self.native_editing.is_open(layer.id):
+                    return  # M1：原生会话同样允许激活（vertex v2 / 数字化路由）
                 # 加点 / 加线 / 加面只在与图层几何类型一致时激活，
                 # 否则保持当前工具（不劫持用户的图层选择）。
                 kind_required = _KIND_BOUND_TOOLS.get(action_id)
@@ -1664,6 +1894,10 @@ class CompositeEditController(QObject):
         # 仍是权威（两层同向，无双真源）。
         if "snapping_topological_editing" in features:
             config["topological_editing"] = bool(self._topology.enabled)
+        # M2 §4 避免重叠：enabled 无层表 = 当前编辑层（默认语义）。
+        config["avoid_intersections"] = {
+            "enabled": self.avoid_intersections_enabled,
+        }
         if not snapping.current_layer_only:
             layers: dict[str, dict[str, object]] = {}
             for layer_id in self._layers:
@@ -1846,9 +2080,9 @@ class CompositeEditController(QObject):
     def geometry_command(self, command_id: str) -> tuple[bool, str]:
         """执行 split / merge；返回 (是否成功, 用户可读消息)。
 
-        几何计算走 ``geometry_service``（QGIS 桥可用时）或 ``vector_operations``
-        的 shapely 兜底；结果一律落为 ``VectorEditSession`` 命令——undo/redo/
-        commit/project 版本链保持完整，QGIS 从不直接改工程数据。
+        几何计算：Python 会话走 ``geometry_service`` / ``vector_operations``
+        并落 ``VectorEditSession``；原生会话走桥 ``split_mirror_features`` /
+        ``merge_mirror_features``（镜像缓冲一宏，手势由桥 ``edit_gesture`` 记账）。
         """
         from paleo_workbench.mapping.vector_operations import (
             merge_selected_polygons,
@@ -1860,6 +2094,8 @@ class CompositeEditController(QObject):
             return False, "没有活动的矢量图层"
         session = layer.edit_session
         if session is None:
+            if self.native_editing.is_open(layer.id):
+                return self._native_geometry_command(command_id, layer)
             return False, "请先开始编辑（几何操作需要编辑会话）"
         mutated_layers: list = [layer]
         try:
@@ -1909,6 +2145,138 @@ class CompositeEditController(QObject):
                     except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
                         pass
         return False, f"未知几何命令 {command_id}"
+
+    def _native_geometry_command(self, command_id: str, layer) -> tuple[bool, str]:
+        """原生会话 split/merge：切线走画布数字化，合并走确认对话框。"""
+        stack = self.native_editing.stack_for(layer.id)
+        if stack is None:
+            return False, "该图层没有进行中的原生编辑会话"
+        if command_id == "merge":
+            return self._native_merge(layer, stack)
+        if command_id == "split":
+            return self._native_split_begin(layer, stack)
+        return False, (
+            "该图层处于原生编辑会话——请先保存或回滚编辑")
+
+    def _selected_native_records(self, layer, stack) -> list[dict]:
+        selected = {str(fid) for fid in layer.selection}
+        records: list[dict] = []
+        try:
+            raw = stack.mirror_features_json(layer.id, 0)
+            payload = raw if isinstance(raw, dict) else json.loads(str(raw))
+        except (TypeError, ValueError):
+            payload = {}
+        for feature in (payload.get("features") or []) if isinstance(payload, dict) else []:
+            if not isinstance(feature, dict):
+                continue
+            feature_id = str(feature.get("id") or "")
+            if feature_id not in selected:
+                continue
+            records.append({
+                "id": feature_id,
+                "geometry": feature.get("geometry") or {},
+                "properties": feature.get("properties") or {},
+            })
+        if records:
+            return records
+        for feature_id in selected:
+            try:
+                feature = layer.feature(feature_id)
+            except KeyError:
+                continue
+            records.append({
+                "id": feature_id,
+                "geometry": dict(feature.geometry),
+                "properties": dict(feature.attributes),
+            })
+        return records
+
+    def _confirm_merge_attributes(self, records):
+        """弹出合并确认框；取消返回 None。测试可 monkeypatch。"""
+        from PySide6.QtWidgets import QDialog
+
+        from paleo_workbench.ui.workstation.merge_features_dialog import (
+            MergeFeaturesDialog,
+        )
+
+        parent = self._canvas if self._canvas is not None else None
+        dialog = MergeFeaturesDialog(records, parent=parent)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dialog.result_payload()
+
+    def _native_merge(self, layer, stack) -> tuple[bool, str]:
+        if len(layer.selection) < 2:
+            return False, "请先选择要合并的要素"
+        if not callable(getattr(stack, "merge_mirror_features", None)):
+            return False, "当前 QGIS 桥不支持原生合并（需重建桥扩展）"
+        records = self._selected_native_records(layer, stack)
+        if len(records) < 2:
+            return False, "请先选择要合并的要素"
+        payload = self._confirm_merge_attributes(records)
+        if payload is None:
+            return False, "已取消合并"
+        try:
+            error = str(stack.merge_mirror_features(
+                layer.id,
+                json.dumps(sorted(layer.selection)),
+                json.dumps(payload),
+            ) or "")
+        except Exception as exc:
+            return False, f"合并失败：{exc}"
+        if error:
+            return False, error
+        # 手势记账走桥 edit_gesture → record_native_gesture（含邻层序列）。
+        target = str(payload.get("target_id") or "")
+        if target:
+            layer.set_selection((target,))
+        self.state_changed.emit()
+        return True, "已合并所选要素"
+
+    def _native_split_begin(self, layer, stack) -> tuple[bool, str]:
+        if not layer.selection:
+            return False, "请先选择要分割的要素"
+        if not callable(getattr(stack, "split_mirror_features", None)):
+            return False, "当前 QGIS 桥不支持原生分割（需重建桥扩展）"
+        self._pending_native_split = layer.id
+        canvas = self._canvas
+        address = getattr(canvas, "canvas_address", 0) if canvas is not None else 0
+        try:
+            stack.set_map_tool(address, "addLine")
+        except Exception:
+            setter = getattr(canvas, "set_map_tool", None) if canvas is not None else None
+            if callable(setter):
+                try:
+                    setter("addLine")
+                except Exception:
+                    pass
+        return True, "请在画布上绘制切线后右键确认"
+
+    def _commit_native_split(self, geometry) -> bool:
+        layer_id = str(self._pending_native_split or "")
+        self._pending_native_split = None
+        layer = self._layers.get(layer_id)
+        if layer is None:
+            return True  # pending 已消耗，勿把切线当成新要素
+        stack = self.native_editing.stack_for(layer_id)
+        if stack is None or not callable(getattr(stack, "split_mirror_features", None)):
+            return True
+        curve = dict(geometry) if isinstance(geometry, dict) else {}
+        if curve.get("type") == "Feature":
+            curve = dict(curve.get("geometry") or {})
+        try:
+            error = str(stack.split_mirror_features(
+                layer_id, json.dumps(curve),
+                json.dumps(sorted(layer.selection))) or "")
+        except Exception:
+            logging.getLogger(__name__).exception("native split failed")
+            return True
+        if error:
+            logging.getLogger(__name__).warning("原生分割失败：%s", error)
+            return True
+        # 手势记账走桥 edit_gesture → record_native_gesture（含邻层序列）。
+        self.state_changed.emit()
+        return True
 
     def _explode_selected_multipart(self, layer, session) -> tuple[bool, str]:
         """V10 拆分多部件：每个选中的 multipart 要素按部件拆为 N 个要素。
@@ -2185,6 +2553,17 @@ class CompositeEditController(QObject):
         """执行编辑命令；返回 True 表示图层内容已变（宿主需重组快照）。"""
         layer = self.active_layer
         session = layer.edit_session if layer is not None else None
+        if command_id in {"undo", "redo"} and layer is not None \
+                and self.native_editing.is_open(layer.id):
+            # M1：原生会话的撤销/重做 = 手势管理器计划（层内 QGIS undoStack
+            # 宏，每层每手势恰一条）经桥执行——编辑发生在镜像缓冲，
+            # Python 真源不动（§2 编辑期间 Python 不动）。
+            done = (self.native_editing.undo_gesture()
+                    if command_id == "undo"
+                    else self.native_editing.redo_gesture())
+            if done:
+                self.state_changed.emit()
+            return done
         if command_id == "undo" and session is not None:
             # V8 M3：栈顶是复合组 origin（顶点编辑 + 共享节点传播）时，
             # undo 必须整组原子撤销；不可安全撤销则拒绝并给出原因（信号
@@ -2357,7 +2736,11 @@ class CompositeEditController(QObject):
                 "editable": "true" if allowed else "false",
                 "geometry_kind": self._kinds.get(layer_id, ""),
                 "template": self._templates.get(layer_id, ""),
-                "editing": "true" if session is not None else "false",
+                # M1：原生会话的层同样在编辑中（停发窗口内数据冻结，
+                # 镜像实时渲染编辑缓冲——快照层 token 不变即 no-op 短路）。
+                "editing": "true" if (session is not None
+                                      or self.native_editing.is_open(layer_id)
+                                      ) else "false",
             }
             if role_value and role_value not in _SNAPSHOT_ROLELESS:
                 metadata["role"] = role_value
@@ -2482,7 +2865,9 @@ class CompositeEditController(QObject):
             "active_layer_kind": layer_kind,
             "wkb_type": wkb_type,
             "vector_writable": layer is not None,
-            "editing": session is not None,
+            # M1：编辑中 = Python 会话或原生会话（顶点 v2/数字化路由）。
+            "editing": session is not None or (
+                layer is not None and self.native_editing.is_open(layer.id)),
             "dirty": bool(session is not None and session.is_dirty),
             "edit_gate_open": bool(gate_allowed),
             "edit_gate_reason": str(gate_reason or ""),
@@ -2499,12 +2884,17 @@ class CompositeEditController(QObject):
                 if layer is not None and session is not None and self._kinds.get(layer.id) == "polygon"
                 else 0
             ),
-            "split_ready": self._split_inputs() is not None,
+            "split_ready": self._split_inputs() is not None or (
+                layer is not None
+                and self.native_editing.is_open(layer.id)
+                and self._kinds.get(layer.id) == "polygon"
+                and bool(layer.selection)
+            ),
             "merge_ready": (
                 layer is not None
-                and session is not None
                 and self._kinds.get(layer.id) == "polygon"
                 and len(layer.selection) >= 2
+                and (session is not None or self.native_editing.is_open(layer.id))
             ),
             "reshape_ready": (
                 layer is not None
@@ -2527,7 +2917,13 @@ class CompositeEditController(QObject):
             # snapping/topology *可用性*不在此采集（V9 W1）——由
             # build_tool_context 从桥 manifest/引擎探测派生；此前硬编码
             # True 是无权威来源的猜测。
-            "crs_valid": _crs_parseable(self.project_crs),
+            # M0 §6：crs_valid 防「声明了假 CRS」（ADV-6 原意）。未声明
+            # （本地帧）是合法状态——平面 GEOS/Shapely 拓扑校验无需 CRS，
+            # 不能把新工程的默认本地帧误判为拓扑不可用。
+            "crs_valid": (
+                not str(self.project_crs or "").strip()
+                or _crs_parseable(self.project_crs)
+            ),
             "project_crs": str(self.project_crs or ""),
             "layer_crs": str(getattr(layer, "crs", "") or "") if layer is not None else "",
             "topology_error_count": self._topology.cached_error_count(

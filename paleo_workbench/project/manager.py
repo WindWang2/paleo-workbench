@@ -709,6 +709,15 @@ class ProjectManager:
         # ``data`` untouched lets the session retain its already-portable
         # sections without another all-resource relativization pass.
         _resolve_project_paths(project, self.project_path)
+        # M0 §6（决议 #1285）：打开工程的 CRS 域兜底检测——旧工程可能在
+        # 「声明地理 CRS + 数据本地坐标」状态下保存。此处只呈现全景；
+        # 进入编辑的进前段会再次拦截并引导一键修复。
+        from paleo_workbench.project.domain import crs_domain_issues
+
+        for issue in crs_domain_issues(project):
+            logger.warning(
+                "工程 CRS 声明与数据坐标范围不符：%s（进入编辑时将引导修复）",
+                issue)
         # The persisted hint stays portable (``."``), while runtime consumers
         # receive the concrete root without turning an immediate clean save
         # into a false metadata mutation.

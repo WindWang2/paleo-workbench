@@ -4,6 +4,11 @@ These tests pin the V10 convergence decisions without requiring the QGIS
 bridge (fake stacks / pure policy units); the qgis-marked suite exercises
 the same invariants against the real runtime
 (tests/test_qgis_v10_runtime_foundation.py).
+
+拓扑编辑迁移 M0（§6 决议 #1285）：旧 ``evaluate_commit_guard``（数字化
+提交门）退休，判定表收敛为进前段 ``evaluate_edit_entry``——语义保留
+（同 CRS / fail-closed / raw 帧 / 别名归一），域校验进 M0 专项测试
+（tests/test_topo_m0_foundation.py）。
 """
 
 from __future__ import annotations
@@ -15,55 +20,63 @@ import pytest
 from paleo_workbench.mapping import crs_chain
 from paleo_workbench.mapping.crs_chain import (
     CrsChainFacts,
-    evaluate_commit_guard,
+    LayerCrsFacts,
+    evaluate_edit_entry,
 )
 from paleo_workbench.mapping.layers import MapDocument
 from paleo_workbench.mapping import qgis_mirror
 
 
 # --------------------------------------------------------------------------- #
-# evaluate_commit_guard — V9 语义保留 + V10 fail-closed 收敛
+# evaluate_edit_entry — V9 语义保留 + V10 fail-closed 收敛（进前段）
 # --------------------------------------------------------------------------- #
 
-def test_guard_both_declared_equal_allows():
-    verdict = evaluate_commit_guard(
-        "EPSG:4490", "EPSG:4490", runtime_crs_capable=True)
+def test_entry_both_declared_equal_allows():
+    verdict = evaluate_edit_entry(
+        [LayerCrsFacts("draft-1", crs="EPSG:4490")],
+        canvas_crs="EPSG:4490", runtime_crs_capable=True)
     assert verdict.allowed
 
 
-def test_guard_both_declared_mismatch_rejects():
-    verdict = evaluate_commit_guard(
-        "EPSG:4326", "EPSG:4490", runtime_crs_capable=False)
+def test_entry_both_declared_mismatch_rejects():
+    verdict = evaluate_edit_entry(
+        [LayerCrsFacts("draft-1", crs="EPSG:4490")],
+        canvas_crs="EPSG:4326", runtime_crs_capable=False)
     assert not verdict.allowed
     assert "4326" in verdict.reason and "4490" in verdict.reason
 
 
-def test_guard_unknown_canvas_fails_closed_when_runtime_capable():
+def test_entry_unknown_canvas_fails_closed_when_runtime_capable():
     """V10 收敛点：proj 链健康的运行时里，画布 CRS 未知 = 真实故障。"""
-    verdict = evaluate_commit_guard(
-        "", "EPSG:4490", runtime_crs_capable=True)
+    verdict = evaluate_edit_entry(
+        [LayerCrsFacts("draft-1", crs="EPSG:4490")],
+        canvas_crs="", runtime_crs_capable=True)
     assert not verdict.allowed
-    assert "unresolved" in verdict.reason or "CRS" in verdict.reason
+    assert "CRS" in verdict.reason
 
 
-def test_guard_unknown_canvas_allows_when_runtime_not_capable():
+def test_entry_unknown_canvas_allows_when_runtime_not_capable():
     """V9 诚实语义保留：CRS 无能运行时（无 proj.db 回退）不产生假拒绝。"""
-    verdict = evaluate_commit_guard(
-        "", "EPSG:4490", runtime_crs_capable=False)
+    verdict = evaluate_edit_entry(
+        [LayerCrsFacts("draft-1", crs="EPSG:4490")],
+        canvas_crs="", runtime_crs_capable=False)
     assert verdict.allowed
 
 
-def test_guard_storage_undeclared_allows_raw_frame():
-    assert evaluate_commit_guard(
-        "EPSG:4326", "", runtime_crs_capable=True).allowed
-    assert evaluate_commit_guard(
-        "", "", runtime_crs_capable=False).allowed
+def test_entry_storage_undeclared_allows_raw_frame():
+    assert evaluate_edit_entry(
+        [LayerCrsFacts("draft-1", crs="")],
+        canvas_crs="EPSG:4326", runtime_crs_capable=True).allowed
+    assert evaluate_edit_entry(
+        [LayerCrsFacts("draft-1", crs="")],
+        canvas_crs="", runtime_crs_capable=False).allowed
 
 
-def test_guard_normalizes_descriptive_aliases():
+def test_entry_normalizes_descriptive_aliases():
     """描述式拼写（“EPSG:4326 / WGS84”）与规范 authid 等价比较。"""
-    assert evaluate_commit_guard(
-        "EPSG:4326 / WGS84", "EPSG:4326", runtime_crs_capable=True).allowed
+    assert evaluate_edit_entry(
+        [LayerCrsFacts("draft-1", crs="EPSG:4326")],
+        canvas_crs="EPSG:4326 / WGS84", runtime_crs_capable=True).allowed
 
 
 def test_chain_facts_projection():

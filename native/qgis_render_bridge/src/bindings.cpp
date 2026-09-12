@@ -443,7 +443,16 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // canvas_output_dpi / mirror_provider_facts / mirror_style_json /
     // upsert scale-range channel / explicit current-layer clear / honest
     // digitize scratch CRS.
-    module.attr("__version__") = "0.6.0a0";
+    // 0.8.0a0 (topo-editing M2): vertex all-layers scope, topological
+    // point scatter, avoid-intersections (config + vertex/move
+    // replication), canvas tracer.
+    // 0.7.0a0 (topo-editing M1): mirror-layer native editing (start/
+    // commit/rollback/undo/redo), committed delta callback, add mirror
+    // feature, mirror_features_json unlimited readback (limit<=0).
+    // 0.9.0a0 (topo-editing M3): split_mirror_features /
+    // merge_mirror_features (native buffer split/merge + attribute
+    // inheritance; neighbor topo-points on split).
+    module.attr("__version__") = "0.9.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -858,6 +867,81 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                      f(status, geom);
                    });
              })
+        // 拓扑编辑迁移 M1（§2）：committed 增量回传（commit 期间同步触发）。
+        .def("set_committed_callback",
+             [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
+                py::function f) {
+               self.setCommittedCallback(
+                   canvas, [f = std::move(f)](const std::string& doc_id,
+                                              const std::string& payload) {
+                     py::gil_scoped_acquire gil;
+                     f(doc_id, payload);
+                   });
+             })
+        .def("start_mirror_layer_editing",
+             &pwb::qgis_render::QgisMapStack::startMirrorLayerEditing,
+             py::arg("doc_id"),
+             "M1 topo-editing: start a native edit session on the mirror "
+             "layer (committed* signals captured for host writeback).")
+        .def("commit_mirror_layer",
+             &pwb::qgis_render::QgisMapStack::commitMirrorLayer,
+             py::arg("doc_id"),
+             "M1 topo-editing: commit the layer's edit buffer; fires the "
+             "committed-callback with the change delta. Failure keeps the "
+             "session open.")
+        .def("roll_back_mirror_layer",
+             &pwb::qgis_render::QgisMapStack::rollBackMirrorLayer,
+             py::arg("doc_id"),
+             "M1 topo-editing: roll the edit buffer back to the session-"
+             "opening snapshot baseline.")
+        .def("mirror_layer_editing",
+             &pwb::qgis_render::QgisMapStack::mirrorLayerEditing,
+             py::arg("doc_id"),
+             "M1 topo-editing: True while the mirror layer holds a native "
+             "edit session.")
+        .def("undo_mirror_edit",
+             &pwb::qgis_render::QgisMapStack::undoMirrorEdit,
+             py::arg("doc_id"),
+             "M1 topo-editing: undo one edit-command macro on the layer's "
+             "undo stack.")
+        .def("redo_mirror_edit",
+             &pwb::qgis_render::QgisMapStack::redoMirrorEdit,
+             py::arg("doc_id"),
+             "M1 topo-editing: redo one edit-command macro.")
+        .def("set_vertex_edit_scope",
+             [](pwb::qgis_render::QgisMapStack& self,
+                std::uintptr_t canvas, bool all_layers) {
+               self.setVertexEditScope(canvas, all_layers);
+             },
+             py::arg("canvas"), py::arg("all_layers"),
+             "M2 topo-editing: vertex tool scope (false = current layer, "
+             "true = all layers; cross-layer shared nodes, same-CRS only).")
+        .def("set_tracing_enabled",
+             [](pwb::qgis_render::QgisMapStack& self,
+                std::uintptr_t canvas, bool enabled) {
+               self.setTracingEnabled(canvas, enabled);
+             },
+             py::arg("canvas"), py::arg("enabled"),
+             "M2 topo-editing: register QgsMapCanvasTracer on the canvas and "
+             "toggle tracing (all capture tools pick it up for free).")
+        .def("add_mirror_feature",
+             &pwb::qgis_render::QgisMapStack::addMirrorFeature,
+             py::arg("doc_id"), py::arg("geojson_feature"),
+             "M1 topo-editing: add one GeoJSON feature into the edit buffer "
+             "(digitize routing); one undoable macro 'Added feature'.")
+        .def("split_mirror_features",
+             &pwb::qgis_render::QgisMapStack::splitMirrorFeatures,
+             py::arg("doc_id"), py::arg("curve_geojson"),
+             py::arg("feature_ids_json") = "",
+             "M3 topo-editing: split selected (or listed) features by a "
+             "LineString curve; topologicalEditing + neighbor topo points; "
+             "one undoable macro 'Features split'.")
+        .def("merge_mirror_features",
+             &pwb::qgis_render::QgisMapStack::mergeMirrorFeatures,
+             py::arg("doc_id"), py::arg("feature_ids_json"),
+             py::arg("attrs_json") = "",
+             "M3 topo-editing: merge listed features (union + attributes); "
+             "one undoable macro 'Merged features'.")
         .def("set_edit_pick_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
                 py::function f) {
