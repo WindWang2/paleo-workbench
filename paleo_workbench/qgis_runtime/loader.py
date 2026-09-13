@@ -138,6 +138,14 @@ def _ensure_linux_protobuf_compat(paths: QgisRuntimePaths, warnings: list[str]) 
 
 
 def _conda_preload(deps_bin: Path, warnings: list[str]) -> list[str]:
+    # ctypes.WinDLL is Windows-only. Conda recipe docs are Windows-only too,
+    # but prepare_bridge_load must never raise (#1265).
+    if os.name != "nt" or not hasattr(ctypes, "WinDLL"):
+        warnings.append(
+            "conda DLL preload skipped "
+            "(ctypes.WinDLL is Windows-only)"
+        )
+        return []
     failures: list[str] = []
     for name in _CONDA_PRELOAD_NAMES:
         hits = glob.glob(str(deps_bin / f"{name}.dll"))
