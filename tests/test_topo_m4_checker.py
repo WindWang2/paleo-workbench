@@ -325,7 +325,7 @@ def test_save_edits_python_path_uses_checker_when_present(qapp):
     canvas.set_overlay_provider = lambda overlay: None
 
     controller = CompositeEditController()
-    layer = controller.create_layer("相带线", "line")
+    layer = controller.create_layer("井点", "point")
     stack.check_errors = [{
         **_OVERLAP_ERROR, "layer_id": layer.id, "feature_id": "x",
     }]

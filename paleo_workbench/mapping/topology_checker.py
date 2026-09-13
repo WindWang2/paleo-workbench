@@ -97,7 +97,7 @@ class TopologyChecker:
     def run(self, stack, canvas, layer_ids, *, extra_config=None) -> list[dict[str, object]]:
         config = {
             "layer_ids": [str(layer_id) for layer_id in layer_ids],
-            "rules": ["overlap", "gap", "is_valid", "workspace_remainder"],
+            "rules": ["overlap", "gap", "is_valid", "workspace_remainder", "dangle"],
             "precision": 8,
         }
         if self.workspace:

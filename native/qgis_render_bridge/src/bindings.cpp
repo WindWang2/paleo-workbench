@@ -462,7 +462,7 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // 0.10.0a0 (topo-editing M4): run_geometry_checks /
     // fix_geometry_error(s) / highlight_checker_errors (analysis
     // overlap/gap/is_valid + workspace remainder).
-    module.attr("__version__") = "0.10.0a0";
+    module.attr("__version__") = "0.11.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 

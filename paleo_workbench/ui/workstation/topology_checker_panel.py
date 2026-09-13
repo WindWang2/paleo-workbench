@@ -30,6 +30,7 @@ _RULE_LABELS = {
     "gap": "面缝隙",
     "is_valid": "几何有效性",
     "workspace_remainder": "工区余量",
+    "dangle": "线悬挂点",
 }
 
 

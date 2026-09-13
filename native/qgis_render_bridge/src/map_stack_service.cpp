@@ -120,6 +120,7 @@
 #include <qgsfeedback.h>
 #include <qgsgeometrycheckcontext.h>
 #include <qgsgeometrycheckerror.h>
+#include <qgsgeometrydanglecheck.h>
 #include <qgsgeometrygapcheck.h>
 #include <qgsgeometryisvalidcheck.h>
 #include <qgsgeometryoverlapcheck.h>
@@ -6001,6 +6002,7 @@ QString checkerRuleId(const QgsGeometryCheck* check) {
   if (id.contains(QLatin1String("Overlap"))) return QStringLiteral("overlap");
   if (id.contains(QLatin1String("Gap"))) return QStringLiteral("gap");
   if (id.contains(QLatin1String("Valid"))) return QStringLiteral("is_valid");
+  if (id.contains(QLatin1String("Dangle"))) return QStringLiteral("dangle");
   return id;
 }
 
@@ -6055,6 +6057,15 @@ QJsonArray methodsToJson(const QgsGeometryCheck* check, const QString& rule) {
     item.insert(QStringLiteral("name"), QStringLiteral("navigate"));
     item.insert(QStringLiteral("description"),
                 QStringLiteral("Zoom to unassigned area"));
+    item.insert(QStringLiteral("stable"), true);
+    methods.append(item);
+  }
+  if (rule == QLatin1String("dangle")) {
+    QJsonObject item;
+    item.insert(QStringLiteral("id"), 0);
+    item.insert(QStringLiteral("name"), QStringLiteral("navigate"));
+    item.insert(QStringLiteral("description"),
+                QStringLiteral("Zoom to dangling endpoint"));
     item.insert(QStringLiteral("stable"), true);
     methods.append(item);
   }
@@ -6113,7 +6124,8 @@ std::string QgisMapStack::serializeCheckerSession() const {
     if (!box.isNull()) item.insert(QStringLiteral("bbox"), bboxToJson(box));
     item.insert(QStringLiteral("location"),
                 QJsonArray{error->location().x(), error->location().y()});
-    const bool fixable = rule != QLatin1String("workspace_remainder");
+    const bool fixable = rule != QLatin1String("workspace_remainder")
+        && rule != QLatin1String("dangle");
     item.insert(QStringLiteral("fixable"), fixable);
     item.insert(QStringLiteral("methods"), methodsToJson(error->check(), rule));
     QString status = QStringLiteral("pending");
@@ -6210,6 +6222,26 @@ bool QgisMapStack::applyCheckerFix(const std::string& error_id, int method,
   }
   QgsGeometryCheckError* check_error = impl_->checker.native_errors.at(index);
   const QString rule = checkerRuleId(check_error->check());
+  if (rule == QLatin1String("dangle")) {
+    std::uintptr_t canvas = impl_->checker.canvas;
+    if (canvas == 0) {
+      for (auto& kv : impl_->canvas_refs) {
+        if (!kv.second.isNull()) {
+          canvas = kv.first;
+          break;
+        }
+      }
+    }
+    if (canvas != 0) {
+      QgsRectangle box = check_error->affectedAreaBBox();
+      if (box.isNull() || box.isEmpty())
+        box = check_error->geometry().boundingBox();
+      const double pad = std::max({box.width(), box.height(), 0.5}) * 0.1;
+      setCanvasExtent(canvas, box.xMinimum() - pad, box.yMinimum() - pad,
+                      box.xMaximum() + pad, box.yMaximum() + pad);
+    }
+    return true;
+  }
   QgsVectorLayer* layer = qobject_cast<QgsVectorLayer*>(
       project()->mapLayer(check_error->layerId()));
   if (layer == nullptr) {
@@ -6327,6 +6359,7 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
     rules.insert(QStringLiteral("gap"));
     rules.insert(QStringLiteral("is_valid"));
     rules.insert(QStringLiteral("workspace_remainder"));
+    rules.insert(QStringLiteral("dangle"));
   }
 
   if (config.value(QStringLiteral("allowed_gaps")).isObject()
@@ -6380,6 +6413,10 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
     auto* gap = new QgsGeometryGapCheck(impl_->checker.context.get(), gap_config);
     gap->prepare(impl_->checker.context.get(), gap_config);
     impl_->checker.checks.append(gap);
+  }
+  if (rules.contains(QStringLiteral("dangle"))) {
+    impl_->checker.checks.append(
+        new QgsGeometryDangleCheck(impl_->checker.context.get(), QVariantMap()));
   }
 
   QgsFeedback feedback;

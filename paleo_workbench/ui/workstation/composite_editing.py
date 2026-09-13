@@ -1357,7 +1357,7 @@ class CompositeEditController(QObject):
         ok_crs, _crs_reason = self._crs_domain_gate(layer)
         if not ok_crs:
             return
-        # M1：polygon 草稿层 + 原生画布 + 桥能力 → 原生编辑会话
+        # 二阶段：polygon + line 约束/综合相，以及注记点，走原生会话。
         # （进前门禁已由 composite_document 的角色/CRS 门把守；controller
         # 内部再复查角色门禁——拒绝则不开 startEditing）。
         if self._native_session_eligible(layer):
@@ -1380,16 +1380,26 @@ class CompositeEditController(QObject):
         self.state_changed.emit()
 
     def _native_session_eligible(self, layer: VectorLayer) -> bool:
-        """M1 原生会话资格：相图草稿先行 = polygon 层 + 原生画布 + 桥能力。"""
+        """原生会话资格：面/线 + 注记点；回退画布或旧桥 → False。"""
         canvas = self._canvas
         stack = getattr(canvas, "stack", None)
         if stack is None:
             return False
         if not hasattr(canvas, "canvas_address"):
             return False  # 回退画布（UnifiedMapCanvas）无原生面
-        if self._kinds.get(layer.id) != "polygon":
-            return False
-        return self.native_editing.bridge_supports(stack)
+        kind = self._kinds.get(layer.id)
+        if kind in {"polygon", "line"}:
+            return self.native_editing.bridge_supports(stack)
+        if kind == "point":
+            from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+
+            role = self.layer_role(layer.id)
+            if role in {
+                LayerRole.MAP_ANNOTATION.value,
+                LayerRole.INTERPRETATION_ANNOTATION.value,
+            }:
+                return self.native_editing.bridge_supports(stack)
+        return False
 
     def ensure_layer_session(self, layer_id: str):
         """门禁下的会话获取：返回 ``(session, reason)``。
