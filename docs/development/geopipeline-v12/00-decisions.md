@@ -70,16 +70,20 @@ geoviz 的 `kriging_grid` 不接受邻域参数；若 geoviz 可用且用户设�
 
 现状 O(holes × exteriors × hole_vertices × ring_edges) 超线性。改为：
 
-1. 每个外环预算 bbox；候选 = bbox 包含洞 bbox 的外环（**精确超集**：点集
-   包含 ⇒ bbox 包含，无假阴性）。
+1. 每个外环预算 bbox；候选 = bbox 与洞 bbox **相交**的外环（**可证超集**：
+   两框不相交 ⇒ 无洞顶点可落入外环内部，不丢票；不能用"包含"判据——
+   洞环可能跨在外环 bbox 之外而有顶点在内）。
 2. 候选仍按面积升序、严格 `votes > best_votes` —— 选择规则与现状逐位相同。
-3. 顶点投票改用与 `point_in_ring_scalar` **同表达式**的向量化射线法
-   （`geometry_planar.points_in_ring_vectorized`，见 D4a），浮点运算次序
-   一致 ⇒ 布尔结果一致 ⇒ 归属一致 ⇒ 输出几何逐字节复现（黄金值
-   poly_* 案例为证）。
+3. 顶点投票改用与 `point_in_ring_scalar` **同表达式同浮点次序**的向量化
+   射线法，逐边谓词相同、**逐顶点判定 = 跨越边的奇偶（XOR）**——首版
+   实现误用 OR 归约（`hits.any`），被评审的随机差分证伪（7.5% 逐点翻转、
+   speckle 二值栅格 10 种子 4 个输出不同；黄金值三分类连续场恰好未
+   触发），已修复并以随机二值栅格 parity 钉锁死。
 
-**D4a**：向量化内核放进 `geometry_planar.py`（与既有 scalar/vectorized
-几何内核同址），`polygonization._point_in_ring` 的调用点不改公开面。
+**D4a（修订）**：向量化投票核 `_hole_vertex_votes` 落在
+`polygonization.py`（洞归属语义的私有内核，与 `_ring_bbox` 同域）；
+`geometry_planar.py` 零改动（首版曾把 `points_in_ring_vectorized` 放
+那里，因逐边小数组循环在小洞×大外环时反而变慢而回退——见 03 验证记录）。
 
 ## D5：黄金值容差论证
 

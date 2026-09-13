@@ -344,8 +344,8 @@ def _load_payload(case: dict, root: Path) -> dict | None:
 # * 克里金网格（z + 方差）—— 大案例的线程化 BLAS 会按缓冲区对齐选择内核，
 #   同一代码两次运行的末位比特可差 ~1e-7（float32 存储）。因此克里金网格
 #   允许 max|Δ| ≤ KRIGING_GRID_ATOL（论证见 docs/development/geopipeline-v12/
-#   03-verification.md：值域 O(1..100)，1e-5 是内核噪声的 ~20 倍余量，
-#   任何真实的邻域/求解语义改动都远大于此）。摘要仍报告实际差异。
+#   03-verification.md：值域 O(1..100)，1e-5 是内核噪声（实测 9.5e-7）的
+#   ~10 倍余量，任何真实的邻域/求解语义改动都远大于此）。摘要仍报告实际差异。
 KRIGING_GRID_ATOL = 1e-5
 KRIGING_STAT_RTOL = 1e-6
 

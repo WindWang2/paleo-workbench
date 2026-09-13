@@ -78,19 +78,32 @@ m6 对抗门禁（手工复现，本环境无法收集 m6，见 §4）：棋盘 
 
 - **k=n 等价**：k 设为样本总数且 ≤ 上限时，逐目标系统 = 全局系统，
   结果 allclose 1e-9（不同 LAPACK 布局的末位差异）。
-- **样本点精确插值**：OK 无偏性质，k=12 下 20 个样本点估值 max|Δ|=1.8e-14
-  （测试断言 1e-4）。
+- **样本点精确插值**：OK 无偏性质，k=12 下 80 个样本点估值 max|Δ|=1.8e-14
+  （测试断言 1e-4；独立冒烟 20 点同量级）。
 - **半径剪枝 = 精确消去**：被剪邻居行列清零、权重钉 0，拉格朗日行只约束
   保留权重（不是数值衰减）；邻居数 < min_neighbors 的目标为 NaN（与 IDW
-  契约一致）。
+  契约一致——含 min_neighbors≤0 钳到 1、min>k 时全 nodata 两个边界，
+  评审 P1-1 后补钉）。
 - **确定性**：同进程重复运行逐字节相同。
 - **方差**：全网格 ≥ 0；样本处方差 < 全场最大。
 
-### 2.3 多边形化：语义不变 = 输出逐字节一致
+### 2.3 多边形化：语义不变 = 输出逐字节一致（含一次被评审证伪又修复的过程）
 
 预筛是**可证超集**（洞 bbox 与外环 bbox 不相交 ⇒ 无顶点可命中 ⇒ 不丢票）；
 投票谓词逐位等价（同表达式同浮点次序）；选择规则逐字未动。黄金值
 poly_* 五案例（含 150² speckle、300² smooth）canonical JSON 逐字节一致。
+
+**评审抓到的首版缺陷（P0，已修复）**：投票核的块内归约误用 OR
+（`hits.any(axis=0)`）而非射线法的跨越奇偶（XOR）——射线穿过凹环 ≥2 次
+的点（在外环 bbox 内但不在环内的点）被误判为在内，非包含外环获得幻影票。
+Spec 轴评审的差分证据：随机环/点 4000 组中 1598 组票数不一致（逐点翻转
+7.5%）；构造 L 形外环可让 0 真票的外环以 5 幻影票夺走洞；**真实 speckle
+二值栅格 10 个随机种子里 4 个输出几何不同**。黄金值三分类连续场恰好不
+触发——这正说明单一形态的黄金值不够，二值最坏场的差分是必要补充。
+修复（块内 `bitwise_xor.reduce` + 跨块异或）后：6000 组 fuzz（含边界点、
+水平边、零长边、>8192 边跨块环）0 不一致；本仓库新增 parity 钉
+（10 种子随机二值栅格，向量化 vs 标量参考输出全等），并反向验证过——
+把 OR 缺陷临时还原时该钉确实变红。
 
 ## 3. 近似披露（metadata 可见性）
 
@@ -109,16 +122,21 @@ poly_* 五案例（含 150² speckle、300² smooth）canonical JSON 逐字节�
 
 | 文件 | 结果 |
 |---|---|
-| tests/test_kriging_neighborhood.py（新增，13 用例） | 13 passed |
+| tests/test_kriging_neighborhood.py（新增，15 用例） | 15 passed |
 | tests/test_kriging_fallback_quality.py（#1036 专项） | 10 passed |
-| tests/test_polygonization_complexity_nail.py（新增，含反向对照） | 2 passed |
+| tests/test_polygonization_complexity_nail.py（新增：正向钉+反向对照+parity 钉） | 3 passed |
 | tests/test_polygon_quality_adversarial.py | 14 passed |
 | tests/test_m3_adversarial_contour_polygon.py | 14 passed |
 | tests/test_m3_stress_topological_remediation.py | 4 passed |
 | tests/test_m3_adversarial_stress.py | 19 passed |
-| tests/test_geological_mapping_pipeline.py | 57 passed, 2 failed（**预存**：stash 验证基线同样失败；等值线分位/定间隔两例，环境相关） |
+| tests/test_geological_mapping_pipeline.py | 23 passed, 0 failed（干净环境复测） |
 | 黄金值 compare（25 案例） | 全部 OK（§2.1） |
-| tautology 守卫（test_no_tautological_assertions） | 守卫文件本身在本环境无法收集（需 geoviz_plots→matplotlib）；**复刻其 AST 扫描**于两个新测试文件 → CLEAN |
+| tautology 守卫（test_no_tautological_assertions） | 守卫文件本身在本环境无法收集（需 geoviz_plots→matplotlib）；**一次性复刻其 AST 扫描**（脚本未入库）于两个新测试文件 → CLEAN |
+
+注：验证过程中曾在被 matplotlib 污染的环境窗口测得
+test_geological_mapping_pipeline "2 failed"（等值线分位/定间隔两例）——
+该环境里 geoviz 引擎路径被意外激活所致；干净环境（geoviz 缺失）复测
+23 passed, 0 failed。两例失败与本轮改动的代码路径无关。
 
 无法在本环境运行的文件（与改动无关的预存环境限制，均经 stash 对照确认）：
 tests/test_challenger_m6_adversarial_stress.py（收集需 pyqtgraph/OpenGL——
@@ -143,5 +161,18 @@ tests/test_polygonization_complexity_nail.py：
   射线法）后同一比值实测 ≈ 12 → 断言其**必须 ≥ 8**（若不超阈即钉失效，
   测试自身会红）；同时断言暴力输出与真实现完全相同（同样语义、更差
   复杂度），排除假阳性对照。
-- 校准（本机 2026-09-13）：fast 4.17 / brute 12.12，阈值 8.0 两侧各 ~1.9×
-  余量；每尺寸取 min-of-2 抑制调度噪声。
+- 校准（本机 2026-09-13）：fast 4.17 / brute 12.12，阈值 8.0 两侧各
+  ≥1.5× 余量（fast 侧 ~1.9×、brute 侧 ~1.5×）；每尺寸取 min-of-2
+  抑制调度噪声。
+
+## 6. 评审处置记录（双轴：Standards + Spec，各一 subagent）
+
+| 级别 | 发现 | 处置 |
+|---|---|---|
+| P0（Spec） | 投票核 OR 归约破坏奇偶语义（§2.3） | 已修（XOR 归约）+ parity 钉 + 反向验证变红 |
+| P1（双轴） | 克里金 min_neighbors=0 产出伪 z=0.0、披露与行为不一致 | 已修（入参钳 max(1,·)）+ 2 个边界测试；min>k 时改为与 IDW 一致的全 nodata |
+| P1（Standards） | 00-decisions D4/D4a 与实现漂移（包含 vs 相交；内核位置） | 已修文档（D4 修订版含 OR 缺陷记录） |
+| P1（Standards） | 03-verification 的 pipeline 测试行数字取自污染环境窗口 | 已修（干净环境 23 passed, 0 failed + 注释说明） |
+| P2 | scipy 裸 ImportError → RuntimeError（对齐 IDW 风格）；常量场 note 覆盖 cap 注解 → 拼接；反向对照 runs=2；比例断言加 t_global 下限护栏；分号双语句拆行；容差注释口径统一 ~10×；样本数 20→80；余量口径 ≥1.5× | 全部已修 |
+| P2（不改） | `neighborhood.max_neighbors`（生效 k）与 IDW 顶层 `max_neighbors`（原始请求）同键两义——克里金块内另有 `requested_max_neighbors` 显式区分，键已入 docs；改名会破坏刚建立的披露契约，留待 UI 统一轮 | 记录于此 |
+| P2（不改） | moving 路径奇异回退 ridge 基数 = 1e-10·sill，global = 1e-10·K[0,0]=1e-10·cov(0)=1e-10·sill——Spec 轴复核两路一致（Standards 轴初判有误），无需改 | 记录于此 |

@@ -179,6 +179,30 @@ class TestNumerics:
         assert params["duplicates_merged"] == 2
         assert abs(gz[0, 0] - 6.0) < 0.5
 
+    def test_min_neighbors_zero_does_not_fabricate_values(self):
+        """min_neighbors<=0（裸 dataclass 不校验）不得产出伪 z=0.0（review P1-1）。
+
+        与 IDW 契约一致：下限钳到 1；0 个有效邻居的目标必须是 NaN。
+        """
+        x, y, z = _arrays(60, seed=17)
+        gx = np.array([2000.0, 500.0])
+        gy = np.array([2000.0, 500.0])
+        gz, _, params = _pure_numpy_kriging(
+            x, y, z, gx, gy, search_radius=300.0, min_neighbors=0
+        )
+        assert math.isnan(gz[0, 0])  # 远点：0 个邻居 → nodata，不是 0.0
+        assert np.isfinite(gz[1, 1])  # 场中心：26 个邻居
+        assert params["neighborhood"]["min_neighbors"] == 1  # 披露与行为一致
+
+    def test_min_neighbors_above_k_is_nodata_like_idw(self):
+        """min_neighbors > max_neighbors 的矛盾输入：与 IDW 一样全 nodata。"""
+        x, y, z = _arrays(40, seed=41)
+        gx = np.linspace(0, 1000, 10)
+        gz, _, _ = _pure_numpy_kriging(
+            x, y, z, gx, gx, max_neighbors=4, min_neighbors=10
+        )
+        assert bool(np.isnan(gz).all())
+
     def test_deterministic_repeat(self):
         x, y, z = _arrays(120, seed=29)
         gx = np.linspace(0, 1000, 20)
@@ -222,6 +246,11 @@ class TestPerformance:
         t0 = time.perf_counter()
         _pure_numpy_kriging(x, y, z, gx, gy)
         t_global = time.perf_counter() - t0
+
+        # 极快机器护栏：全局路径若只有几十 ms，比值噪声化，本断言失去意义
+        assert t_global > 0.05, (
+            f"t_global={t_global:.3f}s too small for a stable ratio on this machine"
+        )
 
         t0 = time.perf_counter()
         gz, gv, _ = _pure_numpy_kriging(

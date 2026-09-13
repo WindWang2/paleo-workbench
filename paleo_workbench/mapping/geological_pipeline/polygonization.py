@@ -84,9 +84,11 @@ def _hole_vertex_votes(hx: np.ndarray, hy: np.ndarray, ring_arr: np.ndarray) -> 
     Exact same predicate as the former per-vertex ``_point_in_ring`` scalar
     loop (v7 §4 shared kernel): per edge ``(y1 > y) != (y2 > y)`` and
     ``x < x1 + t * (x2 - x1)`` with ``t = (y - y1) / (y2 - y1)`` evaluate
-    the identical float64 expressions, and the crossing parity per vertex
-    (XOR over edges) is the scalar ray-cast verdict. Zero-length edges have
-    a False straddle mask everywhere, so their inf/NaN lanes are discarded.
+    the identical float64 expressions, and the per-vertex verdict is the
+    crossing PARITY — XOR over edges, never OR (a point whose ray crosses
+    a concave ring twice is outside; review P0-1 caught the OR form
+    flipping such points). Zero-length edges have a False straddle mask
+    everywhere, so their inf/NaN lanes are discarded.
     """
     ex = ring_arr[:, 0]
     ey = ring_arr[:, 1]
@@ -105,7 +107,7 @@ def _hole_vertex_votes(hx: np.ndarray, hy: np.ndarray, ring_arr: np.ndarray) -> 
             t = (hy[None, :] - y1c) / (y2c - y1c)
             cross_x = x1c + t * (x2c - x1c)
         hits = straddle & (hx[None, :] < cross_x)
-        inside ^= hits.any(axis=0)
+        inside ^= np.bitwise_xor.reduce(hits, axis=0)
     return int(inside.sum())
 
 
@@ -323,8 +325,10 @@ def _assign_holes_to_exteriors(
     for hole in holes:
         harr = np.asarray(hole[:-1], dtype=np.float64)
         hx, hy = harr[:, 0], harr[:, 1]
-        hxmin = float(hx.min()); hxmax = float(hx.max())
-        hymin = float(hy.min()); hymax = float(hy.max())
+        hxmin = float(hx.min())
+        hxmax = float(hx.max())
+        hymin = float(hy.min())
+        hymax = float(hy.max())
         best_idx = -1
         best_votes = 0
         for g_idx in range(len(poly_groups)):

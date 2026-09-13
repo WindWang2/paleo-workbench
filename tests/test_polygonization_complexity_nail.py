@@ -103,8 +103,8 @@ class TestPolygonizationComplexityNail:
         original = polygonization._assign_holes_to_exteriors
         polygonization._assign_holes_to_exteriors = _brute_force_hole_assignment
         try:
-            brute_small_t, brute_geoms = _timed_polygonize(NAIL_SIZES[0], runs=1)
-            brute_large_t, _ = _timed_polygonize(NAIL_SIZES[1], runs=1)
+            brute_small_t, brute_geoms = _timed_polygonize(NAIL_SIZES[0], runs=2)
+            brute_large_t, _ = _timed_polygonize(NAIL_SIZES[1], runs=2)
         finally:
             polygonization._assign_holes_to_exteriors = original
 
@@ -122,3 +122,36 @@ class TestPolygonizationComplexityNail:
         )
         # 暴力路径确实比真实现慢（对照的第二个可信度检查）
         assert brute_small_t > fast_small_t
+
+    def test_parity_matches_scalar_reference_on_random_binary_grids(self):
+        """投票核奇偶回归（review P0-1 的钉）：随机二值栅格上，向量化路径
+        必须与逐顶点标量参考（暴力实现）输出完全一致。
+
+        历史缺陷：``hits.any(axis=0)``（OR 归约）把"射线穿过凹环 ≥2 次"
+        的点判为在内——随机环差分翻转率 7.5%，speckle 二值栅格 10 种子
+        4 个输出不同。三分类连续场的黄金值案例恰好不触发，只有二值
+        最坏场暴露——此钉补上该盲区。
+        """
+        original = polygonization._assign_holes_to_exteriors
+        try:
+            for seed in range(10):
+                rng = np.random.default_rng(1000 + seed)
+                z = rng.normal(0.0, 1.0, (40, 40))
+                class_grid = (z >= 0.0).astype(np.int16)
+
+                fast_geoms, _ = _polygonize_raster_boundaries(
+                    class_grid, z, (0.0, 0.0, 40.0, 40.0), 1
+                )
+                polygonization._assign_holes_to_exteriors = _brute_force_hole_assignment
+                try:
+                    ref_geoms, _ = _polygonize_raster_boundaries(
+                        class_grid, z, (0.0, 0.0, 40.0, 40.0), 1
+                    )
+                finally:
+                    polygonization._assign_holes_to_exteriors = original
+                assert fast_geoms == ref_geoms, (
+                    f"seed {1000 + seed}: vectorized hole assignment diverged "
+                    "from the scalar reference (crossing-parity regression)"
+                )
+        finally:
+            polygonization._assign_holes_to_exteriors = original

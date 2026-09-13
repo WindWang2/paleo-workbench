@@ -598,12 +598,22 @@ def _kriging_moving_targets(
       ``np.linalg.solve((G, k+1, k+1))``; a singular batch falls back to the
       same solve → scaled-ridge → lstsq ladder as the global path.
     """
-    from scipy.spatial import cKDTree
+    try:
+        from scipy.spatial import cKDTree
+    except ImportError as exc:  # pragma: no cover - scipy ships with the app
+        raise RuntimeError(
+            "moving-neighbourhood kriging requires scipy (scipy.spatial.cKDTree)"
+        ) from exc
 
     n = len(z)
     m = len(targets)
     z_pred = np.full(m, np.nan, dtype=np.float64)
     variance = np.full(m, np.nan, dtype=np.float64)
+
+    # 与 IDW 相同的下限钳制（min_neighbors<=0 时不得产生伪值；裸 dataclass
+    # 不校验，入参直接可见 0/负数）与相同的不等式（min > k 时全部 nodata，
+    # 而不是降级续算）——见 review P1-1。
+    min_neighbors = max(1, int(min_neighbors))
 
     k_eff = _effective_neighborhood_k(max_neighbors, n)
     radius = (
@@ -629,7 +639,7 @@ def _kriging_moving_targets(
         dist = np.asarray(dist, dtype=np.float64).reshape(rows, k_eff)
         idx = np.asarray(idx).reshape(rows, k_eff)
         valid = np.isfinite(dist)
-        eligible = valid.sum(axis=1) >= min(min_neighbors, k_eff)
+        eligible = valid.sum(axis=1) >= min_neighbors  # IDW 契约：无 k 截断的严格不等式
         sel = np.nonzero(eligible)[0]
         if sel.size == 0:
             continue
@@ -786,7 +796,11 @@ def _pure_numpy_kriging(
             params["neighborhood"] = _neighborhood_disclosure(
                 max_neighbors, search_radius, min_neighbors, n
             )
-            params["neighborhood"]["note"] = "constant field: every estimate is the sample mean"
+            cap_note = params["neighborhood"].get("note")
+            params["neighborhood"]["note"] = (
+                "constant field: every estimate is the sample mean"
+                + (f"; {cap_note}" if cap_note else "")
+            )
         return (
             np.full_like(gxm, z_const),
             var_const,

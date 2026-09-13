@@ -39,7 +39,8 @@ _polygonize_raster_boundaries
         └─ _hole_vertex_votes(hx, hy, ring_arr)
               (环边, 洞顶点) 二维广播，边按 _HOLE_VOTE_EDGE_CHUNK 分块；
               每边表达式与原标量射线法逐字相同（同浮点次序 → 同布尔结果），
-              逐顶点奇偶 parity 即原判定。
+              逐顶点判定 = 块内 XOR 归约再跨块异或（射线法奇偶语义；
+              review P0-1 曾抓到 OR 归约的语义破坏，现为 parity 钉锁定）。
 ```
 
 - 复杂度：洞 × 候选外环（bbox 相交者）× O(边×顶点/向量化宽度)。
