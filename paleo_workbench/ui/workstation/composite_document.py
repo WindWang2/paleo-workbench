@@ -215,6 +215,18 @@ def _pick_base_identify_target_id(base_layers) -> str | None:
     )
 
 
+def _identify_source_label(snapshot_layer) -> str:
+    """识别条目来源标签：引用快照（metadata.reference）如实标 reference，
+    否则用快照的工区版本号，缺省 workarea。"""
+    version = str(getattr(snapshot_layer, "source_version_id", "") or "")
+    if version:
+        return version
+    metadata = getattr(snapshot_layer, "metadata", None) or {}
+    if str(metadata.get("reference") or "").lower() == "true":
+        return "reference"
+    return "workarea"
+
+
 def _base_identify_entry(base_layers, layer_id, feature_id) -> dict | None:
     """基础镜像层原生 identify 回调 → 面板条目（纯函数，未命中返 None）。
 
@@ -240,9 +252,7 @@ def _base_identify_entry(base_layers, layer_id, feature_id) -> dict | None:
                 "feature_id": str(record.get("id") or ""),
                 "geometry_type": str(geometry.get("type") or ""),
                 "attributes": dict(record.get("properties") or {}),
-                "source": str(
-                    getattr(snapshot_layer, "source_version_id", "") or "workarea"
-                ),
+                "source": _identify_source_label(snapshot_layer),
                 "template": "",
                 "editable": False,
                 "record": dict(record),
@@ -2699,19 +2709,25 @@ class CompositeDocument(QWidget):
     def _on_native_identified(self, payload: dict) -> None:
         """原生 identify 结果 → Python 数据权威组装 → Identify Results 面板。
 
-        原生 QgsMapToolIdentifyFeature 只回 (doc_id, feature_id)；面板条目
-        从 CompositeEditController 的图层记录（权威）重建，不建第二数据源。
-        基础镜像层不在编辑控制器里——此时从工区快照（``_base_layers``）按
-        文档记录 id 反查重建（与 identify_all 基础分支同形），同样复用悬浮框。
-        多图层命中列举仍由 fallback 路径的 identify_all 提供（点选语义差异
-        记录在 03-decisions.md）。
+        原生 QgsMapToolIdentifyFeature 只回 (doc_id, feature_id)（单命中）；
+        面板条目从 CompositeEditController 的图层记录（权威）重建，不建第二
+        数据源。编修层之外的命中（基础工区层、导入的引用层）不在控制器里——
+        此时按**画布实际发布的组合快照**（``layer_manager._layers`` = 基础 +
+        引用 + 编修）用文档记录 id 反查重建（与 identify_all 基础分支同形），
+        同样复用悬浮框；来源标签如实区分 workarea / reference。
+        多图层命中列举仍由 Python identify_all 提供（原生单命中 vs 多列的
+        语义差异记录在 qgis-native-authoring-v7/03-decisions.md）。
         """
         layer_id = str(payload.get("layer_doc_id") or "")
         feature_id = str(payload.get("feature_id") or "")
         controller = self.edit_controller
         layer = controller.layer(layer_id)
         if layer is None:
-            entry = _base_identify_entry(self._base_layers, layer_id, feature_id)
+            # 按画布实际发布的组合快照反查（基础工区 + 引用 + 编修）：引用层
+            # 同样镜像在画布上、能被原生识别命中——只查 _base_layers 会把
+            # 引用命中当成 miss 清空面板（点了可见要素却什么都没弹出）。
+            entry = _base_identify_entry(
+                self.layer_manager._layers, layer_id, feature_id)
             if entry is not None:
                 self.identify_results.set_results([entry])
                 self._show_identify_popup([entry])

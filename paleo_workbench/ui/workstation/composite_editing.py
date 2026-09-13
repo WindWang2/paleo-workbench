@@ -1985,21 +1985,23 @@ class CompositeEditController(QObject):
             tool = MeasureDistanceTool(crs=self.project_crs)
         else:
             layer = self.active_layer
+            # V10 识别修复：identify 恒绑无层 IdentifyTool（与模块契约一致）。
+            # 原生画布按 tool_id 路由（select→QgsMapTool 选择、
+            # identify→QgsMapToolIdentifyFeature）：一旦借活动/最上可见层落到
+            # SelectTool，画布被切成选择模式，识别点击永不弹信息面板——用户
+            # 报障根因。delegate 缺席才回落旧路径（带层 SelectTool）。
+            if action_id == "identify" and callable(self.identify_delegate):
+                tool = IdentifyTool(identify=self.identify_delegate)
+                self._active_tool_action = action_id
+                self.tools.set_active_tool(tool)
+                if canvas is not None and _cpp_alive(canvas):
+                    canvas.setFocus()
+                self.state_changed.emit()
+                return
             if layer is None and action_id == "identify":
-                # 无活动层时 identify 仍可激活：优先绑最上可见编修层
-                # （多图层回调经 identify_delegate 进面板）；连编修层都
-                # 没有（仅基础/引用可查询）时走无层 IdentifyTool。
                 fallback_id = self.topmost_visible_layer_id()
                 if fallback_id is not None:
                     layer = self._layers[fallback_id]
-                elif callable(self.identify_delegate):
-                    tool = IdentifyTool(identify=self.identify_delegate)
-                    self._active_tool_action = action_id
-                    self.tools.set_active_tool(tool)
-                    if canvas is not None and _cpp_alive(canvas):
-                        canvas.setFocus()
-                    self.state_changed.emit()
-                    return
             if layer is None:
                 return
             index = self._snapping.index_for(layer)

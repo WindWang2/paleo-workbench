@@ -335,17 +335,17 @@ def test_identify_with_results_pops_tooltip_on_hit(
     qtbot.addWidget(document)
     controller = document.edit_controller
     layer = controller.create_layer("相带", "polygon")
-    # 并行在途改动（layer_tree_panel reconcile）会吞新建层活动态：
-    # 此处显式恢复被测前置（见 task-8 报告 concerns）。
-    controller.set_active_layer(layer.id)
-    controller.start_editing()
-    layer.edit_session.add_feature(VectorFeature(
+    # 原生会话层没有 Python 工作副本（M5 退役了 polygon/line 的
+    # edit_session）：要素经可信导入通道落基线，识别读的正是基线。
+    controller.import_layer_features(layer.id, [VectorFeature(
         "poly",
         {"type": "Polygon",
          "coordinates": [[[0.0, -1.0], [2.0, -1.0], [2.0, 1.0],
                            [0.0, 1.0], [0.0, -1.0]]]},
         {"facies": "三角洲"},
-    ))
+    )])
+    controller.set_active_layer(layer.id)
+    controller.start_editing()
     shown: list = []
     monkeypatch.setattr(
         "paleo_workbench.ui.workstation.composite_document.QToolTip",
@@ -365,17 +365,17 @@ def test_identify_with_results_no_tooltip_on_miss(
     qtbot.addWidget(document)
     controller = document.edit_controller
     layer = controller.create_layer("相带", "polygon")
-    # 并行在途改动（layer_tree_panel reconcile）会吞新建层活动态：
-    # 此处显式恢复被测前置（见 task-8 报告 concerns）。
-    controller.set_active_layer(layer.id)
-    controller.start_editing()
-    layer.edit_session.add_feature(VectorFeature(
+    # 原生会话层没有 Python 工作副本（M5 退役了 polygon/line 的
+    # edit_session）：要素经可信导入通道落基线，识别读的正是基线。
+    controller.import_layer_features(layer.id, [VectorFeature(
         "poly",
         {"type": "Polygon",
          "coordinates": [[[0.0, -1.0], [2.0, -1.0], [2.0, 1.0],
                            [0.0, 1.0], [0.0, -1.0]]]},
         {"facies": "三角洲"},
-    ))
+    )])
+    controller.set_active_layer(layer.id)
+    controller.start_editing()
     shown: list = []
     monkeypatch.setattr(
         "paleo_workbench.ui.workstation.composite_document.QToolTip",
@@ -391,15 +391,14 @@ def test_native_identified_pops_tooltip(qtbot, tmp_path, monkeypatch):
     qtbot.addWidget(document)
     controller = document.edit_controller
     layer = controller.create_layer("相带", "polygon")
-    # 并行在途改动（layer_tree_panel reconcile）会吞新建层活动态：
-    # 此处显式恢复被测前置（见 task-8 报告 concerns）。
-    controller.set_active_layer(layer.id)
-    controller.start_editing()
-    layer.edit_session.add_feature(VectorFeature(
+    # 同上前提：原生会话层无 Python 工作副本，要素走可信导入通道落基线。
+    controller.import_layer_features(layer.id, [VectorFeature(
         "poly",
         {"type": "Polygon", "coordinates": [[[0.0, 0.0]]] } ,
         {"name": "河道砂"},
-    ))
+    )])
+    controller.set_active_layer(layer.id)
+    controller.start_editing()
     shown: list = []
     monkeypatch.setattr(
         "paleo_workbench.ui.workstation.composite_document.QToolTip",
@@ -543,7 +542,14 @@ def test_native_identified_base_miss_clears_without_tooltip(
 def test_native_identified_multi_hit_lists_all_layers(
     qtbot, tmp_path, monkeypatch
 ):
-    """多点列举（V10 识别修复）：hits 数组逐条重建，未知层条目被滤除。"""
+    """原生识别是**单命中契约**：批量 hits 载荷不得半支持。
+
+    桥 ``QgsMapToolIdentifyFeature`` 只回 (doc_id, feature_id)；多图层命中
+    列举由 Python ``identify_all`` 提供——这条语义差异如实记录在
+    docs/development/qgis-native-authoring-v7/03-decisions.md，不伪装收敛。
+    故 hits 载荷既不是原生契约，也不许伪造条目：面板清空、不弹悬浮。
+    多列能力由 test_identify_all_lists_overlapping_layers 钉住。
+    """
     document = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(document)
     layer = _flagged(document)
@@ -560,8 +566,27 @@ def test_native_identified_multi_hit_lists_all_layers(
             {"layer_doc_id": "home_workarea:nope", "feature_id": "ghost"},
         ],
     })
-    assert document.identify_results.tree.topLevelItemCount() == 1
-    assert "A12" in shown[0][1]
+    assert document.identify_results.tree.topLevelItemCount() == 0
+    assert shown == []
+
+
+def test_identify_all_lists_overlapping_layers(qtbot, tmp_path):
+    """多图层命中列举：重叠两层各出一条（多列能力的真实归属路径）。"""
+    document = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(document)
+    controller = document.edit_controller
+    lower = controller.create_layer("下层", "polygon")
+    upper = controller.create_layer("上层", "polygon")
+
+    def square(fid):
+        return VectorFeature(fid, {"type": "Polygon", "coordinates": [
+            [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]]]}, {})
+
+    controller.import_layer_features(lower.id, [square("lo")])
+    controller.import_layer_features(upper.id, [square("up")])
+    results = controller.identify_all(
+        (1.0, 1.0), base_layers=document._base_layers)
+    assert {lower.id, upper.id} <= {r["layer_id"] for r in results}
 
 
 def test_native_identified_reference_snapshot_entry(
