@@ -61,7 +61,13 @@ def test_deps_prefix_has_no_machine_specific_absolute_path():
 
 
 def test_deps_prefix_falls_back_to_repo_relative_convention(monkeypatch, tmp_path):
-    """无 env override 时走仓库内 build/qgis-deps 约定（不在则 None + 警告）。"""
+    """无 env override 时走仓库内 build/qgis-deps 约定（不在则 None + 警告）。
+
+    该约定路径只在 Windows 实现（deps_prefix 的 nt 分支）——POSIX 上
+    永远返回 None，与实现门一致。
+    """
+    if os.name != "nt":
+        pytest.skip("repo-relative deps 约定仅 Windows 实现（paths.deps_prefix 的 nt 分支）")
     monkeypatch.delenv("PALEO_QGIS_DEPS_DIR", raising=False)
     monkeypatch.setattr(paths, "repo_root", lambda: tmp_path)
     assert paths.deps_prefix() is None  # 干净目录：诚实 None
