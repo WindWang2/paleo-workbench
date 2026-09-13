@@ -52,11 +52,18 @@ class CatalogPort(Protocol):
         external: bool = False,
         tags: list[str] | None = None,
         legacy_resource_id: str | None = None,
+        _checksum_fresh: bool = False,
     ) -> DataVersionRef:
         """Register a user-imported / source asset as a RAW version.
 
         ``external=True`` marks an unmanaged link (source may go missing);
         otherwise the asset is treated as managed/immutable RAW.
+
+        ``_checksum_fresh`` (private): *checksum* was hashed from the source
+        file during this registration call (e.g. by the lifecycle helper), so
+        the managed dedup fast path may treat it as content-proven. Digests
+        of unknown provenance (recorded metadata, scan-time checksums) must
+        pass ``False`` and keep the content re-proof.
         """
         ...
 

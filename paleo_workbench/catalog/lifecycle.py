@@ -66,9 +66,12 @@ def register_resource_input(
     The resource's existing ``checksum`` is reused when present. When it is
     missing (the common case — ``import_service`` records ``checksum=None``),
     it is computed once from the on-disk file so that integrity verification
-    and managed-input identity actually work for real imports. The legacy
-    ``resource.id`` is recorded as the bridge key so
-    ``resolve_legacy_resource`` finds this version.
+    and managed-input identity actually work for real imports. A checksum
+    computed HERE is flagged fresh (``_checksum_fresh``): it doubles as the
+    managed dedup fast path's content proof, so the adapter need not re-hash
+    the source to adopt a matching blob. Reused checksums (recorded at scan
+    time) are never flagged fresh. The legacy ``resource.id`` is recorded as
+    the bridge key so ``resolve_legacy_resource`` finds this version.
 
     Returns None when no catalog backend is active (no project open).
     """
@@ -76,14 +79,17 @@ def register_resource_input(
     if cat is None:
         return None
     checksum = resource.checksum
+    checksum_is_fresh = False
     if checksum is None:
         # Import does not hash; compute lazily so RAW immutability + integrity
         # are meaningful for real data (returns None if unreadable/missing).
         checksum = sha256_file_or_none(resource.path)
+        checksum_is_fresh = checksum is not None
     return cat.register_input(
         name=resource.name,
         path=resource.path,
         checksum=checksum,
+        _checksum_fresh=checksum_is_fresh,
         kind=resource.type,
         format=resource.format,
         external=bool(resource.external),

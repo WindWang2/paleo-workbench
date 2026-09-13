@@ -246,6 +246,7 @@ class CoreCatalogAdapter:
         external: bool = False,
         tags: list[str] | None = None,
         legacy_resource_id: str | None = None,
+        _checksum_fresh: bool = False,
     ) -> DataVersionRef:
         service = self._service
         candidate = Path(path).expanduser()
@@ -256,14 +257,19 @@ class CoreCatalogAdapter:
             # register correctly regardless of how the app was launched.
             candidate = service.project_path.expanduser().resolve().parent / candidate
         resolved = candidate.resolve().as_posix()
+        checksum_is_fresh = _checksum_fresh
         if checksum is None and not external:
             # Managed RAW needs a checksum for dedup/idempotence + integrity.
             # A caller passing a project-relative path cannot hash it against
-            # the CWD, so hash the correctly-resolved file once here (matches
-            # the lifecycle helper's behavior for absolute paths).
+            # the CWD, so hash the correctly-resolved file once here. An
+            # in-process hash (here or in the lifecycle helper) doubles as
+            # the dedup fast path's content proof (``_sha256_verified``);
+            # digests handed in by callers (e.g. recorded at scan time) are
+            # NOT marked fresh and keep the re-proof in place.
             resolved_path = Path(resolved)
             if resolved_path.is_file():
                 checksum = sha256_file_or_none(resolved_path)
+                checksum_is_fresh = checksum is not None
 
         # Stable legacy-bridge asset: once a resource id maps to an asset it
         # always maps to that SAME asset (never a phantom duplicate). A
@@ -332,6 +338,7 @@ class CoreCatalogAdapter:
                 format=format or None,
                 _legacy_resource_id=legacy_resource_id,
                 known_sha256=checksum,
+                _sha256_verified=checksum_is_fresh,
             )
         service.add_tags(tags or [], version_id=version.id)
         return self._version_ref(version)

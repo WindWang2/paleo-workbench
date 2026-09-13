@@ -119,10 +119,14 @@ class InMemoryCatalog:
         external: bool = False,
         tags: list[str] | None = None,
         legacy_resource_id: str | None = None,
+        _checksum_fresh: bool = False,
     ) -> DataVersionRef:
         # External inputs are RAW stage with external=True (externality is not
         # a lifecycle stage in the unified Core vocabulary).
         stage = DataStage.RAW
+        # _checksum_fresh is plumbing for the production dedup fast path (the
+        # adapter skips its content re-proof for digests hashed in the same
+        # registration call); the fake has no fast path, so it is ignored.
         # Managed RAW inputs are idempotent on (path, checksum): re-importing
         # the same source returns the existing version (RAW immutability).
         if not external:
