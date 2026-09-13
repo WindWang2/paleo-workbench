@@ -31,6 +31,7 @@ from paleo_workbench.mapping.tool_availability import (
     _CHECKED_CANVAS_TOOLS,
     _NATIVE_ONLY_TOOLS,
     TOOL_IDS,
+    _writable_gate,
     evaluate_all,
     evaluate_tool,
     stage_group_visibility,
@@ -239,6 +240,28 @@ def test_tool_context_v4_collects_snapping_facts(doc):
     ctx = doc.tool_context()
     assert ctx.snapping_tolerance_px == 15.0
     assert set(ctx.snapping_modes) == {"vertex", "segment"}
+
+
+def test_issue_1260_approx_flag_reaches_tool_context(doc):
+    """#1260: host must copy provider_writable_approximate into ToolContext."""
+    layer_id = _polygon_doc(doc)
+    doc.uses_native_stack = True
+    doc.canvas.mirror_provider_facts = lambda _lid: {
+        "exists": True,
+        "provider": "memory",
+        "supports_editing": None,
+        "capability": {
+            "add_features": False,
+            "change_geometries": True,
+            "change_attribute_values": True,
+        },
+    }
+    ctx = doc.tool_context()
+    assert ctx.provider_writable is False
+    assert ctx.provider_writable_approximate is True
+    reason = _writable_gate(ctx)
+    assert reason is not None
+    assert "判据为近似" in reason
 
 
 def test_crs_mismatch_derivation(doc):
