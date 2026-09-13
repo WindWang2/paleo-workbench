@@ -1,0 +1,1 @@
+{"algorithm_id":"idw","params":{"grid_n":50,"max_neighbors":null,"method":"idw","min_neighbors":1,"n_samples":449,"power":2.0,"search_radius":null},"statistics":{"max":13.154952049255371,"mean":7.830658710479736,"min":2.590593099594116,"std":2.1062171302104375,"total_count":2500,"valid_count":2500}}

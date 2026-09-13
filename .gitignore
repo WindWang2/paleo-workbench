@@ -31,6 +31,9 @@ Thumbs.db
 
 # Sample data is large and stays local; scanner tests use tmp_path fixtures
 data/
+# Golden-value fixtures are small, deterministic, and part of the test contract
+!tests/data/
+!tests/data/**
 
 # Nested engine repo is tracked as a submodule (see .gitmodules)
 # geo-viz-engine/

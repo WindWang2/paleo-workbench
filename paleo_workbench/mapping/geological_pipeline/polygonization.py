@@ -66,6 +66,51 @@ def _point_in_ring(x: float, y: float, ring: Sequence[Sequence[float]]) -> bool:
     return point_in_ring_scalar(x, y, ring)
 
 
+def _ring_bbox(arr: np.ndarray) -> tuple[float, float, float, float]:
+    """(xmin, ymin, xmax, ymax) of a ring given as an (V, 2) float array."""
+    xs, ys = arr[:, 0], arr[:, 1]
+    return (float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()))
+
+
+# (edges × hole-vertices) work cells per chunk: bounds the broadcast temp
+# while amortising the per-chunk numpy call overhead.
+_HOLE_VOTE_EDGE_CHUNK = 8192
+
+
+def _hole_vertex_votes(hx: np.ndarray, hy: np.ndarray, ring_arr: np.ndarray) -> int:
+    """Count hole vertices inside an exterior ring — vectorized over BOTH
+    the ring edges and the vertices.
+
+    Exact same predicate as the former per-vertex ``_point_in_ring`` scalar
+    loop (v7 §4 shared kernel): per edge ``(y1 > y) != (y2 > y)`` and
+    ``x < x1 + t * (x2 - x1)`` with ``t = (y - y1) / (y2 - y1)`` evaluate
+    the identical float64 expressions, and the per-vertex verdict is the
+    crossing PARITY — XOR over edges, never OR (a point whose ray crosses
+    a concave ring twice is outside; review P0-1 caught the OR form
+    flipping such points). Zero-length edges have a False straddle mask
+    everywhere, so their inf/NaN lanes are discarded.
+    """
+    ex = ring_arr[:, 0]
+    ey = ring_arr[:, 1]
+    x2 = np.roll(ex, -1)
+    y2 = np.roll(ey, -1)
+    inside = np.zeros(hx.shape, dtype=bool)
+    n_edges = len(ex)
+    for start in range(0, n_edges, _HOLE_VOTE_EDGE_CHUNK):
+        stop = min(start + _HOLE_VOTE_EDGE_CHUNK, n_edges)
+        y1c = ey[start:stop, None]
+        x1c = ex[start:stop, None]
+        y2c = y2[start:stop, None]
+        x2c = x2[start:stop, None]
+        straddle = (y1c > hy[None, :]) != (y2c > hy[None, :])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = (hy[None, :] - y1c) / (y2c - y1c)
+            cross_x = x1c + t * (x2c - x1c)
+        hits = straddle & (hx[None, :] < cross_x)
+        inside ^= np.bitwise_xor.reduce(hits, axis=0)
+    return int(inside.sum())
+
+
 def simplify_collinear_ring(ring: list[list[float]]) -> list[list[float]]:
     """Remove redundant collinear vertices along straight horizontal/vertical grid steps."""
     if len(ring) <= 4:
@@ -227,32 +272,7 @@ def _polygonize_raster_boundaries(
     for ext in exterior_rings:
         poly_groups.append({"exterior": ext, "holes": []})
 
-    for hole in holes:
-        # Majority vote over hole-ring vertices: a hole belongs to the
-        # smallest exterior containing most of its vertices. Vertex tests
-        # (not centroid) are required here — for concentric rings the hole
-        # ring's centroid falls INSIDE the inner island, which would attach
-        # the hole to the wrong polygon.
-        best_idx = -1
-        best_votes = 0
-        for g_idx, pg in enumerate(poly_groups):
-            votes = sum(
-                1
-                for pt in hole[:-1]
-                if _point_in_ring(pt[0], pt[1], pg["exterior"])
-            )
-            if votes > best_votes:
-                best_votes = votes
-                best_idx = g_idx
-        if best_idx >= 0 and best_votes > 0:
-            poly_groups[best_idx]["holes"].append(hole)
-        else:
-            # No exterior contains this ring: promote it to an island instead
-            # of attaching it to an unrelated polygon.
-            promoted = list(reversed(hole))
-            exterior_rings.append(promoted)
-            poly_groups.append({"exterior": promoted, "holes": []})
-            qc["holes_promoted_to_exterior"] += 1
+    _assign_holes_to_exteriors(poly_groups, exterior_rings, holes, qc)
 
     geoms: list[dict[str, Any]] = []
     for pg in poly_groups:
@@ -262,6 +282,72 @@ def _polygonize_raster_boundaries(
         geoms.append(repaired)
 
     return geoms, qc
+
+
+def _assign_holes_to_exteriors(
+    poly_groups: list[dict[str, Any]],
+    exterior_rings: list[list[list[float]]],
+    holes: list[list[list[float]]],
+    qc: dict[str, int],
+) -> None:
+    """Attach each hole ring to its exterior (majority vote, in place).
+
+    A hole belongs to the smallest exterior containing most of its
+    vertices. Vertex tests (not centroid) are required here — for
+    concentric rings the hole ring's centroid falls INSIDE the inner
+    island, which would attach the hole to the wrong polygon. Exteriors
+    iterate in the caller's ascending-area order, and strict
+    ``votes > best_votes`` keeps the smallest-area winner on ties.
+    An unmatched hole is promoted to an exterior island and counted —
+    never silently stapled onto an unrelated polygon.
+
+    V12-B performance: the former triple Python loop (holes × exteriors ×
+    hole vertices × ring edges) was superlinear in grid area (150²
+    speckle ≈ 3 s per class). Two exact replacements:
+
+    * bbox-intersection prefilter — if a hole's bbox is disjoint from an
+      exterior's bbox, no hole vertex can lie inside that exterior (the
+      ring bbox bounds its interior), so dropping it cannot lose votes.
+      A provable superset filter, not a heuristic.
+    * ``_hole_vertex_votes`` — the same per-vertex predicate as the former
+      ``_point_in_ring`` scalar call, vectorized over ring edges AND hole
+      vertices ((edges, vertices) broadcast, chunked).
+
+    The function is module-level so the complexity regression nail
+    (tests/test_polygonization_complexity_nail.py) can monkeypatch it back
+    to the brute-force form as a negative control.
+    """
+    # Per-exterior bboxes for the prefilter (kept in exterior_rings order;
+    # promoted islands append to all three lists).
+    ext_arrays = [np.asarray(ext, dtype=np.float64) for ext in exterior_rings]
+    ext_bbox = [_ring_bbox(arr) for arr in ext_arrays]
+
+    for hole in holes:
+        harr = np.asarray(hole[:-1], dtype=np.float64)
+        hx, hy = harr[:, 0], harr[:, 1]
+        hxmin = float(hx.min())
+        hxmax = float(hx.max())
+        hymin = float(hy.min())
+        hymax = float(hy.max())
+        best_idx = -1
+        best_votes = 0
+        for g_idx in range(len(poly_groups)):
+            exmin, eymin, exmax, eymax = ext_bbox[g_idx]
+            if hxmax < exmin or hxmin > exmax or hymax < eymin or hymin > eymax:
+                continue  # disjoint bboxes: provably zero votes
+            votes = _hole_vertex_votes(hx, hy, ext_arrays[g_idx])
+            if votes > best_votes:
+                best_votes = votes
+                best_idx = g_idx
+        if best_idx >= 0 and best_votes > 0:
+            poly_groups[best_idx]["holes"].append(hole)
+        else:
+            promoted = list(reversed(hole))
+            exterior_rings.append(promoted)
+            ext_arrays.append(np.asarray(promoted, dtype=np.float64))
+            ext_bbox.append(_ring_bbox(ext_arrays[-1]))
+            poly_groups.append({"exterior": promoted, "holes": []})
+            qc["holes_promoted_to_exterior"] += 1
 
 
 def _mapping_to_lists(obj: Any) -> Any:
