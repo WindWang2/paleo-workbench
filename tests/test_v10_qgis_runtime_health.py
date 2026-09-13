@@ -94,6 +94,21 @@ def test_prepare_bridge_load_never_raises_without_add_dll_directory(monkeypatch)
     assert report.prepared is True
 
 
+def test_prepare_bridge_load_never_raises_without_windll(monkeypatch, tmp_path):
+    """#1265: conda preload uses ctypes.WinDLL; POSIX must not raise."""
+    monkeypatch.setattr(loader, "_PREPARED", False)
+    monkeypatch.setenv("PALEO_QGIS_CONDA_QT", "1")
+    deps = tmp_path / "deps"
+    bin_dir = deps / "Library" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "Qt6Core.dll").write_bytes(b"fake")
+    monkeypatch.setenv("PALEO_QGIS_DEPS_DIR", str(deps))
+    monkeypatch.delattr(loader.ctypes, "WinDLL", raising=False)
+    report = loader.prepare_bridge_load(force=True)
+    assert report.prepared is True
+    assert any("WinDLL" in w for w in report.warnings)
+
+
 def test_proj_data_deploys_from_deps_into_vendor(tmp_path, monkeypatch):
     vendor = tmp_path / "vendor"
     (vendor / "output" / "bin").mkdir(parents=True)
