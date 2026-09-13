@@ -1,0 +1,203 @@
+{
+  "cases": {
+    "contour_smooth_100": {
+      "digests": {
+        "contour_smooth_100.json.gz": "45da1c2b335c811e1074b77413f1ff1d3bfb9297956a5ebb2b6e9e8acbc3afd5"
+      },
+      "kind": "contour",
+      "seconds": 0.0876
+    },
+    "contour_smooth_200": {
+      "digests": {
+        "contour_smooth_200.json.gz": "1e736e73dca48b2356caa502f8f914dc591ba17575999cf38d519c67f7d715bd"
+      },
+      "kind": "contour",
+      "seconds": 0.2181
+    },
+    "contour_smooth_300": {
+      "digests": {
+        "contour_smooth_300.json.gz": "6c840435d6757e021fff7aee44dcb39bea9ad6d630413b4678e28051bf5787b2"
+      },
+      "kind": "contour",
+      "seconds": 0.626
+    },
+    "idw_n2000_g50": {
+      "digests": {
+        "idw_n2000_g50.json": "bb60bd0fa89aceeca9ad1de76737bb744a21bc02392ba8de129c2eaa9b178c54",
+        "idw_n2000_g50.npz": "27a0f7e51aaa097524e9d71c69db009295e2ab0029c4695c691172b7c5b75a43"
+      },
+      "kind": "interp",
+      "seconds": 0.0613
+    },
+    "idw_n500_g200": {
+      "digests": {
+        "idw_n500_g200.json": "356188c04c75fdc50b9878fca7692b09240b0fefb8bdb745a0cfe559e723d82b",
+        "idw_n500_g200.npz": "622d30cd7ad117c2538f01dbe959021eea8135184598bb66c1a1d77ed01b4a73"
+      },
+      "kind": "interp",
+      "seconds": 0.2997
+    },
+    "idw_n500_g300": {
+      "digests": {
+        "idw_n500_g300.json": "7d3385121176798a878448c0882733ab600a59da4b7db341af8ffc0a95cabdae",
+        "idw_n500_g300.npz": "cd79eabb96513a5f6e5da9a6c088700ae62d9779cc61a40c8e1b2c40bf4eca9e"
+      },
+      "kind": "interp",
+      "seconds": 0.5667
+    },
+    "idw_n500_g50": {
+      "digests": {
+        "idw_n500_g50.json": "0a7dfe43ae411f20ec491d1788074e61277283d9ec87492e4f986eff30031885",
+        "idw_n500_g50.npz": "c3a091c75988b6333bbbb45de121aaa1a421e117bba0669efc827bda5bc4da73"
+      },
+      "kind": "interp",
+      "seconds": 0.0162
+    },
+    "idw_n500_g50_boundary": {
+      "digests": {
+        "idw_n500_g50_boundary.json": "0a7dfe43ae411f20ec491d1788074e61277283d9ec87492e4f986eff30031885",
+        "idw_n500_g50_boundary.npz": "c3a091c75988b6333bbbb45de121aaa1a421e117bba0669efc827bda5bc4da73"
+      },
+      "kind": "interp",
+      "seconds": 0.0198
+    },
+    "idw_n500_g50_nodata": {
+      "digests": {
+        "idw_n500_g50_nodata.json": "32e3893d96445f871c3d83f4d2a1e964c5eeef16f861dba407eb6bf596b2c0f1",
+        "idw_n500_g50_nodata.npz": "8bca4c241299c163b3ddab0f13d1f2e2b4b33ab35d2239d3d400a7e4abaa9962"
+      },
+      "kind": "interp",
+      "seconds": 0.0248
+    },
+    "idw_n50_g300": {
+      "digests": {
+        "idw_n50_g300.json": "fd04e2d1ca1db90a7ef4bef9a0966c7a748c619a6af707c928e7fbe0cdaf8eec",
+        "idw_n50_g300.npz": "f9db2a0884ff4b8aea3c26ffd6dd3636b74c2610aaeb36861070dab909123007"
+      },
+      "kind": "interp",
+      "seconds": 0.0611
+    },
+    "idw_n50_g50": {
+      "digests": {
+        "idw_n50_g50.json": "896a44c08c7f1e9b010edd164db630271ae46635777fd2ece07f1bdc518f5a55",
+        "idw_n50_g50.npz": "f214f852422363111f50170b8bf4ba4c938d321866bcb54124092fe9fa2e7bd5"
+      },
+      "kind": "interp",
+      "seconds": 0.0017
+    },
+    "krig_n2000_g50": {
+      "digests": {
+        "krig_n2000_g50.json": "fb5160296b377eed72d00fdf346d4ab5f0666538eea88760722cf513cdcabf5a",
+        "krig_n2000_g50.npz": "dec0a7473a24ec9f7674f04e4db896f0b1e9910ffed55dbab396b8341842ef32"
+      },
+      "kind": "interp",
+      "seconds": 1.0325
+    },
+    "krig_n500_g200": {
+      "digests": {
+        "krig_n500_g200.json": "f3c42ce24755ed8359c46e61d65fa06f6ed06275c0bc5007a4f14885aba47472",
+        "krig_n500_g200.npz": "43277bdfa0e79850faba22059895a3f987faa9833580a287966d0a86c79201ac"
+      },
+      "kind": "interp",
+      "seconds": 1.6205
+    },
+    "krig_n500_g300": {
+      "digests": {
+        "krig_n500_g300.json": "34efde1b0fa8f4a4ec5743fc3ac05dbc14a84d087217537d9dcb5a90675fdedb",
+        "krig_n500_g300.npz": "ab18979fa3610bfb32c3026e92d4e4fab0622a0b73c0b0286f23c6af35b875f4"
+      },
+      "kind": "interp",
+      "seconds": 3.1432
+    },
+    "krig_n500_g50": {
+      "digests": {
+        "krig_n500_g50.json": "bda2edea2c9106118ff957a76d9e04636bc79fc5488b3e4c966beced6d87eac2",
+        "krig_n500_g50.npz": "fb7a37eccb1572f2a273a007e5527d0306d6e023cb3ddd4bac9fffd8fa1de9ec"
+      },
+      "kind": "interp",
+      "seconds": 0.5574
+    },
+    "krig_n500_g50_aniso_declared": {
+      "digests": {
+        "krig_n500_g50_aniso_declared.json": "bda2edea2c9106118ff957a76d9e04636bc79fc5488b3e4c966beced6d87eac2",
+        "krig_n500_g50_aniso_declared.npz": "fb7a37eccb1572f2a273a007e5527d0306d6e023cb3ddd4bac9fffd8fa1de9ec"
+      },
+      "kind": "interp",
+      "seconds": 0.731
+    },
+    "krig_n500_g50_boundary": {
+      "digests": {
+        "krig_n500_g50_boundary.json": "bda2edea2c9106118ff957a76d9e04636bc79fc5488b3e4c966beced6d87eac2",
+        "krig_n500_g50_boundary.npz": "fb7a37eccb1572f2a273a007e5527d0306d6e023cb3ddd4bac9fffd8fa1de9ec"
+      },
+      "kind": "interp",
+      "seconds": 0.7016
+    },
+    "krig_n500_g50_nodata": {
+      "digests": {
+        "krig_n500_g50_nodata.json": "0edbc6b0b134283940810e8bf40cbbf6bd0a3bb6d1c207baf794f66fb1e136ad",
+        "krig_n500_g50_nodata.npz": "8d3779a30bb41a61ef051940a3c5bf07f1dd8b48aff144f3101037152a3d79f1"
+      },
+      "kind": "interp",
+      "seconds": 0.4658
+    },
+    "krig_n50_g300": {
+      "digests": {
+        "krig_n50_g300.json": "60c586d5efd4d808bf85d90b8ba98ea2cb11d71fd985d100cf6c9a01ab844a00",
+        "krig_n50_g300.npz": "0e2736b03a1bf67b3c9849b9c90eb5c94ce6e7f755f47573f5f27dfa38825721"
+      },
+      "kind": "interp",
+      "seconds": 0.337
+    },
+    "krig_n50_g50": {
+      "digests": {
+        "krig_n50_g50.json": "ef60d5d2c8bb2c8d3dbd4423eccb45afdfff706b510cdee1a455f864929853ff",
+        "krig_n50_g50.npz": "b4863df5b2e364b65caa3611789f2e6f04868e9c4f1dc28408b9076ef692416c"
+      },
+      "kind": "interp",
+      "seconds": 0.4265
+    },
+    "poly_smooth_200": {
+      "digests": {
+        "poly_smooth_200.json.gz": "caec39b803eef543ff434836f31f3d27422d13fb67c1e43c68b9d971fd13151b"
+      },
+      "kind": "polygon",
+      "seconds": 0.0434
+    },
+    "poly_smooth_300": {
+      "digests": {
+        "poly_smooth_300.json.gz": "0f90b9f40875fc28dc2336c9bb7ab4c09cf8ed00b5b2c83e1ec435db77fe941a"
+      },
+      "kind": "polygon",
+      "seconds": 0.0804
+    },
+    "poly_speckle_100": {
+      "digests": {
+        "poly_speckle_100.json.gz": "5217e0557874700533a5bc56f6c51617f6459db3dd59b8b7a9edb7823533b230"
+      },
+      "kind": "polygon",
+      "seconds": 1.5411
+    },
+    "poly_speckle_150": {
+      "digests": {
+        "poly_speckle_150.json.gz": "412cd44d85037a4786a41bcf92ab83bcb1e37d099b1ea95f3ec641f18ac2f03b"
+      },
+      "kind": "polygon",
+      "seconds": 2.9794
+    },
+    "poly_speckle_50": {
+      "digests": {
+        "poly_speckle_50.json.gz": "be19974bee8645b59fc4081475a822f23f8d4a375c1b0a93e14daca37f8c42d7"
+      },
+      "kind": "polygon",
+      "seconds": 0.3702
+    }
+  },
+  "machine": {
+    "blas": "scipy-openblas",
+    "machine": "x86_64",
+    "numpy": "2.5.3",
+    "platform": "Linux-6.18.49-2-lts-x86_64-with-glibc2.44",
+    "python": "3.12.13"
+  }
+}
