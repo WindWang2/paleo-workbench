@@ -676,9 +676,11 @@ class CompositeEditController(QObject):
         )
 
         self.native_editing = NativeEditSessionController()
-        # M2 §4 三开关：顶点档位（默认当前层）/ 避免重叠（默认开，裁切
-        # 范围 = 当前编辑层）/ 追踪（默认关）——随编辑会话持久化。
-        self.vertex_all_layers: bool = False
+        # M2 §4 三开关：顶点档位 / 避免重叠（默认开，裁切范围 = 当前
+        # 编辑层）/ 追踪（默认关）——随编辑会话持久化。
+        # M5 follow-up：相图共享边界跨层，默认「全部层」；用户仍可切回当前层。
+        # 三重门未过前不扩展 hanging-point / 线层。
+        self.vertex_all_layers: bool = True
         self.avoid_intersections_enabled: bool = True
         self.tracing_enabled: bool = False
         # M3：原生分割切线手势——geometry_command("split") 打开 addLine，
@@ -1099,7 +1101,7 @@ class CompositeEditController(QObject):
         # M2 §4 开关恢复（缺键 = 默认）。
         topo = dict(
             (workspace.get("topo_editing") or {}) if isinstance(workspace, Mapping) else {})
-        self.vertex_all_layers = bool(topo.get("vertex_all_layers", False))
+        self.vertex_all_layers = bool(topo.get("vertex_all_layers", True))
         self.avoid_intersections_enabled = bool(
             topo.get("avoid_intersections", True))
         self.tracing_enabled = bool(topo.get("tracing", False))
