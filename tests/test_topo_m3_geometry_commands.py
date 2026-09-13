@@ -235,3 +235,27 @@ def test_python_session_split_still_uses_selected_line(qtbot, tmp_path, monkeypa
     assert ok, message
     pieces = list(polygons.edit_session.features())
     assert len(pieces) == 2
+
+
+def test_vertex_scope_defaults_to_all_layers():
+    """M5 follow-up（原 #1293）：相图共享边界跨层，顶点档位默认「全部层」。
+
+    新会话缺省即 True；工程持久化缺键恢复仍回 True（旧工程显式存过
+    False 的仍按 False 恢复）。
+    """
+    from types import SimpleNamespace
+
+    from paleo_workbench.ui.workstation.composite_editing import (
+        CompositeEditController,
+    )
+
+    controller = CompositeEditController()
+    assert controller.vertex_all_layers is True
+
+    project = SimpleNamespace(mapping_workspace={}, user_vector_layers=[])
+    controller.load_from_project(project)
+    assert controller.vertex_all_layers is True
+
+    project.mapping_workspace["topo_editing"] = {"vertex_all_layers": False}
+    controller.load_from_project(project)
+    assert controller.vertex_all_layers is False
