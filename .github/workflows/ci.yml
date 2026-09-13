@@ -245,12 +245,35 @@ jobs:
           # tests/perf is owned by the nightly slow leg (300s per-test
           # timeout): the fsync-heavy budgets repeatedly blew the fast
           # gate's 45s ceiling under runner load.
-          xvfb-run -a python -m pytest -v --tb=line \
-            --timeout=45 \
-            --timeout-method=thread \
-            -m "not slow and not welllog_binding" \
-            --ignore=tests/perf \
-            --durations=25 || true
+          # ---- 切片并行二分（#1300 诊断轮 2）--------------------------------
+          # 段错误在字母序下确定性崩于 tests/test_app_close_dead_shell.py。
+          # 把受害文件之前的全部文件轮询切成 6 片，每片 + 受害文件并行跑：
+          # 崩的片即含「武装者」。core 统一由下方 gdb 段打印。
+          VICTIM=tests/test_app_close_dead_shell.py
+          mapfile -t ALL < <(python - <<'PY'
+          import pathlib
+          victim = 'tests/test_app_close_dead_shell.py'
+          files = sorted(str(f) for f in pathlib.Path('tests').glob('test_*.py'))
+          print('\n'.join(f for f in files if f < victim))
+          PY
+          )
+          N=6
+          pids=()
+          for i in $(seq 0 $((N-1))); do
+            mapfile -t SLICE < <(awk -v i="$i" -v n="$N" 'NR % n == i' < <(printf '%s\n' "${ALL[@]}"))
+            (
+              xvfb-run -a python -m pytest "${SLICE[@]}" "$VICTIM" -v --tb=line \
+                --timeout=45 --timeout-method=thread \
+                -m "not slow and not welllog_binding" \
+                -p no:randomly > "/tmp/slice_$i.log" 2>&1
+            ) &
+            pids+=($!)
+          done
+          for p in "${pids[@]}"; do wait "$p" || true; done
+          for i in $(seq 0 $((N-1))); do
+            echo "===== SLICE $i tail ====="
+            tail -4 "/tmp/slice_$i.log"
+          done
           shopt -s nullglob
           cores=(/tmp/core.*)
           echo "core dumps: ${#cores[@]}"
