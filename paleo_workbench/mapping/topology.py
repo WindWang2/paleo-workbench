@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from typing import Iterable
 
 from paleo_workbench.mapping.vector_layer import VectorLayer, VectorEditSession
@@ -107,6 +108,11 @@ class TopologyService:
 
     # -- 校验引擎选择（V7：QGIS GEOS 优先，Shapely 显式回退） ------------------
 
+    #: 送入桥/Shapely 判有效性的几何类型（点/多点不在校验范围）。
+    _BRIDGE_GEOMETRY_TYPES = frozenset(
+        {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}
+    )
+
     @staticmethod
     def _bridge_validate_fn():
         """桥 geometry.validate（逐错误详情）——不可用时返回 None（回退 Shapely）。
@@ -126,6 +132,45 @@ class TopologyService:
         except Exception:
             return None
 
+    @staticmethod
+    def _bridge_validate_many_fn():
+        """桥 geometry.validate_many（批量，V12-C）——不可用返回 None。
+
+        N 条记录一次过桥取代 N 次跨语言往返（01-baseline §3：调用数 = N）。
+        探测纪律与 ``qgis_mirror._stack_supports_delta`` 相同：
+        ``inspect.signature`` 优先（纯 Python fake / 新桥有签名）；
+        pybind11 builtin 无签名（``ValueError``）时退化为 ``__doc__`` 首行
+        绑定声明的形参匹配（``geometries:``）；无信号 → None（诚实不支持，
+        绝不盲调）。探测不调用被探方法、不缓存结果——老桥零行为变化。
+        BASE 的桥尚无该函数：真桥路径继续走逐要素回退，直至桥侧补齐。
+        """
+        try:
+            from paleo_workbench.mapping.qgis_style import qgis_bridge_available
+
+            if not qgis_bridge_available():
+                return None
+            import qgis_render_bridge as native
+
+            fn = getattr(native.geometry, "validate_many", None)
+            if fn is None or not callable(fn):
+                return None
+            import inspect
+
+            try:
+                params = inspect.signature(fn).parameters
+                if "geometries" not in params:
+                    return None
+            except (TypeError, ValueError):
+                doc = getattr(fn, "__doc__", None)
+                first_line = (
+                    doc.split("\n", 1)[0] if isinstance(doc, str) and doc else ""
+                )
+                if not re.search(r"\bgeometries:", first_line):
+                    return None
+            return fn
+        except Exception:
+            return None
+
     def validate(self, layers: Iterable[VectorLayer]) -> list[dict[str, object]]:
         issues: list[dict[str, object]] = []
         for layer in layers:
@@ -142,10 +187,19 @@ class TopologyService:
         self, layer_id: str, records: Iterable[dict[str, object]],
     ) -> list[dict[str, object]]:
         """校验 (feature_id, geometry) 记录集（拓扑编辑迁移 M1：原生编辑
-        会话的几何事实从镜像读回，无 Python 会话/图层对象可用）。"""
+        会话的几何事实从镜像读回，无 Python 会话/图层对象可用）。
+
+        V12-C：桥提供 ``geometry.validate_many`` 时（能力探针确认），本层
+        的可校验几何**一次**过桥取代逐要素 N 次跨语言往返；批量异常/返回
+        形状不符 → 警告一次并按既有「桥路径失败」纪律整批回退 Shapely
+        （P2-2/P2-6），老桥（无批量签名）零行为变化。校验规则、输出结构
+        与 issues 顺序逐字不变。"""
         issues: list[dict[str, object]] = []
         # 探测单次提升（review-2 P2-6）：逐要素重复 import 探测是 O(N) 开销。
         bridge_validate = self._bridge_validate_fn()
+        bridge_validate_many = (
+            self._bridge_validate_many_fn() if bridge_validate is not None else None
+        )
         shapely_ok = self._shapely_available()
         if bridge_validate is None and not shapely_ok:
             return [
@@ -157,27 +211,57 @@ class TopologyService:
                     "message": "拓扑检查需要 QGIS 桥或 Shapely/GEOS，当前均不可用",
                 }
             ]
+        records = list(records)
         bridge_failed = False
-        for record in records:
+        messages_by_index: dict[int, list[str]] = {}
+        if bridge_validate_many is not None:
+            batch = [
+                (index, record["geometry"])
+                for index, record in enumerate(records)
+                if isinstance(record.get("geometry"), dict)
+                and record["geometry"].get("type") in self._BRIDGE_GEOMETRY_TYPES
+            ]
+            if batch:
+                try:
+                    results = bridge_validate_many([geometry for _, geometry in batch])
+                    if not isinstance(results, list) or len(results) != len(batch):
+                        raise ValueError(
+                            "validate_many 返回形状不符："
+                            f"{len(results) if isinstance(results, list) else type(results).__name__}"
+                            f"（期望 {len(batch)} 条）"
+                        )
+                    for (index, _), errors in zip(batch, results):
+                        messages_by_index[index] = [
+                            str(entry.get("message") or "invalid geometry")
+                            for entry in errors
+                        ]
+                except Exception as exc:
+                    # 与单要素路径同纪律（P2-2 可诊断 + P2-6 只报一次）：
+                    # 批量失败 ⇒ 本轮桥路径整体让位 Shapely，不做 N 次重试。
+                    _logger.warning("QGIS 批量几何校验失败，回退 Shapely：%s", exc)
+                    messages_by_index = {}
+                    bridge_failed = True
+        for index, record in enumerate(records):
             feature_id = str(record.get("feature_id") or "")
             geometry = record.get("geometry") or {}
             if not isinstance(geometry, dict):
                 continue
-            if geometry.get("type") in {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}:
-                messages: list[str] | None
-                if bridge_validate is not None and not bridge_failed:
-                    try:
-                        errors = bridge_validate(geometry)
-                        messages = [str(entry.get("message") or "invalid geometry") for entry in errors]
-                    except Exception as exc:
-                        # 桥路径失败必须可诊断（P2-2）且只报一次（P2-6）。
-                        _logger.warning("QGIS 几何校验失败，后续回退 Shapely：%s", exc)
-                        bridge_failed = True
-                        messages = None
-                else:
-                    messages = None
+            if geometry.get("type") in self._BRIDGE_GEOMETRY_TYPES:
+                messages = messages_by_index.get(index)
                 if messages is None:
-                    messages = self._shapely_messages(geometry)
+                    if bridge_validate is not None and not bridge_failed:
+                        try:
+                            errors = bridge_validate(geometry)
+                            messages = [str(entry.get("message") or "invalid geometry") for entry in errors]
+                        except Exception as exc:
+                            # 桥路径失败必须可诊断（P2-2）且只报一次（P2-6）。
+                            _logger.warning("QGIS 几何校验失败，后续回退 Shapely：%s", exc)
+                            bridge_failed = True
+                            messages = None
+                    else:
+                        messages = None
+                    if messages is None:
+                        messages = self._shapely_messages(geometry)
                 for message in messages:
                     issues.append(
                         {
