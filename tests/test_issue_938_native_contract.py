@@ -166,7 +166,9 @@ def test_938_8_qgis_bridge_has_version():
     except ImportError:
         pytest.skip("qgis_render_bridge not built (optional)")
     assert hasattr(qgis_render_bridge, "__version__")
-    assert qgis_render_bridge.__version__ == "0.2.17a0"
+    # 桥的权威版本在 bindings.cpp module.attr("__version__")（随拓扑/V7/V10
+    # 阶段递增，setup.py 的 0.7.0a0 是包版本、不同步）——勿再抄其它原生模块的号。
+    assert qgis_render_bridge.__version__ == "0.11.0a0"
 
 
 # ---------------------------------------------------------------------------
