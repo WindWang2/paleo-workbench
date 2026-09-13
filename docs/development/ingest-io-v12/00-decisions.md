@@ -93,6 +93,27 @@ digest 是同进程刚刚对同一文件算出的新鲜哈希，复核即重复�
   哈希总数不变（只是计算点从 lifecycle 移到 adapter），但外部链接（external）
   不再被 lifecycle 白白哈希一次——`link_external` 与 adapter external 分支
   从不消费该 checksum（已核实），纯浪费消除，无可见行为变化。
+  **（已被上方「D6 修正」取代：lifecycle 保持补哈希；external 的无效哈希
+  作为 BASE 行为保留，记入 04-known-limitations。）**
+
+## D6 修正（实现中发现并调整）— 新鲜度标记走端口协议 `_checksum_fresh`
+
+初版设计让 lifecycle 停止补哈希、由 adapter 全权哈希。两个既有钉子证明这不成立：
+`test_integrity_unknown_when_no_checksum`（seam 层：port 不伪造 checksum）与
+`test_import_without_checksum_computes_it`（lifecycle 层：注册时必须有 digest，
+Review H3）共同钉住分层契约——**lifecycle 是 fake/port 路径上唯一负责补哈希的
+产线层**。最终形态：
+
+- `lifecycle.register_resource_input` 保持 BASE 行为（checksum 缺失时补哈希），
+  新增 `_checksum_fresh` 标记本次哈希的新鲜度；复用 `resource.checksum`
+  （scan 来源）时恒为 False。
+- `CatalogPort.register_input` 协议、`CoreCatalogAdapter`、测试替身
+  `InMemoryCatalog` 三处签名增加 `_checksum_fresh: bool = False`（端口此前
+  无下划线参数——`legacy_resource_id` 无前缀；本参数以 docstring 的
+  "(private)" 标注私有，是端口上的首例，评审已知悉并接受）；替身接受但忽略。
+- adapter 合并两个新鲜度来源（lifecycle 标记 / 本调用内自哈希）后作为
+  `_sha256_verified` 下传。
+- I/O 数字不受影响：UI 漏斗仍然恰好一次预哈希（在 lifecycle）。
 
 ## D7 — blob 落盘改为「同读分发」（tee），临时文件放 blob 根目录
 
@@ -116,6 +137,14 @@ temp + fsync + rename + dir fsync + read-only 的全部原子性与只读标记�
 SQLite store 事务域不碰：并发只发生在纯文件系统元数据收集，catalog 提交仍
 串行（register_imported_resources 的 chunked batch 语义不变）。
 
+## D9 — 范围排除
+
+- derived/result 注册路径（`register_result_asset`、run 产物）的 pre-hash 不动：
+  那些摘要进入 run/artifact 记录，语义不同，不在本 Goal 声明范围内。
+- `catalog/service.py` 缓存/事务框架、schema 版本、`_vendored/`、native、
+  QGIS 桥：一律不碰。
+- `scanner.py` 本体行为不变（仅提取 worker 预算辅助函数）。
+
 ## D10 — 测试环境：主 checkout venv + PYTHONPATH 指向本 worktree（仓库既有约定）
 
 PyPI 直连长时间挂起（另一会话的安装同样卡住），worktree 独立 venv 装不完。
@@ -131,11 +160,3 @@ PYTHONPATH 先于 site-packages，`import paleo_workbench` 实测解析到本 wo
 （已验证：`paleo_workbench.__file__` 指向本 worktree；`test_catalog_dedup.py`
 16 passed）。依赖来自主 venv（pinned 集与 BASE 一致）。受约束的独立 venv
 安装在后台继续，若最终成功则在 PR 前用独立 venv 复跑关键测试双保险。
-
-## D9 — 范围排除
-
-- derived/result 注册路径（`register_result_asset`、run 产物）的 pre-hash 不动：
-  那些摘要进入 run/artifact 记录，语义不同，不在本 Goal 声明范围内。
-- `catalog/service.py` 缓存/事务框架、schema 版本、`_vendored/`、native、
-  QGIS 桥：一律不碰。
-- `scanner.py` 本体行为不变（仅提取 worker 预算辅助函数）。

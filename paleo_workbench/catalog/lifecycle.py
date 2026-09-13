@@ -67,11 +67,13 @@ def register_resource_input(
     missing (the common case — ``import_service`` records ``checksum=None``),
     it is computed once from the on-disk file so that integrity verification
     and managed-input identity actually work for real imports. A checksum
-    computed HERE is flagged fresh (``_checksum_fresh``): it doubles as the
-    managed dedup fast path's content proof, so the adapter need not re-hash
-    the source to adopt a matching blob. Reused checksums (recorded at scan
-    time) are never flagged fresh. The legacy ``resource.id`` is recorded as
-    the bridge key so ``resolve_legacy_resource`` finds this version.
+    computed HERE from an ABSOLUTE path is flagged fresh
+    (``_checksum_fresh``): it doubles as the managed dedup fast path's
+    content proof, so the adapter need not re-hash the source to adopt a
+    matching blob. Reused checksums (recorded at scan time) and
+    project-relative paths (resolved differently by the adapter) are never
+    flagged fresh. The legacy ``resource.id`` is recorded as the bridge key
+    so ``resolve_legacy_resource`` finds this version.
 
     Returns None when no catalog backend is active (no project open).
     """
@@ -84,7 +86,16 @@ def register_resource_input(
         # Import does not hash; compute lazily so RAW immutability + integrity
         # are meaningful for real data (returns None if unreadable/missing).
         checksum = sha256_file_or_none(resource.path)
-        checksum_is_fresh = checksum is not None
+        # Freshness is claimed only for ABSOLUTE paths: a project-relative
+        # ``resource.path`` resolves against the process CWD here but against
+        # the PROJECT dir in the adapter, so the hashed file and the
+        # registered file could differ — such digests stay unproven and the
+        # dedup fast path re-proofs them (the adapter re-hashes the resolved
+        # file itself when this hash fails, so the CWD!=project case still
+        # gets its fast path).
+        checksum_is_fresh = (
+            checksum is not None and Path(resource.path).is_absolute()
+        )
     return cat.register_input(
         name=resource.name,
         path=resource.path,

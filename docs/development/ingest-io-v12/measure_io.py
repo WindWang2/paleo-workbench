@@ -34,9 +34,7 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pathlib
-
-PAYLOAD = b"seismic-trace-like-bytes" * 300_000  # ~7.6 MB
+PAYLOAD = b"seismic-trace-like-bytes" * 300_000  # ~7.2 MB
 
 
 class Counters:
@@ -88,19 +86,13 @@ def make_resource(src: Path):
 
 def install_counters(counters: Counters):
     """Monkeypatch-style wrappers; returns an undo callable."""
-    import paleo_workbench.catalog.checksum as checksum_mod
-    import paleo_workbench.catalog.lifecycle as lifecycle_mod
-    import paleo_workbench.catalog.adapter as adapter_mod
     import paleo_workbench.catalog.storage as storage_mod
 
     src = counters.src
     root = counters.root
-    orig_open = pathlib.Path.open
+    orig_open = Path.open
     orig_mkstemp = tempfile.mkstemp
-    orig_sha = checksum_mod.sha256_file
     orig_digest = storage_mod._digest_of
-    orig_sha_lifecycle = lifecycle_mod.sha256_file_or_none
-    orig_sha_adapter = adapter_mod.sha256_file_or_none
 
     def counting_open(self, mode="r", *args, **kwargs):
         try:
@@ -132,32 +124,18 @@ def install_counters(counters: Counters):
             counters.write_passes += 1
         return orig_mkstemp(*args, **kwargs)
 
-    def counting_sha(path, *args, **kwargs):
-        counters.hash_passes += 1
-        return orig_sha(path, *args, **kwargs)
-
     def counting_digest(path):
         counters.hash_passes += 1
         return orig_digest(path)
 
-    def counting_sha_or_none(path):
-        # these wrap sha256_file; count at the leaf only (sha256_file itself)
-        return orig_sha_lifecycle(path)
-
-    pathlib.Path.open = counting_open
+    Path.open = counting_open
     tempfile.mkstemp = counting_mkstemp
-    checksum_mod.sha256_file = counting_sha
     storage_mod._digest_of = counting_digest
-    lifecycle_mod.sha256_file_or_none = counting_sha_or_none
-    adapter_mod.sha256_file_or_none = counting_sha_or_none
 
     def undo():
-        pathlib.Path.open = orig_open
+        Path.open = orig_open
         tempfile.mkstemp = orig_mkstemp
-        checksum_mod.sha256_file = orig_sha
         storage_mod._digest_of = orig_digest
-        lifecycle_mod.sha256_file_or_none = orig_sha_lifecycle
-        adapter_mod.sha256_file_or_none = orig_sha_adapter
 
     return undo
 
@@ -212,7 +190,7 @@ def run_scenarios(tmp: Path) -> list[tuple[str, dict[str, int]]]:
         results.append(("S3 UI funnel (dedup hit)", c.snapshot()))
 
         src4 = make_source(tmp, "svc-dedup.bin")  # same bytes, new path
-        import hashlib
+        import hashlib  # local: only this scenario needs a digest
 
         digest = hashlib.sha256(PAYLOAD).hexdigest()
         c = Counters(src4, root)

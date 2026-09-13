@@ -2057,8 +2057,9 @@ class DataCatalogService(DataFabricV11Mixin):
         the same size, no copy happens and the version references the shared
         blob (O(1)). Every managed RAW import also registers its payload in
         the content store so later imports of the same content dedup to it.
-        ``_sha256_verified`` (private; adapter-only) marks digests the adapter
-        hashed from the source in the same registration call — see
+        ``_sha256_verified`` (private; adapter-only) marks digests hashed
+        in-process from the source in the same registration call (by the
+        adapter itself or the lifecycle helper) — see
         :func:`paleo_workbench.catalog.storage.place_managed_file`.
 
         Payload copy+hash happens outside the lock. The new asset is added

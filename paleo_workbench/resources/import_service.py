@@ -209,9 +209,10 @@ def _collect_entry(
 ) -> tuple[ResourceItem | None, str | None, Path | None]:
     """Collect one file's metadata for the folder/file import funnels.
 
-    Returns ``(item, warning, filtered)`` with at most one non-None — the
-    per-file slice of the former serial loops, kept identical so parallel
-    collection (``_map_collect``) reproduces the serial results exactly.
+    Returns ``(item, warning, filtered)`` — the per-file slice of the former
+    serial loops, kept identical so parallel collection (``_map_collect``)
+    reproduces the serial results exactly (an empty file yields BOTH a
+    warning and a filtered entry, exactly as the loops did).
     ``explicit`` marks the explicit-path variant (user-picked files): a
     non-file gets a diagnostic and macOS ``._`` resource forks are NOT
     silently dropped; folder collection skips both without a word.

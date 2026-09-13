@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-import paleo_workbench.catalog.checksum as checksum_mod
 import paleo_workbench.catalog.lifecycle as lifecycle_mod
 import paleo_workbench.catalog.storage as storage_mod
 from paleo_workbench.catalog.adapter import CoreCatalogAdapter
@@ -47,12 +46,10 @@ class IOCounters:
         self.src_full_reads = 0
         self.payload_re_reads = 0
         self.write_passes = 0
-        self.hash_fn_calls = 0  # sha256_file() + _digest_of() invocations
         self.digest_of_calls = 0
 
         orig_open = Path.open
         orig_mkstemp = tempfile.mkstemp
-        orig_sha = checksum_mod.sha256_file
         orig_digest = storage_mod._digest_of
         src, root = self.src, self.root
 
@@ -83,18 +80,12 @@ class IOCounters:
                 self.write_passes += 1
             return orig_mkstemp(*args, **kwargs)
 
-        def counting_sha(path, *args, **kwargs):
-            self.hash_fn_calls += 1
-            return orig_sha(path, *args, **kwargs)
-
         def counting_digest(path):
-            self.hash_fn_calls += 1
             self.digest_of_calls += 1
             return orig_digest(path)
 
         monkeypatch.setattr(Path, "open", counting_open)
         monkeypatch.setattr(tempfile, "mkstemp", counting_mkstemp)
-        monkeypatch.setattr(checksum_mod, "sha256_file", counting_sha)
         monkeypatch.setattr(storage_mod, "_digest_of", counting_digest)
 
 
@@ -222,6 +213,100 @@ def test_io_counters_detect_double_hashing_regression(
     counters = IOCounters(monkeypatch, second, _artifacts_root(service))
     _register(service, second)
     assert counters.src_full_reads == 2  # detector fires: 2 != 1 pinned above
+
+
+# ------------------------------------------------- durability / boundary
+
+
+def test_blob_fsync_failure_fails_the_import(
+    service, tmp_path, monkeypatch
+):
+    """A fsync failure on the blob temp must fail the placement (never commit
+    a non-durable content-store blob silently) — the payload-side contract
+    extended to the tee'd blob write."""
+    import os as os_mod
+    import tempfile as tempfile_mod
+
+    src = _source(tmp_path, "eio.bin")
+    real_mkstemp = tempfile_mod.mkstemp
+    blob_root = blob_dir_for(service.project_path).resolve()
+    blob_temp_fds: set[int] = set()
+
+    def tracking_mkstemp(*args, **kwargs):
+        fd, name = real_mkstemp(*args, **kwargs)
+        directory = Path(kwargs.get("dir") or ".").resolve()
+        if directory == blob_root:
+            blob_temp_fds.add(fd)
+        return fd, name
+
+    real_fsync = os_mod.fsync
+
+    def failing_blob_fsync(fd):
+        if fd in blob_temp_fds:
+            raise OSError("EIO: blob temp fsync failed")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(tempfile_mod, "mkstemp", tracking_mkstemp)
+    monkeypatch.setattr(os_mod, "fsync", failing_blob_fsync)
+    with pytest.raises(OSError, match="blob temp fsync"):
+        service.import_raw(src)
+    # Nothing committed, no blob, no leftover temps at the blobs root.
+    assert service.document.versions == []
+    assert list(blob_root.glob(".blob-*")) == []
+    from paleo_workbench.catalog import dedup
+
+    assert dedup.scan_blobs(service.project_path) == {}
+
+
+def test_lifecycle_marks_fresh_only_for_absolute_paths(tmp_path, monkeypatch):
+    """The freshness flag (dedup re-proof skip) is claimed only when the
+    hashed path is absolute — a project-relative resource.path resolves
+    against the CWD here and against the project dir in the adapter, so the
+    hashed file and the registered file could differ."""
+
+    class Recorder:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def register_input(self, **kwargs):
+            self.calls.append(kwargs)
+            return None
+
+    recorder = Recorder()
+    absolute_src = _source(tmp_path, "abs.bin")
+    resource = _resource(absolute_src)
+    register_resource_input(resource, catalog=recorder)
+    assert recorder.calls[-1]["_checksum_fresh"] is True
+    assert recorder.calls[-1]["checksum"] == hashlib.sha256(PAYLOAD).hexdigest()
+
+    relative_resource = ResourceItem(
+        name="rel.bin",
+        path="incoming/rel.bin",  # project-relative by contract
+        type="seismic",
+        format="sgy",
+        checksum=None,
+        external=False,
+    )
+    (tmp_path / "incoming" / "rel.bin").write_bytes(PAYLOAD)
+    monkeypatch.chdir(tmp_path)  # make the CWD-relative hash succeed
+    register_resource_input(relative_resource, catalog=recorder)
+    assert recorder.calls[-1]["_checksum_fresh"] is False
+
+
+def test_explicit_path_import_keeps_variant_diagnostics(tmp_path):
+    """import_files (user-picked paths) differs from folder collection on
+    purpose: a non-file gets a 不是文件 warning, and macOS ._ resource forks
+    are NOT silently dropped."""
+    from paleo_workbench.resources.import_service import import_files
+
+    missing = tmp_path / "missing.las"
+    mac_junk = tmp_path / "._picked.las"
+    mac_junk.write_text("~Version\n", encoding="utf-8")
+
+    report = import_files([missing, mac_junk], existing=[])
+    assert report.warnings == [f"{missing}: 不是文件"]
+    assert [r.name for r in report.added] == ["._picked.las"]
+    assert report.skipped_filter == []
 
 
 # ------------------------------------------------- folder determinism
