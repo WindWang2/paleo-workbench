@@ -16,6 +16,23 @@ def _checksum(path: Path) -> str:
     return sha256_file(path)
 
 
+def default_workers() -> int:
+    """Thread budget for metadata/collection IO, shared by scanner and
+    import_service so the two funnels cannot diverge (ADR 0056 spirit).
+
+    P2-A: background work shares the governor's IO-slot budget instead of
+    opening cpu_count+4 threads that fight interactive slice reads for the
+    disk. Always at least 2, at most 32.
+    """
+    try:
+        from paleo_workbench.runtime.resource_governor import get_governor
+
+        workers = max(2, min(32, int(get_governor().io_slots()) + 2))
+    except Exception:
+        workers = min(32, (os.cpu_count() or 1) + 4)
+    return max(workers, 2)
+
+
 def _process_file(
     path: Path,
     project_path: Path | None,
@@ -76,16 +93,7 @@ def scan_resources(
     if max_workers:
         workers = max_workers
     else:
-        # P2-A: background scanning shares the governor's IO-slot budget
-        # instead of opening cpu_count+4 threads that fight interactive
-        # slice reads for the disk.
-        try:
-            from paleo_workbench.runtime.resource_governor import get_governor
-
-            workers = max(2, min(32, int(get_governor().io_slots()) + 2))
-        except Exception:
-            workers = min(32, (os.cpu_count() or 1) + 4)
-        workers = max(workers, 2)
+        workers = default_workers()
     with ThreadPoolExecutor(max_workers=workers) as pool:
         processed = list(
             pool.map(

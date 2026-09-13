@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from paleo_workbench.resources.io_registry import (
     ROLE_BY_TYPE,
     TYPE_LABELS,
 )
+from paleo_workbench.resources.scanner import default_workers
 
 
 @dataclass
@@ -198,6 +200,72 @@ def _collect_resource(
     )
 
 
+def _collect_entry(
+    path: Path,
+    project_path: Path | None,
+    *,
+    preferred_only: bool,
+    explicit: bool,
+) -> tuple[ResourceItem | None, str | None, Path | None]:
+    """Collect one file's metadata for the folder/file import funnels.
+
+    Returns ``(item, warning, filtered)`` with at most one non-None — the
+    per-file slice of the former serial loops, kept identical so parallel
+    collection (``_map_collect``) reproduces the serial results exactly.
+    ``explicit`` marks the explicit-path variant (user-picked files): a
+    non-file gets a diagnostic and macOS ``._`` resource forks are NOT
+    silently dropped; folder collection skips both without a word.
+    Thread-safe: only local state and stateless helpers.
+    """
+    try:
+        if not path.is_file():
+            if explicit:
+                return None, f"{path}: 不是文件", None
+            return None, None, None
+        if not explicit and path.name.startswith("._"):
+            return None, None, None
+        if path.stat().st_size == 0:
+            return None, f"{path}: 空文件已跳过", path
+        item = _collect_resource(path, project_path, preferred_only=preferred_only)
+        if item is None:
+            return None, None, path
+        return item, None, None
+    except OSError as exc:
+        return None, f"{path}: {exc}", None
+
+
+def _map_collect(
+    paths: list[Path],
+    project_path: Path | None,
+    *,
+    preferred_only: bool,
+    explicit: bool,
+) -> tuple[list[ResourceItem], list[str], list[Path]]:
+    """Per-file metadata collection with bounded concurrency.
+
+    ``ThreadPoolExecutor.map`` preserves input order, so candidates/warnings/
+    filtered come out in exactly the serial-loop order regardless of thread
+    scheduling; the stat+probe work is IO-bound and releases the GIL.
+    """
+    workers = max(1, min(default_workers(), len(paths)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        entries = list(
+            pool.map(
+                lambda p: _collect_entry(
+                    p,
+                    project_path,
+                    preferred_only=preferred_only,
+                    explicit=explicit,
+                ),
+                paths,
+            )
+        )
+    candidates = [item for item, _, _ in entries if item is not None]
+    warnings = [w for _, w, _ in entries if w is not None]
+    filtered = [p for _, _, p in entries if p is not None]
+    return candidates, warnings, filtered
+
+
 def _collect_folder(
     root: Path,
     project_path: Path | None = None,
@@ -208,28 +276,9 @@ def _collect_folder(
         paths = sorted(root.rglob("*"))
     except OSError as exc:
         return [], [f"{root}: {exc}"], []
-
-    candidates: list[ResourceItem] = []
-    warnings: list[str] = []
-    filtered: list[Path] = []
-    for path in paths:
-        try:
-            if not path.is_file() or path.name.startswith("._"):
-                continue
-            if path.stat().st_size == 0:
-                warnings.append(f"{path}: 空文件已跳过")
-                filtered.append(path)
-                continue
-            item = _collect_resource(
-                path, project_path, preferred_only=preferred_only
-            )
-            if item is None:
-                filtered.append(path)
-                continue
-            candidates.append(item)
-        except OSError as exc:
-            warnings.append(f"{path}: {exc}")
-    return candidates, warnings, filtered
+    return _map_collect(
+        paths, project_path, preferred_only=preferred_only, explicit=False
+    )
 
 
 def import_files(
@@ -239,29 +288,9 @@ def import_files(
     *,
     preferred_only: bool = False,
 ) -> ImportReport:
-    candidates: list[ResourceItem] = []
-    warnings: list[str] = []
-    filtered: list[Path] = []
-
-    for path in paths:
-        try:
-            if not path.is_file():
-                warnings.append(f"{path}: 不是文件")
-                continue
-            if path.stat().st_size == 0:
-                warnings.append(f"{path}: 空文件已跳过")
-                filtered.append(path)
-                continue
-            item = _collect_resource(
-                path, project_path, preferred_only=preferred_only
-            )
-            if item is None:
-                filtered.append(path)
-                continue
-            candidates.append(item)
-        except OSError as exc:
-            warnings.append(f"{path}: {exc}")
-
+    candidates, warnings, filtered = _map_collect(
+        paths, project_path, preferred_only=preferred_only, explicit=True
+    )
     report = _filter_new(candidates, existing, project_path)
     report.warnings.extend(annotate_facies_product_groups(report.added, existing))
     report.warnings.extend(warnings)
