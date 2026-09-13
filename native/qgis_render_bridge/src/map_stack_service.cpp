@@ -80,7 +80,6 @@
 #include <qgsmaptool.h>
 #include <qgsmaptoolcapture.h>
 #include <qgsmaptooldigitizefeature.h>
-#include <qgsmaptoolidentifyfeature.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
 #include <qgsmaptopixel.h>
@@ -998,7 +997,7 @@ struct QgisMapStack::Impl {
       edit_pick_callbacks;
   // 选择/identify（M3 Task 4；Qt parent=画布持有）与选中高亮投影
   std::unordered_map<std::uintptr_t, PwbSelectTool*> select_tools;
-  std::unordered_map<std::uintptr_t, QgsMapToolIdentifyFeature*> identify_tools;
+  std::unordered_map<std::uintptr_t, PwbIdentifyTool*> identify_tools;
   std::unordered_map<std::uintptr_t,
                      std::function<void(const std::string&, const std::string&)>>
       selection_callbacks;
@@ -4516,37 +4515,12 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
       canvas->setMapTool(slot);
       return;
     }
-    // identify 分支见下（targetLayer 钉死）。
-    // QgsMapToolIdentifyFeature 无 setLayer——目标图层在构造时钉死；
-    // 每次激活按当前图层新建（旧工具由 Qt parent=画布回收）。
-    // 回调解析同样钉死构造时图层（终局审查 I3）：激活后切当前图层
-    // 不得让 (doc_id, feature_id) 来自两个层。
-    auto* targetLayer = qobject_cast<QgsVectorLayer*>(canvas->currentLayer());
-    auto* tool = new QgsMapToolIdentifyFeature(canvas, targetLayer);
-    impl_->identify_tools[canvas_addr] = tool;
-    std::weak_ptr<char> alive2 = alive_token_;
-    QObject::connect(
-        tool,
-        static_cast<void (QgsMapToolIdentifyFeature::*)(const QgsFeature&)>(
-            &QgsMapToolIdentifyFeature::featureIdentified),
-        canvas,
-        [this, alive2, canvas_addr,
-         target = QPointer<QgsVectorLayer>(targetLayer)](const QgsFeature& feature) {
-        if (alive2.expired()) return;
-        auto cbIt = impl_->selection_callbacks.find(canvas_addr);
-        if (cbIt == impl_->selection_callbacks.end() || !cbIt->second) return;
-        std::string docId;
-        std::string fid = std::to_string(static_cast<long long>(feature.id()));
-        if (!target.isNull()) {
-          docId = target->customProperty(QStringLiteral("pwb/doc_id"))
-                      .toString()
-                      .toStdString();
-          fid = fidResolver()(target.data(), feature.id());
-        }
-        cbIt->second("identify", std::string("{\"layer_doc_id\":\"") + docId +
-                                     "\",\"feature_id\":\"" + fid + "\"}");
-      });
-    canvas->setMapTool(tool);
+    // identify：全局 TopDownAll 扫描（不钉当前层），单命中取视觉最上层，
+    // miss 发空回执——三语义都在 PwbIdentifyTool 内（见 edit_tools.cpp）。
+    // 工具不钉层，缓存复用即可（与 select 同一模式）。
+    auto& slot = impl_->identify_tools[canvas_addr];
+    if (slot == nullptr) slot = new PwbIdentifyTool(canvas, std::move(cb), fidResolver());
+    canvas->setMapTool(slot);
     return;
   }
   if (kind == "measure") {

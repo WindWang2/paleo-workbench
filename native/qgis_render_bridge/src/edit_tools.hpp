@@ -20,6 +20,7 @@
 #include <qgsfeaturerequest.h>
 #include <qgsgeometry.h>
 #include <qgsmaptool.h>
+#include <qgsmaptoolidentify.h>
 #include <qgspointlocator.h>
 #include <qgspointxy.h>
 #include <qgsrectangle.h>
@@ -269,6 +270,22 @@ class PwbSelectTool : public PwbEditPickTool {
   void onGeometryChanged(Qt::KeyboardModifiers modifiers);
 
   std::unique_ptr<QgsMapToolSelectionHandler> handler_;
+};
+
+
+// 原生 identify 工具（M3 Task 4 修复）：全局 TopDownAll 扫描（不钉当前层），
+// 单命中取视觉最上层结果，miss 也发空回执——三者都由本类在桥内保证。
+class PwbIdentifyTool : public QgsMapToolIdentify {
+ public:
+  PwbIdentifyTool(QgsMapCanvas* canvas, PwbEditPickTool::Callback callback,
+                  PwbEditPickTool::FeatureIdResolver resolver = nullptr);
+
+  void canvasReleaseEvent(QgsMapMouseEvent* e) override;
+  void keyPressEvent(QKeyEvent* e) override;
+
+ private:
+  PwbEditPickTool::Callback callback_;
+  PwbEditPickTool::FeatureIdResolver resolver_;
 };
 
 

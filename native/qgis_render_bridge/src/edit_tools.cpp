@@ -7,6 +7,7 @@
 #include <set>
 
 #include <QKeyEvent>
+#include <QPoint>
 
 #include <qgsabstractgeometry.h>
 #include <qgscoordinatereferencesystem.h>
@@ -1494,6 +1495,51 @@ void PwbSelectTool::onGeometryChanged(Qt::KeyboardModifiers modifiers) {
       quoted.join(QStringLiteral(",")).toStdString() + "],\"modifiers\":[" +
       quotedMods.join(QStringLiteral(",")).toStdString() + "]}";
   callback_("selection", payload);
+}
+
+// -- identify（M3 Task 4 修复）------------------------------------------------
+
+PwbIdentifyTool::PwbIdentifyTool(QgsMapCanvas* canvas,
+                                 PwbEditPickTool::Callback callback,
+                                 PwbEditPickTool::FeatureIdResolver resolver)
+    : QgsMapToolIdentify(canvas),
+      callback_(std::move(callback)),
+      resolver_(std::move(resolver)) {}
+
+void PwbIdentifyTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
+  if (e->button() != Qt::LeftButton) return;
+  // TopDownAll 全局扫描（canvas->layers(true) 序：index 0 = 视觉最上层），
+  // 不依赖 canvas.currentLayer——空当前层同样可识别。
+  const QPoint pos = e->pixelPoint();  // QMouseEvent::x()/y() 在 Qt6 已弃用
+  const QList<QgsMapToolIdentify::IdentifyResult> results =
+      identify(pos.x(), pos.y(), QgsMapToolIdentify::TopDownAll,
+               QgsMapToolIdentify::VectorLayer);
+  std::string docId;
+  std::string fid;
+  if (!results.isEmpty()) {
+    // 单命中契约：多命中取视觉最上层首个结果。
+    const QgsMapToolIdentify::IdentifyResult& hit = results.first();
+    if (auto* vl = qobject_cast<QgsVectorLayer*>(hit.mLayer)) {
+      docId = vl->customProperty(QStringLiteral("pwb/doc_id"))
+                  .toString()
+                  .toStdString();
+      fid = resolver_ ? resolver_(vl, hit.mFeature.id())
+                      : std::to_string(static_cast<long long>(hit.mFeature.id()));
+    }
+  }
+  // miss 也发空回执（Python 宿主据此清空识别面板）。
+  callback_("identify", std::string("{\"layer_doc_id\":\"") + docId +
+                            "\",\"feature_id\":\"" + fid + "\"}");
+}
+
+void PwbIdentifyTool::keyPressEvent(QKeyEvent* e) {
+  // Esc 退出工具（对齐旧 QgsMapToolIdentifyFeature 行为）。
+  if (e->key() == Qt::Key_Escape) {
+    canvas()->unsetMapTool(this);
+    e->accept();
+    return;
+  }
+  QgsMapToolIdentify::keyPressEvent(e);
 }
 
 // -- 测距（V7）---------------------------------------------------------------
