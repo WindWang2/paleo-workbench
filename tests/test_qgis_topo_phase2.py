@@ -102,8 +102,8 @@ def test_connected_line_network_has_no_dangle(qtbot, stack):
         _cleanup(stack, addr, "shore")
 
 
-def test_box_select_translates_distinct_vertices(qtbot, stack):
-    """§4 框选多节点：空处拖框选中两点，再拖其中一点，两点平移同一向量。"""
+def _box_select_then_translate(qtbot, stack, modifier):
+    """空处拖框选中两点 → 拖其中一点 → 两点平移同一向量。"""
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
     from shiboken6 import wrapInstance
@@ -141,10 +141,10 @@ def test_box_select_translates_distinct_vertices(qtbot, stack):
             from PySide6.QtCore import QPoint
             return QPoint(int(40 * x), int(400 - 40 * y))
 
-        QTest.mousePress(view.viewport(), Qt.LeftButton, Qt.NoModifier,
+        QTest.mousePress(view.viewport(), Qt.LeftButton, modifier,
                          _pixel(1.5, 1.5))
         QTest.mouseMove(view.viewport(), _pixel(6.5, 2.5))
-        QTest.mouseRelease(view.viewport(), Qt.LeftButton, Qt.NoModifier,
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, modifier,
                            _pixel(6.5, 2.5))
         QTest.mousePress(view.viewport(), Qt.LeftButton, Qt.NoModifier,
                          _pixel(2.0, 2.0))
@@ -166,6 +166,87 @@ def test_box_select_translates_distinct_vertices(qtbot, stack):
         stack.set_map_tool(addr, "pan")
         if stack.mirror_layer_editing("doc-box"):
             stack.roll_back_mirror_layer("doc-box")
+
+
+def test_box_select_translates_distinct_vertices(qtbot, stack):
+    """§4 框选多节点：空处拖框选中两点，再拖其中一点，两点平移同一向量。"""
+    from PySide6.QtCore import Qt
+
+    _box_select_then_translate(qtbot, stack, Qt.NoModifier)
+
+
+def test_shift_box_select_translates_distinct_vertices(qtbot, stack):
+    """§4 规格写法：Shift+拖框同样进入框选（修饰键不拦截该手势）。"""
+    from PySide6.QtCore import Qt
+
+    _box_select_then_translate(qtbot, stack, Qt.ShiftModifier)
+
+
+def test_tracing_inserts_vertices_at_intersections(qtbot, stack):
+    """§4 追踪交点插点：追踪沿边 + 与其他边相交处插入交点顶点。
+
+    追踪开着时 QgsTracer 取 setAddPointsOnIntersectionsEnabled——沿水平
+    引导线 (2,5)→(8,5) 追踪，与竖直引导线 (5,2)→(5,8) 的交点 (5,5) 必须
+    成为环上顶点，否则新面与该边仍是两点相切（后续拓扑检查看不到共享点）。
+    """
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from shiboken6 import wrapInstance
+    from PySide6.QtWidgets import QGraphicsView
+
+    addr = stack.create_canvas()
+    view = wrapInstance(addr, QGraphicsView)
+    qtbot.addWidget(view)
+    view.resize(400, 400)
+    view.show()
+    guides = _collection(
+        _line("h", [[2.0, 5.0], [8.0, 5.0]]),
+        _line("v", [[5.0, 2.0], [5.0, 8.0]]),
+    )
+    try:
+        stack.upsert_mirror_layer(
+            "guide-x", "引导线", "LineString", "EPSG:4326", guides,
+            "", "", "", True, 1.0, is_reference=False, is_editable=True,
+            data_revision=1)
+        stack.upsert_mirror_layer(
+            "draft-x", "草稿", "Polygon", "EPSG:4326", _collection(),
+            "", "", "", True, 1.0, is_reference=False, is_editable=True,
+            data_revision=1)
+        stack.set_canvas_extent(addr, 0.0, 0.0, 10.0, 10.0)
+        assert stack.start_mirror_layer_editing("draft-x") == ""
+        stack.set_current_layer(addr, "draft-x")
+        captured = []
+        stack.set_digitize_callback(
+            addr, lambda status, geom: captured.append((status, geom)))
+        stack.set_tracing_enabled(addr, True)
+        stack.set_snapping_config(addr, json.dumps({
+            "enabled": True, "mode": "all_layers", "tolerance_px": 20.0,
+            "types": ["vertex", "segment"],
+        }))
+        stack.set_map_tool(addr, "addPolygon")
+
+        def _pixel(x, y):
+            return QPoint(int(40 * x), int(400 - 40 * y))
+
+        for x, y in [(2.0, 5.0), (8.0, 5.0), (8.0, 2.0), (2.0, 2.0)]:
+            QTest.mouseMove(view.viewport(), _pixel(x, y))
+            QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier,
+                             _pixel(x, y))
+        QTest.mouseClick(view.viewport(), Qt.RightButton, Qt.NoModifier,
+                         _pixel(2.0, 2.0))
+        qtbot.waitUntil(
+            lambda: any(s == "completed" for s, _ in captured), timeout=3000)
+        ring = json.loads(
+            [g for s, g in captured if s == "completed"][-1]
+        )["coordinates"][0]
+        assert any(abs(float(px) - 5.0) <= 0.05 and abs(float(py) - 5.0) <= 0.05
+                   for px, py in ring), f"交点未插入环（ring={ring}）"
+    finally:
+        stack.set_tracing_enabled(addr, False)
+        stack.set_map_tool(addr, "pan")
+        for doc in ("draft-x", "guide-x"):
+            if stack.mirror_layer_editing(doc):
+                stack.roll_back_mirror_layer(doc)
 
 
 def test_line_layer_starts_native_editing(qtbot, stack):

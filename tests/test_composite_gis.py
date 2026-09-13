@@ -153,10 +153,13 @@ def test_template_schema_roundtrips_through_project(qtbot, tmp_path):
     assert any(field.name == "fault_type" for field in restored_fields)
 
 
-def test_digitized_features_carry_template_defaults(qtbot, tmp_path):
+def test_digitized_features_carry_template_defaults(qtbot, tmp_path, monkeypatch):
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    # 宿主捕获工具的模板默认值（Python 会话路径）。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("F1 断层", "line", template="fault")
     controller.start_editing()
     controller.activate_tool("add_line")
@@ -291,10 +294,14 @@ def _line(feature_id, points):
     return VectorFeature(feature_id, {"type": "LineString", "coordinates": points})
 
 
-def test_merge_selected_polygons_via_composite(qtbot, tmp_path):
+def test_merge_selected_polygons_via_composite(qtbot, tmp_path, monkeypatch):
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    # 本测试钉 Python 会话路径的合并语义（原生路径见 test_qgis_topo_m3_*）
+    # ——显式禁用原生翻转，与 test_split_polygon_by_selected_line 同款。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("相带", "polygon", template="facies")
     controller.start_editing()
     session = layer.edit_session
@@ -356,10 +363,14 @@ def layer_selection_contains_all(layer, feature_ids):
     return feature_ids <= layer.selection
 
 
-def test_split_requires_polygon_and_line(qtbot, tmp_path):
+def test_split_requires_polygon_and_line(qtbot, tmp_path, monkeypatch):
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    # Python 会话路径的前置条件措辞（原生路径由 _native_split_begin 给出
+    # "请先选择要分割的要素"，见 test_split_native_reports_selection_first）。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     controller.create_layer("相带", "polygon", template="facies")
     controller.start_editing()
     ok, message = controller.geometry_command("split")
@@ -370,10 +381,14 @@ def test_split_requires_polygon_and_line(qtbot, tmp_path):
 # --- topology ---------------------------------------------------------------
 
 
-def test_topology_gate_blocks_save_on_invalid_geometry(qtbot, tmp_path):
+def test_topology_gate_blocks_save_on_invalid_geometry(qtbot, tmp_path, monkeypatch):
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    # Python 会话路径的门禁接线（原生门禁见 test_topo_m4_checker /
+    # test_qgis_topo_m4_checker）——显式禁用原生翻转。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("相带", "polygon", template="facies")
     controller.start_editing()
     # 自相交蝴蝶结多边形（无效）。
@@ -401,10 +416,76 @@ def test_topology_gate_blocks_save_on_invalid_geometry(qtbot, tmp_path):
     assert not controller.editing
 
 
-def test_topology_disabled_allows_save(qtbot, tmp_path):
+def _native_layer_with_bowtie(doc, controller, name="相带"):
+    """真实原生会话 + 无效几何（自相交蝴蝶结）基线要素。
+
+    导入后必须先同步重组（stage_actions 同款）：镜像层是编辑缓冲的事实
+    源，基线要素在发布前不进镜像。
+    """
+    layer = controller.create_layer(name, "polygon", template="facies")
+    controller.import_layer_features(layer.id, [VectorFeature(
+        "bad",
+        {
+            "type": "Polygon",
+            "coordinates": [
+                [[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0], [0.0, 0.0]]
+            ],
+        },
+    )])
+    doc._sync_composition_now()
+    controller.set_active_layer(layer.id)
+    controller.start_editing()
+    assert controller.native_editing.is_open(layer.id), "应进入原生会话"
+    return layer
+
+
+def test_topo_native_gate_blocks_save(qtbot, tmp_path):
+    """原生会话：门禁开 → 无效几何阻断保存，会话保持打开。"""
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    layer = _native_layer_with_bowtie(doc, controller)
+    controller.set_topology(True)
+    reason = controller.save_edits()
+    assert reason is not None and "拓扑" in reason, reason
+    assert controller.native_editing.is_open(layer.id), "阻断后会话必须保持打开"
+
+
+def test_topo_native_gate_off_allows_save(qtbot, tmp_path):
+    """原生会话：门禁关 → 同一无效几何保存放行（补此前缺失的方向）。"""
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = _native_layer_with_bowtie(doc, controller)
+    controller.set_topology(False)
+    assert controller.save_edits() is None
+    assert not controller.native_editing.is_open(layer.id)
+    assert layer.feature_ids() == ("bad",), "提交必须把要素写回宿主基线"
+
+
+def test_split_native_reports_selection_first(qtbot, tmp_path):
+    """原生分割：先要选中要素；有选中则转入切线数字化（两步式）。"""
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    layer = _native_layer_with_bowtie(doc, controller)
+
+    ok, message = controller.geometry_command("split")
+    assert not ok and "选择" in message, message
+
+    layer.set_selection({"bad"})
+    ok, message = controller.geometry_command("split")
+    assert ok and "切线" in message, message
+
+
+def test_topology_disabled_allows_save(qtbot, tmp_path, monkeypatch):
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    # 门禁关闭 → 保存放行（Python 会话路径）。原生路径的同向覆盖见
+    # test_topo_native_gate_off_allows_save。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("相带", "polygon", template="facies")
     controller.start_editing()
     layer.edit_session.add_feature(_polygon("ok"))
@@ -415,7 +496,7 @@ def test_topology_disabled_allows_save(qtbot, tmp_path):
 # --- 属性表 ----------------------------------------------------------------
 
 
-def test_attribute_table_edits_go_through_session(qtbot, tmp_path):
+def test_attribute_table_edits_go_through_session(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.ui.workstation.composite_attribute_table import (
         CompositeAttributeTableDialog,
     )
@@ -423,21 +504,25 @@ def test_attribute_table_edits_go_through_session(qtbot, tmp_path):
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    # 属性表写回 Python 会话（原生会话的属性写回见 test_qgis_topo_m1_*）。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("断层线", "line", template="fault")
     controller.start_editing()
     layer.edit_session.add_feature(_line("f1", [[0.0, 0.0], [1.0, 0.0]]))
 
     dialog = CompositeAttributeTableDialog(controller, layer.id)
     assert dialog.table.rowCount() == 1
-    # 找到 fault_type 列并编辑。
+    # 找到 fault_type 列并编辑（表头带必填标记 *，按前缀匹配）。
     header_index = -1
     for column in range(dialog.table.columnCount()):
-        if dialog.table.horizontalHeaderItem(column).text() == "断层性质":
+        if dialog.table.horizontalHeaderItem(column).text().startswith("断层性质"):
             header_index = column
             break
     assert header_index > 0
-    item = dialog.table.item(0, header_index)
-    item.setText("走滑断层")
+    # 单元格写入走模型 EditRole（视图 item 是只读测试句柄）。
+    model = dialog.table.model()
+    assert model.setData(model.index(0, header_index), "走滑断层")
     feature = layer.edit_session.feature("f1")
     assert feature.attributes.get("fault_type") == "走滑断层"
     assert layer.edit_session.undo_stack, "属性修改必须落为可撤销命令"
@@ -487,10 +572,13 @@ def test_identify_all_returns_multiple_layers(qtbot, tmp_path):
     assert polygons.selection == {"poly"}
 
 
-def test_identify_delegate_feeds_results_panel(qtbot, tmp_path):
+def test_identify_delegate_feeds_results_panel(qtbot, tmp_path, monkeypatch):
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    # identify 委托读 Python 会话视图（原生 identify 见 test_qgis_canvas_tool_wiring）。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("断层线", "line", template="fault")
     controller.start_editing()
     layer.edit_session.add_feature(_line("l1", [[0.0, 0.0], [2.0, 0.0]]))
@@ -567,11 +655,13 @@ def test_snapping_settings_dialog_writes_service(qtbot, tmp_path):
 # --- review 回归：会话失效后的工具重绑（Blocker #1） --------------------------
 
 
-def test_tool_rebinds_after_save_edits(qtbot, tmp_path):
+def test_tool_rebinds_after_save_edits(qtbot, tmp_path, monkeypatch):
     """保存编辑后继续数字化必须进入新会话，不得写进已脱钩的旧缓冲。"""
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("断层线", "line", template="fault")
     controller.start_editing()
     controller.activate_tool("add_line")
@@ -615,10 +705,13 @@ def test_tool_falls_back_to_pan_after_flush(qtbot, tmp_path):
 # --- review 回归：flush 拓扑门禁（High #3） ---------------------------------
 
 
-def test_flush_respects_topology_gate(qtbot, tmp_path):
+def test_flush_respects_topology_gate(qtbot, tmp_path, monkeypatch):
     doc = CompositeDocument(_project(tmp_path))
     qtbot.addWidget(doc)
     controller = doc.edit_controller
+    # Python 会话路径的 flush 门禁（原生 flush 见 test_qgis_topo_m4_checker）。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("相带", "polygon", template="facies")
     controller.start_editing()
     layer.edit_session.add_feature(

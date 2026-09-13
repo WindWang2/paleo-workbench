@@ -30,6 +30,21 @@ def doc(qtbot, tmp_path) -> CompositeDocument:
     return document
 
 
+@pytest.fixture
+def fallback_doc(qtbot, tmp_path, monkeypatch) -> CompositeDocument:
+    """回退画布文档（后端缺失的机器形态；本机桥在场需显式制造失败）。"""
+    from paleo_workbench.ui.workstation import composite_document as cd
+
+    class _NoBridgeShim(cd.QgisCanvasShim):
+        def __init__(self, *_args, **_kwargs):
+            raise RuntimeError("桥不可用（测试强制回退画布）")
+
+    monkeypatch.setattr(cd, "QgisCanvasShim", _NoBridgeShim)
+    document = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(document)
+    return document
+
+
 def _add_layer(document, name, kind, role) -> str:
     layer = document.edit_controller.create_layer(name, kind)
     from paleo_workbench.mapping_workspace.stage_state import LayerMembershipRecord
@@ -151,8 +166,12 @@ def test_close_project_mid_capture(doc, qtbot):
     assert not availability["add_line"].enabled
 
 
-def test_backend_drop_before_reshape(doc):
+def test_backend_drop_before_reshape(fallback_doc):
     """backend 失效后点 reshape：能力门禁拒绝（无回退实现不得假可用）。"""
+    # "backend 失效" = 无原生栈的回退画布（本机桥在场，用 fallback_doc
+    # 显式制造）；原生画布上的 reshape 见 test_qgis_topo_m1_*。
+    doc = fallback_doc
+    assert not doc.uses_native_stack, "本用例钉的是后端缺失形态"
     layer_id = _add_layer(doc, "R", "polygon", LayerRole.INITIAL_FACIES_DRAFT)
     doc.edit_controller.set_active_layer(layer_id)
     doc.edit_controller.start_editing()
@@ -210,8 +229,11 @@ def stage_groups(document):
     return stage_group_visibility(stage.value if stage else None)
 
 
-def test_selection_change_then_merge_rapid(doc):
+def test_selection_change_then_merge_rapid(doc, monkeypatch):
     """选择变化后立刻 merge（无刷新间隙）：merge_ready 以新鲜求值拦截。"""
+    # Python 会话路径的 merge 前置判定（原生合并见 test_qgis_topo_m3_*）。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     layer_id = _add_layer(doc, "M", "polygon", LayerRole.INITIAL_FACIES_DRAFT)
     doc.edit_controller.set_active_layer(layer_id)
     doc.edit_controller.start_editing()

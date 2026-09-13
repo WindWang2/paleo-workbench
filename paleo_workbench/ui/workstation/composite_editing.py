@@ -1221,7 +1221,20 @@ class CompositeEditController(QObject):
         return stack, getattr(canvas, "canvas_address", 0)
 
     def _gate_topology_issues(self, layer) -> list[dict[str, object]]:
-        """M4：桥检查器优先，与 save_edits / commit_all 共用一份结果。"""
+        """M4：原生会话走桥检查器，Python 会话校验工作副本。
+
+        Python 会话的未提交工作副本不在镜像里——桥检查器只看已提交内容，
+        拿它校验 Python 会话等于放行未提交的坏几何（原生画布成为默认之后
+        的门禁空洞）。原生会话的缓冲本身就在镜像中，桥检查器即其事实源。
+        """
+        if getattr(layer, "edit_session", None) is not None:
+            issues = self._topology.validate([layer])
+            # 忽略豁免归检查器所有（blocking_errors）：面板里"地质上可接受"
+            # 的结论必须同样作用于 Python 会话的保存门禁。
+            checker = getattr(self._topology, "checker", None)
+            if checker is not None:
+                issues = checker.blocking_errors(issues)
+            return issues
         stack, canvas = self._checker_stack()
         if stack is not None:
             return self._topology.checker.run_for_commit(

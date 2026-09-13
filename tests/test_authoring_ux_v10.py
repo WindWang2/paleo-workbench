@@ -68,6 +68,26 @@ def doc(qtbot, tmp_path) -> CompositeDocument:
     return document
 
 
+@pytest.fixture
+def fallback_doc(qtbot, tmp_path, monkeypatch) -> CompositeDocument:
+    """回退画布文档（无原生栈的机器形态）。
+
+    本机桥已构建 → 必须显式制造 shim 构造失败才能拿到回退面板
+    （``_create_canvas`` 的降级契约），否则回退专用断言随环境漂移。
+    需保持"类型"——宿主链路有 isinstance(canvas, QgisCanvasShim) 判别。
+    """
+    from paleo_workbench.ui.workstation import composite_document as cd
+
+    class _NoBridgeShim(cd.QgisCanvasShim):
+        def __init__(self, *_args, **_kwargs):
+            raise RuntimeError("桥不可用（测试强制回退画布）")
+
+    monkeypatch.setattr(cd, "QgisCanvasShim", _NoBridgeShim)
+    document = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(document)
+    return document
+
+
 def _register_role(document: CompositeDocument, layer_id: str, role: LayerRole) -> None:
     document.stage_controller.state.set_membership(
         LayerMembershipRecord(layer_id=layer_id, role=role)
@@ -129,8 +149,12 @@ def test_edit_session_tools_are_not_read_risk():
             f"{tool_id} 需要编辑会话却登记为 {spec.risk}")
 
 
-def test_controller_action_icons_resolve_to_assets():
+def test_controller_action_icons_resolve_to_assets(qapp):
     """工具条/命令面每个 id 的图标都能解析成真实资产（#1256）。
+
+    渲染 SVG 需要 QGuiApplication（QPixmap 无应用实例直接 abort），
+    故显式请求 qapp——否则本用例随环境有无应用实例而崩溃。
+    
 
     ``MapActionController`` 以 ``ToolButtonIconOnly`` 呈现（18×18），图标
     缺失 = 一个空白按钮。此前 5 个 V10 新命令的 svg 根本不存在，而旧断言
@@ -259,8 +283,10 @@ def test_layer_menu_facts_repair_kind_gate_reaches_menu(doc):
     assert "面" in facts.repair_geometry.disabled_reason
 
 
-def test_fallback_panel_menu_uses_evaluator_probe(qtbot, doc):
+def test_fallback_panel_menu_uses_evaluator_probe(qtbot, fallback_doc):
     """回退树右键菜单：RAW 图层的「开始编辑」禁用 + 「复制为草稿」在场。"""
+    doc = fallback_doc
+    assert not doc.uses_native_stack, "本用例钉的是回退面板"
     layer_id = _polygon_doc(doc)
     _register_role(doc, layer_id, LayerRole.INITIAL_FACIES_SOURCE)
     doc._sync_action_state()
@@ -633,10 +659,9 @@ def test_evaluate_all_budget_ms():
     assert elapsed < 0.005, f"evaluate_all 均值 {elapsed * 1000:.2f}ms 超 5ms 预算"
 
 
-def test_thousand_layer_refresh_structural_bound(qtbot, tmp_path):
+def test_thousand_layer_refresh_structural_bound(qtbot, fallback_doc):
     """1000 层：全量树重建有界 + 差分刷新不重建（§28 无严重卡顿）。"""
-    document = CompositeDocument(_project(tmp_path))
-    qtbot.addWidget(document)
+    document = fallback_doc
     # 批量建层时暂停逐层重组（结构变化本就 immediate 全量重组——用户
     # 逐层操作无此风暴；本测试度量的是树/状态刷新，不是建层路径）。
     document.edit_controller.layers_changed.disconnect()  # 全量断开（批量建层）

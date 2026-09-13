@@ -312,7 +312,11 @@ def test_scenario16_commit_aligns_ledger_and_records_gesture_audit():
 
 
 def test_save_edits_python_path_uses_checker_when_present(qapp):
-    """Python 会话 save_edits 与原生 commit_all 共用检查器门禁。"""
+    """Python 会话 save_edits 门禁校验**工作副本**，且共用忽略豁免。
+
+    回归：门禁曾把 Python 会话交给桥检查器（只读镜像），未提交的坏几何
+    因不在镜像里而被静默放行——镜像里查不到，保存就过了。
+    """
     from paleo_workbench.ui.workstation.composite_editing import (
         CompositeEditController,
     )
@@ -325,21 +329,30 @@ def test_save_edits_python_path_uses_checker_when_present(qapp):
     canvas.set_overlay_provider = lambda overlay: None
 
     controller = CompositeEditController()
-    layer = controller.create_layer("井点", "point")
-    stack.check_errors = [{
-        **_OVERLAP_ERROR, "layer_id": layer.id, "feature_id": "x",
-    }]
+    # FakeCheckerStack 具备原生编辑面——本用例钉 Python 会话路径，显式关掉
+    # 原生翻转（原生会话的门禁见 test_scenario13 / test_qgis_topo_m4_checker）。
+    controller._native_session_eligible = lambda _layer: False
+    layer = controller.create_layer("相带", "polygon", template="facies")
+    # 桥检查器面在位但零错误：阻断只能来自工作副本（这正是回归点）。
+    stack.check_errors = []
     controller.attach_canvas(canvas)
     controller.set_topology(True)
     controller.start_editing()
     assert layer.edit_session is not None
+    layer.edit_session.add_feature(VectorFeature(
+        "bad",
+        {"type": "Polygon", "coordinates": [
+            [[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0], [0.0, 0.0]]]},
+        {},
+    ))
 
     reason = controller.save_edits()
     assert reason and "拓扑" in reason, reason
     assert layer.edit_session is not None
 
-    controller.topology.checker.ignore(
-        stack.check_errors[0], reason="accepted")
+    # 忽略豁免归检查器：面板判"地质上可接受"后同一会话保存放行。
+    for issue in controller.topology.validate([layer]):
+        controller.topology.checker.ignore(issue, reason="accepted")
     assert controller.save_edits() is None
     assert layer.edit_session is None
 

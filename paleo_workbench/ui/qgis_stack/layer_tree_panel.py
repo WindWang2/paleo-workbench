@@ -435,6 +435,12 @@ class QgisLayerTreePanel(QWidget):
         # active_layer_changed（见 _publishing 注释）。
         if getattr(self, "_publishing", False):
             return
+        # 组结构 reconcile 同属程序化重排（建组/放置/阶段显隐）：重建节点会让
+        # 原生树选中瞬时清空，若当作用户切层外发，活动图层被清成 None——
+        # 刚建好的图层随即"没有活动的矢量图层"，编辑入口直接失效。
+        controller = self._group_controller
+        if controller is not None and getattr(controller, "reconciling", False):
+            return
         self._selected_doc_id = doc_id or None
         self._sync_opacity(self._selected_doc_id)
         # V11（A1）：探针在场时删除按钮按 facts 门禁（editable 旗标或 RAW
@@ -589,7 +595,10 @@ class QgisLayerTreePanel(QWidget):
             if layer is not None and layer.name != name:
                 self._layers[self._layers.index(layer)] = replace(layer, name=name)
         if changes.order:
-            listed = [self.layer_by_id(doc) for doc in changes.order]
+            # 桥回声 order 是 top-first（显示序，与 mirror 推送约定一致），
+            # 而 _layers 是组装序（自下而上，V11 04-ordering §5）——必须反转，
+            # 否则树内重排写回后顺序被倒置/看起来没生效（用户重排静默丢失）。
+            listed = [self.layer_by_id(doc) for doc in reversed(changes.order)]
             listed = [layer for layer in listed if layer is not None]
             listed_ids = {layer.id for layer in listed}
             unlisted = [layer for layer in self._layers if layer.id not in listed_ids]

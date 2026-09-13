@@ -38,10 +38,27 @@ def test_create_layer_appends_editable_snapshot(qtbot, tmp_path):
     assert snapshot.name == "相带边界"
     assert snapshot.metadata["editable"] == "true"
     assert snapshot.metadata["geometry_kind"] == "polygon"
-    # 用户图层绘制在基础工区图层之上（显示序自上而下：新层置顶）。
-    assert layers[0].id == layer.id
+    # 用户图层绘制在基础工区图层之上（快照自下而上：末位 = 顶层；
+    # 桥侧 top-first 由 mirror 显式反转，V11 04-ordering §5）。
+    assert layers[-1].id == layer.id
     # 新建图层即成为活动图层
     assert document.edit_controller.active_layer_id == layer.id
+
+
+def test_create_layer_keeps_active_layer_after_group_reconcile(qtbot, tmp_path):
+    """建层后的组结构 reconcile 不得把活动图层清成 None（回归）。
+
+    reconcile 重建原生树节点会让选中瞬时清空；该跳变若当作用户切层外发，
+    活动图层被清空——新建图层随即"没有活动的矢量图层"，开始编辑、数字化
+    工具、属性表全部失效（曾经的 11 个红测试共因）。
+    """
+    document = _document(qtbot, tmp_path)
+    controller = document.edit_controller
+    layer = controller.create_layer("相带边界", "polygon")
+    assert controller.active_layer_id == layer.id, (
+        "组 reconcile 后活动图层必须存活")
+    controller.start_editing()
+    assert controller.editing, "建层后必须能直接开始编辑"
 
 
 def test_editing_session_add_undo_redo_save(qtbot, tmp_path):
@@ -71,9 +88,13 @@ def test_editing_session_add_undo_redo_save(qtbot, tmp_path):
     assert len(layer.features()) == 1
 
 
-def test_rollback_discards_working_copy(qtbot, tmp_path):
+def test_rollback_discards_working_copy(qtbot, tmp_path, monkeypatch):
     document = _document(qtbot, tmp_path)
     controller = document.edit_controller
+    # 宿主捕获工具 + Python 工作副本的回滚语义（原生回滚见
+    # test_topo_m1_native_editing.test_rollback_restores_baseline_and_closes_window）。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("断层线", "line")
     controller.start_editing()
     controller.activate_tool("add_line")
@@ -236,9 +257,12 @@ def test_rename_layer(qtbot, tmp_path):
     assert layer.name == "井位注记"
 
 
-def test_layers_persist_into_project_document(qtbot, tmp_path):
+def test_layers_persist_into_project_document(qtbot, tmp_path, monkeypatch):
     document = _document(qtbot, tmp_path)
     controller = document.edit_controller
+    # 宿主捕获 → 工程文档写回（原生提交写回见 test_topo_m1_native_editing）。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     layer = controller.create_layer("断层 F1", "line", template="fault")
     controller.start_editing()
     controller.activate_tool("add_line")
@@ -347,17 +371,15 @@ def test_tree_rename_writes_back_to_authority_and_project(qtbot, tmp_path):
     panel = document.layer_manager
 
     if getattr(panel, "tree_host", None) is not None:
+        import json as _json
+
         tree = panel.tree_host.tree_view_address
         stack = document.canvas.stack
-
-        def row_of(name):
-            for row in range(stack.tree_view_row_count(tree)):
-                if stack.tree_view_layer_name(tree, row) == name:
-                    return row
-            return None
-
-        qtbot.waitUntil(lambda: row_of("井点") is not None, timeout=3000)
-        stack.tree_view_rename_row(tree, row_of("井点"), "井点A")
+        # 原生树内联改名：面板经 _on_tree_change 回写（见面板 docstring）。
+        # 图层分组后不在顶层行，桥的 tree_view_*_row 只索引顶层——投递树
+        # 变更回调本身，断言回写权威 + 持久化；显示名由 reconcile 下推。
+        assert stack.tree_view_select_doc(tree, layer.id), "图层应在原生树中"
+        panel._on_tree_change(_json.dumps({"renames": {layer.id: "井点A"}}))
         qtbot.waitUntil(lambda: controller.layer(layer.id).name == "井点A", timeout=2000)
     else:
         from PySide6.QtWidgets import QInputDialog
@@ -397,10 +419,8 @@ def test_tree_rename_writes_back_to_authority_and_project(qtbot, tmp_path):
     if getattr(panel, "tree_host", None) is not None:
         stack = document.canvas.stack
         tree = panel.tree_host.tree_view_address
-        qtbot.waitUntil(lambda: any(
-            stack.tree_view_layer_name(tree, row) == "井点A"
-            for row in range(stack.tree_view_row_count(tree))
-        ), timeout=3000)
+        # 重命名后原生树仍持有该图层节点（名字下推由 reconcile 承担）。
+        assert stack.tree_view_select_doc(tree, layer.id)
     else:
         qtbot.waitUntil(lambda: any(
             "井点A" in panel.tree.topLevelItem(r).text(0)
@@ -501,7 +521,16 @@ def test_fallback_opens_properties_for_base_workarea_layers(qtbot, tmp_path, mon
     发状态栏消息然后 return——井位 / 工区边界 / 参考层点了等于没点。
     """
     from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
+    from paleo_workbench.ui.workstation import composite_document as cd
 
+    # 回退画布只在桥缺失/初始化失败时出现；本机桥已构建，必须显式制造失败
+    # （_create_canvas 的降级契约），否则测试前提随环境漂移。
+    # 必须是"类型"——宿主链路里有 isinstance(canvas, QgisCanvasShim) 判别。
+    class _NoBridgeShim(cd.QgisCanvasShim):
+        def __init__(self, *_args, **_kwargs):
+            raise RuntimeError("桥不可用（测试强制回退画布）")
+
+    monkeypatch.setattr(cd, "QgisCanvasShim", _NoBridgeShim)
     document = _document(qtbot, tmp_path)
     assert not document.uses_native_stack
     assert document._base_layers, "工区基础图层应已随 set_project 组装"

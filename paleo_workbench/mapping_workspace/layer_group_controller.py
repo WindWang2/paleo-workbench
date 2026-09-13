@@ -93,6 +93,8 @@ class LayerGroupController:
         self._order_keys: dict[str, str] = {}
         # V11 已应用的树修订号（回声过期判定；0 = 未知/旧桥）。
         self._applied_tree_revision: int = 0
+        # 程序化树应用窗口：期间原生树选中跳变是重排噪声，不是用户切层。
+        self.reconciling: bool = False
         # R6 降级原因（None = 可用；宿主呈现持久状态）。
         self._last_degraded_reason: str | None = None
         # V11 最近一次 reconcile 的组成快照（阶段切换时空组重物化用）。
@@ -353,8 +355,12 @@ class LayerGroupController:
         self._last_snapshots = list(layer_snapshots)
         desired = self.build_desired_tree(layer_snapshots)
         try:
-            with tree_transaction(self._stack) as window:
-                self._apply_tree(desired, force=force)
+            self.reconciling = True
+            try:
+                with tree_transaction(self._stack) as window:
+                    self._apply_tree(desired, force=force)
+            finally:
+                self.reconciling = False
             revision = window.get("revision")
             if isinstance(revision, int) and revision > 0:
                 self._applied_tree_revision = revision
