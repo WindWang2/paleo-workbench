@@ -17,6 +17,20 @@ __all__ = ["merge_selected_polygons", "split_polygon_by_line"]
 
 
 def merge_selected_polygons(session: VectorEditSession, feature_ids: Iterable[str]) -> str:
+    # 前置校验在分发前统一：原生路径不校验输入，空坐标会让桥抛低层
+    # QgisGeometryError（不可读消息直漏用户）。两条路径共用同一组拒绝语义
+    # ——与 _shapely_merge 的既有措辞一致（回归：round2 review 空坐标用例）。
+    ids = tuple(dict.fromkeys(str(feature_id) for feature_id in feature_ids))
+    if len(ids) < 2:
+        raise ValueError("select at least two polygons to merge")
+    features = [session.feature(feature_id) for feature_id in ids]
+    if any(
+        feature.geometry["type"] not in {"Polygon", "MultiPolygon"}
+        for feature in features
+    ):
+        raise ValueError("only polygon features can be merged")
+    if any(not feature.geometry.get("coordinates") for feature in features):
+        raise ValueError("selected polygons cannot form a valid merged polygon")
     if qgis_bridge_available():
         from paleo_workbench.mapping.geometry_service import (
             merge_selected_polygons as qgis_merge,

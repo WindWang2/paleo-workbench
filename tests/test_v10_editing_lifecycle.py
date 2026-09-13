@@ -10,6 +10,23 @@ from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.workstation.composite_document import CompositeDocument
 
 
+@pytest.fixture(autouse=True)
+def _python_session_path(monkeypatch):
+    """本文件钉**回退画布路径 + session 级不变量**（见模块 docstring）。
+    polygon/line 已翻原生会话（M5），故统一把会话资格钉回 Python 路径，
+    否则「采集中途切层不打断」这类 session 级语义会被原生重绑覆盖。
+    原生腿由 qgis-marked 用例覆盖（test_qgis_topo_*）。"""
+    from paleo_workbench.ui.workstation.composite_editing import (
+        CompositeEditController,
+    )
+
+    monkeypatch.setattr(
+        CompositeEditController,
+        "_native_session_eligible",
+        lambda _self, _layer: False,
+    )
+
+
 def _project(tmp_path: Path) -> ProjectDocument:
     project = ProjectDocument.new("Pearl River Mouth", region="HZ26")
     project.meta.project_root = str(tmp_path)

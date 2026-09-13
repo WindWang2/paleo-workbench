@@ -66,7 +66,11 @@ def test_manifest_declares_v10_features(bridge):
         "current_layer_clear", "digitize_scratch_honest_crs",
     ):
         assert flag in features, f"manifest 缺少 V10 特性 {flag}"
-    assert bridge.__version__ >= "0.6.0a0"
+    # 版本号必须按版本语义比较：字符串比较在 0.10+ 会假红
+    # （'0.11.0a0' < '0.6.0a0' 字典序），也对 0.10 vs 0.9 误判。
+    from packaging.version import Version
+
+    assert Version(bridge.__version__) >= Version("0.6.0a0")
 
 
 def test_runtime_facts_reports_versions_and_probes(stack):

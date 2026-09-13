@@ -17,6 +17,23 @@ from paleo_workbench.mapping.tool_availability import evaluate_all
 from paleo_workbench.mapping.vector_layer import VectorFeature
 
 
+@pytest.fixture(autouse=True)
+def _python_session_path(monkeypatch):
+    """本文件钉**回退语义**下的契约集成（docstring：runs headless on the
+    fallback canvas）。polygon/line 已翻原生会话（M5），故统一把会话资格钉回
+    Python 路径——「fallback stack records honestly」这类断言测的正是它。
+    原生腿由 qgis-marked 用例覆盖（test_qgis_topo_*）。"""
+    from paleo_workbench.ui.workstation.composite_editing import (
+        CompositeEditController,
+    )
+
+    monkeypatch.setattr(
+        CompositeEditController,
+        "_native_session_eligible",
+        lambda _self, _layer: False,
+    )
+
+
 def _polygon(fid: str, offset: float = 0.0) -> VectorFeature:
     return VectorFeature(
         fid,
@@ -139,8 +156,12 @@ class TestEditDeltaWorkstationFlow:
         assert deltas[0].operation == "create_feature"
         assert deltas[0].source_tool == "add_polygon(python-fallback)"
         assert not deltas[0].from_native_tool
-        # Engine provenance token is honest on the fallback stack.
-        assert deltas[0].qgis_capability == "unavailable"
+        # 引擎来源诚实：delta 的 token = 宿主注入的能力令牌（会话 ← 控制器
+        # ← 文档单点注入）。字面 "unavailable" 只在宿主从未注入时成立——
+        # 那是控制器类属性的缺省值，不是本环境的契约（本机桥在场，注入的是
+        # 真实能力摘要）。
+        assert deltas[0].qgis_capability == controller.qgis_capability_token
+        assert deltas[0].qgis_capability
 
     def test_split_merge_commands_tagged(self, qtbot, tmp_path, monkeypatch):
         document = _document(qtbot, tmp_path)

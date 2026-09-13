@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""图层显示序语义（自上而下：面板顶 = 画布最上 = 压住下层）。
+"""图层显示序语义（面板顶 = 画布最上 = 压住下层）。
+
+约定的两种读法：**组装列表自下而上**（``_layers`` / 组装快照，末位=最上），
+**面板自上而下**（原生树首行=最上；由 mirror 推桥时的显式反转呈现）。
 
 覆盖：模板分类归属（新建层进工作流组而非未分类）、组装序（用户层在
 上/基础层反转井位压边界）、新层置顶、副本紧邻源层、显示序单一权威
@@ -74,9 +77,9 @@ def test_composition_display_order_top_down(qtbot, tmp_path):
 
     layers = document.layer_manager._layers
     ids = [snapshot.id for snapshot in layers]
-    # 用户层在首位（顶）；基础块 = 权威 _base_layers 的反转（末位垫底）
-    assert ids[0] == layer.id
-    assert ids[1:] == [snap.id for snap in reversed(document._base_layers)]
+    # 组装序自下而上：末位 = 画布最上 = 面板顶（显示时整体反转）。
+    assert ids[-1] == layer.id
+    assert ids[:-1] == [snap.id for snap in document._base_layers]
 
 
 def test_new_layer_heads_controller_order(qtbot, tmp_path):
@@ -88,16 +91,17 @@ def test_new_layer_heads_controller_order(qtbot, tmp_path):
     controller = document.edit_controller
     first = controller.create_layer("层一", "line")
     second = controller.create_layer("层二", "line")
-    assert list(controller._layers.keys())[0] == second.id  # 新层置顶
+    assert list(controller._layers.keys())[-1] == second.id  # 新层置顶（组装序末位）
 
-    # 面板回写：面板列表缺少的新层（新建当拍）置于头，不被压尾
+    # 面板回写：面板列表未覆盖的层保守保持原序**尾部**（apply_display_state
+    # 的异常路径契约），新层不被丢掉。
     controller.apply_display_state([
         SimpleNamespace(id=first.id, visible=True, opacity=1.0)])
-    assert list(controller._layers.keys())[0] == second.id
+    assert list(controller._layers.keys()) == [first.id, second.id]
 
     # 复制置顶（与新建层同语义）
     dup = controller.duplicate_layer(first.id)
-    assert list(controller._layers.keys())[0] == dup.id
+    assert list(controller._layers.keys())[-1] == dup.id
 
 
 def test_persistence_follows_display_order(qtbot, tmp_path):
@@ -112,4 +116,4 @@ def test_persistence_follows_display_order(qtbot, tmp_path):
     controller.sync_to_project(document._project)
     persisted = [record.id for record in document._project.user_vector_layers]
     assert persisted == list(controller._layers.keys())
-    assert persisted[0] == b.id
+    assert persisted[-1] == b.id

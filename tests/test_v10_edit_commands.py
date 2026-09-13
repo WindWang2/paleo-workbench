@@ -30,6 +30,10 @@ def _document(qtbot, tmp_path) -> CompositeDocument:
 
 def _polygon_layer_with(document, features):
     controller = document.edit_controller
+    # 本文件钉**宿主侧 Python 会话**的命令语义（一个动作 = 一个 undo 单元、
+    # delta 映射、选集切换）：polygon 已翻原生会话（M5），此处钉回 Python
+    # 路径；原生等价语义见 test_qgis_topo_m3_geometry_commands。
+    controller._native_session_eligible = lambda _layer: False
     layer = controller.create_layer("相带", "polygon")
     controller.start_editing()
     session = layer.edit_session

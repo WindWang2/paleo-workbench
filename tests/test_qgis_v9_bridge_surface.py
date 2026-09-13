@@ -55,7 +55,10 @@ def canvas(stack, qtbot):
 def test_manifest_declares_v9_features():
     manifest = __import__("qgis_render_bridge").capability_manifest()
     assert "snapping_topological_editing" in manifest["features"]
-    assert __import__("qgis_render_bridge").__version__ >= "0.5.0a0"
+    # 同 v10：版本语义比较（字符串序在 0.10+ 会假红）。
+    from packaging.version import Version
+
+    assert Version(__import__("qgis_render_bridge").__version__) >= Version("0.5.0a0")
 
 
 def test_snapping_config_pushes_topological_editing(stack, canvas):
