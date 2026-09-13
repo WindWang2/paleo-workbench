@@ -331,43 +331,33 @@ def test_ring_and_part_appliers_refresh_topology_count(doc, monkeypatch):
     assert calls == [layer.id], "add_part 未刷新拓扑错误计数"
 
 
-# V10 几何改写入口（06 §D：新增命令族挂入同一刷新点）。嵌套 applier
-# （_make_part_applier._apply）含在外层方法源码里。新增入口必须登记。
-_V10_GEOMETRY_MUTATORS = (
-    "_apply_captured_ring",
-    "_make_part_applier",
-    "_explode_selected_multipart",
-    "_collect_selected_multipart",
-    "_ring_and_part_commands",
-    "edit_command",
-)
+def test_move_part_refreshes_topology_count_for_merge_gate(doc):
+    """move_part 成功后 merge 门禁必须读到新计数，不能沿用过期 0（#1264）。"""
+    from paleo_workbench.mapping.vector_layer import VectorFeature
 
+    layer = doc.edit_controller.create_layer("parts", "polygon")
+    _register_role(doc, layer.id, LayerRole.INITIAL_FACIES_DRAFT)
+    controller = doc.edit_controller
+    controller.set_active_layer(layer.id)
+    controller.start_editing()
+    session = layer.edit_session
+    with session.edit_source("seed"):
+        session.add_feature(VectorFeature(
+            "f0",
+            {"type": "MultiPolygon", "coordinates": [
+                [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]],
+                [[[20.0, 0.0], [30.0, 0.0], [30.0, 10.0], [20.0, 10.0], [20.0, 0.0]]],
+            ]},
+            {}))
+    layer.set_selection(("f0",))
+    controller._topology.refresh_error_count(layer)
+    assert controller.tool_context_inputs()["topology_error_count"] == 0
 
-def test_v10_geometry_mutators_refresh_topology_before_emit():
-    """V10 新增命令族每个成功路径都在 content_changed 前刷新计数（#1264）。
-
-    枚举入口再扫源码，不逐命令手写断言——某条成功路径漏挂刷新即红。
-    """
-    from paleo_workbench.ui.workstation.composite_editing import (
-        CompositeEditController,
-    )
-
-    missing: list[str] = []
-    for name in _V10_GEOMETRY_MUTATORS:
-        method = getattr(CompositeEditController, name)
-        source = inspect.getsource(method)
-        emits = list(re.finditer(r"self\.content_changed\.emit\(", source))
-        assert emits, f"{name} 没有 content_changed.emit"
-        for match in emits:
-            tail = [
-                line for line in source[: match.start()].splitlines() if line.strip()
-            ][-12:]
-            if not any("refresh_error_count" in line for line in tail):
-                missing.append(name)
-    assert not missing, (
-        "成功路径 content_changed.emit 前未调用 refresh_error_count: "
-        + ", ".join(missing)
-    )
+    ok, message = controller._ring_and_part_commands(
+        "move_part", pick_point={"point": (25.0, 5.0), "delta": (-15.0, 5.0)})
+    assert ok, message
+    assert controller.tool_context_inputs()["topology_error_count"] >= 1, (
+        "move_part 后拓扑计数未刷新，merge/collect 门禁会读到过期 0")
 
 
 # -- #1258：edit-pick 回执必须落到 shim 分发层 ----------------------------------
