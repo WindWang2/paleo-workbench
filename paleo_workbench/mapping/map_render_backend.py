@@ -29,6 +29,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, Q
 
 from paleo_workbench.mapping.facies_brush_cache import FaciesPatternBrushCache
 from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
+from paleo_workbench.mapping.revision_cache import LatestRevisionCache
 
 logger = logging.getLogger(__name__)
 
@@ -658,11 +659,13 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._render_generation: int | None = None
         self._render_pending = False
         self._prepared_lock = threading.Lock()
-        self._prepared: dict[str, _PreparedLayer] = {}
+        self._prepared: LatestRevisionCache[str, int, _PreparedLayer] = LatestRevisionCache()
         # #1051: per-(layer, revision, CRS-pair) reprojected geometry. Keyed
         # separately from _prepared because the transform depends on the
         # PROJECT CRS, which can change without a data revision bump.
-        self._reprojected: dict[tuple[str, int, str, str], _PreparedLayer] = {}
+        self._reprojected: LatestRevisionCache[str, tuple[int, str, str], _PreparedLayer] = (
+            LatestRevisionCache()
+        )
         #: Public per-frame warnings (#1051): layers whose CRS differs from
         #: the project CRS and could not be reprojected (pyproj missing or
         #: unresolvable CRS name). Rebuilt by every composition paint so it
@@ -1019,12 +1022,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
         # Drop parsed payloads for layers that left the composition so document
         # switches do not accumulate stale prepared geometry.
         with self._prepared_lock:
-            for layer_id in list(self._prepared):
-                if layer_id not in seen_layers:
-                    del self._prepared[layer_id]
-            for key in list(self._reprojected):
-                if key[0] not in seen_layers:
-                    del self._reprojected[key]
+            self._prepared.prune(seen_layers)
+            self._reprojected.prune(seen_layers)
 
     def _warn_raster_unprojected(
         self, layer: MapLayerSnapshot, project_crs: str, kind: str
@@ -1064,9 +1063,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
         target_name = _normalize_crs_name(project_crs)
         if not source_name or not target_name or source_name == target_name:
             return prepared
-        key = (layer.id, int(layer.data_revision), source_name, target_name)
+        key = (int(layer.data_revision), source_name, target_name)
         with self._prepared_lock:
-            cached = self._reprojected.get(key)
+            cached = self._reprojected.get(layer.id, key)
         if cached is not None:
             return cached
         try:
@@ -1083,16 +1082,16 @@ class FallbackMapRenderBackend(MapRenderBackend):
             )
             return prepared
         with self._prepared_lock:
-            # Keep one entry per layer: a revision bump replaces, not
-            # accumulates, the cached transform.
-            for stale in [k for k in self._reprojected if k[0] == layer.id]:
-                del self._reprojected[stale]
-            self._reprojected[key] = reprojected
+            # One entry per layer: store replaces any previous revision/CRS
+            # pair instead of accumulating cached transforms.
+            self._reprojected.store(layer.id, key, reprojected)
         return reprojected
 
     def _prepared_layer(self, layer: MapLayerSnapshot) -> _PreparedLayer:
-        cached = self._prepared.get(layer.id)
-        if cached is not None and cached.revision == int(layer.data_revision):
+        revision = int(layer.data_revision)
+        with self._prepared_lock:
+            cached = self._prepared.get(layer.id, revision)
+        if cached is not None:
             self._diagnostics["prepared_cache_hits"] += 1
             return cached
         items: list[_PreparedFeature] = []
@@ -1116,11 +1115,11 @@ class FallbackMapRenderBackend(MapRenderBackend):
             layer_type=str(layer.layer_type),
         )
         with self._prepared_lock:
-            existing = self._prepared.get(layer.id)
-            if existing is not None and existing.revision == int(layer.data_revision):
+            existing = self._prepared.get(layer.id, int(layer.data_revision))
+            if existing is not None:
                 self._diagnostics["prepared_cache_hits"] += 1
                 return existing
-            self._prepared[layer.id] = prepared_layer
+            self._prepared.store(layer.id, int(layer.data_revision), prepared_layer)
         self._diagnostics["prepared_cache_misses"] += 1
         self._diagnostics["prepared_layers"] = len(self._prepared)
         return prepared_layer

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+from paleo_workbench.mapping.revision_cache import LatestRevisionCache
+
 # Polygon layers mirror as MultiPolygon so single/multi features share one
 # WKB type on the memory provider (matches qgis_layer_schema's
 # qgis_geometry_type_name; R2-F3).
@@ -219,6 +221,13 @@ _STACK_ID_REFS: dict[int, object] = {}
 def _purge_stack_entries(stack_id: int) -> None:
     for key in [key for key in _MIRROR_LEDGER if key[0] == stack_id]:
         del _MIRROR_LEDGER[key]
+    # V12-C：三表同命运——栈地址被复用/栈消亡时，签名缓存与 raster 台账
+    # 也一并失效（此前只清主台账；残留旧签会让新栈首次发布的 no-op 判定
+    # 读到陈旧基线，#1257 同族隐患）。
+    for subject in [s for s in _SIGNATURE_CACHE.subjects() if s[0] == stack_id]:
+        _SIGNATURE_CACHE.remove(subject)
+    for key in [key for key in _RASTER_LEDGER if key[0] == stack_id]:
+        del _RASTER_LEDGER[key]
 
 
 def _ledger_key(stack, layer_id: str) -> tuple[int, str]:
@@ -242,10 +251,13 @@ def _ledger_key(stack, layer_id: str) -> tuple[int, str]:
     return (stack_id, str(layer_id))
 
 
-#: V11（O(changed) delta 路径）：逐要素签名缓存——(stack, layer,
-#: data_revision) → (fid → signature)。同修订重发布命中时零重算；
-#: 修订变化时缓存旧值作旧签基线（触及要素重签确认），发布成功后刷新。
-_SIGNATURE_CACHE: dict[tuple[int, str, int], dict[str, tuple]] = {}
+#: V11（O(changed) delta 路径）：逐要素签名缓存——(stack, layer) 主体保留
+#: 一个修订的 (fid → signature)。同修订重发布命中时零重算（get 精确匹配
+#: 修订）；发布成功后 store 新修订并替换旧修订。容器契约见
+#: :class:`paleo_workbench.mapping.revision_cache.LatestRevisionCache`。
+_SIGNATURE_CACHE: LatestRevisionCache[tuple[int, str], int, dict[str, tuple]] = (
+    LatestRevisionCache()
+)
 
 
 class _RasterLedgerEntry:
@@ -266,6 +278,13 @@ _RASTER_LEDGER: dict[tuple[int, str], _RasterLedgerEntry] = {}
 def reset_publish_ledger() -> None:
     """Clear the publish ledger (stack re-created / project switched)."""
     _MIRROR_LEDGER.clear()
+    # V10：栈 id 登记一并清（防长期进程里 False 标记累积）。
+    _STACK_ID_REFS.clear()
+    # V11：签名缓存 + raster 台账一并清（project 切换后旧签全部失效）。
+    # （V12-C：这三行原本误置于 _layer_ledger_tokens 的 return 之后，
+    # 从未执行——reset 不清缓存是 #1257 同族的陈旧隐患，现接回。）
+    _SIGNATURE_CACHE.clear()
+    _RASTER_LEDGER.clear()
 
 
 def align_publish_ledger(stack, layer) -> bool:
@@ -398,11 +417,6 @@ def _layer_ledger_tokens(layer) -> dict:
             _feature_signature(f) for f in features},
         "scale_range": _scale_range_token(layer),
     }
-    # V10：栈 id 登记一并清（防长期进程里 False 标记累积）。
-    _STACK_ID_REFS.clear()
-    # V11：签名缓存 + raster 台账一并清（project 切换后旧签全部失效）。
-    _SIGNATURE_CACHE.clear()
-    _RASTER_LEDGER.clear()
 
 
 def _doc_declares(method, *names: str) -> bool:
@@ -865,10 +879,11 @@ def mirror_snapshot_to_stack(
                 seen.append(layer.id)
                 continue
             # V11：同修订缓存命中检查（ledger_active 确定后）。
-            cache_key = (id(stack), str(layer.id), int(layer_revision)) \
-                if ledger_active else None
-            cached_signatures = _SIGNATURE_CACHE.get(cache_key) \
-                if cache_key is not None else None
+            signature_subject = (id(stack), str(layer.id)) if ledger_active else None
+            cached_signatures = (
+                _SIGNATURE_CACHE.get(signature_subject, int(layer_revision))
+                if signature_subject is not None else None
+            )
             if cached_signatures is not None and len(cached_signatures) != len(features):
                 cached_signatures = None  # 要素增删 → 缓存作废，全签重建
             unchanged = (
@@ -1017,10 +1032,13 @@ def mirror_snapshot_to_stack(
                     continue
             if ledger_active:
                 # V11：发布后刷新缓存——优先级：差分确认新签（fresh，已算
-                # 过）> 同修订旧缓存 > 重签。旧修订条目逐出防无界增长。
+                # 过）> 同修订旧缓存 > 重签。store 替换同主体旧修订（至多
+                # 一修订，防无界增长）。
                 post_signatures: dict[str, tuple] = {}
-                cached_now = (_SIGNATURE_CACHE.get(cache_key)
-                              if cache_key is not None else None)
+                cached_now = (
+                    _SIGNATURE_CACHE.get(signature_subject, int(layer_revision))
+                    if signature_subject is not None else None
+                )
                 for f in features:
                     fid = str((f.get("properties") or {}).get("__pwb_fid")
                               or (f.get("properties") or {}).get("id") or "")
@@ -1030,14 +1048,9 @@ def mirror_snapshot_to_stack(
                         post_signatures[fid] = cached_now[fid]
                     else:
                         post_signatures[fid] = _feature_signature(f)
-                _SIGNATURE_CACHE[cache_key] = dict(post_signatures) \
-                    if cache_key is not None else post_signatures
-                if cache_key is not None:
-                    for old_key in [key_ for key_ in _SIGNATURE_CACHE
-                                    if key_[0] == cache_key[0]
-                                    and key_[1] == cache_key[1]
-                                    and key_[2] != cache_key[2]]:
-                        del _SIGNATURE_CACHE[old_key]
+                if signature_subject is not None:
+                    _SIGNATURE_CACHE.store(
+                        signature_subject, int(layer_revision), dict(post_signatures))
                 _MIRROR_LEDGER[_ledger_key(stack, layer.id)] = _LedgerEntry(
                     layer_revision, style_sig, bool(layer.visible),
                     float(layer.opacity), geom, dict(post_signatures),
@@ -1064,10 +1077,10 @@ def mirror_snapshot_to_stack(
         for stale_key in [key for key in _MIRROR_LEDGER
                           if key[0] == id(stack) and key not in keep_keys]:
             del _MIRROR_LEDGER[stale_key]
-        for stale_key in [key for key in _SIGNATURE_CACHE
-                          if key[0] == id(stack)
-                          and (key[0], key[1]) not in keep_keys]:
-            del _SIGNATURE_CACHE[stale_key]
+        # 签名缓存剪除只作用于本栈（多画布并存时别的栈的条目不动）。
+        for subject in [s for s in _SIGNATURE_CACHE.subjects()
+                        if s[0] == id(stack) and s not in keep_keys]:
+            _SIGNATURE_CACHE.remove(subject)
         for stale_key in [key for key in _RASTER_LEDGER
                           if key[0] == id(stack) and key not in keep_keys]:
             del _RASTER_LEDGER[stale_key]
