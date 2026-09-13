@@ -2663,6 +2663,7 @@ class CompositeEditController(QObject):
                 dx, dy = spec.get("delta", (0.0, 0.0))
                 with session.edit_source("move_part(command)"):
                     session.move_part(feature_id, part_index, float(dx), float(dy))
+                self._topology.refresh_error_count(layer)
                 self.content_changed.emit(layer.id)
                 self.state_changed.emit()
                 return True, "已平移部件"

@@ -331,6 +331,45 @@ def test_ring_and_part_appliers_refresh_topology_count(doc, monkeypatch):
     assert calls == [layer.id], "add_part 未刷新拓扑错误计数"
 
 
+# V10 几何改写入口（06 §D：新增命令族挂入同一刷新点）。嵌套 applier
+# （_make_part_applier._apply）含在外层方法源码里。新增入口必须登记。
+_V10_GEOMETRY_MUTATORS = (
+    "_apply_captured_ring",
+    "_make_part_applier",
+    "_explode_selected_multipart",
+    "_collect_selected_multipart",
+    "_ring_and_part_commands",
+    "edit_command",
+)
+
+
+def test_v10_geometry_mutators_refresh_topology_before_emit():
+    """V10 新增命令族每个成功路径都在 content_changed 前刷新计数（#1264）。
+
+    枚举入口再扫源码，不逐命令手写断言——某条成功路径漏挂刷新即红。
+    """
+    from paleo_workbench.ui.workstation.composite_editing import (
+        CompositeEditController,
+    )
+
+    missing: list[str] = []
+    for name in _V10_GEOMETRY_MUTATORS:
+        method = getattr(CompositeEditController, name)
+        source = inspect.getsource(method)
+        emits = list(re.finditer(r"self\.content_changed\.emit\(", source))
+        assert emits, f"{name} 没有 content_changed.emit"
+        for match in emits:
+            tail = [
+                line for line in source[: match.start()].splitlines() if line.strip()
+            ][-12:]
+            if not any("refresh_error_count" in line for line in tail):
+                missing.append(name)
+    assert not missing, (
+        "成功路径 content_changed.emit 前未调用 refresh_error_count: "
+        + ", ".join(missing)
+    )
+
+
 # -- #1258：edit-pick 回执必须落到 shim 分发层 ----------------------------------
 
 class _Recorder:
