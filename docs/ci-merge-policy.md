@@ -106,3 +106,7 @@ Code staged in #234 that makes the Windows build clean:
 - Issue #234 — Windows CI + advisory suite cleanup
 - PR #233 — Well Log Workstation phase-1 + engine bridge
 - Map #207 — wayfinder product map (closed)
+
+## Review follow-up (2026-09-13)
+
+QGIS renderer path filters now also include paleo_workbench/ui/workstation/** and paleo_workbench/qgis_runtime/** so 编图 host / runtime loader changes re-run the bridge gate.
