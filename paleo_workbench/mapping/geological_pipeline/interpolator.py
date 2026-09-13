@@ -42,6 +42,48 @@ class KrigingInterpolator(Interpolator):
         grid_x = np.linspace(xmin, xmax, grid_n, dtype=np.float64)
         grid_y = np.linspace(ymin, ymax, grid_n, dtype=np.float64)
 
+        if _neighborhood_requested(options.max_neighbors, options.search_radius):
+            # V12-B (decision D3): the geoviz engine takes no neighbourhood
+            # parameters, so honouring them means the numpy moving-
+            # neighbourhood path — an explicit, disclosed downgrade of the
+            # variogram estimator whenever the engine would have been used.
+            grid_z, grid_var, algo_params = _pure_numpy_kriging(
+                xs, ys, zs, grid_x, grid_y,
+                model=options.variogram_model,
+                max_neighbors=options.max_neighbors,
+                search_radius=options.search_radius,
+                min_neighbors=options.min_neighbors,
+            )
+            algo_params["sample_points"] = [
+                {"well": p.well_name or p.well_id, "x": p.x, "y": p.y, "value": p.value}
+                for p in dataset.valid_points
+            ]
+            algo_params["degraded"] = True
+            algo_params["degraded_reason"] = (
+                "moving-neighbourhood kriging runs on the numpy path "
+                "(geoviz engine exposes no max_neighbors/search_radius); "
+                "variogram fitted with numpy grid-OLS, not the engine's "
+                "weighted WLS fit; r_squared not computed (engine LOO "
+                "unavailable on this path)"
+            )
+            algo_params["variogram_fit"] = "numpy-grid-ols"
+            algo_params["r_squared"] = None
+            return FactorGridResult(
+                grid_z=np.asarray(grid_z, dtype=np.float32),
+                grid_x=grid_x,
+                grid_y=grid_y,
+                factor_name=dataset.factor_name,
+                algorithm_id="kriging",
+                algorithm_parameters=algo_params,
+                crs=dataset.crs or options.crs,
+                unit=dataset.unit,
+                variance_grid=(
+                    np.asarray(grid_var, dtype=np.float32)
+                    if grid_var is not None
+                    else None
+                ),
+            )
+
         try:
             from geoviz import (
                 fit_variogram,
@@ -350,7 +392,66 @@ def _idw_all_neighbors(
 _KRIGE_TARGET_CELLS = 1 << 26  # ~64M float64 elements ≈ 512 MiB per array
 _KRIGE_TARGET_CHUNK = 1 << 18  # lower bound for tiny sample sets
 
+# Moving-neighborhood budget (V12-B): each chunk holds (k+1)² covariance /
+# system entries per target plus the (chunk, k) query results, so the chunk
+# length scales with the per-target system size instead of the sample count.
+_KRIGE_NEIGHBOR_CELLS = 1 << 26  # ~512 MiB per (chunk, k, k) float64 array
+_KRIGE_NEIGHBOR_CHUNK = 1 << 14
+# Per-target system size cap. A (k+1)² system per target is only tractable
+# for bounded k; beyond this the request is capped and the cap is DISCLOSED
+# in the result metadata (never silently applied).
+_KRIGE_NEIGHBORHOOD_CAP = 256
+
 _KRIGE_MODELS = ("spherical", "exponential", "gaussian")
+
+
+def _neighborhood_requested(
+    max_neighbors: int | None, search_radius: float | None
+) -> bool:
+    """True when the user opted into a bounded kriging neighbourhood."""
+    if max_neighbors is not None and int(max_neighbors) > 0:
+        return True
+    return search_radius is not None and float(search_radius) > 0.0
+
+
+def _effective_neighborhood_k(max_neighbors: int | None, n: int) -> int:
+    """Resolve the per-target kNN size, honouring the tractability cap.
+
+    ``k = min(requested, n, cap)`` — clamping to the sample count is normal
+    kNN semantics (every sample is a neighbour), NOT an approximation; only
+    the cap is, and only ``_neighborhood_disclosure`` marks it.
+    """
+    requested = int(max_neighbors) if max_neighbors is not None else n
+    return int(min(max(1, requested), n, _KRIGE_NEIGHBORHOOD_CAP))
+
+
+def _neighborhood_disclosure(
+    max_neighbors: int | None,
+    search_radius: float | None,
+    min_neighbors: int,
+    n: int,
+) -> dict[str, Any]:
+    """Metadata block that makes every neighbourhood approximation visible."""
+    requested = int(max_neighbors) if max_neighbors is not None else n
+    k_eff = _effective_neighborhood_k(max_neighbors, n)
+    radius = (
+        float(search_radius) if search_radius is not None and search_radius > 0 else None
+    )
+    block: dict[str, Any] = {
+        "engine": "cKDTree-moving",
+        "max_neighbors": k_eff,
+        "requested_max_neighbors": requested,
+        "search_radius": radius,
+        "min_neighbors": max(1, int(min_neighbors)),
+        "capped": min(requested, n) > k_eff,
+    }
+    if block["capped"]:
+        block["cap"] = _KRIGE_NEIGHBORHOOD_CAP
+        block["note"] = (
+            "requested neighbourhood exceeds the tractability cap; "
+            "only the nearest cap samples are used per target"
+        )
+    return block
 
 
 def _deduplicate_samples(
@@ -470,10 +571,153 @@ def _fit_variogram_numpy(
     return nugget, psill, r, int(lag.size)
 
 
+def _kriging_moving_targets(
+    sample_pts: np.ndarray,
+    z: np.ndarray,
+    targets: np.ndarray,
+    cov,
+    sill: float,
+    total_sill: float,
+    max_neighbors: int | None,
+    search_radius: float | None,
+    min_neighbors: int,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Moving-neighbourhood Ordinary Kriging over per-target kNN systems.
+
+    Semantics (V12-B, decisions D2/D3 in docs/development/geopipeline-v12/):
+
+    * each target solves its own augmented OK system restricted to its k
+      nearest samples (optionally pruned by *search_radius*) — NOT an
+      approximation of the global solution: pruned neighbours are
+      eliminated from the system exactly, by zeroing their rows/columns
+      and pinning their weights to 0 while the unbiasedness row still sums
+      the *kept* weights to 1;
+    * targets with fewer than *min_neighbors* kept neighbours are nodata
+      (NaN), matching the IDW neighbourhood contract;
+    * the per-target systems are solved through a batched
+      ``np.linalg.solve((G, k+1, k+1))``; a singular batch falls back to the
+      same solve → scaled-ridge → lstsq ladder as the global path.
+    """
+    from scipy.spatial import cKDTree
+
+    n = len(z)
+    m = len(targets)
+    z_pred = np.full(m, np.nan, dtype=np.float64)
+    variance = np.full(m, np.nan, dtype=np.float64)
+
+    k_eff = _effective_neighborhood_k(max_neighbors, n)
+    radius = (
+        float(search_radius)
+        if search_radius is not None and search_radius > 0
+        else None
+    )
+    tree = cKDTree(sample_pts)
+    system_cells = (k_eff + 1) * (k_eff + 1)
+    chunk_rows = max(64, min(_KRIGE_NEIGHBOR_CHUNK, _KRIGE_NEIGHBOR_CELLS // system_cells))
+    diag = np.arange(k_eff)
+    ridge = 1e-10 * float(sill) if sill > 0 else 1e-10
+
+    for start in range(0, m, chunk_rows):
+        stop = min(start + chunk_rows, m)
+        rows = stop - start
+        dist, idx = tree.query(
+            targets[start:stop],
+            k=k_eff,
+            distance_upper_bound=radius if radius is not None else np.inf,
+            workers=1,
+        )
+        dist = np.asarray(dist, dtype=np.float64).reshape(rows, k_eff)
+        idx = np.asarray(idx).reshape(rows, k_eff)
+        valid = np.isfinite(dist)
+        eligible = valid.sum(axis=1) >= min(min_neighbors, k_eff)
+        sel = np.nonzero(eligible)[0]
+        if sel.size == 0:
+            continue
+
+        d_tn = dist[sel]                      # (G, k)
+        ids = idx[sel]                        # (G, k)
+        keep = valid[sel]                     # (G, k)
+        dropped = ~keep
+        ids_safe = np.where(keep, ids, 0)
+        # neighbour-neighbour distances, in-place to avoid the (G, k, k, 2)
+        # broadcast temp (memory traffic dominates at k² per target)
+        px = sample_pts[ids_safe, 0]          # (G, k)
+        py = sample_pts[ids_safe, 1]
+        d_nn = px[:, :, None] - px[:, None, :]
+        d_nn *= d_nn
+        dyy = py[:, :, None] - py[:, None, :]
+        dyy *= dyy
+        d_nn += dyy
+        np.sqrt(d_nn, out=d_nn)               # (G, k, k)
+
+        g = sel.size
+        Knn = cov(d_nn)                       # cov(0) == sill on the diagonal
+        cov_tn = cov(d_tn)                    # (G, k), reused for rhs + variance
+        if dropped.any():
+            # Exact elimination of pruned neighbours: zero their rows/columns
+            # and pin their weight to 0 (identity row); the Lagrange row then
+            # constrains only the kept weights.
+            drop2 = dropped[:, :, None] | dropped[:, None, :]
+            Knn[drop2] = 0.0
+            diag_vals = Knn[:, diag, diag]
+            diag_vals[dropped] = 1.0
+            Knn[:, diag, diag] = diag_vals
+            cov_tn[dropped] = 0.0
+        K = np.zeros((g, k_eff + 1, k_eff + 1), dtype=np.float64)
+        K[:, :k_eff, :k_eff] = Knn
+        lagrange_col = np.where(dropped, 0.0, 1.0)
+        K[:, k_eff, :k_eff] = lagrange_col
+        K[:, :k_eff, k_eff] = lagrange_col
+
+        rhs = np.zeros((g, k_eff + 1), dtype=np.float64)
+        rhs[:, :k_eff] = cov_tn
+        rhs[:, k_eff] = 1.0
+
+        try:
+            W = np.linalg.solve(K, rhs[:, :, None])[:, :, 0]
+        except np.linalg.LinAlgError:
+            W = np.empty_like(rhs)
+            for gi in range(g):
+                W[gi] = _solve_single_system(K[gi], rhs[gi], ridge, k_eff)
+
+        w = W[:, :k_eff]
+        mu = W[:, k_eff]
+        z_vals = z[ids_safe]
+        z_vals[dropped] = 0.0
+        z_pred[start + sel] = (w * z_vals).sum(axis=1)
+        variance[start + sel] = np.maximum(
+            0.0,
+            total_sill - ((w * cov_tn).sum(axis=1) + mu),
+        )
+
+    stats = _neighborhood_disclosure(max_neighbors, search_radius, min_neighbors, n)
+    return z_pred, variance, stats
+
+
+def _solve_single_system(
+    K: np.ndarray, rhs: np.ndarray, ridge: float, k: int
+) -> np.ndarray:
+    """solve → scaled-ridge → lstsq ladder for one singular target system."""
+    try:
+        return np.linalg.solve(K, rhs)
+    except np.linalg.LinAlgError:
+        regularized = K.copy()
+        idx = np.arange(k)
+        regularized[idx, idx] += ridge * float(k)
+        try:
+            return np.linalg.solve(regularized, rhs)
+        except np.linalg.LinAlgError:
+            weights, *_ = np.linalg.lstsq(regularized, rhs, rcond=None)
+            return weights
+
+
 def _pure_numpy_kriging(
     x: np.ndarray, y: np.ndarray, z: np.ndarray,
     grid_x: np.ndarray, grid_y: np.ndarray,
     model: str = "spherical",
+    max_neighbors: int | None = None,
+    search_radius: float | None = None,
+    min_neighbors: int = 1,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Self-contained numpy Ordinary Kriging fallback (#1036 remediation).
 
@@ -490,6 +734,12 @@ def _pure_numpy_kriging(
       the unbiasedness constraint;
     * target evaluation is chunked so the (M x N) broadcast stays
       memory-bounded for large grids.
+
+    V12-B: *max_neighbors* / *search_radius* / *min_neighbors* opt into a
+    moving-neighbourhood evaluator (per-target kNN systems via cKDTree).
+    With both neighbourhood knobs unset the global path below runs
+    UNCHANGED — bit-identical to the pre-V12-B fallback (golden baseline
+    ``tests/data/geopipeline_golden``).
     """
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
@@ -521,19 +771,60 @@ def _pure_numpy_kriging(
         z_const = float(np.mean(z))
         gxm, gym = np.meshgrid(grid_x, grid_y)
         var_const = np.full(gxm.shape, max(nugget, 0.0), dtype=np.float64)
+        params = {
+            "method": "kriging_fallback",
+            "model": model_name,
+            "range": r,
+            "sill": float(sill),
+            "nugget": float(nugget),
+            "n_samples": n,
+            "duplicates_merged": duplicates,
+            "variogram_bins": bins,
+            "variogram_fit": "numpy-grid-ols",
+        }
+        if _neighborhood_requested(max_neighbors, search_radius):
+            params["neighborhood"] = _neighborhood_disclosure(
+                max_neighbors, search_radius, min_neighbors, n
+            )
+            params["neighborhood"]["note"] = "constant field: every estimate is the sample mean"
         return (
             np.full_like(gxm, z_const),
             var_const,
+            params,
+        )
+
+    total_sill = sill + nugget
+
+    if _neighborhood_requested(max_neighbors, search_radius):
+        # Moving neighbourhood (V12-B): per-target kNN systems instead of the
+        # global (n+1)² solve — O(M·k³) instead of O(n³ + M·n²).
+        gx, gy = np.meshgrid(grid_x, grid_y)
+        targets = np.stack([gx.ravel(), gy.ravel()], axis=1)  # (M, 2)
+        z_pred, variance, nb_stats = _kriging_moving_targets(
+            sample_pts,
+            z,
+            targets,
+            cov,
+            float(sill),
+            total_sill,
+            max_neighbors,
+            search_radius,
+            min_neighbors,
+        )
+        return (
+            z_pred.reshape((len(grid_y), len(grid_x))),
+            variance.reshape((len(grid_y), len(grid_x))),
             {
                 "method": "kriging_fallback",
                 "model": model_name,
-                "range": r,
+                "range": float(r),
                 "sill": float(sill),
                 "nugget": float(nugget),
                 "n_samples": n,
                 "duplicates_merged": duplicates,
                 "variogram_bins": bins,
                 "variogram_fit": "numpy-grid-ols",
+                "neighborhood": nb_stats,
             },
         )
 
