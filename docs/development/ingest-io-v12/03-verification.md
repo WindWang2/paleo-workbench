@@ -68,7 +68,46 @@ tests/e2e/test_integrity_guard（tautological 守卫）— 33 passed，0 failed�
 （lifecycle 层必须补哈希）→ D6 修正：lifecycle 保持哈希点，新鲜度经
 `_checksum_fresh` 下传，替身接受但忽略。
 
-## 4. TDD 过程记录
+## 4. 双轴 code-review 与修复轮
+
+两位评审 subagent（串行执行，遵守 ≤2 并发预算）：
+
+- **Spec 轴**：FAIL (0 P0, 1 P1) → 修复后全清。
+  - P1（已修）：blob 临时文件 fsync 失败被吞——非耐久 blob 可能静默提交；
+    现在 fsync 失败使整个放置失败（与 payload 侧同契约），并有故障注入钉
+    （`test_blob_fsync_failure_fails_the_import`）。
+  - P2×5：相对路径新鲜度漏洞（已修，只对绝对路径标记 + 边界钉）；
+    `_commit_blob_temp` 异常泄漏临时文件（已修）；source 消失时 fd 泄漏
+    （已修）；显式路径变体测试缺口（已补钉）；无 digest 重复导入多付一次
+    临时写（接受，见 04 #3）。
+- **Standards 轴**：FAIL (0 P0, 2 P1) → 修复后全清。
+  - 两个 P1 均为 docstring 与代码不符（`_collect_entry` 元组语义、
+    lifecycle 新鲜度条件），已改写。
+  - P2×7：注释措辞、"the adapter hashed" 不精确（lifecycle 也会哈希）、
+    死计数器、Recorder 可变类属性、决策文档先例引用错误、measure_io 清理、
+    tickets 拆分——全部处理（除下述）。
+  - 接受项：`_checksum_fresh` 是端口协议上首个下划线参数（文档已如实
+    标注为 deliberate）。
+
+修复轮后全量复跑：主 venv 345 passed；独立 worktree venv 348 passed
+（含 `tests/e2e/test_integrity_guard.py` tautological/integrity 守卫）。
+
+## 5. 最终测量（评审修复后，独立 venv）
+
+| 场景 | 源读 | payload 再读 | 写 |
+|---|---|---|---|
+| S1 service.import_raw（新内容） | 1 | 0 | 2 |
+| S2 UI 漏斗（新内容） | 2 | 0 | 2 |
+| S3 UI 漏斗（dedup 命中） | 1 | 0 | 0 |
+| S4 service dedup（未经证实 digest） | 1 | 0 | 0 |
+| S6 UI 漏斗（幂等命中） | 1 | 0 | 0 |
+
+注：`hashes` 列在清理后只计 `_digest_of`（S4=1，其余 0），与 01-baseline
+的旧口径（含 sha256_file）不可直接对比；源读/payload 再读/写三列口径未变。
+`import_folder` 墙钟在共享机器上噪声大（60~101ms，tmpfs 小文件，见
+04 #4），不作为验收指标；确定性与并发由测试钉死。
+
+## 6. TDD 过程记录
 
 `tests/test_ingest_io_v12.py` 在实现前运行：4 failed（payload 再读、dedup
 双读、串行采集三类钉）+ 3 passed（守卫钉与反向对照）；实现后 7 passed。
