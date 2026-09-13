@@ -209,13 +209,49 @@ GEO_TEMPLATES: tuple[GeoTemplate, ...] = (
         ),
     ),
     GeoTemplate(
-        "facies", "相带", "polygon", default_style_for("facies"),
+        "facies", "相带（相图）", "polygon", default_style_for("facies"),
         fields=(
-            _field("facies", "相带类型", kind="choice",
-                   choices=("冲积扇", "河流", "三角洲", "滨浅湖", "半深湖", "深湖", "海底扇", "浊积", "碳酸盐岩台地")),
+            # 三级相字段：choices 留空——词表驱动，属性表/检查器/选择对话框
+            # 从 FaciesTaxonomy 级联生成选项。
+            _field("facies", "相", kind="choice"),
+            _field("sub_facies", "亚相", kind="choice"),
+            _field("micro_facies", "微相", kind="choice"),
             _field("lithology", "岩性"),
             _field("confidence", "可信度", kind="choice", choices=_CONFIDENCE, default="中"),
             _field("horizon", "层位", required=True),
+            _field("level", "解释级别", kind="choice",
+                   choices=("facies", "sub_facies", "micro_facies")),
+            _field("parent_id", "父级要素"),
+            _field("source", "资料来源"),
+        ),
+    ),
+    GeoTemplate(
+        "facies_sub", "相带（亚相图）", "polygon", default_style_for("facies"),
+        fields=(
+            _field("facies", "相", kind="choice"),
+            _field("sub_facies", "亚相", kind="choice"),
+            _field("micro_facies", "微相", kind="choice"),
+            _field("lithology", "岩性"),
+            _field("confidence", "可信度", kind="choice", choices=_CONFIDENCE, default="中"),
+            _field("horizon", "层位", required=True),
+            _field("level", "解释级别", kind="choice",
+                   choices=("facies", "sub_facies", "micro_facies")),
+            _field("parent_id", "父级要素"),
+            _field("source", "资料来源"),
+        ),
+    ),
+    GeoTemplate(
+        "facies_micro", "相带（微相图）", "polygon", default_style_for("facies"),
+        fields=(
+            _field("facies", "相", kind="choice"),
+            _field("sub_facies", "亚相", kind="choice"),
+            _field("micro_facies", "微相", kind="choice"),
+            _field("lithology", "岩性"),
+            _field("confidence", "可信度", kind="choice", choices=_CONFIDENCE, default="中"),
+            _field("horizon", "层位", required=True),
+            _field("level", "解释级别", kind="choice",
+                   choices=("facies", "sub_facies", "micro_facies")),
+            _field("parent_id", "父级要素"),
             _field("source", "资料来源"),
         ),
     ),
@@ -278,6 +314,25 @@ GEO_TEMPLATES: tuple[GeoTemplate, ...] = (
 )
 
 _TEMPLATE_BY_KEY: dict[str, GeoTemplate] = {t.key: t for t in GEO_TEMPLATES}
+
+#: 相带模板家族（分级变体，词表驱动字段 + 捕获后标注流）。
+FACIES_TEMPLATE_KEYS: frozenset[str] = frozenset(
+    {"facies", "facies_sub", "facies_micro"})
+_FACIES_TEMPLATE_LEVEL: dict[str, str] = {
+    "facies": "facies",
+    "facies_sub": "sub_facies",
+    "facies_micro": "micro_facies",
+}
+
+
+def facies_template_level(template_key: str) -> str | None:
+    """相带模板键 → 图层级解释深度；非相带模板返回 None。"""
+    return _FACIES_TEMPLATE_LEVEL.get(str(template_key or ""))
+
+
+def is_facies_template_layer(templates: Mapping[str, str], layer_id: str) -> bool:
+    """控制器模板注册表里的图层是否属于相带家族。"""
+    return str(templates.get(str(layer_id), "")) in FACIES_TEMPLATE_KEYS
 
 
 def template_by_key(key: str) -> GeoTemplate | None:
@@ -585,6 +640,9 @@ class CompositeEditController(QObject):
     sessions_committed = Signal()
     # M2 §3：全部层档手势波及邻层被门禁拒绝（场景 7——状态条提示）。
     native_join_refused = Signal(str)
+    # 捕获工具落地一个新要素（layer_id, feature_id）——相带层的「指定
+    # 相带」弹窗由此触发（原生/回退两条捕获路径同源）。
+    feature_captured = Signal(str, str)
     # 选择 / 编辑态 / 撤销栈等纯状态变化（驱动工具条使能）。
     state_changed = Signal()
 
@@ -628,6 +686,8 @@ class CompositeEditController(QObject):
         self._pending_native_split: str | None = None
         # 宿主注入的多图层识别回调（Identify Results 面板）；缺省单图层命中。
         self.identify_delegate: Any = None
+        # 相分类词表 provider（属性表级联编辑器同源；无注入则退化为普通编辑）。
+        self.facies_taxonomy_provider: Any = None
         # 修订键控的序列化缓存：数字化点击只重组变化图层，不整层重编码
         # （review #6：100k 要素时每次点击的全量 as_record 是 GUI 线程热点）。
         # (composite revision, session 对象, features 元组, extent, 有序
@@ -1403,6 +1463,35 @@ class CompositeEditController(QObject):
         self.project_crs = crs
         return True, ""
 
+    def apply_facies_selection(
+        self, layer_id: str, feature_id: str, selection: Mapping[str, object]
+    ) -> tuple[bool, str]:
+        """把级联选择结果写到要素（三名称字段 + level）。
+
+        ``parent_id`` 不在此写——三矢量模型落地时由跨层选择专门赋值。
+        """
+        from paleo_workbench.mapping.facies_taxonomy import FaciesTaxonomy
+
+        session, reason = self.ensure_layer_session(layer_id)
+        if session is None:
+            return False, reason
+        values = {
+            "facies": str(selection.get("facies") or ""),
+            "sub_facies": str(selection.get("sub_facies") or ""),
+            "micro_facies": str(selection.get("micro_facies") or ""),
+            "level": FaciesTaxonomy.selection_level(selection),
+        }
+        try:
+            session.begin_edit_command()
+            for key, value in values.items():
+                session.change_attribute(feature_id, key, value)
+        except KeyError as exc:
+            session.destroy_edit_command()
+            return False, str(exc)
+        session.end_edit_command()
+        self.content_changed.emit(str(layer_id))
+        return True, ""
+
     def import_layer_features(self, layer_id: str, features: list) -> None:
         """可信导入通道：向（通常是 RAW 角色的）图层写入初始要素。
 
@@ -1524,6 +1613,8 @@ class CompositeEditController(QObject):
         self.native_editing.gestures.finish(
             new_feature_id("gesture"), undo_text="Added feature",
             layer_ids=[layer.id])
+        if str(self._templates.get(layer.id, "")) in FACIES_TEMPLATE_KEYS:
+            self.feature_captured.emit(layer.id, host_id)
         return True
 
     def cancel_native_capture(self) -> None:
@@ -1912,12 +2003,20 @@ class CompositeEditController(QObject):
                     # V9 W9：模板未指定时按角色捕获语义取默认（角色 → spec →
                     # template_key → field_defaults；无 spec 保持空——不猜）。
                     defaults = self._capture_defaults_for_role(layer.id)
+                captured = (
+                    (lambda fid, _lid=layer.id: self.feature_captured.emit(_lid, fid))
+                    if str(self._templates.get(layer.id, "")) in FACIES_TEMPLATE_KEYS
+                    else None
+                )
                 if action_id == "add_point":
-                    tool = AddPointTool(session, snap=self._snap, attributes=defaults)
+                    tool = AddPointTool(session, snap=self._snap, attributes=defaults,
+                                        on_captured=captured)
                 elif action_id == "add_line":
-                    tool = AddLineTool(session, snap=self._snap, attributes=defaults)
+                    tool = AddLineTool(session, snap=self._snap, attributes=defaults,
+                                       on_captured=captured)
                 elif action_id == "add_polygon":
-                    tool = AddPolygonTool(session, snap=self._snap, attributes=defaults)
+                    tool = AddPolygonTool(session, snap=self._snap, attributes=defaults,
+                                          on_captured=captured)
                 elif action_id == "move_feature":
                     tool = MoveFeatureTool(session, identify=lambda point: index.identify(point, self._tolerance()))
                 elif action_id == "vertex":

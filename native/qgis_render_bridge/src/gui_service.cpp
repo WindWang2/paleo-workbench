@@ -5,6 +5,9 @@
 #include <QDialog>
 #include <QFileInfo>
 #include <QObject>
+#include <QRect>
+#include <QScreen>
+#include <QSize>
 #include <QString>
 #include <QTemporaryDir>
 #include <QThread>
@@ -134,6 +137,23 @@ GuiDialogResult collect_result(QgsVectorLayer& layer, bool ok) {
 
 }  // namespace
 
+
+namespace {
+// 原生 QGIS 对话框的初始尺寸策略：内容区足够可见（不依赖 sizeHint 的
+// 最小化），并夹在屏幕可用区的 85% 内。QMainWindow 类对话框（属性页）
+// 用更大基准。
+void apply_initial_dialog_size(QDialog& dialog, int width, int height) {
+  if (QScreen* screen = dialog.screen()) {
+    const QRect available = screen->availableGeometry();
+    width = qMin(width, static_cast<int>(available.width() * 0.85));
+    height = qMin(height, static_cast<int>(available.height() * 0.85));
+    dialog.resize(QSize(width, height));
+  } else {
+    dialog.resize(QSize(width, height));
+  }
+}
+}  // namespace
+
 GuiDialogResult run_renderer_properties_dialog(const GuiDialogRequest& request) {
     assert_gui_thread();
     DialogSession session(request);
@@ -143,6 +163,7 @@ GuiDialogResult run_renderer_properties_dialog(const GuiDialogRequest& request) 
     if (!request.title.empty()) {
         dialog.setWindowTitle(QString::fromStdString(request.title));
     }
+    apply_initial_dialog_size(dialog, 760, 620);
     dialog.exec();
     return collect_result(*session.layer(), dialog.result() == QDialog::Accepted);
 }
@@ -175,6 +196,7 @@ GuiDialogResult run_symbol_selector_dialog(const GuiDialogRequest& request,
     if (!request.title.empty()) {
         dialog.setWindowTitle(QString::fromStdString(request.title));
     }
+    apply_initial_dialog_size(dialog, 720, 640);
     dialog.exec();
     if (dialog.result() != QDialog::Accepted) {
         GuiDialogResult cancelled;
@@ -204,6 +226,7 @@ bool run_style_manager_dialog(const std::string& style_db_path) {
     }
     (void)QgsGui::instance();
     QgsStyleManagerDialog dialog(style.get(), nullptr);
+    apply_initial_dialog_size(dialog, 720, 560);
     dialog.exec();
     return dialog.result() == QDialog::Accepted;
 }

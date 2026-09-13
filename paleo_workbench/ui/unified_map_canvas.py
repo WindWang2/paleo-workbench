@@ -232,7 +232,72 @@ def _paint_decorations_impl(
             painter.setPen(QColor(_CHROME_INK_ON_DARK_BODY))
             painter.setFont(font)
             painter.drawText(QPointF(rect.left() + 23 * scale, y), label)
+        # 相图类别图例：顶层为分类相图时，在工区图例左侧并排第二箱
+        # （每类 = 底色样块 + SVG 纹理平铺 + 类别名——与画布填充同构）。
+        facies = decorations.get("facies_legend")
+        if isinstance(facies, Mapping) and facies.get("items"):
+            facies_items = [dict(entry) for entry in facies["items"] if isinstance(entry, Mapping)][:10]
+            title = str(facies.get("title") or "相图")
+            f_row = 18 * scale
+            f_height = 12 * scale + f_row * (len(facies_items) + 1)
+            f_width = 176 * scale
+            f_rect = QRectF(rect.left() - f_width - 8 * scale, rect.bottom() - f_height,
+                            f_width, f_height)
+            painter.setPen(QPen(QColor(_CHROME_PANEL_BORDER), 1.0 * scale))
+            painter.setBrush(QColor(_CHROME_PANEL_BG))
+            painter.drawRect(f_rect)
+            title_font = QFont(painter.font())
+            title_font.setBold(True)
+            title_font.setPixelSize(max(8, round(11 * scale)))
+            painter.setPen(QColor(_CHROME_INK_ON_DARK_BODY))
+            painter.setFont(title_font)
+            painter.drawText(QPointF(f_rect.left() + 8 * scale, f_rect.top() + 14 * scale),
+                             title)
+            painter.setFont(font)
+            for index, entry in enumerate(facies_items):
+                label = str(entry.get("label") or "")
+                y = f_rect.top() + 14 * scale + (index + 1) * f_row
+                swatch_rect = QRectF(f_rect.left() + 8 * scale, y - swatch,
+                                     14 * scale, swatch)
+                base = QColor(str(entry.get("color") or "#b0bec5"))
+                if not base.isValid():
+                    base = QColor(_SWATCH_FALLBACK)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(base)
+                painter.drawRect(swatch_rect)
+                pattern_pixmap = _facies_pattern_pixmap(str(entry.get("pattern") or ""))
+                if pattern_pixmap is not None:
+                    painter.drawTiledPixmap(swatch_rect.toRect(), pattern_pixmap)
+                painter.setPen(QColor(_CHROME_INK_ON_DARK_BODY))
+                painter.drawText(QPointF(f_rect.left() + 28 * scale, y), label)
         painter.restore()
+
+
+_PATTERN_PIXMAP_CACHE: dict[str, object] = {}
+
+
+def _facies_pattern_pixmap(pattern_id: str):
+    """相类别纹理样块的 SVG 平铺图（32×32 透明底黑线砖；无映射/加载失败 → None）。"""
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QIcon
+
+    if not pattern_id:
+        return None
+    cached = _PATTERN_PIXMAP_CACHE.get(pattern_id)
+    if cached is not None:
+        return cached
+    from paleo_workbench.mapping.facies_patterns import FACIES_PATTERN_DIR
+
+    path = FACIES_PATTERN_DIR / f"{pattern_id}.svg"
+    if not path.is_file():
+        _PATTERN_PIXMAP_CACHE[pattern_id] = None
+        return None
+    pixmap = QIcon(str(path)).pixmap(QSize(32, 32))
+    if pixmap.isNull():
+        _PATTERN_PIXMAP_CACHE[pattern_id] = None
+        return None
+    _PATTERN_PIXMAP_CACHE[pattern_id] = pixmap
+    return pixmap
 
 
 def paint_map_decorations(

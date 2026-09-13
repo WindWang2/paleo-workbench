@@ -54,8 +54,9 @@ def test_map_layer_properties_shows_managed_when_no_provenance(qtbot):
     dlg = MapLayerPropertiesDialog(layer)
     qtbot.addWidget(dlg)
     label_texts = [lbl.text() for lbl in dlg.findChildren(QLabel)]
-    # The dialog should show "managed" for empty provenance, never a bare "None".
-    assert any("managed" in t for t in label_texts)
+    # The dialog should show a managed-source placeholder for empty provenance,
+    # never a bare "None" (labels are localized Chinese).
+    assert any("工程管理" in t for t in label_texts)
     assert not any(t == "None" for t in label_texts)
     dlg.deleteLater()
 
@@ -135,7 +136,7 @@ def test_layer_properties_apply_blocks_invalid_classes_json(qtbot, monkeypatch):
 
     assert received == []
     assert not dlg.classes_error_label.isHidden()
-    assert "Invalid Classes JSON" in dlg.classes_error_label.text()
+    assert "无效的分级 JSON" in dlg.classes_error_label.text()
 
 
 def test_layer_properties_ok_blocks_invalid_classes_json(qtbot, monkeypatch):
@@ -155,7 +156,7 @@ def test_layer_properties_ok_blocks_invalid_classes_json(qtbot, monkeypatch):
 
     assert dlg.result() != QDialog.DialogCode.Accepted
     assert not dlg.classes_error_label.isHidden()
-    assert "Invalid Classes JSON" in dlg.classes_error_label.text()
+    assert "无效的分级 JSON" in dlg.classes_error_label.text()
     # Editing the text again hides the error and allows acceptance.
     dlg.classes_edit.setPlainText('{"delta": "#6c8ebf"}')
     assert dlg.classes_error_label.isHidden()

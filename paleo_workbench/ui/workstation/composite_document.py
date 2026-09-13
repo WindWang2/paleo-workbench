@@ -336,6 +336,7 @@ class LayerManagerPanel(QFrame):
     """
 
     create_layer_requested = Signal()
+    facies_taxonomy_requested = Signal()
     remove_layer_requested = Signal(str)
     rename_layer_requested = Signal(str)
     # 引用矢量图层（外部 GDAL 源，只读参考）的导入与上下文动作。
@@ -393,6 +394,9 @@ class LayerManagerPanel(QFrame):
         for label, icon, tip, callback in (
             ("新建矢量图层", "map/tree-add-layer.svg", "新建点 / 线 / 面矢量图层", self._on_create_layer),
             ("导入参考图层", "map/tree-add-layer.svg", "导入外部矢量文件作为只读参考（GDAL）", self._on_import_reference),
+            ("相分类词表", "map/tree-attribute-table.svg",
+             "查看/导入/恢复 相-亚相-微相三级分类词表",
+             self.facies_taxonomy_requested.emit),
             ("删除图层", "map/tree-remove.svg", "删除当前矢量图层（编修图层）", self._on_remove_layer),
         ):
             button = QToolButton(self)
@@ -1042,8 +1046,15 @@ class CompositeDocument(QWidget):
             else "unavailable"
         )
         self.edit_controller.attach_canvas(self.canvas)
+        # 相图类别图例：包装控制器 overlay——顶层可见层是分类相图时追加。
+        self.canvas.set_overlay_provider(self._canvas_overlay_state)
         self.edit_controller.identify_delegate = self._identify_with_results
         self._wire_topology_checker_panel()
+        self.edit_controller.facies_taxonomy_provider = self._facies_taxonomy
+        self.edit_controller.feature_captured.connect(self._on_feature_captured)
+        self._facies_style_signature: dict[str, frozenset[str]] = {}
+        self.edit_controller.content_changed.connect(
+            self._refresh_facies_layer_style)
         # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，
         # 源文件永不修改；工程只保存引用描述）。合成顺序固定为
         # 基础工区 → 引用参考 → 编修图层（参考永远垫底）。
@@ -1160,6 +1171,9 @@ class CompositeDocument(QWidget):
                 self._rename_layer_prompt
             )
         self.layer_manager.import_reference_requested.connect(self._import_reference_layer)
+        if hasattr(self.layer_manager, "facies_taxonomy_requested"):
+            self.layer_manager.facies_taxonomy_requested.connect(
+                self.open_facies_taxonomy_dialog)
         self.layer_manager.remove_reference_requested.connect(self._remove_reference_layer)
         self.layer_manager.refresh_reference_requested.connect(self._refresh_reference_layer)
         self.layer_manager.toggle_reference_snap_requested.connect(
@@ -3745,6 +3759,8 @@ class CompositeDocument(QWidget):
         self._attribute_dialog.feature_activated.connect(
             lambda feature_id, lid=layer_id: self._locate_feature(feature_id, lid)
         )
+        self._attribute_dialog.assign_facies_requested.connect(
+            lambda lid=layer_id: self.assign_facies_to_selection(lid))
         self._attribute_dialog.show()
 
     def _locate_feature(self, feature_id: str, layer_id: str | None = None) -> None:
@@ -4068,6 +4084,209 @@ class CompositeDocument(QWidget):
             self.status_message.emit(f"导出失败：{exc}")
             return
         self.status_message.emit(f"已导出 {len(features)} 个要素到 {path}")
+
+    # -- 相分类词表 / 指定相带 -------------------------------------------------
+
+    def facies_taxonomy(self):
+        """当前词表（工程覆盖优先；结果缓存，词表对话框落地时失效）。"""
+        from paleo_workbench.mapping.facies_taxonomy import FaciesTaxonomy
+
+        cached = getattr(self, "_facies_taxonomy_cache", None)
+        if cached is not None:
+            return cached
+        taxonomy = FaciesTaxonomy.from_project(self._project)
+        self._facies_taxonomy_cache = taxonomy
+        return taxonomy
+
+    def _facies_taxonomy(self):
+        """控制器 provider 注入点（属性表级联同源）。"""
+        return self.facies_taxonomy()
+
+    def _canvas_overlay_state(self) -> dict:
+        """画布 overlay 包装：控制器基础态 + 顶层相图类别图例。"""
+        state = self.edit_controller.overlay_state()
+        try:
+            facies = self._top_facies_legend()
+        except Exception:
+            logging.getLogger(__name__).exception("facies legend state failed")
+            facies = None
+        if facies:
+            decorations = dict(state.get("decorations") or {})
+            decorations["facies_legend"] = facies
+            state = dict(state)
+            state["decorations"] = decorations
+        return state
+
+    def _top_facies_legend(self) -> dict | None:
+        layers = getattr(getattr(self, "layer_manager", None), "_layers", None)
+        if not layers:
+            return None
+        for snapshot in layers:
+            if not getattr(snapshot, "visible", True):
+                continue
+            style = getattr(snapshot, "style", None)
+            if not isinstance(style, Mapping):
+                continue
+            if str(style.get("renderer") or "") != "categorized":
+                continue
+            categories = style.get("categories") or {}
+            if not isinstance(categories, Mapping) or not categories:
+                continue
+            patterns = dict(style.get("fill_patterns") or {})
+            items = [
+                {
+                    "label": str(value),
+                    "color": str(fill or "#b0bec5"),
+                    "pattern": str(patterns.get(value) or ""),
+                }
+                for value, fill in list(categories.items())[:10]
+            ]
+            return {"title": str(getattr(snapshot, "name", "") or "相图"),
+                    "items": items}
+        return None
+
+    def _facies_layer_anchor_level(self, layer_id: str) -> str:
+        from paleo_workbench.ui.workstation.composite_editing import (
+            facies_template_level,
+        )
+
+        key = self.edit_controller._templates.get(str(layer_id), "")
+        return facies_template_level(key) or "facies"
+
+    def _is_facies_layer(self, layer_id: str) -> bool:
+        from paleo_workbench.ui.workstation.composite_editing import (
+            is_facies_template_layer,
+        )
+
+        return is_facies_template_layer(self.edit_controller._templates, layer_id)
+
+    def _on_feature_captured(self, layer_id: str, feature_id: str) -> None:
+        self._assign_facies_dialog(layer_id, feature_id)
+
+    def _assign_facies_dialog(self, layer_id: str, feature_id: str) -> None:
+        from paleo_workbench.ui.workstation.facies_selector import (
+            FaciesSelectionDialog,
+        )
+
+        controller = self.edit_controller
+        layer = controller.layer(str(layer_id))
+        if layer is None:
+            return
+        session = layer.edit_session
+        source = session.features() if session is not None else layer.features()
+        feature = next((f for f in source if f.feature_id == feature_id), None)
+        current = dict(feature.attributes) if feature is not None else {}
+        dialog = FaciesSelectionDialog(
+            self.facies_taxonomy(), current,
+            title=f"指定相带 — {layer.name}",
+            anchor_level=self._facies_layer_anchor_level(layer_id),
+            parent=self)
+        if dialog.exec() != FaciesSelectionDialog.DialogCode.Accepted:
+            return
+        ok, reason = controller.apply_facies_selection(
+            layer_id, feature_id, dialog.selection())
+        if not ok:
+            self.status_message.emit(f"相带属性未写入：{reason}")
+
+    def _refresh_facies_layer_style(self, layer_id) -> None:
+        layer_id = str(layer_id or "")
+        if not layer_id or not self._is_facies_layer(layer_id):
+            return
+        controller = self.edit_controller
+        layer = controller.layer(layer_id)
+        if layer is None:
+            return
+        field = self._facies_layer_anchor_level(layer_id)
+        session = layer.edit_session
+        source = session.features() if session is not None else layer.features()
+        values = sorted({
+            str(feature.attributes.get(field) or "").strip()
+            for feature in source
+            if str(feature.attributes.get(field) or "").strip()
+        })
+        if not values:
+            return
+        signature = frozenset(values)
+        if self._facies_style_signature.get(layer_id) == signature:
+            return
+        style = dict(layer.style or {})
+        last = self._facies_style_signature.get(layer_id)
+        if last is not None:
+            managed = (
+                style.get("renderer") == "categorized"
+                and style.get("field") == field
+                and set((style.get("categories") or {}).keys()) == set(last)
+            )
+        else:
+            managed = str(style.get("renderer") or "single") == "single"
+        if not managed:
+            return
+        try:
+            from paleo_workbench.ui.workstation.stage_actions import (
+                _categorized_facies_style,
+            )
+
+            new_style = _categorized_facies_style(
+                [dict(feature.attributes) for feature in source], field=field)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "categorized facies style failed for %s", layer_id)
+            return
+        if not new_style:
+            return
+        controller.set_layer_style(layer_id, new_style)
+        self._facies_style_signature[layer_id] = signature
+
+    def assign_facies_from_inspector(self, payload) -> None:
+        payload = payload if isinstance(payload, dict) else {}
+        result = payload.get("object")
+        result = result if isinstance(result, dict) else {}
+        layer_id = str(
+            payload.get("layer_id") or result.get("layer_id") or "")
+        feature_id = str(result.get("feature_id") or "")
+        if not layer_id or not feature_id:
+            self.status_message.emit("指定相带：检查器没有要素上下文")
+            return
+        if not self._is_facies_layer(layer_id):
+            self.status_message.emit("指定相带：该图层不是相带图层")
+            return
+        self._assign_facies_dialog(layer_id, feature_id)
+
+    def assign_facies_to_selection(self, layer_id: str | None = None) -> None:
+        controller = self.edit_controller
+        layer_id = str(layer_id or controller.active_layer_id or "")
+        if not layer_id or not self._is_facies_layer(layer_id):
+            self.status_message.emit("指定相带：请先选中相带图层")
+            return
+        layer = controller.layer(layer_id)
+        selection = sorted(getattr(layer, "selection", ()) or ())
+        if not selection:
+            self.status_message.emit("指定相带：请先选中要素")
+            return
+        for feature_id in selection:
+            self._assign_facies_dialog(str(layer_id), feature_id)
+
+    def open_facies_taxonomy_dialog(self) -> None:
+        from paleo_workbench.ui.workstation.facies_selector import (
+            FaciesTaxonomyDialog,
+        )
+
+        dialog = FaciesTaxonomyDialog(self.facies_taxonomy(), self)
+        if dialog.exec() != FaciesTaxonomyDialog.DialogCode.Accepted:
+            return
+        taxonomy = dialog.result_taxonomy()
+        if taxonomy is None:
+            return
+        if taxonomy.source == "builtin":
+            self._project.facies_taxonomy = None
+            self.status_message.emit("相分类词表已恢复内置默认（保存工程后生效）")
+        else:
+            self._project.facies_taxonomy = taxonomy.to_project_dict()
+            n = taxonomy.counts()
+            self.status_message.emit(
+                f"相分类词表已更新（相 {n[0]} · 亚相 {n[1]} · 微相 {n[2]}；"
+                "保存工程后生效）")
+        self._facies_taxonomy_cache = None
 
     # -- 识别结果 -------------------------------------------------------------
 

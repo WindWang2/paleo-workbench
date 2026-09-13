@@ -66,12 +66,14 @@ _FACIES_FALLBACK_PALETTE = (
 )
 
 
-def _categorized_facies_style(features: Any) -> dict:
+def _categorized_facies_style(features: Any, *, field: str = "") -> dict:
     """由要素属性构造带图案的沉积相分类样式 dict（无有效相名 → {}）。
 
     输入元素兼容三种形态：(geometry, properties) 二元组、带 "properties"
     键的 GeoJSON 要素、直接的属性 dict。分类值取 facies_name（为空回退
-    facies）；field 按多数要素实际携带的键确定。每类 fill 优先取要素自带
+    facies）；field 按多数要素实际携带的键确定——除非 ``field`` 显式
+    指定（相带分级图层：相图 facies / 亚相图 sub_facies / 微相图
+    micro_facies，此时不做回退交叉取值）。每类 fill 优先取要素自带
     color，其次 geological_symbols 同名类色，最后稳定哈希取回退调色板；
     label 即值本身；fill_patterns 只收录有 SVG 映射的类。
     """
@@ -101,10 +103,18 @@ def _categorized_facies_style(features: Any) -> dict:
 
     name_hits = sum(1 for props in buckets if _clean(props, "facies_name") not in _BLANK_FACIES_VALUES)
     facies_hits = sum(1 for props in buckets if _clean(props, "facies") not in _BLANK_FACIES_VALUES)
-    if not name_hits and not facies_hits:
-        return {}
-    field = "facies_name" if name_hits >= facies_hits else "facies"
-    other = "facies" if field == "facies_name" else "facies_name"
+    forced = str(field or "").strip()
+    if forced:
+        # 相带分级图层：按目标级别字段分类，不与 facies_name 交叉回退。
+        field = forced
+        if not any(_clean(props, field) not in _BLANK_FACIES_VALUES for props in buckets):
+            return {}
+        other = ""
+    else:
+        if not name_hits and not facies_hits:
+            return {}
+        field = "facies_name" if name_hits >= facies_hits else "facies"
+        other = "facies" if field == "facies_name" else "facies_name"
 
     values: list[str] = []
     seen: set[str] = set()

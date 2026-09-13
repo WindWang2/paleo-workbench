@@ -183,6 +183,81 @@ def test_well_and_seismic_are_host_docks(qtbot, tmp_path):
     assert not ws.well_dock.isHidden()
 
 
+def _multi_view_project(tmp_path: Path) -> ProjectDocument:
+    project = _project(tmp_path)
+    project.wells.append(
+        WellEntity(name="B07", surface_x=3.0, surface_y=4.0, project_x=3.0, project_y=4.0)
+    )
+    project.resources.extend(
+        [
+            ResourceItem(
+                name="B07.Las", path="wells/B07.Las", type="well_log", format="las"
+            ),
+            ResourceItem(
+                name="vol_a.sgy", path="seismic/vol_a.sgy", type="seismic", format="segy"
+            ),
+            ResourceItem(
+                name="vol_b.sgy", path="seismic/vol_b.sgy", type="seismic", format="segy"
+            ),
+        ]
+    )
+    return project
+
+
+def _docks_with_id(ws, dock_id: str) -> list[QDockWidget]:
+    return [
+        dock
+        for dock in ws._dock_host.findChildren(QDockWidget)
+        if str(dock.property("pwbDockId") or "") == dock_id
+    ]
+
+
+def test_opening_two_wells_keeps_both_docks(qtbot, tmp_path):
+    shell = AppShell(project=_multi_view_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    ws.show_well("A12")
+    ws.show_well("B07")
+    docks = _docks_with_id(ws, "well")
+    assert len(docks) == 2
+    assert all(not dock.isHidden() for dock in docks)
+    titles = " ".join(dock.windowTitle() for dock in docks)
+    assert "A12" in titles
+    assert "B07" in titles
+    for dock in docks:
+        features = dock.features()
+        assert not (features & QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+
+
+def test_reopening_the_same_well_does_not_duplicate_the_dock(qtbot, tmp_path):
+    shell = AppShell(project=_multi_view_project(tmp_path))
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    ws.show_well("A12")
+    ws.show_well("A12")
+    assert len(_docks_with_id(ws, "well")) == 1
+    assert not ws.well_dock.isHidden()
+
+
+def test_opening_two_seismic_volumes_keeps_both_docks(qtbot, tmp_path):
+    project = _multi_view_project(tmp_path)
+    shell = AppShell(project=project)
+    qtbot.addWidget(shell)
+    ws = shell.workstation
+    volumes = [item for item in project.resources if item.type == "seismic"]
+    ws.show_seismic(volumes[0])
+    ws.show_seismic(volumes[1])
+    docks = _docks_with_id(ws, "seismic")
+    assert len(docks) == 2
+    assert all(not dock.isHidden() for dock in docks)
+    titles = " ".join(dock.windowTitle() for dock in docks)
+    assert "vol_a" in titles
+    assert "vol_b" in titles
+    for dock in docks:
+        features = dock.features()
+        assert not (features & QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+
+
 def test_linked_workspace_has_no_nested_map_document(qtbot, tmp_path):
     shell = AppShell(project=_project(tmp_path))
     qtbot.addWidget(shell)

@@ -258,6 +258,13 @@ class SnappingSettingsDialog(QDialog):
 
         self._populate_layers()
 
+        # 初始尺寸按内容计算：表格行数×行高 + 头尾固定区（此前默认
+        # sizeHint 会把伸展表格压到不可见，用户必须手动拉大窗口）。
+        self._table.setMinimumHeight(150)
+        rows = self._table.rowCount()
+        self.resize(min(760, max(560, 140 + rows * 26)),
+                    min(700, max(470, 370 + rows * 30)))
+
     def _populate_layers(self) -> None:
         """Fill the per-layer table with items, not cell widgets.
 

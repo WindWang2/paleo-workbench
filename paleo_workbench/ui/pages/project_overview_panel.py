@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import style, tokens
 
@@ -80,6 +80,8 @@ class ProjectOverviewPanel(QWidget):
         ]
         for key, caption in specs:
             block = QWidget()
+            block.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
             block_layout = QVBoxLayout(block)
             block_layout.setContentsMargins(0, 0, 0, 0)
             block_layout.setSpacing(tokens.SPACE_1)

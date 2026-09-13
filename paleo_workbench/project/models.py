@@ -622,6 +622,9 @@ class ProjectDocument(BaseModel):
     meta: ProjectMeta
     coordinate: CoordinateReference = Field(default_factory=CoordinateReference)
     stratigraphy: StratigraphicFramework = Field(default_factory=StratigraphicFramework)
+    # 相/亚相/微相三级词表的工程覆盖（None = 用内置默认；结构见
+    # mapping/facies_taxonomy.py：{"source": str, "tree": {相: {亚相: {微相: {}}}}}）。
+    facies_taxonomy: dict[str, Any] | None = None
     # WorkArea-centered domain layer (schema v2, additive & backward compatible:
     # old projects simply carry empty/None domain sections until migrated).
     workarea: WorkArea | None = None

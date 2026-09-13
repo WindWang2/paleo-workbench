@@ -1025,12 +1025,13 @@ def test_composite_imports_reference_vector_layer(qtbot, tmp_path):
     assert reference is not None
     assert len(reference.features) == 2
     assert reference.metadata.get("geometry_kind") == "point"
-    # 合成顺序：引用垫底（基础工区 → 引用 → 编修图层）。
+    # 合成顺序（显示序自上而下）：编修图层 → 引用 → 基础工区——引用在
+    # 用户层之下、基础层之上。
     user = next(
         (layer for layer in layers if layer.metadata.get("editable") == "true"), None
     )
     assert user is not None
-    assert layers.index(reference) < layers.index(user)
+    assert layers.index(reference) > layers.index(user)
 
     # 工程持久化（内存写回；磁盘保存走工程保存流程）。
     assert len(project.workstation_reference_layers) == 1
@@ -1134,6 +1135,21 @@ def test_reference_import_without_gdal_reports_actionably(qtbot, tmp_path, monke
     assert doc.import_reference_layers([str(source)]) == 0
     assert doc._reference_layers == []
     assert any("GDAL" in message for message in log.messages)
+
+
+def test_reference_import_refused_while_project_crs_undeclared(qtbot, tmp_path):
+    """V9 W3 策略（M0 默认下仍成立）：工程 CRS 未声明拒绝参考导入并说明。"""
+    project = _project(tmp_path)
+    assert project.coordinate.project_crs == ""  # M0 新工程默认本地帧
+    doc = CompositeDocument(project)
+    qtbot.addWidget(doc)
+    log = _MessageLog(doc)
+    source = tmp_path / "refs.geojson"
+    _write_reference_points_geojson(source)
+    assert doc.import_reference_layers([str(source)]) == 0
+    assert doc._reference_layers == []
+    assert any(
+        "声明坐标系" in message for message in log.messages), log.messages
 
 
 def test_reference_snap_participation_and_removal(qtbot, tmp_path):

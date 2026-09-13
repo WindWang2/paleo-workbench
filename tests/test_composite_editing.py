@@ -38,8 +38,8 @@ def test_create_layer_appends_editable_snapshot(qtbot, tmp_path):
     assert snapshot.name == "相带边界"
     assert snapshot.metadata["editable"] == "true"
     assert snapshot.metadata["geometry_kind"] == "polygon"
-    # 用户图层绘制在基础工区图层之上（快照自下而上）。
-    assert layers[-1].id == layer.id
+    # 用户图层绘制在基础工区图层之上（显示序自上而下：新层置顶）。
+    assert layers[0].id == layer.id
     # 新建图层即成为活动图层
     assert document.edit_controller.active_layer_id == layer.id
 

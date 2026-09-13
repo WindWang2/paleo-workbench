@@ -212,11 +212,43 @@ class _AttributeTableModel(QAbstractTableModel):
 
 
 class _FieldEditorDelegate(QStyledItemDelegate):
-    """按字段元数据生成编辑器（QGIS 编辑控件词表的表内对应物）。"""
+    """按字段元数据生成编辑器（QGIS 编辑控件词表的表内对应物）。
 
-    def __init__(self, columns_provider, parent=None) -> None:
+    相带三字段（facies/sub_facies/micro_facies）为词表级联：选项由
+    taxonomy provider 动态生成，子级按同行父级值过滤（grill 共识
+    Q3-d/Q1）——静态 choices 为空的 choice 字段走此通道。
+    """
+
+    #: 词表级联字段（键 = FaciesTaxonomy 的三级 level 键）。
+    _FACIES_KEYS = ("facies", "sub_facies", "micro_facies")
+
+    def __init__(self, columns_provider, taxonomy_provider=None, parent=None) -> None:
         super().__init__(parent)
         self._columns_provider = columns_provider
+        # controller.facies_taxonomy_provider（无注入 → 退化为普通编辑器）。
+        self._taxonomy_provider = taxonomy_provider
+
+    def _facies_choices(self, index, field) -> list[str] | None:
+        """该单元格的词表级联选项；非级联字段/无词表返回 None。"""
+        if field.key not in self._FACIES_KEYS or self._taxonomy_provider is None:
+            return None
+        taxonomy = self._taxonomy_provider()
+        if taxonomy is None or not taxonomy:
+            return None
+        # 同行父级链（相[→亚相]当前值）——父为空时该级返回全集。
+        parents = []
+        for key in self._FACIES_KEYS[:self._FACIES_KEYS.index(field.key)]:
+            sibling = index.sibling(index.row(), 1 + self._column_of(key))
+            value = str(sibling.data() or "").strip() if sibling.isValid() else ""
+            parents.append(value)
+        return taxonomy.names(field.key, tuple(parents))
+
+    def _column_of(self, key: str) -> int:
+        columns = self._columns_provider()
+        for column, field in enumerate(columns):
+            if field.key == key:
+                return column
+        return -1
 
     def createEditor(self, parent, option, index):  # noqa: N802
         columns = self._columns_provider()
@@ -224,6 +256,14 @@ class _FieldEditorDelegate(QStyledItemDelegate):
         if column < 0 or column >= len(columns):
             return super().createEditor(parent, option, index)
         field: AttributeFieldMeta = columns[column]
+        facies_choices = self._facies_choices(index, field)
+        if facies_choices is not None:
+            combo = QComboBox(parent)
+            combo.setEditable(True)
+            if field.key != "facies":
+                combo.addItem("")  # 不填（任一级可停）
+            combo.addItems(facies_choices)
+            return combo
         if field.choices:
             combo = QComboBox(parent)
             combo.setEditable(True)
@@ -270,6 +310,8 @@ class CompositeAttributeTableDialog(QDialog):
     """One layer's attribute table, editing through the edit session."""
 
     feature_activated = Signal(str)  # double-clicked feature id (host locates it)
+    # 「指定相带…」请求（宿主弹级联对话框；仅相带家族图层出现菜单项）。
+    assign_facies_requested = Signal()
 
     def __init__(self, controller, layer_id: str, parent=None) -> None:
         super().__init__(parent)
@@ -304,7 +346,19 @@ class CompositeAttributeTableDialog(QDialog):
             QHeaderView.ResizeMode.Interactive
         )
         self.table.horizontalHeader().setSortIndicatorShown(True)
-        self.table.setItemDelegate(_FieldEditorDelegate(self._columns, self.table))
+        self.table.setItemDelegate(_FieldEditorDelegate(
+            self._columns,
+            taxonomy_provider=getattr(controller, "facies_taxonomy_provider", None),
+            parent=self.table))
+        # 相带家族图层：右键选中行 →「指定相带…」（级联对话框宿主侧弹）。
+        from paleo_workbench.ui.workstation.composite_editing import (
+            is_facies_template_layer,
+        )
+
+        if is_facies_template_layer(controller._templates, self._layer_id):
+            self.table.setContextMenuPolicy(
+                Qt.ContextMenuPolicy.CustomContextMenu)
+            self.table.customContextMenuRequested.connect(self._on_context_menu)
         outer.addWidget(self.table, 1)
 
         batch = QFrame(self)
@@ -344,6 +398,17 @@ class CompositeAttributeTableDialog(QDialog):
 
         self.refresh()
         self.resize(720, 420)
+
+    def _on_context_menu(self, position) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        if not self.table.selectedIndexes():
+            return
+        menu = QMenu(self.table)
+        action = menu.addAction("指定相带…")
+        chosen = menu.exec(self.table.viewport().mapToGlobal(position))
+        if chosen is action:
+            self.assign_facies_requested.emit()
 
     # -- data ---------------------------------------------------------------
 

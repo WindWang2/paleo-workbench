@@ -94,6 +94,7 @@ class HubScrollArea(QScrollArea):
 
 
 class WorkstationFrame(QWidget):
+
     """Native Qt workstation shell.
 
     图件显示区域（文档区）是窗口中央内容，永不浮动；其余一切面板 —
@@ -247,6 +248,9 @@ class WorkstationFrame(QWidget):
         self.inspector.set_context_seam(_layer_context_seam)
         self._agent_undo_stack: list[dict] = []
         self._current_well_name = ""
+        self._extra_well_docks: list[QDockWidget] = []
+        self._extra_seismic_docks: list[QDockWidget] = []
+        self._view_instance_seq = 0
         # B18 去重：Agent 面板直接作为 dock 内容（旧 ProcessHub 内层
         # 「任务/日志/控制台」tab 与 dock 层概念重复，已拆除——任务中心 /
         # 日志 / 控制台各自是宿主级 dock，显隐 / 浮动 / 停靠独立）。
@@ -371,6 +375,31 @@ class WorkstationFrame(QWidget):
         )
         return dock
 
+    def _add_clone_dock(
+        self, source_id: str, widget: QWidget, title: str, object_name: str
+    ) -> QDockWidget:
+        descriptor = workstation_dock_registry.require(source_id)
+        dock = QDockWidget(title, self._dock_host)
+        dock.setObjectName(object_name)
+        dock.setProperty("pwbDockId", source_id)
+        dock.setWidget(widget)
+        features = (
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
+        if descriptor.can_float:
+            features |= QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        dock.setFeatures(features)
+        dock.setMinimumSize(0, 0)
+        float_min = descriptor.min_floating_size
+        dock.topLevelChanged.connect(
+            lambda floating, d=dock, m=float_min: self._sync_float_min_size(d, floating, m)
+        )
+        self._dock_host.addDockWidget(
+            self._AREA_BY_NAME[descriptor.preferred_area], dock
+        )
+        return dock
+
     @staticmethod
     def _sync_float_min_size(dock: QDockWidget, floating: bool, min_size) -> None:
         if floating:
@@ -409,6 +438,9 @@ class WorkstationFrame(QWidget):
             )
         )
         self.composite.object_selected.connect(self.inspector.show_payload)
+        # 检查器要素页「指定相带…」→ composite 弹三级级联对话框（Q3-d）。
+        self.inspector.assign_facies_requested.connect(
+            self.composite.assign_facies_from_inspector)
         # V7 §8：图层树选择驱动类型化 Inspector（layer / factor 分节）。
         composite_layer_panel = getattr(self.composite, "layer_manager", None)
         if composite_layer_panel is not None:
@@ -972,6 +1004,7 @@ class WorkstationFrame(QWidget):
             handler(kind_value)
 
     def set_project(self, project, project_path: str | None = None) -> None:
+        self._drop_extra_view_docks()
         self._project = project
         if project_path is not None:
             self._project_path = str(project_path)
@@ -1053,23 +1086,149 @@ class WorkstationFrame(QWidget):
         return self.composite
 
     def show_well(self, well_name: str = "") -> None:
-        self.well_dock.show()
-        self.well_dock.raise_()
-        if well_name:
-            self._current_well_name = str(well_name)
-            self.agent_panel.set_active_well(str(well_name))
-            self.linked_workspace.open_well(well_name)
+        name = str(well_name or "").strip()
+        self.linked_workspace.ensure_views(load_defaults=not bool(name))
+        if not name:
+            self._capture_default_occupancy()
+            self.well_dock.show()
+            self.well_dock.raise_()
+            return
+        existing = self._find_well_dock(name)
+        if existing is not None:
+            existing.show()
+            existing.raise_()
+            self._current_well_name = name
+            self.agent_panel.set_active_well(name)
+            return
+        dock, pane = self._well_dock_for_new_view()
+        bound = self.linked_workspace.bind_well(pane, name)
+        if not bound:
+            return
+        dock.setProperty("pwbWellName", bound)
+        dock.show()
+        dock.raise_()
+        self._current_well_name = bound
+        self.agent_panel.set_active_well(bound)
 
     def show_seismic(self, resource=None) -> None:
-        self.seismic_dock.show()
-        self.seismic_dock.raise_()
-        self.linked_workspace.ensure_views()
-        if resource is not None and self.linked_workspace.seismic_panel is not None:
-            self.linked_workspace.seismic_panel.show_resource(resource, self._project)
-            name = str(getattr(resource, "name", "") or "")
-            self.linked_workspace.seismic_pane.set_title(
-                f"地震剖面 · {name}" if name else "地震剖面"
-            )
+        self.linked_workspace.ensure_views(load_defaults=resource is None)
+        if resource is None:
+            self._capture_default_occupancy()
+            self.seismic_dock.show()
+            self.seismic_dock.raise_()
+            return
+        key = self._seismic_resource_key(resource)
+        existing = self._find_seismic_dock(key)
+        if existing is not None:
+            existing.show()
+            existing.raise_()
+            return
+        dock, pane = self._seismic_dock_for_new_view()
+        bound = self.linked_workspace.bind_seismic(pane, resource)
+        dock.setProperty("pwbSeismicKey", bound or key)
+        dock.show()
+        dock.raise_()
+
+    def _capture_default_occupancy(self) -> None:
+        well = str(self.linked_workspace._active_well_name or "")
+        if well and not str(self.well_dock.property("pwbWellName") or ""):
+            self.well_dock.setProperty("pwbWellName", well)
+        key = str(getattr(self.linked_workspace, "_default_seismic_key", "") or "")
+        if key and not str(self.seismic_dock.property("pwbSeismicKey") or ""):
+            self.seismic_dock.setProperty("pwbSeismicKey", key)
+
+    @staticmethod
+    def _seismic_resource_key(resource) -> str:
+        return str(
+            getattr(resource, "id", "")
+            or getattr(resource, "path", "")
+            or getattr(resource, "name", "")
+            or ""
+        )
+
+    def _find_well_dock(self, name: str):
+        target = str(name).upper()
+        for dock in (self.well_dock, *self._extra_well_docks):
+            bound = str(dock.property("pwbWellName") or "")
+            if bound.upper() == target:
+                return dock
+        return None
+
+    def _find_seismic_dock(self, key: str):
+        target = str(key)
+        if not target:
+            return None
+        for dock in (self.seismic_dock, *self._extra_seismic_docks):
+            if str(dock.property("pwbSeismicKey") or "") == target:
+                return dock
+        return None
+
+    def _well_dock_for_new_view(self):
+        if not str(self.well_dock.property("pwbWellName") or ""):
+            return self.well_dock, self.linked_workspace.well_pane
+        return self._spawn_well_dock()
+
+    def _seismic_dock_for_new_view(self):
+        if not str(self.seismic_dock.property("pwbSeismicKey") or ""):
+            return self.seismic_dock, self.linked_workspace.seismic_pane
+        return self._spawn_seismic_dock()
+
+    def _spawn_well_dock(self):
+        self._view_instance_seq += 1
+        pane = self.linked_workspace.make_well_pane()
+        dock = self._add_clone_dock(
+            "well",
+            pane,
+            "测井轨道",
+            f"WorkstationDock_well_{self._view_instance_seq}",
+        )
+        self._extra_well_docks.append(dock)
+        self._wire_instance_dock(dock, self.well_dock)
+        return dock, pane
+
+    def _spawn_seismic_dock(self):
+        self._view_instance_seq += 1
+        pane = self.linked_workspace.make_seismic_pane()
+        dock = self._add_clone_dock(
+            "seismic",
+            pane,
+            "地震剖面",
+            f"WorkstationDock_seismic_{self._view_instance_seq}",
+        )
+        self._extra_seismic_docks.append(dock)
+        self._wire_instance_dock(dock, self.seismic_dock)
+        return dock, pane
+
+    def _wire_instance_dock(self, dock: QDockWidget, anchor: QDockWidget) -> None:
+        dock.topLevelChanged.connect(lambda *_: self._schedule_state_save())
+        dock.dockLocationChanged.connect(lambda *_: self._schedule_state_save())
+        dock.visibilityChanged.connect(lambda *_: self._schedule_state_save())
+        host = self._dock_host
+        if isinstance(host, QMainWindow):
+            host.splitDockWidget(anchor, dock, Qt.Orientation.Horizontal)
+        self._refresh_panel_menu()
+
+    def _drop_extra_view_docks(self) -> None:
+        docks = list(self._extra_well_docks) + list(self._extra_seismic_docks)
+        if not docks:
+            self.linked_workspace.drop_extra_panes()
+            return
+        self._extra_well_docks.clear()
+        self._extra_seismic_docks.clear()
+        self.linked_workspace.drop_extra_panes()
+        for dock in docks:
+            dock.blockSignals(True)
+            host = dock.parentWidget()
+            if isinstance(host, QMainWindow):
+                host.removeDockWidget(dock)
+            dock.deleteLater()
+        if not self._layout_frozen:
+            self._refresh_panel_menu()
+
+    def _refresh_panel_menu(self) -> None:
+        if getattr(self, "composite", None) is None:
+            return
+        self._wire_composite_panel_menu()
 
     #: 编图旁边的工具页：弹出对话框，不进「功能页」dock。
     _TOOL_DIALOG_KEYS = frozenset({"preparation", "review"})
@@ -1086,6 +1245,22 @@ class WorkstationFrame(QWidget):
         self.hub_dock.setWindowTitle(str(title or "功能页"))
         self.hub_dock.show()
         self.hub_dock.raise_()
+        # 初始打开给足内容宽度（用户反馈"打开后内容被压扁需手动拉大"）：
+        # 功能页 dock 默认按最小 sizeHint 收窄。这里按窗口宽度分 45%
+        # （至少 560px），queued 到布局稳定后执行一次；用户此后自由拖动。
+        host = self._dock_host
+        target = max(560, int(host.width() * 0.45))
+        current = self.hub_dock.size().width()
+        if current < target:
+            # 首次打开给足内容宽度——经 dock_framework 的 grow-only
+            # 入口（resizeDocks 的架构约束：只允许出现在框架层，
+            # 且只在 dock 小于可用底线时增长）。
+            from paleo_workbench.ui.dock_framework import (
+                ensure_dock_usable,
+            )
+            QTimer.singleShot(
+                0, lambda: ensure_dock_usable(
+                    host, self.hub_dock, minimum=target, vertical=False))
 
     def activate_joint(self) -> None:
         self.show_seismic()
@@ -1333,6 +1508,11 @@ class WorkstationFrame(QWidget):
             action = dock.toggleViewAction()
             action.setText(label)
             actions.append((label, action))
+        for dock in (*self._extra_well_docks, *self._extra_seismic_docks):
+            action = dock.toggleViewAction()
+            title = str(dock.windowTitle() or "面板")
+            action.setText(f"显示{title}")
+            actions.append((action.text(), action))
         return actions
 
     def _wire_composite_panel_menu(self) -> None:
@@ -1341,6 +1521,10 @@ class WorkstationFrame(QWidget):
         for attr, label in self._PANEL_TOGGLE_TABLE:
             action = getattr(self, attr).toggleViewAction()
             action.setText(label)
+            toggle_actions.append(action)
+        for dock in (*self._extra_well_docks, *self._extra_seismic_docks):
+            action = dock.toggleViewAction()
+            action.setText(f"显示{dock.windowTitle()}")
             toggle_actions.append(action)
         preset_actions = [
             (preset.id, preset.label) for preset in list_presets()
@@ -1366,7 +1550,9 @@ class WorkstationFrame(QWidget):
             self.composite_input_dock,
             self.composite_linked_dock,
             self.well_dock,
+            *self._extra_well_docks,
             self.seismic_dock,
+            *self._extra_seismic_docks,
             self.hub_dock,
             self.mapping_stage_dock,
         )
@@ -1509,6 +1695,10 @@ class WorkstationFrame(QWidget):
         host.tabifyDockWidget(self.agent_dock, self.composite_linked_dock)
         host.tabifyDockWidget(self.agent_dock, self.well_dock)
         host.tabifyDockWidget(self.well_dock, self.seismic_dock)
+        for extra in self._extra_well_docks:
+            host.splitDockWidget(self.well_dock, extra, Qt.Orientation.Horizontal)
+        for extra in self._extra_seismic_docks:
+            host.splitDockWidget(self.seismic_dock, extra, Qt.Orientation.Horizontal)
 
     def _hide_default_closed_docks(self) -> None:
         """编图默认：地图为主，只留资源管理器、编图阶段、图层管理、检查器。"""
@@ -1614,13 +1804,15 @@ class WorkstationFrame(QWidget):
         self.well_dock.setVisible(on)
         if on:
             self.well_dock.raise_()
-            self.linked_workspace.ensure_views()
+            self.linked_workspace.ensure_views(load_defaults=True)
+            self._capture_default_occupancy()
 
     def _on_seismic_section_toggled(self, on: bool) -> None:
         self.seismic_dock.setVisible(on)
         if on:
             self.seismic_dock.raise_()
-            self.linked_workspace.ensure_views()
+            self.linked_workspace.ensure_views(load_defaults=True)
+            self._capture_default_occupancy()
 
     def _on_link_toggled(self, on: bool) -> None:
         self.linked_workspace.set_linked(on)
@@ -1956,6 +2148,7 @@ class WorkstationFrame(QWidget):
         self.log_viewer.shutdown()
         self.task_center.shutdown()
         self.composite.shutdown()
+        self._drop_extra_view_docks()
         self._teardown_docks()
         return self.linked_workspace.shutdown_workers(wait_ms)
 

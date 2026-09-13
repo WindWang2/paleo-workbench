@@ -278,7 +278,7 @@ def item_factory(monkeypatch):
 
 def test_composite_single_attribute_change_updates_one_row_in_place(qtbot, item_factory):
     controller, layer, dialog = _composite_dialog(qtbot, 300)
-    facies_column = _column_of(dialog, "相带类型")
+    facies_column = _column_of(dialog, "相")
     row = _row_of(dialog, "f00007")
     untouched = dialog.table.item(_row_of(dialog, "f00008"), facies_column).text()
 
@@ -299,7 +299,7 @@ def test_composite_differential_cost_is_independent_of_feature_count(qtbot, item
     counts = []
     for feature_count in (120, 480):
         controller, layer, dialog = _composite_dialog(qtbot, feature_count)
-        facies_column = _column_of(dialog, "相带类型")
+        facies_column = _column_of(dialog, "相")
         item_factory["n"] = 0
         layer.edit_session.change_attribute("f00007", "facies", "深湖")
         controller.content_changed.emit(layer.id)
@@ -312,7 +312,7 @@ def test_composite_differential_cost_is_independent_of_feature_count(qtbot, item
 
 def test_composite_full_rebuild_on_structure_changes(qtbot, item_factory):
     controller, layer, dialog = _composite_dialog(qtbot, 80)
-    facies_column = _column_of(dialog, "相带类型")
+    facies_column = _column_of(dialog, "相")
     assert dialog.table.rowCount() == 80
 
     # 新增要素 → 行结构变化 → 全量重建
@@ -359,7 +359,7 @@ def test_composite_header_sort_reorders_model_rows(qtbot):
 
 def test_composite_single_edit_at_2000_features_under_bound(qtbot, item_factory):
     controller, layer, dialog = _composite_dialog(qtbot, 2000)
-    facies_column = _column_of(dialog, "相带类型")
+    facies_column = _column_of(dialog, "相")
 
     item_factory["n"] = 0
     started = time.perf_counter()

@@ -2,9 +2,10 @@
 
 门禁：identify 从"活动矢量图层"放宽为"工程已打开且存在可查询图层"
 （``ToolContext.queryable_layer_count``，编修层 + 基础工区层 + 就绪引用层）；
-select/select_rectangle 门禁不动。无活动层时 fallback 仍可激活 identify
-（最上可见编修层绑定，无编修层时走无层 IdentifyTool），有结果时在点击处
-QToolTip 悬浮（纯函数 ``_identify_popup_text`` 组装文本）。
+select/select_rectangle 门禁不动。identify 与活动层解耦（V10 识别修复）：
+恒绑无层 IdentifyTool（原生栈 PwbIdentifyTool 扫全部可见镜像层，旧桥经
+identify_delegate 多层识别），有结果时在点击处 QToolTip 悬浮（纯函数
+``_identify_popup_text`` 组装文本）。
 """
 
 from __future__ import annotations
@@ -214,34 +215,41 @@ def test_fallback_identify_without_any_layer_uses_delegate(qtbot):
 
 
 def test_fallback_identify_without_active_layer_binds_topmost(qtbot):
+    """识别与图层解耦（V10 识别修复）：无活动层 + 存在编修层时也绑
+    无层 IdentifyTool——绑 SelectTool 会让原生栈把识别点击路由成选择
+    回调，信息面板永远不出现。"""
     controller = CompositeEditController()
     lower = controller.create_layer("下层", "polygon")
     upper = controller.create_layer("上层", "polygon")
     controller.set_active_layer(None)
-    controller.identify_delegate = lambda point: None
+    calls: list = []
+    controller.identify_delegate = lambda point: calls.append(point)
     controller.activate_tool("identify")
     tool = controller.tools.active_tool
-    assert tool is not None
-    assert getattr(tool, "layer", None) is not None
-    assert tool.layer.id == upper.id
+    assert isinstance(tool, IdentifyTool)
+    assert getattr(tool, "layer", None) is None
+    assert tool.mouse_press((3.0, 4.0)) is True
+    assert calls == [(3.0, 4.0)]
     assert lower.id != upper.id
 
 
 def test_fallback_identify_skips_hidden_topmost(qtbot):
+    """可见性过滤属于识别执行（delegate / 原生拾取只扫可见层），
+    不属于工具激活——隐藏层存在不影响 IdentifyTool 绑定。"""
     controller = CompositeEditController()
-    lower = controller.create_layer("下层", "polygon")
+    controller.create_layer("下层", "polygon")
     upper = controller.create_layer("上层", "polygon")
     controller.apply_display_state([
-        SimpleNamespace(id=lower.id, visible=True, opacity=1.0),
         SimpleNamespace(id=upper.id, visible=False, opacity=1.0),
     ])
     controller.set_active_layer(None)
-    controller.identify_delegate = lambda point: None
+    calls: list = []
+    controller.identify_delegate = lambda point: calls.append(point)
     controller.activate_tool("identify")
     tool = controller.tools.active_tool
-    assert tool is not None
-    assert getattr(tool, "layer", None) is not None
-    assert tool.layer.id == lower.id
+    assert isinstance(tool, IdentifyTool)
+    assert tool.mouse_press((1.0, 1.0)) is True
+    assert calls == [(1.0, 1.0)]
 
 
 def test_topmost_visible_layer_id_follows_display(qtbot):
@@ -276,15 +284,16 @@ def test_command_requested_identify_activates_without_active_layer(
     qtbot.addWidget(document)
     controller = document.edit_controller
     controller.create_layer("下层", "polygon")
-    upper = controller.create_layer("上层", "polygon")
+    controller.create_layer("上层", "polygon")
     controller.set_active_layer(None)
     document._on_command_requested("identify")
     tool = controller.tools.active_tool
     assert tool is not None
-    # 既存语义：有活动层时 identify 经 SelectTool 承载（tool_id 恒 "select"，
-    # 非本次范围）；关键是绑定层为最上可见层且点击可进面板。
-    bound = getattr(tool, "layer", None)
-    assert bound is not None and bound.id == upper.id
+    # V10 识别修复：编修层存在时 identify 仍必须是 identify 工具——
+    # 绑 SelectTool（tool_id "select"）会让原生栈把识别点击变成选择
+    # 回调，属性信息不弹（用户报障的根因）。
+    assert isinstance(tool, IdentifyTool)
+    assert tool.tool_id == "identify"
 
 
 # -- 文档集成 -----------------------------------------------------------------
@@ -529,6 +538,64 @@ def test_native_identified_base_miss_clears_without_tooltip(
         {"layer_doc_id": layer.id, "feature_id": "wells:ghost"})
     assert document.identify_results.tree.topLevelItemCount() == 0
     assert shown == []
+
+
+def test_native_identified_multi_hit_lists_all_layers(
+    qtbot, tmp_path, monkeypatch
+):
+    """多点列举（V10 识别修复）：hits 数组逐条重建，未知层条目被滤除。"""
+    document = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(document)
+    layer = _flagged(document)
+    record = layer.features[0]
+    shown: list = []
+    monkeypatch.setattr(
+        "paleo_workbench.ui.workstation.composite_document.QToolTip",
+        SimpleNamespace(showText=lambda *args: shown.append(args),
+                        hideText=lambda: None),
+    )
+    document._on_native_identified({
+        "hits": [
+            {"layer_doc_id": layer.id, "feature_id": record.get("id")},
+            {"layer_doc_id": "home_workarea:nope", "feature_id": "ghost"},
+        ],
+    })
+    assert document.identify_results.tree.topLevelItemCount() == 1
+    assert "A12" in shown[0][1]
+
+
+def test_native_identified_reference_snapshot_entry(
+    qtbot, tmp_path, monkeypatch
+):
+    """引用层（导入参考，如参考相图）命中 → 面板条目 + 来源=reference。"""
+    from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot
+
+    document = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(document)
+    shown: list = []
+    monkeypatch.setattr(
+        "paleo_workbench.ui.workstation.composite_document.QToolTip",
+        SimpleNamespace(showText=lambda *args: shown.append(args),
+                        hideText=lambda: None),
+    )
+    snapshot = MapLayerSnapshot(
+        id="ref_test", name="参考相图", layer_type="vector",
+        extent=(0.0, 0.0, 10.0, 10.0), crs="EPSG:4326",
+        data_revision=1, style_revision=1,
+        features=({"id": "ref_test:0",
+                   "geometry": {"type": "Polygon",
+                                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]},
+                   "properties": {"facies": "深水盆地"}},),
+        style={}, visible=True, opacity=0.65,
+        metadata={"reference": "true"},
+    )
+    document.layer_manager._layers.append(snapshot)
+    document._on_native_identified(
+        {"layer_doc_id": "ref_test", "feature_id": "ref_test:0"})
+    assert document.identify_results.tree.topLevelItemCount() == 1
+    item = document.identify_results.tree.topLevelItem(0)
+    assert item.text(0) == "参考相图"
+    assert "深水盆地" in shown[0][1]
 
 
 def test_ensure_identify_layer_current_selects_base_without_edit_layers(

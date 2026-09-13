@@ -184,7 +184,8 @@ def test_manage_row_includes_add_group(qtbot, qapp):
     panel = QgisLayerTreePanel()
     qtbot.addWidget(panel)
     labels = [button.text() for button in panel._manage_buttons]
-    assert labels == ["新建矢量图层", "导入参考图层", "添加分组", "删除图层"]
+    assert labels == ["新建矢量图层", "导入参考图层", "相分类词表",
+                      "添加分组", "删除图层"]
     hits = []
     panel.create_group_requested.connect(lambda: hits.append("group"))
     next(button for button in panel._manage_buttons if button.text() == "添加分组").click()

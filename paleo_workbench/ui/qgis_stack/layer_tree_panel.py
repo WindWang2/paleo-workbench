@@ -71,6 +71,8 @@ class QgisLayerTreePanel(QWidget):
     # 无 rename_layer_requested：树上改名直接生效并经 _on_tree_change 回写
     # （QGIS 语义，rename 不经请求信号绕行）。
     import_reference_requested = Signal()
+    # 相分类词表管理（grill 共识 Q8-b：编图工作区动作入口）。
+    facies_taxonomy_requested = Signal()
     remove_reference_requested = Signal(str)
     refresh_reference_requested = Signal(str)
     toggle_reference_snap_requested = Signal(str)
@@ -132,6 +134,8 @@ class QgisLayerTreePanel(QWidget):
              self.create_layer_requested.emit),
             ("导入参考图层", "map/tree-add-layer.svg",
              "导入外部矢量文件作为只读参考（GDAL）", self.import_reference_requested.emit),
+            ("相分类词表", "map/tree-attribute-table.svg",
+             "查看/导入/恢复 相-亚相-微相三级分类词表", self.facies_taxonomy_requested.emit),
             ("添加分组", "map/tree-add-group.svg",
              "新建图层组（可拖入图层）", self.create_group_requested.emit),
             ("删除图层", "map/tree-remove.svg", "删除当前矢量图层（编修图层）",

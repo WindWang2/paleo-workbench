@@ -40,6 +40,9 @@ class WorkstationInspector(QFrame):
     """Contextual properties, interpretation, style, and provenance."""
 
     style_changed = Signal(dict)  # 兼容保留；真实样式编辑走 edit_style_requested
+    # 要素页「指定相带…」（grill Q3-d）：携带当前 feature payload，宿主
+    # 判相带家族图层并弹三级级联对话框。
+    assign_facies_requested = Signal(dict)
     edit_style_requested = Signal(str)
 
     def __init__(self, project=None, parent=None):
@@ -437,6 +440,15 @@ class WorkstationInspector(QFrame):
             self.interpretation_form.addRow("模板角色", self._readonly(template))
         self.interpretation_form.addRow(
             "来源", self._readonly(result.get("source") or "identify"))
+        # 「指定相带…」：要素级动作（grill 共识 Q3-d）——宿主判图层是否
+        # 相带家族并弹级联对话框；非相带要素点了会收到状态提示。
+        from PySide6.QtWidgets import QPushButton
+
+        assign_button = QPushButton("指定相带…", self)
+        assign_button.setObjectName("SecondaryButton")
+        assign_button.clicked.connect(
+            lambda _checked=False, p=payload: self.assign_facies_requested.emit(p))
+        self.interpretation_form.addRow("相带", assign_button)
         self._set_history([f"要素 {result.get('feature_id') or '—'}"])
 
     def show_factor(self, payload) -> None:

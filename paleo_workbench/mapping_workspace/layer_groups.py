@@ -320,14 +320,32 @@ def movable_into_system_group(role: LayerRole | str | None, group_id: str) -> bo
 # 旧工程迁移（V5 §72/§73）：保守归类，绝不因猜测名字改变科学语义
 # ---------------------------------------------------------------------------
 
+#: 模板键 → 专业归属角色（classify 第 4 步；新建层按模板直接进工作流
+#: 组——断层→地质约束、物源/展布/方向/打断→各约束线、测井点→地质表达、
+#: 相带三级→人工解释与修编、成图范围→地质表达。无映射才落未分类）。
+_TEMPLATE_ROLE_HOME: dict[str, LayerRole] = {
+    "fault": LayerRole.FAULT_CONSTRAINT,
+    "source": LayerRole.PROVENANCE_LINE,
+    "spreading": LayerRole.DISTRIBUTION_LINE,
+    "direction": LayerRole.PROVENANCE_DIRECTION,
+    "break": LayerRole.INTERPOLATION_BOUNDARY,
+    "well_point": LayerRole.MAP_SYMBOL,
+    "facies_sub": LayerRole.INITIAL_FACIES_DRAFT,
+    "facies_micro": LayerRole.INITIAL_FACIES_DRAFT,
+    "extent": LayerRole.MAP_REFERENCE,
+}
+
+
 def classify_layer_for_migration(layer) -> tuple[LayerRole, str, str]:
-    """旧工程图层 → (role, home_group_id, constraint_kind)。
+    """旧工程图层 / 新建图层 → (role, home_group_id, constraint_kind)。
 
     只依据 **machine-readable** 信号保守归类：
     1. 新元数据 ``layer.metadata["layer_role"]``（已是 V5 工程）；
     2. ``home_workarea:`` id 前缀 → 基础参考；
     3. 参考图层（metadata.reference）→ 基础参考；
-    4. UserVectorLayer.template 模板键 → 约束/草稿角色；
+    4. 模板键（metadata.template 或 UserVectorLayer.template）→ 专业
+       归属组（约束线/相带/测井点/成图范围各回各组——新建层立即可见
+       于其工作流组，不再坠入底部「未分类」）；
     5. 全部未命中 → LEGACY_UNCLASSIFIED（进兜底组，不猜名字）。
     """
     metadata = dict(getattr(layer, "metadata", None) or {})
@@ -342,11 +360,18 @@ def classify_layer_for_migration(layer) -> tuple[LayerRole, str, str]:
     if metadata.get("reference") == "true":
         return LayerRole.BASE_REFERENCE, BASE_REFERENCE_GROUP_ID, ""
 
-    template_key = str(getattr(layer, "template", "") or "").strip().lower()
+    # 快照的模板键在 metadata.template（UserVectorLayer 持久化记录才是
+    # .template 属性）——两处都读，缺一会让新建层误入未分类组。
+    template_key = str(
+        metadata.get("template") or getattr(layer, "template", "") or ""
+    ).strip().lower()
     if template_key:
         kind = _TEMPLATE_CONSTRAINT_KINDS.get(template_key)
         if kind is not None:
             return kind.layer_role, "phase2.constraints", kind.value
+        role = _TEMPLATE_ROLE_HOME.get(template_key)
+        if role is not None:
+            return role, home_group_for_role(role), ""
         if template_key in ("facies", "相图", "沉积相", "facies_polygon"):
             return LayerRole.INITIAL_FACIES_DRAFT, "phase1.interpretation", ""
 

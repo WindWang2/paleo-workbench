@@ -339,6 +339,7 @@ class _CaptureTool(MapTool):
         feature_id_factory: Callable[[], str] | None = None,
         snap: Callable[[Point], Point] | None = None,
         attributes: Mapping[str, object] | None = None,
+        on_captured: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__()
         self.session = session
@@ -346,7 +347,21 @@ class _CaptureTool(MapTool):
         self._snap = snap or (lambda point: (float(point[0]), float(point[1])))
         # 模板默认字段值：新要素直接携带地质 schema 的初始属性。
         self._default_attributes = dict(attributes or {})
+        # 要素捕获完成回调（feature_id）——宿主用它驱动「指定相带」
+        # 弹窗等捕获后标注流；回调异常不得影响要素落地。
+        self._on_captured = on_captured
         self.points: list[Point] = []
+
+    def _notify_captured(self, feature_id: str) -> None:
+        if self._on_captured is None:
+            return
+        try:
+            self._on_captured(feature_id)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "capture completion callback failed (%s)", self.tool_id)
 
     @property
     def edits_data(self) -> bool:
@@ -395,10 +410,12 @@ class _CaptureTool(MapTool):
                 ring.append(list(ring[0]))
             geometry = {"type": "Polygon", "coordinates": [ring]}
         with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            feature_id = self._feature_id_factory()
             self.session.add_feature(
-                VectorFeature(self._feature_id_factory(), geometry, self._default_attributes)
+                VectorFeature(feature_id, geometry, self._default_attributes)
             )
         self.points.clear()
+        self._notify_captured(feature_id)
         return True
 
     def commit_geometry(self, geometry: Mapping[str, object]) -> bool:
@@ -415,12 +432,14 @@ class _CaptureTool(MapTool):
         if gtype != expected and gtype != f"Multi{expected}":
             return False
         with self.session.edit_source(f"{self.tool_id}(native)"):
+            feature_id = self._feature_id_factory()
             self.session.add_feature(
                 VectorFeature(
-                    self._feature_id_factory(), dict(geometry), self._default_attributes
+                    feature_id, dict(geometry), self._default_attributes
                 )
             )
         self.points.clear()
+        self._notify_captured(feature_id)
         return True
 
 

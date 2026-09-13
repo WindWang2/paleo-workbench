@@ -94,6 +94,13 @@ class LinkedInterpretationWorkspace(QWidget):
         self.seismic_panel = None
         self.well_panel = None
         self._orientation_combo = None
+        # Extra view instances (primary panes stay well_pane / seismic_pane).
+        self._extra_well_panes: list[DocumentPane] = []
+        self._extra_seismic_panes: list[DocumentPane] = []
+        self._well_panels: dict[int, object] = {}
+        self._seismic_panels: dict[int, object] = {}
+        self._well_names: dict[int, str] = {}
+        self._default_seismic_key = ""
         # B9: honest degradation note when the docked well panel is not on the
         # native engine (None while the engine backend is active).
         self._well_backend_note: str | None = None
@@ -190,21 +197,23 @@ class LinkedInterpretationWorkspace(QWidget):
         self.refresh_domain_status()
 
     def _install_empty_states(self) -> None:
-        for pane, text in (
-            (self.seismic_pane, "打开包含 SEG-Y 的工程后加载地震解释视图"),
-            (self.well_pane, "选择井数据后加载测井轨道"),
-        ):
-            holder = QWidget(pane)
-            holder_layout = QVBoxLayout(holder)
-            holder_layout.setContentsMargins(10, 10, 10, 10)
-            label = QLabel(text, holder)
-            label.setObjectName("WorkstationDocumentEmptyState")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setWordWrap(True)
-            holder_layout.addWidget(label)
-            pane.set_content(holder)
+        self._fill_empty_state(self.seismic_pane, "打开包含 SEG-Y 的工程后加载地震解释视图")
+        self._fill_empty_state(self.well_pane, "选择井数据后加载测井轨道")
+
+    @staticmethod
+    def _fill_empty_state(pane: DocumentPane, text: str) -> None:
+        holder = QWidget(pane)
+        holder_layout = QVBoxLayout(holder)
+        holder_layout.setContentsMargins(10, 10, 10, 10)
+        label = QLabel(text, holder)
+        label.setObjectName("WorkstationDocumentEmptyState")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        holder_layout.addWidget(label)
+        pane.set_content(holder)
 
     def set_project(self, project, project_path: str | None = None) -> None:
+        self.drop_extra_panes()
         self._project = project
         self._project_path = str(project_path) if project_path else None
         self._load_requested = False
@@ -218,6 +227,9 @@ class LinkedInterpretationWorkspace(QWidget):
         self._coordination = controller
         if self.seismic_panel is not None:
             self.seismic_panel.attach_coordination(controller)
+        for panel in self._seismic_panels.values():
+            if panel is not None:
+                panel.attach_coordination(controller)
         # Status-only bus subscription (L10): badge/conversion state follows
         # every selection change without ever publishing back.
         if controller is not None:
@@ -237,13 +249,13 @@ class LinkedInterpretationWorkspace(QWidget):
         """
         if not self._linked:
             return
-        panel = self.seismic_panel
-        locate = getattr(panel, "locate_position", None)
-        if callable(locate):
-            try:
-                locate(int(il), int(xl), twt)
-            except Exception:
-                pass
+        for panel in self._iter_seismic_panels():
+            locate = getattr(panel, "locate_position", None)
+            if callable(locate):
+                try:
+                    locate(int(il), int(xl), twt)
+                except Exception:
+                    pass
 
     def apply_link_cursor(self, well_name: str, md: float | None) -> bool:
         """Drive the docked well view's native link cursor (case B).
@@ -257,30 +269,27 @@ class LinkedInterpretationWorkspace(QWidget):
             return False
         if not str(well_name or ""):
             return False
-        if str(well_name) != str(self._active_well_name):
-            return False
-        panel = self.well_panel
-        if panel is None:
-            return False
-        driven = bool(panel.set_link_cursor(md))
+        driven = False
+        for _pane, bound, panel in self._iter_well_slots():
+            if panel is None or str(bound) != str(well_name):
+                continue
+            driven = bool(panel.set_link_cursor(md)) or driven
         if driven:
             unit = "m" if md is not None else ""
             value = f"{md:,.1f}" if md is not None else "已清除"
             self.status_changed.emit(
-                f"井震联动游标 · {self._active_well_name} {value} {unit}".strip()
+                f"井震联动游标 · {well_name} {value} {unit}".strip()
             )
         return driven
 
-    def ensure_views(self) -> None:
+    def ensure_views(self, *, load_defaults: bool = True) -> None:
         if self._views_created or not self._can_create_native_views():
+            return
+        if not self._native_platform_ok():
             return
         from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
         from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 
-        app = QApplication.instance()
-        platform = getattr(app, "platformName", lambda: "")()
-        if app is None or platform in {"offscreen", "minimal"}:
-            return
         self.seismic_panel = SeismicViewPanel(self.seismic_pane)
         self.well_panel = WellLogCanvasPanel(self.well_pane)
         self._configure_compact_panels()
@@ -292,11 +301,18 @@ class LinkedInterpretationWorkspace(QWidget):
         if self._coordination is not None:
             self.seismic_panel.attach_coordination(self._coordination)
 
-        seismic = self._first_resource("seismic")
-        if seismic is not None:
-            self.seismic_panel.set_project_path(self._project_path)
-            self.seismic_panel.show_resource(seismic, self._project)
-        self.open_well(self._preferred_well_name())
+        if load_defaults:
+            seismic = self._first_resource("seismic")
+            if seismic is not None:
+                self.seismic_panel.set_project_path(self._project_path)
+                self.seismic_panel.show_resource(seismic, self._project)
+                self._default_seismic_key = str(
+                    getattr(seismic, "id", "")
+                    or getattr(seismic, "path", "")
+                    or getattr(seismic, "name", "")
+                    or ""
+                )
+            self.open_well(self._preferred_well_name())
         note = self.well_backend_note()
         self.status_changed.emit(
             "井震视图已加载"
@@ -304,9 +320,96 @@ class LinkedInterpretationWorkspace(QWidget):
             else f"井震视图已加载 · 测井轨道 {note}"
         )
 
+    def _native_platform_ok(self) -> bool:
+        app = QApplication.instance()
+        platform = getattr(app, "platformName", lambda: "")()
+        return app is not None and platform not in {"offscreen", "minimal"}
+
     def _can_create_native_views(self) -> bool:
         resources = list(getattr(self._project, "resources", None) or [])
         return bool(resources)
+
+    def make_well_pane(self) -> DocumentPane:
+        pane = DocumentPane("测井轨道")
+        self._fill_empty_state(pane, "选择井数据后加载测井轨道")
+        self._sync_link_badge(pane)
+        panel = self._try_create_well_panel(pane)
+        if panel is not None:
+            self._well_panels[id(pane)] = panel
+        self._extra_well_panes.append(pane)
+        return pane
+
+    def make_seismic_pane(self) -> DocumentPane:
+        pane = DocumentPane("地震剖面")
+        self._fill_empty_state(pane, "打开包含 SEG-Y 的工程后加载地震解释视图")
+        self._sync_link_badge(pane)
+        panel = self._try_create_seismic_panel(pane)
+        if panel is not None:
+            self._seismic_panels[id(pane)] = panel
+        self._extra_seismic_panes.append(pane)
+        return pane
+
+    def _try_create_well_panel(self, pane: DocumentPane):
+        if not self._native_platform_ok() or not self._can_create_native_views():
+            return None
+        from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
+
+        panel = WellLogCanvasPanel(pane)
+        panel.title_label.hide()
+        panel.backend_combo.hide()
+        backend, _reason = engine_adapter.resolve_default_backend()
+        panel.set_backend(backend)
+        pane.set_content(panel)
+        panel.depth_cursor_moved.connect(
+            lambda depth, current=panel: self._on_depth_cursor_from(current, depth)
+        )
+        return panel
+
+    def _try_create_seismic_panel(self, pane: DocumentPane):
+        if not self._native_platform_ok() or not self._can_create_native_views():
+            return None
+        from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
+
+        panel = SeismicViewPanel(pane)
+        panel.set_interpretation_bar_visible(False)
+        panel.enter_profile_mode()
+        pane.set_content(panel)
+        self._install_profile_orientation_selector(pane=pane, panel=panel)
+        if self._coordination is not None:
+            panel.attach_coordination(self._coordination)
+        return panel
+
+    def drop_extra_panes(self) -> None:
+        for pane in list(self._extra_well_panes):
+            panel = self._well_panels.pop(id(pane), None)
+            if panel is not None:
+                try:
+                    panel.shutdown()
+                except Exception:
+                    pass
+            self._well_names.pop(id(pane), None)
+        for pane in list(self._extra_seismic_panes):
+            panel = self._seismic_panels.pop(id(pane), None)
+            if panel is not None:
+                try:
+                    panel.shutdown()
+                except Exception:
+                    pass
+        self._extra_well_panes.clear()
+        self._extra_seismic_panes.clear()
+
+    def _iter_well_slots(self):
+        yield self.well_pane, str(self._active_well_name or ""), self.well_panel
+        for pane in self._extra_well_panes:
+            yield pane, str(self._well_names.get(id(pane), "")), self._well_panels.get(id(pane))
+
+    def _iter_seismic_panels(self):
+        if self.seismic_panel is not None:
+            yield self.seismic_panel
+        for pane in self._extra_seismic_panes:
+            panel = self._seismic_panels.get(id(pane))
+            if panel is not None:
+                yield panel
 
     def _configure_compact_panels(self) -> None:
         if self.well_panel is not None:
@@ -323,14 +426,17 @@ class LinkedInterpretationWorkspace(QWidget):
             self.seismic_panel.enter_profile_mode()
             self._install_profile_orientation_selector()
 
-    def _install_profile_orientation_selector(self) -> None:
+    def _install_profile_orientation_selector(self, pane=None, panel=None) -> None:
         """L5: 2-D 解释面方向切换（Inline / Crossline / Time 切片）。"""
         from PySide6.QtWidgets import QComboBox
 
-        panel = self.seismic_panel
-        if panel is None or getattr(self, "_orientation_combo", None) is not None:
+        pane = pane or self.seismic_pane
+        panel = panel or self.seismic_panel
+        if panel is None:
             return
-        combo = QComboBox(self.seismic_pane)
+        if pane is self.seismic_pane and getattr(self, "_orientation_combo", None) is not None:
+            return
+        combo = QComboBox(pane)
         combo.setObjectName("SeismicProfileOrientationCombo")
         combo.setToolTip("二维解释面方向（联动档位仅改变显示，不重读体积）")
         for label, key in (
@@ -339,21 +445,29 @@ class LinkedInterpretationWorkspace(QWidget):
             ("Time 切片", "time"),
         ):
             combo.addItem(label, key)
-        combo.currentIndexChanged.connect(self._on_orientation_changed)
-        # 插到地震 pane 头部（标题与联动徽标之间）
-        header = self.seismic_pane.header_layout
+        combo.currentIndexChanged.connect(
+            lambda index, current=panel, box=combo: self._on_orientation_changed_for(
+                current, box, index
+            )
+        )
+        header = pane.header_layout
         if header is not None:
             header.insertWidget(header.count() - 1, combo)
-        self._orientation_combo = combo
+        if pane is self.seismic_pane:
+            self._orientation_combo = combo
 
     def _on_orientation_changed(self, index: int) -> None:
-        panel = self.seismic_panel
-        if panel is None or self._orientation_combo is None:
+        self._on_orientation_changed_for(
+            self.seismic_panel, self._orientation_combo, index
+        )
+
+    def _on_orientation_changed_for(self, panel, combo, index: int) -> None:
+        if panel is None or combo is None:
             return
-        key = str(self._orientation_combo.itemData(index) or "inline")
+        key = str(combo.itemData(index) or "inline")
         ok = panel.set_profile_orientation(key)
         if ok:
-            self.status_changed.emit(f"解释面方向：{self._orientation_combo.itemText(index)}")
+            self.status_changed.emit(f"解释面方向：{combo.itemText(index)}")
         else:
             self.status_changed.emit(f"未知解释面方向 {key!r}，已忽略")
 
@@ -411,32 +525,64 @@ class LinkedInterpretationWorkspace(QWidget):
 
     def open_well(self, well_name_or_id: str) -> None:
         if not self._views_created:
-            self.ensure_views()
-        if not self._views_created:
-            return
+            self.ensure_views(load_defaults=False)
+        self.bind_well(self.well_pane, well_name_or_id)
+
+    def bind_well(self, pane: DocumentPane, well_name_or_id: str) -> str:
         well = self._find_well(well_name_or_id)
         if well is None:
-            return
+            return ""
         name = str(getattr(well, "name", "") or well_name_or_id)
         resource = self._well_resource(name)
-        well_panel = self.well_panel
+        well_panel = (
+            self.well_panel if pane is self.well_pane
+            else self._well_panels.get(id(pane))
+        )
         if resource is not None and well_panel is not None:
             well_panel.show_resource(resource, self._project)
-            self._active_well_name = name
-            self.well_pane.set_title(f"测井轨道 · {name}")
+            active_name = name
+            pane.set_title(f"测井轨道 · {name}")
         else:
             # R3-M1: a well without a log resource must NOT keep the previous
             # well's curves under the new name — that misattributed every
             # link cursor. Clear the surface and refuse the active-well slot.
             if well_panel is not None:
                 well_panel.update_state(None)
-            self._active_well_name = ""
-            self.well_pane.set_title(f"测井轨道 · {name}（无测井数据）")
+            active_name = ""
+            if resource is None:
+                pane.set_title(f"测井轨道 · {name}（无测井数据）")
+            else:
+                pane.set_title(f"测井轨道 · {name}")
+        if pane is self.well_pane:
+            self._active_well_name = active_name
+        else:
+            self._well_names[id(pane)] = active_name
         self._apply_well_overlay(name)
         self.object_selected.emit({"kind": "well", "object": well, "well_name": name})
         self.well_focused.emit(name)
         self.status_changed.emit(f"已打开井 {name}")
         self.refresh_domain_status()
+        return name
+
+    def bind_seismic(self, pane: DocumentPane, resource) -> str:
+        name = str(getattr(resource, "name", "") or "")
+        key = str(
+            getattr(resource, "id", "")
+            or getattr(resource, "path", "")
+            or name
+            or ""
+        )
+        panel = (
+            self.seismic_panel if pane is self.seismic_pane
+            else self._seismic_panels.get(id(pane))
+        )
+        if panel is not None:
+            panel.set_project_path(self._project_path)
+            panel.show_resource(resource, self._project)
+            if self._coordination is not None:
+                panel.attach_coordination(self._coordination)
+        pane.set_title(f"地震剖面 · {name}" if name else "地震剖面")
+        return key
 
     def _apply_well_overlay(self, well_name: str) -> None:
         """Project the active well onto the seismic sections (L5, R1-M2).
@@ -445,19 +591,23 @@ class LinkedInterpretationWorkspace(QWidget):
         registration / no calibration) and it surfaces in the status line
         instead of being swallowed.
         """
-        panel = self.seismic_panel
-        setter = getattr(panel, "set_well_overlay", None)
-        if not callable(setter):
-            return
-        try:
-            active = setter(well_name or None)
-        except Exception:
-            self.status_changed.emit("井迹投影不可用（剖面板异常）")
-            return
-        if not active:
-            reason = getattr(panel, "well_overlay_unavailable_reason", lambda: None)()
-            if reason:
-                self.status_changed.emit(f"井迹投影不可用：{reason}")
+        reported = False
+        for panel in self._iter_seismic_panels():
+            setter = getattr(panel, "set_well_overlay", None)
+            if not callable(setter):
+                continue
+            try:
+                active = setter(well_name or None)
+            except Exception:
+                if not reported:
+                    self.status_changed.emit("井迹投影不可用（剖面板异常）")
+                    reported = True
+                continue
+            if not active and not reported:
+                reason = getattr(panel, "well_overlay_unavailable_reason", lambda: None)()
+                if reason:
+                    self.status_changed.emit(f"井迹投影不可用：{reason}")
+                    reported = True
 
     def show_all_wells(self) -> None:
         self.show_all_wells_requested.emit()
@@ -469,17 +619,26 @@ class LinkedInterpretationWorkspace(QWidget):
 
     def set_linked(self, enabled: bool) -> None:
         self._linked = bool(enabled)
-        for pane in (self.seismic_pane, self.well_pane):
-            pane.link_label.setText("联动" if enabled else "独立")
-            pane.link_label.setProperty("linked", bool(enabled))
-            pane.link_label.style().unpolish(pane.link_label)
-            pane.link_label.style().polish(pane.link_label)
+        panes = [self.seismic_pane, self.well_pane]
+        panes.extend(self._extra_well_panes)
+        panes.extend(self._extra_seismic_panes)
+        for pane in panes:
+            self._sync_link_badge(pane)
         self.refresh_domain_status()
+
+    def _sync_link_badge(self, pane: DocumentPane) -> None:
+        pane.link_label.setText("联动" if self._linked else "独立")
+        pane.link_label.setProperty("linked", bool(self._linked))
+        pane.link_label.style().unpolish(pane.link_label)
+        pane.link_label.style().polish(pane.link_label)
 
     def is_linked(self) -> bool:
         return self._linked
 
     def _on_depth_cursor(self, depth: float) -> None:
+        self._on_depth_cursor_from(self.well_panel, depth)
+
+    def _on_depth_cursor_from(self, panel, depth: float) -> None:
         """Case C producer (link-gated): dock well cursor → coordination bus.
 
         The panel-level gate already throttles this to ~8 Hz; the link
@@ -489,9 +648,9 @@ class LinkedInterpretationWorkspace(QWidget):
             return
         self.status_changed.emit(f"联动深度 {depth:,.1f} m")
         controller = self._coordination
-        if controller is None:
+        if controller is None or panel is None:
             return
-        well = str(getattr(self.well_panel, "current_well_name", lambda: "")() or "")
+        well = str(getattr(panel, "current_well_name", lambda: "")() or "")
         if not well:
             return
         publish = getattr(controller, "publish_depth_cursor", None)
@@ -533,6 +692,7 @@ class LinkedInterpretationWorkspace(QWidget):
         return "A12"
 
     def shutdown_workers(self, _wait_ms: int = 3_000) -> bool:
+        self.drop_extra_panes()
         if self.seismic_panel is not None:
             self.seismic_panel.shutdown()
         if self.well_panel is not None:

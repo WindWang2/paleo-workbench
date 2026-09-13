@@ -77,6 +77,15 @@ FACIES_PATTERN_MAP: dict[str, str] = {
     "岸线带": "shoreface",
     "浅海": "shallow_marine",
     "深海": "deep_marine",
+    # -- 参考相图词表（内置 FaciesTaxonomy 的 8 相全覆盖）---------------------
+    # 深水盆地 = 半深海/深水盆地平原 → abyssal 砖（deep_marine 留给「深海」）。
+    "深水盆地": "abyssal",
+    # 滨岸 = wave-dominated shoreline（前滨/临滨带）→ shoreface。
+    "滨岸": "shoreface",
+    "潟湖": "lagoon",
+    "潮坪": "tidal_flat",
+    "碳酸盐台地": "carbonate_platform",
+    "陆棚": "shelf",
 }
 
 

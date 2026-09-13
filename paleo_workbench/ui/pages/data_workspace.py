@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
+    QSizePolicy,
     QHBoxLayout,
     QSplitter,
     QStackedWidget,
@@ -119,7 +120,9 @@ class DataWorkspace(QWidget):
         self.right_splitter.addWidget(self.inspector_panel)
         self.right_splitter.setStretchFactor(0, 2)
         self.right_splitter.setStretchFactor(1, 1)
-        self.right_splitter.setSizes([400, 200])
+        self.right_splitter.setSizes([260, 140])
+        self.right_splitter.setStretchFactor(0, 3)
+        self.right_splitter.setStretchFactor(1, 2)
 
         self.main_splitter.addWidget(self.navigation_tree)
         center_container = QWidget()
@@ -135,12 +138,16 @@ class DataWorkspace(QWidget):
         self._map_collapsed_before_overview = True
         self.main_splitter.addWidget(center_container)
         self.main_splitter.addWidget(self.right_splitter)
+        # 三个子区都是 Expanding 参与伸展（sizeHint 驱动初始分配：
+        # minHint 驱动的布局在打开工程后列宽膨胀会把面板互相挤压）。
+        for side in (self.navigation_tree, center_container, self.right_splitter):
+            side.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.main_splitter.setStretchFactor(0, 0)
-        self.main_splitter.setStretchFactor(1, 1)
-        self.main_splitter.setStretchFactor(2, 0)
-        self.main_splitter.setSizes([220, 600, 480])
+        self.main_splitter.setStretchFactor(1, 3)
+        self.main_splitter.setStretchFactor(2, 2)
 
         layout.addWidget(self.main_splitter)
+
 
         # M6: the side panels float through the shared FloatController; the
         # center table/overview stack stays docked.
