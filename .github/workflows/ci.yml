@@ -245,34 +245,36 @@ jobs:
           # tests/perf is owned by the nightly slow leg (300s per-test
           # timeout): the fsync-heavy budgets repeatedly blew the fast
           # gate's 45s ceiling under runner load.
-          # ---- 切片并行二分（#1300 诊断轮 2）--------------------------------
-          # 段错误在字母序下确定性崩于 tests/test_app_close_dead_shell.py。
-          # 把受害文件之前的全部文件轮询切成 6 片，每片 + 受害文件并行跑：
-          # 崩的片即含「武装者」。core 统一由下方 gdb 段打印。
-          VICTIM=tests/test_app_close_dead_shell.py
-          mapfile -t ALL < <(python - <<'PY'
-          import pathlib
-          victim = 'tests/test_app_close_dead_shell.py'
-          files = sorted(str(f) for f in pathlib.Path('tests').glob('test_*.py'))
-          print('\n'.join(f for f in files if f < victim))
-          PY
-          )
-          N=6
-          pids=()
-          for i in $(seq 0 $((N-1))); do
-            mapfile -t SLICE < <(awk -v i="$i" -v n="$N" 'NR % n == i' < <(printf '%s\n' "${ALL[@]}"))
+          # ---- 最小化矩阵（#1300 诊断轮 3）--------------------------------
+          # 轮 2 结论：任何 ~40 文件切片 + 受害文件都崩（6 中 5 崩），武装者
+          # 在切片公共因子中（conftest 固件 / pytest-qt / qapp 会话态）。
+          # 轮 3 跑四路并行最小化，FULL 日志全部回传（上轮只传了 tail，
+          # 丢了各片的崩溃用例名）：
+          #   A 受害文件单独
+          #   B 受害 + tests/test_app.py
+          #   C 受害 + 最小 Qt 测试（test_action_help_v8，无原生桥）
+          #   D 受害 + tests/test_a11y_dpi_v6.py（dpi/图标 Qt 测试）
+          run_case() {
+            local name="$1"; shift
             (
-              xvfb-run -a python -m pytest "${SLICE[@]}" "$VICTIM" -v --tb=line \
+              xvfb-run -a python -m pytest "$@" -v --tb=line \
                 --timeout=45 --timeout-method=thread \
                 -m "not slow and not welllog_binding" \
-                -p no:randomly > "/tmp/slice_$i.log" 2>&1
-            ) &
-            pids+=($!)
-          done
-          for p in "${pids[@]}"; do wait "$p" || true; done
-          for i in $(seq 0 $((N-1))); do
-            echo "===== SLICE $i tail ====="
-            tail -4 "/tmp/slice_$i.log"
+                -p no:randomly > "/tmp/case_$name.log" 2>&1
+            )
+            echo "case $name exit=$?"
+          }
+          VICTIM=tests/test_app_close_dead_shell.py
+          run_case A "$VICTIM" &
+          run_case B tests/test_app.py "$VICTIM" &
+          run_case C tests/test_action_help_v8.py "$VICTIM" &
+          run_case D tests/test_a11y_dpi_v6.py "$VICTIM" &
+          wait || true
+          for name in A B C D; do
+            echo "===== CASE $name (fatal lines) ====="
+            grep -E 'Fatal Python error|Segmentation|PASSED|FAILED|passed|failed' "/tmp/case_$name.log" | tail -6
+            echo "----- CASE $name last 12 lines -----"
+            tail -12 "/tmp/case_$name.log"
           done
           shopt -s nullglob
           cores=(/tmp/core.*)
