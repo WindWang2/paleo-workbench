@@ -29,6 +29,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, Q
 
 from paleo_workbench.mapping.facies_brush_cache import FaciesPatternBrushCache
 from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
+from paleo_workbench.mapping.revision_cache import LatestRevisionCache
 
 logger = logging.getLogger(__name__)
 
@@ -624,6 +625,39 @@ def _reprojected_prepared_layer(
     return _PreparedLayer(tuple(features), prepared.revision, prepared.layer_type)
 
 
+class _ScalarImageEntry:
+    """Revision-keyed composite-ready QImage for one scalar-grid layer.
+
+    Built once per (data, style) revision change by ``_draw_scalar_grid``.
+    The QImage owns its bytes (built via ``QImage(...).copy()``), so the
+    numpy buffer from ``rasterize()`` is never referenced beyond the build —
+    the historical dangling-buffer segfault class cannot recur here. Raster
+    dimensions travel in the cache key via the payload's width/height when
+    it exposes them.
+    """
+
+    __slots__ = ("image", "payload")
+
+    def __init__(self, image: QImage, payload: object) -> None:
+        self.image = image
+        self.payload = payload
+
+
+def _payload_revision(payload: object, name: str) -> int | None:
+    """Best-effort revision off a renderer payload (native layers expose it).
+
+    Pure-Python payloads may not expose revisions; ``None`` participates in
+    the cache key tuple so absent metadata is stable, never assumed equal.
+    """
+    value = getattr(payload, name, None)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class FallbackMapRenderBackend(MapRenderBackend):
     """Explicit QPainter renderer for tests and hosts without a QGIS bridge.
 
@@ -658,11 +692,13 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._render_generation: int | None = None
         self._render_pending = False
         self._prepared_lock = threading.Lock()
-        self._prepared: dict[str, _PreparedLayer] = {}
+        self._prepared: LatestRevisionCache[str, int, _PreparedLayer] = LatestRevisionCache()
         # #1051: per-(layer, revision, CRS-pair) reprojected geometry. Keyed
         # separately from _prepared because the transform depends on the
         # PROJECT CRS, which can change without a data revision bump.
-        self._reprojected: dict[tuple[str, int, str, str], _PreparedLayer] = {}
+        self._reprojected: LatestRevisionCache[str, tuple[int, str, str], _PreparedLayer] = (
+            LatestRevisionCache()
+        )
         #: Public per-frame warnings (#1051): layers whose CRS differs from
         #: the project CRS and could not be reprojected (pyproj missing or
         #: unresolvable CRS name). Rebuilt by every composition paint so it
@@ -670,12 +706,20 @@ class FallbackMapRenderBackend(MapRenderBackend):
         #: silent.
         self.crs_warnings: list[str] = []
         self._frame_cache: tuple[tuple, RenderFrame] | None = None
+        # V12-C: scalar-grid QImage cache — rasterize() + full-frame copy are
+        # paid once per (data, style) revision, not once per frame. Guarded by
+        # _prepared_lock because _draw_scalar_grid runs on the render worker.
+        self._scalar_images: LatestRevisionCache[str, tuple, _ScalarImageEntry] = (
+            LatestRevisionCache()
+        )
         self._facies_patterns = FaciesPatternBrushCache()
         _LIVE_FALLBACKS.add(self)
         self._diagnostics = {
             "prepared_layers": 0,
             "prepared_cache_hits": 0,
             "prepared_cache_misses": 0,
+            "scalar_cache_hits": 0,
+            "scalar_cache_misses": 0,
             "features_total": 0,
             "features_drawn": 0,
             "points_drawn": 0,
@@ -821,6 +865,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         with self._prepared_lock:
             self._prepared.clear()
             self._reprojected.clear()
+            self._scalar_images.clear()
         self._frame_cache = None
         super().shutdown()
 
@@ -1019,12 +1064,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
         # Drop parsed payloads for layers that left the composition so document
         # switches do not accumulate stale prepared geometry.
         with self._prepared_lock:
-            for layer_id in list(self._prepared):
-                if layer_id not in seen_layers:
-                    del self._prepared[layer_id]
-            for key in list(self._reprojected):
-                if key[0] not in seen_layers:
-                    del self._reprojected[key]
+            self._prepared.prune(seen_layers)
+            self._reprojected.prune(seen_layers)
+            self._scalar_images.prune(seen_layers)
 
     def _warn_raster_unprojected(
         self, layer: MapLayerSnapshot, project_crs: str, kind: str
@@ -1064,9 +1106,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
         target_name = _normalize_crs_name(project_crs)
         if not source_name or not target_name or source_name == target_name:
             return prepared
-        key = (layer.id, int(layer.data_revision), source_name, target_name)
+        key = (int(layer.data_revision), source_name, target_name)
         with self._prepared_lock:
-            cached = self._reprojected.get(key)
+            cached = self._reprojected.get(layer.id, key)
         if cached is not None:
             return cached
         try:
@@ -1083,16 +1125,16 @@ class FallbackMapRenderBackend(MapRenderBackend):
             )
             return prepared
         with self._prepared_lock:
-            # Keep one entry per layer: a revision bump replaces, not
-            # accumulates, the cached transform.
-            for stale in [k for k in self._reprojected if k[0] == layer.id]:
-                del self._reprojected[stale]
-            self._reprojected[key] = reprojected
+            # One entry per layer: store replaces any previous revision/CRS
+            # pair instead of accumulating cached transforms.
+            self._reprojected.store(layer.id, key, reprojected)
         return reprojected
 
     def _prepared_layer(self, layer: MapLayerSnapshot) -> _PreparedLayer:
-        cached = self._prepared.get(layer.id)
-        if cached is not None and cached.revision == int(layer.data_revision):
+        revision = int(layer.data_revision)
+        with self._prepared_lock:
+            cached = self._prepared.get(layer.id, revision)
+        if cached is not None:
             self._diagnostics["prepared_cache_hits"] += 1
             return cached
         items: list[_PreparedFeature] = []
@@ -1116,11 +1158,11 @@ class FallbackMapRenderBackend(MapRenderBackend):
             layer_type=str(layer.layer_type),
         )
         with self._prepared_lock:
-            existing = self._prepared.get(layer.id)
-            if existing is not None and existing.revision == int(layer.data_revision):
+            existing = self._prepared.get(layer.id, int(layer.data_revision))
+            if existing is not None:
                 self._diagnostics["prepared_cache_hits"] += 1
                 return existing
-            self._prepared[layer.id] = prepared_layer
+            self._prepared.store(layer.id, int(layer.data_revision), prepared_layer)
         self._diagnostics["prepared_cache_misses"] += 1
         self._diagnostics["prepared_layers"] = len(self._prepared)
         return prepared_layer
@@ -1663,24 +1705,53 @@ class FallbackMapRenderBackend(MapRenderBackend):
         painter.restore()
 
     def _draw_scalar_grid(self, painter: QPainter, layer: MapLayerSnapshot) -> None:
-        """Composite the existing native scalar-raster cache without interpolation."""
+        """Composite the scalar raster without interpolation, cached per revision.
+
+        V12-C: pan/zoom used to pay ``rasterize()`` (a fresh full-frame buffer
+        out of the payload every call) plus a full-frame ``QImage.copy()``
+        EVERY frame. The QImage is now built once per (data, style) revision
+        — snapshot revisions AND the payload's own revisions (native
+        ScalarGridLayer exposes them) are both in the key, and the cached
+        entry additionally requires ``renderer_payload`` identity, so a
+        swapped payload object can never be served the previous pixels.
+        """
         scalar = layer.renderer_payload
         if scalar is None or not hasattr(scalar, "rasterize"):
             return
-        rgba = scalar.rasterize()
-        try:
-            height, width = int(rgba.shape[0]), int(rgba.shape[1])
-        except (AttributeError, IndexError, TypeError, ValueError):
-            return
-        if height < 1 or width < 1:
-            return
-        image = QImage(
-            rgba.data,
-            width,
-            height,
-            width * 4,
-            QImage.Format.Format_RGBA8888,
-        ).copy()
+        key = (
+            int(layer.data_revision),
+            int(layer.style_revision),
+            _payload_revision(scalar, "data_revision"),
+            _payload_revision(scalar, "style_revision"),
+            getattr(scalar, "width", None),
+            getattr(scalar, "height", None),
+        )
+        image: QImage | None = None
+        with self._prepared_lock:
+            entry = self._scalar_images.get(layer.id, key)
+            if entry is not None and entry.payload is scalar:
+                self._diagnostics["scalar_cache_hits"] += 1
+                image = entry.image
+        if image is None:
+            rgba = scalar.rasterize()
+            try:
+                height, width = int(rgba.shape[0]), int(rgba.shape[1])
+            except (AttributeError, IndexError, TypeError, ValueError):
+                return
+            if height < 1 or width < 1:
+                return
+            image = QImage(
+                rgba.data,
+                width,
+                height,
+                width * 4,
+                QImage.Format.Format_RGBA8888,
+            ).copy()
+            with self._prepared_lock:
+                self._scalar_images.store(
+                    layer.id, key, _ScalarImageEntry(image, scalar)
+                )
+                self._diagnostics["scalar_cache_misses"] += 1
         xmin, ymin, xmax, ymax = layer.extent
         top_left = self._screen_point((xmin, ymax))
         bottom_right = self._screen_point((xmax, ymin))

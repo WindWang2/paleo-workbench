@@ -271,13 +271,13 @@ def test_fallback_bounds_cache_survives_revision_bumps_without_rescanning_all() 
     # v2 contract: bounds live in the prepared layer's vectorised bbox array,
     # indexed by feature order (the layer id keys the prepared cache).
     layer = backend._snapshot.layers[0]
-    prepared = backend._prepared[layer.id]
+    prepared = backend._prepared.latest(layer.id)
     bounds = tuple(prepared.feature_bboxes[0])
     assert prepared.features[0].feature_id == layer.features[0]["id"]
 
     backend.set_layer_snapshot(_snapshot(data_revision=3))
     backend.render_sync()
     new_layer = backend._snapshot.layers[0]
-    new_prepared = backend._prepared[new_layer.id]
+    new_prepared = backend._prepared.latest(new_layer.id)
     assert new_prepared.features[0].feature_id == layer.features[0]["id"]
     assert tuple(new_prepared.feature_bboxes[0]) == bounds
