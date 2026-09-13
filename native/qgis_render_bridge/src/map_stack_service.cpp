@@ -1467,6 +1467,30 @@ void QgisMapStack::shutdown() {
   impl_->orphan_tree_expand_callbacks.clear();
   impl_->tree_pending.clear();
   impl_->tree_flush_scheduled.clear();
+  // V5 组节点不属 owned_layers——共享 QgsProject（进程单例）下残留组会跨栈
+  // 污染后续栈/宿主的期望树与 tree 快照（图层组测试曾自带 remove_groups_except
+  // 绕过这一缺口）。这里收口本栈已知的组：子节点先上提，不带走他栈的组。
+  // 必须在 known_group_names 清空之前、initialized 归零之前执行。
+  if (!impl_->known_group_names.empty()) {
+    std::vector<std::string> keep;
+    std::function<void(QgsLayerTreeGroup*)> collect =
+        [&](QgsLayerTreeGroup* parent) {
+          for (QgsLayerTreeNode* child : parent->children()) {
+            auto* group = treeGroupCast(child);
+            if (group == nullptr) continue;
+            const std::string gid =
+                group->customProperty(kGroupIdProp).toString().toStdString();
+            if (!gid.empty()
+                && impl_->known_group_names.find(gid)
+                    == impl_->known_group_names.end()) {
+              keep.push_back(gid);
+            }
+            collect(group);
+          }
+        };
+    collect(project()->layerTreeRoot());
+    removeGroupsExcept(keep);
+  }
   impl_->known_layer_names.clear();
   impl_->known_layer_visibility.clear();
   impl_->known_group_names.clear();

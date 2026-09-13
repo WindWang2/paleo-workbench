@@ -1547,6 +1547,13 @@ class QgisCanvasShim(QWidget):
             self.stack.clear_project_layers()
         except Exception:
             pass
+        # V5 组节点不在 mirror 图层表里——clear_project_layers 清不到它们，
+        # 残留组会跨文档/跨测试污染下一个宿主的期望树与 tree 快照。上一行
+        # 的图层收口本身就是全局语义，这里保持一致（子节点先上提，不吞层）。
+        try:
+            self.stack.remove_groups_except([])
+        except Exception:
+            pass
         try:
             self.stack.destroy_canvas(int(addr))
         except Exception:
@@ -1556,6 +1563,16 @@ class QgisCanvasShim(QWidget):
         if getattr(self, "_shutdown_done", False):
             return
         self._shutdown_done = True
+        # 宿主文档仍在世（宿主未走 document.shutdown 的路径）：通知它停掉
+        # 待触发的重组 debounce，否则弃用文档会在后续事件泵里用旧期望树
+        # 覆盖共享 QgsProject（下一个文档/用例的组树被抹）。
+        host = self.parent()
+        notifier = getattr(host, "on_canvas_disposed", None)
+        if callable(notifier):
+            try:
+                notifier()
+            except Exception:
+                pass
         self._restore_tool_patch()
         try:
             self._measure_router.detach()

@@ -3974,7 +3974,13 @@ class CompositeDocument(QWidget):
            即回退）；
         2) observe 拒绝的非法放置 → force reconcile 把 QGIS 树拉回领域
            权威位置（修复：非法拖放永不自愈）。
+
+        画布已收尾的文档拒绝入场：其原生树面板仍挂在共享 QgsProject 上，
+        后续文档的组结构变更会被回灌成"用户结构改动"——旧期望树随即覆盖
+        共享树，把新宿主的组抹掉（弃用文档不得再对共享工程动手）。
         """
+        if getattr(self, "_canvas_disposed", False):
+            return
         controller = self.stage_controller.group_controller
         try:
             if getattr(controller, "last_observe_rejected", False):
@@ -4348,9 +4354,21 @@ class CompositeDocument(QWidget):
 
     # -- 快照合成 ------------------------------------------------------------------
 
+    def on_canvas_disposed(self) -> None:
+        """画布已收尾：停发本文档的重组 debounce。
+
+        画布（原生栈）销毁后本文档的控制器仍持有镜像/组状态；待触发的
+        debounce 一旦在后续事件泵里跑起来，就会用它自己的期望树覆盖共享
+        QgsProject——下一个文档（或下一个用例）的图层组被抹掉。
+        WorkstationFrame 正常切工程走 shutdown()，但宿主弃用文档而未调
+        shutdown 时无人收口，故画布收尾时由本回调兜住。
+        """
+        self._canvas_disposed = True
+        self._composition_timer.stop()
+
     def _sync_composition(self, *, immediate: bool = True) -> None:
         """重组发布（默认立即；内容变化经 ``immediate=False`` 走 debounce）。"""
-        if self._loading:
+        if self._loading or getattr(self, "_canvas_disposed", False):
             return
         if immediate:
             self._composition_timer.stop()
