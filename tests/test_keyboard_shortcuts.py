@@ -5,10 +5,12 @@ simulating raw keypresses, because QShortcut activation is Qt-version
 sensitive and flaky under the pytest-qt offscreen platform. The contract
 under test is: (a) the callbacks exist with the right behavior, and
 (b) digit shortcuts are blocked while a text field has focus.
-"""
 
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*setActiveWindow.*")
+Window activation deliberately does NOT use the deprecated
+``QApplication.setActiveWindow``: under the offscreen platform it
+leaves focus on an anonymous container widget, so focus assertions
+read the wrong widget (verified by minimal A/B probe).
+"""
 
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QLineEdit
@@ -61,7 +63,6 @@ def test_digit_shortcut_blocked_in_text_field(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
-    QApplication.setActiveWindow(window)
     shell = window.app_shell
     # The data toolbar lives on the 数据 hub's 数据管理 sub-module; switch
     # there so its search box is the current page and can actually take focus.
@@ -71,10 +72,17 @@ def test_digit_shortcut_blocked_in_text_field(qtbot):
     # Let the workstation's deferred dock-layout restore (0 ms timer off the
     # WorkstationFrame constructor) settle BEFORE focusing: restoreState()
     # reflows the docks and would otherwise yank focus back to the frame.
-    QApplication.processEvents()
     search = shell.data_page.data_toolbar.search_box
-    search.setFocus()
-    QApplication.processEvents()
+
+    # 焦点断言必须等延迟 dock 恢复落定：WorkstationFrame 构造挂的 0ms
+    # 布局恢复定时器会在 restoreState() 重排 dock 时把焦点拽回 frame，
+    # 单次 processEvents 之后读到的只是那个中间态。期间反复请求焦点，
+    # 直到它稳定落在搜索框（与产品 Ctrl+F 的意图一致）。
+    def _focus_landed() -> bool:
+        search.setFocus()
+        return QApplication.focusWidget() is search
+
+    qtbot.waitUntil(_focus_landed, timeout=2000)
     assert isinstance(QApplication.focusWidget(), QLineEdit)
 
     shell._shortcut_switch_page(2)  # should be a no-op
@@ -88,7 +96,6 @@ def test_digit_shortcut_blocked_in_app_bar_command_input(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
-    QApplication.setActiveWindow(window)
     shell = window.app_shell
     command_input = shell.workstation.app_bar.command_input
     command_input.setFocus()
@@ -151,7 +158,6 @@ def test_window_focus_search_targets_data_toolbar_when_data_page_active(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
-    QApplication.setActiveWindow(window)
     # Switch to the 数据 hub's 数据管理 sub-module, which has its own search box.
     # (switch_to, not navigate_to: no fade → no graphics effect → hidden GL
     # pages stay uninitialized under the offscreen platform.)
@@ -161,9 +167,11 @@ def test_window_focus_search_targets_data_toolbar_when_data_page_active(qtbot):
     QApplication.processEvents()
 
     window._shortcut_focus_search()
-    QApplication.processEvents()
-
-    assert QApplication.focusWidget() is data_page.data_toolbar.search_box
+    # 同 test_digit_shortcut_blocked_in_text_field：等延迟 dock 恢复落定，
+    # 否则读到的是被拽走后的中间态。
+    qtbot.waitUntil(
+        lambda: QApplication.focusWidget() is data_page.data_toolbar.search_box,
+        timeout=2000)
 
 
 def test_window_focus_search_falls_back_to_app_bar(qtbot):
@@ -171,7 +179,6 @@ def test_window_focus_search_falls_back_to_app_bar(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
-    QApplication.setActiveWindow(window)
     # 数据 / 项目概述 (the home surface) has no data_toolbar.
     window.app_shell.hub_data.switch_to("overview")
 
@@ -234,7 +241,6 @@ def test_data_page_delete_guarded_in_text_field(qtbot, tmp_path):
     window._refresh_shell()
     qtbot.addWidget(window)
     window.show()
-    QApplication.setActiveWindow(window)
 
     # Switch to the 数据 hub's 数据管理 sub-module
     window.app_shell.hub_data.switch_to("management")

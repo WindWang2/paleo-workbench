@@ -9,6 +9,16 @@ from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtWidgets import QGraphicsOpacityEffect
 
 
+@pytest.fixture(autouse=True)
+def _enable_page_fade(monkeypatch):
+    """渐变默认禁用（V9 审计 D-2：graphics effect 会逼兄弟页 QOpenGLWidget
+    提前 initializeGL，offscreen CI 曾死在 pyqtgraph initializeGL）。本文件
+    验证的是动画契约，故按文档开关（PALEO_PAGE_FADE=1）显式开启。"""
+    from paleo_workbench.ui.app_shell import AppShell
+
+    monkeypatch.setattr(AppShell, "_PAGE_FADE_ENABLED", True)
+
+
 # --- AppShell page-switch tests (headless: no native-window exposure) ---
 
 def test_page_switch_attaches_opacity_effect(qtbot):

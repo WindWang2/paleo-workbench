@@ -345,7 +345,7 @@ def test_composite_header_sort_reorders_model_rows(qtbot):
     layer.edit_session.change_attribute("f00001", "facies", "A")
     layer.edit_session.change_attribute("f00002", "facies", "B")
     controller.content_changed.emit(layer.id)
-    column = _column_of(dialog, "相带类型")
+    column = _column_of(dialog, "相")
     dialog._model.sort(column, Qt.SortOrder.AscendingOrder)
     assert [dialog._model._fids[row] for row in range(3)] == [
         "f00001", "f00002", "f00000",

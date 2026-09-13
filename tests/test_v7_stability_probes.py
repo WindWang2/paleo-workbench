@@ -122,7 +122,7 @@ class TestScaleProbes:
 
 
 class TestToolActivationStability:
-    def test_context_inputs_constant_in_layer_size(self, qtbot, tmp_path):
+    def test_context_inputs_constant_in_layer_size(self, qtbot, tmp_path, monkeypatch):
         """Review-3 P1-1 回归探针：tool_context_inputs 不得 O(要素数)。
 
         直接构造 ToolContext 的 evaluator 探针测不到采集器本身的 O(N)——
@@ -135,6 +135,9 @@ class TestToolActivationStability:
 
         document = _document(qtbot, tmp_path)
         controller = document.edit_controller
+        # 探针钉宿主侧 Python 会话规模行为（原生会话等价语义见 test_qgis_topo_*）。
+        monkeypatch.setattr(
+            controller, "_native_session_eligible", lambda _layer: False)
         for name, kind in (("小", "point"), ("大", "polygon")):
             layer = controller.create_layer(name, kind)
             controller.set_active_layer(layer.id)
@@ -153,11 +156,14 @@ class TestToolActivationStability:
         controller.set_active_layer(big_layer.id)
         big = min(timeit.repeat(controller.tool_context_inputs, number=50, repeat=3))
         assert big < max(small * 8.0, small + 0.10)
-    def test_100x_activate_deactivate_cycle(self, qtbot, tmp_path):
+    def test_100x_activate_deactivate_cycle(self, qtbot, tmp_path, monkeypatch):
         from tests.test_composite_editing import _document
 
         document = _document(qtbot, tmp_path)
         controller = document.edit_controller
+        # 探针钉宿主侧 Python 会话规模行为（原生会话等价语义见 test_qgis_topo_*）。
+        monkeypatch.setattr(
+            controller, "_native_session_eligible", lambda _layer: False)
         layer = controller.create_layer("断层", "line")
         controller.start_editing()
         for i in range(100):

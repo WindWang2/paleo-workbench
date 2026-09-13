@@ -55,7 +55,7 @@ def test_tree_menu_tooltips_visible(doc):
     # _on_context_menu 内部调用 setToolTipsVisible(True)。
     from PySide6.QtWidgets import QMenu
 
-    probe = QMenu(panel.tree)
+    probe = QMenu(panel)
     probe.setToolTipsVisible(True)
     assert probe.toolTipsVisible()
 
@@ -106,7 +106,12 @@ def test_canvas_menu_suppressed_mid_capture(doc):
 
 
 # R4-2：切层开启编辑时先提交他层会话（无静默遗弃）。
-def test_toggle_editing_commits_other_session(doc):
+def test_toggle_editing_commits_other_session(doc, monkeypatch):
+    # 本文件钉宿主侧 Python 会话簿记（提交/回滚/撤销单元/拓扑计数）：
+    # polygon/line 已翻原生会话（M5），此处显式钉回 Python 路径；
+    # 原生等价语义见 test_qgis_topo_m1/m2/m4_*。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     a = doc.edit_controller.create_layer("A", "polygon")
     _register_role(doc, a.id, LayerRole.INITIAL_FACIES_DRAFT)
     doc.edit_controller.set_active_layer(a.id)
@@ -127,8 +132,13 @@ def test_toggle_editing_commits_other_session(doc):
     assert doc.edit_controller.layer(b.id).edit_session is not None
 
 
-def test_tree_layer_switch_commits_other_session(doc):
+def test_tree_layer_switch_commits_other_session(doc, monkeypatch):
     """#1268: 树选中另一层也必须提交/回滚前一会话。"""
+    # 本文件钉宿主侧 Python 会话簿记（提交/回滚/撤销单元/拓扑计数）：
+    # polygon/line 已翻原生会话（M5），此处显式钉回 Python 路径；
+    # 原生等价语义见 test_qgis_topo_m1/m2/m4_*。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     a = doc.edit_controller.create_layer("A", "polygon")
     _register_role(doc, a.id, LayerRole.INITIAL_FACIES_DRAFT)
     doc.edit_controller.set_active_layer(a.id)
@@ -149,7 +159,12 @@ def test_tree_layer_switch_commits_other_session(doc):
 
 
 # R4-3：拓扑 chip 校验覆盖全部打开的会话（与计数同口径）。
-def test_topology_validate_covers_all_sessions(doc):
+def test_topology_validate_covers_all_sessions(doc, monkeypatch):
+    # 本文件钉宿主侧 Python 会话簿记（提交/回滚/撤销单元/拓扑计数）：
+    # polygon/line 已翻原生会话（M5），此处显式钉回 Python 路径；
+    # 原生等价语义见 test_qgis_topo_m1/m2/m4_*。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     layers = []
     for name in ("A", "B"):
         layer = doc.edit_controller.create_layer(name, "polygon")
@@ -254,7 +269,12 @@ def _seeded_polygon(doc, name, count, select=True):
 
 
 # #1259：多选 delete/duplicate = 单一 undo 单元（07 §B.1）。
-def test_multi_select_delete_is_single_undo_unit(doc):
+def test_multi_select_delete_is_single_undo_unit(doc, monkeypatch):
+    # 本文件钉宿主侧 Python 会话簿记（提交/回滚/撤销单元/拓扑计数）：
+    # polygon/line 已翻原生会话（M5），此处显式钉回 Python 路径；
+    # 原生等价语义见 test_qgis_topo_m1/m2/m4_*。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     layer = _seeded_polygon(doc, "del", 3)
     session = layer.edit_session
     assert len(session.undo_stack) == 1  # seed 宏
@@ -265,7 +285,12 @@ def test_multi_select_delete_is_single_undo_unit(doc):
     assert {f.feature_id for f in session.features()} == {"f0", "f1", "f2"}
 
 
-def test_multi_select_duplicate_is_single_undo_unit(doc):
+def test_multi_select_duplicate_is_single_undo_unit(doc, monkeypatch):
+    # 本文件钉宿主侧 Python 会话簿记（提交/回滚/撤销单元/拓扑计数）：
+    # polygon/line 已翻原生会话（M5），此处显式钉回 Python 路径；
+    # 原生等价语义见 test_qgis_topo_m1/m2/m4_*。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     layer = _seeded_polygon(doc, "dup", 3)
     session = layer.edit_session
     assert doc.edit_controller.edit_command("duplicate_selected") is True
@@ -278,6 +303,9 @@ def test_multi_select_duplicate_is_single_undo_unit(doc):
 # #1264：add_ring / add_part 挂上拓扑计数刷新点。
 def test_ring_and_part_appliers_refresh_topology_count(doc, monkeypatch):
     """V10 新增命令族与同族命令共用刷新点（否则门禁读到过期计数）。"""
+    # 同前：钉宿主侧 Python 会话（原生等价语义见 test_qgis_topo_*）。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     import json as _json
     import types
 
@@ -331,8 +359,13 @@ def test_ring_and_part_appliers_refresh_topology_count(doc, monkeypatch):
     assert calls == [layer.id], "add_part 未刷新拓扑错误计数"
 
 
-def test_move_part_refreshes_topology_count_for_merge_gate(doc):
+def test_move_part_refreshes_topology_count_for_merge_gate(doc, monkeypatch):
     """move_part 成功后 merge 门禁必须读到新计数，不能沿用过期 0（#1264）。"""
+    # 本文件钉宿主侧 Python 会话簿记（提交/回滚/撤销单元/拓扑计数）：
+    # polygon/line 已翻原生会话（M5），此处显式钉回 Python 路径；
+    # 原生等价语义见 test_qgis_topo_m1/m2/m4_*。
+    monkeypatch.setattr(
+        doc.edit_controller, "_native_session_eligible", lambda _layer: False)
     from paleo_workbench.mapping.vector_layer import VectorFeature
 
     layer = doc.edit_controller.create_layer("parts", "polygon")

@@ -250,7 +250,7 @@ def test_refresh_shell_flushes_layout_before_hide(qtbot, tmp_path, monkeypatch):
 # --- #1126: project save flushes composite edit sessions ----------------------
 
 
-def test_flush_composite_edits_commits_sessions(qtbot, tmp_path):
+def test_flush_composite_edits_commits_sessions(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.app import PaleoWorkbenchWindow
     from paleo_workbench.mapping.vector_layer import VectorFeature
 
@@ -259,6 +259,10 @@ def test_flush_composite_edits_commits_sessions(qtbot, tmp_path):
 
     composite = window.app_shell.workstation.composite
     controller = composite.edit_controller
+    # 本用例钉宿主侧 Python 会话的 flush 契约（原生 flush 见
+    # test_qgis_topo_m4_checker 与 test_composite_gis 的原生门禁用例）。
+    monkeypatch.setattr(
+        controller, "_native_session_eligible", lambda _layer: False)
     controller.create_layer("断层线", "line", template="fault")
     controller.start_editing()
     controller.active_layer.edit_session.add_feature(

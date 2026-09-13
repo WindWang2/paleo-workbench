@@ -25,6 +25,25 @@ def document(qtbot, tmp_path):
     return doc
 
 
+@pytest.fixture()
+def fallback_document(qtbot, tmp_path, monkeypatch):
+    """回退画布文档：树装饰用例钉的是回退面板的树控件。
+
+    本机桥已构建（原生面板无 ``tree`` 属性），必须显式制造 shim 构造失败
+    才能拿到回退面板；需保持"类型"——宿主链路有 isinstance 判别。
+    """
+    from paleo_workbench.ui.workstation import composite_document as cd
+
+    class _NoBridgeShim(cd.QgisCanvasShim):
+        def __init__(self, *_args, **_kwargs):
+            raise RuntimeError("桥不可用（测试强制回退画布）")
+
+    monkeypatch.setattr(cd, "QgisCanvasShim", _NoBridgeShim)
+    doc = CompositeDocument(_project(tmp_path))
+    qtbot.addWidget(doc)
+    return doc
+
+
 def _add_layer(document, kind, role, name="层", **extra):
     layer = document.edit_controller.create_layer(name, kind)
     document.stage_controller.state.set_membership(LayerMembershipRecord(
@@ -109,7 +128,8 @@ def test_run_qa_validator_crash_becomes_issue(document, monkeypatch):
 
 
 # R3#1 (P1): 新鲜度变化 → 树装饰即时刷新
-def test_stale_summary_refreshes_tree_decorations(document, qtbot):
+def test_stale_summary_refreshes_tree_decorations(fallback_document, qtbot):
+    document = fallback_document
     from paleo_workbench.mapping_workspace.dependencies import (
         ArtifactFreshness,
         FreshnessStatus,
@@ -193,7 +213,8 @@ def test_style_manager_call_signature(document, monkeypatch):
 
 
 # R1#7 (P2): 缺失图层装饰
-def test_missing_layer_gets_missing_decoration(document, qtbot):
+def test_missing_layer_gets_missing_decoration(fallback_document, qtbot):
+    document = fallback_document
     layer = _add_layer(document, "polygon", LayerRole.INITIAL_FACIES_DRAFT)
     document._sync_composition_now()
     # 直接从编辑权威删除（树上残留行）。

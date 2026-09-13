@@ -167,7 +167,8 @@ def test_unique_allows_distinct_value(qtbot, controller):
 
     written = dialog._write_attribute("f2", "station", "text", "C")
 
-    assert written is None
+    # #1276：写入成功返回 True（False = 被门禁/约束拒绝）。
+    assert written is True
     assert layer.edit_session.feature("f2").attributes["station"] == "C"
 
 
@@ -177,7 +178,7 @@ def test_unique_allows_rewriting_own_current_value(qtbot, controller):
     # f1 自身当前值 "A" 不构成冲突（原地重写合法）
     written = dialog._write_attribute("f1", "station", "text", "A")
 
-    assert written is None
+    assert written is True
     assert layer.edit_session.feature("f1").attributes["station"] == "A"
 
 
@@ -187,7 +188,7 @@ def test_unique_ignores_empty_values(qtbot, controller):
     # 空值不占用唯一域（NULL 语义：与另一要素的 "A" 不撞车）
     written = dialog._write_attribute("f2", "station", "text", "")
 
-    assert written is None
+    assert written is True
     assert layer.edit_session.feature("f2").attributes["station"] == ""
 
 
@@ -200,7 +201,7 @@ def test_unique_compares_numerics_by_value(qtbot, controller):
     # "100.0" 与 100.0 同值 → 拒绝
     assert dialog._write_attribute("f2", "elevation", "real", "100.0") is False
     # 数值不同 → 放行
-    assert dialog._write_attribute("f2", "elevation", "real", "200.5") is None
+    assert dialog._write_attribute("f2", "elevation", "real", "200.5") is True
     assert session.feature("f2").attributes["elevation"] == 200.5
 
 
@@ -225,5 +226,5 @@ def test_non_unique_field_allows_duplicate(qtbot, controller):
         AttributeFieldMeta(key="station", label="测站", kind="text"),
     )
 
-    assert dialog._write_attribute("f2", "station", "text", "A") is None
+    assert dialog._write_attribute("f2", "station", "text", "A") is True
     assert layer.edit_session.feature("f2").attributes["station"] == "A"
