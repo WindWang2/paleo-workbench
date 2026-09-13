@@ -385,23 +385,30 @@ def place_managed_file(
     keep_source: bool = True,
     known_sha256: str | None = None,
     register_blob: bool = False,
+    _sha256_verified: bool = False,
 ) -> tuple[str, int, str]:
     """Copy *source* into managed storage atomically, hashing in one pass.
 
-    Reads the source exactly once: streams it to a temp file in the target
-    directory while accumulating SHA-256, then fsync + rename into place and
-    marks the committed payload read-only.
+    Reads the source exactly once per pass: streams it to a temp file in the
+    target directory while accumulating SHA-256, then fsync + rename into
+    place and marks the committed payload read-only. With *register_blob* the
+    content-store copy is written from the SAME read — the just-placed
+    payload is never re-read to build the blob.
 
     Dedup (P4): when *known_sha256* names a blob already present in the
     content store AND the source is the same size, no copy happens at all —
     the version's path points at the shared read-only blob (O(1), copy-free).
-    The caller-provided digest is trusted (the adapter computes it with our
-    own hasher before calling; integrity re-hashes the payload). With
-    *register_blob*, the placed payload is also registered in the content
-    store so later imports of the same content dedup to it.
+    A digest of unknown provenance is proven by re-hashing the source here
+    (never trust a size+digest pair without content proof, or a stale digest
+    could silently link a version to content that differs from the source
+    file). ``_sha256_verified`` (private; marks digests hashed in-process
+    from this same source during the same registration call — adapter or
+    lifecycle helper) skips that re-proof: the fresh in-process hash IS the
+    content proof. The copy path always hashes what it writes and rejects a
+    mismatching caller digest (honest checksum).
 
-    Returns ``(relative_path, size_bytes, sha256)``. On failure the temp file
-    is removed and no partial payload is left behind.
+    Returns ``(relative_path, size_bytes, sha256)``. On failure the temp
+    files are removed and no partial payload is left behind.
 
     ``keep_source=False`` moves instead of copying (used when committing a
     working copy that is being promoted to immutable).
@@ -415,13 +422,14 @@ def place_managed_file(
     _require_safe_entity_id("version", version_id)
     if known_sha256 is not None and has_blob(project, known_sha256):
         try:
-            if source.stat().st_size == blob_size(project, known_sha256) \
-                    and _digest_of(source) == known_sha256:
+            if source.stat().st_size == blob_size(project, known_sha256) and (
+                _sha256_verified or _digest_of(source) == known_sha256
+            ):
                 # The caller's digest names an existing blob AND the source
-                # content actually matches it: share the read-only blob, O(1)
-                # (hash-only verification — never trust a size+digest pair
-                # without content proof, or a stale digest could silently link
-                # a version to content that differs from the source file).
+                # content matches it: share the read-only blob, O(1). The
+                # match is proven by re-hashing here, or — when
+                # _sha256_verified says the caller hashed this same file
+                # in-process moments ago — accepted without a second read.
                 blob = blob_path(project, known_sha256)
                 if not keep_source:
                     # Dedup hit must not orphan the source working file in
@@ -441,35 +449,94 @@ def place_managed_file(
     digest = hashlib.sha256()
     size = 0
     fd, tmp_name = tempfile.mkstemp(prefix=".place-", dir=str(target_dir))
+    # Content-store copy (register_blob) streams from the same read. The
+    # digest is unknown until the stream completes, so the blob temp cannot
+    # sit in its shard directory yet; it lives at the blobs/ root (scan_blobs
+    # skips non-directory root entries, and a crash orphan here is the same
+    # class as the shard-dir ``.blob-*`` leftovers of _place_blob_bytes).
+    blob_tmp: str | None = None
+    blob_fd = -1
+    if register_blob:
+        blob_root = blob_dir_for(project)
+        blob_root.mkdir(parents=True, exist_ok=True)
+        blob_fd, blob_tmp = tempfile.mkstemp(prefix=".blob-", dir=str(blob_root))
     try:
-        with os.fdopen(fd, "wb") as out, source.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
-                digest.update(chunk)
-                out.write(chunk)
-                size += len(chunk)
-            out.flush()
-            os.fsync(out.fileno())
-        os.replace(tmp_name, target)
-        fsync_dir(target_dir)
-    except Exception:
+        blob_out = os.fdopen(blob_fd, "wb") if blob_tmp is not None else None
+        try:
+            with os.fdopen(fd, "wb") as out, source.open("rb") as handle:
+                try:
+                    for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
+                        digest.update(chunk)
+                        size += len(chunk)
+                        out.write(chunk)
+                        if blob_out is not None:
+                            blob_out.write(chunk)
+                    out.flush()
+                    os.fsync(out.fileno())
+                    if blob_out is not None:
+                        # A failed blob fsync must fail the placement (same
+                        # contract as the payload fsync above): content-store
+                        # blobs are trusted forever by has_blob/dedup, so a
+                        # non-durable write can never be committed silently.
+                        blob_out.flush()
+                        os.fsync(blob_out.fileno())
+                finally:
+                    if blob_out is not None:
+                        blob_out.close()
+            os.replace(tmp_name, target)
+            fsync_dir(target_dir)
+        except BaseException:
+            if blob_out is not None and not blob_out.closed:
+                try:
+                    blob_out.close()
+                except OSError:
+                    pass
+            raise
+    except BaseException:
         safe_unlink(tmp_name)
+        if blob_tmp is not None:
+            safe_unlink(blob_tmp)
         raise
     hex_digest = digest.hexdigest()
     if known_sha256 is not None and known_sha256 != hex_digest:
         # Honest checksum: never silently adopt a caller-provided digest that
         # does not match the bytes actually placed.
         safe_unlink(target)
+        if blob_tmp is not None:
+            safe_unlink(blob_tmp)
         raise CatalogError(
             f"Checksum mismatch for {source}: caller reported {known_sha256},"
             f" actual {hex_digest}"
         )
     _make_readonly(target)
-    if register_blob:
-        place_blob(project, target, hex_digest)
+    if blob_tmp is not None:
+        _commit_blob_temp(project, hex_digest, blob_tmp)
     if not keep_source:
         safe_unlink(source)
     project_dir = _project_dir(project)
     return target.relative_to(project_dir).as_posix(), size, hex_digest
+
+
+def _commit_blob_temp(project_path: Path, digest: str, blob_tmp: str) -> None:
+    """Atomically land a pre-written temp file as ``blobs/xx/<digest>``.
+
+    Same idempotency contract as ``_place_blob_bytes``: an already-present
+    blob is left untouched (the content-addressed name guarantees equality)
+    and the temp is discarded — a blob that appeared concurrently is never
+    overwritten.
+    """
+    target_dir = blob_dir_for(Path(project_path)) / digest[:2]
+    if (target_dir / digest).is_file():
+        safe_unlink(blob_tmp)
+        return
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        os.replace(blob_tmp, target_dir / digest)
+    except BaseException:
+        safe_unlink(blob_tmp)
+        raise
+    fsync_dir(target_dir)
+    _make_readonly(target_dir / digest)
 
 
 def place_managed_tree(

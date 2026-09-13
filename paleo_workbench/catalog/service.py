@@ -1657,6 +1657,7 @@ class DataCatalogService(DataFabricV11Mixin):
         move: bool,
         known_sha256: str | None = None,
         register_blob: bool = False,
+        sha256_verified: bool = False,
     ) -> tuple[DataVersion, Path]:
         """Place the payload and build the (not yet appended) DataVersion."""
         if not self._is_safe_version_id(asset.id):
@@ -1695,6 +1696,7 @@ class DataCatalogService(DataFabricV11Mixin):
             keep_source=not move,
             known_sha256=known_sha256,
             register_blob=register_blob,
+            _sha256_verified=sha256_verified,
         )
         version.path = rel_path
         version.size_bytes = size
@@ -1715,6 +1717,7 @@ class DataCatalogService(DataFabricV11Mixin):
         _restore_payload_to: Path | None = None,
         known_sha256: str | None = None,
         _register_blob: bool = False,
+        _sha256_verified: bool = False,
     ) -> DataVersion:
         """Place *source_path* under managed storage and commit a new version.
 
@@ -1722,8 +1725,9 @@ class DataCatalogService(DataFabricV11Mixin):
         the SAME save as the version commit (atomic run-output linkage), and
         restored on rollback.
 
-        ``known_sha256`` / ``_register_blob`` (private; adapter import path):
-        see :func:`paleo_workbench.catalog.storage.place_managed_file`.
+        ``known_sha256`` / ``_register_blob`` / ``_sha256_verified`` (private;
+        adapter import path): see
+        :func:`paleo_workbench.catalog.storage.place_managed_file`.
 
         Payload copy+hash+fsync happens OUTSIDE the lock (same reason as
         :meth:`register_result_asset`). Version numbers are assigned at
@@ -1757,6 +1761,7 @@ class DataCatalogService(DataFabricV11Mixin):
                 run_id=run_id, metadata=metadata, move=move,
                 known_sha256=known_sha256,
                 register_blob=_register_blob,
+                sha256_verified=_sha256_verified,
             )
             with self._lock:
                 try:
@@ -2035,6 +2040,7 @@ class DataCatalogService(DataFabricV11Mixin):
         asset_id: str | None = None,
         _legacy_resource_id: str | None = None,
         known_sha256: str | None = None,
+        _sha256_verified: bool = False,
     ) -> DataVersion:
         """Import *source_path* as an immutable managed RAW snapshot.
 
@@ -2051,6 +2057,10 @@ class DataCatalogService(DataFabricV11Mixin):
         the same size, no copy happens and the version references the shared
         blob (O(1)). Every managed RAW import also registers its payload in
         the content store so later imports of the same content dedup to it.
+        ``_sha256_verified`` (private; adapter-only) marks digests hashed
+        in-process from the source in the same registration call (by the
+        adapter itself or the lifecycle helper) — see
+        :func:`paleo_workbench.catalog.storage.place_managed_file`.
 
         Payload copy+hash happens outside the lock. The new asset is added
         and persisted in the same locked section as its first version, so a
@@ -2063,6 +2073,7 @@ class DataCatalogService(DataFabricV11Mixin):
             return self.register_version(
                 asset_id, source_path, DataStage.RAW, metadata=metadata,
                 known_sha256=known_sha256, _register_blob=True,
+                _sha256_verified=_sha256_verified,
             )
         asset = self._new_asset(
             name or source_path.name, type, format, metadata
@@ -2086,6 +2097,7 @@ class DataCatalogService(DataFabricV11Mixin):
                 run_id=None, metadata=metadata, move=False,
                 known_sha256=known_sha256,
                 register_blob=True,
+                sha256_verified=_sha256_verified,
             )
             with self._lock:
                 if (
