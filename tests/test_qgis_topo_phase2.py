@@ -102,6 +102,72 @@ def test_connected_line_network_has_no_dangle(qtbot, stack):
         _cleanup(stack, addr, "shore")
 
 
+def test_box_select_translates_distinct_vertices(qtbot, stack):
+    """§4 框选多节点：空处拖框选中两点，再拖其中一点，两点平移同一向量。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from shiboken6 import wrapInstance
+    from PySide6.QtWidgets import QGraphicsView
+
+    addr = stack.create_canvas()
+    view = wrapInstance(addr, QGraphicsView)
+    qtbot.addWidget(view)
+    view.resize(400, 400)
+    view.show()
+    fc = {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [[
+                [2.0, 2.0], [6.0, 2.0], [6.0, 6.0], [2.0, 6.0], [2.0, 2.0]]]},
+            "properties": {"__pwb_fid": "sq"},
+        }],
+    }
+    try:
+        stack.upsert_mirror_layer(
+            "doc-box", "框选", "Polygon", "EPSG:4326", json.dumps(fc),
+            "", "", "", True, 1.0, is_reference=False, is_editable=True,
+            data_revision=1)
+        stack.set_canvas_extent(addr, 0.0, 0.0, 10.0, 10.0)
+        assert stack.start_mirror_layer_editing("doc-box") == ""
+        stack.set_current_layer(addr, "doc-box")
+        events = []
+        stack.set_edit_pick_callback(
+            addr, lambda action, payload: events.append(
+                (action, json.loads(payload))))
+        stack.set_map_tool(addr, "vertex")
+
+        def _pixel(x, y):
+            from PySide6.QtCore import QPoint
+            return QPoint(int(40 * x), int(400 - 40 * y))
+
+        QTest.mousePress(view.viewport(), Qt.LeftButton, Qt.NoModifier,
+                         _pixel(1.5, 1.5))
+        QTest.mouseMove(view.viewport(), _pixel(6.5, 2.5))
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, Qt.NoModifier,
+                           _pixel(6.5, 2.5))
+        QTest.mousePress(view.viewport(), Qt.LeftButton, Qt.NoModifier,
+                         _pixel(2.0, 2.0))
+        QTest.mouseMove(view.viewport(), _pixel(3.0, 3.0))
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, Qt.NoModifier,
+                           _pixel(3.0, 3.0))
+        qtbot.waitUntil(
+            lambda: any(a == "edit_gesture" for a, _ in events), timeout=2000)
+        payload = json.loads(stack.mirror_features_json("doc-box", 0))
+        ring = payload["features"][0]["geometry"]["coordinates"][0]
+        pts = {(round(x, 1), round(y, 1)) for x, y in ring}
+        assert (3.0, 3.0) in pts
+        assert (7.0, 3.0) in pts
+        # 闭合环必须仍闭合：首尾同点，且顶点数不变（平移不是重建环）。
+        assert len(ring) == 5, ring
+        assert ring[0] == ring[-1], ring
+        assert (round(ring[0][0], 1), round(ring[0][1], 1)) == (3.0, 3.0)
+    finally:
+        stack.set_map_tool(addr, "pan")
+        if stack.mirror_layer_editing("doc-box"):
+            stack.roll_back_mirror_layer("doc-box")
+
+
 def test_line_layer_starts_native_editing(qtbot, stack):
     addr, _view = _canvas(qtbot, stack)
     try:

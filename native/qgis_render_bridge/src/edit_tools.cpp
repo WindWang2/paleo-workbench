@@ -17,6 +17,7 @@
 #include <qgsmaptoolselectionhandler.h>
 #include <qgspointlocator.h>
 #include <qgsproject.h>
+#include <qgsrectangle.h>
 #include <qgsrubberband.h>
 #include <qgssnappingutils.h>
 #include <qgssnapindicator.h>
@@ -264,6 +265,43 @@ std::vector<QgsVectorLayer*> PwbVertexTool::candidateLayers() const {
   return out;
 }
 
+std::vector<PwbVertexTool::VertexRef> PwbVertexTool::verticesInRect(
+    QgsVectorLayer* layer, const QgsRectangle& rect) {
+  std::vector<VertexRef> out;
+  if (layer == nullptr || rect.isEmpty()) return out;
+  QgsFeature feature;
+  QgsFeatureIterator cursor = layer->getFeatures(QgsFeatureRequest(rect));
+  while (cursor.nextFeature(feature)) {
+    if (!feature.hasGeometry()) continue;
+    const QgsGeometry geometry = feature.geometry();
+    const QgsAbstractGeometry* raw = geometry.constGet();
+    if (raw == nullptr) continue;
+    const int total = static_cast<int>(raw->vertexCount());
+    for (int nr = 0; nr < total; ++nr) {
+      QgsVertexId vid;
+      if (!geometry.vertexIdFromVertexNr(nr, vid) || !vid.isValid()) continue;
+      const QgsPoint point = raw->vertexAt(vid);
+      if (!rect.contains(QgsPointXY(point.x(), point.y()))) continue;
+      // 闭合环首尾同一点只收一次。
+      if (nr > 0) {
+        QgsVertexId first;
+        if (geometry.vertexIdFromVertexNr(0, first)) {
+          const QgsPoint origin = raw->vertexAt(first);
+          if (vid.part == first.part && vid.ring == first.ring
+              && std::hypot(point.x() - origin.x(), point.y() - origin.y())
+                  <= kSharedNodeEpsilon
+              && nr == total - 1) {
+            continue;
+          }
+        }
+      }
+      out.push_back({layer, feature.id(), vid,
+                     QgsPointXY(point.x(), point.y())});
+    }
+  }
+  return out;
+}
+
 std::vector<PwbVertexTool::VertexRef> PwbVertexTool::verticesNear(
     QgsVectorLayer* layer, const QgsPointXY& center, double radius) {
   std::vector<VertexRef> out;
@@ -375,6 +413,161 @@ void PwbVertexTool::beginSharedDrag(const QgsPointXY& anchor,
   rubber_->setColor(QColor(255, 0, 0, 200));
   rubber_->setWidth(2);
   rubber_->addPoint(anchor);
+}
+
+bool PwbVertexTool::vertexInBoxedSelection(const VertexRef& ref) const {
+  for (const VertexRef& item : boxed_selection_) {
+    if (item.layer == ref.layer && item.fid == ref.fid
+        && item.vid.part == ref.vid.part && item.vid.ring == ref.vid.ring
+        && item.vid.vertex == ref.vid.vertex) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void PwbVertexTool::startBoxSelect(const QgsPointXY& start) {
+  boxing_ = true;
+  box_start_ = start;
+  boxed_selection_.clear();
+  clearSharedMarkers();
+  box_rubber_ = std::make_unique<QgsRubberBand>(canvas(), Qgis::GeometryType::Polygon);
+  box_rubber_->setColor(QColor(0, 120, 255, 50));
+  box_rubber_->setStrokeColor(QColor(0, 90, 200, 220));
+  box_rubber_->setWidth(1);
+  updateBoxSelect(start);
+}
+
+void PwbVertexTool::updateBoxSelect(const QgsPointXY& now) {
+  if (!boxing_ || !box_rubber_) return;
+  const double xmin = std::min(box_start_.x(), now.x());
+  const double xmax = std::max(box_start_.x(), now.x());
+  const double ymin = std::min(box_start_.y(), now.y());
+  const double ymax = std::max(box_start_.y(), now.y());
+  box_rubber_->reset(Qgis::GeometryType::Polygon);
+  box_rubber_->addPoint(QgsPointXY(xmin, ymin));
+  box_rubber_->addPoint(QgsPointXY(xmax, ymin));
+  box_rubber_->addPoint(QgsPointXY(xmax, ymax));
+  box_rubber_->addPoint(QgsPointXY(xmin, ymax));
+  box_rubber_->addPoint(QgsPointXY(xmin, ymin));
+}
+
+void PwbVertexTool::cancelBoxSelect() {
+  boxing_ = false;
+  box_rubber_.reset();
+}
+
+void PwbVertexTool::finishBoxSelect(const QgsPointXY& end) {
+  boxing_ = false;
+  box_rubber_.reset();
+  const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+  if (std::hypot(end.x() - box_start_.x(), end.y() - box_start_.y())
+      < kTolerancePx * mup) {
+    boxed_selection_.clear();
+    clearSharedMarkers();
+    callback_("pick_miss", "{}");
+    return;
+  }
+  const QgsRectangle rect(
+      std::min(box_start_.x(), end.x()), std::min(box_start_.y(), end.y()),
+      std::max(box_start_.x(), end.x()), std::max(box_start_.y(), end.y()));
+  std::vector<VertexRef> found;
+  if (allLayersScope()) {
+    for (QgsVectorLayer* layer : candidateLayers()) {
+      auto part = verticesInRect(layer, rect);
+      found.insert(found.end(), part.begin(), part.end());
+    }
+  } else if (QgsVectorLayer* layer = editLayer()) {
+    found = verticesInRect(layer, rect);
+  }
+  boxed_selection_ = std::move(found);
+  clearSharedMarkers();
+  for (const VertexRef& ref : boxed_selection_) {
+    auto marker = std::make_unique<QgsVertexMarker>(canvas());
+    marker->setCenter(ref.pos);
+    marker->setIconType(QgsVertexMarker::ICON_BOX);
+    marker->setIconSize(8);
+    marker->setColor(QColor(0, 120, 255, 220));
+    marker->setPenWidth(2);
+    shared_markers_.push_back(std::move(marker));
+  }
+  if (boxed_selection_.empty()) {
+    callback_("pick_miss", "{}");
+  }
+}
+
+void PwbVertexTool::beginTranslateDrag(const QgsPointXY& anchor,
+                                       std::vector<VertexRef> selected) {
+  translating_ = true;
+  shared_drag_ = std::move(selected);
+  drag_anchor_ = anchor;
+  dragging_ = true;
+  clearHover();
+  hideSnapIndicator();
+  rubber_ = std::make_unique<QgsRubberBand>(canvas(), Qgis::GeometryType::Point);
+  rubber_->setColor(QColor(0, 120, 255, 200));
+  rubber_->setWidth(2);
+  for (const VertexRef& ref : shared_drag_) {
+    rubber_->addPoint(ref.pos);
+  }
+}
+
+void PwbVertexTool::finishTranslateDrag(const QgsPointXY& target) {
+  const std::vector<VertexRef> refs = std::move(shared_drag_);
+  const QgsPointXY anchor = drag_anchor_;
+  translating_ = false;
+  cancelDrag();
+  const double dx = target.x() - anchor.x();
+  const double dy = target.y() - anchor.y();
+  const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+  if (std::hypot(dx, dy) < kTolerancePx * mup) return;
+  std::map<QgsVectorLayer*, std::map<QgsFeatureId, std::vector<VertexRef>>> grouped;
+  for (const VertexRef& ref : refs) {
+    if (ref.layer == nullptr || !ref.layer->isEditable()) continue;
+    grouped[ref.layer][ref.fid].push_back(ref);
+  }
+  std::vector<QgsVectorLayer*> layers;
+  std::vector<QgsFeatureId> fids;
+  for (auto& [layer, by_fid] : grouped) {
+    layer->beginEditCommand(QStringLiteral("Moved vertex"));
+    bool any = false;
+    for (auto& [fid, layer_refs] : by_fid) {
+      QgsFeature feature;
+      if (!layer->getFeatures(QgsFeatureRequest(fid)).nextFeature(feature)
+          || !feature.hasGeometry()) {
+        continue;
+      }
+      QgsGeometry geometry = feature.geometry();
+      bool moved = false;
+      for (const VertexRef& ref : layer_refs) {
+        const int nr = geometry.vertexNrFromVertexId(ref.vid);
+        if (nr < 0) continue;
+        moved = geometry.moveVertex(
+            QgsPoint(ref.pos.x() + dx, ref.pos.y() + dy), nr) || moved;
+      }
+      if (!moved) continue;
+      layer->changeGeometry(fid, geometry);
+      fids.push_back(fid);
+      any = true;
+    }
+    if (!any) {
+      layer->destroyEditCommand();
+      continue;
+    }
+    layer->endEditCommand();
+    layers.push_back(layer);
+  }
+  if (!layers.empty()) {
+    emitGestureMulti("vertex_move", "Moved vertex", layers, fids);
+    // 选区随动：位置刷新后标记不残留旧点，下次拖动以新位置为基准。
+    for (VertexRef& ref : boxed_selection_) {
+      ref.pos = QgsPointXY(ref.pos.x() + dx, ref.pos.y() + dy);
+    }
+    for (std::size_t i = 0;
+         i < boxed_selection_.size() && i < shared_markers_.size(); ++i) {
+      shared_markers_[i]->setCenter(boxed_selection_[i].pos);
+    }
+  }
 }
 
 QList<QgsVectorLayer*> PwbVertexTool::avoidLayersFor(
@@ -712,13 +905,12 @@ void PwbVertexTool::emitGestureMulti(
 void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (e->button() != Qt::LeftButton) return;
   if (QgsVectorLayer* layer = editLayer()) {
+    if (boxing_) cancelBoxSelect();
     const double mup = canvas()->mapSettings().mapUnitsPerPixel();
     std::vector<VertexRef> shared;
     if (allLayersScope()) {
-      // M2 全部层档：跨候选层发现（同 CRS 过滤 + join_requested 入集）。
       shared = discoverAllLayers(e->mapPoint(), kTolerancePx * mup);
     } else {
-      // v2 当前层档：层内拾取 → 1e-8 精确重合集 = 共享节点。
       const std::vector<VertexRef> picked =
           verticesNear(layer, e->mapPoint(), kTolerancePx * mup);
       if (!picked.empty()) {
@@ -727,9 +919,16 @@ void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
       }
     }
     if (shared.empty()) {
-      callback_("pick_miss", "{}");
+      // §4 框选多节点：点空处拖出矩形。
+      startBoxSelect(e->mapPoint());
       return;
     }
+    if (!boxed_selection_.empty()
+        && vertexInBoxedSelection(shared.front())) {
+      beginTranslateDrag(shared.front().pos, boxed_selection_);
+      return;
+    }
+    boxed_selection_.clear();
     beginSharedDrag(shared.front().pos, std::move(shared));
     return;
   }
@@ -752,22 +951,41 @@ void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
 }
 
 void PwbVertexTool::canvasMoveEvent(QgsMapMouseEvent* e) {
+  if (boxing_) {
+    updateBoxSelect(e->mapPoint());
+    return;
+  }
   if (!dragging_) {
-    // V10：非拖动 hover——顶点/段命中 marker + snap 指示与节流反馈。
-    // updateHover 返回它已查到的 locator 命中，指示器复用（单次 move 单次
-    // snapToMap，review-4 #2）。
     const QgsPointLocator::Match m = updateHoverMatch(e->mapPoint());
     updateSnapIndicator(e->mapPoint(), &m);
     return;
   }
   const QgsPointXY p = snapOrRaw(e->mapPoint());
+  if (translating_) {
+    const double dx = p.x() - drag_anchor_.x();
+    const double dy = p.y() - drag_anchor_.y();
+    rubber_->reset(Qgis::GeometryType::Point);
+    for (const VertexRef& ref : shared_drag_) {
+      rubber_->addPoint(QgsPointXY(ref.pos.x() + dx, ref.pos.y() + dy));
+    }
+    return;
+  }
   rubber_->reset(Qgis::GeometryType::Point);
   rubber_->addPoint(p);
 }
 
 void PwbVertexTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
-  if (!dragging_ || e->button() != Qt::LeftButton) return;
+  if (e->button() != Qt::LeftButton) return;
+  if (boxing_) {
+    finishBoxSelect(e->mapPoint());
+    return;
+  }
+  if (!dragging_) return;
   const QgsPointXY p = snapOrRaw(e->mapPoint());
+  if (translating_) {
+    finishTranslateDrag(p);
+    return;
+  }
   if (!shared_drag_.empty()) {
     // v2：共享节点集整体落位（每层每手势恰一宏 + 拓扑点散布）。
     finishSharedDrag(p);
@@ -844,6 +1062,31 @@ void PwbVertexTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
 }
 
 void PwbVertexTool::keyPressEvent(QKeyEvent* e) {
+  if (e->key() == Qt::Key_Escape && boxing_) {
+    cancelBoxSelect();
+    boxed_selection_.clear();
+    clearSharedMarkers();
+    e->accept();
+    return;
+  }
+  if (e->key() == Qt::Key_Delete && !dragging_ && !boxed_selection_.empty()) {
+    // 一个位置只删一次：finishSharedDeleteAt 自行发现该位置的全部节点，
+    // 重复调用会在删除成功后再补一次拒绝回调。
+    std::vector<QgsPointXY> positions;
+    for (const VertexRef& ref : boxed_selection_) {
+      const bool known = std::any_of(
+          positions.begin(), positions.end(), [&ref](const QgsPointXY& p) {
+            return std::hypot(p.x() - ref.pos.x(), p.y() - ref.pos.y())
+                <= kSharedNodeEpsilon;
+          });
+      if (!known) positions.push_back(ref.pos);
+    }
+    for (const QgsPointXY& pos : positions) finishSharedDeleteAt(pos);
+    boxed_selection_.clear();
+    clearSharedMarkers();
+    e->accept();
+    return;
+  }
   if (e->key() == Qt::Key_Delete && !dragging_) {
     if (QgsVectorLayer* layer = editLayer()) {
       // v2 联合删除（M1 当前层 + M2 全部层档跨层）：hover 顶点位置的
@@ -879,6 +1122,9 @@ void PwbVertexTool::keyPressEvent(QKeyEvent* e) {
 }
 
 void PwbVertexTool::deactivate() {
+  cancelBoxSelect();
+  boxed_selection_.clear();
+  translating_ = false;
   clearHover();
   clearSharedMarkers();
   shared_drag_.clear();

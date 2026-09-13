@@ -17,7 +17,17 @@
 - `tests/test_topo_phase2.py`：线约束/综合相/注记资格；非注记点层仍走 Python；默认规则含 dangle。
 - `tests/test_qgis_topo_phase2.py`（真桥）：开线报悬挂点；闭合环无悬挂；线层 `startEditing`。
 
-## 仍不在本阶段
+## 二阶段补完（框选 / 追踪交点 / 验收钉）
 
-- 线悬挂点无几何自动修复（原生 `NoChange`）。
-- 规格三重门的人工全周期回归 / 用户体验签字。
+| 实现件 | 位置 |
+|---|---|
+| 框选多节点 | `PwbVertexTool` 空处拖框 → 蓝框选中；拖其中一点平移同一向量 |
+| 选区编辑 | `Delete` 删除选中节点（同位置只删一次）；`Esc` 或重新框选清空；平移后选区随动 |
+| 追踪交点插点 | `QgsTracer::setAddPointsOnIntersectionsEnabled` 随追踪开关 |
+| 16 场景索引 + 真实工程周期 | `tests/test_topo_acceptance_cycle.py` |
+
+悬挂点仍无几何自动修复（原生 `NoChange`）。
+
+三重门：① M0–M5 验收锚点全绿（16 场景各有自动化钉，索引见
+`test_topo_acceptance_cycle.SCENARIO_COVERAGE`）；② 真实工程
+建稿→编辑→检查→保存→导出周期已自动化；③ 用户体验签字仍待人工确认。

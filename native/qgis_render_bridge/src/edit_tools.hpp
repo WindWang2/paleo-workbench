@@ -22,6 +22,7 @@
 #include <qgsmaptool.h>
 #include <qgspointlocator.h>
 #include <qgspointxy.h>
+#include <qgsrectangle.h>
 #include <qgsvertexid.h>
 #include <qgsvertexmarker.h>
 
@@ -169,11 +170,21 @@ class PwbVertexTool : public PwbEditPickTool {
   static std::vector<VertexRef> verticesNear(QgsVectorLayer* layer,
                                              const QgsPointXY& center,
                                              double radius);
+  static std::vector<VertexRef> verticesInRect(QgsVectorLayer* layer,
+                                               const QgsRectangle& rect);
   // 全部层档按下发现：跨候选层取最近顶点为锚 → 1e-8 联合集；对未在
   // 会话中的伙伴层同步发 "join_requested"（宿主门禁复查入集，§3）。
   std::vector<VertexRef> discoverAllLayers(const QgsPointXY& mapPoint,
                                            double pick_radius);
   void beginSharedDrag(const QgsPointXY& anchor, std::vector<VertexRef> shared);
+  void beginTranslateDrag(const QgsPointXY& anchor,
+                          std::vector<VertexRef> selected);
+  void finishTranslateDrag(const QgsPointXY& target);
+  void startBoxSelect(const QgsPointXY& start);
+  void updateBoxSelect(const QgsPointXY& now);
+  void finishBoxSelect(const QgsPointXY& end);
+  void cancelBoxSelect();
+  bool vertexInBoxedSelection(const VertexRef& ref) const;
   // 多层落位：每层恰一宏（顶点移动 + 几何避免重叠 + 同层拓扑点），
   // 散布目标层各一宏（bbox 预查）；一次 edit_gesture 回调（多层序列）。
   void finishSharedDrag(const QgsPointXY& target);
@@ -205,6 +216,11 @@ class PwbVertexTool : public PwbEditPickTool {
   std::vector<VertexRef> shared_drag_;
   QgsPointXY drag_anchor_;
   std::vector<std::unique_ptr<QgsVertexMarker>> shared_markers_;
+  bool boxing_ = false;
+  bool translating_ = false;
+  QgsPointXY box_start_;
+  std::unique_ptr<QgsRubberBand> box_rubber_;
+  std::vector<VertexRef> boxed_selection_;
 };
 
 class PwbMoveTool : public PwbEditPickTool {

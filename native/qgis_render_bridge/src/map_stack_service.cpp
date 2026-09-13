@@ -4764,6 +4764,9 @@ void QgisMapStack::setTracingEnabled(std::uintptr_t canvas_addr,
     tracer->setActionEnableTracing(action.data());
   }
   action->setChecked(enabled);
+  // 二阶段：vendored QGIS 4.2 有 QgsTracer::setAddPointsOnIntersectionsEnabled。
+  // 追踪开启时在交点插点，关闭时保持图但不插交点。
+  tracer->setAddPointsOnIntersectionsEnabled(enabled);
 }
 
 void QgisMapStack::setEditPickCallback(
