@@ -625,6 +625,39 @@ def _reprojected_prepared_layer(
     return _PreparedLayer(tuple(features), prepared.revision, prepared.layer_type)
 
 
+class _ScalarImageEntry:
+    """Revision-keyed composite-ready QImage for one scalar-grid layer.
+
+    Built once per (data, style) revision change by ``_draw_scalar_grid``.
+    The QImage owns its bytes (built via ``QImage(...).copy()``), so the
+    numpy buffer from ``rasterize()`` is never referenced beyond the build —
+    the historical dangling-buffer segfault class cannot recur here.
+    """
+
+    __slots__ = ("image", "payload", "width", "height")
+
+    def __init__(self, image: QImage, payload: object, width: int, height: int) -> None:
+        self.image = image
+        self.payload = payload
+        self.width = width
+        self.height = height
+
+
+def _payload_revision(payload: object, name: str) -> int | None:
+    """Best-effort revision off a renderer payload (native layers expose it).
+
+    Pure-Python payloads may not expose revisions; ``None`` participates in
+    the cache key tuple so absent metadata is stable, never assumed equal.
+    """
+    value = getattr(payload, name, None)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class FallbackMapRenderBackend(MapRenderBackend):
     """Explicit QPainter renderer for tests and hosts without a QGIS bridge.
 
@@ -673,12 +706,20 @@ class FallbackMapRenderBackend(MapRenderBackend):
         #: silent.
         self.crs_warnings: list[str] = []
         self._frame_cache: tuple[tuple, RenderFrame] | None = None
+        # V12-C: scalar-grid QImage cache — rasterize() + full-frame copy are
+        # paid once per (data, style) revision, not once per frame. Guarded by
+        # _prepared_lock because _draw_scalar_grid runs on the render worker.
+        self._scalar_images: LatestRevisionCache[str, tuple, _ScalarImageEntry] = (
+            LatestRevisionCache()
+        )
         self._facies_patterns = FaciesPatternBrushCache()
         _LIVE_FALLBACKS.add(self)
         self._diagnostics = {
             "prepared_layers": 0,
             "prepared_cache_hits": 0,
             "prepared_cache_misses": 0,
+            "scalar_cache_hits": 0,
+            "scalar_cache_misses": 0,
             "features_total": 0,
             "features_drawn": 0,
             "points_drawn": 0,
@@ -824,6 +865,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         with self._prepared_lock:
             self._prepared.clear()
             self._reprojected.clear()
+            self._scalar_images.clear()
         self._frame_cache = None
         super().shutdown()
 
@@ -1024,6 +1066,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         with self._prepared_lock:
             self._prepared.prune(seen_layers)
             self._reprojected.prune(seen_layers)
+            self._scalar_images.prune(seen_layers)
 
     def _warn_raster_unprojected(
         self, layer: MapLayerSnapshot, project_crs: str, kind: str
@@ -1662,24 +1705,53 @@ class FallbackMapRenderBackend(MapRenderBackend):
         painter.restore()
 
     def _draw_scalar_grid(self, painter: QPainter, layer: MapLayerSnapshot) -> None:
-        """Composite the existing native scalar-raster cache without interpolation."""
+        """Composite the scalar raster without interpolation, cached per revision.
+
+        V12-C: pan/zoom used to pay ``rasterize()`` (a fresh full-frame buffer
+        out of the payload every call) plus a full-frame ``QImage.copy()``
+        EVERY frame. The QImage is now built once per (data, style) revision
+        — snapshot revisions AND the payload's own revisions (native
+        ScalarGridLayer exposes them) are both in the key, and the cached
+        entry additionally requires ``renderer_payload`` identity, so a
+        swapped payload object can never be served the previous pixels.
+        """
         scalar = layer.renderer_payload
         if scalar is None or not hasattr(scalar, "rasterize"):
             return
-        rgba = scalar.rasterize()
-        try:
-            height, width = int(rgba.shape[0]), int(rgba.shape[1])
-        except (AttributeError, IndexError, TypeError, ValueError):
-            return
-        if height < 1 or width < 1:
-            return
-        image = QImage(
-            rgba.data,
-            width,
-            height,
-            width * 4,
-            QImage.Format.Format_RGBA8888,
-        ).copy()
+        key = (
+            int(layer.data_revision),
+            int(layer.style_revision),
+            _payload_revision(scalar, "data_revision"),
+            _payload_revision(scalar, "style_revision"),
+            getattr(scalar, "width", None),
+            getattr(scalar, "height", None),
+        )
+        image: QImage | None = None
+        with self._prepared_lock:
+            entry = self._scalar_images.get(layer.id, key)
+            if entry is not None and entry.payload is scalar:
+                self._diagnostics["scalar_cache_hits"] += 1
+                image = entry.image
+        if image is None:
+            rgba = scalar.rasterize()
+            try:
+                height, width = int(rgba.shape[0]), int(rgba.shape[1])
+            except (AttributeError, IndexError, TypeError, ValueError):
+                return
+            if height < 1 or width < 1:
+                return
+            image = QImage(
+                rgba.data,
+                width,
+                height,
+                width * 4,
+                QImage.Format.Format_RGBA8888,
+            ).copy()
+            with self._prepared_lock:
+                self._scalar_images.store(
+                    layer.id, key, _ScalarImageEntry(image, scalar, width, height)
+                )
+                self._diagnostics["scalar_cache_misses"] += 1
         xmin, ymin, xmax, ymax = layer.extent
         top_left = self._screen_point((xmin, ymax))
         bottom_right = self._screen_point((xmax, ymin))

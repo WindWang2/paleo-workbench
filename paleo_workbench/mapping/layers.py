@@ -287,6 +287,16 @@ class GridMapLayer(MapLayer):
                 self._layer = layer
             def rasterize(self) -> np.ndarray:
                 return self._layer.rasterize_rgba()
+            # V12-C: revision surface for the fallback scalar-QImage cache —
+            # grid data bumps data_revision, ramp/range bumps style_revision,
+            # so the cache key sees payload-side changes even if a host path
+            # forgets to bump the snapshot revisions.
+            @property
+            def data_revision(self) -> int:
+                return self._layer.data_revision
+            @property
+            def style_revision(self) -> int:
+                return self._layer.style_revision
 
         return MapLayerSnapshot(
             id=self.id,
