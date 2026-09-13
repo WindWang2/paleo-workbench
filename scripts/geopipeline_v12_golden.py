@@ -29,6 +29,12 @@ from pathlib import Path
 
 import numpy as np
 
+# 黄金值钉的是**纯 numpy 回退路径**（本 Goal 的优化对象）。geoviz 是否可导入
+# 取决于环境（例如 site-packages 里出现 matplotlib 会让经 editable 安装指向
+# 的 geoviz_plots 导入成功），这会静默把 KrigingInterpolator 切到引擎路径、
+# 让基线比对失真。这里显式挡掉 geoviz，保证脚本在任何环境下钉同一实现。
+sys.modules.setdefault("geoviz", None)  # None in sys.modules → import geoviz 即 ImportError
+
 from paleo_workbench.mapping.geological_pipeline.interpolator import (
     IDWInterpolator,
     KrigingInterpolator,

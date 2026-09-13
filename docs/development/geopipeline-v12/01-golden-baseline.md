@@ -81,3 +81,20 @@ cd <worktree>
 .venv/bin/python scripts/geopipeline_v12_golden.py generate --out tests/data/geopipeline_golden
 .venv/bin/python scripts/geopipeline_v12_golden.py compare --against tests/data/geopipeline_golden
 ```
+
+## 环境敏感性事件（2026-09-13，验证期发现）
+
+为尝试收集 m6 对抗套件临时安装的 matplotlib 使 editable 安装指向的
+`geoviz_plots`（位于 main worktree 的 geo-viz-engine 检出）导入成功 →
+`KrigingInterpolator` 默认路径从 numpy 回退翻转到 geoviz 引擎 → 黄金值
+比对 9 个克里金案例 FAIL（max|Δ| ~1.0——两条完全不同的实现路径）。
+
+处置（两层）：
+
+1. 卸载偏离规格的包（matplotlib/pyproj/pyqtgraph/segyio 均非 dev extras
+   成员），恢复声明的最小环境；
+2. **黄金值脚本显式钉死回退路径**（`sys.modules.setdefault("geoviz", None)`）：
+   geoviz 可导入性是环境属性而非代码属性，不钉死则被钉对象会随环境漂移。
+
+该事件是"先建黄金值基线"的直接价值证明：环境级翻转被字节级闸门当场
+捕获，而非混进性能数字里被合理化。
