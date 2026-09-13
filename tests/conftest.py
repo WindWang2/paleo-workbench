@@ -175,3 +175,29 @@ def cleanup_qt_deferred_deletes():
             app.processEvents()
         except Exception:
             pass
+        # Qt 样式表引擎的孤儿助手清理（e2e/test_a0_style_broadcast 文档串描述的
+        # 跨用例滞留控件问题的可收口子集）：每次 setStyleSheet 抛光都会在
+        # QStyleSheetStyle 侧实例化隐藏的、无父对象、完全匿名的助手控件
+        # （QLineEdit/QToolButton/QFrame 等）。它们不进任何 Qt 父子树，
+        # qtbot 的回收够不到，跨用例线性累积（实测每壳循环 +8）；累积到数千后
+        # 全局重抛光会逐个触碰它们——在半拆包装器上 segfault（~82% CI hang /
+        # #951 族 / dead-shell 崩溃的累积性引信）。这里在 DeferredDelete 冲刷后
+        # 对「无父 + 隐藏 + 完全匿名 + 无窗口标题」的顶层控件补 deleteLater。
+        # 可见悬浮窗/有标题菜单都不满足条件，不会被误删。
+        try:
+            from PySide6.QtWidgets import QMenu
+
+            for w in app.topLevelWidgets():
+                if (
+                    w.parentWidget() is None
+                    and not w.isVisible()
+                    and not w.objectName()
+                    and not w.windowTitle()
+                ):
+                    if isinstance(w, QMenu) and (w.title() or w.actions()):
+                        continue  # 真菜单（有标题/动作）不是样式助手
+                    w.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            app.processEvents()
+        except Exception:
+            pass
