@@ -4350,6 +4350,8 @@ class CompositeDocument(QWidget):
 
     def _sync_composition(self, *, immediate: bool = True) -> None:
         """重组发布（默认立即；内容变化经 ``immediate=False`` 走 debounce）。"""
+        if self._loading:
+            return
         if immediate:
             self._composition_timer.stop()
             self._sync_composition_now()
@@ -4452,12 +4454,18 @@ class CompositeDocument(QWidget):
             apply = getattr(getattr(self.canvas, "stack", None), "apply_project_xml", None)
             if xml and callable(apply):
                 apply(xml)
-            self._sync_composition_now()
             if self._home_extent is not None:
                 self.canvas.set_extent(self._home_extent)
         finally:
             self._loading = False
         if project is not None:
+            # 装载期间 load_from_project 会 layers_changed；若当时就发布，
+            # 信封随后把 singleSymbol 盖到镜像上，而发布台账仍记着
+            # fill_patterns 的签名 → 最终 compose 跳过样式，相图纹理消失。
+            from paleo_workbench.mapping.qgis_mirror import reset_publish_ledger
+
+            reset_publish_ledger()
+            self._sync_composition_now()
             self._write_map_project_xml()
             # 工程装载完成后恢复阶段上下文（组显隐 + 编辑目标 + 就绪度评估）。
             self.stage_controller.restore_stage_view()
