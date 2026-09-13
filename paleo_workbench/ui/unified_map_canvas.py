@@ -276,6 +276,39 @@ def _paint_decorations_impl(
 _PATTERN_PIXMAP_CACHE: dict[str, object] = {}
 
 
+def legend_chrome_size(decorations: Mapping[str, Any], *, scale: float = 1.0) -> tuple[int, int]:
+    """原生图例控件尺寸：必须放下工区图例，以及其左侧的相图纹理箱。
+
+    ``paint_map_decorations`` 把相图箱画在工区图例左边。控件若只有
+    ~180px 宽，纹理箱落在负坐标被裁掉——这就是原生画布上看不见相图
+    纹理填充的原因。无图例内容时返回 (0, 0)。
+    """
+    items = list(decorations.get("legend_items") or ())[:8]
+    facies = decorations.get("facies_legend")
+    facies_n = 0
+    if isinstance(facies, Mapping):
+        facies_n = len([
+            entry for entry in (facies.get("items") or ())
+            if isinstance(entry, Mapping)
+        ][:10])
+    if not items and not facies_n:
+        return (0, 0)
+    legend_width = 164 * scale
+    row_height = 18 * scale
+    margin = 16 * scale
+    legend_height = 10 * scale + row_height * len(items) if items else 10 * scale
+    f_width = 176 * scale
+    f_row = 18 * scale
+    f_height = (12 * scale + f_row * (facies_n + 1)) if facies_n else 0.0
+    gap = 8 * scale
+    width = margin + legend_width + margin
+    if facies_n:
+        width = margin + legend_width + gap + f_width
+    height = margin + max(legend_height, f_height)
+    return (max(1, int(math.ceil(width))), max(1, int(math.ceil(height))))
+
+
+
 def _facies_pattern_pixmap(pattern_id: str):
     """相类别纹理样块的 SVG 平铺图（32×32 透明底黑线砖；无映射/加载失败 → None）。"""
     from PySide6.QtCore import QSize

@@ -110,3 +110,41 @@ def test_paint_map_decorations_dual_legend(qtbot):
             and abs(image.pixelColor(x, y).blue() - target[2]) <= 30
             for x in range(0, 560, 2) for y in range(0, 240, 2))
         assert found, f"图例样块缺失：{name}"
+
+
+def test_legend_chrome_size_keeps_facies_pattern_box_on_canvas():
+    """原生图例控件必须宽到能放下相图纹理箱（180px 会把左侧纹理箱裁掉）。"""
+    from PySide6.QtGui import QImage, QPainter
+
+    from paleo_workbench.ui.unified_map_canvas import (
+        legend_chrome_size,
+        paint_map_decorations,
+    )
+
+    decorations = {
+        "elements": ["图例"],
+        "legend_items": [{"label": "井位", "color": "#f59f00"}],
+        "facies_legend": {
+            "title": "相图",
+            "items": [
+                {"label": "扇三角洲", "color": "#c47f4e", "pattern": "delta"},
+            ],
+        },
+    }
+    width, height = legend_chrome_size(decorations)
+    image = QImage(width, height, QImage.Format.Format_RGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    paint_map_decorations(
+        painter, decorations,
+        width=width, height=height, extent=(0.0, 0.0, 1.0, 1.0),
+        dark_chrome=True,
+    )
+    painter.end()
+    found = any(
+        abs(image.pixelColor(x, y).red() - 196) <= 30
+        and abs(image.pixelColor(x, y).green() - 127) <= 30
+        and abs(image.pixelColor(x, y).blue() - 78) <= 30
+        for x in range(0, width, 2) for y in range(0, height, 2)
+    )
+    assert found, "相图纹理箱被原生图例控件裁掉"

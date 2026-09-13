@@ -737,13 +737,14 @@ class QgisCanvasShim(QWidget):
         self._chrome_north.setGeometry(8, 48, 48, 56)
         provider = getattr(self, "_overlay_provider", None)
         state = provider() if callable(provider) else {}
-        items = []
-        if isinstance(state, dict):
-            items = list((state.get("decorations") or {}).get("legend_items") or ())
-        if items:
-            legend_h = 10 + 18 * min(8, len(items)) + 16
+        decorations = (state.get("decorations") or {}) if isinstance(state, dict) else {}
+        from paleo_workbench.ui.unified_map_canvas import legend_chrome_size
+
+        legend_w, legend_h = legend_chrome_size(decorations)
+        if legend_w and legend_h:
             self._chrome_legend.setGeometry(
-                max(0, map_w - 196), max(0, map_h - legend_h - 8), 180, legend_h)
+                max(0, map_w - legend_w - 8), max(0, map_h - legend_h - 8),
+                legend_w, legend_h)
             self._chrome_legend.show()
             self._chrome_legend.raise_()
             self._chrome_legend.update()
