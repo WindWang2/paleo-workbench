@@ -24,6 +24,7 @@ This module is a leaf: standard library + optional pyproj.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import Any
 
 __all__ = [
@@ -61,8 +62,17 @@ _KNOWN_GEOGRAPHIC = {
 _PROJECTED_EXCEPTIONS = {"EPSG:3857"}
 
 
+@lru_cache(maxsize=None)
 def crs_is_geographic(crs: str | None) -> bool | None:
-    """True/False when the CRS axis units are known, ``None`` when unknown."""
+    """True/False when the CRS axis units are known, ``None`` when unknown.
+
+    Memoized (V12-B): polygonization asks this per feature/ring — thousands
+    of calls per layer with the same CRS string. Without the cache every
+    miss on a non-builtin id re-attempts the (failing) pyproj import and
+    rescans sys.path (~0.1-0.2 ms each, ~2 s per 150² speckle layer). The
+    function is pure in its string argument, so caching cannot change any
+    verdict.
+    """
     if not crs:
         return None
     token = crs.split("/")[0].strip().upper()
