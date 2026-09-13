@@ -48,9 +48,21 @@ def _simulate_failed_rebuild(qtbot, window) -> None:
     raised) — once the deferred deletion runs, ``app_shell`` wraps a
     destroyed C++ object.
     """
+    # Production `_refresh_shell` shuts workers/canvas down before
+    # deleteLater when the wrapper is still valid. Skipping that leaves
+    # the process-wide QgsProject / native mapstack dirty; the next
+    # QgisCanvasShim() then SIGSEGVs in __init__ (main CI red at ee5028ee).
+    # Keep the dead-wrapper contract, but release native state first.
+    shell = window.app_shell
+    if shiboken6.isValid(shell):
+        try:
+            shell.shutdown_workers()
+        except Exception:
+            pass
     window.setCentralWidget(None)
-    window.app_shell.setParent(None)
-    window.app_shell.deleteLater()
+    if shiboken6.isValid(window.app_shell):
+        window.app_shell.setParent(None)
+        window.app_shell.deleteLater()
     qtbot.waitUntil(lambda: not shiboken6.isValid(window.app_shell))
 
 

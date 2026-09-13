@@ -361,18 +361,32 @@ class PaleoWorkbenchWindow(QMainWindow):
             self.app_shell.shutdown_workers()
             self.app_shell.setParent(None)
             self.app_shell.deleteLater()
-        self.app_shell = AppShell(
-            project=self.project,
-            parent=self,
-            defer_nonvisible_bindings=defer_nonvisible_bindings,
-            dock_host=self,
-        )
-        self._apply_project_to_shell()
-        self.setCentralWidget(self.app_shell)
-        self._wire_shell_signals()
-        self._update_title()
-        # Re-bind project file path after shell rebuild (import/export I/O).
-        self.app_shell.set_data_project_path(self.project_path)
+        replacement = None
+        try:
+            replacement = AppShell(
+                project=self.project,
+                parent=self,
+                defer_nonvisible_bindings=defer_nonvisible_bindings,
+                dock_host=self,
+            )
+            self.app_shell = replacement
+            self._apply_project_to_shell()
+            self.setCentralWidget(self.app_shell)
+            self._wire_shell_signals()
+            self._update_title()
+            # Re-bind project file path after shell rebuild (import/export I/O).
+            self.app_shell.set_data_project_path(self.project_path)
+        except Exception:
+            if replacement is not None:
+                try:
+                    if shiboken6.isValid(replacement):
+                        replacement.shutdown_workers()
+                        replacement.setParent(None)
+                        replacement.deleteLater()
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "failed AppShell construction leftover cleanup")
+            raise
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Close project-owned workers/catalog deterministically on app exit."""
