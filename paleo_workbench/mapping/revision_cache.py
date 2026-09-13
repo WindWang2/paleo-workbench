@@ -13,7 +13,7 @@ hits/misses itself, and each caller decides when ``prune``/``clear`` run.
 
 from __future__ import annotations
 
-from typing import Generic, Hashable, Iterable, Optional, TypeVar
+from typing import Generic, Hashable, Iterable, TypeVar
 
 SubjectT = TypeVar("SubjectT", bound=Hashable)
 RevisionT = TypeVar("RevisionT")
@@ -32,9 +32,11 @@ class LatestRevisionCache(Generic[SubjectT, RevisionT, ValueT]):
       keeps the container at one entry per subject (bounded by the active
       subject set, not by revision churn).
     - :meth:`latest` reads the stored value WITHOUT revision validation. It
-      exists for the one legitimate "old value as delta baseline" reader
-      (``qgis_mirror`` pre-delta signatures); render-side caches must not use
-      it on the serving path.
+      exists for diagnostics and tests that inspect the current entry after
+      a revision change (e.g. ``test_fallback_render_incremental`` reading
+      the replaced prepared layer); production readers — including both
+      ``qgis_mirror`` signature-cache reads — must use revision-checked
+      :meth:`get` and must not serve ``latest`` output.
     """
 
     __slots__ = ("_entries",)
@@ -42,13 +44,13 @@ class LatestRevisionCache(Generic[SubjectT, RevisionT, ValueT]):
     def __init__(self) -> None:
         self._entries: dict[SubjectT, tuple[RevisionT, ValueT]] = {}
 
-    def get(self, subject: SubjectT, revision_key: RevisionT) -> Optional[ValueT]:
+    def get(self, subject: SubjectT, revision_key: RevisionT) -> ValueT | None:
         entry = self._entries.get(subject)
         if entry is not None and entry[0] == revision_key:
             return entry[1]
         return None
 
-    def latest(self, subject: SubjectT) -> Optional[ValueT]:
+    def latest(self, subject: SubjectT) -> ValueT | None:
         entry = self._entries.get(subject)
         return None if entry is None else entry[1]
 

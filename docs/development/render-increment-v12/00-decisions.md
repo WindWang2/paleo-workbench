@@ -77,12 +77,14 @@
 | `_SIGNATURE_CACHE` | qgis_mirror.py:245-248 | `(id(stack), layer_id)` | `data_revision` | **有**：修订变化时旧签名作 delta 基线（:868-873 读旧值） |
 
 **决策**：新模块 `paleo_workbench/mapping/revision_cache.py` 提供
-`LatestRevisionCache[Subject, Value]`：
-- `get(subject, revision_key)` — 仅当修订键完全相等才命中；
-- `latest(subject)` — 不校验修订取最近值（供 mirror 的「旧签基线」读法）；
+`LatestRevisionCache[Subject, Revision, Value]`：
+- `get(subject, revision_key)` — 仅当修订键完全相等才命中（**生产读取一律走它**；
+  mirror 的预读与发布后刷新读都是精确修订 `get`，与 BASE 语义一致）；
+- `latest(subject)` — 不校验修订取最近值，仅供诊断/测试检视当前条目
+  （如 test_fallback_render_incremental 读取被替换后的 prepared 层）；
 - `store(subject, revision_key, value)` — 同主体旧修订条目一律替换（mirror
-  :1035-1040 的「同 (stack,layer) 只留一个修订」语义归一）；
-- `prune(keep_subjects)` / `clear()`。
+  「同 (stack,layer) 只留一个修订」语义归一）；
+- `prune(keep_subjects)` / `remove(subject)` / `clear()`。
 镜像侧的 `(stack,layer)` 主体键、渲染侧的 `layer.id` 主体键都成立；
 `map_document_snapshot._FEATURE_CACHE` 是**有界 LRU**（按要素数淘汰），语义不同，
 **不迁移**（避免为共用而共用）。

@@ -7,19 +7,20 @@
 ## A. `revision_cache.py` — LatestRevisionCache
 
 ```python
-class LatestRevisionCache(Generic[Subject, Value]):
+class LatestRevisionCache(Generic[SubjectT, RevisionT, ValueT]):
     """每主体至多保留一个修订版的缓存。
 
     命中语义：store(subject, key, value) 之后的 get(subject, key) 返回 value；
     任何不同的 key 都 miss（安全侧：修订未知/漂移 ⇒ 重建，永不服旧值）。
-    latest(subject) 不校验修订，专供「旧值作基线」的读者（qgis_mirror
-    delta 签名基线）；对渲染侧缓存无此读法。
+    latest(subject) 不校验修订，仅供诊断/测试检视当前条目——生产读取
+    （含 mirror 的预读与发布后刷新读）一律走精确修订的 get。
     """
 
     def get(self, subject, revision_key) -> Value | None
-    def latest(self, subject) -> Value | None          # 不校验修订
+    def latest(self, subject) -> Value | None          # 不校验修订（诊断/测试）
     def store(self, subject, revision_key, value)      # 替换同主体任何旧条目
-    def subjects(self) -> tuple[Subject, ...]          # prune 用
+    def subjects(self) -> tuple[SubjectT, ...]
+    def remove(self, subject) -> None                  # 按主体删（栈回收剪除用）
     def prune(self, keep) -> None                      # 保留 keep 中的主体
     def clear(self) -> None
     def __len__(self) -> int
@@ -41,7 +42,7 @@ class LatestRevisionCache(Generic[Subject, Value]):
 | `_prepared` | `layer.id` | `int(data_revision)` | `_prepared_layer` 快路径 + 双检插入（锁留在后端） |
 | `_reprojected` | `layer.id` | `(int(data_revision), src, dst)` | `_reprojected_prepared` |
 | `_scalar_images`（新） | `layer.id` | 见 §B | `_draw_scalar_grid` |
-| `_SIGNATURE_CACHE` | `(id(stack), layer_id)` | `int(data_revision)` | `mirror_snapshot_to_stack` 预读（`latest`）+ 发布后 store |
+| `_SIGNATURE_CACHE` | `(id(stack), layer_id)` | `int(data_revision)` | `mirror_snapshot_to_stack` 预读 + 发布后刷新读（均精确修订 `get`）+ 发布成功 store + 栈剪除 `remove` |
 
 `qgis_mirror` 迁移的行为差异（有意为之，均有测试）：
 1. `reset_publish_ledger` 真正清空签名缓存（修复 :392-405 死代码——原意图即如此，
@@ -58,16 +59,20 @@ _scalar_images: LatestRevisionCache[str, _ScalarImageEntry]
 _ScalarImageEntry:
     image: QImage            # .copy() 产物，自有数据
     payload: object          # 强引用；命中还要求 renderer_payload is entry.payload
-    width/height: int
 ```
+
+（栅格尺寸经 payload 的 `width`/`height` 属性进入修订键——payload 不暴露
+则恒为 None，不产生假失效；条目本身不再另存尺寸。）
 
 `_draw_scalar_grid` 新流程：
 1. `scalar = layer.renderer_payload`；None/无 `rasterize` → return（不变）。
 2. 计算 `key = (int(layer.data_revision), int(layer.style_revision),
    _payload_revision(scalar, "data_revision"), _payload_revision(scalar,
-   "style_revision"))`；`_payload_revision` 用 `getattr`，native 层有该属性、
-   `_ScalarPayload`（本 Goal 补）有、其余 payload 无 ⇒ None（参与元组比较即可）。
-3. 命中且 `entry.payload is scalar` 且尺寸一致 → 直接用 `entry.image`（零拷贝零重算）。
+   "style_revision"), getattr(scalar, "width", None),
+   getattr(scalar, "height", None))`；`_payload_revision` 用 `getattr`，
+   native 层有该属性、`_ScalarPayload`（本 Goal 补）有、其余 payload 无
+   ⇒ None（参与元组比较即可）。
+3. 命中且 `entry.payload is scalar` → 直接用 `entry.image`（零拷贝零重算）。
 4. 未命中 → `rgba = scalar.rasterize()` → 原 shape 探测/早退路径不变 →
    `QImage(...).copy()` 一次 → `store`。
 5. `drawImage(QRectF(...).normalized(), image)`（不变）。
@@ -115,16 +120,16 @@ def _bridge_validate_many_fn():
 
 | # | 场景 | 操作 | 正向断言 | 反向对照（破坏键后断言陈旧） |
 |---|---|---|---|---|
-| 1 | 改顶点 | feature geometry 改点 + data_revision+1 | prepared miss+1；帧字节变化 | 键比较恒真 ⇒ 帧字节不变（陈旧）被断言 |
-| 2 | 增删要素 | features ±1 + data_revision+1 | 同上；要素计数变化 | 同上 |
-| 3 | 改样式（不动几何） | style_revision+1 | 帧**变化**；prepared **零** miss（hits+1） | 破坏 prepared 键 ⇒ miss 计数被压为 0（与正向断言互补） |
-| 4 | 可见性/不透明度 | visible/opacity 翻转 | 帧变化；重新可见后 prepared/scalar 仍命中（无 miss） | 跳过剪除 ⇒ 缓存膨胀被断言（len 增长） |
-| 5 | 切换图层（文档切换） | 快照换成另一组 layer id | `_prepared`/`_scalar_images` 主体集 == 新集合（旧条目释放） | 破坏 prune ⇒ len 陈旧增长被断言 |
-| 6 | 切换 CRS | project_crs 变化 | `_reprojected` 新键；帧变化（pyproj 在场时） | 键退化 ⇒ 旧投影被复用（帧不变）被断言 |
-| 7 | undo/redo | 会话 revision + data_revision 回滚 | prepared miss；帧还原为 undo 前字节 | 同 1 |
-| 8 | scalar 数据变更 | grid 值变 + revision bump | scalar_cache miss；帧变化 | payload 修订不入键 ⇒ 旧像素被断言 |
+| 1 | 改顶点 | feature geometry 改点 + data_revision+1 | prepared miss+1；帧字节变化 | `sabotage_cache_key` ⇒ 帧字节不变（陈旧）被断言 |
+| 2 | 增删要素 | features ±1 + data_revision+1 | 同上；`features_total` 变化 | `sabotage_cache_key` ⇒ 被删要素仍被绘制（计数/帧不变）被断言 |
+| 3 | 改样式（不动几何） | style_revision+1 | 帧**变化**；prepared **零** miss | `sabotage_frame_key`（丢 style_revision）⇒ 旧帧被复用被断言 |
+| 4 | 可见性/不透明度 | visible / opacity 变化 | 帧**变化**；prepared 零重建；隐藏期条目保留、重现像素一致 | `sabotage_frame_key`（丢 visible/opacity）⇒ 隐藏层不消失、半透明不混合被断言 |
+| 5 | 切换图层（文档切换） | 快照换成另一组 layer id | `_prepared`/`_scalar_images` 主体集 == 新集合（旧条目释放） | `sabotage_prune` ⇒ 旧主体残留（len 增长）被断言 |
+| 6 | 切换 CRS | project_crs 变化 | `_reprojected` 新键、条目替换；新 CRS 下几何可见 | `sabotage_cache_key` ⇒ 旧投影被复用（几何消失于空基线）被断言 |
+| 7 | undo/redo | 会话 revision + data_revision 回滚 | prepared miss；帧还原为 undo 前字节 | `sabotage_cache_key` ⇒ undo 后仍服编辑几何（帧 == 编辑帧）被断言 |
+| 8 | scalar 数据变更 | grid 值变 + revision bump | scalar_cache miss；帧变化 | `sabotage_cache_key` ⇒ 旧像素被断言 |
 | 9 | scalar 样式变更 | set_color_ramp（style bump） | scalar miss；帧变化 | 同 8 |
-| 10 | scalar payload 替换 | 同 layer.id 换新 payload 对象 | miss（`is` 校验兜底） | 去掉 `is` 校验且修订相同 ⇒ 陈旧被断言 |
+| 10 | scalar payload 替换 | 同 layer.id 换新 payload 对象 | miss（`is` 校验兜底） | 条目 payload 被改指新对象 ⇒ 陈旧被断言 |
 
 另：镜像侧 `reset_publish_ledger` 真清理（迁移后）+ 签名缓存旧值基线读法回归
 （现有 `test_mirror_lifecycle_v11` 全绿即可）+ 拓扑：fake 批量桥 N→1 调用数、

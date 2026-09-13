@@ -27,7 +27,7 @@
 
 | 文件 | 结果 |
 |---|---|
-| `tests/test_render_increment_v12.py`（新，20 用例：矩阵+反向对照） | **20 passed** |
+| `tests/test_render_increment_v12.py`（新，25 用例：矩阵+反向对照） | **25 passed** |
 | `tests/test_topology_batch_v12.py`（新，11 用例） | **10 passed, 1 skipped**（真桥用例无桥自跳） |
 | `tests/test_mirror_cache_reset_v12.py`（新，2 用例） | **2 passed** |
 | `tests/test_map_render_backend.py` | 17 passed |
@@ -59,15 +59,16 @@
 | # | 场景 | 正向测试（断言失效/复用正确） | 反向对照（破坏键→断言陈旧被服出） |
 |---|---|---|---|
 | 1 | 改顶点 | `test_vertex_edit_invalidates_prepared_and_changes_pixels` | `test_negative_control_broken_prepared_key_serves_stale_geometry` |
-| 2 | 增/删要素 | `test_feature_removal_invalidates_prepared_and_changes_pixels` | 同 #1 机制（同一键） |
+| 2 | 增/删要素 | `test_feature_removal/addition_invalidates_prepared_and_changes_pixels` | `test_negative_control_broken_prepared_key_keeps_removed_feature`（被删要素仍被绘制） |
 | 3 | 改样式（不动几何） | `test_style_change_reuses_prepared_geometry`（帧变+零重建） | `test_negative_control_broken_frame_key_serves_stale_style` |
-| 4 | 可见性/不透明度 | `test_visibility_roundtrip_keeps_prepared_entry` | 同 #3 对照（帧键 visible 恒真→隐藏层不消失，同用例断言） |
+| 4 | 可见性/不透明度 | `test_visibility_roundtrip_keeps_prepared_entry` + `test_opacity_change_reuses_prepared_geometry` + scalar 往返 | `..._broken_frame_key_...`（同用例断言样式/隐藏/半透明三轴陈旧） |
 | 5 | 切换图层/文档 | `test_layer_switch_prunes_prepared_entries` + `test_scalar_grid_layer_switch_prunes_cache` | `test_negative_control_broken_prune_*`（prepared/scalar 两件） |
 | 6 | 切换 CRS | `test_crs_switch_reprojects_through_new_cache_entry` | `test_negative_control_broken_reproject_key_serves_stale_projection` |
-| 7 | undo/redo | `test_undo_redo_rebuilds_and_restores_geometry_pixels` | 同 #1 机制（修订键对照覆盖） |
+| 7 | undo/redo | `test_undo_redo_rebuilds_and_restores_geometry_pixels` | `test_negative_control_broken_prepared_key_makes_undo_serve_edited_geometry` |
 | 8+ | scalar 数据/样式变更 | `test_scalar_grid_data/style_change_invalidates_cache` | `test_negative_control_broken_scalar_key_serves_stale_pixels` |
 | 9 | scalar payload 侧修订 | `test_scalar_grid_payload_revision_alone_invalidates_cache` | 同 #8 机制 |
 | 10 | scalar payload 对象替换 | `test_scalar_grid_payload_object_swap_forces_miss` | `test_negative_control_dropped_payload_identity_serves_previous_image` |
+| S4 | scalar 可见性往返 | `test_scalar_grid_visibility_roundtrip_retains_entry_and_restores_pixels`（隐藏期条目保留、重现像素一致、恰一次重栅格化） | 同 #4 帧键对照机制 |
 | M1 | mirror reset 清签名缓存 | `test_reset_publish_ledger_clears_signature_cache` | 用例内置前后对照（reset 前 len==1 / 后 len==0 / 重发布重签） |
 | M2 | 栈回收三表同剪 | `test_stack_gc_purges_signature_and_raster_entries_with_ledger` | 同上（剪前非空/剪后空） |
 

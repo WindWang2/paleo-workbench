@@ -631,16 +631,16 @@ class _ScalarImageEntry:
     Built once per (data, style) revision change by ``_draw_scalar_grid``.
     The QImage owns its bytes (built via ``QImage(...).copy()``), so the
     numpy buffer from ``rasterize()`` is never referenced beyond the build —
-    the historical dangling-buffer segfault class cannot recur here.
+    the historical dangling-buffer segfault class cannot recur here. Raster
+    dimensions travel in the cache key via the payload's width/height when
+    it exposes them.
     """
 
-    __slots__ = ("image", "payload", "width", "height")
+    __slots__ = ("image", "payload")
 
-    def __init__(self, image: QImage, payload: object, width: int, height: int) -> None:
+    def __init__(self, image: QImage, payload: object) -> None:
         self.image = image
         self.payload = payload
-        self.width = width
-        self.height = height
 
 
 def _payload_revision(payload: object, name: str) -> int | None:
@@ -1749,7 +1749,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
             ).copy()
             with self._prepared_lock:
                 self._scalar_images.store(
-                    layer.id, key, _ScalarImageEntry(image, scalar, width, height)
+                    layer.id, key, _ScalarImageEntry(image, scalar)
                 )
                 self._diagnostics["scalar_cache_misses"] += 1
         xmin, ymin, xmax, ymax = layer.extent

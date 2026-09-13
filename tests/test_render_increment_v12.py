@@ -163,14 +163,14 @@ def sabotage_prune(monkeypatch):
 
 @pytest.fixture
 def sabotage_frame_key(monkeypatch):
-    """反向对照专用：_frame_key 丢弃 style_revision，visible 恒 True。"""
+    """反向对照专用：_frame_key 丢弃 style_revision / visible / opacity。"""
     original = FallbackMapRenderBackend._frame_key
 
     def stripped(self):
         extent, output, dpi, layers, project_crs = original(self)
         layers = tuple(
-            (layer_id, layer_type, revision, True, opacity, scale_range, crs)
-            for (layer_id, layer_type, revision, _style_rev, _visible, opacity,
+            (layer_id, layer_type, revision, True, 1.0, scale_range, crs)
+            for (layer_id, layer_type, revision, _style_rev, _visible, _opacity,
                  scale_range, crs) in layers
         )
         return (extent, output, dpi, layers, project_crs)
@@ -296,6 +296,33 @@ def test_scalar_grid_layer_switch_prunes_cache():
     assert backend._scalar_images.subjects() == ("map:other",)
 
 
+def test_scalar_grid_visibility_roundtrip_retains_entry_and_restores_pixels():
+    payload = _CountingSolidRaster()
+    backend = FallbackMapRenderBackend()
+    visible_1 = _render(backend, _scalar_snapshot(payload))
+    assert backend._scalar_images.subjects() == ("map:grid",)
+
+    # 隐藏（真实宿主 set_visible 会 bump style_revision——快照与 payload
+    # 两侧同步）。隐藏帧不绘制标量层，但条目不剪除。
+    payload.style_revision = 2
+    from dataclasses import replace as _replace
+
+    base = _scalar_snapshot(payload, style_revision=2)
+    hidden = MapRenderSnapshot(
+        project_crs="EPSG:3857",
+        layers=(_replace(base.layers[0], visible=False),),
+    )
+    _render(backend, hidden)
+    assert backend._scalar_images.subjects() == ("map:grid",)  # retained while hidden
+
+    # 重现（style_revision 再 bump → 一次安全重栅格化），像素与首帧一致。
+    payload.style_revision = 3
+    visible_2 = _render(backend, _scalar_snapshot(payload, style_revision=3))
+
+    assert payload.rasterize_calls == 2  # 重现时恰好一次，不重复
+    assert visible_2.rgba == visible_1.rgba
+
+
 def test_negative_control_broken_prune_accumulates_stale_entries(sabotage_prune):
     backend = FallbackMapRenderBackend()
     _render(backend, _scalar_snapshot(_CountingSolidRaster(), layer_id="map:grid"))
@@ -334,6 +361,41 @@ def test_feature_removal_invalidates_prepared_and_changes_pixels():
     assert after.rgba != before.rgba
 
 
+def test_feature_addition_invalidates_prepared_and_changes_pixels():
+    backend = FallbackMapRenderBackend()
+    before = _render(backend, _vector_snapshot())
+    misses_before = backend.render_diagnostics()["prepared_cache_misses"]
+
+    after = _render(
+        backend,
+        _vector_snapshot(
+            features=(_polygon(0.0, 0.0, "f1"), _polygon(80.0, 0.0, "f2"),
+                      _polygon(160.0, 0.0, "f3")),
+            data_revision=2,
+        ),
+    )
+
+    assert backend.render_diagnostics()["prepared_cache_misses"] == misses_before + 1
+    assert backend.render_diagnostics()["features_total"] == 3
+    assert after.rgba != before.rgba
+
+
+def test_negative_control_broken_prepared_key_keeps_removed_feature(
+        sabotage_cache_key):
+    backend = FallbackMapRenderBackend()
+    before = _render(backend, _vector_snapshot())
+
+    after = _render(
+        backend,
+        _vector_snapshot(features=(_polygon(0.0, 0.0, "f1"),), data_revision=2),
+    )
+
+    # 修订键失效时被删要素仍在绘制（features_total=2、帧不变）——
+    # 正向「要素删除断言」因此有牙齿。
+    assert backend.render_diagnostics()["features_total"] == 2
+    assert after.rgba == before.rgba
+
+
 def test_style_change_reuses_prepared_geometry():
     """改样式（不动几何）→ 帧必须变化，但 prepared 零重建（纯命中）。"""
     backend = FallbackMapRenderBackend()
@@ -366,6 +428,20 @@ def test_visibility_roundtrip_keeps_prepared_entry():
     # 隐藏期间缓存保留，重新可见零重建，且几何与首次可见帧逐字节一致。
     assert backend.render_diagnostics()["prepared_cache_misses"] == misses_before
     assert visible_2.rgba == visible_1.rgba
+
+
+def test_opacity_change_reuses_prepared_geometry():
+    """不透明度变化 → 帧变化（半透明混合），prepared 零重建。"""
+    backend = FallbackMapRenderBackend()
+    opaque = _render(backend, _vector_snapshot(opacity=1.0))
+    misses_before = backend.render_diagnostics()["prepared_cache_misses"]
+
+    half = _render(
+        backend, _vector_snapshot(opacity=0.5, style_revision=2),
+    )
+
+    assert backend.render_diagnostics()["prepared_cache_misses"] == misses_before
+    assert half.rgba != opaque.rgba
 
 
 def test_layer_switch_prunes_prepared_entries():
@@ -426,11 +502,13 @@ def test_negative_control_broken_frame_key_serves_stale_style(sabotage_frame_key
         }),
     )
     hidden = _render(backend, _vector_snapshot(visible=False, style_revision=2))
+    faded = _render(backend, _vector_snapshot(opacity=0.5, style_revision=2))
 
-    # 帧键丢掉 style_revision / visible 时旧帧确实被复用——样式未上屏、
-    # 隐藏层不消失；两个正向断言（帧变化 / 隐藏生效）因此有牙齿。
+    # 帧键丢掉 style_revision / visible / opacity 时旧帧确实被复用——
+    # 样式未上屏、隐藏层不消失、半透明不混合；三个正向断言因此有牙齿。
     assert styled.rgba == before.rgba
     assert hidden.rgba == before.rgba
+    assert faded.rgba == before.rgba
 
 
 def test_undo_redo_rebuilds_and_restores_geometry_pixels():
@@ -450,6 +528,33 @@ def test_undo_redo_rebuilds_and_restores_geometry_pixels():
 
     assert backend.render_diagnostics()["prepared_cache_misses"] == misses_after_v1 + 2
     assert undone.rgba == v1.rgba  # geometry-equal ⇒ pixel-equal, revision be damned
+
+
+def test_negative_control_broken_prepared_key_makes_undo_serve_edited_geometry(
+        monkeypatch):
+    """#1257 同族：undo 前一刻修订键失效 → undo 后仍绘制已编辑几何。
+
+    键破坏在 v1/v2 正确渲染**之后**才注入（否则三帧全部退化为同帧，
+    对照空转）——这正是「undo 命中陈旧 prepared」的最小故障模型。
+    """
+    backend = FallbackMapRenderBackend()
+    v1 = _render(backend, _vector_snapshot(data_revision=1))
+    v2 = _render(backend, _vector_snapshot(
+        features=(_polygon(0.0, 40.0, "f1"), _polygon(80.0, 0.0, "f2")),
+        data_revision=2,
+    ))
+    assert v2.rgba != v1.rgba  # 前两帧在键完好时正确区分（非空转前提）
+
+    def broken_get(self, subject, revision_key):
+        entry = self._entries.get(subject)
+        return None if entry is None else entry[1]
+
+    monkeypatch.setattr(LatestRevisionCache, "get", broken_get)
+    undone = _render(backend, _vector_snapshot(data_revision=3))  # 几何回滚到 v1
+
+    # 键被破坏时 undo 仍服 v2 的编辑几何（帧 == 编辑帧）——正向
+    # 「undo 必须还原 v1 像素」断言因此有牙齿。
+    assert undone.rgba == v2.rgba
 
 
 def _geo_snapshot(project_crs: str, *, visible: bool = True) -> MapRenderSnapshot:
