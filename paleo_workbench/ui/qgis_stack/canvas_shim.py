@@ -411,18 +411,18 @@ class QgisCanvasShim(QWidget):
         # V8/M1：最近一次成功激活的原生工具 (tool_id, kind)；初值 pan
         # （set_map_tool_controller 绑定时强制 pan）。
         self._last_native_tool: tuple[str, str] = ("pan", "pan")
-        # Qt 树析构期间触发的 destroyed 回调只做状态记账：半析构画布上再进
-        # destroy_canvas/unsetMapTool 会踩悬空子对象（native 栈已证实）。
-        # 画布的桥表回收由桥在 canvas destroyed 时自行完成；orderly 关闭仍走
-        # shutdown()（宿主在拆树前显式调用）。
-        try:
-            self.destroyed.connect(lambda _obj=None: self._mark_disposed())
-        except Exception:
-            pass
-        try:
-            self.canvas.destroyed.connect(lambda _obj=None: self._mark_disposed())
-        except Exception:
-            pass
+        # CI A/B（#1300 诊断分支）：destroyed 回调是 #951 后疑似残留 UAF
+        # 首嫌——lambda 捕获 self 形成的 shiboken 连接在 C++ 销毁后由 GC
+        # 回收 wrapper 时踩 Signal 机械（PyType_IsSubtype(0x1)）。暂时
+        # 注释以 A/B 验证；orderly 关闭仍走 shutdown()/closeEvent。
+        # try:
+        #     self.destroyed.connect(lambda _obj=None: self._mark_disposed())
+        # except Exception:
+        #     pass
+        # try:
+        #     self.canvas.destroyed.connect(lambda _obj=None: self._mark_disposed())
+        # except Exception:
+        #     pass
         # 局部范围历史，映射 UnifiedMapCanvas 的 can_previous/can_next
         try:
             initial = tuple(self.stack.canvas_extent(self._canvas_address))
