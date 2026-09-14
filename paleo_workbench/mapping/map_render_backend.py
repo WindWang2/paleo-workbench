@@ -731,7 +731,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         )
         # Ticket 3（vector-perf-increment）：数据集级 Visvalingam LOD——按
         # (layer, revision, 缩放档) 缓存的显示几何化简（永不写回要素）。
-        self._lod_cache: LatestRevisionCache[str, tuple[int, float], _PreparedLayer] = (
+        self._lod_cache: LatestRevisionCache[str, tuple[int, float, str], _PreparedLayer] = (
             LatestRevisionCache()
         )
         self._vector_lod_disabled = os.environ.get(
@@ -1180,7 +1180,10 @@ class FallbackMapRenderBackend(MapRenderBackend):
         tolerance = vector_lod.tolerance_area(mupp)
         if bucket <= 0.0 or tolerance <= 0.0:
             return prepared
-        key = (int(layer.data_revision), bucket)
+        # 评审 P1：键含目标 CRS（缓存的是重投影后的 prepared——工程 CRS
+        # 切换且 revision 不变时，同缩放档不得取到旧 CRS 几何）。
+        project_crs = str(self._snapshot.project_crs or "")
+        key = (int(layer.data_revision), bucket, project_crs)
         with self._prepared_lock:
             cached = self._lod_cache.get(layer.id, key)
         if cached is not None:

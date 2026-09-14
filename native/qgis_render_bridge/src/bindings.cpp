@@ -993,6 +993,12 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                 throw std::invalid_argument(
                     "bus_drain_into destination must be a byte buffer");
               }
+              // 评审 P2：必须连续一维——strided/多维缓冲会按 128B 步进
+              // 覆写不相关内存。
+              if (info.ndim != 1 || info.strides[0] != 1) {
+                throw std::invalid_argument(
+                    "bus_drain_into destination must be contiguous 1-D");
+              }
               const std::size_t capacity =
                   static_cast<std::size_t>(info.size)
                   / sizeof(pwb::qgis_render::PwbEditEventPod);
