@@ -340,6 +340,8 @@ def _extension() -> Pybind11Extension:
             str(HERE / "src" / "gui_service.cpp"),
             str(HERE / "src" / "geometry_service.cpp"),
             str(HERE / "src" / "geological_topology_core.cpp"),
+            str(HERE / "src" / "spatial_index_core.cpp"),
+            str(HERE / "src" / "incremental_topology.cpp"),
             str(HERE / "src" / "map_stack_service.cpp"),
             str(HERE / "src" / "edit_tools.cpp"),
             str(HERE / "src" / "bindings.cpp"),

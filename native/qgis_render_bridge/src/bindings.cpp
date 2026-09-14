@@ -1198,6 +1198,116 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              &pwb::qgis_render::QgisMapStack::highlightCheckerErrors,
              py::arg("canvas"), py::arg("error_ids_json"),
              "M4 topo-editing: rubber-band highlight of checker error geometries.")
+        .def(
+            "set_event_bus_enabled",
+            [](pwb::qgis_render::QgisMapStack& self, bool enabled) {
+              self.setEventBusEnabled(enabled);
+            },
+            py::arg("enabled"),
+            "vector-perf Ticket 5: enable the zero-copy 64B-POD SPSC event "
+            "ring (JSON callbacks unchanged; opt-in).")
+        .def(
+            "bus_drain_into",
+            [](pwb::qgis_render::QgisMapStack& self, py::buffer dst,
+               int max_events) {
+              py::buffer_info info = dst.request(true);  // writable
+              if (info.itemsize != 1) {
+                throw std::invalid_argument(
+                    "bus_drain_into destination must be a byte buffer");
+              }
+              // 评审 P2：必须连续一维——strided/多维缓冲会按 128B 步进
+              // 覆写不相关内存。
+              if (info.ndim != 1 || info.strides[0] != 1) {
+                throw std::invalid_argument(
+                    "bus_drain_into destination must be contiguous 1-D");
+              }
+              const std::size_t capacity =
+                  static_cast<std::size_t>(info.size)
+                  / sizeof(pwb::qgis_render::PwbEditEventPod);
+              if (info.size % sizeof(pwb::qgis_render::PwbEditEventPod) != 0) {
+                throw std::invalid_argument(
+                    "destination size must be a multiple of the POD size");
+              }
+              if (max_events > 0
+                  && static_cast<std::size_t>(max_events) < capacity) {
+                return self.busDrain(
+                    reinterpret_cast<pwb::qgis_render::PwbEditEventPod*>(
+                        info.ptr),
+                    static_cast<std::size_t>(max_events));
+              }
+              return self.busDrain(
+                  reinterpret_cast<pwb::qgis_render::PwbEditEventPod*>(
+                      info.ptr),
+                  capacity);
+            },
+            py::arg("dst"), py::arg("max_events") = 0,
+            "vector-perf Ticket 5: drain queued events into a preallocated "
+            "writable buffer (single FFI call, zero per-event Python "
+            "objects); returns the number of events written.")
+        .def(
+            "bus_stats",
+            [](pwb::qgis_render::QgisMapStack& self) {
+              return self.busStats();
+            },
+            "vector-perf Ticket 5: bus JSON stats "
+            "{enabled, capacity, pushed, dropped}.")
+        .def(
+            "bus_emit_bench",
+            [](pwb::qgis_render::QgisMapStack& self, int count) {
+              self.busEmitBench(count);
+            },
+            py::arg("count"),
+            "vector-perf Ticket 5: inject n events through the real "
+            "producer path (tool sink -> ring); diagnostic benchmark face.")
+        .def(
+            "vertex_pick_query",
+            [](pwb::qgis_render::QgisMapStack& self, const std::string& doc_id,
+               double x, double y, double radius) {
+              bool indexed = false;
+              const std::vector<pwb::qgis_render::PwbVertexHit> hits =
+                  self.vertexPickQuery(doc_id, x, y, radius, indexed);
+              py::dict out;
+              out["indexed"] = indexed;
+              py::list items;
+              for (const auto& h : hits) {
+                py::dict item;
+                item["feature_id"] = h.feature_id;
+                item["part"] = h.part;
+                item["ring"] = h.ring;
+                item["nr"] = h.vertex_nr;
+                item["vertex_type"] = h.vertex_type;
+                item["x"] = h.x;
+                item["y"] = h.y;
+                items.append(std::move(item));
+              }
+              out["hits"] = std::move(items);
+              return out;
+            },
+            py::arg("doc_id"), py::arg("x"), py::arg("y"), py::arg("radius"),
+            "vector-perf Ticket 1: production verticesNear diagnostic — "
+            "radius query over the layer's vertex R-tree (linear fallback "
+            "under PWB_DISABLE_VERTEX_INDEX=1 or on small layers).")
+        .def(
+            "vertex_pick_bench",
+            [](pwb::qgis_render::QgisMapStack& self, const std::string& doc_id,
+               double x, double y, double radius, int repeats) {
+              bool indexed = false;
+              int hits = 0;
+              const std::vector<double> micros = self.vertexPickBenchMicros(
+                  doc_id, x, y, radius, repeats, hits, indexed);
+              py::dict out;
+              out["indexed"] = indexed;
+              out["hits"] = hits;
+              py::list values;
+              for (const double us : micros) values.append(us);
+              out["micros"] = std::move(values);
+              return out;
+            },
+            py::arg("doc_id"), py::arg("x"), py::arg("y"), py::arg("radius"),
+            py::arg("repeats") = 21,
+            "vector-perf Ticket 1: per-call microsecond timings of the "
+            "production vertex pick path (first call may include the lazy "
+            "bulk index build).")
         .def("set_edit_pick_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
                 py::function f) {

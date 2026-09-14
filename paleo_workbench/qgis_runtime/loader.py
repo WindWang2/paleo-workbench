@@ -45,6 +45,28 @@ _CONDA_PRELOAD_NAMES = (
     "sqlite3", "zlib", "libexpat", "gdal", "geos_c", "proj_9", "spatialite", "zstd",
 )
 
+# VENDOR recipe: the Qt entries above are deliberately EXCLUDED.
+#
+# On this recipe the process Qt is PySide6's own wheel copy, and vendor_bin
+# holds at most a couple of Qt modules PySide6 lacks (Qt6Core5Compat). Those
+# are found through the PATH entry the loader already prepends, which is
+# version-safe. Preloading them by absolute path is NOT: the vendor Qt was
+# built against whatever prefix compiled QGIS (6.8.0), so on a different
+# interpreter — e.g. a legacy conda env running Qt 6.6.3 — ctypes.WinDLL would
+# inject a foreign-version Qt module into the process. Qt modules must only
+# ever be preloaded on the CONDA_QT recipe, where the prefix's Qt IS the
+# process Qt by construction.
+#
+# What still needs preloading here is the non-Qt geo/C set: the application's
+# other native extensions and CPython's own sqlite3/ssl pin these process-wide
+# first, and Windows resolves by module base name, so a later PATH entry can
+# never win against an already-resident module (recorded in the module
+# docstring as "...qgis_core fails with ERROR_MOD_NOT_FOUND").
+_VENDOR_PRELOAD_NAMES = (
+    "spatialindex-64", "exiv2", "zip", "sqlite3", "zlib", "libexpat",
+    "gdal", "geos_c", "proj_9", "spatialite", "zstd", "libprotobuf-lite",
+)
+
 
 class LoadRecipe(str, Enum):
     VENDOR = "vendor"
@@ -137,7 +159,11 @@ def _ensure_linux_protobuf_compat(paths: QgisRuntimePaths, warnings: list[str]) 
             continue
 
 
-def _conda_preload(deps_bin: Path, warnings: list[str]) -> list[str]:
+def _conda_preload(
+    deps_bin: Path,
+    warnings: list[str],
+    names: tuple[str, ...] = _CONDA_PRELOAD_NAMES,
+) -> list[str]:
     # ctypes.WinDLL is Windows-only. Conda recipe docs are Windows-only too,
     # but prepare_bridge_load must never raise (#1265).
     if os.name != "nt" or not hasattr(ctypes, "WinDLL"):
@@ -147,7 +173,7 @@ def _conda_preload(deps_bin: Path, warnings: list[str]) -> list[str]:
         )
         return []
     failures: list[str] = []
-    for name in _CONDA_PRELOAD_NAMES:
+    for name in names:
         hits = glob.glob(str(deps_bin / f"{name}.dll"))
         if not hits:
             continue
@@ -239,6 +265,25 @@ def prepare_bridge_load(*, force: bool = False) -> LoadReport:
     # bisection; the legacy conftest recipe had this order all along).
     if recipe is LoadRecipe.CONDA_QT and paths.deps_bin is not None:
         preload_failures = _conda_preload(paths.deps_bin, warnings)
+    elif recipe is LoadRecipe.VENDOR and paths.vendor_bin is not None:
+        # Windows V7 port: the vendor build links its own Qt/geo C libraries
+        # (output/bin is self-contained). The application also loads native
+        # extensions plus CPython's own sqlite3/ssl, which pin the process-wide
+        # sqlite3 / zlib / libexpat slots with THEIR copies first — the exact
+        # hazard the module docstring records for the conda recipe
+        # ("native extensions otherwise pin incompatible sqlite3/zlib/expat
+        # process-wide and qgis_core fails"). Windows resolves by module base
+        # name, so a later PATH entry never wins against an already-resident
+        # module: qgis_core.dll then binds to the squatting copy and dies with
+        # ERROR_PROC_NOT_FOUND instead of ERROR_MOD_NOT_FOUND.
+        #
+        # Only the non-Qt geo/C subset is preloaded here — see
+        # _VENDOR_PRELOAD_NAMES for why preloading Qt modules would be unsafe
+        # on this recipe. Qt modules (incl. Qt6Core5Compat) resolve through the
+        # vendor_bin PATH entry the loader prepends above.
+        preload_failures = _conda_preload(
+            paths.vendor_bin, warnings, _VENDOR_PRELOAD_NAMES
+        )
     _PREPARED = True
     return LoadReport(
         recipe=recipe,

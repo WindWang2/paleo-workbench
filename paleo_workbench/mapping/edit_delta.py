@@ -16,6 +16,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -224,3 +226,92 @@ def delta_from_command(
         related_feature_ids=related if command_type in {"split_feature", "merge_features"} else (),
         timestamp=time.time() if timestamp is None else timestamp,
     )
+
+
+# ---------------------------------------------------------------------------
+# vector-perf-increment Ticket 5：零拷贝二进制 EditDelta 事件总线。
+#
+# C++ 桥侧 64 字节对齐 SPSC 环（edit_delta_pod.hpp）：编辑工具的手势/吸附
+# 发射点在 JSON 回调之外并行写环；本类一次 FFI 调用批量排水到调用方预分
+# 配缓冲——按记录零 Python 对象、零 JSON、零分配（10 kHz 高频流不再触发
+# 内存碎片与 GC 停顿）。默认关闭（set_event_bus_enabled 显式启用），
+# JSON 回调通道行为不变（API 兼容红线）。
+# ---------------------------------------------------------------------------
+
+#: 与 native/qgis_render_bridge/src/edit_delta_pod.hpp 的 PwbEditEventPod
+#: 逐字段对齐（static_assert 双侧钉死 128 字节 = 2×64B 缓存行）。
+EDIT_EVENT_DTYPE = np.dtype([
+    ("x", "<f8"),
+    ("y", "<f8"),
+    ("dx", "<f8"),
+    ("dy", "<f8"),
+    ("feature_ref", "<i8"),
+    ("timestamp_ns", "<u8"),
+    ("sequence", "<u8"),
+    ("kind", "<u4"),
+    ("canvas_slot", "<u4"),
+    ("part", "<u4"),
+    ("ring", "<u4"),
+    ("vertex_nr", "<i4"),
+    ("crc32", "<u4"),
+    ("reserved", "<u4", (12,)),
+])
+assert EDIT_EVENT_DTYPE.itemsize == 128
+
+#: 事件种类（与 C++ EditEventKind 一致）。
+EVENT_SNAP_FEEDBACK = 1
+EVENT_VERTEX_MOVE = 2
+EVENT_GESTURE_MULTI = 3
+
+
+class ZeroCopyEventBus:
+    """桥事件环的 Python 消费面（每栈一个；非线程安全——GUI 单消费者）。"""
+
+    def __init__(self, stack, capacity: int = 4096) -> None:
+        self._stack = stack
+        self._buf = np.zeros(capacity, dtype=EDIT_EVENT_DTYPE)
+        self._stride = EDIT_EVENT_DTYPE.itemsize
+        self._byte_view = self._buf.view(np.uint8).reshape(-1)
+        self.enabled = False
+
+    def enable(self) -> None:
+        self._stack.set_event_bus_enabled(True)
+        self.enabled = True
+
+    def disable(self) -> None:
+        self._stack.set_event_bus_enabled(False)
+        self.enabled = False
+
+    def drain(self, max_events: int | None = None) -> np.ndarray:
+        """批量排水（单次 FFI 调用）。返回零拷贝视图（环序）；无事件返回
+        空数组——两条路径都不分配新内存。"""
+        limit = 0 if max_events is None else int(max_events)
+        # 排水主路径零 Python 分配：满容量预分配视图 + C++ 侧上限
+        # （切片会每批新建视图对象——tracemalloc 下可见）。
+        n = int(self._stack.bus_drain_into(self._byte_view, limit))
+        if n <= 0:
+            return self._buf[:0]
+        return self._buf[:n]
+
+    def stats(self) -> dict:
+        import json as _json
+        return _json.loads(self._stack.bus_stats())
+
+
+def event_to_dict(event: np.void) -> dict:
+    """单事件按需解码（消费侧显式调用——排水主路径不做每事件对象）。"""
+    return {
+        "kind": int(event["kind"]),
+        "x": float(event["x"]),
+        "y": float(event["y"]),
+        "dx": float(event["dx"]),
+        "dy": float(event["dy"]),
+        "feature_ref": int(event["feature_ref"]),
+        "sequence": int(event["sequence"]),
+        "timestamp_ns": int(event["timestamp_ns"]),
+        "canvas_slot": int(event["canvas_slot"]),
+        "part": int(event["part"]),
+        "ring": int(event["ring"]),
+        "vertex_nr": int(event["vertex_nr"]),
+        "crc32": int(event["crc32"]),
+    }

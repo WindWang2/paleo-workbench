@@ -27,6 +27,8 @@
 #include <qgsvertexid.h>
 #include <qgsvertexmarker.h>
 
+#include "spatial_index_core.hpp"
+
 class QgsRubberBand;
 class QgsSnapIndicator;
 class QgsVectorLayer;
@@ -34,6 +36,44 @@ class QgsMapToolSelectionHandler;
 class QgsDistanceArea;
 
 namespace pwb::qgis_render {
+
+// -- Ticket 5（vector-perf-increment）：零拷贝事件汇（可选）。工具发射点
+// 在 JSON 回调之外并行写二进制环（set_event_bus_enabled 启用；未启用时
+// sink 为空，零开销）。
+struct PwbEditEventRaw {
+  std::uint32_t kind = 0;
+  double x = 0.0, y = 0.0, dx = 0.0, dy = 0.0;
+  qint64 feature_ref = 0;
+  std::uint16_t part = 0;
+  std::uint16_t ring = 0;
+  std::int32_t vertex_nr = 0;
+};
+using EditEventSink = std::function<void(const PwbEditEventRaw&)>;
+
+// -- Ticket 1（vector-perf-increment）：索引化顶点查询（生产 verticesNear
+// 的加速路径；PWB_DISABLE_VERTEX_INDEX=1 或小层回退线性扫描，语义一致） --
+struct PwbVertexHit {
+  qint64 feature_id = 0;
+  int part = 0;
+  int ring = 0;
+  int vertex_nr = 0;
+  int vertex_type = 0;  // Qgis::VertexType 整型（QgsVertexId 逐字段还原）
+  double x = 0.0;
+  double y = 0.0;
+};
+
+// 与 center 距离 <= radius 的全部顶点（合并编辑缓冲；含闭合环重复点——
+// 与线性 verticesNear 完全同集，顺序 = (feature_id, vertex_nr) 升序）。
+// indexed 出参：本查询是否由 R-Tree 服务（诊断/测试用）。
+std::vector<PwbVertexHit> QueryVerticesNear(QgsVectorLayer* layer,
+                                            const QgsPointXY& center,
+                                            double radius, bool* indexed);
+// 索引失效。feature 粒度 = 墓碑删除 + 按编辑缓冲最新几何重插（顶点编号
+// 在插/删点后平移，逐顶点手术更新不安全）；layer 粒度 = 标记重建（懒，
+// 下次查询时一次 STR 批量装载摊平）。
+void InvalidateVertexIndexFeature(QgsVectorLayer* layer, QgsFeatureId fid);
+void InvalidateVertexIndexLayer(QgsVectorLayer* layer);
+void DropVertexIndex(QgsVectorLayer* layer);
 
 class PwbEditPickTool : public QgsMapTool {
  public:
@@ -46,6 +86,13 @@ class PwbEditPickTool : public QgsMapTool {
   PwbEditPickTool(QgsMapCanvas* canvas, Callback callback,
                   FeatureIdResolver resolver = nullptr);
   ~PwbEditPickTool() override;
+
+  // Ticket 5：二进制事件汇（总线启用时由 QgisMapStack 注入；空 = 关闭）。
+  void setEventSink(EditEventSink sink) { event_sink_ = std::move(sink); }
+  // 发射一条原始事件（环满静默丢弃——交互流新事件优先）。
+  void emitRawEvent(PwbEditEventRaw event) {
+    if (event_sink_) event_sink_(event);
+  }
 
   void keyPressEvent(QKeyEvent* e) override;
   void deactivate() override;
@@ -89,6 +136,7 @@ class PwbEditPickTool : public QgsMapTool {
 
   Callback callback_;
   FeatureIdResolver resolver_;
+  EditEventSink event_sink_;
   std::unique_ptr<QgsRubberBand> rubber_;
   Pick current_;
   bool dragging_ = false;

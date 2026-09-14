@@ -141,6 +141,190 @@ PwbEditPickTool::PwbEditPickTool(QgsMapCanvas* canvas, Callback callback,
 
 PwbEditPickTool::~PwbEditPickTool() = default;
 
+// -- Ticket 1：顶点 R-Tree 索引注册表 ----------------------------------------
+namespace {
+
+// 低于该顶点规模的层建索引不划算（一次批量装载 ≈ 一次线性扫描）。
+constexpr std::size_t kMinVerticesToIndex = 2048;
+
+struct VertexIndexState {
+  QPointer<QgsVectorLayer> layer;
+  std::unique_ptr<SpatialIndexCore> index;
+  bool probed = false;  // 已尝试构建（含"低于阈值不建"结论）
+  bool dirty = true;    // 懒重建标记（layer 粒度失效）
+};
+
+std::unordered_map<QgsVectorLayer*, std::unique_ptr<VertexIndexState>>&
+vertexIndexRegistry() {
+  // unordered_map + unique_ptr 值：VertexIndexState 含 unique_ptr 成员不可
+  // 拷贝；QHash 的 find/detach 路径会实例化节点拷贝（C2280），std 容器
+  // 无此要求。
+  static std::unordered_map<QgsVectorLayer*, std::unique_ptr<VertexIndexState>>
+      registry;
+  return registry;
+}
+
+bool vertexIndexDisabledByEnv() {
+  return qEnvironmentVariableIsSet("PWB_DISABLE_VERTEX_INDEX")
+      && QString::fromLocal8Bit(qgetenv("PWB_DISABLE_VERTEX_INDEX"))
+             != QStringLiteral("0");
+}
+
+// 采集顶点项（与线性 verticesNear 同源：getFeatures 合并编辑缓冲；每个
+// nr 一项，含闭合环重复点；vertex_type 保真以便 QgsVertexId 还原）。
+void collectVertexEntries(QgsVectorLayer* layer, const QgsFeatureIds* only,
+                          std::vector<VertexEntry>& out) {
+  QgsFeature feature;
+  QgsFeatureRequest request;
+  if (only != nullptr && !only->isEmpty()) {
+    request.setFilterFids(*only);
+  }
+  QgsFeatureIterator cursor = layer->getFeatures(request);
+  while (cursor.nextFeature(feature)) {
+    if (!feature.hasGeometry()) continue;
+    const QgsGeometry geometry = feature.geometry();
+    const QgsAbstractGeometry* raw = geometry.constGet();
+    if (raw == nullptr) continue;
+    const int total = static_cast<int>(raw->vertexCount());
+    for (int nr = 0; nr < total; ++nr) {
+      QgsVertexId vid;
+      if (!geometry.vertexIdFromVertexNr(nr, vid) || !vid.isValid()) continue;
+      const QgsPoint point = raw->vertexAt(vid);
+      VertexEntry entry;
+      entry.x = point.x();
+      entry.y = point.y();
+      entry.feature_id = feature.id();
+      entry.part = vid.part;
+      entry.ring = vid.ring;
+      entry.vertex_nr = nr;
+      entry.vertex_type = static_cast<int>(vid.type);
+      out.push_back(std::move(entry));
+    }
+  }
+}
+
+// 线性参照（禁用开关/未建索引时的回退，语义与历史实现逐字段一致）。
+std::vector<PwbVertexHit> linearVerticesNear(QgsVectorLayer* layer,
+                                             const QgsPointXY& center,
+                                             double radius) {
+  std::vector<PwbVertexHit> out;
+  std::vector<VertexEntry> entries;
+  collectVertexEntries(layer, nullptr, entries);
+  for (const VertexEntry& e : entries) {
+    if (std::hypot(e.x - center.x(), e.y - center.y()) <= radius) {
+      PwbVertexHit hit;
+      hit.feature_id = e.feature_id;
+      hit.part = e.part;
+      hit.ring = e.ring;
+      hit.vertex_nr = e.vertex_nr;
+      hit.vertex_type = e.vertex_type;
+      hit.x = e.x;
+      hit.y = e.y;
+      out.push_back(hit);
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+std::vector<PwbVertexHit> QueryVerticesNear(QgsVectorLayer* layer,
+                                            const QgsPointXY& center,
+                                            double radius, bool* indexed) {
+  if (indexed != nullptr) *indexed = false;
+  if (layer == nullptr) return {};
+  if (vertexIndexDisabledByEnv()) return linearVerticesNear(layer, center, radius);
+
+  auto& registry = vertexIndexRegistry();
+  auto inserted = registry.emplace(layer, nullptr);
+  if (inserted.second) {
+    inserted.first->second = std::make_unique<VertexIndexState>();
+  }
+  VertexIndexState& state = *inserted.first->second;
+  if (state.layer.data() != layer) {
+    // 地址复用防护：旧层已毁（QPointer 落空或指向他层）而注册表项还在
+    // （多数测试/宿主路径不经 removeMirrorLayersExcept 收尾）——视为全新
+    // 状态重建，绝不沿用旧层索引。
+    state = VertexIndexState{};
+    state.layer = layer;
+  }
+  // 顺手清扫已亡条目，防注册表跨栈生命周期无界增长。
+  if (registry.size() > 64) {
+    for (auto it = registry.begin(); it != registry.end();) {
+      if (it->second->layer.data() == nullptr && it->first != layer) {
+        it = registry.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  if (!state.probed || state.dirty) {
+    // 首建或懒重建：一次 STR 批量装载。
+    std::vector<VertexEntry> entries;
+    collectVertexEntries(layer, nullptr, entries);
+    if (entries.size() < kMinVerticesToIndex) {
+      state.index.reset();
+    } else {
+      if (!state.index) state.index = std::make_unique<SpatialIndexCore>();
+      state.index->rebuild(std::move(entries));
+    }
+    state.probed = true;
+    state.dirty = false;
+  }
+  if (!state.index) return linearVerticesNear(layer, center, radius);
+
+  std::vector<VertexEntry> found;
+  state.index->radiusQuery(center.x(), center.y(), radius, found);
+  // 与线性顺序对齐：(feature_id, vertex_nr) 升序（内存 provider fid 升序迭代）。
+  std::sort(found.begin(), found.end(), [](const VertexEntry& a,
+                                           const VertexEntry& b) {
+    if (a.feature_id != b.feature_id) return a.feature_id < b.feature_id;
+    return a.vertex_nr < b.vertex_nr;
+  });
+  std::vector<PwbVertexHit> out;
+  out.reserve(found.size());
+  for (const VertexEntry& e : found) {
+    PwbVertexHit hit;
+    hit.feature_id = e.feature_id;
+    hit.part = e.part;
+    hit.ring = e.ring;
+    hit.vertex_nr = e.vertex_nr;
+    hit.vertex_type = e.vertex_type;
+    hit.x = e.x;
+    hit.y = e.y;
+    out.push_back(hit);
+  }
+  if (indexed != nullptr) *indexed = true;
+  return out;
+}
+
+void InvalidateVertexIndexFeature(QgsVectorLayer* layer, QgsFeatureId fid) {
+  if (layer == nullptr) return;
+  auto& registry = vertexIndexRegistry();
+  const auto it = registry.find(layer);
+  if (it == registry.end() || !it->second->index) return;
+  it->second->index->removeFeature(fid);
+  // 按编辑缓冲后的最新几何重插（顶点编号已平移，逐项手术更新不安全）。
+  QgsFeatureIds only;
+  only << fid;
+  std::vector<VertexEntry> fresh;
+  collectVertexEntries(layer, &only, fresh);
+  for (VertexEntry& e : fresh) it->second->index->insert(std::move(e));
+}
+
+void InvalidateVertexIndexLayer(QgsVectorLayer* layer) {
+  if (layer == nullptr) return;
+  auto& registry = vertexIndexRegistry();
+  const auto it = registry.find(layer);
+  if (it == registry.end()) return;
+  it->second->dirty = true;  // 懒重建：下次查询一次 STR 批量装载摊平
+}
+
+void DropVertexIndex(QgsVectorLayer* layer) {
+  if (layer == nullptr) return;
+  vertexIndexRegistry().erase(layer);
+}
+
 void PwbEditPickTool::keyPressEvent(QKeyEvent* e) {
   if (e->key() == Qt::Key_Escape && dragging_) {
     cancelDrag();
@@ -326,6 +510,11 @@ void PwbEditPickTool::updateSnapIndicator(
               QString::number(m.distance(), 'g', 12).toStdString() + "}";
     snap_feedback_x_ = m.point().x();
     snap_feedback_y_ = m.point().y();
+    // Ticket 5：吸附高频流走二进制环（不经过 JSON 拼装）。
+    emitRawEvent({/*kind*/ 1u, /*x*/ m.point().x(), /*y*/ m.point().y(),
+                  /*dx*/ 0.0, /*dy*/ 0.0,
+                  /*feature_ref*/ static_cast<qint64>(m.featureId()),
+                  /*part*/ 0, /*ring*/ 0, /*vertex_nr*/ -1});
   } else {
     payload = "{\"matched\":false}";
   }
@@ -403,26 +592,16 @@ std::vector<PwbVertexTool::VertexRef> PwbVertexTool::verticesInRect(
 
 std::vector<PwbVertexTool::VertexRef> PwbVertexTool::verticesNear(
     QgsVectorLayer* layer, const QgsPointXY& center, double radius) {
+  // Ticket 1：R-Tree 索引路径（QueryVerticesNear 内含线性回退与禁用开关，
+  // 语义与原线性实现逐字段一致——等价性由 tests/perf/
+  // test_spatial_index_benchmarks.py 钉死）。
   std::vector<VertexRef> out;
   if (layer == nullptr) return out;
-  QgsFeature feature;
-  QgsFeatureIterator cursor = layer->getFeatures();  // 合并编辑缓冲
-  while (cursor.nextFeature(feature)) {
-    if (!feature.hasGeometry()) continue;
-    const QgsGeometry geometry = feature.geometry();
-    const QgsAbstractGeometry* raw = geometry.constGet();
-    if (raw == nullptr) continue;
-    const int total = static_cast<int>(raw->vertexCount());
-    for (int nr = 0; nr < total; ++nr) {
-      QgsVertexId vid;
-      if (!geometry.vertexIdFromVertexNr(nr, vid) || !vid.isValid()) continue;
-      const QgsPoint point = raw->vertexAt(vid);
-      if (std::hypot(point.x() - center.x(), point.y() - center.y())
-          <= radius) {
-        out.push_back({layer, feature.id(), vid,
-                       QgsPointXY(point.x(), point.y())});
-      }
-    }
+  for (const PwbVertexHit& hit : QueryVerticesNear(layer, center, radius,
+                                                   nullptr)) {
+    QgsVertexId vid(hit.part, hit.ring, hit.vertex_nr,
+                    static_cast<Qgis::VertexType>(hit.vertex_type));
+    out.push_back({layer, hit.feature_id, vid, QgsPointXY(hit.x, hit.y)});
   }
   return out;
 }
@@ -654,6 +833,7 @@ void PwbVertexTool::finishTranslateDrag(const QgsPointXY& target) {
       continue;
     }
     layer->endEditCommand();
+    InvalidateVertexIndexLayer(layer);
     layers.push_back(layer);
   }
   if (!layers.empty()) {
@@ -756,6 +936,15 @@ std::vector<QgsFeatureId> PwbVertexTool::applyVertexMoves(
         QgsPoint(drag_anchor_.x(), drag_anchor_.y()));
   }
   layer->endEditCommand();
+  // 索引失效：仅本宏 touched 要素变更且无拓扑散布/避让裁切时按要素粒度
+  // （其余情形可能改动他要素，层粒度懒重建兜底）。
+  if (topological || !avoid_layers.isEmpty()) {
+    InvalidateVertexIndexLayer(layer);
+  } else {
+    for (const QgsFeatureId fid : touched) {
+      InvalidateVertexIndexFeature(layer, fid);
+    }
+  }
   return touched;
 }
 
@@ -793,6 +982,7 @@ void PwbVertexTool::scatterTopologicalPoints(
       layer->destroyEditCommand();  // 无插入 → 不留痕
     } else {
       layer->endEditCommand();
+      InvalidateVertexIndexLayer(layer);  // 散布可触碰他要素
     }
   }
 }
@@ -926,6 +1116,13 @@ void PwbVertexTool::finishSharedDeleteAt(const QgsPointXY& at) {
   for (QgsVectorLayer* layer : layers) {
     if (topological) layer->addTopologicalPoints(QgsPoint(at.x(), at.y()));
     layer->endEditCommand();
+    if (topological) {
+      InvalidateVertexIndexLayer(layer);
+    } else {
+      for (const VertexRef& ref : shared) {
+        if (ref.layer == layer) InvalidateVertexIndexFeature(layer, ref.fid);
+      }
+    }
   }
   {
     std::vector<QgsVectorLayer*> scatter_targets;
@@ -1105,6 +1302,16 @@ void PwbVertexTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   }
   cancelDrag();
   clearHover();  // 提交后镜像异步刷新（120ms 防抖）：立即失效，防止 stale 几何上删点
+  {
+    const QgsPoint orig = pick.geometry.constGet()->vertexAt(vid);
+    // Ticket 5：顶点落位原语走二进制环。
+    emitRawEvent({/*kind*/ 2u, /*x*/ p.x(), /*y*/ p.y(),
+                  /*dx*/ p.x() - orig.x(), /*dy*/ p.y() - orig.y(),
+                  /*feature_ref*/ static_cast<qint64>(pick.fid),
+                  /*part*/ static_cast<std::uint16_t>(vid.part),
+                  /*ring*/ static_cast<std::uint16_t>(vid.ring),
+                  /*vertex_nr*/ vid.vertex});
+  }
   std::string payload = "{" + basePayload(pick) + ",\"path\":" +
                         vertexPathJson(pick.geometry.wkbType(), vid) +
                         ",\"x\":" + QString::number(p.x(), 'g', 12).toStdString() +
@@ -1143,6 +1350,12 @@ void PwbVertexTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
       layer->addTopologicalPoints(QgsPoint(p.x(), p.y()));
     }
     layer->endEditCommand();
+    if (canvas()->project() != nullptr
+        && canvas()->project()->topologicalEditing()) {
+      InvalidateVertexIndexLayer(layer);
+    } else {
+      InvalidateVertexIndexFeature(layer, insert_fid);
+    }
     emitGestureMulti("vertex_insert", "Added vertex", {layer},
                      {insert_fid});
     e->accept();
@@ -1488,6 +1701,7 @@ void PwbMoveTool::finishNativeMove(double dx, double dy) {
     }
   }
   layer->endEditCommand();
+  InvalidateVertexIndexLayer(layer);  // 平移 + 拓扑散布可触碰多要素
   emitGestureFrom(layer, "feature_move", "Moved feature", {native_fid_});
 }
 

@@ -5,6 +5,8 @@
 #include "map_stack_service.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <cmath>
 #include <limits>
 #include <filesystem>
@@ -119,6 +121,9 @@
 #include "style_codec.hpp"
 #include <qgsrasterlayer.h>
 #include <qgsrasterrenderer.h>
+#include <atomic>
+
+#include "edit_delta_pod.hpp"
 #include "edit_tools.hpp"
 
 #include <qgsfeedback.h>
@@ -1119,6 +1124,10 @@ struct QgisMapStack::Impl {
       committed_callbacks;
   std::vector<std::function<void(const std::string&, const std::string&)>>
       orphan_committed_callbacks;
+  // Ticket 5（vector-perf-increment）：零拷贝事件环（set_event_bus_enabled
+  // 显式启用；默认 nullptr = 关闭，工具 sink 判空零开销）。
+  std::unique_ptr<EditEventRing> event_ring;
+  std::atomic<std::uint64_t> event_sequence{0};
   // M4 §5：检查器会话（错误对象生命周期绑在栈上，下次 run/shutdown 释放）。
   struct CheckerSession {
     std::unique_ptr<QgsGeometryCheckContext> context;
@@ -1137,6 +1146,27 @@ struct QgisMapStack::Impl {
     std::uintptr_t canvas = 0;
     QJsonObject last_config;
     QStringList last_layer_docs;
+    // Ticket 2（vector-perf-increment）：增量拓扑状态 + 沿用错误所属的
+    // 退休检查实例（保活——QgsGeometryCheckError 持 check 裸指针）。
+    TopoIncrementalState incremental;
+    QList<QgsGeometryCheck*> retired_checks;
+    // Ticket 2：错误序列化整项缓存（错误对象稳定——重证才换实例）；
+    // serialize 对数千条 carried 错误逐项重建 JSON 是主要成本（~25µs/条
+    // × 2000 条 = 50ms），整项缓存后仅新错误付出。同时保留几何缓存供
+    // bbox 回退路径。
+    QHash<const QgsGeometryCheckError*, QJsonObject> error_item_json;
+    // Ticket 2：carried 错误的紧凑序列化串缓存——serialize 的剩余主项是
+    // QJsonDocument 对数千条稳定项的重复编码；串缓存后装配为 O(条数)
+    // 字符串拼接，仅新错误走 QJsonDocument 编码。
+    QHash<const QgsGeometryCheckError*, QByteArray> error_item_compact;
+    QHash<const QgsGeometryCheckError*, QJsonValue> error_geometry_json;
+    // 评审 P1：对象稳定错误 id——错误入册时分配且终身不变（QHash 重排
+    // 不再使 carried 项 id 漂移：串缓存安全，Python 侧跨 run 持 id 变稳）。
+    QHash<const QgsGeometryCheckError*, QString> error_ids;
+    int next_error_id = 0;
+    // 评审 P1：退休检查引用计数——carried 错误持 check 裸指针，引用归零
+    // 即释放（有界，不随增量 run 数无限累积）。
+    QHash<QgsGeometryCheck*, int> retired_refs;
 
     ~CheckerSession() { reset(nullptr); }
 
@@ -1146,11 +1176,20 @@ struct QgisMapStack::Impl {
       native_by_id.clear();
       qDeleteAll(checks);
       checks.clear();
+      qDeleteAll(retired_checks);
+      retired_checks.clear();
+      retired_refs.clear();
+      error_ids.clear();
+      next_error_id = 0;
+      error_item_json.clear();
+      error_item_compact.clear();
+      error_geometry_json.clear();
       qDeleteAll(pools);
       pools.clear();
       context.reset();
       remainders.clear();
       last_layer_docs.clear();
+      incremental.clear();
       if (allowed_gaps && project != nullptr) {
         project->removeMapLayer(allowed_gaps.data());
       }
@@ -2128,6 +2167,7 @@ bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
     impl_->mirror_data_revisions.erase(doc_id);
   }
   layer.updateExtents();
+  InvalidateVertexIndexLayer(&layer);  // Ticket 1：镜像 delta 后顶点索引懒重建
   invalidateLocators(layer);
   impl_->mirror_data_revisions[doc_id] = new_revision;
   return true;
@@ -2500,6 +2540,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       // schema 漂移）之后捕捉会一直吸附到重建前的旧几何。放在本分支内而非
       // 分支外，避免在 delta 已自失效（applyMirrorFeatureDelta）时重复重建。
       invalidateLocators(*existing);
+      InvalidateVertexIndexLayer(existing);  // Ticket 1：同因，顶点索引懒重建
     }
     existing->updateExtents();
     // V10 P0（review-4）：镜像层建 provider 空间索引——无索引时编辑工具的
@@ -2754,11 +2795,13 @@ void QgisMapStack::removeMirrorLayersExcept(const std::vector<std::string>& doc_
     bool keepIt = hasDoc && keep.find(doc_id) != keep.end();
     if (hasDoc) {
       if (!keepIt) {
+        DropVertexIndex(qobject_cast<QgsVectorLayer*>(layer));  // Ticket 1
         project()->removeMapLayer(layer);
         impl_->owned_layers.erase(qgis_id);
         impl_->eraseMirrorByDocIdIfQgisMatches(doc_id, qgis_id);
       }
     } else {
+      DropVertexIndex(qobject_cast<QgsVectorLayer*>(layer));  // Ticket 1
       project()->removeMapLayer(layer);
       impl_->owned_layers.erase(qgis_id);
       impl_->eraseMirrorByQgisId(qgis_id);
@@ -3414,6 +3457,97 @@ QgsVectorLayer* QgisMapStack::editingLayerFor(const std::string& doc_id) const {
   return layer;
 }
 
+void QgisMapStack::setEventBusEnabled(bool enabled) {
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  if (enabled) {
+    if (impl_->event_ring == nullptr) {
+      // 4096 条 × 64B = 256KB/画布栈；满则丢弃最旧交互流（新事件优先）。
+      impl_->event_ring = std::make_unique<EditEventRing>(4096);
+      impl_->event_sequence.store(0, std::memory_order_relaxed);
+    }
+  } else {
+    impl_->event_ring.reset();
+    impl_->event_sequence.store(0, std::memory_order_relaxed);
+  }
+}
+
+std::size_t QgisMapStack::busDrain(PwbEditEventPod* out,
+                                   std::size_t out_capacity) {
+  if (!impl_ || !impl_->initialized || impl_->event_ring == nullptr) return 0;
+  return impl_->event_ring->drain(out, out_capacity);
+}
+
+std::string QgisMapStack::busStats() {
+  if (!impl_ || !impl_->initialized || impl_->event_ring == nullptr) {
+    return "{\"enabled\":false}";
+  }
+  return "{\"enabled\":true,\"capacity\":" +
+         std::to_string(impl_->event_ring->capacity()) +
+         ",\"pushed\":" + std::to_string(impl_->event_ring->pushed()) +
+         ",\"dropped\":" + std::to_string(impl_->event_ring->dropped()) + "}";
+}
+
+// Ticket 5 基准面：经真实生产者路径（工具 sink → 环）注入 n 条事件——
+// 排水侧的 Python 分配测量不走此入口。
+void QgisMapStack::busEmitBench(int count) {
+  if (!impl_ || !impl_->initialized || impl_->event_ring == nullptr) {
+    throw std::runtime_error("event bus is not enabled");
+  }
+  for (int i = 0; i < count; ++i) {
+    const std::uint64_t seq =
+        impl_->event_sequence.fetch_add(1, std::memory_order_relaxed);
+    impl_->event_ring->tryPush(MakeEditEvent(
+        kEventSnapFeedback, 0u, seq, static_cast<double>(i) * 0.001,
+        static_cast<double>(i) * 0.002, 0.0, 0.0,
+        static_cast<qint64>(i % 1000), 0, 0, -1,
+        static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count())));
+  }
+}
+
+std::vector<PwbVertexHit> QgisMapStack::vertexPickQuery(
+    const std::string& doc_id, double x, double y, double radius,
+    bool& indexed) {
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  QgsVectorLayer* layer =
+      mirrorLayerByDoc(project(), impl_->mirror_by_doc, doc_id);
+  if (layer == nullptr) {
+    throw std::runtime_error("mirror layer not found: " + doc_id);
+  }
+  return QueryVerticesNear(layer, QgsPointXY(x, y), radius, &indexed);
+}
+
+std::vector<double> QgisMapStack::vertexPickBenchMicros(
+    const std::string& doc_id, double x, double y, double radius, int repeats,
+    int& hits, bool& indexed) {
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  QgsVectorLayer* layer =
+      mirrorLayerByDoc(project(), impl_->mirror_by_doc, doc_id);
+  if (layer == nullptr) {
+    throw std::runtime_error("mirror layer not found: " + doc_id);
+  }
+  std::vector<double> micros;
+  micros.reserve(static_cast<std::size_t>(std::max(1, repeats)));
+  std::size_t last_hits = 0;
+  for (int i = 0; i < std::max(1, repeats); ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::vector<PwbVertexHit> found =
+        QueryVerticesNear(layer, QgsPointXY(x, y), radius, &indexed);
+    const auto t1 = std::chrono::steady_clock::now();
+    micros.push_back(
+        std::chrono::duration<double, std::micro>(t1 - t0).count());
+    last_hits = found.size();
+  }
+  hits = static_cast<int>(last_hits);
+  return micros;
+}
+
 std::string QgisMapStack::startMirrorLayerEditing(const std::string& doc_id) {
   if (!impl_ || !impl_->initialized) {
     throw std::runtime_error("map stack is not initialized");
@@ -3485,6 +3619,7 @@ std::string QgisMapStack::commitMirrorLayer(const std::string& doc_id) {
   }
   // 成功：fid 表已按 committed 信号增量重建（added 按序配对 / removed
   // 擦除）；组 delta 回传宿主（§2 回写通道）。
+  InvalidateVertexIndexLayer(layer);  // Ticket 1：提交落 provider 后整层懒重建
   fireCommittedDelta(doc_id);
   endEditSessionState(doc_id);
   impl_->commit_capture.erase(doc_id);
@@ -3495,6 +3630,7 @@ std::string QgisMapStack::rollBackMirrorLayer(const std::string& doc_id) {
   QgsVectorLayer* layer = editingLayerFor(doc_id);
   if (layer == nullptr) return "layer not in an edit session: " + doc_id;
   layer->rollBack(true);  // 复位到会话开启时快照基线（§2 易失会话）
+  InvalidateVertexIndexLayer(layer);  // Ticket 1：缓冲复位后重建
   endEditSessionState(doc_id);
   impl_->commit_capture.erase(doc_id);
   return "";
@@ -3508,6 +3644,7 @@ std::string QgisMapStack::undoMirrorEdit(const std::string& doc_id) {
   QgsVectorLayer* layer = editingLayerFor(doc_id);
   if (layer == nullptr) return "layer not in an edit session: " + doc_id;
   layer->undoStack()->undo();
+  InvalidateVertexIndexLayer(layer);  // Ticket 1：撤销重放宏改几何
   return "";
 }
 
@@ -3515,6 +3652,7 @@ std::string QgisMapStack::redoMirrorEdit(const std::string& doc_id) {
   QgsVectorLayer* layer = editingLayerFor(doc_id);
   if (layer == nullptr) return "layer not in an edit session: " + doc_id;
   layer->undoStack()->redo();
+  InvalidateVertexIndexLayer(layer);  // Ticket 1：重做重放宏改几何
   return "";
 }
 
@@ -5258,11 +5396,25 @@ QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
     if (cbIt == impl_->edit_pick_callbacks.end() || !cbIt->second) return;
     cbIt->second(action, payload);
   };
+  // Ticket 5：二进制事件汇（环未启用时 sink 内判空 = 零开销 no-op）。
+  EditEventSink sink =
+      [this, alive, canvas_addr](const PwbEditEventRaw& raw) {
+        if (alive.expired() || impl_->event_ring == nullptr) return;
+        const std::uint64_t seq =
+            impl_->event_sequence.fetch_add(1, std::memory_order_relaxed);
+        impl_->event_ring->tryPush(MakeEditEvent(
+            raw.kind, static_cast<std::uint32_t>(canvas_addr & 0xFFFFFFFFu),
+            seq, raw.x, raw.y, raw.dx, raw.dy, raw.feature_ref, raw.part,
+            raw.ring, raw.vertex_nr,
+            static_cast<std::uint64_t>(
+                std::chrono::steady_clock::now().time_since_epoch().count())));
+      };
   PwbEditPickTool::FeatureIdResolver resolver = fidResolver();
   if (vertex) {
     auto& slot = impl_->vertex_tools[canvas_addr];
     if (slot == nullptr) {
       slot = new PwbVertexTool(canvas, std::move(cb), std::move(resolver));
+      slot->setEventSink(sink);
       // 拓扑编辑迁移 M1（§4 顶点 v2 当前层档）：编辑目标 = 画布当前层
       // 且处于 M1 原生会话（无会话 → nullptr → 工具保持 v1 回调模式）。
       // 工具 parent=画布，画布亡则工具亡——canvas 裸指针安全。
@@ -5314,6 +5466,7 @@ QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
     auto& slot = impl_->move_tools[canvas_addr];
     if (slot == nullptr) {
       slot = new PwbMoveTool(canvas, std::move(cb), std::move(resolver));
+      slot->setEventSink(sink);
       // M2 §4 移动复刻：与会话当前层的原生模式。
       slot->setEditLayerProvider([this, alive,
                                   canvas]() -> QgsVectorLayer* {
@@ -6606,6 +6759,36 @@ QString checkerRuleId(const QgsGeometryCheck* check) {
   return id;
 }
 
+// Ticket 2：沿用错误 vs 新证错误等价判定（去重用——受限池会为池内干净
+// 邻居重证其（干净,干净）对，与缓存携带的同一错误重复）。
+bool equivalentCheckerErrors(const QgsGeometryCheckError& a,
+                             const QgsGeometryCheckError& b) {
+  if (checkerRuleId(a.check()) != checkerRuleId(b.check())) return false;
+  if (a.layerId() != b.layerId() || a.featureId() != b.featureId()) {
+    return false;
+  }
+  const auto* overlap_a =
+      dynamic_cast<const QgsGeometryOverlapCheckError*>(&a);
+  const auto* overlap_b =
+      dynamic_cast<const QgsGeometryOverlapCheckError*>(&b);
+  if ((overlap_a == nullptr) != (overlap_b == nullptr)) return false;
+  if (overlap_a != nullptr && overlap_b != nullptr) {
+    const auto& other_a = overlap_a->overlappedFeature();
+    const auto& other_b = overlap_b->overlappedFeature();
+    if (other_a.layerId() != other_b.layerId()
+        || other_a.featureId() != other_b.featureId()) {
+      return false;
+    }
+    const double area_a = a.value().toDouble();
+    const double area_b = b.value().toDouble();
+    if (std::abs(area_a - area_b)
+        > 1e-9 * std::max(1.0, std::abs(area_a))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 QJsonValue geometryToJsonValue(const QgsGeometry& geom) {
   if (geom.isNull() || geom.isEmpty()) return QJsonValue();
   QJsonParseError err{};
@@ -6622,9 +6805,19 @@ QJsonArray bboxToJson(const QgsRectangle& box) {
 
 class PwbLayerFeaturePool : public QgsVectorLayerFeaturePool {
  public:
+  // 全量池（原语义）。
   explicit PwbLayerFeaturePool(QgsVectorLayer* layer)
       : QgsVectorLayerFeaturePool(layer) {
     const QgsFeatureIds ids = getFeatures(QgsFeatureRequest());
+    setFeatureIds(ids);
+  }
+  // Ticket 2：受限池（脏要素 ∪ 脏区邻居）——检查只遍历池内要素。
+  // getFeatures(filterFids) 显式填充缓存与空间索引（mIndex）——OverlapCheck
+  // 的内层 LayerFeatures(bbox) 走 getIntersects：空索引会退化为懒填充、
+  // 配对结果依赖遍历顺序（可漏对），必须构造期建满。
+  PwbLayerFeaturePool(QgsVectorLayer* layer, const QgsFeatureIds& ids)
+      : QgsVectorLayerFeaturePool(layer) {
+    getFeatures(QgsFeatureRequest().setFilterFids(ids));
     setFeatureIds(ids);
   }
 };
@@ -6675,7 +6868,11 @@ QJsonArray methodsToJson(const QgsGeometryCheck* check, const QString& rule) {
 }  // namespace
 
 std::string QgisMapStack::serializeCheckerSession() const {
-  QJsonArray errors;
+  // Ticket 2：carried 错误的紧凑串缓存——QJsonDocument 对数千条稳定项的
+  // 重复编码是增量 serialize 的剩余主项（~18ms @2k 条）；串缓存后装配为
+  // O(条数) 拼接，仅新错误付出编码。串按整项（含 status）缓存；fix 会
+  // 改写 status → fixGeometryError(s) 入口整体失效（低频，可接受）。
+  QStringList compact_parts;
   auto hostFid = [this](const std::string& doc, QgsFeatureId fid) -> QString {
     auto table = impl_->mirror_feature_fids.find(doc);
     if (table != impl_->mirror_feature_fids.end()) {
@@ -6695,12 +6892,19 @@ std::string QgisMapStack::serializeCheckerSession() const {
     if (index < 0 || index >= impl_->checker.native_errors.size()) continue;
     QgsGeometryCheckError* error = impl_->checker.native_errors.at(index);
     if (error == nullptr) continue;
+    const auto cached_compact =
+        impl_->checker.error_item_compact.constFind(error);
+    if (cached_compact != impl_->checker.error_item_compact.constEnd()) {
+      compact_parts.append(cached_compact.value());
+      continue;
+    }
     QgsVectorLayer* layer = qobject_cast<QgsVectorLayer*>(
         project()->mapLayer(error->layerId()));
     const std::string doc = docOfLayer(layer);
     const QString rule = checkerRuleId(error->check());
     QJsonObject item;
-    item.insert(QStringLiteral("id"), it.key());
+    item.insert(QStringLiteral("id"),
+                impl_->checker.error_ids.value(error, it.key()));
     item.insert(QStringLiteral("rule"), rule);
     item.insert(QStringLiteral("layer_id"), QString::fromStdString(doc));
     item.insert(QStringLiteral("feature_id"),
@@ -6717,7 +6921,15 @@ std::string QgisMapStack::serializeCheckerSession() const {
     item.insert(QStringLiteral("message"), error->description());
     item.insert(QStringLiteral("value"), QJsonValue::fromVariant(error->value()));
     const QgsGeometry geom = error->geometry();
-    const QJsonValue geom_json = geometryToJsonValue(geom);
+    QJsonValue geom_json;
+    const auto cached_geom =
+        impl_->checker.error_geometry_json.constFind(error);
+    if (cached_geom != impl_->checker.error_geometry_json.constEnd()) {
+      geom_json = cached_geom.value();
+    } else {
+      geom_json = geometryToJsonValue(geom);
+      impl_->checker.error_geometry_json.insert(error, geom_json);
+    }
     if (!geom_json.isNull()) item.insert(QStringLiteral("geometry"), geom_json);
     QgsRectangle box = error->affectedAreaBBox();
     if (box.isNull() || box.isEmpty()) box = geom.boundingBox();
@@ -6736,7 +6948,13 @@ std::string QgisMapStack::serializeCheckerSession() const {
     else if (error->status() == QgsGeometryCheckError::StatusObsolete)
       status = QStringLiteral("obsolete");
     item.insert(QStringLiteral("status"), status);
-    if (status == QLatin1String("pending")) errors.append(item);
+    impl_->checker.error_item_json.insert(error, item);
+    const QByteArray compact =
+        QJsonDocument(item).toJson(QJsonDocument::Compact);
+    impl_->checker.error_item_compact.insert(error, compact);
+    if (status == QLatin1String("pending")) {
+      compact_parts.append(QString::fromUtf8(compact));
+    }
   }
   for (const auto& rem : impl_->checker.remainders) {
     QJsonObject item;
@@ -6753,10 +6971,18 @@ std::string QgisMapStack::serializeCheckerSession() const {
     item.insert(QStringLiteral("methods"),
                 methodsToJson(nullptr, QStringLiteral("workspace_remainder")));
     item.insert(QStringLiteral("status"), QStringLiteral("pending"));
-    errors.append(item);
+    compact_parts.append(QString::fromUtf8(
+        QJsonDocument(item).toJson(QJsonDocument::Compact)));
   }
-  QJsonObject payload;
-  payload.insert(QStringLiteral("errors"), errors);
+  // 手工装配：errors 全部来自紧凑串（逐项均已由 QJsonDocument 编码产出）。
+  QByteArray payload;
+  payload.reserve(64 + compact_parts.size() * 160);
+  payload.append("{\"errors\":[");
+  for (int i = 0; i < compact_parts.size(); ++i) {
+    if (i > 0) payload.append(',');
+    payload.append(compact_parts.at(i).toUtf8());
+  }
+  payload.append(']');
   if (impl_->checker.allowed_gaps) {
     QJsonArray gaps;
     QgsFeature feature;
@@ -6766,9 +6992,17 @@ std::string QgisMapStack::serializeCheckerSession() const {
       const QJsonValue geom = geometryToJsonValue(feature.geometry());
       if (!geom.isNull()) gaps.append(geom);
     }
-    payload.insert(QStringLiteral("allowed_gaps"), gaps);
+    QJsonObject gaps_payload;
+    gaps_payload.insert(QStringLiteral("allowed_gaps"), gaps);
+    payload.append(',');
+    // 去掉外层 { }，仅拼接 allowed_gaps 成员。
+    const QByteArray gaps_compact =
+        QJsonDocument(gaps_payload).toJson(QJsonDocument::Compact);
+    payload.append(gaps_compact.constData() + 1, gaps_compact.size() - 2);
   }
-  return QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  payload.append('}');
+  return std::string(payload.constData(),
+                     static_cast<std::size_t>(payload.size()));
 }
 
 void QgisMapStack::fireCheckerGesture(const std::vector<std::string>& docs,
@@ -6909,8 +7143,6 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
     throw std::invalid_argument("run_geometry_checks config must be a JSON object");
   }
   const QJsonObject config = doc.object();
-  impl_->checker.reset(project());
-  impl_->checker.last_config = config;
   impl_->checker.canvas = canvas_addr;
 
   QStringList layer_docs;
@@ -6945,8 +7177,6 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
   if (!map_crs.isValid()) map_crs = project()->crs();
   if (!map_crs.isValid()) map_crs = layers.front()->crs();
   const int precision = std::max(1, config.value(QStringLiteral("precision")).toInt(8));
-  impl_->checker.context = std::make_unique<QgsGeometryCheckContext>(
-      precision, map_crs, project()->transformContext(), project());
 
   QSet<QString> rules;
   if (config.value(QStringLiteral("rules")).isArray()) {
@@ -6961,6 +7191,50 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
     rules.insert(QStringLiteral("workspace_remainder"));
     rules.insert(QStringLiteral("dangle"));
   }
+
+  // -- Ticket 2（vector-perf-increment）：增量通道 ---------------------------
+  // 当前要素戳（一次遍历：WKB 指纹 + 包围盒）——差分出脏集后，无变化走
+  // 缓存直返快路径；有变化且规则可子集化（无 gap）走受限复检。
+  QHash<QString, QHash<qint64, TopoFidStamp>> current_stamps;
+  for (QgsVectorLayer* layer : layers) {
+    auto& table = current_stamps[layer->id()];
+    QgsFeature stamp_feature;
+    QgsFeatureIterator stamp_cursor = layer->getFeatures();
+    while (stamp_cursor.nextFeature(stamp_feature)) {
+      if (!stamp_feature.hasGeometry()) continue;
+      const QgsGeometry geom = stamp_feature.geometry();
+      if (geom.isNull() || geom.isEmpty()) continue;
+      TopoFidStamp stamp;
+      stamp.hash = topoFingerprint(geom);
+      const QgsRectangle box = geom.boundingBox();
+      stamp.minx = box.xMinimum();
+      stamp.miny = box.yMinimum();
+      stamp.maxx = box.xMaximum();
+      stamp.maxy = box.yMaximum();
+      table.insert(static_cast<qint64>(stamp_feature.id()), stamp);
+    }
+  }
+  if (!incrementalTopologyDisabledByEnv()
+      && impl_->checker.incremental.sameRequest(config, layer_docs,
+                                                map_crs.authid())) {
+    const TopoDiff diff =
+        topoDiff(impl_->checker.incremental, current_stamps);
+    if (diff.empty()) {
+      // 快路径：几何零变化（含 gap 规则）——会话错误/余量仍有效。
+      impl_->checker.last_config = config;
+      return serializeCheckerSession();
+    }
+    if (!rules.contains(QStringLiteral("gap"))) {
+      return runIncrementalGeometryChecks(canvas, layers, layer_docs, config,
+                                          rules, current_stamps, diff);
+    }
+  }
+  impl_->checker.reset(project());
+  impl_->checker.last_config = config;
+  // 上下文在 reset 之后创建（Ticket 2：reset 会销毁旧上下文——增量路径
+  // 复用上次会话上下文，请求相同 ⇒ 同 precision/CRS/transformContext）。
+  impl_->checker.context = std::make_unique<QgsGeometryCheckContext>(
+      precision, map_crs, project()->transformContext(), project());
 
   if (config.value(QStringLiteral("allowed_gaps")).isObject()
       && rules.contains(QStringLiteral("gap"))) {
@@ -7032,52 +7306,235 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
     }
   }
   for (int i = 0; i < impl_->checker.native_errors.size(); ++i) {
-    impl_->checker.native_by_id.insert(QString::number(i), i);
+    QgsGeometryCheckError* error = impl_->checker.native_errors.at(i);
+    auto id_it = impl_->checker.error_ids.find(error);
+    if (id_it == impl_->checker.error_ids.end()) {
+      id_it = impl_->checker.error_ids.insert(
+          error, QString::number(impl_->checker.next_error_id++));
+    }
+    impl_->checker.native_by_id.insert(id_it.value(), i);
   }
 
   if (rules.contains(QStringLiteral("workspace_remainder"))) {
-    QgsGeometry work;
-    if (config.value(QStringLiteral("workspace")).isObject()) {
-      const QJsonObject ws = config.value(QStringLiteral("workspace")).toObject();
-      work = QgsJsonUtils::geometryFromGeoJson(
-          QString::fromUtf8(QJsonDocument(ws).toJson(QJsonDocument::Compact)));
-    } else if (canvas != nullptr) {
-      work = QgsGeometry::fromRect(canvas->extent());
-    }
-    if (!work.isEmpty()) {
-      QgsGeometry combined;
-      bool first = true;
-      for (QgsVectorLayer* layer : layers) {
-        if (layer->geometryType() != Qgis::GeometryType::Polygon) continue;
-        QgsFeature feature;
-        QgsFeatureIterator iterator = layer->getFeatures();
-        while (iterator.nextFeature(feature)) {
-          if (!feature.hasGeometry() || feature.geometry().isEmpty()) continue;
-          QgsGeometry geom = feature.geometry();
-          if (first) {
-            combined = geom;
-            first = false;
-          } else {
-            combined = combined.combine(geom);
-          }
+    computeWorkspaceRemainders(canvas, layers, layer_docs, config);
+  }
+
+  // Ticket 2：记录本次请求与要素戳——下次同请求可增量。
+  impl_->checker.incremental.valid = true;
+  impl_->checker.incremental.config = config;
+  impl_->checker.incremental.layer_docs = layer_docs;
+  impl_->checker.incremental.map_crs_id = map_crs.authid();
+  impl_->checker.incremental.stamps = current_stamps;
+  return serializeCheckerSession();
+}
+
+void QgisMapStack::computeWorkspaceRemainders(
+    QgsMapCanvas* canvas, const QList<QgsVectorLayer*>& layers,
+    const QStringList& layer_docs, const QJsonObject& config) {
+  QgsGeometry work;
+  if (config.value(QStringLiteral("workspace")).isObject()) {
+    const QJsonObject ws = config.value(QStringLiteral("workspace")).toObject();
+    work = QgsJsonUtils::geometryFromGeoJson(
+        QString::fromUtf8(QJsonDocument(ws).toJson(QJsonDocument::Compact)));
+  } else if (canvas != nullptr) {
+    work = QgsGeometry::fromRect(canvas->extent());
+  }
+  if (!work.isEmpty()) {
+    QgsGeometry combined;
+    bool first = true;
+    for (QgsVectorLayer* layer : layers) {
+      if (layer->geometryType() != Qgis::GeometryType::Polygon) continue;
+      QgsFeature feature;
+      QgsFeatureIterator iterator = layer->getFeatures();
+      while (iterator.nextFeature(feature)) {
+        if (!feature.hasGeometry() || feature.geometry().isEmpty()) continue;
+        QgsGeometry geom = feature.geometry();
+        if (first) {
+          combined = geom;
+          first = false;
+        } else {
+          combined = combined.combine(geom);
         }
       }
-      QgsGeometry remainder;
-      try {
-        remainder = first ? work : work.difference(combined);
-      } catch (...) {
-        remainder = QgsGeometry();
-      }
-      const double min_area = impl_->checker.context->reducedTolerance;
-      if (!remainder.isEmpty() && remainder.area() > min_area) {
-        QgisMapStack::Impl::CheckerSession::Remainder rem;
-        rem.id = QStringLiteral("ws-0");
-        rem.layer_doc_id = layer_docs.isEmpty() ? QString() : layer_docs.front();
-        rem.geometry = remainder;
-        rem.bbox = remainder.boundingBox();
-        impl_->checker.remainders.push_back(std::move(rem));
+    }
+    QgsGeometry remainder;
+    try {
+      remainder = first ? work : work.difference(combined);
+    } catch (...) {
+      remainder = QgsGeometry();
+    }
+    const double min_area = impl_->checker.context->reducedTolerance;
+    if (!remainder.isEmpty() && remainder.area() > min_area) {
+      Impl::CheckerSession::Remainder rem;
+      rem.id = QStringLiteral("ws-0");
+      rem.layer_doc_id = layer_docs.isEmpty() ? QString() : layer_docs.front();
+      rem.geometry = remainder;
+      rem.bbox = remainder.boundingBox();
+      impl_->checker.remainders.push_back(std::move(rem));
+    }
+  }
+}
+
+std::string QgisMapStack::runIncrementalGeometryChecks(
+    QgsMapCanvas* canvas, const QList<QgsVectorLayer*>& layers,
+    const QStringList& layer_docs, const QJsonObject& config,
+    const QSet<QString>& rules,
+    const QHash<QString, QHash<qint64, TopoFidStamp>>& current_stamps,
+    const TopoDiff& diff) {
+  // 脏区：差分盒并集外扩 2×容差（容差沿用上次会话 context——请求相同
+  // ⇒ 同 precision/CRS/transformContext）。
+  const double tolerance = impl_->checker.context
+      ? impl_->checker.context->reducedTolerance
+      : 0.0;
+  const QgsRectangle dirty_box = expandDirtyBox(diff.dirty_box, tolerance);
+
+  // 旧错误划分：本要素脏（或 overlap 对端脏/已删）→ 丢弃重证；其余沿用。
+  // 退休检查引用计数（评审 P1）：丢弃错误递减其 check 引用，归零即释放。
+  auto release_error = [this](QgsGeometryCheckError* error) {
+    impl_->checker.error_ids.remove(error);
+    impl_->checker.error_item_json.remove(error);
+    impl_->checker.error_item_compact.remove(error);
+    impl_->checker.error_geometry_json.remove(error);
+    const auto ref_it =
+        impl_->checker.retired_refs.find(
+            const_cast<QgsGeometryCheck*>(error->check()));
+    if (ref_it != impl_->checker.retired_refs.end()) {
+      if (--ref_it.value() <= 0) {
+        impl_->checker.retired_checks.removeOne(error->check());
+        impl_->checker.retired_refs.erase(ref_it);
+        delete error->check();
       }
     }
+    delete error;
+  };
+  QList<QgsGeometryCheckError*> carried;
+  for (QgsGeometryCheckError* error : impl_->checker.native_errors) {
+    const auto dirty_a = diff.dirty.constFind(error->layerId());
+    const bool clean_a =
+        (dirty_a == diff.dirty.constEnd()
+         || !dirty_a.value().contains(error->featureId()))
+        && current_stamps.value(error->layerId())
+               .contains(static_cast<qint64>(error->featureId()));
+    bool keep = clean_a;
+    if (keep) {
+      if (auto* overlap =
+              dynamic_cast<QgsGeometryOverlapCheckError*>(error)) {
+        const auto& other = overlap->overlappedFeature();
+        const auto dirty_b = diff.dirty.constFind(other.layerId());
+        keep = (dirty_b == diff.dirty.constEnd()
+                || !dirty_b.value().contains(other.featureId()))
+            && current_stamps.value(other.layerId())
+                   .contains(static_cast<qint64>(other.featureId()));
+      }
+    }
+    if (keep) {
+      carried.append(error);
+    } else {
+      release_error(error);
+    }
+  }
+  impl_->checker.native_errors = carried;
+
+  // 旧检查实例退休（沿用错误持 check 裸指针——引用计数保活，评审 P1）。
+  for (QgsGeometryCheck* check : impl_->checker.checks) {
+    int refs = 0;
+    for (const QgsGeometryCheckError* error : carried) {
+      if (error->check() == check) ++refs;
+    }
+    if (refs > 0) {
+      impl_->checker.retired_checks.append(check);
+      impl_->checker.retired_refs.insert(check, refs);
+    } else {
+      delete check;  // 无沿用引用：立即释放
+    }
+  }
+  impl_->checker.checks.clear();
+  qDeleteAll(impl_->checker.pools);
+  impl_->checker.pools.clear();
+
+  for (QgsVectorLayer* layer : layers) {
+    QgsFeatureIds ids;
+    const QSet<qint64> dirty_fids = diff.dirty.value(layer->id());
+    for (const qint64 fid : dirty_fids) {
+      ids << static_cast<QgsFeatureId>(fid);
+    }
+    if (!dirty_box.isNull() && !dirty_box.isEmpty()) {
+      QgsFeature neighbor;
+      QgsFeatureIterator cursor =
+          layer->getFeatures(QgsFeatureRequest(dirty_box));
+      while (cursor.nextFeature(neighbor)) {
+        if (!dirty_fids.contains(static_cast<qint64>(neighbor.id()))) {
+          ids << neighbor.id();  // 脏区相交的干净邻居（只读参与配对）
+        }
+      }
+    }
+    impl_->checker.pools.insert(layer->id(),
+                                new PwbLayerFeaturePool(layer, ids));
+  }
+
+  QVariantMap overlap_config;
+  overlap_config.insert(
+      QStringLiteral("maxOverlapArea"),
+      config.value(QStringLiteral("max_overlap_area")).toDouble(0.0));
+  if (rules.contains(QStringLiteral("is_valid"))) {
+    impl_->checker.checks.append(new QgsGeometryIsValidCheck(
+        impl_->checker.context.get(), QVariantMap()));
+  }
+  if (rules.contains(QStringLiteral("overlap"))) {
+    impl_->checker.checks.append(new QgsGeometryOverlapCheck(
+        impl_->checker.context.get(), overlap_config));
+  }
+  if (rules.contains(QStringLiteral("dangle"))) {
+    impl_->checker.checks.append(new QgsGeometryDangleCheck(
+        impl_->checker.context.get(), QVariantMap()));
+  }
+
+  QList<QgsGeometryCheckError*> fresh;
+  QgsFeedback feedback;
+  QStringList messages;
+  for (QgsGeometryCheck* check : impl_->checker.checks) {
+    try {
+      check->collectErrors(impl_->checker.pools, fresh, messages, &feedback);
+    } catch (const std::exception&) {
+      continue;
+    } catch (...) {
+      continue;
+    }
+  }
+  // 去重：受限池会为池内干净邻居重证其（干净,干净）对——与缓存携带的
+  // 同一错误重复，丢弃 fresh 侧。
+  for (QgsGeometryCheckError* error : fresh) {
+    bool duplicate = false;
+    for (const QgsGeometryCheckError* kept : impl_->checker.native_errors) {
+      if (equivalentCheckerErrors(*error, *kept)) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      impl_->checker.error_item_json.remove(error);
+      impl_->checker.error_item_compact.remove(error);
+      impl_->checker.error_geometry_json.remove(error);
+      delete error;
+    } else {
+      impl_->checker.error_ids.insert(
+          error, QString::number(impl_->checker.next_error_id++));
+      impl_->checker.native_errors.append(error);
+    }
+  }
+
+  // workspace_remainder 依赖全体并集，不可子集化：全量重算。
+  if (rules.contains(QStringLiteral("workspace_remainder"))) {
+    impl_->checker.remainders.clear();
+    computeWorkspaceRemainders(canvas, layers, layer_docs, config);
+  }
+
+  impl_->checker.incremental.stamps = current_stamps;
+  impl_->checker.native_by_id.clear();
+  for (int i = 0; i < impl_->checker.native_errors.size(); ++i) {
+    impl_->checker.native_by_id.insert(
+        impl_->checker.error_ids.value(impl_->checker.native_errors.at(i)),
+        i);
   }
   return serializeCheckerSession();
 }
@@ -7085,6 +7542,9 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
 std::string QgisMapStack::fixGeometryError(std::uintptr_t canvas_addr,
                                            const std::string& error_id,
                                            int method) {
+  // fix 会改写错误 status——序列化串缓存整体失效（低频路径）。
+  impl_->checker.error_item_compact.clear();
+  impl_->checker.error_item_json.clear();
   if (canvas_addr != 0) canvasOrThrow(canvas_addr);
   std::vector<std::string> touched;
   std::string failure;
@@ -7148,6 +7608,9 @@ std::string QgisMapStack::fixGeometryError(std::uintptr_t canvas_addr,
 std::string QgisMapStack::fixGeometryErrors(std::uintptr_t canvas_addr,
                                             const std::string& error_ids_json,
                                             int method) {
+  // fix 会改写错误 status——序列化串缓存整体失效（低频路径）。
+  impl_->checker.error_item_compact.clear();
+  impl_->checker.error_item_json.clear();
   if (canvas_addr != 0) canvasOrThrow(canvas_addr);
   QJsonParseError parse_error{};
   const QJsonDocument doc = QJsonDocument::fromJson(

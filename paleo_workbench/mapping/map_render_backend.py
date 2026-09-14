@@ -28,6 +28,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPolygonF
 
 from paleo_workbench.mapping.facies_brush_cache import FaciesPatternBrushCache
+from paleo_workbench.mapping import vector_lod
 from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
 from paleo_workbench.mapping.revision_cache import LatestRevisionCache
 
@@ -582,6 +583,22 @@ def reproject_xy(xy: np.ndarray, transformer: Any) -> np.ndarray:
     )
 
 
+
+def _lod_subset_prepared(prepared: _PreparedLayer, keep: np.ndarray) -> _PreparedLayer:
+    """Keep-mask 子集化的显示几何（Ticket 3）：路径数组重排，part 计数
+    不变（锚点保证每 part 至少保留端点），要素级数组原样共享。"""
+    keep_index = np.nonzero(keep)[0]
+    if len(keep_index) == len(keep):
+        return prepared
+    reduced = object.__new__(_PreparedLayer)
+    for slot in _PreparedLayer.__slots__:
+        setattr(reduced, slot, getattr(prepared, slot))
+    reduced.path_xy = prepared.path_xy[keep_index]
+    counts = np.add.reduceat(keep.astype(np.int64), prepared.path_offsets[:-1])
+    reduced.path_offsets = np.concatenate(([0], np.cumsum(counts)))
+    return reduced
+
+
 def _reprojected_prepared_layer(
     prepared: "_PreparedLayer", transformer: Any
 ) -> "_PreparedLayer":
@@ -712,7 +729,21 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._scalar_images: LatestRevisionCache[str, tuple, _ScalarImageEntry] = (
             LatestRevisionCache()
         )
+        # Ticket 3（vector-perf-increment）：数据集级 Visvalingam LOD——按
+        # (layer, revision, 缩放档) 缓存的显示几何化简（永不写回要素）。
+        self._lod_cache: LatestRevisionCache[str, tuple[int, float, str], _PreparedLayer] = (
+            LatestRevisionCache()
+        )
+        self._vector_lod_disabled = os.environ.get(
+            "PWB_DISABLE_VECTOR_LOD", "").strip() not in ("", "0")
+        # Ticket 4：分组批处理开关（关闭 = 旧逐要素两遍绘制；能力回退 +
+        # 逐像素 parity 测试的参照路径）。
+        self._facies_batch_disabled = os.environ.get(
+            "PWB_DISABLE_FACIES_BATCH", "").strip() not in ("", "0")
         self._facies_patterns = FaciesPatternBrushCache()
+        # Ticket 4：全部花纹 × 档位一次性烘焙进图集（首个绘制帧零 SVG 解析；
+        # 资产缺失时 prebake 返回 0，懒渲染回退不变）。
+        self._facies_patterns.prebake()
         _LIVE_FALLBACKS.add(self)
         self._diagnostics = {
             "prepared_layers": 0,
@@ -1130,6 +1161,51 @@ class FallbackMapRenderBackend(MapRenderBackend):
             self._reprojected.store(layer.id, key, reprojected)
         return reprojected
 
+    def _lod_prepared(
+        self, prepared: _PreparedLayer, layer: MapLayerSnapshot, mupp: float
+    ) -> _PreparedLayer:
+        """数据集级 Visvalingam LOD（vector-perf-increment Ticket 3）。
+
+        按缩放档（2 的幂）缓存显示几何的化简结果；形态锚点（端点/拐点/
+        极值）永不下桌。化简只影响绘制——要素几何、拾取、拓扑均在原始
+        数据上进行（04-known-limitations #4）。小层/近距视图/禁用开关
+        （PWB_DISABLE_VECTOR_LOD=1）回退原样。
+        """
+        if self._vector_lod_disabled or prepared.path_xy is None:
+            return prepared
+        total = len(prepared.path_xy)
+        if total < vector_lod.MIN_VERTEX_COUNT:
+            return prepared
+        bucket = vector_lod.scale_bucket_mupp(mupp)
+        tolerance = vector_lod.tolerance_area(mupp)
+        if bucket <= 0.0 or tolerance <= 0.0:
+            return prepared
+        # 评审 P1：键含目标 CRS（缓存的是重投影后的 prepared——工程 CRS
+        # 切换且 revision 不变时，同缩放档不得取到旧 CRS 几何）。
+        project_crs = str(self._snapshot.project_crs or "")
+        key = (int(layer.data_revision), bucket, project_crs)
+        with self._prepared_lock:
+            cached = self._lod_cache.get(layer.id, key)
+        if cached is not None:
+            return cached
+        keep = vector_lod.visvalingam_keep_mask(
+            prepared.path_xy[:, 0],
+            prepared.path_xy[:, 1],
+            prepared.path_offsets[:-1],
+            prepared.path_is_ring,
+            tolerance,
+        )
+        reduced = _lod_subset_prepared(prepared, keep)
+        self._diagnostics["lod_vertices_total"] = (
+            self._diagnostics.get("lod_vertices_total", 0) + total
+        )
+        self._diagnostics["lod_vertices_kept"] = (
+            self._diagnostics.get("lod_vertices_kept", 0) + int(keep.sum())
+        )
+        with self._prepared_lock:
+            self._lod_cache.store(layer.id, key, reduced)
+        return reduced
+
     def _prepared_layer(self, layer: MapLayerSnapshot) -> _PreparedLayer:
         revision = int(layer.data_revision)
         with self._prepared_lock:
@@ -1211,6 +1287,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
         # transform; a foreign layer CRS reprojects here (see
         # _reprojected_prepared for the degraded/warned path).
         prepared = self._reprojected_prepared(prepared, layer)
+        mupp = (span_x / width) if width > 0 else 0.0
+        prepared = self._lod_prepared(prepared, layer, mupp)
         self._diagnostics["features_total"] += len(prepared.features)
         visible_features = self._cull_features(prepared, view)
         self._diagnostics["features_drawn"] += int(visible_features.sum())
@@ -1364,11 +1442,37 @@ class FallbackMapRenderBackend(MapRenderBackend):
 
         # Polygons: rings of one feature share a path so OddEvenFill keeps
         # holes correct; category fills switch brushes between features.
+        # Ticket 4（vector-perf-increment）：按（类别色 × 花纹）分组批处理——
+        # 基色每色一次 drawPath、花纹每纹一次 drawPath（图集笔刷）。相邻
+        # 平铺（相带契约：无叠置）下与逐要素绘制逐像素一致（parity 钉）；
+        # 逐分支的 graduated/非分类路径保持原逐要素行为。
         current_feature = -1
         path: QPainterPath | None = None
+        color_paths: dict[str, QPainterPath] = {}
+        plain_path = QPainterPath()
+        has_plain = False
+        pattern_paths: dict[str, QPainterPath] = {}
+        pattern_of_feature: dict[int, str] = {}
+        late_paths: list[tuple[QPainterPath, QColor | None]] = []
+
+        def _draw_immediate(feature_path: QPainterPath, color_name: str,
+                            pattern_id) -> None:
+            painter.save()
+            painter.setBrush(self._color(color_name, style.fill))
+            painter.drawPath(feature_path)
+            painter.restore()
+            if pattern_id:
+                pattern_brush = self._facies_patterns.brush_for(
+                    pattern_id, scale=dpi_scale)
+                if pattern_brush is not None:
+                    painter.save()
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(pattern_brush)
+                    painter.drawPath(feature_path)
+                    painter.restore()
 
         def flush_polygon() -> None:
-            nonlocal path, current_feature
+            nonlocal path, current_feature, has_plain
             if path is not None and not path.isEmpty():
                 if categories is not None and current_feature >= 0:
                     key = str(
@@ -1376,20 +1480,27 @@ class FallbackMapRenderBackend(MapRenderBackend):
                     )
                     color_name = categories.get(key)
                     if color_name is not None:
-                        painter.save()
-                        painter.setBrush(self._color(color_name, style.fill))
-                        painter.drawPath(path)
-                        painter.restore()
+                        if self._facies_batch_disabled:
+                            _draw_immediate(
+                                path, color_name,
+                                patterns.get(key) if patterns else None)
+                            path = None
+                            current_feature = -1
+                            return
+                        group = color_paths.get(color_name)
+                        if group is None:
+                            group = QPainterPath()
+                            group.setFillRule(Qt.FillRule.OddEvenFill)
+                            color_paths[color_name] = group
+                        group.addPath(path)
                         if patterns is not None:
-                            pattern_brush = self._facies_patterns.brush_for(
-                                patterns.get(key), scale=dpi_scale
-                            )
-                            if pattern_brush is not None:
-                                painter.save()
-                                painter.setPen(Qt.PenStyle.NoPen)
-                                painter.setBrush(pattern_brush)
-                                painter.drawPath(path)
-                                painter.restore()
+                            pattern_id = patterns.get(key)
+                            if pattern_id and pattern_id not in pattern_paths:
+                                merged = QPainterPath()
+                                merged.setFillRule(Qt.FillRule.OddEvenFill)
+                                pattern_paths[pattern_id] = merged
+                            if pattern_id:
+                                pattern_paths[pattern_id].addPath(path)
                         path = None
                         current_feature = -1
                         return
@@ -1399,14 +1510,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
                         val = prepared.features[current_feature].properties.get("value")
                     color_name = _range_color(val, style)
                     if color_name is not None:
-                        painter.save()
-                        painter.setBrush(self._color(color_name, style.fill))
-                        painter.drawPath(path)
-                        painter.restore()
+                        late_paths.append((path, self._color(color_name, style.fill)))
                         path = None
                         current_feature = -1
                         return
-                painter.drawPath(path)
+                plain_path.addPath(path)
+                has_plain = True
             path = None
             current_feature = -1
 
@@ -1433,6 +1542,31 @@ class FallbackMapRenderBackend(MapRenderBackend):
             for x, y in coordinates[1:]:
                 path.lineTo(x, y)
         flush_polygon()
+        # -- 分组落笔：基色每色一次，花纹每纹一次（图集笔刷）。 ----------
+        for color_name, group_path in color_paths.items():
+            painter.save()
+            painter.setBrush(self._color(color_name, style.fill))
+            painter.drawPath(group_path)
+            painter.restore()
+        if has_plain:
+            painter.drawPath(plain_path)
+        for late_path, late_color in late_paths:
+            painter.save()
+            painter.setBrush(late_color)
+            painter.drawPath(late_path)
+            painter.restore()
+        if pattern_paths:
+            for pattern_id, group_path in pattern_paths.items():
+                pattern_brush = self._facies_patterns.brush_for(
+                    pattern_id, scale=dpi_scale
+                )
+                if pattern_brush is None:
+                    continue
+                painter.save()
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(pattern_brush)
+                painter.drawPath(group_path)
+                painter.restore()
         self._diagnostics["vertices_simplified"] += visible_vertices - drawn_vertices
 
     def _paint_layer_points(

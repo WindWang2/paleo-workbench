@@ -95,6 +95,8 @@ if(PALEO_WITH_QGIS_RENDERER)
         src/gui_service.cpp
         src/geometry_service.cpp
         src/geological_topology_core.cpp
+        src/spatial_index_core.cpp
+        src/incremental_topology.cpp
         src/map_stack_service.cpp
         src/edit_tools.cpp
     )

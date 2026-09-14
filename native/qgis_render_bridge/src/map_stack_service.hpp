@@ -6,10 +6,20 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <QHash>
+#include <QJsonObject>
+#include <QList>
+#include <QSet>
+#include <QStringList>
 // M1 原生编辑会话声明需要 committed* 信号的全部值类型。
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
 #include <qgsvectorlayer.h>
+
+#include "edit_delta_pod.hpp"
+#include "edit_tools.hpp"
+#include "incremental_topology.hpp"
 
 class QgsMapCanvas;
 class QgsLayerTreeView;
@@ -328,6 +338,22 @@ public:
   // 编辑工具的 begin/endEditCommand 保证）；手势级编排（跨层逆序）在宿主。
   std::string undoMirrorEdit(const std::string& doc_id);
   std::string redoMirrorEdit(const std::string& doc_id);
+  // Ticket 1（vector-perf-increment）顶点拾取诊断面：生产 verticesNear 同
+  // 路径（索引/线性回退由 QueryVerticesNear 决定）。基准与等价性测试用。
+  // Ticket 5（vector-perf-increment）：零拷贝事件总线。默认关闭；启用后
+  // 工具发射点并行写 64B POD SPSC 环（JSON 回调不变）。drain 单次 FFI
+  // 批量搬运到调用方缓冲。
+  void setEventBusEnabled(bool enabled);
+  std::size_t busDrain(PwbEditEventPod* out, std::size_t out_capacity);
+  std::string busStats();
+  void busEmitBench(int count);
+  std::vector<PwbVertexHit> vertexPickQuery(const std::string& doc_id,
+                                            double x, double y, double radius,
+                                            bool& indexed);
+  std::vector<double> vertexPickBenchMicros(const std::string& doc_id,
+                                            double x, double y, double radius,
+                                            int repeats, int& hits,
+                                            bool& indexed);
   // 编辑会话中向镜像缓冲加要素（数字化路由，M1）：geojson = 单个
   // Feature（properties.__pwb_fid = 宿主 id）；一宏可撤（"Added feature"）。
   std::string addMirrorFeature(const std::string& doc_id,
@@ -374,6 +400,19 @@ public:
   // gap_threshold, max_overlap_area}。返回 {errors:[...]}。
   std::string runGeometryChecks(std::uintptr_t canvas_addr,
                                 const std::string& config_json);
+  // Ticket 2（vector-perf-increment）：工区余量（全量并集差，不可子集
+  // 化）；受限复检（脏 ∪ 邻居池 + 沿用错误补丁合入）。fix 无需全量池
+  // ——QgsFeaturePool::getFeature 缓存未命中自动回源取层。
+  void computeWorkspaceRemainders(QgsMapCanvas* canvas,
+                                  const QList<QgsVectorLayer*>& layers,
+                                  const QStringList& layer_docs,
+                                  const QJsonObject& config);
+  std::string runIncrementalGeometryChecks(
+      QgsMapCanvas* canvas, const QList<QgsVectorLayer*>& layers,
+      const QStringList& layer_docs, const QJsonObject& config,
+      const QSet<QString>& rules,
+      const QHash<QString, QHash<qint64, TopoFidStamp>>& current_stamps,
+      const TopoDiff& diff);
   std::string fixGeometryError(std::uintptr_t canvas_addr,
                                const std::string& error_id, int method);
   std::string fixGeometryErrors(std::uintptr_t canvas_addr,
