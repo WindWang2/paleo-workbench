@@ -358,6 +358,11 @@ class QgisCanvasShim(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 半构造防护：_load_mapstack 失败（无桥/测试强制 fallback）时构造函数
+        # 抛出，但 super().__init__(parent) 已把本部件挂进父级——残件仍会收到
+        # resize/show 事件；_canvas_created=False 让 chrome overlay 安装静默跳过
+        # （此前引用未初始化的 self.canvas 在 resizeEvent 内再抛 AttributeError）。
+        self._canvas_created = False
         QgisMapStack = _load_mapstack()
 
         self.stack = QgisMapStack()
@@ -719,6 +724,8 @@ class QgisCanvasShim(QWidget):
         return max(1, host.width()), max(1, host.height())
 
     def _install_chrome_overlay(self) -> None:
+        if not getattr(self, "_canvas_created", False):
+            return  # 半构造残件（构造期无桥异常）：无 canvas，无 chrome 可装
         host = canvas_viewport(self.canvas) or self
         if self._chrome_scale is None:
             self._chrome_scale = _ScaleChrome(self, host)

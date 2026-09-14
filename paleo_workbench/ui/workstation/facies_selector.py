@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -33,6 +33,53 @@ from paleo_workbench.mapping.facies_taxonomy import (
 )
 
 _EMPTY = ""  # 子级「不填/清空」哨兵
+
+
+class FaciesBrushContext(QObject):
+    """当前相带画刷（M2）：数字化捕获后自动赋值的持续装备状态。
+
+    语义（00-decisions D10/D11）：装备四元组 = 词表选择 {facies,
+    sub_facies, micro_facies} + 派生 level；未装备（未 armed）时捕获走
+    既有模态对话框路径——本类只是新增的快路径，不改变旧路径行为。
+    幂等装备（同值重复 equip）不重复广播，杜绝回环放大。
+    """
+
+    equipped_changed = Signal(dict)
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._selection: dict[str, str] | None = None
+
+    @property
+    def is_armed(self) -> bool:
+        return self._selection is not None
+
+    def selection(self) -> dict[str, str]:
+        values = dict(self._selection or {})
+        values.setdefault("facies", "")
+        values.setdefault("sub_facies", "")
+        values.setdefault("micro_facies", "")
+        return values
+
+    def equip(self, selection: Mapping[str, Any]) -> None:
+        values = self.selection()
+        values.update({
+            "facies": str(selection.get("facies") or ""),
+            "sub_facies": str(selection.get("sub_facies") or ""),
+            "micro_facies": str(selection.get("micro_facies") or ""),
+        })
+        values.pop("level", None)
+        values["level"] = FaciesTaxonomy.selection_level(values)
+        if values == self._selection:
+            return
+        self._selection = values
+        self.equipped_changed.emit(dict(values))
+
+    def clear(self) -> None:
+        if self._selection is None:
+            return
+        self._selection = None
+        self.equipped_changed.emit({})
 
 
 class FaciesCascadeSelector(QWidget):

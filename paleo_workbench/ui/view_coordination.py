@@ -86,6 +86,10 @@ class ViewCoordinationController(QObject):
         self._well_dock_sink = None          # (well_name) → open/focus dock
         self._link_cursor_sink = None        # (well_name, md_m|None) → engine crosshair
         self._link_cursor_set = False        # a link cursor is currently shown
+        # M3 连井剖面井位级光标（地图光标最近井 → 剖面指示；空串 = 清除）。
+        self._section_cursor_sink = None
+        self._section_cursor_set = False
+        self._section_cursor_last = ""
         selection_context.selection_changed.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------
@@ -746,6 +750,34 @@ class ViewCoordinationController(QObject):
         selections, so there is no echo path to guard here.
         """
         self._well_dock_sink = sink
+
+    def set_section_cursor_sink(self, sink) -> None:
+        """Register the correlation-section cursor target: ``(well_name)``.
+
+        M3：地图光标最近井 → 连井剖面井位级指示（引擎无逐道 crosshair
+        API，指示为井位级；见 paleo-ui 04 已知限制 #11）。空串 = 清除。
+        生产侧（HudController）已做 60ms 合并 + 去重 + 单次清除；此处
+        路由保持简单可靠——清除不节流（丢了清除比晚到更糟）。
+        """
+        self._section_cursor_sink = sink
+
+    def publish_section_cursor(self, well_name: str, *, source: str) -> None:
+        """发布井位级剖面联动（去重；well_name 空串 = 清除一次）。"""
+        _ = source  # source tag 保留给调试/未来多生产者裁决
+        name = str(well_name or "").strip()
+        if not name:
+            if self._section_cursor_set and self._section_cursor_sink is not None:
+                self._section_cursor_set = False
+                self._section_cursor_last = ""
+                self._section_cursor_sink("")
+            return
+        if self._section_cursor_sink is None:
+            return
+        if name == self._section_cursor_last and self._section_cursor_set:
+            return
+        self._section_cursor_last = name
+        self._section_cursor_set = True
+        self._section_cursor_sink(name)
 
     def set_link_cursor_sink(self, sink) -> None:
         """Register the native link-cursor target: ``(well_name, md_m|None)``.

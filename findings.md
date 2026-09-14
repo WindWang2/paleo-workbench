@@ -1,61 +1,91 @@
-# Findings — Scientific Interpretation & Algorithm V6
+# Findings — Paleo UI Workbench (feat/paleo-ui-workbench)
 
 ## Environment
-- Repo root main checkout: C:\Users\wangj.KEVIN\projects\paleo-workbench (branch main @ 295fabc3)
-- Worktree: .worktrees/scientific-interpretation-v6, branch feat/scientific-interpretation-v6
-- Submodules pinned: geo-viz-engine 5e03beba, well-log-engine f845e7ab, gdal/proj NOT initialized (huge; vendored build only)
-- pyproject: requires-python >=3.12,<3.13; deps pyside6/pydantic/numpy/pandas/lasio/rasterio/shapely/zarr
-- geo-viz-engine subpackages installed editable (geoviz_common, geoviz_well_log, ..., geoviz_seismic, geoviz_paleo_map)
-- GDAL NOT pip dep — vendored native build (ADR 0060); tests needing osgeo may skip if absent
+- 主仓 main @ e7214566；worktree C:\Users\wangj.KEVIN\projects\paleo-workbench-paleo-ui
+  branch feat/paleo-ui-workbench；geo-viz-engine 子模块已用本地 reference 初始化
+- 主仓 .venv (cp312, PySide6 6.11.2) 可复用：editable MetaPathFinder 位于
+  sys.meta_path 尾部，pytest pythonpath=["."]（rootdir=worktree）先命中 → worktree
+  代码生效（实测 paleo_workbench.__file__ 指向 worktree）
+- UI 测试配方：QT_QPA_PLATFORM=offscreen + `-m "not slow and not opengl"`；
+  冒烟 tests/test_facies_taxonomy.py 15 passed
 
-## Architecture map (from CONTEXT.md/PROJECT.md)
-- paleo_workbench/catalog = DataCatalogService (ADR 0056): DataAsset/DataVersion/DataRun/Tag; RAW immutable; catalog.json canonical + sqlite index
-- paleo_workbench/harness = Harness 2.0 (ADR 0066): ActionSpec/ActionRegistry/HarnessExecutor
-- paleo_workbench/providers = Provider SDK (ADR 0065)
-- paleo_workbench/runtime/resource_governor.py = ADR 0064 admission authority
-- paleo_workbench/mapping/geological_pipeline = factor extraction + kriging/IDW + marching squares + polygonization
-- paleo_workbench/viz = SelectionContext, CoordinateTransformHub (TimeDepthCalibration fail-closed), picking_controller, correlation engines
-- paleo_workbench/workflow = curve_interpretation (DERIVED + provenance), map_product (MapProductRecord)
-- paleo_workbench/mapping_workspace = Mapping Workspace V5
-- native/ = well_log_core, seismic_3d_core, grid_render_core, layer_model_core, qgis_render_bridge
-- Well log units/null: CONTEXT has extensive well-log import semantics (ResForm v1, Inferred Null whitelist -999.25/-999/-9999/-99999, Source-Domain Null, LIS depth domain match, axis segmentation)
-- ADRs 0056–0068 relevant; 33 ADRs total
+## Architecture (Explore 双报告要点, 2026-09-14)
 
-## Audit findings (A–Q) — DONE, see docs/development/scientific-interpretation-v6/00-baseline.md
+### Shell / 工作台
+- WorkstationFrame (ui/workstation/shell.py L96)：dock_host QMainWindow 持有全部
+  QDockWidget；_add_dock L344 走 workstation_dock_registry；_wire_mapping_stage
+  L534 是期次/horizon 联动主接线点；_on_mapping_horizon L871 = set_target_from_boundary
+  + stage_controller.refresh_evaluation()（无换层，仅元数据）
+- 新 dock 需登记：dock_framework.py WORKSTATION_DOCKS + shell._PANEL_TOGGLE_TABLE +
+  _shell_docks()；浮动覆盖层 parenting 范式 = PwbToast.show_on(parent)（reparent 到
+  window，QTimer child 自动消亡）
+- UIContextService (ui_context.py L116)：UIContextSnapshot ~40 字段 + provider 注册
+  —— HUD 事实流应经此投影（如 MapStatusBar.apply_context 模式）
 
-### P0 defect register (drive implementation order)
-1. P0-1 Engine bridges NaN gaps (adapter filters nulls; payload has no nulls key; bridge sets nulls={})
-2. P0-2 Display-name identity across correlation/tops/datum/multi-well
-3. P0-3 Undeclared depth unit → "m" default chain-wide
-4. P0-4 SEG-Y trace-scan ignores SourceGroupScalar (only loader.py:98 applies it, 1 call site)
-5. P0-5 Fabricated 1.0m-bin survey from zero coords (survey.py:120)
-6. P0-6 Constraints dropped for non-IDW backends, n_break_lines:0 reported
-7. P0-7 create_factor_map dialog ignores ALL constraint layers
-8. P0-8 Harness well.open/describe use decimated preview loader (no disclosure)
-9. P0-9 One well's prediction attached to ALL correlation wells
-10. P0-10 area/length in raw CRS units (square degrees under 4326)
+### 画布双栈
+- QgisCanvasShim (qgis_stack/canvas_shim.py L348)：set_extent L634(record_history,
+  coalesce_history) 直接设无动画；zoom_by L682；map_position_changed(tuple) 光标坐标
+  信号；native_identified(dict) 识别；export_png L1460；set_layer_snapshot L1399
+  增量镜像（changed_hints）；shutdown_live_shims L41
+- UnifiedMapCanvas (unified_map_canvas.py L360) fallback：同鸭子面 + map_clicked(tuple)
+  L376（裸左键）+ render_export_image L855；无 identify 工具
+- Python 权威拾取：composite_editing.identify_all(point, base_layers) L2802（editable
+  走 FeatureSpatialIndex L287，base 走 _geometry_hit）→ 吸色管双栈可用
 
-### Key implementation anchors
-- Unit authority: workflow/curve_operations.py unit_conversion whitelist is exemplary; build DepthUnit semantics around it
-- Gap-aware engine: engine CAN split runs (curve_lod.cpp valid_sample); need nulls in payload schema → well-log-engine submodule change likely
-- Constraint routing: workflow/factor_interpolation.py:409-417 computes for all, drops for non-IDW at geoviz factor/interpolation.py:317
-- capability matrix must produce requested/applied/ignored/unsupported + diagnostics in FactorGridResult
-- Kriging: engine kriging.py has variance + LOO already; needs anisotropy, fit diagnostics surfaced, nugget/range settable; unify numpy fallback fitter
-- Harness: 15/17 scientific actions missing; ActionResult lacks provenance field
-- Pre-existing main failure: test_integrity_guard tautological assertions (5 sites)
+### 期次/层序现状（GAP）
+- horizon = 纯字符串 stratigraphy.target_horizon；workflow/stratigraphy.py:
+  set_target_from_boundary L86 / active_target_horizon L105 / horizons_from_data L121
+  / horizon_choices L163 / ensure_horizon_catalog L145
+- PaleoMapDocument.linked_target_horizon（每 horizon 一图档）；user_vector_layers
+  单层集不分 horizon；代码中无 寒武系/奥陶系 等年代名（grep 空）
+- MappingStageBar.horizon_combo (mapping_stage_bar.py L148) + _commit_horizon L247
+  （_suppress_horizon echo 防护范式）
+- 层组：layer_groups.py GroupTemplate/system templates；LayerGroupController.
+  reconcile L347 tree_transaction + keyed-LCS diff_trees；apply_stage_visibility L497
+  只推变更组 —— 期次可见性切换可复用同思路
 
-## qgis-geolayer-cartography-v7 key facts (session 2026-09-08)
-- All phases implemented+committed through f38e7c76+perf; 250+ new tests green
-- Vendor QGIS building at C:\Users\wangj.KEVIN\paleo-qgis-build\qgis-vendor
-  (conda deps env paleo-qgis-deps; qt6keychain built from source v0.14.0;
-  vendored patches documented in third_party/qgis/UPSTREAM.md)
-- Bridge runtime: PATH=vendor\output\bin + deps\Library\bin first;
-  QT_QPA_PLATFORM=offscreen; osgeo via deps env (cp312 ABI match) —
-  .scratch/run-bridge-tests.cmd has the wrapper; numpy shadowing risk if
-  PYTHONPATH=deps site-packages — copy osgeo pkg into venv instead if hit
-- Pending: build bridge ext (uv pip install -e native/qgis_render_bridge with
-  PALEO_WITH_QGIS_RENDERER=1 PALEO_QGIS_BUILD_DIR=vendor PALEO_QGIS_CMAKE_PREFIX=deps\Library
-  LIB=deps\Library\lib) → run tests/test_qgis_scalar_raster_v7.py + -m qgis suite →
-  docs 05/07 → 3 review rounds → baseline rerun → PR
-- Known env issues: full-suite theme-switch hang (passes standalone),
-  test_lod_render_path Windows crash (V6-era)
+### 相带
+- FaciesTaxonomy (mapping/facies_taxonomy.py L52)：builtin=resources/facies_taxonomy.json
+  {"_meta","tree":{相:{亚相:{微相:{}}}}} 8/24/66；project override ProjectDocument.
+  facies_taxonomy；from_geojson_features
+- 特征属性 facies/sub_facies/micro_facies/level；分配=模态 FaciesSelectionDialog
+  （composite_document._assign_facies_dialog L4210）；无当前相带持续状态（GAP）
+- 颜色：stage_actions._categorized_facies_style（分类渲染器）；花纹：
+  mapping/facies_patterns.py fill_patterns；图例 overlay=_top_facies_legend L4167
+- 捕获后自动赋值挂点：edit_controller.feature_captured → _on_feature_captured
+
+### QC
+- TopologyCheckerPanel (topology_checker_panel.py L37)：issue dict {id,rule,layer_id,
+  feature_id,other_feature_id,message,fixable,bbox,methods}；信号 zoom_requested(list)/
+  highlight_requested(str)/fix_requested(str,int)/fix_all/ignore/restore；_RULE_LABELS
+  {overlap,gap,is_valid,workspace_remainder,dangle}
+- cartographic_qa.py：15 规则族纯检测（collect_cartographic_qa L1215）；issue=
+  workflow/qc.make_issue {rule,severity,message,feature_id,feature_kind,ref,geometry,
+  centroid,extra}；无 UI 无修复（GAP=QC Hub 首个消费者）
+- 修复件：topology.repair_invalid_geometry L311；geometry_operations.repair L442；
+  composite_editing.repair_layer_geometries L2364
+
+### 跨视图联动
+- ViewCoordinationController (view_coordination.py L42)：SelectionContext(viz/
+  selection_context.py L74) changed-field 路由 + source-tag skip + emit=False 回切
+  + 节流(30-120ms) —— echo 防护范式库
+- 已有 sinks：set_spatial_cursor_sink L729 (x,y→图标记)、set_link_cursor_sink L750
+  ((well_name,md)→engine crosshair)；连井 CrossWellHost (viz/hosts/cross_well_host.py)
+  未接 SelectionContext（GAP=本任务接线）
+- 单因素运行时：FactorGridResult(workflow/factor_grid_result.py L240) grid_z/grid_x/
+  grid_y/variance_grid/input_points(=控制井样点)；factor_grid_artifacts.py
+  peek_live_factor_grid L341；FACTOR_DEFAULTS(workflow/factor_units.py L27, 砂地比%)
+
+### 撤销/快捷键/测试
+- 撤销：VectorEditSession undo_stack/redo_stack + begin/end_edit_command
+  (vector_layer.py L474+)；native=gesture 宏；无 QUndoStack
+- shortcuts.py：register_shortcut L43 (ApplicationShortcut, 同 id 替换, 文本输入守卫)；
+  conflicts() L126；已占用键见 task_plan
+- 测试范式：AppShell 全壳 / WorkstationFrame 直构+ _force_fallback monkeypatch /
+  FakeCheckerStack 纯鸭子；conftest isolate_qsettings + cleanup_qt_deferred_deletes
+  (reap 匿名 parentless) autouse
+- 视觉：visual_qa_v11.py v11_shot_table L857 name→builder；像素 diff 非 gate (V5 D8)
+
+## Open questions to verify by test
+- Qt 快捷键跨上下文优先级：ApplicationShortcut("1" hub) vs WidgetWithChildrenShortcut
+  ("1" 画布) 同键并存时是否只触发画布域（Ticket 2 首个测试实证，记入 00-decisions D6）

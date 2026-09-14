@@ -1,48 +1,82 @@
-# Progress — QGIS Cartography Runtime V11
+# Progress — Paleo UI Workbench
 
-## Session 2026-09-12 (setup + state sync + audits + M1–M8)
-- Worktree C:\Users\wangj.KEVIN\projects\paleo-workbench-qgis-runtime-v11,
-  branch qgis-runtime-v11 off main 6c08fb7d. Submodules pinned
-  (geo-viz-engine 08851951f via local clone; well-log-engine f845e7ab).
-- GitHub synced: open PRs #1267/#1277 file-level ownership (findings +
-  00-overlap-audit); #1278 map 8/8 decisions read, impl NOT started, spec
-  file missing everywhere → V11 materializes it.
-- Vendor build recovered at neutral paleo-qgis-build\qgis-vendor; conda
-  paleo-qgis-deps intact; VS2022 toolchain OK. Worktree venv cp312
-  (PySide6 6.11.2), bridge 0.7.0a0 built via PALEO_QGIS_REUSE_VENDOR=1.
-- 4 parallel deep audits → .scratch/v11-audit/*.md + 01-current-qgis-runtime
-  (defect register: 3 P0, 12 P1).
-- M1 architecture docs (0642e367): 02-authority, 03-plan, 04-ordering.
-- M2ordering+plan (9a2657fa): layer_order, LayerTreePlan, controller rewire,
-  nested user groups, invalid-move ids, effective_home_group. 36 tests.
-- M3 tree diff (0b65621c): keyed LCS + diff-driven reconcile + call-count
-  structural tests. 22 tests.
-- M4 native transaction (1cae67f2, bridge 0.7.0a0): begin/end window,
-  tree_revision + runtime_facts counters, expand-preserving placements,
-  tree_transaction wired into reconcile + mirror. 10 native tests.
-- M5 echo gate (d6164860): revision-based stale drop (02 invariant 3).
-- M6 five-target state (d4dc6b45): EditTargetSnapshot + divergent status.
-- M7 stage fixes (9006c98f): rematerialize (D11), ghost prune (D13),
-  factor titles (D2).
-- M8 layout order (62157cc9): mirrorTreeOrderTopFirst (P0-1); flat
-  top-first reversal + parity tests.
-- M9 topology M0: spec docs/specs/topological-editing-migration-spec.md
-  (agent assembly, 366 lines); crs_gate.py + pre-entry gate + guided fix
-  (#1285); two-phase all-or-nothing flush (#1283); 14 tests.
-- M10 lifecycle+scale (42146767, 1b228914): save-intent channel,
-  changed_hints O(changed), raster ledger, single-mount fix, scale suite.
-- M11 review round (40b8c2e6): R1–R4 parallel agents (P0×7: ghost-container
-  drop, self/cycle recursion, unfiltered mount, skipped-drift, stale-hints
-  loss, ledger poisoning, fast-path bypass) + R5 CRS / R6 fallback / R7
-  scale / R8 final. Docs 05–08/10–14 complete (15 files).
-- Final validation: 204 passed Python family + 39 passed native family.
-- Incidents: sed over-reach self-recursion (probe4 hang, fixed); json.loads
-  on dict in my test (teardown hang, fixed + C++ shutdown reset);
-  gate-phase-1 abort semantics; layer-only declaration check.
-- Pre-existing env: test_mapping_stage_ui multi-test AV (main too);
-  authoring_ux registry-flags (owned by #1267).
+## Session 2026-09-14
 
-## Next
-- PHASE 9: save-intent buffer + feature-sig cache + raster ledger +
-  lifecycle docs; PHASE 10 groups UI; PHASE 13 scale; PHASE 14 reviews;
-  PHASE 15 docs tail + PR.
+### PHASE 0 (complete)
+- worktree ../paleo-workbench-paleo-ui @ feat/paleo-ui-workbench (off main e7214566)
+- geo-viz-engine 子模块本地 reference 初始化成功
+- 复用主仓 .venv 冒烟通过：tests/test_facies_taxonomy.py 15 passed (offscreen)
+
+### PHASE 1 (complete)
+- Explore×2 完成（workstation UI / domain+canvas），要点入 findings.md
+- 5 份文档落盘 docs/development/paleo-ui-workbench/：00-decisions(13 条)、
+  01-interaction-specs(S1-S5 storyboards)、02-state-machine(5 态 FSM 转移表)、
+  03-tdd-ui-test-plan(≈112 用例矩阵)、04-known-limitations(22 条)
+
+### 测试记录
+| 命令 | 结果 |
+|---|---|
+| pytest tests/test_facies_taxonomy.py (worktree, offscreen) | 15 passed |
+
+### PHASE 2 / Ticket 1 (complete)
+- 新增 workflow/stratigraphic_epochs.py（内置年代方案+目录合并）、
+  mapping_workspace/epoch_switching.py（差分计划器+洋葱皮集合）、
+  ui/components/stratigraphic_timeline_slider.py（部件+执行器）
+- layer_groups.py 增 epoch 组 id 助手；composite_document.py 挂载时间轴+
+  控制器接线+set_project 目录刷新；shell.py 期次→层位条同步
+- 外科修复 canvas_shim 半构造残件 resizeEvent AttributeError（_canvas_created
+  防护）——同时解除了既有 test_mapping_stage_ui 在本机的环境性失败
+- tests/ui/test_stratigraphic_timeline.py 24/24 绿；回归 63 passed
+
+### PHASE 3 / Ticket 2 (complete)
+- facies_selector.py + FaciesBrushContext（幂等装备/清空）；stage_actions 抽出
+  facies_category_color 单一取色真源；新组件 facies_palette_widget /
+  facies_eyedropper（pick_facies_at 纯函数双栈一致）
+- composite_document：画刷优先捕获赋值（单一撤销命令零模态）、吸色管点击
+  （fallback map_clicked / Python identify_all）、数字键 1-9 绘图期动态注册
+- app_shell：hub 页导航"绘图期"守卫（D6 双保险；offscreen 无法实证路由）
+- dock：facies_palette 描述符 + shell 停靠 + 面板菜单
+- tests/ui/test_facies_palette.py 18/18；回归 97 passed
+
+### PHASE 4 / Ticket 3 (complete)
+- ui/components/constraint_factor_hud.py：O(1) 采样纯函数（双线性/钳制差分坡度/
+  方差置信度/线性最近井）+ HUD 部件（画布子控件、鼠标穿透、8 标签固定）+
+  HudController（60ms 合并节流、井位联动发布、300ms 延迟清除、同井去重）
+- view_coordination：set_section_cursor_sink/publish_section_cursor（去重+单次
+  清除，clear 不节流）；CompositeDocument 挂 HUD+网格缓存；app_shell 注入
+  view_coordination + sink → CompositeVisualizationPanel.show_section_cursor
+  （井位级竖带指示；引擎无 crosshair API，04 #11 已更新）
+- tests/ui/test_constraint_hud.py 15/15；回归（含 view_coordination/visualization
+  panel/workstation shell）151 passed
+
+### PHASE 5 / Ticket 4 (complete)
+- mapping/qc_quickfix.py：sliver_merge（共享边最长/并列面积优势相，单命令合并
+  +整体撤销）/ tangent_close（切线延伸步长=容差×0.5 上限容差×8，不可修诚实禁用）
+- ui/components/interactive_qc_hub.py：SmoothPanController（180ms ease-in-out、
+  4-12 帧、历史恰 1 条、用户可打断）+ InteractiveQCHub（来源聚合/双击定位/
+  Enter 定位/F 修复键盘流/修复按钮 availability+tooltip）
+- composite_document：qc_hub 挂画布下（拓扑 chip 激活时与拓扑面板同开）、
+  修复执行→单一撤销命令→mark_resolved→即时重组；cartographic_qa 增
+  issues_for_interactive_hub 适配器（bbox/layer_id 定位字段）
+- tests/ui/test_interactive_qc_hub.py 15/15；回归（ui/topo/stage）全绿
+
+### PHASE 6 / Ticket 5 (complete)
+- workstation/mode_state.py：5 态 FSM（02 转移表全实现 + 瞬态 pan_held +
+  mode_before_travel 回退）+ MODE_HINTS 查找表
+- workstation/keybinding_manager.py：composite/canvas 双挂事件过滤器
+  （Space 临时平移/Tab 循环/Z-X 中心缩放/Ctrl+D 吸属性/Esc 退出链）+
+  提示条 KeybindingHintBar；文本输入聚焦全让路
+- shortcuts.py：register_shortcut 增 context 参数（默认应用域不变）
+- composite_document：tab_cycle_selection/ctrl_d_pick_facies + FSM 事件桥
+  （工具/时间轴/QC 面板显隐）；修复中发现并修正 VectorLayer.selection
+  为 property 的调用形态
+- tests/ui/test_mode_state 8 + test_keybinding_flow 10 全绿；
+  全壳回归（workstation_shell/keyboard_shortcuts/dock_framework）59 passed
+
+### PHASE 7 (审查修复 + 视觉验证)
+- 双轴审查（2 agents）：Standards 双 gate PASS（memory/echo）；Spec 4 阻断+
+  8 摩擦 → 修复 B1-B4/F2/F3/F6/F8/P1-1..P1-5/P2/P3（洋葱皮层序获像素级证据
+  #8ead9f=30% 精确混合色）
+- 视觉回归 6 用例（结构/状态 gate + 测量记录，D13-rev2 回归 V5 D8 政策）；
+  4 张证据截图 assets/；04-visual-qa-verification.md 落盘
+- tests/ui 98/98 全绿；全量套件第二轮后台复跑中

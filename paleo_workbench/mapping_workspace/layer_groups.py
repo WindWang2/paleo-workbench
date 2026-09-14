@@ -211,6 +211,27 @@ def factor_task_of_group(group_id: str) -> str | None:
     return None
 
 
+#: 期次组前缀（时间轴差分切换的树侧投影；图层可见性权威仍走快照层）。
+EPOCH_GROUP_PREFIX = "epoch."
+
+
+def epoch_group_id(epoch_key: str) -> str:
+    """期次 key → 稳定组 id（与 factor 组同约定：绑定 key，与显示名解耦）。"""
+    sanitized = str(epoch_key or "").strip().replace(" ", "_")
+    return f"{EPOCH_GROUP_PREFIX}{sanitized}" if sanitized else ""
+
+
+def is_epoch_group(group_id: str) -> bool:
+    return str(group_id or "").startswith(EPOCH_GROUP_PREFIX)
+
+
+def epoch_key_of_group(group_id: str) -> str | None:
+    """期次组 id → 期次 key（非期次组返回 None；供层归属分类器消费）。"""
+    if is_epoch_group(group_id):
+        return str(group_id)[len(EPOCH_GROUP_PREFIX):].replace("_", " ")
+    return None
+
+
 #: 角色 → home group（图层在联合树中的唯一归属）。
 #: QC/辅助类角色按「创建阶段的 aux/qc 组」路由，需带 stage 提示。
 _ROLE_HOME_GROUP: dict[LayerRole, str] = {

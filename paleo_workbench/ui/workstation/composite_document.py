@@ -1017,6 +1017,33 @@ class CompositeDocument(QWidget):
         self._empty_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._empty_hint.hide()
 
+        # M1 多期次时间轴：画布之上的常驻横条（期次差分切换 + 洋葱皮）。
+        from paleo_workbench.ui.components.stratigraphic_timeline_slider import (
+            StratigraphicTimelineWidget,
+        )
+
+        self.timeline = StratigraphicTimelineWidget(self)
+        layout.insertWidget(0, self.timeline)
+
+        # M3 单因素约束 HUD：画布右上角浮动只读条（鼠标穿透、行控件固定）
+        # + 光标最近井 → 连井剖面联动发布（宿主壳注入 view_coordination）。
+        from paleo_workbench.ui.components.constraint_factor_hud import (
+            ConstraintFactorHud,
+            HudController,
+        )
+
+        self.constraint_hud = ConstraintFactorHud(self.canvas)
+        self._hud_factor_grid = None
+        self.hud_controller = HudController(self)
+        self.hud_controller.bind(
+            hud=self.constraint_hud,
+            factor_grid_provider=lambda: self._hud_factor_grid,
+            wells_provider=lambda: list(
+                getattr(self._project, "wells", None) or []),
+        )
+        self.canvas.map_position_changed.connect(
+            lambda pos: self.hud_controller.handle_position(*tuple(pos)))
+
         # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。
         self.identify_results = IdentifyResultsPanel(self)
         self.identify_results.setMaximumHeight(200)
@@ -1029,6 +1056,22 @@ class CompositeDocument(QWidget):
         self.topology_panel.setMaximumHeight(220)
         self.topology_panel.hide()
         layout.addWidget(self.topology_panel)
+        # M4 交互式质检修复向导：问题聚合 + 平滑定位 + QuickFix（与拓扑
+        # 面板同列；拓扑 chip 激活时一并打开，见 _on_topology_issue_activated）。
+        from paleo_workbench.ui.components.interactive_qc_hub import (
+            InteractiveQCHub,
+            SmoothPanController,
+        )
+
+        self.qc_hub = InteractiveQCHub(self)
+        self.qc_hub.setMaximumHeight(240)
+        self.qc_hub.hide()
+        layout.addWidget(self.qc_hub)
+        self.smooth_pan = SmoothPanController(self)
+        self.qc_hub.issue_focused.connect(self._focus_qc_issue)
+        self.qc_hub.fix_requested.connect(self._apply_quick_fix)
+        self.qc_hub.set_fix_context(self._qc_fix_context)
+        self.qc_hub.refresh_requested.connect(self._refresh_qc_issues)
         self.status_bar = MapStatusBar(self)
         layout.addWidget(self.status_bar)
         # V10 §15：拓扑问题 chip 的进入路径（显式校验 + 首问题定位反馈）；
@@ -1063,6 +1106,39 @@ class CompositeDocument(QWidget):
         self.edit_controller.facies_taxonomy_provider = self._facies_taxonomy
         self.edit_controller.feature_captured.connect(self._on_feature_captured)
         self._facies_style_signature: dict[str, frozenset[str]] = {}
+        # M2 相带画刷：装备上下文 + 调色板 + 吸色管（连续数字化免模态，
+        # 00-decisions D10/D11）。调色板默认隐藏——宿主 dock 挂载时 reparent。
+        from paleo_workbench.ui.workstation.facies_selector import (
+            FaciesBrushContext,
+        )
+        from paleo_workbench.ui.components.facies_palette_widget import (
+            FaciesPaletteWidget,
+        )
+        from paleo_workbench.ui.components.facies_eyedropper import (
+            FaciesEyedropper,
+        )
+
+        self.facies_brush = FaciesBrushContext(self)
+        self.facies_palette = FaciesPaletteWidget(self)
+        self.facies_palette.set_brush(self.facies_brush)
+        try:
+            self.facies_palette.set_taxonomy(self.facies_taxonomy())
+        except Exception:
+            pass
+        self.facies_palette.hide()
+        self.facies_eyedropper = FaciesEyedropper(self)
+        self.facies_eyedropper.bind(
+            lambda point: self.edit_controller.identify_all(point))
+        self.facies_eyedropper.picked.connect(self._on_eyedropper_picked)
+        self.facies_eyedropper.pick_missed.connect(self._on_eyedropper_missed)
+        self.facies_palette.eyedropper_toggled.connect(
+            self.set_eyedropper_active)
+        self._eyedropper_cursor = False
+        self._digit_shortcuts: list = []
+        self.edit_controller.state_changed.connect(self._sync_digit_keys)
+        map_clicked = getattr(self.canvas, "map_clicked", None)
+        if map_clicked is not None:
+            map_clicked.connect(self._on_canvas_map_clicked)
         self.edit_controller.content_changed.connect(
             self._refresh_facies_layer_style)
         # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，
@@ -1272,6 +1348,53 @@ class CompositeDocument(QWidget):
         # V5 阶段动作分派（面板动作 → 工作流；见 stage_actions.py）。
         from paleo_workbench.ui.workstation.stage_actions import StageActionDispatcher
         self.stage_actions = StageActionDispatcher(self)
+
+        # M1 时间轴执行器：差分可见性切换（view-time，零画布重建）+ horizon
+        # 写穿走既有权威（set_target_from_boundary → refresh_evaluation）。
+        from paleo_workbench.ui.components.stratigraphic_timeline_slider import (
+            EpochTimelineController,
+        )
+
+        self.epoch_timeline = EpochTimelineController(self)
+        self.epoch_timeline.bind(
+            layer_manager=self.layer_manager,
+            project=project,
+            status_sink=self.status_message.emit,
+        )
+        self.timeline.epoch_committed.connect(self.epoch_timeline.request_commit)
+        self.timeline.epoch_committed.connect(
+            lambda *_: self.stage_controller.refresh_evaluation())
+        self.timeline.onion_toggled.connect(self.epoch_timeline.set_onion)
+        # F3（review）：控制器实际生效状态回同步按钮（无可叠层等场景）。
+        self.epoch_timeline.onion_applied.connect(
+            self._sync_onion_button_state)
+        # 外部提交（自动化/壳层直调）后的部件高亮回同步（幂等，无回环）。
+        self.epoch_timeline.epoch_changed.connect(self.timeline.set_current_epoch)
+
+        # M5 全键盘编图流：FSM 投影层 + 底部提示条 + 键过滤器（composite/
+        # canvas 双挂；文本输入聚焦让路，见 keybinding_manager 模块注释）。
+        from paleo_workbench.ui.workstation.mode_state import (
+            ModeEvent,
+            ModeStateMachine,
+        )
+        from paleo_workbench.ui.workstation.keybinding_manager import (
+            KeybindingHintBar,
+            WorkstationKeyBindingManager,
+        )
+
+        self.mode_state = ModeStateMachine(self)
+        self.hint_bar = KeybindingHintBar(self)
+        self.hint_bar.apply_mode(self.mode_state.mode)
+        layout.addWidget(self.hint_bar)
+        self.mode_state.mode_changed.connect(self.hint_bar.apply_mode)
+        self.keybinding = WorkstationKeyBindingManager(self, self)
+        self.keybinding.install()
+        self.timeline.scrub_started.connect(
+            lambda: self.mode_state.dispatch(ModeEvent.SCRUB_START))
+        self.timeline.epoch_committed.connect(
+            lambda *_: self.mode_state.dispatch(ModeEvent.EPOCH_COMMIT))
+        self.timeline.onion_toggled.connect(
+            lambda *_: self.mode_state.dispatch(ModeEvent.ONION_TOGGLED))
 
         self._build_toolbar()
         self.set_project(project)
@@ -2462,6 +2585,123 @@ class CompositeDocument(QWidget):
         panel.ignore_requested.connect(_ignore)
         panel.restore_requested.connect(_restore)
 
+    def _refresh_qc_issues(self) -> None:
+        """重新检查（用户触发）：制图 QA 15 规则族聚合进向导（S4-4）。"""
+        project = self._project
+        if project is None:
+            self.qc_hub.set_issues("carto", [])
+            return
+        try:
+            from paleo_workbench.mapping.cartographic_qa import (
+                issues_for_interactive_hub,
+            )
+
+            issues = issues_for_interactive_hub(project)
+        except Exception:
+            self.status_message.emit("制图 QA 检查失败（详见日志）")
+            return
+        self.qc_hub.set_issues("carto", issues)
+        self.status_message.emit(f"制图 QA 完成：{len(issues)} 处问题")
+
+    def tab_cycle_selection(self) -> None:
+        """M5 Tab：当前层要素循环选中（环序；无层/无要素为无操作）。"""
+        layer = self.edit_controller.active_layer
+        if layer is None:
+            return
+        ids = [f.feature_id for f in layer.features()]
+        if not ids:
+            return
+        selection = layer.selection  # property（VectorLayer.selection）
+        current = next(iter(selection)) if len(selection) == 1 else None
+        index = ids.index(current) if current in ids else -1
+        layer.set_selection([ids[(index + 1) % len(ids)]])
+
+    def ctrl_d_pick_facies(self) -> None:
+        """M5 Ctrl+D：吸取选中要素相带属性装备画刷（吸色管键盘路径）。"""
+        layer = self.edit_controller.active_layer
+        if layer is None:
+            return
+        selection = layer.selection  # property（VectorLayer.selection）
+        if not selection:
+            return
+        feature = layer.feature(next(iter(selection)))
+        attributes = dict(feature.attributes)
+        if not str(attributes.get("facies") or "").strip():
+            return
+        self.facies_brush.equip({
+            "facies": attributes.get("facies", ""),
+            "sub_facies": attributes.get("sub_facies", ""),
+            "micro_facies": attributes.get("micro_facies", ""),
+        })
+        self.status_message.emit(
+            f"已吸取选中要素相带：{attributes.get('facies', '')}")
+
+    def open_qc_hub(self) -> None:
+        """M4：打开交互式质检修复向导（供宿主命令/面板入口调用）。"""
+        self.qc_hub.setVisible(True)
+        self.qc_hub.raise_()
+
+    def _focus_qc_issue(self, issue: dict) -> None:
+        """双击/定位问题 → 平滑平移居中（bbox + 10% pad，D9）。"""
+        bbox = issue.get("bbox")
+        if not bbox:
+            centroid = issue.get("centroid")
+            if centroid:
+                x, y = float(centroid[0]), float(centroid[1])
+                bbox = (x - 1.0, y - 1.0, x + 1.0, y + 1.0)
+        if bbox:
+            self.smooth_pan.pan_to_extent(self.canvas, bbox, pad=0.10)
+        feature_id = str(issue.get("feature_id") or "")
+        layer_id = str(issue.get("layer_id") or "")
+        if feature_id and layer_id:
+            layer = self.edit_controller.layer(layer_id)
+            if layer is not None:
+                # B1（review）：fallback 高亮 = 选中集（04 #13 诚实降级的
+                # 兑现）+ 状态条指认；native 栈另有 highlight_checker_errors。
+                self.edit_controller.set_active_layer(layer_id)
+                layer.set_selection([feature_id])
+                self.status_message.emit(
+                    f"已定位问题要素 {feature_id}（已选中高亮，图层 {layer.name}）")
+
+    def _qc_fix_context(self, issue: dict):
+        """只读可用性上下文（P1-3 review）：读 layer.features()，不开编辑会话。"""
+        from paleo_workbench.mapping.qc_quickfix import QuickFixContext
+
+        layer = self.edit_controller.layer(str(issue.get("layer_id") or ""))
+        if layer is None:
+            return None
+        tolerance = getattr(self.edit_controller, "_tolerance", None)
+        return QuickFixContext(
+            layer=layer, session=None,
+            tolerance=float(tolerance() if callable(tolerance) else 1.0))
+
+    def _apply_quick_fix(self, issue: dict, action_id: str) -> None:
+        from paleo_workbench.mapping.qc_quickfix import QUICK_FIX_ACTIONS
+
+        action = next((a for a in QUICK_FIX_ACTIONS
+                       if a.action_id == str(action_id)), None)
+        if action is None:
+            self.status_message.emit(f"未知修复动作：{action_id}")
+            return
+        context = self._qc_fix_context(issue)
+        if context is None:
+            self.status_message.emit("修复上下文不可用（图层或会话缺失）")
+            return
+        # 真正修复才打开编辑会话（P1-3）：单命令写侧通道。
+        session, _reason = self.edit_controller.ensure_layer_session(context.layer.id)
+        if session is None:
+            self.status_message.emit("修复上下文不可用（图层或会话缺失）")
+            return
+        context.session = session
+        try:
+            action.apply(dict(issue), context)
+        except Exception as exc:  # 修复失败必须可见，不静默
+            self.status_message.emit(f"修复失败：{exc}")
+            return
+        self.status_message.emit(f"已修复：{action.title}（可 Ctrl+Z 撤销）")
+        self.qc_hub.mark_resolved(dict(issue))
+        self._sync_composition(immediate=True)
+
     def _on_topology_issue_activated(self) -> None:
         """拓扑问题 chip：显式校验 + 首问题定位反馈（V10 §15 / R4-3）。
 
@@ -2476,6 +2716,11 @@ class CompositeDocument(QWidget):
                              ignored_keys=checker.ignored_keys(),
                              last_run_at=checker.last_run_at)
             panel.setVisible(True)
+            # M4：拓扑问题同步进交互式修复向导（聚合来源 "topology"）。
+            self.qc_hub.set_issues("topology", [
+                dict(issue) for issue in
+                (checker.last_errors or issues)])
+            self.qc_hub.setVisible(True)
         if not issues:
             self.status_message.emit("拓扑校验通过（问题计数已刷新）")
             self._sync_action_state()
@@ -4185,7 +4430,98 @@ class CompositeDocument(QWidget):
         return is_facies_template_layer(self.edit_controller._templates, layer_id)
 
     def _on_feature_captured(self, layer_id: str, feature_id: str) -> None:
+        if self.facies_brush.is_armed:
+            # M2 画刷优先：捕获即赋值（单一撤销命令），零模态打断。
+            ok, reason = self.edit_controller.apply_facies_selection(
+                layer_id, feature_id, self.facies_brush.selection())
+            if ok:
+                selection = self.facies_brush.selection()
+                label = " / ".join(
+                    part for part in (
+                        selection.get("facies"),
+                        selection.get("sub_facies"),
+                        selection.get("micro_facies")) if part)
+                self.status_message.emit(f"已按画刷赋值相带：{label}")
+            else:
+                self.status_message.emit(f"相带属性未写入：{reason}")
+            return
         self._assign_facies_dialog(layer_id, feature_id)
+
+    def set_eyedropper_active(self, active: bool) -> None:
+        """吸色管会话开关（M2；按钮态回同步抑制，无回环）。"""
+        from PySide6.QtGui import QCursor, QGuiApplication
+
+        self.facies_eyedropper.set_active(bool(active))
+        self.facies_palette.set_eyedropper_active(bool(active))
+        if active and not self._eyedropper_cursor:
+            QGuiApplication.setOverrideCursor(
+                QCursor(Qt.CursorShape.CrossCursor))
+            self._eyedropper_cursor = True
+        elif not active and self._eyedropper_cursor:
+            QGuiApplication.restoreOverrideCursor()
+            self._eyedropper_cursor = False
+
+    def handle_eyedropper_click(self, point) -> None:
+        if self.facies_eyedropper.active:
+            self.facies_eyedropper.handle_click(tuple(point))
+
+    def _on_canvas_map_clicked(self, point) -> None:
+        if self.facies_eyedropper.active:
+            self.facies_eyedropper.handle_click(tuple(point))
+
+    def _on_eyedropper_missed(self) -> None:
+        self.status_message.emit("吸色管未命中相带要素——保持当前装备")
+        self._toast("未命中相带要素——保持当前装备", tone="warning")
+
+    def _toast(self, text: str, *, tone: str = "process") -> None:
+        from paleo_workbench.ui.components.toast import PwbToast
+
+        try:
+            PwbToast.show_on(self.canvas, text, tone=tone, timeout_ms=2000)
+        except Exception:
+            pass  # offscreen/无窗口环境退化为状态条（已有）
+
+    def _on_eyedropper_picked(self, picked: dict) -> None:
+        self.facies_brush.equip({
+            key: picked.get(key, "")
+            for key in ("facies", "sub_facies", "micro_facies")})
+        label = " / ".join(
+            part for part in (
+                picked.get("facies"), picked.get("sub_facies"),
+                picked.get("micro_facies")) if part)
+        message = f"吸色管已装备：{label}（颜色 {picked.get('color') or '—'}）"
+        self.status_message.emit(message)
+        self._toast(message, tone="success")
+        self.set_eyedropper_active(False)  # F8：一次性会话，拾取即退出
+
+    def _sync_onion_button_state(self, applied: bool) -> None:
+        self.timeline.onion_button.blockSignals(True)
+        self.timeline.onion_button.setChecked(bool(applied))
+        self.timeline.onion_button.blockSignals(False)
+
+    def _sync_digit_keys(self) -> None:
+        """数字键 1-9 画布域装备（M2；仅绘图工具激活期注册，D6）。"""
+        tool = getattr(self.edit_controller.tools, "active_tool", None)
+        active_id = str(getattr(tool, "tool_id", "") or "")
+        drawing = active_id.startswith("add_")
+        if drawing and not self._digit_shortcuts:
+            from PySide6.QtGui import QKeySequence, QShortcut
+
+            for index in range(1, 10):
+                shortcut = QShortcut(QKeySequence(str(index)), self)
+                shortcut.setContext(
+                    Qt.ShortcutContext.WidgetWithChildrenShortcut)
+                shortcut.activated.connect(
+                    lambda i=index: self.facies_palette.equip_by_index(i - 1))
+                self._digit_shortcuts.append(shortcut)
+        elif not drawing and self._digit_shortcuts:
+            for shortcut in self._digit_shortcuts:
+                shortcut.setParent(None)
+                shortcut.deleteLater()
+            self._digit_shortcuts = []
+
+    def _digit_keys_active(self) -> bool:
+        return bool(self._digit_shortcuts)
 
     def _assign_facies_dialog(self, layer_id: str, feature_id: str) -> None:
         from paleo_workbench.ui.workstation.facies_selector import (
@@ -4509,6 +4845,51 @@ class CompositeDocument(QWidget):
             if callable(expand):
                 expand()
         self.input_tree.refresh(project)
+        self._refresh_timeline_epochs()
+        self._refresh_hud_grid_cache()
+        try:
+            self.facies_palette.set_taxonomy(self.facies_taxonomy())
+        except Exception:
+            pass
+
+    def _refresh_hud_grid_cache(self) -> None:
+        """HUD 网格缓存刷新（工程装载时一次；刷新循环只读缓存，D7）。"""
+        grid = None
+        project = self._project
+        if project is not None:
+            try:
+                from paleo_workbench.project.factor_grid_artifacts import (
+                    peek_live_factor_grid,
+                )
+
+                tasks = list(getattr(project, "factor_map_tasks", None) or [])
+                candidates = [
+                    task for task in tasks
+                    if "砂地" in f"{getattr(task, 'name', '')}"
+                    f"{getattr(task, 'factor_type', '')}"
+                ] or tasks[-1:]
+                for task in candidates:
+                    task_id = (getattr(task, "task_id", None)
+                               or getattr(task, "id", None))
+                    result = peek_live_factor_grid(task_id)
+                    if result is not None:
+                        grid = result
+                        break
+            except Exception:
+                grid = None
+        self._hud_factor_grid = grid
+
+    def _refresh_timeline_epochs(self) -> None:
+        """时间轴期次目录刷新（工程装载/切换；M1，00-decisions D1）。"""
+        from paleo_workbench.workflow.stratigraphic_epochs import build_epoch_catalog
+
+        catalog = build_epoch_catalog(self._project)
+        self.epoch_timeline.set_project(self._project)
+        self.epoch_timeline.set_epochs(catalog)
+        self.timeline.set_epochs(catalog)
+        current = self.epoch_timeline.current_epoch()
+        if current:
+            self.timeline.set_current_epoch(current)
 
     def _write_map_project_xml(self) -> None:
         """把当前 QgsProject 呈现态写入工程信封。loading 期间不调用。"""

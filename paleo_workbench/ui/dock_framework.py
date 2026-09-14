@@ -108,6 +108,16 @@ WORKSTATION_DOCKS: tuple[DockDescriptor, ...] = (
         workflow_tags=("mapping",),
     ),
     DockDescriptor(
+        dock_id="facies_palette",
+        title="相带画刷",
+        preferred_area=AREA_RIGHT,
+        importance=DockImportance.SECONDARY,
+        default_visible=True,
+        preferred_size=(240, 0),
+        workflow_tags=("mapping",),
+        remark="M2 相带调色板 + 吸色管 + 数字键装备",
+    ),
+    DockDescriptor(
         dock_id="hub",
         title="功能页",
         preferred_area=AREA_RIGHT,

@@ -46,6 +46,7 @@ def register_shortcut(
     callback: Callable[[], None],
     *,
     enabled_in_text_input: bool = True,
+    context: Qt.ShortcutContext | None = None,
 ) -> QShortcut:
     """创建 QShortcut 并登记。同 id 重复注册替换旧绑定。"""
     old = _shortcuts.pop(spec.id, None)
@@ -57,7 +58,12 @@ def register_shortcut(
         except RuntimeError:
             pass
     shortcut = QShortcut(QKeySequence(spec.key), parent)
-    shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+    # M5：默认仍为应用域；画布域快捷键（如相带数字键的宿主自定义）经
+    # ``context`` 显式收窄（WidgetWithChildrenShortcut 等）。
+    shortcut.setContext(
+        context if context is not None
+        else Qt.ShortcutContext.ApplicationShortcut
+    )
     if enabled_in_text_input:
         shortcut.activated.connect(callback)
     else:

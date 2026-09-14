@@ -210,6 +210,9 @@ class WorkstationFrame(QWidget):
         # 联动区不再是中央文档：内容部件已由宿主 dock 接管，本体保持隐藏。
         self.linked_workspace.hide()
         self.composite = CompositeDocument(project, self)
+        # M1：时间轴期次提交 → 层位条同步（set_horizon_state 自带抑制，无回环）。
+        self.composite.timeline.epoch_committed.connect(
+            self._on_timeline_epoch_committed)
         self.page_stack = page_stack
         # V9：页面栈保留自然 minimumSizeHint——HubScrollArea 会在 dock
         # 过窄时以滚动条降级（见 HubScrollArea），不再需要清零式豁免。
@@ -272,6 +275,11 @@ class WorkstationFrame(QWidget):
         # 编图面板（由宿主 QMainWindow 持有 dock）
         self.composite_layer_dock = self._add_dock(
             "composite_layer", self.composite.layer_manager
+        )
+        # M2 相带画刷调色板（装备上下文/吸色管在 composite 上，本壳只停靠）。
+        self.composite.facies_palette.show()
+        self.facies_palette_dock = self._add_dock(
+            "facies_palette", self.composite.facies_palette
         )
         self.composite_input_dock = self._add_dock(
             "composite_input", self.composite.input_tree
@@ -868,6 +876,15 @@ class WorkstationFrame(QWidget):
         self.stage_bar.set_horizon_state(
             active_target_horizon(project), ensure_horizon_catalog(project))
 
+    def _on_timeline_epoch_committed(self, key: str) -> None:
+        """时间轴期次提交后的层位条回写（M1；echo 由 set_horizon_state 抑制）。"""
+        project = self._project
+        if project is None:
+            return
+        from paleo_workbench.workflow.stratigraphy import ensure_horizon_catalog
+
+        self.stage_bar.set_horizon_state(str(key), ensure_horizon_catalog(project))
+
     def _on_mapping_horizon(self, horizon: str) -> None:
         from paleo_workbench.workflow.stratigraphy import (
             active_target_horizon,
@@ -884,7 +901,9 @@ class WorkstationFrame(QWidget):
             return
         if text == active_target_horizon(project):
             return
-        set_target_from_boundary(project, text)
+        # B3（review）：horizon 下拉与时间轴统一通道——走期次提交（元数据
+        # 写穿 + 图层差分 + 时间轴高亮回同步一体），消灭三态矛盾。
+        self.composite.epoch_timeline.request_commit(text)
         self._sync_mapping_horizon()
         self.composite.stage_controller.refresh_evaluation()
         self.status_message.emit(f"编图层位：{text}（相图在此层位下进行）")
@@ -1489,6 +1508,7 @@ class WorkstationFrame(QWidget):
         ("inspector_dock", "显示检查器"),
         ("composite_input_dock", "显示输入与结果"),
         ("composite_layer_dock", "显示图层管理"),
+        ("facies_palette_dock", "显示相带画刷"),
         ("composite_linked_dock", "显示联动视图"),
         ("mapping_stage_dock", "显示编图阶段"),
         ("well_dock", "显示测井轨道"),
@@ -1547,6 +1567,7 @@ class WorkstationFrame(QWidget):
             self.logs_dock,
             self.console_dock,
             self.composite_layer_dock,
+            self.facies_palette_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
             self.well_dock,

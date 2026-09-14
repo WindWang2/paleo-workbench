@@ -73,7 +73,7 @@ def test_registry_describes_all_workstation_docks():
     assert set(ids) == {
         "nav", "mapping_stage", "inspector", "composite_layer", "hub",
         "composite_input", "agent", "tasks", "logs", "console",
-        "composite_linked", "well", "seismic",
+        "composite_linked", "well", "seismic", "facies_palette",
     }
     for dock_id in ids:
         descriptor = workstation_dock_registry.require(dock_id)
