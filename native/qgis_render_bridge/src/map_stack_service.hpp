@@ -353,6 +353,22 @@ public:
                                      const std::string& curve_geojson,
                                      const std::string& feature_ids_json = "",
                                      const std::string& options_json = "{}");
+  // geotopo Ticket 3 共边联动重塑：arc_geojson = find_shared_arcs 输出的
+  // 共享弧（容差内双侧唯一匹配），curve_geojson = 新界线；经核心
+  // reshape_shared_arc 守恒三校验（201-204 拒绝式零变更），GEOS 复核后
+  // 两侧各一宏 changeGeometry + 邻层拓扑点，一条 boundary_reshape 手势。
+  std::string reshapeMirrorSharedBoundary(const std::string& doc_id_a,
+                                          const std::string& doc_id_b,
+                                          const std::string& feature_id_a,
+                                          const std::string& feature_id_b,
+                                          const std::string& arc_geojson,
+                                          const std::string& curve_geojson,
+                                          double tolerance = 1e-6);
+  // geotopo Ticket 5 补偿恢复：单宏内 delete-all + 按快照重加（内容等价，
+  // fid 可能重排——04-known-limitations #6）。features_json = mirror_features_json
+  // 同构 {"features":[Feature...]}。
+  std::string restoreMirrorSnapshot(const std::string& doc_id,
+                                    const std::string& features_json);
   // M4 §5 拓扑检查器：analysis 检查（overlap/gap/is_valid）+ 工区余量。
   // config_json: {layer_ids, rules, precision, workspace, allowed_gaps,
   // gap_threshold, max_overlap_area}。返回 {errors:[...]}。
