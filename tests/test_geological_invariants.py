@@ -30,10 +30,11 @@ def _polygons(facies_a: str, facies_b: str) -> dict[str, list[dict]]:
 #: 8 builtin facies (facies_taxonomy.json tree keys).
 FACIES = ["三角洲", "冲积扇", "深水盆地", "滨岸", "潟湖", "潮坪", "碳酸盐台地", "陆棚"]
 
-#: Hand-derived expectation from D7 ranks (|Δ|≤1, plus 三角洲↔陆棚 whitelist).
+#: Hand-derived expectation from D7 ranks (|Δ|≤1, plus 三角洲↔陆棚/深水盆地
+#: 浊积白名单——审查 Spec#5 补全)。
 _LEGAL_PAIRS = {
     ("三角洲", "三角洲"), ("三角洲", "冲积扇"), ("三角洲", "滨岸"), ("三角洲", "潟湖"),
-    ("三角洲", "潮坪"), ("三角洲", "陆棚"),
+    ("三角洲", "潮坪"), ("三角洲", "陆棚"), ("三角洲", "深水盆地"),
     ("冲积扇", "冲积扇"), ("冲积扇", "三角洲"),
     ("滨岸", "滨岸"), ("滨岸", "三角洲"), ("滨岸", "潟湖"), ("滨岸", "潮坪"),
     ("滨岸", "碳酸盐台地"), ("滨岸", "陆棚"),
@@ -192,3 +193,10 @@ def test_project_override_replaces_builtin_adjacency():
     violations = gi.validate_facies_adjacency(
         _polygons("甲", "乙"), adjacency=adjacency)
     assert violations == []
+
+
+def test_delta_front_turbidite_directly_touching_deep_basin_is_whitelisted():
+    """三角洲前缘滑塌浊积直接入深水盆地（断陷湖盆常见）：白名单放行。"""
+    adjacency = gi.FaciesAdjacency.builtin()
+    assert adjacency.may_touch("三角洲", "深水盆地")[0]
+    assert gi.validate_facies_adjacency(_polygons("三角洲", "深水盆地")) == []

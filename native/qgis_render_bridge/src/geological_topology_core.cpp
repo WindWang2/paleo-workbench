@@ -152,10 +152,12 @@ class NodeTable {
     explicit NodeTable(double tolerance) : tolerance_(tolerance) {}
 
     uint32_t intern(double x, double y) {
-        const long ix = static_cast<long>(std::llround(x / tolerance_));
-        const long iy = static_cast<long>(std::llround(y / tolerance_));
-        for (long dy = -1; dy <= 1; ++dy) {
-            for (long dx = -1; dx <= 1; ++dx) {
+        // int64 网格键：MSVC long 是 32 位，1e7/1e-6 = 1e13 会静默溢出
+        // （审查 Standards#3）。
+        const int64_t ix = static_cast<int64_t>(std::llround(x / tolerance_));
+        const int64_t iy = static_cast<int64_t>(std::llround(y / tolerance_));
+        for (int64_t dy = -1; dy <= 1; ++dy) {
+            for (int64_t dx = -1; dx <= 1; ++dx) {
                 const auto it = buckets_.find(cell_key(ix + dx, iy + dy));
                 if (it == buckets_.end()) {
                     continue;
@@ -837,6 +839,16 @@ ReshapePairResult reshape_shared_arc(const std::vector<double>& ring_a_xy,
     const auto new_a = build_ring(rotated_a, orient_a);
     const auto new_b = build_ring(rotated_b, orient_b);
 
+    // 规模护栏（审查 Standards#4）：两两段检查是 O(n²)，超限拒绝而非
+    // 在 GIL 释放下无界燃烧。
+    constexpr std::size_t kMaxCrossPairs = 4000000;  // 4e6 段对 ≈ 数秒上限
+    if (new_a.size() * new_b.size() > kMaxCrossPairs
+        || new_a.size() * new_a.size() > kMaxCrossPairs
+        || new_b.size() * new_b.size() > kMaxCrossPairs) {
+        return fail(ErrorCode::InvalidInput,
+                    "reshape inputs exceed the crossing-check budget "
+                    "(simplify the rings or reduce vertices)");
+    }
     if (ring_self_crosses(new_a, tolerance) || ring_self_crosses(new_b, tolerance)) {
         return fail(ErrorCode::RingInvalid, "reshaped ring invalid: self-intersection");
     }

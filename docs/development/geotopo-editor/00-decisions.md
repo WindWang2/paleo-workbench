@@ -97,7 +97,7 @@
 
 ## D8 · 守卫接入点：commit_all 第三谓词 + save_edits 同步门
 
-**决策**：`NativeEditSessionController.commit_all(*, gate, topology, geology)` 新增 `geology` 谓词（`GeologyGate(run: Callable[[list[LayerSnapshot]], list[InvariantViolation]])`）；`CompositeEditController.save_edits/_gate_topology_issues` 并联接入。违规 severity=error → 拦截提交（会话保留）；warning → 放行但经 `state_changed` 通道上报语义警告。校验输入 = `readback_features` 镜像真值 + 关联线层记录。
+**决策**：`NativeEditSessionController.commit_all(*, gate, topology, geology=None)` 新增 `geology` 谓词（`Callable[[dict[layer_id, records]], list[InvariantViolation]]`）；`CompositeEditController.save_edits/_commit_native_sessions` 并联接入（违规只算一次，同一结果喂前置判定与谓词）。违规 severity=error → 拦截提交（会话保留）；warning → 放行但经**新增 `geology_blocked = Signal(object)`** 通道上报（不改 `state_changed` 签名——审查 Spec#4 漂移修正）。校验输入 = `readback_features` 镜像真值（含 attributes）+ LayerRole→地质角色映射（fault_constraint→fault_line、factor_contour→isopath_line）。门开关随拓扑门。
 
 ---
 

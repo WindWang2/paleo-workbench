@@ -408,10 +408,14 @@ def reshape_shared_arc(
 
 
 def _reshape_via_bridge(bridge, polygon_a, polygon_b, arc, curve, tolerance) -> ReshapePair:
-    payload = json.loads(bridge.reshape_shared_arc(
-        json.dumps(polygon_a), json.dumps(polygon_b),
-        json.dumps([list(p) for p in arc]), json.dumps([list(p) for p in curve]),
-        tolerance))
+    try:
+        envelope = bridge.reshape_shared_arc(
+            json.dumps(polygon_a), json.dumps(polygon_b),
+            json.dumps([list(p) for p in arc]), json.dumps([list(p) for p in curve]),
+            tolerance)
+    except Exception as exc:  # 桥异常 → 契约码（与 polygonize 路径同哲学）
+        raise GeoTopoError("PWB-GT-001", f"bridge call failed: {exc}") from exc
+    payload = json.loads(envelope)
     if payload.get("status") != "ok":
         raise GeoTopoError(payload.get("code", "PWB-GT-201"),
                            payload.get("message", "reshape failed"))

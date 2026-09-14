@@ -335,3 +335,86 @@ class TestNativeCompensation:
                 stack.mirror_features_json("doc-r", 0))["features"]) == 2
         finally:
             stack.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# 4.10 / 5.6：save_edits 真实接线（geology_blocked 信号 + 拓扑门变体）
+
+
+def _adjacent_facies_mirror(stack):
+    stack.mirror["polys"] = [
+        {"id": "fa",
+         "geometry": {"type": "Polygon", "coordinates": [[
+             [0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]]},
+         "properties": {"__pwb_fid": "fa", "facies": "深水盆地"}},
+        {"id": "fb",
+         "geometry": {"type": "Polygon", "coordinates": [[
+             [10.0, 0.0], [20.0, 0.0], [20.0, 10.0], [10.0, 10.0], [10.0, 0.0]]]},
+         "properties": {"__pwb_fid": "fb", "facies": "冲积扇"}},
+    ]
+
+
+def test_save_edits_real_geology_wiring_blocks_and_emits(qtbot):
+    from PySide6.QtCore import QObject
+
+    from paleo_workbench.ui.workstation.composite_editing import (
+        CompositeEditController,
+    )
+
+    layer = _layer("polys", ("fa", _record("fa", facies="深水盆地")),
+                   ("fb", _record("fb", facies="冲积扇")))
+    stack = FakeNativeStack()
+    _adjacent_facies_mirror(stack)
+    controller = CompositeEditController()
+    controller._layers[layer.id] = layer
+    controller._kinds[layer.id] = "polygon"
+    controller._active_layer_id = layer.id
+    controller._canvas = type("Canvas", (), {
+        "stack": stack, "canvas_address": 1,
+        "set_map_tool": lambda self, kind: None,
+        "setFocus": lambda self: None,
+    })()
+    ok, reason = controller.native_editing.open(
+        stack, layer, gate=lambda _lid: (True, ""), canvas_address=1)
+    assert ok, reason
+    controller._topology.enabled = True  # 地质门随拓扑门开启（§4.4）
+
+    emitted: list[object] = []
+    controller.geology_blocked.connect(emitted.append)
+    stack.calls.clear()
+    result = controller.save_edits()
+    assert result is not None and "facies_adjacency_gap" in result
+    assert emitted and any(
+        getattr(v, "code", "") == "facies_adjacency_gap" for v in emitted[0])
+    assert not [c for c in stack.calls if c[0] == "commit"]  # 零提交
+
+
+def test_save_edits_topology_door_variant_blocks_too(qtbot):
+    """5.6 拓扑门变体：桥检查器报错同样拦截（双门任一违规 → 全拦截）。"""
+    from paleo_workbench.ui.workstation.composite_editing import (
+        CompositeEditController,
+    )
+
+    layer = _layer("polys", ("fa", _record("fa")))
+    stack = FakeNativeStack()
+    stack.mirror["polys"] = [_record("fa")]
+    stack.check_errors = True
+    controller = CompositeEditController()
+    controller._layers[layer.id] = layer
+    controller._kinds[layer.id] = "polygon"
+    controller._active_layer_id = layer.id
+    controller._canvas = type("Canvas", (), {
+        "stack": stack, "canvas_address": 1,
+        "set_map_tool": lambda self, kind: None,
+        "setFocus": lambda self: None,
+    })()
+    ok, reason = controller.native_editing.open(
+        stack, layer, gate=lambda _lid: (True, ""), canvas_address=1)
+    assert ok, reason
+    controller._topology.enabled = True
+    stack.run_geometry_checks = lambda *a, **k: json.dumps(
+        {"errors": [{"layer_id": "polys", "feature_id": "fa",
+                     "message": "自相交"}]})
+
+    result = controller.save_edits()
+    assert result is not None and "未通过拓扑检查" in result

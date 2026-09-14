@@ -23,6 +23,7 @@ __all__ = [
     "AddLineTool",
     "AddPointTool",
     "AddPolygonTool",
+    "BoundaryReshapeTool",
     "FaultCutTool",
     "IdentifyTool",
     "MapTool",
@@ -145,6 +146,21 @@ class FaultCutTool(MapTool):
     def __init__(self) -> None:
         super().__init__()
         self.native_digitize_kind = "faultCut"
+
+
+class BoundaryReshapeTool(MapTool):
+    """共边重塑占位工具——C++ PwbBoundaryReshapeTool（kind=boundaryReshape）。
+
+    交互契约：先在当前面层选中**恰好两个相邻**要素，再数字化新界线
+    （左键布点/右键或双击收笔）；applier 取离曲线中点最近的共享弧联动
+    重塑（守恒校验失败零变更）。
+    """
+
+    tool_id = "boundary_reshape"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.native_digitize_kind = "boundaryReshape"
 
 
 class ZoomTool(MapTool):

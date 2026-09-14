@@ -47,6 +47,7 @@ from paleo_workbench.mapping.map_tools import (
     AddLineTool,
     AddPointTool,
     AddPolygonTool,
+    BoundaryReshapeTool,
     FaultCutTool,
     IdentifyTool,
     MapToolController,
@@ -1588,23 +1589,25 @@ class CompositeEditController(QObject):
         """M1 原生会话整集合提交（§3 全或无）；成功返回 None。
 
         geotopo Ticket 4/5：并联地质不变量门（error 拦截 / warning 经
-        ``geology_blocked`` 信号上报，不阻塞）。"""
-        violations_before = self._collect_geology_violations()
-        errors = [v for v in violations_before
+        ``geology_blocked`` 信号上报，不阻塞）。违规只算一次（审查
+        Standards#2），同一结果喂前置判定与 commit_all 的 geology 谓词。"""
+        violations = (self._collect_geology_violations()
+                      if self._geology_gate_enabled() else [])
+        errors = [v for v in violations
                   if getattr(v, "severity", "error") == "error"]
         if errors:
-            self.geology_blocked.emit(violations_before)
+            self.geology_blocked.emit(violations)
             return (f"地质不变量校验未通过：{errors[0].code}："
                     f"{errors[0].message}（全部编辑未提交）")
         ok, reason = self.native_editing.commit_all(
             gate=self.can_edit_layer,
             topology=self._topology,
-            geology=self._collect_geology_violations if self._geology_gate_enabled() else None,
+            geology=(lambda _records: violations) if self._geology_gate_enabled() else None,
             on_committed=self._on_native_committed,
         )
         if not ok:
             return reason
-        warnings = [v for v in violations_before
+        warnings = [v for v in violations
                     if getattr(v, "severity", "error") == "warning"]
         if warnings:
             self.geology_blocked.emit(warnings)
@@ -1617,27 +1620,42 @@ class CompositeEditController(QObject):
         """地质门开关（与拓扑门同款拓扑开关语义；默认随拓扑门）。"""
         return bool(getattr(self._topology, "enabled", False))
 
-    def _collect_geology_violations(self) -> list:
-        """会话集合的地质不变量违规（编辑真值读回 = 镜像缓冲）。"""
+    # LayerRole 词表 → 守卫地质角色（Spec 审查 #2b）：词表无剥蚀边界
+    # 词条，erosion_boundary 仅经显式 roles 注入（测试覆盖），工程接入
+    # 待词表扩展（04-known-limitations #16）。
+    _GEOLOGY_ROLE_BY_LAYER_ROLE = {
+        "fault_constraint": "fault_line",
+        "factor_contour": "isopath_line",
+    }
+
+    def _collect_geology_violations(self, records=None) -> list:
+        """会话集合的地质不变量违规（编辑真值读回 = 镜像缓冲）。
+
+        ``records`` 由 commit_all 的 geology 谓词回填（同一真值二次
+        判定时复用入口）；None = 现场读回。"""
         from paleo_workbench.mapping.geological_invariants import run_geology_gate
 
-        records: dict[str, list[dict]] = {}
-        roles: dict[str, str] = {}
-        for layer_id in self.native_editing.session_layer_ids():
-            stack = self.native_editing.stack_for(layer_id)
-            layer = self._layers.get(layer_id)
-            if stack is None or layer is None:
-                continue
-            try:
-                records[layer_id] = self.native_editing.readback_features(
-                    stack, layer_id)
-            except Exception:  # noqa: BLE001 — 门禁读回失败按空处理并留日志
-                logging.getLogger(__name__).exception(
-                    "geology gate readback failed: %s", layer_id)
-                records[layer_id] = []
-            roles[layer_id] = self._layer_roles.get(layer_id, "")
+        if records is None:
+            records = {}
+            for layer_id in self.native_editing.session_layer_ids():
+                stack = self.native_editing.stack_for(layer_id)
+                layer = self._layers.get(layer_id)
+                if stack is None or layer is None:
+                    continue
+                try:
+                    records[layer_id] = self.native_editing.readback_features(
+                        stack, layer_id)
+                except Exception:  # noqa: BLE001 — 门禁读回失败按空处理并留日志
+                    logging.getLogger(__name__).exception(
+                        "geology gate readback failed: %s", layer_id)
+                    records[layer_id] = []
         if not records:
             return []
+        roles = {
+            layer_id: self._GEOLOGY_ROLE_BY_LAYER_ROLE.get(
+                self._layer_roles.get(layer_id, ""), "")
+            for layer_id in records
+        }
         try:
             return run_geology_gate(records, roles=roles)
         except Exception:  # noqa: BLE001 — 守卫自身异常不阻塞提交主链
@@ -2203,6 +2221,22 @@ class CompositeEditController(QObject):
                             getattr(fault_stack, "fault_cut_mirror_features", None)):
                         return
                     tool = FaultCutTool()
+                elif action_id == "boundary_reshape":
+                    # geotopo Ticket 3：共边重塑 native-only——需当前面层
+                    # 处于原生会话且**恰好两个相邻要素**被选中；数字化与
+                    # 守恒校验全在 C++ PwbBoundaryReshapeTool。
+                    if not hasattr(self._canvas, "canvas_address"):
+                        return
+                    if self._kinds.get(layer.id) != "polygon":
+                        return
+                    if len(layer.selection) != 2:
+                        return
+                    reshape_stack = self.native_editing.stack_for(layer.id)
+                    if reshape_stack is None or not callable(
+                            getattr(reshape_stack,
+                                    "reshape_mirror_shared_boundary", None)):
+                        return
+                    tool = BoundaryReshapeTool()
                 else:
                     return
         self._active_tool_action = action_id

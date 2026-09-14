@@ -67,8 +67,8 @@
 | 4.6 | 断层端点抵达面边界 / 触及另一断层 / 出框 | 合法 |
 | 4.7 | 等厚线跨越剥蚀边界且无顶点断开 | `isopath_crosses_unconformity` error |
 | 4.8 | 等厚线在跨界处已断开（有顶点） | 合法 |
-| 4.9 | commit_all 集成（FakeNativeStack）| geology 返回 error 违规 → 全集拦截、无层提交；清违规后提交成功 |
-| 4.10 | save_edits 集成（CompositeDocument） | 违规 → sessions_committed 不发；state_changed 载荷含 geology_violations |
+| 4.9 | commit_all 集成（FakeNativeStack）| geology 返回 error 违规 → 全集拦截、无层提交；warning 放行（test_atomic_multilayer_commits.py） |
+| 4.10 | save_edits 真实接线集成 | geology_blocked 信号携带违规、零提交（test_atomic_multilayer_commits.py::test_save_edits_real_geology_wiring_blocks_and_emits） |
 
 ## Ticket 5 · 原子宏事务
 
@@ -85,7 +85,7 @@
 
 ## F · 双引擎一致性矩阵
 
-`test_geotopo_parity.py`（qgis 腿）：1.1–1.5、3.1、3.5 用例同数据双跑（bridge geotopo ↔ shapely fallback），断言面数/面积集合/共边弧长一致（容差 1e-9）。
+`test_geotopo_parity.py`（qgis 腿）：cross/t/collinear/grid-10 同数据双跑（bridge geotopo ↔ shapely fallback），断言面数/面积多重集一致（容差 1e-4）+ 共边弧长 + 重塑守恒一致。figure-eight（框内真孔洞）为**严格 xfail 钉子**——孔洞近似差异 = 内环面积（04-known-limitations #17）。
 
 ## 数据集生成方案
 

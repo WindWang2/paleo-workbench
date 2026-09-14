@@ -343,6 +343,59 @@ class TestNativeFaultCut:
         finally:
             stack.shutdown()
 
+
+    def test_z_fault_across_two_adjacent_faces(self, qtbot, qapp):
+        """2.3：Z 形断层一次穿越两相邻面——两面均分割，单手势多层。"""
+        stack, events, canvas = self._setup_stack(qtbot, qapp)
+        try:
+            from qgis_render_bridge.mapstack import QgisMapStack  # noqa: F401
+            fc = {
+                "type": "FeatureCollection",
+                "features": [
+                    {"type": "Feature",
+                     "geometry": {"type": "Polygon", "coordinates": [[
+                         (0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0),
+                         (0.0, 0.0)]]},
+                     "properties": {"__pwb_fid": "fa", "facies": "滨岸"}},
+                    {"type": "Feature",
+                     "geometry": {"type": "Polygon", "coordinates": [[
+                         (10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0),
+                         (10.0, 0.0)]]},
+                     "properties": {"__pwb_fid": "fb", "facies": "陆棚"}},
+                ],
+            }
+            fields = json.dumps([{"name": "facies", "type": "QString"}])
+            stack.upsert_mirror_layer("doc-draft", "相带", "Polygon", "EPSG:4326",
+                                      json.dumps(fc), "", "", "",
+                                      True, 1.0,
+                                      is_reference=False, is_editable=True,
+                                      data_revision=2, fields_json=fields)
+            curve = json.dumps({"type": "LineString", "coordinates": [
+                [5.0, -1.0], [5.0, 5.0], [15.0, 5.0], [15.0, 11.0]]})
+            error = stack.fault_cut_mirror_features("doc-draft", curve)
+            assert error == "", error
+            features = self._readback(stack)
+            assert len(features) == 4  # 两面各一分为二
+            for feature in features:
+                assert feature.get("properties", {}).get("facies") in ("滨岸", "陆棚")
+                assert feature.get("properties", {}).get("fault_bounded") in (True, "true", 1)
+            gestures = [p for a, p in events if a == "edit_gesture"]
+            assert gestures and gestures[-1]["gesture"] == "fault_cut"
+        finally:
+            stack.shutdown()
+
+    def test_endpoints_exactly_on_boundary_split_pinned(self, qtbot, qapp):
+        """2.4：断层两端点正好落在面边界上（不多出不少）——钉死为 2 面。"""
+        stack, _events, _canvas = self._setup_stack(qtbot, qapp)
+        try:
+            curve = json.dumps({"type": "LineString",
+                                "coordinates": [[5.0, 0.0], [5.0, 10.0]]})
+            error = stack.fault_cut_mirror_features("doc-draft", curve)
+            assert error == "", error
+            assert len(self._readback(stack)) == 2  # 边界到边界恰好分割
+        finally:
+            stack.shutdown()
+
     def test_map_tool_fault_cut_kind_activates(self, qtbot, qapp):
         stack, _events, _canvas = self._setup_stack(qtbot, qapp)
         try:

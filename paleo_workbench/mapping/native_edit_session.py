@@ -171,6 +171,7 @@ class NativeEditSessionController:
             normalized.append({
                 "feature_id": feature_id,
                 "geometry": feature.get("geometry") or {},
+                "attributes": dict(properties),
             })
         return normalized
 
@@ -263,11 +264,12 @@ class NativeEditSessionController:
                     f"地质不变量校验未通过（{names}）：{first.code}："
                     f"{first.message}——共 {len(errors)} 个 error 级违规"
                     f"（全部编辑未提交）")
-        # 快照（补偿恢复的输入）：提交前捕获每层镜像真值。
+        # 快照（补偿恢复的输入）：提交前捕获每层镜像真值——仅多会话集合
+        # 需要（单会话失败无"已提交层"可补偿；审查 Standards#7）。
         snapshots: dict[str, str] = {}
-        if callable(getattr(next(iter(self._sessions.values()), {}).get("stack")
-                            if self._sessions else None,
-                            "restore_mirror_snapshot", None)):
+        if len(self._sessions) >= 2 and all(callable(getattr(
+                session["stack"], "restore_mirror_snapshot", None))
+                for session in self._sessions.values()):
             for layer_id, session in self._sessions.items():
                 try:
                     snapshots[layer_id] = str(

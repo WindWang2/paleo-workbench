@@ -219,3 +219,62 @@ class TestNativeReshape:
             assert areas == [pytest.approx(100.0), pytest.approx(100.0)]
         finally:
             stack.shutdown()
+
+    def test_mirror_reshape_scatters_topological_points(self, qtbot, qapp):
+        """3.8：重塑曲线顶点散布到关联线层（addTopologicalPoints 同族）。"""
+        from PySide6.QtWidgets import QGraphicsView
+        from shiboken6 import wrapInstance
+
+        from qgis_render_bridge.mapstack import QgisMapStack
+
+        stack = QgisMapStack()
+        stack.initialize()
+        try:
+            fc = {"type": "FeatureCollection", "features": [
+                {"type": "Feature",
+                 "geometry": SQUARE_A,
+                 "properties": {"__pwb_fid": "fa"}},
+                {"type": "Feature",
+                 "geometry": SQUARE_B,
+                 "properties": {"__pwb_fid": "fb"}},
+            ]}
+            fields = json.dumps([{"name": "facies", "type": "QString"}])
+            stack.upsert_mirror_layer("doc-poly", "相带", "Polygon", "EPSG:4326",
+                                      json.dumps(fc), "", "", "",
+                                      True, 1.0,
+                                      is_reference=False, is_editable=True,
+                                      data_revision=1, fields_json=fields)
+            # 关联线层：一条穿越凸出区域的对角界线（同 CRS、可编辑）——
+            # addTopologicalPoints 只把"落在既有线段上"的点插入线层。
+            line_fc = {"type": "FeatureCollection", "features": [
+                {"type": "Feature",
+                 "geometry": {"type": "LineString",
+                              "coordinates": [[10.0, 0.0], [20.0, 10.0]]},
+                 "properties": {"__pwb_fid": "edge"}},
+            ]}
+            stack.upsert_mirror_layer("doc-lines", "界线", "LineString", "EPSG:4326",
+                                      json.dumps(line_fc), "", "", "",
+                                      True, 1.0,
+                                      is_reference=False, is_editable=True,
+                                      data_revision=1)
+            assert stack.start_mirror_layer_editing("doc-poly") == ""
+            assert stack.start_mirror_layer_editing("doc-lines") == ""
+            canvas = stack.create_canvas()
+            view = wrapInstance(canvas, QGraphicsView)
+            qtbot.addWidget(view)
+            view.resize(400, 400)
+            view.show()
+
+            curve_points = [[10.0, 0.0], [12.5, 2.5], [15.0, 5.0], [12.5, 7.5], [10.0, 10.0]]
+            error = stack.reshape_mirror_shared_boundary(
+                "doc-poly", "doc-poly", "fa", "fb",
+                json.dumps(SHARED_EDGE), json.dumps(curve_points))
+            assert error == "", error
+            payload = json.loads(stack.mirror_features_json("doc-lines", 0))
+            line_coords = payload["features"][0]["geometry"]["coordinates"]
+            xs = {round(float(x), 6) for x, _y in line_coords}
+            # 曲线中间顶点（12.5/15.0）经拓扑点散布进入关联线层。
+            assert 12.5 in xs and 15.0 in xs
+        finally:
+            stack.shutdown()
+

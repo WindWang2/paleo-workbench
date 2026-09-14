@@ -133,6 +133,15 @@ class PwbFaultCutTool : public QgsMapTool {
   bool dragging_ = false;
 };
 
+// geotopo Ticket 3：共边重塑数字化工具。捕获交互与 PwbFaultCutTool 同
+// 款（左键布点/右键双击收笔/Esc 取消）——语义差异全在 applier（这里=
+// 两选中相邻面的共享弧联动重塑，见 map_stack_service 的 boundaryReshape
+// 分派）；失败经 boundary_reshape_failed 回执上报。
+class PwbBoundaryReshapeTool : public PwbFaultCutTool {
+ public:
+  using PwbFaultCutTool::PwbFaultCutTool;
+};
+
 class PwbVertexTool : public PwbEditPickTool {
  public:
   using PwbEditPickTool::PwbEditPickTool;

@@ -3790,6 +3790,14 @@ std::string QgisMapStack::faultCutMirrorFeatures(
     }
     if (selected.isEmpty()) return "PWB-GT-102: no features intersect the fault curve";
   }
+  const QgsFeatureIds selection_backup = layer->selectedFeatureIds();
+  const auto restore_selection = [layer, selection_backup]() {
+    if (selection_backup.isEmpty()) {
+      layer->removeSelection();
+    } else {
+      layer->selectByIds(selection_backup);
+    }
+  };
   layer->selectByIds(selected);
 
   QgsProject* proj = project();
@@ -3821,6 +3829,7 @@ std::string QgisMapStack::faultCutMirrorFeatures(
       layer->splitFeatures(curve, topology_test_points, true, true);
   if (result != Qgis::GeometryOperationResult::Success) {
     layer->destroyEditCommand();
+    restore_selection();
     return "PWB-GT-104: split engine failed: " + splitResultMessage(result);
   }
   const QgsFeatureIds after_ids = layer->allFeatureIds();
@@ -3831,13 +3840,8 @@ std::string QgisMapStack::faultCutMirrorFeatures(
   if (added.isEmpty()) {
     // 断层未贯穿（部分穿越/仅触边界）：QGIS 未分割——拒绝式幂等，不留痕。
     layer->destroyEditCommand();
+    restore_selection();
     return "PWB-GT-104: fault curve does not fully cross any selected feature";
-  }
-  for (QgsFeatureId fid : added) {
-    const std::string host =
-        "fault-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
-    impl_->pending_added_host_ids[doc_id].push_back(host);
-    impl_->mirror_feature_fids[doc_id][static_cast<long long>(fid)] = host;
   }
 
   // 属性延续由 splitFeatures 克隆；断裂标记 + 盘侧写入两侧（原 fid + 新增）。
@@ -3869,10 +3873,18 @@ std::string QgisMapStack::faultCutMirrorFeatures(
     }
     if (!layer->changeAttributeValues(feature.id(), values)) {
       layer->destroyEditCommand();
+      restore_selection();
       return "PWB-GT-104: cannot stamp fault-bounded markers";
     }
   }
   layer->endEditCommand();
+  // 簿记延迟到宏成功之后（审查 Standards#5）：失败路径不再残留孤儿映射。
+  for (QgsFeatureId fid : added) {
+    const std::string host =
+        "fault-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+    impl_->pending_added_host_ids[doc_id].push_back(host);
+    impl_->mirror_feature_fids[doc_id][static_cast<long long>(fid)] = host;
+  }
 
   // 邻层拓扑点散布（同 split §4）+ fault_cut 多层手势回执。
   std::vector<std::string> affected_layers{doc_id};
@@ -4155,8 +4167,11 @@ std::string QgisMapStack::restoreMirrorSnapshot(
   }
   layer->endEditCommand();
 
-  // fid→宿主 id 映射表重建（新 fid = 恢复后的真实 id）。
+  // fid→宿主 id 映射表 + pending 列表重建（审查 Standards#6：恢复后的
+  // 会话提交时 committedAdded 需与宿主 id 正确配对，否则退化为数值 fid）。
   impl_->mirror_feature_fids[doc_id].clear();
+  impl_->pending_added_host_ids.erase(doc_id);
+  auto& pending_hosts = impl_->pending_added_host_ids[doc_id];
   const QgsFeatureIds live = layer->allFeatureIds();
   QgsFeatureIterator it = layer->getFeatures(QgsFeatureRequest(live));
   QgsFeature feature;
@@ -4165,6 +4180,7 @@ std::string QgisMapStack::restoreMirrorSnapshot(
     if (!host.isEmpty()) {
       impl_->mirror_feature_fids[doc_id][static_cast<long long>(feature.id())] =
           host.toStdString();
+      pending_hosts.push_back(host.toStdString());
     }
   }
   return "";
@@ -4937,6 +4953,119 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
   }
   if (kind == "vertex" || kind == "move") {
     canvas->setMapTool(editToolFor(canvas_addr, canvas, kind == "vertex"));
+    return;
+  }
+  if (kind == "boundaryReshape") {
+    // geotopo Ticket 3（Spec 审查 #1 补全）：两选中相邻面的共享弧数字化
+    // 重塑——applier 解析最近共享弧后走 reshapeMirrorSharedBoundary。
+    std::weak_ptr<char> reshape_alive = alive_token_;
+    PwbFaultCutTool::FaultCutApplier applier =
+        [this, reshape_alive, canvas](const QgsGeometry& curve) -> std::string {
+          if (reshape_alive.expired()) return "PWB-GT-301: map stack gone";
+          QgsVectorLayer* current =
+              qobject_cast<QgsVectorLayer*>(canvas->currentLayer());
+          if (current == nullptr) return "PWB-GT-103: no current vector layer";
+          const QString doc =
+              current->customProperty(QStringLiteral("pwb/doc_id")).toString();
+          if (doc.isEmpty() || !current->isEditable()) {
+            return "PWB-GT-103: layer not in an edit session";
+          }
+          const QgsFeatureIds selection = current->selectedFeatureIds();
+          if (selection.size() != 2) {
+            return "PWB-GT-301: boundary reshape needs exactly two selected "
+                   "adjacent features";
+          }
+          const std::string doc_id = doc.toStdString();
+          auto table = impl_->mirror_feature_fids.find(doc_id);
+          if (table == impl_->mirror_feature_fids.end()) {
+            return "PWB-GT-201: feature id table unavailable";
+          }
+          QgsFeatureList picked;
+          for (QgsFeatureId fid : selection) {
+            QgsFeature feature;
+            if (!current->getFeatures(QgsFeatureRequest(fid)).nextFeature(feature)
+                || !feature.hasGeometry()) {
+              return "PWB-GT-201: selected features have no geometry";
+            }
+            picked.append(feature);
+          }
+          std::vector<double> ring_a, ring_b;
+          for (int which = 0; which < 2; ++which) {
+            const QgsGeometry& geometry = picked[which].geometry();
+            const QgsCurvePolygon* polygon =
+                qgsgeometry_cast<const QgsCurvePolygon*>(geometry.constGet());
+            if (polygon == nullptr || polygon->exteriorRing() == nullptr) {
+              return "PWB-GT-201: polygon exterior rings unavailable";
+            }
+            const QgsCurve* ring = polygon->exteriorRing();
+            const int total = ring->numPoints();
+            std::vector<double>& target = which == 0 ? ring_a : ring_b;
+            for (int i = 0; i < total; ++i) {
+              const QgsPoint point = ring->vertexAt(QgsVertexId(0, 0, i));
+              target.push_back(point.x());
+              target.push_back(point.y());
+            }
+          }
+          const pwb::geotopo::SharedArcsResult arcs =
+              pwb::geotopo::find_shared_arcs(ring_a, ring_b, 1e-6);
+          if (arcs.error != pwb::geotopo::ErrorCode::Ok || arcs.arcs.empty()) {
+            return "PWB-GT-201: no shared arc between the selected features";
+          }
+          // 离数字化曲线中点最近的共享弧。
+          const QgsPointXY mid = curve.centroid().asPoint();
+          const pwb::geotopo::SharedArc* best = &arcs.arcs[0];
+          double best_distance = std::numeric_limits<double>::max();
+          for (const pwb::geotopo::SharedArc& arc : arcs.arcs) {
+            const double distance = std::hypot(arc.start_x + arc.end_x - 2 * mid.x(),
+                                               arc.start_y + arc.end_y - 2 * mid.y());
+            if (distance < best_distance) {
+              best_distance = distance;
+              best = &arc;
+            }
+          }
+          QJsonArray arc_array;
+          for (std::size_t k = 0; k + 1 < best->arc_xy.size(); k += 2) {
+            arc_array.append(QJsonArray{best->arc_xy[k], best->arc_xy[k + 1]});
+          }
+          QJsonArray curve_array;
+          const QgsCurve* curve_ring =
+              qgsgeometry_cast<const QgsCurve*>(curve.constGet());
+          if (curve_ring != nullptr) {
+            const int total = curve_ring->numPoints();
+            for (int i = 0; i < total; ++i) {
+              const QgsPoint point = curve_ring->vertexAt(QgsVertexId(0, 0, i));
+              curve_array.append(QJsonArray{point.x(), point.y()});
+            }
+          }
+          const QString host_a =
+              QString::fromStdString(table->second.count(
+                  static_cast<long long>(picked[0].id()))
+                  ? table->second[static_cast<long long>(picked[0].id())]
+                  : std::to_string(picked[0].id()));
+          const QString host_b =
+              QString::fromStdString(table->second.count(
+                  static_cast<long long>(picked[1].id()))
+                  ? table->second[static_cast<long long>(picked[1].id())]
+                  : std::to_string(picked[1].id()));
+          return reshapeMirrorSharedBoundary(
+              doc_id, doc_id, host_a.toStdString(), host_b.toStdString(),
+              QJsonDocument(arc_array).toJson(QJsonDocument::Compact).toStdString(),
+              QJsonDocument(curve_array).toJson(QJsonDocument::Compact).toStdString());
+        };
+    PwbFaultCutTool::FaultCutReporter reporter =
+        [this, reshape_alive, canvas_addr](const std::string& action,
+                                           const std::string& payload_json) {
+          if (reshape_alive.expired()) return;
+          auto cb = impl_->edit_pick_callbacks.find(canvas_addr);
+          if (cb != impl_->edit_pick_callbacks.end() && cb->second) {
+            cb->second(action == "fault_cut_failed" ? "boundary_reshape_failed"
+                                                    : action,
+                       payload_json);
+          }
+        };
+    impl_->tools[canvas_addr] = std::make_unique<PwbBoundaryReshapeTool>(
+        canvas, std::move(applier), std::move(reporter));
+    canvas->setMapTool(impl_->tools[canvas_addr].get());
     return;
   }
   if (kind == "faultCut") {

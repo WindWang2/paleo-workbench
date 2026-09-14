@@ -151,6 +151,8 @@ def validate_facies_adjacency(
         for j in range(i + 1, len(polygons)):
             la, fa, ga, name_a = polygons[i]
             lb, fb, gb, name_b = polygons[j]
+            if ga.disjoint(gb):
+                continue  # bbox 级预过滤（审查 Standards#8）：免 GEOS 相交
             if ga.boundary.intersection(gb.boundary).length < threshold:
                 continue  # 触点/针触共享边不足阈值：不算直接相邻
             allowed, reason = adjacency.may_touch(name_a, name_b)
@@ -284,7 +286,12 @@ def validate_isopath_continuity(
         if role == ROLE_ISOPATH_LINE and geometry.get("type") == "LineString":
             isopaths.append((layer_id, str(record.get("feature_id", "?")), _shapely_geometry(record)))
         elif role == ROLE_EROSION_BOUNDARY:
-            erosion_boundaries.append(_shapely_geometry(record).boundary)
+            geometry = record.get("geometry") or {}
+            if geometry.get("type") == "LineString":
+                # 线状剥蚀边界：取几何本身（.boundary 会退化为双端点）。
+                erosion_boundaries.append(_shapely_geometry(record))
+            else:
+                erosion_boundaries.append(_shapely_geometry(record).boundary)
 
     violations: list[InvariantViolation] = []
     for layer_id, feature_id, line in isopaths:
