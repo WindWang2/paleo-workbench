@@ -48,3 +48,14 @@
   （井位级竖带指示；引擎无 crosshair API，04 #11 已更新）
 - tests/ui/test_constraint_hud.py 15/15；回归（含 view_coordination/visualization
   panel/workstation shell）151 passed
+
+### PHASE 5 / Ticket 4 (complete)
+- mapping/qc_quickfix.py：sliver_merge（共享边最长/并列面积优势相，单命令合并
+  +整体撤销）/ tangent_close（切线延伸步长=容差×0.5 上限容差×8，不可修诚实禁用）
+- ui/components/interactive_qc_hub.py：SmoothPanController（180ms ease-in-out、
+  4-12 帧、历史恰 1 条、用户可打断）+ InteractiveQCHub（来源聚合/双击定位/
+  Enter 定位/F 修复键盘流/修复按钮 availability+tooltip）
+- composite_document：qc_hub 挂画布下（拓扑 chip 激活时与拓扑面板同开）、
+  修复执行→单一撤销命令→mark_resolved→即时重组；cartographic_qa 增
+  issues_for_interactive_hub 适配器（bbox/layer_id 定位字段）
+- tests/ui/test_interactive_qc_hub.py 15/15；回归（ui/topo/stage）全绿

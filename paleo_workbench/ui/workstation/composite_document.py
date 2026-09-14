@@ -1056,6 +1056,22 @@ class CompositeDocument(QWidget):
         self.topology_panel.setMaximumHeight(220)
         self.topology_panel.hide()
         layout.addWidget(self.topology_panel)
+        # M4 交互式质检修复向导：问题聚合 + 平滑定位 + QuickFix（与拓扑
+        # 面板同列；拓扑 chip 激活时一并打开，见 _on_topology_issue_activated）。
+        from paleo_workbench.ui.components.interactive_qc_hub import (
+            InteractiveQCHub,
+            SmoothPanController,
+        )
+
+        self.qc_hub = InteractiveQCHub(self)
+        self.qc_hub.setMaximumHeight(240)
+        self.qc_hub.hide()
+        layout.addWidget(self.qc_hub)
+        self.smooth_pan = SmoothPanController(self)
+        self.qc_hub.issue_focused.connect(self._focus_qc_issue)
+        self.qc_hub.fix_requested.connect(self._apply_quick_fix)
+        self.qc_hub.set_fix_context(self._qc_fix_context)
+        self.qc_hub.refresh_requested.connect(self._refresh_qc_issues)
         self.status_bar = MapStatusBar(self)
         layout.addWidget(self.status_bar)
         # V10 §15：拓扑问题 chip 的进入路径（显式校验 + 首问题定位反馈）；
@@ -2543,6 +2559,83 @@ class CompositeDocument(QWidget):
         panel.ignore_requested.connect(_ignore)
         panel.restore_requested.connect(_restore)
 
+    def _refresh_qc_issues(self) -> None:
+        """重新检查（用户触发）：制图 QA 15 规则族聚合进向导（S4-4）。"""
+        project = self._project
+        if project is None:
+            self.qc_hub.set_issues("carto", [])
+            return
+        try:
+            from paleo_workbench.mapping.cartographic_qa import (
+                issues_for_interactive_hub,
+            )
+
+            issues = issues_for_interactive_hub(project)
+        except Exception:
+            self.status_message.emit("制图 QA 检查失败（详见日志）")
+            return
+        self.qc_hub.set_issues("carto", issues)
+        self.status_message.emit(f"制图 QA 完成：{len(issues)} 处问题")
+
+    def open_qc_hub(self) -> None:
+        """M4：打开交互式质检修复向导（供宿主命令/面板入口调用）。"""
+        self.qc_hub.setVisible(True)
+        self.qc_hub.raise_()
+
+    def _focus_qc_issue(self, issue: dict) -> None:
+        """双击/定位问题 → 平滑平移居中（bbox + 10% pad，D9）。"""
+        bbox = issue.get("bbox")
+        if not bbox:
+            centroid = issue.get("centroid")
+            if centroid:
+                x, y = float(centroid[0]), float(centroid[1])
+                bbox = (x - 1.0, y - 1.0, x + 1.0, y + 1.0)
+        if bbox:
+            self.smooth_pan.pan_to_extent(self.canvas, bbox, pad=0.10)
+        feature_id = str(issue.get("feature_id") or "")
+        layer_id = str(issue.get("layer_id") or "")
+        if feature_id and layer_id:
+            layer = self.edit_controller.layer(layer_id)
+            if layer is not None:
+                # 诚实降级（04 #13）：fallback 栈的高亮 = 选中编辑目标层并
+                # 写状态条；native 栈另有 highlight_checker_errors 通道。
+                self.edit_controller.set_active_layer(layer_id)
+
+    def _qc_fix_context(self, issue: dict):
+        from paleo_workbench.mapping.qc_quickfix import QuickFixContext
+
+        layer = self.edit_controller.layer(str(issue.get("layer_id") or ""))
+        if layer is None:
+            return None
+        session, _reason = self.edit_controller.ensure_layer_session(layer.id)
+        if session is None:
+            return None
+        tolerance = getattr(self.edit_controller, "_tolerance", None)
+        return QuickFixContext(
+            layer=layer, session=session,
+            tolerance=float(tolerance() if callable(tolerance) else 1.0))
+
+    def _apply_quick_fix(self, issue: dict, action_id: str) -> None:
+        from paleo_workbench.mapping.qc_quickfix import QUICK_FIX_ACTIONS
+
+        action = next((a for a in QUICK_FIX_ACTIONS
+                       if a.action_id == str(action_id)), None)
+        if action is None:
+            self.status_message.emit(f"未知修复动作：{action_id}")
+            return
+        context = self._qc_fix_context(issue)
+        if context is None:
+            self.status_message.emit("修复上下文不可用（图层或会话缺失）")
+            return
+        try:
+            action.apply(dict(issue), context)
+        except Exception as exc:  # 修复失败必须可见，不静默
+            self.status_message.emit(f"修复失败：{exc}")
+            return
+        self.status_message.emit(f"已修复：{action.title}（可 Ctrl+Z 撤销）")
+        self.qc_hub.mark_resolved(dict(issue))
+        self._sync_composition(immediate=True)
+
     def _on_topology_issue_activated(self) -> None:
         """拓扑问题 chip：显式校验 + 首问题定位反馈（V10 §15 / R4-3）。
 
@@ -2557,6 +2650,11 @@ class CompositeDocument(QWidget):
                              ignored_keys=checker.ignored_keys(),
                              last_run_at=checker.last_run_at)
             panel.setVisible(True)
+            # M4：拓扑问题同步进交互式修复向导（聚合来源 "topology"）。
+            self.qc_hub.set_issues("topology", [
+                dict(issue) for issue in
+                (checker.last_errors or issues)])
+            self.qc_hub.setVisible(True)
         if not issues:
             self.status_message.emit("拓扑校验通过（问题计数已刷新）")
             self._sync_action_state()

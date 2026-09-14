@@ -1278,6 +1278,55 @@ def collect_cartographic_qa_issues(
     return issues
 
 
+def _geojson_bbox(geometry: Any) -> list[float] | None:
+    """GeoJSON 几何 → 包围盒 [xmin, ymin, xmax, ymax]（纯递归，无引擎依赖）。"""
+    if not isinstance(geometry, dict):
+        return None
+
+    xs: list[float] = []
+    ys: list[float] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, (list, tuple)):
+            if (len(node) >= 2 and all(isinstance(v, (int, float)) for v in node[:2])
+                    and not any(isinstance(v, (list, tuple)) for v in node[:2])):
+                xs.append(float(node[0]))
+                ys.append(float(node[1]))
+                return
+            for child in node:
+                _walk(child)
+
+    _walk(geometry.get("coordinates"))
+    if not xs:
+        return None
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def issues_for_interactive_hub(project: Any, *, snapshot: Any = None) -> list[dict]:
+    """交互式 QC Hub（M4）视角：制图 QA issue + 定位字段（bbox/layer_id）。
+
+    纯适配不重查（检查一律走 :func:`collect_cartographic_qa_issues`）：
+    ``bbox`` 从 issue.geometry 包围盒派生，``layer_id`` 取 ref/layer 语义
+    字段——向导双击定位（平滑平移）与修复上下文解析都依赖这两个键。
+    """
+    issues = collect_cartographic_qa_issues(project, snapshot=snapshot)
+    adapted: list[dict] = []
+    for issue in issues:
+        item = dict(issue)
+        if "bbox" not in item:
+            bbox = _geojson_bbox(item.get("geometry"))
+            if bbox is None and item.get("centroid"):
+                x, y = float(item["centroid"][0]), float(item["centroid"][1])
+                bbox = [x - 1.0, y - 1.0, x + 1.0, y + 1.0]
+            if bbox is not None:
+                item["bbox"] = bbox
+        item.setdefault(
+            "layer_id",
+            str(item.get("ref") or item.get("layer") or ""))
+        adapted.append(item)
+    return adapted
+
+
 def cartographic_rule_summary(
     project: Any,
     *,
