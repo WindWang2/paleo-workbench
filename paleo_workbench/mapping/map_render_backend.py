@@ -28,6 +28,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPolygonF
 
 from paleo_workbench.mapping.facies_brush_cache import FaciesPatternBrushCache
+from paleo_workbench.mapping import vector_lod
 from paleo_workbench.mapping.map_styles import MarkerSymbol, TextStyle, VectorStyle
 from paleo_workbench.mapping.revision_cache import LatestRevisionCache
 
@@ -582,6 +583,22 @@ def reproject_xy(xy: np.ndarray, transformer: Any) -> np.ndarray:
     )
 
 
+
+def _lod_subset_prepared(prepared: _PreparedLayer, keep: np.ndarray) -> _PreparedLayer:
+    """Keep-mask 子集化的显示几何（Ticket 3）：路径数组重排，part 计数
+    不变（锚点保证每 part 至少保留端点），要素级数组原样共享。"""
+    keep_index = np.nonzero(keep)[0]
+    if len(keep_index) == len(keep):
+        return prepared
+    reduced = object.__new__(_PreparedLayer)
+    for slot in _PreparedLayer.__slots__:
+        setattr(reduced, slot, getattr(prepared, slot))
+    reduced.path_xy = prepared.path_xy[keep_index]
+    counts = np.add.reduceat(keep.astype(np.int64), prepared.path_offsets[:-1])
+    reduced.path_offsets = np.concatenate(([0], np.cumsum(counts)))
+    return reduced
+
+
 def _reprojected_prepared_layer(
     prepared: "_PreparedLayer", transformer: Any
 ) -> "_PreparedLayer":
@@ -712,6 +729,13 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._scalar_images: LatestRevisionCache[str, tuple, _ScalarImageEntry] = (
             LatestRevisionCache()
         )
+        # Ticket 3（vector-perf-increment）：数据集级 Visvalingam LOD——按
+        # (layer, revision, 缩放档) 缓存的显示几何化简（永不写回要素）。
+        self._lod_cache: LatestRevisionCache[str, tuple[int, float], _PreparedLayer] = (
+            LatestRevisionCache()
+        )
+        self._vector_lod_disabled = os.environ.get(
+            "PWB_DISABLE_VECTOR_LOD", "").strip() not in ("", "0")
         self._facies_patterns = FaciesPatternBrushCache()
         _LIVE_FALLBACKS.add(self)
         self._diagnostics = {
@@ -1130,6 +1154,48 @@ class FallbackMapRenderBackend(MapRenderBackend):
             self._reprojected.store(layer.id, key, reprojected)
         return reprojected
 
+    def _lod_prepared(
+        self, prepared: _PreparedLayer, layer: MapLayerSnapshot, mupp: float
+    ) -> _PreparedLayer:
+        """数据集级 Visvalingam LOD（vector-perf-increment Ticket 3）。
+
+        按缩放档（2 的幂）缓存显示几何的化简结果；形态锚点（端点/拐点/
+        极值）永不下桌。化简只影响绘制——要素几何、拾取、拓扑均在原始
+        数据上进行（04-known-limitations #4）。小层/近距视图/禁用开关
+        （PWB_DISABLE_VECTOR_LOD=1）回退原样。
+        """
+        if self._vector_lod_disabled or prepared.path_xy is None:
+            return prepared
+        total = len(prepared.path_xy)
+        if total < vector_lod.MIN_VERTEX_COUNT:
+            return prepared
+        bucket = vector_lod.scale_bucket_mupp(mupp)
+        tolerance = vector_lod.tolerance_area(mupp)
+        if bucket <= 0.0 or tolerance <= 0.0:
+            return prepared
+        key = (int(layer.data_revision), bucket)
+        with self._prepared_lock:
+            cached = self._lod_cache.get(layer.id, key)
+        if cached is not None:
+            return cached
+        keep = vector_lod.visvalingam_keep_mask(
+            prepared.path_xy[:, 0],
+            prepared.path_xy[:, 1],
+            prepared.path_offsets[:-1],
+            prepared.path_is_ring,
+            tolerance,
+        )
+        reduced = _lod_subset_prepared(prepared, keep)
+        self._diagnostics["lod_vertices_total"] = (
+            self._diagnostics.get("lod_vertices_total", 0) + total
+        )
+        self._diagnostics["lod_vertices_kept"] = (
+            self._diagnostics.get("lod_vertices_kept", 0) + int(keep.sum())
+        )
+        with self._prepared_lock:
+            self._lod_cache.store(layer.id, key, reduced)
+        return reduced
+
     def _prepared_layer(self, layer: MapLayerSnapshot) -> _PreparedLayer:
         revision = int(layer.data_revision)
         with self._prepared_lock:
@@ -1211,6 +1277,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
         # transform; a foreign layer CRS reprojects here (see
         # _reprojected_prepared for the degraded/warned path).
         prepared = self._reprojected_prepared(prepared, layer)
+        mupp = (span_x / width) if width > 0 else 0.0
+        prepared = self._lod_prepared(prepared, layer, mupp)
         self._diagnostics["features_total"] += len(prepared.features)
         visible_features = self._cull_features(prepared, view)
         self._diagnostics["features_drawn"] += int(visible_features.sum())
