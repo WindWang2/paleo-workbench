@@ -86,3 +86,11 @@ Loop exit: docs_generated && ui_tdd_all_green && memory_and_leak_free && visual_
    性/透明度应用（零画布重建）
 4. 相带数字键 1-9 与 hub 导航 1-5 冲突 → 画布域 WidgetWithChildrenShortcut + 工具
    激活期动态注册；Ticket 2 先以测试实证 Qt 跨上下文优先级再定稿（00-decisions D6）
+
+## Final result (2026-09-14)
+- 11 atomic commits (3fe8496a..1adc274d), 46 files +6283/-191
+- PR #1302 https://github.com/WindWang2/paleo-workbench/pull/1302
+- Loop exit: docs_generated ✅ / ui_tdd_all_green ✅ (98/98 + regressions) /
+  memory_and_leak_free ✅ (Standards gate) / visual_review_passed ✅
+- Full suite: 8361 passed / 81 failed (attributed: pre-existing environmental +
+  no-active-window flakes) — see 04-visual-qa-verification.md §4
