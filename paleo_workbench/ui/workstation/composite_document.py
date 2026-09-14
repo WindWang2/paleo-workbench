@@ -1017,6 +1017,14 @@ class CompositeDocument(QWidget):
         self._empty_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._empty_hint.hide()
 
+        # M1 多期次时间轴：画布之上的常驻横条（期次差分切换 + 洋葱皮）。
+        from paleo_workbench.ui.components.stratigraphic_timeline_slider import (
+            StratigraphicTimelineWidget,
+        )
+
+        self.timeline = StratigraphicTimelineWidget(self)
+        layout.insertWidget(0, self.timeline)
+
         # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。
         self.identify_results = IdentifyResultsPanel(self)
         self.identify_results.setMaximumHeight(200)
@@ -1272,6 +1280,25 @@ class CompositeDocument(QWidget):
         # V5 阶段动作分派（面板动作 → 工作流；见 stage_actions.py）。
         from paleo_workbench.ui.workstation.stage_actions import StageActionDispatcher
         self.stage_actions = StageActionDispatcher(self)
+
+        # M1 时间轴执行器：差分可见性切换（view-time，零画布重建）+ horizon
+        # 写穿走既有权威（set_target_from_boundary → refresh_evaluation）。
+        from paleo_workbench.ui.components.stratigraphic_timeline_slider import (
+            EpochTimelineController,
+        )
+
+        self.epoch_timeline = EpochTimelineController(self)
+        self.epoch_timeline.bind(
+            layer_manager=self.layer_manager,
+            project=project,
+            status_sink=self.status_message.emit,
+        )
+        self.timeline.epoch_committed.connect(self.epoch_timeline.request_commit)
+        self.timeline.epoch_committed.connect(
+            lambda *_: self.stage_controller.refresh_evaluation())
+        self.timeline.onion_toggled.connect(self.epoch_timeline.set_onion)
+        # 外部提交（自动化/壳层直调）后的部件高亮回同步（幂等，无回环）。
+        self.epoch_timeline.epoch_changed.connect(self.timeline.set_current_epoch)
 
         self._build_toolbar()
         self.set_project(project)
@@ -4509,6 +4536,19 @@ class CompositeDocument(QWidget):
             if callable(expand):
                 expand()
         self.input_tree.refresh(project)
+        self._refresh_timeline_epochs()
+
+    def _refresh_timeline_epochs(self) -> None:
+        """时间轴期次目录刷新（工程装载/切换；M1，00-decisions D1）。"""
+        from paleo_workbench.workflow.stratigraphic_epochs import build_epoch_catalog
+
+        catalog = build_epoch_catalog(self._project)
+        self.epoch_timeline.set_project(self._project)
+        self.epoch_timeline.set_epochs(catalog)
+        self.timeline.set_epochs(catalog)
+        current = self.epoch_timeline.current_epoch()
+        if current:
+            self.timeline.set_current_epoch(current)
 
     def _write_map_project_xml(self) -> None:
         """把当前 QgsProject 呈现态写入工程信封。loading 期间不调用。"""

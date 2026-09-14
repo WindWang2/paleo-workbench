@@ -16,8 +16,8 @@
 
 ## D2 洋葱皮（Onion-skin）公式
 - 范围：仅 **相邻前一期次**（index-1）；不叠加多期（噪声>收益，登记为 04 限制）。
-- 透明度：轮廓层 alpha 固定 `0.30`（30%），映射到既有 10-100% 不透明度 API 的
-  `set_layer_opacity(layer_id, 30)`。
+- 透明度：轮廓层 alpha 固定 `0.30`（30%），经既有 API
+  `set_layer_opacity(layer_id, 0.30)`（fraction 0..1）应用。
 - 参与层：目标期次的 **相带面/相带边界类** 图层（kind∈{facies, facies_boundary,
   boundary} 或 role∈{FACIES_BOUNDARY, PALEO_SHORELINE}）；非相带类（底图/井位等）
   不参与洋葱皮，避免参考层闪烁。

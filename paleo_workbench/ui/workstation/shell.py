@@ -210,6 +210,9 @@ class WorkstationFrame(QWidget):
         # 联动区不再是中央文档：内容部件已由宿主 dock 接管，本体保持隐藏。
         self.linked_workspace.hide()
         self.composite = CompositeDocument(project, self)
+        # M1：时间轴期次提交 → 层位条同步（set_horizon_state 自带抑制，无回环）。
+        self.composite.timeline.epoch_committed.connect(
+            self._on_timeline_epoch_committed)
         self.page_stack = page_stack
         # V9：页面栈保留自然 minimumSizeHint——HubScrollArea 会在 dock
         # 过窄时以滚动条降级（见 HubScrollArea），不再需要清零式豁免。
@@ -867,6 +870,15 @@ class WorkstationFrame(QWidget):
             return
         self.stage_bar.set_horizon_state(
             active_target_horizon(project), ensure_horizon_catalog(project))
+
+    def _on_timeline_epoch_committed(self, key: str) -> None:
+        """时间轴期次提交后的层位条回写（M1；echo 由 set_horizon_state 抑制）。"""
+        project = self._project
+        if project is None:
+            return
+        from paleo_workbench.workflow.stratigraphy import ensure_horizon_catalog
+
+        self.stage_bar.set_horizon_state(str(key), ensure_horizon_catalog(project))
 
     def _on_mapping_horizon(self, horizon: str) -> None:
         from paleo_workbench.workflow.stratigraphy import (
