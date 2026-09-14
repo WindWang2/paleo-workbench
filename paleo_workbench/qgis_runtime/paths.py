@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 #: conda-统一配方会用到，见 loader.py）。
 _DEPS_BUILD_SUBDIR = ("native", "qgis_render_bridge", "build", "qgis-deps")
 
+#: 缺失 deps 前缀的警告每个进程只发一次（每个画布/图层发布都会探测一次，
+#: 否则一次启动刷出 6 条同样的消息）。
+_DEPS_WARNED = False
+
 
 def _env_dir(name: str) -> Path | None:
     value = os.environ.get(name, "").strip()
@@ -70,16 +74,21 @@ def deps_prefix() -> Path | None:
     override = _env_dir("PALEO_QGIS_DEPS_DIR")
     if override is not None:
         return override
+    global _DEPS_WARNED
     if os.name == "nt":
         default = repo_root().joinpath(*_DEPS_BUILD_SUBDIR)
         if default.is_dir():
             return default
-        logger.warning(
-            "未找到 QGIS deps 前缀：PALEO_QGIS_DEPS_DIR 未设置（或指向非目录），"
-            "且默认位置 %s 不存在——conda-统一配方将无法解析依赖。"
-            "请设置 PALEO_QGIS_DEPS_DIR，或把 deps 前缀放到该默认路径。",
-            default,
-        )
+        # Warn once per process: callers probe this on every canvas/layer
+        # publish, and the message was drowning the console (6x per boot).
+        if not _DEPS_WARNED:
+            _DEPS_WARNED = True
+            logger.warning(
+                "未找到 QGIS deps 前缀：PALEO_QGIS_DEPS_DIR 未设置（或指向非目录），"
+                "且默认位置 %s 不存在——conda-统一配方将无法解析依赖。"
+                "请设置 PALEO_QGIS_DEPS_DIR，或把 deps 前缀放到该默认路径。",
+                default,
+            )
     return None
 
 
