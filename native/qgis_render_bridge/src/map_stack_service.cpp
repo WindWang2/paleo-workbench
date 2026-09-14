@@ -5,6 +5,7 @@
 #include "map_stack_service.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <filesystem>
@@ -2123,6 +2124,7 @@ bool QgisMapStack::applyMirrorFeatureDelta(QgsVectorLayer& layer,
     impl_->mirror_data_revisions.erase(doc_id);
   }
   layer.updateExtents();
+  InvalidateVertexIndexLayer(&layer);  // Ticket 1：镜像 delta 后顶点索引懒重建
   invalidateLocators(layer);
   impl_->mirror_data_revisions[doc_id] = new_revision;
   return true;
@@ -2495,6 +2497,7 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       // schema 漂移）之后捕捉会一直吸附到重建前的旧几何。放在本分支内而非
       // 分支外，避免在 delta 已自失效（applyMirrorFeatureDelta）时重复重建。
       invalidateLocators(*existing);
+      InvalidateVertexIndexLayer(existing);  // Ticket 1：同因，顶点索引懒重建
     }
     existing->updateExtents();
     // V10 P0（review-4）：镜像层建 provider 空间索引——无索引时编辑工具的
@@ -2749,11 +2752,13 @@ void QgisMapStack::removeMirrorLayersExcept(const std::vector<std::string>& doc_
     bool keepIt = hasDoc && keep.find(doc_id) != keep.end();
     if (hasDoc) {
       if (!keepIt) {
+        DropVertexIndex(qobject_cast<QgsVectorLayer*>(layer));  // Ticket 1
         project()->removeMapLayer(layer);
         impl_->owned_layers.erase(qgis_id);
         impl_->eraseMirrorByDocIdIfQgisMatches(doc_id, qgis_id);
       }
     } else {
+      DropVertexIndex(qobject_cast<QgsVectorLayer*>(layer));  // Ticket 1
       project()->removeMapLayer(layer);
       impl_->owned_layers.erase(qgis_id);
       impl_->eraseMirrorByQgisId(qgis_id);
@@ -3409,6 +3414,47 @@ QgsVectorLayer* QgisMapStack::editingLayerFor(const std::string& doc_id) const {
   return layer;
 }
 
+std::vector<PwbVertexHit> QgisMapStack::vertexPickQuery(
+    const std::string& doc_id, double x, double y, double radius,
+    bool& indexed) {
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  QgsVectorLayer* layer =
+      mirrorLayerByDoc(project(), impl_->mirror_by_doc, doc_id);
+  if (layer == nullptr) {
+    throw std::runtime_error("mirror layer not found: " + doc_id);
+  }
+  return QueryVerticesNear(layer, QgsPointXY(x, y), radius, &indexed);
+}
+
+std::vector<double> QgisMapStack::vertexPickBenchMicros(
+    const std::string& doc_id, double x, double y, double radius, int repeats,
+    int& hits, bool& indexed) {
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  QgsVectorLayer* layer =
+      mirrorLayerByDoc(project(), impl_->mirror_by_doc, doc_id);
+  if (layer == nullptr) {
+    throw std::runtime_error("mirror layer not found: " + doc_id);
+  }
+  std::vector<double> micros;
+  micros.reserve(static_cast<std::size_t>(std::max(1, repeats)));
+  std::size_t last_hits = 0;
+  for (int i = 0; i < std::max(1, repeats); ++i) {
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::vector<PwbVertexHit> found =
+        QueryVerticesNear(layer, QgsPointXY(x, y), radius, &indexed);
+    const auto t1 = std::chrono::steady_clock::now();
+    micros.push_back(
+        std::chrono::duration<double, std::micro>(t1 - t0).count());
+    last_hits = found.size();
+  }
+  hits = static_cast<int>(last_hits);
+  return micros;
+}
+
 std::string QgisMapStack::startMirrorLayerEditing(const std::string& doc_id) {
   if (!impl_ || !impl_->initialized) {
     throw std::runtime_error("map stack is not initialized");
@@ -3480,6 +3526,7 @@ std::string QgisMapStack::commitMirrorLayer(const std::string& doc_id) {
   }
   // 成功：fid 表已按 committed 信号增量重建（added 按序配对 / removed
   // 擦除）；组 delta 回传宿主（§2 回写通道）。
+  InvalidateVertexIndexLayer(layer);  // Ticket 1：提交落 provider 后整层懒重建
   fireCommittedDelta(doc_id);
   endEditSessionState(doc_id);
   impl_->commit_capture.erase(doc_id);
@@ -3490,6 +3537,7 @@ std::string QgisMapStack::rollBackMirrorLayer(const std::string& doc_id) {
   QgsVectorLayer* layer = editingLayerFor(doc_id);
   if (layer == nullptr) return "layer not in an edit session: " + doc_id;
   layer->rollBack(true);  // 复位到会话开启时快照基线（§2 易失会话）
+  InvalidateVertexIndexLayer(layer);  // Ticket 1：缓冲复位后重建
   endEditSessionState(doc_id);
   impl_->commit_capture.erase(doc_id);
   return "";
@@ -3503,6 +3551,7 @@ std::string QgisMapStack::undoMirrorEdit(const std::string& doc_id) {
   QgsVectorLayer* layer = editingLayerFor(doc_id);
   if (layer == nullptr) return "layer not in an edit session: " + doc_id;
   layer->undoStack()->undo();
+  InvalidateVertexIndexLayer(layer);  // Ticket 1：撤销重放宏改几何
   return "";
 }
 
@@ -3510,6 +3559,7 @@ std::string QgisMapStack::redoMirrorEdit(const std::string& doc_id) {
   QgsVectorLayer* layer = editingLayerFor(doc_id);
   if (layer == nullptr) return "layer not in an edit session: " + doc_id;
   layer->undoStack()->redo();
+  InvalidateVertexIndexLayer(layer);  // Ticket 1：重做重放宏改几何
   return "";
 }
 

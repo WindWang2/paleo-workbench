@@ -94,6 +94,7 @@ if(PALEO_WITH_QGIS_RENDERER)
         src/style_codec.cpp
         src/gui_service.cpp
         src/geometry_service.cpp
+        src/spatial_index_core.cpp
         src/map_stack_service.cpp
         src/edit_tools.cpp
     )

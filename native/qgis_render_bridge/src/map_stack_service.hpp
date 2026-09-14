@@ -11,6 +11,8 @@
 #include <qgsgeometry.h>
 #include <qgsvectorlayer.h>
 
+#include "edit_tools.hpp"
+
 class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsMapTool;
@@ -328,6 +330,15 @@ public:
   // 编辑工具的 begin/endEditCommand 保证）；手势级编排（跨层逆序）在宿主。
   std::string undoMirrorEdit(const std::string& doc_id);
   std::string redoMirrorEdit(const std::string& doc_id);
+  // Ticket 1（vector-perf-increment）顶点拾取诊断面：生产 verticesNear 同
+  // 路径（索引/线性回退由 QueryVerticesNear 决定）。基准与等价性测试用。
+  std::vector<PwbVertexHit> vertexPickQuery(const std::string& doc_id,
+                                            double x, double y, double radius,
+                                            bool& indexed);
+  std::vector<double> vertexPickBenchMicros(const std::string& doc_id,
+                                            double x, double y, double radius,
+                                            int repeats, int& hits,
+                                            bool& indexed);
   // 编辑会话中向镜像缓冲加要素（数字化路由，M1）：geojson = 单个
   // Feature（properties.__pwb_fid = 宿主 id）；一宏可撤（"Added feature"）。
   std::string addMirrorFeature(const std::string& doc_id,

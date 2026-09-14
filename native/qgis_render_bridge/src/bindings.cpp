@@ -976,6 +976,55 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              &pwb::qgis_render::QgisMapStack::highlightCheckerErrors,
              py::arg("canvas"), py::arg("error_ids_json"),
              "M4 topo-editing: rubber-band highlight of checker error geometries.")
+        .def(
+            "vertex_pick_query",
+            [](pwb::qgis_render::QgisMapStack& self, const std::string& doc_id,
+               double x, double y, double radius) {
+              bool indexed = false;
+              const std::vector<pwb::qgis_render::PwbVertexHit> hits =
+                  self.vertexPickQuery(doc_id, x, y, radius, indexed);
+              py::dict out;
+              out["indexed"] = indexed;
+              py::list items;
+              for (const auto& h : hits) {
+                py::dict item;
+                item["feature_id"] = h.feature_id;
+                item["part"] = h.part;
+                item["ring"] = h.ring;
+                item["nr"] = h.vertex_nr;
+                item["vertex_type"] = h.vertex_type;
+                item["x"] = h.x;
+                item["y"] = h.y;
+                items.append(std::move(item));
+              }
+              out["hits"] = std::move(items);
+              return out;
+            },
+            py::arg("doc_id"), py::arg("x"), py::arg("y"), py::arg("radius"),
+            "vector-perf Ticket 1: production verticesNear diagnostic — "
+            "radius query over the layer's vertex R-tree (linear fallback "
+            "under PWB_DISABLE_VERTEX_INDEX=1 or on small layers).")
+        .def(
+            "vertex_pick_bench",
+            [](pwb::qgis_render::QgisMapStack& self, const std::string& doc_id,
+               double x, double y, double radius, int repeats) {
+              bool indexed = false;
+              int hits = 0;
+              const std::vector<double> micros = self.vertexPickBenchMicros(
+                  doc_id, x, y, radius, repeats, hits, indexed);
+              py::dict out;
+              out["indexed"] = indexed;
+              out["hits"] = hits;
+              py::list values;
+              for (const double us : micros) values.append(us);
+              out["micros"] = std::move(values);
+              return out;
+            },
+            py::arg("doc_id"), py::arg("x"), py::arg("y"), py::arg("radius"),
+            py::arg("repeats") = 21,
+            "vector-perf Ticket 1: per-call microsecond timings of the "
+            "production vertex pick path (first call may include the lazy "
+            "bulk index build).")
         .def("set_edit_pick_callback",
              [](pwb::qgis_render::QgisMapStack& self, std::uintptr_t canvas,
                 py::function f) {
