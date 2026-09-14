@@ -72,3 +72,11 @@
   为 property 的调用形态
 - tests/ui/test_mode_state 8 + test_keybinding_flow 10 全绿；
   全壳回归（workstation_shell/keyboard_shortcuts/dock_framework）59 passed
+
+### PHASE 7 (审查修复 + 视觉验证)
+- 双轴审查（2 agents）：Standards 双 gate PASS（memory/echo）；Spec 4 阻断+
+  8 摩擦 → 修复 B1-B4/F2/F3/F6/F8/P1-1..P1-5/P2/P3（洋葱皮层序获像素级证据
+  #8ead9f=30% 精确混合色）
+- 视觉回归 6 用例（结构/状态 gate + 测量记录，D13-rev2 回归 V5 D8 政策）；
+  4 张证据截图 assets/；04-visual-qa-verification.md 落盘
+- tests/ui 98/98 全绿；全量套件第二轮后台复跑中

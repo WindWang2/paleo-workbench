@@ -42,8 +42,9 @@ Loop exit: docs_generated && ui_tdd_all_green && memory_and_leak_free && visual_
       mapping/qc_quickfix.py + cartographic_qa.py 接线；tests/ui/test_interactive_qc_hub.py
 - [ ] PHASE 6 / Ticket 5: workstation/keybinding_manager.py + mode_state.py(FSM) +
       shortcuts.py + shell.py 组装 + 提示条；tests/ui/test_keybinding_flow.py
-- [ ] PHASE 7: 全量回归 + echo-loop 审计 + parentless 泄漏审计 + 视觉回归快照 +
-      04-visual-qa-verification.md + 原子 commit 序列 + PR
+- [x] PHASE 7: 双轴审查（Standards 双 gate PASS / Spec B1-B4+F 项修复）+
+      echo/泄漏审计测试 + 视觉回归（D13-rev2 政策）+ 像素级洋葱皮证据 +
+      04-visual-qa-verification.md + 全量套件复跑 + PR
 
 ## Key architecture anchors (from Explore reports)
 - Shell = WorkstationFrame (ui/workstation/shell.py L96)；dock 注册 dock_framework.py

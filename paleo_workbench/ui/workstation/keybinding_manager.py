@@ -105,6 +105,10 @@ class WorkstationKeyBindingManager(QObject):
         if event.type() == QEvent.Type.KeyPress:
             if focus_in_text_input():
                 return False
+            # D9：动画平移期间的任何用户按键先打断动画（cancel 是幂等的）。
+            smooth_pan = getattr(composite, "smooth_pan", None)
+            if smooth_pan is not None:
+                smooth_pan.cancel()
             key = event.key()
             modifiers = event.modifiers()
             if key == Qt.Key.Key_Space and modifiers == Qt.KeyboardModifier.NoModifier:
@@ -180,23 +184,44 @@ class WorkstationKeyBindingManager(QObject):
         if callable(handler):
             handler()
 
+    def _escape_step(self, machine) -> None:
+        if machine is not None:
+            machine.dispatch(ModeEvent.ESC)
+
     def handle_escape(self) -> None:
-        """安全退出链（D9 顺序）：退出工具 → 关闭向导 → IDLE。"""
+        """安全退出链（D9 顺序；04 #23 两级接力）。
+
+        手势进行中 → 先取消采点（既有 map cancel 语义）；洋葱皮激活 →
+        结束期次对比；工具激活 → 退出工具；向导可见 → 关闭；最后 IDLE。
+        """
         composite = self._composite
         machine = getattr(composite, "mode_state", None)
         controller = composite.edit_controller
         tool = getattr(controller.tools, "active_tool", None)
         tool_id = str(getattr(tool, "tool_id", "") or "")
+        # B4（review）：数字化手势进行中——先取消手势（不退工具），与既有
+        # map cancel 接力（composite 右键同款 tool.points 探测先例）。
+        if tool is not None and getattr(tool, "points", None):
+            controller.cancel_active_tool()
+            return
+        # F2（review）：洋葱皮激活——Esc 首按结束期次对比（02 表语义）。
+        timeline = getattr(composite, "timeline", None)
+        epoch_timeline = getattr(composite, "epoch_timeline", None)
+        if timeline is not None and timeline.onion_button.isChecked():
+            timeline.onion_button.blockSignals(True)
+            timeline.onion_button.setChecked(False)
+            timeline.onion_button.blockSignals(False)
+            if epoch_timeline is not None:
+                epoch_timeline.set_onion(False)
+            self._escape_step(machine)
+            return
         if tool_id and tool_id != "pan":
             controller.activate_tool("pan")
-            if machine is not None:
-                machine.dispatch(ModeEvent.ESC)
+            self._escape_step(machine)
             return
         qc_hub = getattr(composite, "qc_hub", None)
         if qc_hub is not None and qc_hub.isVisible():
             qc_hub.hide()
-            if machine is not None:
-                machine.dispatch(ModeEvent.ESC)
+            self._escape_step(machine)
             return
-        if machine is not None:
-            machine.dispatch(ModeEvent.ESC)
+        self._escape_step(machine)

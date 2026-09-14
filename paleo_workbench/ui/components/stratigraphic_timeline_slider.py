@@ -306,6 +306,8 @@ class EpochTimelineController(QObject):
     #: 提交完成（含外部直调 request_commit 的自动化路径）→ 宿主回同步部件
     #: 高亮。只读广播：消费者不得再触发提交（echo 断路契约，02-FSM 同款）。
     epoch_changed = Signal(str)
+    #: 洋葱皮实际生效状态（False = 无前期次层等场景按钮需回同步，F3）。
+    onion_applied = Signal(bool)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -313,6 +315,7 @@ class EpochTimelineController(QObject):
         self._project: Any = None
         self._status_sink: Callable[[str], None] | None = None
         self._classifier: Callable[[Any], str | None] | None = None
+        self._custom_classifier: Callable[[Any], str | None] | None = None
         self._epochs: list[Any] = []
         self._current_key: str | None = None
         self._onion = False
@@ -332,6 +335,7 @@ class EpochTimelineController(QObject):
         self._project = project
         self._status_sink = status_sink
         self._classifier = classifier
+        self._custom_classifier = classifier
 
     def set_project(self, project: Any) -> None:
         self._project = project
@@ -345,7 +349,9 @@ class EpochTimelineController(QObject):
 
     def set_epochs(self, epochs: Sequence[Any]) -> None:
         self._epochs = list(epochs)
-        if self._classifier is None:
+        # 目录变化即重建默认分类器（工程装载时首建目录常为空；注入的自定义
+        # 分类器不覆盖）。
+        if self._custom_classifier is None:
             self._classifier = default_epoch_classifier(self._epochs)
         if self._current_key is None and self._epochs:
             self._current_key = str(self._epochs[0].key)
@@ -446,6 +452,7 @@ class EpochTimelineController(QObject):
             self._onion = False
             label = self._label_of(self._current_key or "")
             self._status(f"期次「{label}」无相邻前一期次相带层可叠加")
+            self.onion_applied.emit(False)  # F3：按钮态回同步
             return
         self._onion = True
         self._onion_restore = []
@@ -453,9 +460,12 @@ class EpochTimelineController(QObject):
             layer = self._find_layer(layer_id)
             visible = bool(layer.visible) if layer is not None else True
             opacity = float(layer.opacity) if layer is not None else 1.0
-            self._onion_restore.append((layer_id, visible, opacity))
+            position = self._layer_position(layer_id)
+            self._onion_restore.append((layer_id, visible, opacity, position))
             self._manager.set_layer_visible(layer_id, True)
             self._manager.set_layer_opacity(layer_id, ONION_OPACITY)
+            self._raise_layer_to_top(layer_id)  # B2：置于当前层之上
+        self.onion_applied.emit(True)
         self._status(
             f"洋葱皮开启：前一期次「{self._prev_label()}」相带以 30% 半透明叠加")
 
@@ -468,12 +478,42 @@ class EpochTimelineController(QObject):
                 return self._label_of(keys[index - 1])
         return ""
 
+    def _layer_position(self, layer_id: str) -> int:
+        for index, layer in enumerate(self._layers()):
+            if str(layer.id) == str(layer_id):
+                return index
+        return -1
+
+    def _raise_layer_to_top(self, layer_id: str) -> None:
+        """把洋葱层移到渲染栈顶（列表末位 = 最后绘制 = 在上）；无 move_layer 则跳过。
+
+        move_layer(id, direction) 的 direction=+1 使 index 变小（朝底部）；
+        B2 review 修正：渲染自底向上，"置于当前层之上" = 移向列表末位。
+        """
+        move = getattr(self._manager, "move_layer", None)
+        if not callable(move):
+            return
+        layers = self._layers()
+        position = self._layer_position(layer_id)
+        for _ in range(max(len(layers) - 1 - position, 0)):
+            move(str(layer_id), -1)
+
+    def _lower_layer_to(self, layer_id: str, position: int) -> None:
+        """复原到记录的原列表位置（index 大者在上，原位可能在中部）。"""
+        move = getattr(self._manager, "move_layer", None)
+        if not callable(move):
+            return
+        current = self._layer_position(layer_id)
+        for _ in range(max(current - position, 0)):
+            move(str(layer_id), 1)
+
     def _restore_onion(self) -> None:
         if not self._onion_restore:
             self._onion = False
             return
-        for layer_id, visible, opacity in self._onion_restore:
+        for layer_id, visible, opacity, position in self._onion_restore:
             try:
+                self._lower_layer_to(layer_id, position)  # B2：复原层序
                 self._manager.set_layer_opacity(layer_id, opacity)
                 self._manager.set_layer_visible(layer_id, visible)
             except Exception:

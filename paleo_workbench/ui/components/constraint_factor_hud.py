@@ -41,10 +41,9 @@ def _axis_locate(axis: np.ndarray, value: float) -> int | None:
         return None
     ascending = bool(axis[-1] > axis[0])
     probe = axis if ascending else axis[::-1]
-    target = value if ascending else value
-    if target < probe[0] or target > probe[-1]:
+    if value < probe[0] or value > probe[-1]:
         return None
-    index = int(np.searchsorted(probe, target, side="right")) - 1
+    index = int(np.searchsorted(probe, value, side="right")) - 1
     index = max(0, min(index, probe.size - 2))
     return index if ascending else probe.size - 2 - index
 
@@ -111,10 +110,13 @@ def local_slope_degrees(grid: Any, x: float, y: float) -> float | None:
     return math.degrees(math.atan(math.hypot(dz_dx, dz_dy)))
 
 
-def confidence_from_variance(grid: Any, x: float, y: float) -> float | None:
+def confidence_from_variance(
+    grid: Any, x: float, y: float, *, sigma_ref: float | None = None
+) -> float | None:
     """克里金方差 → 置信度：``1 / (1 + σ/σ_z)``（σ_z=网格值标准差，尺度无关）。
 
-    无方差网格（如 IDW 结果）返回 None——不虚构置信度。
+    无方差网格（如 IDW 结果）返回 None——不虚构置信度。``sigma_ref`` 可由
+    调用方缓存注入（O(格点数) 的 nanstd 不进 60ms 刷新循环，D7）。
     """
     if grid is None or getattr(grid, "variance_grid", None) is None:
         return None
@@ -126,13 +128,20 @@ def confidence_from_variance(grid: Any, x: float, y: float) -> float | None:
         variance = float(np.asarray(grid.variance_grid)[row, col])
         if math.isnan(variance):
             return None
-        sigma_ref = float(np.nanstd(np.asarray(grid.grid_z)))
+        if sigma_ref is None or sigma_ref <= 0:
+            sigma_ref = float(np.nanstd(np.asarray(grid.grid_z)))
         if sigma_ref <= 0:
             return None
         sigma = math.sqrt(max(variance, 0.0))
         return 1.0 / (1.0 + sigma / sigma_ref)
     except (IndexError, ValueError, TypeError):
         return None
+
+
+def grid_sigma_reference(grid: Any) -> float:
+    """网格值标准差（σ_ref）；调用方按网格身份缓存，勿在刷新循环内调用。"""
+    sigma = float(np.nanstd(np.asarray(grid.grid_z)))
+    return sigma if sigma > 0 else 0.0
 
 
 def nearest_well(
@@ -174,9 +183,16 @@ class ConstraintFactorHud(QWidget):
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(2)
         self._value_labels: dict[str, QLabel] = {}
+        tooltips = {
+            "sand_ratio": "光标处单因素（砂地比）网格双线性采样；无活动网格时为 —",
+            "slope": "单因素网格局部梯度坡度（中心差分）；无网格时为 —",
+            "nearest_well": "容差内最近控制井；相别分歧需井-层位解释数据在场",
+            "confidence": "克里金方差置信度 1/(1+σ/σz)；IDW 等无方差结果为 —",
+        }
         for row, (key, label) in enumerate(HUD_ROWS):
             name_label = QLabel(label, self)
             name_label.setObjectName(f"ConstraintHudRow_{key}")
+            name_label.setToolTip(tooltips.get(key, ""))
             value_label = QLabel(_MISSING, self)
             value_label.setObjectName(f"ConstraintHudValue_{key}")
             layout.addWidget(name_label, row, 0)
@@ -229,6 +245,7 @@ class HudController(QObject):
         self._section_well_radius = 50.0
         self._pending: tuple[float, float] | None = None
         self._last_well = ""
+        self._sigma_cache: tuple[int, float] | None = None
         self._clear_scheduled = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -283,7 +300,13 @@ class HudController(QObject):
             slope = local_slope_degrees(grid, x, y)
             if slope is not None:
                 values["slope"] = f"{slope:.2f}°"
-            confidence = confidence_from_variance(grid, x, y)
+            # P1-1（review）：nanstd O(格点数)，按网格身份缓存一次（D7）。
+            cache = self._sigma_cache
+            if cache is None or cache[0] != id(grid):
+                cache = (id(grid), grid_sigma_reference(grid))
+                self._sigma_cache = cache
+            confidence = confidence_from_variance(
+                grid, x, y, sigma_ref=cache[1])
             if confidence is not None:
                 values["confidence"] = f"{confidence:.2f}"
         wells = self._wells_provider() if self._wells_provider else []

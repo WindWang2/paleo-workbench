@@ -155,12 +155,24 @@ def test_is_facies_layer_honests_on_non_facies():
 # ---------------------------------------------------------------------------
 
 class FakeLayerManager:
-    """LayerManagerPanel 鸭子面（set_layer_visible/opacity + _layers）。"""
+    """LayerManagerPanel 鸭子面（set_layer_visible/opacity/move_layer + _layers）。"""
 
     def __init__(self, layers):
         self._layers = list(layers)
         self.visible_calls: list[tuple[str, bool]] = []
         self.opacity_calls: list[tuple[str, float]] = []
+        self.move_calls: list[tuple[str, int]] = []
+
+    def move_layer(self, layer_id, direction):
+        """direction=+1 → index 变小（朝渲染底部）；-1 → 朝渲染顶部。"""
+        self.move_calls.append((str(layer_id), int(direction)))
+        for index, layer in enumerate(self._layers):
+            if str(layer.id) == str(layer_id):
+                target = index - int(direction)
+                if 0 <= target < len(self._layers):
+                    self._layers[index], self._layers[target] = (
+                        self._layers[target], self._layers[index])
+                return
 
     def layer_by_id(self, layer_id):
         return next((l for l in self._layers if l.id == layer_id), None)
@@ -254,6 +266,25 @@ def test_onion_controller_sets_30pct_and_restores(qtbot):
     controller.set_onion(False)
     assert ("F2", 1.0) in manager.opacity_calls
     assert ("F2", False) in manager.visible_calls
+
+
+def test_onion_raises_prev_epoch_layer_to_render_top(qtbot):
+    """B2（review）：洋葱层须置于渲染栈顶（列表末位=最后绘制=在上）。"""
+    layers = [
+        _layer("BASE", None),
+        _layer("F2", "E2", visible=False),
+        _layer("F3", "E3"),
+    ]
+    epochs = [SimpleNamespace(key=k) for k in ("E1", "E2", "E3")]
+    controller, manager, _ = _controller(qtbot, layers, epochs)
+    controller.request_commit("E3")
+    order_before = [l.id for l in manager._layers]
+    controller.set_onion(True)
+    order_onion = [l.id for l in manager._layers]
+    assert order_onion[-1] == "F2"  # 洋葱层在渲染顶
+    assert set(order_onion) == set(order_before)
+    controller.set_onion(False)
+    assert [l.id for l in manager._layers] == order_before  # 层序复原
 
 
 def test_onion_first_epoch_is_inert(qtbot):

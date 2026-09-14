@@ -106,7 +106,8 @@ def is_facies_layer(layer: Any) -> bool:
     if role:
         return role in _FACIES_LAYER_ROLES
     name = str(getattr(layer, "name", "") or "")
-    return "相" in name  # 名称兜底：保守包含"相"字的层视为相带层
+    # 名称兜底（review P3）：收窄为明确相带词，避免吞"相干体切片"等地震层。
+    return any(word in name for word in ("相带", "沉积相", "相面", "亚相", "微相"))
 
 
 def build_epoch_switch_plan(

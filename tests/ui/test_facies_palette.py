@@ -20,6 +20,17 @@ from paleo_workbench.mapping.facies_taxonomy import FaciesTaxonomy
 QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def _restore_override_cursor():
+    """吸色管测试可能向 QApplication 全局 override cursor 栈压入十字光标
+    （P1-5 review）——栈不随 widget 销毁复原，逐用例清空防跨用例污染。"""
+    from PySide6.QtGui import QGuiApplication
+
+    yield
+    while QGuiApplication.overrideCursor() is not None:
+        QGuiApplication.restoreOverrideCursor()
+
+
 # ---------------------------------------------------------------------------
 # D6 前置实证：同键跨快捷键上下文分发（gate；结论回写 00-decisions）
 # ---------------------------------------------------------------------------

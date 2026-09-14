@@ -123,6 +123,8 @@ class InteractiveQCHub(QWidget):
         self._sources: dict[str, list[dict]] = {}
         self._items: list[dict] = []  # 当前展示的 issue 列表（稳定序）
         self._fix_context_provider: Callable[[dict], Any] | None = None
+        self._current_issue: dict = {}
+        self._current_availability: dict[str, tuple[bool, str]] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -267,10 +269,13 @@ class InteractiveQCHub(QWidget):
             if ctx is None:
                 button.setEnabled(False)
                 button.setToolTip("无修复上下文（图层/会话不可用）")
+                self._current_availability[action.action_id] = (
+                    False, "无修复上下文（图层/会话不可用）")
             else:
                 ok, reason = action.availability(issue, ctx)
                 button.setEnabled(ok)
                 button.setToolTip(reason if ok else f"不可修复：{reason}")
+                self._current_availability[action.action_id] = (ok, reason)
             button.show()
 
     def fix_button(self, action_id: str) -> QPushButton | None:
@@ -306,9 +311,14 @@ class InteractiveQCHub(QWidget):
                 self._locate_selected()
                 return True
             if event.key() == Qt.Key.Key_F:
+                # F6（review）：键盘路径与按钮同门禁——只发首个可用动作。
                 issue = self._current_issue_dict()
-                actions = actions_for_rule(str(issue.get("rule") or ""))
-                if issue and actions:
-                    self.fix_requested.emit(dict(issue), actions[0].action_id)
-                    return True
+                for action in actions_for_rule(str(issue.get("rule") or "")):
+                    ok, _reason = self._current_availability.get(
+                        action.action_id, (False, ""))
+                    if ok:
+                        self.fix_requested.emit(
+                            dict(issue), action.action_id)
+                        return True
+                return False
         return super().eventFilter(obj, event)

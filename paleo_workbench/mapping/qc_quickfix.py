@@ -25,11 +25,21 @@ MAX_EXTENSION_FACTOR = 8.0
 
 @dataclass
 class QuickFixContext:
-    """修复执行上下文（图层 + 打开的编辑会话 + 吸附容差）。"""
+    """修复上下文（图层 + 容差；session 可选）。
+
+    ``session=None`` = 只读可用性判定（读 ``layer.features()``，不开编辑
+    会话——选中 issue 仅显示按钮不得有写侧副作用，review P1-3）；``apply``
+    路径由宿主先 ``ensure_layer_session`` 再携带真会话调用。
+    """
 
     layer: Any
-    session: Any
+    session: Any = None
     tolerance: float = 1.0
+
+    def _features(self):
+        if self.session is not None:
+            return self.session.features()
+        return self.layer.features() if self.layer is not None else ()
 
 
 @dataclass(frozen=True)
@@ -58,11 +68,42 @@ def _shape(geometry: dict):
     return _shapely().shape(dict(geometry))
 
 
+def _geometry_bbox(geometry: Any) -> tuple[float, float, float, float] | None:
+    """GeoJSON 几何 → 包围盒（纯递归；避免 GEOS 构造成本，review P1-2）。"""
+    if not isinstance(geometry, dict):
+        return None
+    xs: list[float] = []
+    ys: list[float] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, (list, tuple)):
+            if (len(node) >= 2 and isinstance(node[0], (int, float))
+                    and isinstance(node[1], (int, float))):
+                xs.append(float(node[0]))
+                ys.append(float(node[1]))
+                return
+            for child in node:
+                _walk(child)
+
+    _walk(geometry.get("coordinates"))
+    if not xs:
+        return None
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _bboxes_touch(a, b) -> bool:
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
 def _plan_sliver_merge(issue: dict, ctx: QuickFixContext):
     """返回 (sliver, dominant, others) 或 (None, None, 原因)。"""
-    session = ctx.session
+    features = ctx._features()
     sliver_id = str(issue.get("feature_id") or "")
-    sliver = session.feature(sliver_id) if sliver_id else None
+    sliver = None
+    for feature in features:
+        if feature.feature_id == sliver_id:
+            sliver = feature
+            break
     if sliver is None:
         return None, None, "要素不存在或已被删除"
     if sliver.geometry.get("type") not in ("Polygon", "MultiPolygon"):
@@ -70,12 +111,18 @@ def _plan_sliver_merge(issue: dict, ctx: QuickFixContext):
     sliver_geom = _shape(sliver.geometry)
     if not sliver_geom.is_valid:
         return None, None, "碎屑要素几何无效（先修复无效几何）"
+    sliver_bbox = _geometry_bbox(sliver.geometry)
     best = None  # (shared_length, area, feature)
-    for other in session.features():
+    for other in features:
         if other.feature_id == sliver_id:
             continue
         if other.geometry.get("type") not in ("Polygon", "MultiPolygon"):
             continue
+        # bbox 预过滤（P1-2）：不相交包络直接跳过，避免逐要素 GEOS 构造。
+        if sliver_bbox is not None:
+            other_bbox = _geometry_bbox(other.geometry)
+            if other_bbox is None or not _bboxes_touch(sliver_bbox, other_bbox):
+                continue
         other_geom = _shape(other.geometry)
         if not other_geom.is_valid or not other_geom.touches(sliver_geom):
             continue
@@ -96,6 +143,8 @@ def _plan_sliver_merge(issue: dict, ctx: QuickFixContext):
 
 def apply_sliver_merge(issue: dict, ctx: QuickFixContext) -> bool:
     """碎多边形吸附合并到相邻优势相（单一撤销命令）。"""
+    if ctx.session is None:
+        raise RuntimeError("无编辑会话（宿主须先 ensure_layer_session）")
     sliver, dominant, reason = _plan_sliver_merge(issue, ctx)
     if sliver is None or dominant is None:
         raise RuntimeError(reason or "不可修复")
@@ -172,10 +221,15 @@ def _tangent_extend(coords: list, tolerance: float):
         f"（容差 {tolerance:g}×{MAX_EXTENSION_FACTOR:g}）——需人工修编")
 
 
+def _feature_of(ctx: QuickFixContext, feature_id: str):
+    for feature in ctx._features():
+        if feature.feature_id == str(feature_id):
+            return feature
+    return None
+
+
 def tangent_close_availability(issue: dict, ctx: QuickFixContext):
-    session = ctx.session
-    feature_id = str(issue.get("feature_id") or "")
-    feature = session.feature(feature_id) if feature_id else None
+    feature = _feature_of(ctx, str(issue.get("feature_id") or ""))
     if feature is None:
         return False, "要素不存在或已被删除"
     if feature.geometry.get("type") != "LineString":
@@ -189,8 +243,10 @@ def tangent_close_availability(issue: dict, ctx: QuickFixContext):
 
 def apply_tangent_close(issue: dict, ctx: QuickFixContext) -> bool:
     session = ctx.session
+    if session is None:
+        raise RuntimeError("无编辑会话（宿主须先 ensure_layer_session）")
     feature_id = str(issue.get("feature_id") or "")
-    feature = session.feature(feature_id) if feature_id else None
+    feature = _feature_of(ctx, feature_id)
     if feature is None or feature.geometry.get("type") != "LineString":
         raise RuntimeError("要素缺失或不是线要素")
     closed, reason = _tangent_extend(

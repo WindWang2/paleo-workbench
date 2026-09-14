@@ -105,6 +105,11 @@ def build_epoch_catalog(project: ProjectDocument | Any | None) -> list[Stratigra
             undated.append(StratigraphicEpoch(key=name, label=name))
         else:
             label, age = match
-            dated.append(StratigraphicEpoch(key=name, label=label, age_ma=age))
+            # "X 顶界" 与 "X 底界" 若都用年代名会得到同名刻度且顶界被赋底界
+            # 年龄（review Spec-P2）——顶界保留原文区分，排序年龄仍按底界。
+            if "顶界" in name:
+                undated.append(StratigraphicEpoch(key=name, label=name))
+            else:
+                dated.append(StratigraphicEpoch(key=name, label=label, age_ma=age))
     dated.sort(key=lambda e: -e.age_ma)  # 底界年龄大 = 更老 = 排前
     return dated + undated

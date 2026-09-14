@@ -901,7 +901,9 @@ class WorkstationFrame(QWidget):
             return
         if text == active_target_horizon(project):
             return
-        set_target_from_boundary(project, text)
+        # B3（review）：horizon 下拉与时间轴统一通道——走期次提交（元数据
+        # 写穿 + 图层差分 + 时间轴高亮回同步一体），消灭三态矛盾。
+        self.composite.epoch_timeline.request_commit(text)
         self._sync_mapping_horizon()
         self.composite.stage_controller.refresh_evaluation()
         self.status_message.emit(f"编图层位：{text}（相图在此层位下进行）")

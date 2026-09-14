@@ -81,7 +81,6 @@ def test_space_released_without_press_is_inert(qtbot, monkeypatch):
     doc = _composite(qtbot, monkeypatch)
     doc.setFocus()
     doc.keybinding.release_temporary_pan()  # 未按过的 release 不得炸/换工具
-    assert doc.edit_controller.tools.active_tool is None or True
 
 
 # ---------------------------------------------------------------------------

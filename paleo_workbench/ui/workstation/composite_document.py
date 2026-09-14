@@ -1130,9 +1130,7 @@ class CompositeDocument(QWidget):
         self.facies_eyedropper.bind(
             lambda point: self.edit_controller.identify_all(point))
         self.facies_eyedropper.picked.connect(self._on_eyedropper_picked)
-        self.facies_eyedropper.pick_missed.connect(
-            lambda: self.status_message.emit(
-                "吸色管未命中相带要素——保持当前装备"))
+        self.facies_eyedropper.pick_missed.connect(self._on_eyedropper_missed)
         self.facies_palette.eyedropper_toggled.connect(
             self.set_eyedropper_active)
         self._eyedropper_cursor = False
@@ -1367,6 +1365,9 @@ class CompositeDocument(QWidget):
         self.timeline.epoch_committed.connect(
             lambda *_: self.stage_controller.refresh_evaluation())
         self.timeline.onion_toggled.connect(self.epoch_timeline.set_onion)
+        # F3（review）：控制器实际生效状态回同步按钮（无可叠层等场景）。
+        self.epoch_timeline.onion_applied.connect(
+            self._sync_onion_button_state)
         # 外部提交（自动化/壳层直调）后的部件高亮回同步（幂等，无回环）。
         self.epoch_timeline.epoch_changed.connect(self.timeline.set_current_epoch)
 
@@ -2655,22 +2656,23 @@ class CompositeDocument(QWidget):
         if feature_id and layer_id:
             layer = self.edit_controller.layer(layer_id)
             if layer is not None:
-                # 诚实降级（04 #13）：fallback 栈的高亮 = 选中编辑目标层并
-                # 写状态条；native 栈另有 highlight_checker_errors 通道。
+                # B1（review）：fallback 高亮 = 选中集（04 #13 诚实降级的
+                # 兑现）+ 状态条指认；native 栈另有 highlight_checker_errors。
                 self.edit_controller.set_active_layer(layer_id)
+                layer.set_selection([feature_id])
+                self.status_message.emit(
+                    f"已定位问题要素 {feature_id}（已选中高亮，图层 {layer.name}）")
 
     def _qc_fix_context(self, issue: dict):
+        """只读可用性上下文（P1-3 review）：读 layer.features()，不开编辑会话。"""
         from paleo_workbench.mapping.qc_quickfix import QuickFixContext
 
         layer = self.edit_controller.layer(str(issue.get("layer_id") or ""))
         if layer is None:
             return None
-        session, _reason = self.edit_controller.ensure_layer_session(layer.id)
-        if session is None:
-            return None
         tolerance = getattr(self.edit_controller, "_tolerance", None)
         return QuickFixContext(
-            layer=layer, session=session,
+            layer=layer, session=None,
             tolerance=float(tolerance() if callable(tolerance) else 1.0))
 
     def _apply_quick_fix(self, issue: dict, action_id: str) -> None:
@@ -2685,6 +2687,12 @@ class CompositeDocument(QWidget):
         if context is None:
             self.status_message.emit("修复上下文不可用（图层或会话缺失）")
             return
+        # 真正修复才打开编辑会话（P1-3）：单命令写侧通道。
+        session, _reason = self.edit_controller.ensure_layer_session(context.layer.id)
+        if session is None:
+            self.status_message.emit("修复上下文不可用（图层或会话缺失）")
+            return
+        context.session = session
         try:
             action.apply(dict(issue), context)
         except Exception as exc:  # 修复失败必须可见，不静默
@@ -4461,6 +4469,18 @@ class CompositeDocument(QWidget):
         if self.facies_eyedropper.active:
             self.facies_eyedropper.handle_click(tuple(point))
 
+    def _on_eyedropper_missed(self) -> None:
+        self.status_message.emit("吸色管未命中相带要素——保持当前装备")
+        self._toast("未命中相带要素——保持当前装备", tone="warning")
+
+    def _toast(self, text: str, *, tone: str = "process") -> None:
+        from paleo_workbench.ui.components.toast import PwbToast
+
+        try:
+            PwbToast.show_on(self.canvas, text, tone=tone, timeout_ms=2000)
+        except Exception:
+            pass  # offscreen/无窗口环境退化为状态条（已有）
+
     def _on_eyedropper_picked(self, picked: dict) -> None:
         self.facies_brush.equip({
             key: picked.get(key, "")
@@ -4469,8 +4489,15 @@ class CompositeDocument(QWidget):
             part for part in (
                 picked.get("facies"), picked.get("sub_facies"),
                 picked.get("micro_facies")) if part)
-        self.status_message.emit(
-            f"吸色管已装备：{label}（颜色 {picked.get('color') or '—'}）")
+        message = f"吸色管已装备：{label}（颜色 {picked.get('color') or '—'}）"
+        self.status_message.emit(message)
+        self._toast(message, tone="success")
+        self.set_eyedropper_active(False)  # F8：一次性会话，拾取即退出
+
+    def _sync_onion_button_state(self, applied: bool) -> None:
+        self.timeline.onion_button.blockSignals(True)
+        self.timeline.onion_button.setChecked(bool(applied))
+        self.timeline.onion_button.blockSignals(False)
 
     def _sync_digit_keys(self) -> None:
         """数字键 1-9 画布域装备（M2；仅绘图工具激活期注册，D6）。"""
