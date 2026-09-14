@@ -15,6 +15,10 @@
 // Qt DOM (v7 raster_renderer_info): AFTER pybind11 per the rule above.
 #include <QDomDocument>
 #include <QDomElement>
+// geotopo JSON adapter (QJsonDocument) — likewise after pybind11.
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <qgis.h>
 #include <qgsconfig.h>  // _QGIS_VERSION（capability manifest 的版本串）
@@ -22,6 +26,7 @@
 #include <qgsrendercontext.h>
 #include <qgssymbol.h>
 
+#include "geological_topology_core.hpp"
 #include "geometry_service.hpp"
 #include "gui_service.hpp"
 #include "map_stack_service.hpp"
@@ -720,6 +725,85 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                       return pwb::qgis_render::geometry_clip(
                           geometry_arg(source), parse_extent(extent));
                   });
+
+    // Geological topology core (geotopo tickets): JSON-envelope contract,
+    // never raises — malformed input returns an error envelope string
+    // (02-interface-contracts §1/§3).
+    auto geotopo = module.def_submodule(
+        "geotopo", "Geological planar-topology core (DCEL polygonizer)");
+    geotopo.def(
+        "polygonize_control_lines",
+        [](const std::string& lines_json, const std::string& options_json) {
+            namespace gt = pwb::geotopo;
+            const auto error_envelope = [](gt::ErrorCode code, const QString& message) {
+                gt::PolygonizeResult bad;
+                bad.error = code;
+                bad.message = message.toStdString();
+                return gt::polygonize_result_to_json(bad);
+            };
+            QJsonParseError parse_error{};
+            const QJsonDocument lines_doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(lines_json), &parse_error);
+            if (parse_error.error != QJsonParseError::NoError || !lines_doc.isObject()) {
+                return error_envelope(gt::ErrorCode::MalformedJson,
+                                      QString("malformed json: %1")
+                                          .arg(parse_error.errorString()));
+            }
+            gt::PolygonizeOptions options;
+            if (!options_json.empty()) {
+                const QJsonDocument options_doc = QJsonDocument::fromJson(
+                    QByteArray::fromStdString(options_json), &parse_error);
+                if (parse_error.error != QJsonParseError::NoError || !options_doc.isObject()) {
+                    return error_envelope(gt::ErrorCode::MalformedJson,
+                                          QString("malformed options json: %1")
+                                              .arg(parse_error.errorString()));
+                }
+                const QJsonObject obj = options_doc.object();
+                options.tolerance = obj.value("tolerance").toDouble(1e-6);
+                options.min_ring_area = obj.value("min_ring_area").toDouble(0.0);
+                if (obj.contains("clip_envelope")) {
+                    const QJsonArray clip = obj.value("clip_envelope").toArray();
+                    if (clip.size() == 4) {
+                        options.has_clip = true;
+                        options.clip_xmin = clip.at(0).toDouble();
+                        options.clip_ymin = clip.at(1).toDouble();
+                        options.clip_xmax = clip.at(2).toDouble();
+                        options.clip_ymax = clip.at(3).toDouble();
+                    }
+                }
+            }
+            std::vector<gt::ControlLineInput> lines;
+            const QJsonArray lines_array = lines_doc.object().value("lines").toArray();
+            for (const QJsonValue& value : lines_array) {
+                const QJsonObject record = value.toObject();
+                gt::ControlLineInput line;
+                line.id = record.value("id").toString().toStdString();
+                const QJsonArray path = record.value("path").toArray();
+                for (const QJsonValue& point : path) {
+                    const QJsonArray xy = point.toArray();
+                    if (xy.size() != 2) {
+                        return error_envelope(
+                            gt::ErrorCode::InvalidInput,
+                            QString("line '%1' has a non-2D vertex").arg(
+                                QString::fromStdString(line.id)));
+                    }
+                    line.xy.push_back(xy.at(0).toDouble());
+                    line.xy.push_back(xy.at(1).toDouble());
+                }
+                lines.push_back(std::move(line));
+            }
+            // NaN survives QJsonValue round-trip; the core rejects non-finite
+            // vertices with PWB-GT-001.
+            gt::PolygonizeResult result;
+            {
+                py::gil_scoped_release release;
+                result = gt::polygonize_control_lines(lines, options);
+            }
+            return gt::polygonize_result_to_json(result);
+        },
+        py::arg("lines"), py::arg("options") = "{}",
+        "Polygonize a control-line network into bounded facies faces "
+        "(JSON envelope per docs/development/geotopo-editor/02-interface-contracts.md).");
 
     auto mapstack = module.def_submodule("mapstack", "QGIS native map stack");
     py::class_<pwb::qgis_render::QgisMapStack>(mapstack, "QgisMapStack")
