@@ -1280,11 +1280,52 @@ class CompositeEditController(QObject):
         return (layer.edit_session is not None
                 or self.native_editing.is_open(layer.id))
 
+    def current_canvas_layer_id(self) -> str:
+        """画布当前层的 doc_id（"" = 没有 / 不是镜像层）。无桥面时恒 ""。"""
+        canvas = self._canvas
+        getter = getattr(canvas, "current_layer_doc_id", None)
+        if not callable(getter):
+            return ""
+        try:
+            return str(getter() or "")
+        except Exception:
+            return ""
+
+    def repush_canvas_current_layer(self) -> bool:
+        """把活动层重新推成画布当前层（幂等；已就位则空操作）。
+
+        V12 M0-2b（编辑工具链 D-B）：宿主过去只在 ``set_active_layer`` 里推
+        一次，而那一推往往发生在镜像发布**之前**（``create_layer`` 先激活、
+        后 emit ``layers_changed`` → 快照发布），桥以 ``unknown doc_id`` 拒绝
+        且无人重试——画布 current layer 于是永远为空/陈旧，顶点工具的
+        ``editLayer()`` 恒为 nullptr，v2 档失活、拖动退化成 v1 静默失败。
+
+        凡"目标层可能刚刚变得可解析"的时刻都要调本方法：原生会话开启后、
+        镜像发布后、树选中被同 id 短路时。
+        """
+        layer_id = self._active_layer_id
+        canvas = self._canvas
+        if not layer_id or canvas is None:
+            return False
+        if not hasattr(canvas, "set_current_layer"):
+            return False
+        if self.current_canvas_layer_id() == str(layer_id):
+            return False
+        try:
+            canvas.set_current_layer(str(layer_id))
+        except Exception:
+            return False
+        return True
+
     def set_active_layer(self, layer_id: str | None) -> None:
         layer_id = str(layer_id) if layer_id else None
         if layer_id is not None and layer_id not in self._layers:
             layer_id = None
         if layer_id == self._active_layer_id:
+            # V12 M0-2b：同 id 不代表画布已接收——首次推送可能早于镜像发布
+            # 而被拒（见 repush_canvas_current_layer）。这里补一次幂等重推，
+            # 否则"点树里这一层"这个最自然的用户动作救不回画布侧。
+            self.repush_canvas_current_layer()
             return
         previous = self.active_layer
         if previous is not None and previous.edit_session is not None:
@@ -1389,6 +1430,11 @@ class CompositeEditController(QObject):
                 stack, layer, gate=self.can_edit_layer,
                 canvas_address=address)
             if ok:
+                # V12 M0-2b：会话层此刻必定已在镜像里（open 走的
+                # start_mirror_layer_editing 按 doc_id 解析成功），把画布
+                # current layer 补上——这是 v2 顶点工具/原生 identify 的
+                # 目标层，此前全靠 set_active_layer 那一推（常常已被拒绝）。
+                self.repush_canvas_current_layer()
                 self._rebind_active_tool()
                 self.state_changed.emit()
                 return
@@ -1734,6 +1780,10 @@ class CompositeEditController(QObject):
                 canvas_address=getattr(self._canvas, "canvas_address", 0))
             if not ok:
                 refused.append(f"「{layer.name}」{reason}")
+        # V12 M0-2b：入集的邻层是"候选层"，编辑目标仍是活动层——这里只把
+        # 活动层重新确认一次（press 期间同步入集可能刚重建过镜像树，
+        # 画布 current layer 若被清空，本次拖动就白拖了）。
+        self.repush_canvas_current_layer()
         if refused:
             self.native_join_refused.emit(
                 "邻层未参与编辑：" + "；".join(refused))
@@ -3410,6 +3460,10 @@ class CompositeEditController(QObject):
             "collect_ready": self._selection_geometry_facts(layer, session)[1],
             "snapping_enabled": self._snapping.enabled,
             "topology_enabled": self._topology.enabled,
+            # V12 M1：编辑期联动开关（三个既有子能力 → 工具条勾选态）。
+            "avoid_intersections_enabled": bool(self.avoid_intersections_enabled),
+            "tracing_enabled": bool(self.tracing_enabled),
+            "vertex_all_layers": bool(self.vertex_all_layers),
             # V10 M3：捕捉配置事实（呈现详情——容差/模式/角色推荐态）。
             # 全部读 SnappingService 既有权威（全局值 + per-layer 覆盖通道），
             # 不建第二配置源；采集 O(1)。

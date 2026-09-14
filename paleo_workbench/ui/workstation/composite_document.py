@@ -68,7 +68,10 @@ from paleo_workbench.mapping.tool_context import build_tool_context
 from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
-from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+from paleo_workbench.ui.qgis_stack.canvas_shim import (
+    QgisCanvasShim,
+    bridge_available,
+)
 from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
@@ -1208,11 +1211,15 @@ class CompositeDocument(QWidget):
         if measure_updated is not None:
             measure_updated.connect(self._on_measure_updated)
         # V10（review-5 #20）：捕获过程反馈接到测距栏（数字化与测距互斥，
-        # 标签复用零 UI 改动）；snap_feedback 保持纯信号面（消费方按需接线，
-        # 状态栏 snapping 标签归 update_state 所有——避免高频闪烁）。
+        # 标签复用零 UI 改动）。
         capture_progress = getattr(self.canvas, "capture_progress", None)
         if capture_progress is not None:
             capture_progress.connect(self._on_capture_progress)
+        # V12 M0-4：捕捉命中反馈接状态条（只进 snapping chip 的 tooltip——
+        # chip 文本归 update_state 权威，逐像素写标签会与它互相闪烁）。
+        snap_feedback = getattr(self.canvas, "snap_feedback", None)
+        if snap_feedback is not None:
+            snap_feedback.connect(self.status_bar.set_snap_match)
         measure_canceled = getattr(self.canvas, "measure_canceled", None)
         if measure_canceled is not None:
             measure_canceled.connect(lambda: self.status_bar.set_measure(""))
@@ -1408,6 +1415,15 @@ class CompositeDocument(QWidget):
         fallback 渲染器；原生专属分支（QgsVectorLayerProperties 等）以
         ``uses_native_stack`` 显式判断。桥构建指引见 canvas_shim 的报错文案。
         """
+        # 桥缺失时**不能**构造 QgisCanvasShim：壳层重建会第二次走进这里，
+        # 而"构造注定失败的 QWidget"在第二次会触发访问冲突（0xC0000005）。
+        # 所以先探测、再决定构造（与 display_canvas.create_display_canvas
+        # 同一模式）。
+        if not bridge_available():
+            logging.getLogger(__name__).debug(
+                "QGIS 渲染桥不可用，直接使用 fallback 画布"
+            )
+            return UnifiedMapCanvas(parent=self), False
         try:
             return QgisCanvasShim(parent=self), True
         except Exception:
@@ -3253,9 +3269,20 @@ class CompositeDocument(QWidget):
 
         source_role = self.stage_controller.state.role_of(str(layer_id))
         if source_role.is_raw_protected:
+            # 相预测（井/震）与初始相图同源：副本是「拿去改的解释草稿」，
+            # 一律落 INITIAL_FACIES_DRAFT（home = phase1.interpretation）。
+            # 不能退 USER_GENERAL——它的 home 就是 LEGACY 未分类兜底组
+            # （z 序垫底），副本与源同几何同样式，被源完全遮盖，画布上
+            # 表现为「复制出来的图层不显示」。
             draft_role = (
                 LayerRole.INITIAL_FACIES_DRAFT
-                if source_role == LayerRole.INITIAL_FACIES_SOURCE
+                if source_role in (
+                    LayerRole.INITIAL_FACIES_SOURCE,
+                    LayerRole.WELL_FACIES_PREDICTION,
+                    LayerRole.SEISMIC_FACIES_PREDICTION,
+                    LayerRole.WELL_FACIES_CONFIDENCE,
+                    LayerRole.SEISMIC_FACIES_CONFIDENCE,
+                )
                 else LayerRole.USER_GENERAL
             )
             self.stage_controller.state.set_membership(
@@ -4773,6 +4800,15 @@ class CompositeDocument(QWidget):
                 expand()
         except Exception:
             logging.getLogger(__name__).exception("stage workspace reconcile failed")
+        # V12 M0-2b：镜像 upsert 完成后补推画布当前层。这是本缺陷的兜底口——
+        # 首次推送总发生在镜像入项目之前（create_layer 先激活、后发布），
+        # 桥必然以 unknown doc_id 拒绝；发布之后再确认一次，编辑目标才真正
+        # 就位（否则顶点工具/原生 identify 永远拿不到 editLayer）。
+        try:
+            self.edit_controller.repush_canvas_current_layer()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "canvas current-layer repush failed")
 
     # -- 工程绑定 -------------------------------------------------------------
 

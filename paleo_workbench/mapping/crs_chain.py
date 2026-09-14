@@ -125,6 +125,16 @@ def evaluate_edit_entry(
                     declared_crs=declared,
                 )
         elif storage and not canvas and runtime_crs_capable:
+            # 本地/自定义投影（proj4 tmerc 等）没有 EPSG authid：桥
+            # canvasDestinationCrs 回读 authid() 得空串，被当成「画布
+            # 未知」。但投影（非经纬度）图层在画布 authid 未知时与画布同
+            # 按投影米 no-OTF 恒等渲染，坐标帧一致，不是错帧故障——放行。
+            # fail-closed 只保留给经纬度图层（画布未知时经纬度数据会被
+            # 按米错绘，那是真实风险）。
+            from paleo_workbench.mapping.crs_contract import crs_is_geographic
+
+            if crs_is_geographic(storage) is False:
+                continue
             return CrsEntryVerdict(
                 False,
                 f"图层「{layer.layer_id}」声明 CRS {storage}，但画布目标 "

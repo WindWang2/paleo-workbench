@@ -517,17 +517,18 @@ class LayerGroupController:
                     view_state.group_locked[group_id] = True
         changed = 0
         for group_id, visible in effective.items():
-            if group_id not in self._last_group_visibility or \
-                    self._last_group_visibility[group_id] != visible:
-                try:
-                    self._stack.set_group_visibility(group_id, visible)
-                    # 成功才记已应用：失败的显隐保持未应用态，后续重试
-                    #（否则记忆表与 QGIS 实际显隐永久漂移）。
-                    self._last_group_visibility[group_id] = visible
-                    changed += 1
-                except Exception:
-                    logger.debug("set_group_visibility failed for %s", group_id,
-                                 exc_info=True)
+            # 全量推，不跳「未变化」：_last_group_visibility 与 QGIS 实际态
+            # 会漂移（组被 remove_groups_except 重建 / reconcile 重置 / 树
+            # UI 直改后未回流），漂移后「只推变化」会把错误显隐冻结成永久
+            # （典型：兜底组里图层树勾选可见但画布不渲染）。组数量为个位
+            # 数，set_group_visibility 是廉价 setter，全量推换永远一致。
+            try:
+                self._stack.set_group_visibility(group_id, visible)
+                self._last_group_visibility[group_id] = visible
+                changed += 1
+            except Exception:
+                logger.debug("set_group_visibility failed for %s", group_id,
+                             exc_info=True)
         return effective
 
     def set_group_visible(self, group_id: str, visible: bool,

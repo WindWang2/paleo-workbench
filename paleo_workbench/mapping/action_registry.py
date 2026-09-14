@@ -123,6 +123,8 @@ def _specs() -> dict[str, ActionSpec]:
         "select_all", "invert_selection", "clear_selection", "toggle_editing",
         "save_edits", "snapping", "topology", "layer_properties",
         "attribute_table",
+        # V12 M1：编辑期联动开关（地图右键即可切换，与工具条同一求值器）。
+        "avoid_intersections", "tracing", "vertex_scope",
     }
     specs: dict[str, ActionSpec] = {}
     for tool_id in TOOL_IDS:

@@ -606,18 +606,39 @@ std::vector<PwbVertexTool::VertexRef> PwbVertexTool::verticesNear(
   return out;
 }
 
+namespace {
+
+//: 两层坐标是否可比（§2 跨层拓扑只在同 CRS 层间成立）。
+//: 双方都未声明 CRS（工程未声明坐标系时镜像层 CRS 为空）→ 可比：画布此时
+//: 按原坐标渲染，逐字比较坐标才是正确语义。只有一方声明时不可比——
+//: 混着比会得到看似成功、实则错位的拓扑联动。
+bool coordinatesComparable(QgsVectorLayer* a, QgsVectorLayer* b) {
+  if (a == nullptr || b == nullptr) return false;
+  const QgsCoordinateReferenceSystem& ca = a->crs();
+  const QgsCoordinateReferenceSystem& cb = b->crs();
+  if (!ca.isValid() && !cb.isValid()) return true;
+  if (!ca.isValid() || !cb.isValid()) return false;
+  return ca == cb;
+}
+
+}  // namespace
+
 std::vector<PwbVertexTool::VertexRef> PwbVertexTool::discoverAllLayers(
     const QgsPointXY& mapPoint, double pick_radius) {
   // 候选层内最近顶点为锚（同 CRS 层才可比坐标——§2 跨层拓扑仅同 CRS）。
+  // V12 M0-2d：未声明 CRS 的层**不再直接丢弃**。旧写法 `if
+  // (!ref.layer->crs().isValid()) continue;` 在工程坐标系未声明的工程里
+  // （镜像层 CRS 为空，工作站的常见形态）会让候选**全部**落空，press 于是
+  // 走"点空处"分支 → 框选 → 短按即 pick_miss：用户看到的就是节点工具
+  // "完全拖不动"，且没有任何提示。
   const auto candidates = candidateLayers();
   std::vector<VertexRef> picked;
   for (QgsVectorLayer* layer : candidates) {
     if (layer == nullptr) continue;
     for (VertexRef& ref : verticesNear(layer, mapPoint, pick_radius)) {
-      if (!ref.layer->crs().isValid()) continue;
       if (!picked.empty()
-          && ref.layer->crs() != picked.front().layer->crs()) {
-        continue;  // 与首个命中层不同 CRS：不参与本轮发现
+          && !coordinatesComparable(ref.layer, picked.front().layer)) {
+        continue;  // 与首个命中层不可比（一方声明 CRS、一方没有）：不参与
       }
       picked.push_back(std::move(ref));
     }
@@ -625,14 +646,11 @@ std::vector<PwbVertexTool::VertexRef> PwbVertexTool::discoverAllLayers(
   if (picked.empty()) return picked;
   const QgsPointXY anchor = picked.front().pos;
   // 同 CRS 过滤（§2）：坐标只在同 CRS 层间可比——异层 CRS 直接不参与。
-  const QgsCoordinateReferenceSystem primary_crs =
-      picked.front().layer != nullptr ? picked.front().layer->crs()
-                                      : QgsCoordinateReferenceSystem();
+  QgsVectorLayer* primary = picked.front().layer;
   std::vector<VertexRef> shared;
   std::vector<std::string> join_ids;
   for (QgsVectorLayer* layer : candidates) {
-    if (layer == nullptr || !layer->crs().isValid()
-        || (primary_crs.isValid() && layer->crs() != primary_crs)) {
+    if (layer == nullptr || !coordinatesComparable(layer, primary)) {
       continue;
     }
     for (const VertexRef& ref : verticesNear(layer, anchor,
@@ -1225,7 +1243,12 @@ void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
       return;
     }
     boxed_selection_.clear();
-    beginSharedDrag(shared.front().pos, std::move(shared));
+    // 先取锚点、再移动容器：MSVC 的实参求值顺序是从右往左，写成
+    // ``beginSharedDrag(shared.front().pos, std::move(shared))`` 时 move 先执行，
+    // 容器的缓冲区已经易主 → front() 对空容器解引用（空指针 + 偏移），
+    // 拖动工具在 Windows 上按下即崩。GCC/Clang 自左向右，故只在 MSVC 复现。
+    const QgsPointXY anchor = shared.front().pos;
+    beginSharedDrag(anchor, std::move(shared));
     return;
   }
   Pick pick;

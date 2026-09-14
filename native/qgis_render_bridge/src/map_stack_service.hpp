@@ -210,8 +210,12 @@ public:
       std::uintptr_t canvas,
       std::function<void(const std::string&, const std::string&)> callback);
   // 画布当前图层（原生选择/identify 的目标图层）；doc_id 未命中镜像抛
-  // invalid_argument。
+  // invalid_argument。空 doc_id = 显式清除（manifest `current_layer_clear`）。
   void setCurrentLayer(std::uintptr_t canvas, const std::string& doc_id);
+  // 当前图层的 doc_id（V12 M0-2a，manifest `current_layer_query`）：
+  // 无当前层或当前层不是镜像层时返回空串。宿主用它做"目标层是否已就位"
+  // 的幂等重推判定，避免在 Python 侧维护会漂移的影子状态。
+  std::string currentLayerId(std::uintptr_t canvas);
   // 选中高亮投影（QgsHighlight，QGIS 桌面选中样式）：Python 选集是权威，
   // 每次调用整组替换。feature_ids_json 为 JSON 字符串数组；未知 id 跳过。
   void highlightFeatures(std::uintptr_t canvas, const std::string& doc_id,

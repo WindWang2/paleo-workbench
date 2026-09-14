@@ -456,6 +456,7 @@ class EpochTimelineController(QObject):
             return
         self._onion = True
         self._onion_restore = []
+        raised = True
         for layer_id in onion_ids:
             layer = self._find_layer(layer_id)
             visible = bool(layer.visible) if layer is not None else True
@@ -464,10 +465,14 @@ class EpochTimelineController(QObject):
             self._onion_restore.append((layer_id, visible, opacity, position))
             self._manager.set_layer_visible(layer_id, True)
             self._manager.set_layer_opacity(layer_id, ONION_OPACITY)
-            self._raise_layer_to_top(layer_id)  # B2：置于当前层之上
+            raised = self._raise_layer_to_top(layer_id) and raised  # B2：置于当前层之上
         self.onion_applied.emit(True)
-        self._status(
-            f"洋葱皮开启：前一期次「{self._prev_label()}」相带以 30% 半透明叠加")
+        hint = f"洋葱皮开启：前一期次「{self._prev_label()}」相带以 30% 半透明叠加"
+        if not raised:
+            # 分层模式下 root 平铺序不是权威（组结构由 LayerGroupController
+            # 管），置顶推不动——如实说明，别让用户以为叠加层已在最上。
+            hint += "（当前分组模式不支持跨组置顶：叠加层仍在其所属组内）"
+        self._status(hint)
 
     def _prev_label(self) -> str:
         keys = [str(getattr(e, "key", "") or "") for e in self._epochs]
@@ -484,19 +489,28 @@ class EpochTimelineController(QObject):
                 return index
         return -1
 
-    def _raise_layer_to_top(self, layer_id: str) -> None:
-        """把洋葱层移到渲染栈顶（列表末位 = 最后绘制 = 在上）；无 move_layer 则跳过。
+    def _raise_layer_to_top(self, layer_id: str) -> bool:
+        """把洋葱层移到渲染栈顶（列表末位 = 最后绘制 = 在上）。
+
+        返回是否**真的应用**：分组模式下 ``move_layer`` 不推桥（root 平铺序
+        不是权威），置顶落不了地——调用方据此如实呈现，不制造"已在最上"的
+        假象（V12 D-C2：静默 no-op 是这一条最坏的表现形态）。
 
         move_layer(id, direction) 的 direction=+1 使 index 变小（朝底部）；
         B2 review 修正：渲染自底向上，"置于当前层之上" = 移向列表末位。
         """
         move = getattr(self._manager, "move_layer", None)
         if not callable(move):
-            return
+            return False
         layers = self._layers()
         position = self._layer_position(layer_id)
-        for _ in range(max(len(layers) - 1 - position, 0)):
-            move(str(layer_id), -1)
+        moved = max(len(layers) - 1 - position, 0)
+        if moved == 0:
+            return True  # 已在栈顶，无需移动
+        applied = False
+        for _ in range(moved):
+            applied = bool(move(str(layer_id), -1))
+        return applied
 
     def _lower_layer_to(self, layer_id: str, position: int) -> None:
         """复原到记录的原列表位置（index 大者在上，原位可能在中部）。"""

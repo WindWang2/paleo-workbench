@@ -2,7 +2,7 @@
 
 编辑权迁移 QGIS 后宿主是**同步方**：镜像层经桥 ``startEditing()`` 进入
 原生编辑缓冲，顶点工具直接编辑镜像；Python 真源（user_vector_layers）
-只在提交后消费 committed\* 增量对齐（``VectorLayer.apply_committed_delta``）。
+只在提交后消费 committed\\* 增量对齐（``VectorLayer.apply_committed_delta``）。
 编辑期间 Python 不动——未提交编辑即崩溃即丢（易失会话，无 sidecar）。
 
 三段门禁的落点：

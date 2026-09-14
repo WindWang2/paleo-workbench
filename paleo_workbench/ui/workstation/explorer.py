@@ -413,8 +413,97 @@ class WorkstationExplorer(QFrame):
                 _TreeNode("group/history-exports/empty", "尚无导出成果", {"kind": "empty"})
             )
         root.children.append(exports)
-        self.footer_label.setText("解释、校验与导出历史")
+        root.children.append(self._process_results_node())
+        self.footer_label.setText("过程成果、解释、校验与导出历史")
         return [root]
+
+    def _process_results_node(self) -> _TreeNode:
+        """过程成果：阶段工作区里带角色的成果（角色归类 + 成熟度）。
+
+        数据源是 ``ProjectDocument.mapping_workspace``——由
+        :meth:`CompositeDocument._sync_workspace_state_to_project` 写入
+        ``stage_controller.save_state()`` 的结果，并在「保存阶段成果」时落盘。
+        因此这里列出的是**工作流真正产生并保存过的**中间/最终成果
+        （校正稿、综合解释、相带边界、单因素、约束……），
+        每一项带着角色、成熟度和钉住的来源版本。
+
+        RAW 输入不在这里：它们是只读来源，登记在数据目录中（数据管理页）。
+        没有工作区状态（未开工程 / 旧工程）时给空态，不静默隐藏。
+        """
+        from paleo_workbench.mapping_workspace.layer_roles import ROLE_LABELS
+        from paleo_workbench.mapping_workspace.stage_state import ArtifactMaturity
+        from paleo_workbench.ui.workstation.state_language import state_token
+
+        empty = _TreeNode(
+            "group/history-process/empty", "尚无过程成果", {"kind": "empty"}
+        )
+        project = self._project
+        workspace = getattr(project, "mapping_workspace", None)
+        memberships = getattr(workspace, "memberships", None)
+        if not memberships:
+            return self._group_node("group/history-process", "过程成果", [empty])
+
+        names: dict[str, str] = {}
+        for layer in list(getattr(project, "user_vector_layers", None) or []):
+            layer_id = str(getattr(layer, "id", "") or "")
+            if layer_id:
+                names[layer_id] = str(getattr(layer, "name", "") or layer_id)
+
+        # 成熟度键的约定是 "<kind>:<layer_id>"（见 create_facies_draft 的
+        # set_maturity("phase1_draft:<id>")）；也容忍裸 layer_id 的历史数据。
+        maturity_by_layer: dict[str, str] = {}
+        for key, value in (getattr(workspace, "artifact_maturity", None) or {}).items():
+            head, sep, tail = str(key).partition(":")
+            maturity_by_layer[tail if sep else head] = str(value)
+        default_maturity = str(getattr(ArtifactMaturity, "DRAFT", "draft"))
+
+        grouped: dict[str, list[_TreeNode]] = {}
+        order: list[str] = []
+        for layer_id, record in memberships.items():
+            role = getattr(record, "role", None)
+            role_label = ROLE_LABELS.get(role) or str(
+                getattr(role, "value", "") or "未分类"
+            )
+            maturity_value = maturity_by_layer.get(str(layer_id), default_maturity)
+            token = state_token("maturity", maturity_value)
+            maturity_text = f"{token.glyph} {token.label}" if token is not None else ""
+            pinned = str(getattr(record, "source_version_id", "") or "")
+            name = names.get(str(layer_id), str(layer_id))
+
+            text = f"{name} · {maturity_text}" if maturity_text else name
+            tooltip = f"角色：{role_label}"
+            if maturity_text:
+                tooltip += f"\n成熟度：{maturity_text}"
+            if pinned:
+                tooltip += f"\n钉住来源版本：{pinned}"
+
+            grouped.setdefault(role_label, []).append(
+                _TreeNode(
+                    f"process/{layer_id}",
+                    text,
+                    {
+                        "kind": "layer",
+                        "layer_id": str(layer_id),
+                        "object": record,
+                    },
+                    tooltip=tooltip,
+                )
+            )
+            if role_label not in order:
+                order.append(role_label)
+
+        children = [
+            _TreeNode(
+                f"group/history-process/{label}",
+                f"{label} ({len(grouped[label])})",
+                {"kind": "group"},
+                children=grouped[label],
+            )
+            for label in order
+        ]
+        return self._group_node(
+            "group/history-process", f"过程成果 ({len(memberships)})", children
+        )
 
     def _spec_workspaces(self) -> list[_TreeNode]:
         joint = _TreeNode(

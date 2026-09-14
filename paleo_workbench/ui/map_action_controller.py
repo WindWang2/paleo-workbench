@@ -55,7 +55,8 @@ class MapActionController(QObject):
         "save_edits", "rollback", "delete_selected",
         "undo", "redo", "split", "merge",
         "duplicate_selected", "explode_multipart", "collect_multipart",
-        "snapping", "topology", "cancel",
+        "snapping", "avoid_intersections", "tracing", "vertex_scope",
+        "topology", "cancel",
     )
 
     #: 词表单一来源（V8 M4：action_help.TOOL_LABELS；帮助/QAction 同名）。
@@ -108,7 +109,10 @@ class MapActionController(QObject):
         shortcut_registry = dict(TOOL_SHORTCUTS)
         for action_id in self._COMMAND_IDS:
             shortcut = shortcut_registry.get(action_id, "")
-            action = self._action(action_id, checkable=action_id in {"snapping", "topology", "toggle_editing"}, shortcut=shortcut)
+            action = self._action(action_id, checkable=action_id in {
+                "snapping", "topology", "toggle_editing",
+                "avoid_intersections", "tracing", "vertex_scope",
+            }, shortcut=shortcut)
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
         self.actions["pan"].setChecked(True)
         # V7 专业分组扩展（Layer / Symbology / Factor / QA / Layout·Export）。

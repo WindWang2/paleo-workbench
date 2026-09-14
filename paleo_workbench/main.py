@@ -265,6 +265,7 @@ def main() -> int:
     # and cached layers on application quit instead of relying on interpreter
     # teardown — QGIS mirrors rely on it for a clean exit.
     app.aboutToQuit.connect(_shutdown_render_backends)
+    app.aboutToQuit.connect(_shutdown_task_scheduler)
     return app.exec()
 
 
@@ -281,5 +282,90 @@ def _shutdown_render_backends() -> None:
         )
 
 
+def _shutdown_task_scheduler() -> None:
+    """Join the resource-governance worker threads before Qt tears down.
+
+    `ensure_global_governance()` starts two daemon workers
+    (`paleo-heavy-task` / `paleo-interactive-task`) and registers no exit hook
+    of its own. Left running they outlive Qt's teardown, which reports
+    `QThreadStorage: entry N destroyed before end of thread` and then faults
+    (0xC0000005 on Windows). Idempotent: a no-op when governance never started.
+    """
+    try:
+        from paleo_workbench.runtime import reset_global_scheduler
+
+        reset_global_scheduler()
+    except Exception:  # noqa: BLE001 — teardown must never break quitting
+        logging.getLogger("paleo_workbench").debug(
+            "task scheduler shutdown failed", exc_info=True
+        )
+
+
+def _install_crash_diagnostics() -> None:
+    """Best-effort faulthandler for direct ``-m paleo_workbench.main`` runs.
+
+    ``run-venv.bat`` goes through ``run_app.py``, which already installs
+    faulthandler *plus* a run timeline and a hard-exit guard. IDE and plain
+    command-line launches bypass that entirely, so a native fault (access
+    violation / stack overflow) inside a worker thread or the vendored-QGIS
+    render bridge kills the process silently, with no stack and no clue.
+
+    Cheap, never fatal, and only wired up under ``__main__``.
+    ``PALEO_NO_CRASH_LOG=1`` opts out.
+    """
+    import os
+
+    if os.environ.get("PALEO_NO_CRASH_LOG", "").strip().lower() in {"1", "true", "yes"}:
+        return
+    try:
+        import faulthandler
+
+        log_dir = Path(__file__).resolve().parent.parent / ".workbuddy"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stream = (log_dir / "gui_crash.log").open("w", encoding="utf-8", errors="replace")
+        faulthandler.enable(file=stream, all_threads=True)
+
+        # A header turns an otherwise bare fault dump into something readable:
+        # which interpreter/Qt, and whether the QGIS canvas or the fallback is
+        # actually driving the composite editing area.
+        header = [f"# pid={os.getpid()} argv={sys.argv!r}"]
+        try:
+            from PySide6 import __version__ as pyside_version
+            from PySide6.QtCore import qVersion
+
+            header.append(f"# PySide6={pyside_version} Qt={qVersion()}")
+        except Exception:  # noqa: BLE001
+            header.append("# PySide6 version unavailable")
+        try:
+            from paleo_workbench.qgis_runtime.loader import prepare_bridge_load
+
+            report = prepare_bridge_load()
+            header.append(
+                f"# qgis recipe={report.recipe} dll_dirs={report.dll_dirs} "
+                f"warnings={report.warnings}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            header.append(f"# qgis loader failed: {type(exc).__name__}: {exc}")
+        try:
+            import qgis_render_bridge as _bridge
+
+            header.append(f"# qgis_render_bridge={_bridge.__file__}")
+        except Exception as exc:  # noqa: BLE001
+            header.append(f"# qgis_render_bridge unavailable: {type(exc).__name__}: {exc}")
+        try:
+            from osgeo import gdal as _gdal
+
+            header.append(f"# osgeo GDAL={_gdal.VersionInfo()}")
+        except Exception as exc:  # noqa: BLE001
+            header.append(f"# osgeo unavailable: {type(exc).__name__}: {exc}")
+        header.append("# (no stack below == clean exit)")
+
+        stream.write("\n".join(header) + "\n")
+        stream.flush()
+    except Exception:  # noqa: BLE001 — diagnostics must never break startup
+        pass
+
+
 if __name__ == "__main__":
+    _install_crash_diagnostics()
     raise SystemExit(main())

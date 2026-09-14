@@ -61,6 +61,35 @@ def _register_qgis_dll_directories() -> None:
         import qgis_render_bridge  # noqa: F401
     except Exception:
         pass
+    _assert_bridge_origin()
+
+
+def _assert_bridge_origin() -> None:
+    """桥产物必须来自 ``native/qgis_render_bridge/``（V12 M0-5）。
+
+    手写 ``setup.py build_ext --inplace`` 若在仓库根目录执行，会把 .pyd 落到
+    **仓库根**；根目录在 ``sys.path`` 里且优先于包目录，于是所有测试与启动
+    静默加载这个"影子桥"，包内产物反而失效——"改了源码没生效 / 修复误判为
+    生效"都可能由此产生（编辑工具链诊断期踩到过一次）。这里 fail fast。
+    """
+    import importlib.util
+    from pathlib import Path
+
+    try:
+        spec = importlib.util.find_spec("qgis_render_bridge")
+    except Exception:
+        return
+    if spec is None or not spec.origin:
+        return
+    expected = Path(__file__).resolve().parents[1] / "native" / "qgis_render_bridge"
+    origin = Path(spec.origin).resolve()
+    if expected not in origin.parents:
+        raise RuntimeError(
+            f"qgis_render_bridge 从意外位置加载：{origin}\n"
+            f"期望位于 {expected} 之下——多半是手工 build_ext --inplace 在"
+            "仓库根目录留下的影子产物，请删除后重建（见 docs/development/"
+            "qgis-editing-authoring-v12/00-baseline.md §5）。"
+        )
 
 
 _register_qgis_dll_directories()

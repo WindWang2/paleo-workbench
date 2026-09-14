@@ -1034,9 +1034,17 @@ class FallbackMapRenderBackend(MapRenderBackend):
 
         ``label_specs`` non-None (worker path): label placements are
         COLLECTED as plain data instead of painted, so the pass never
-        touches font engines off the GUI thread (#822). None (export /
-        render_to_painter): labels paint inline as before.
+        touches font engines off the GUI thread (#822).
+
+        None（导出 / ``render_to_painter``）：本方法自建收集表并在**全部几何
+        画完之后**统一绘制。V12 I-2：标注分层与 QGIS 原生一致（标注是几何
+        之后的独立一遍，同 zIndex 时按图层序 —— 顶层标注压在最上）；此前
+        内联绘制让下层点标注被上层几何盖住，与原生栈观感不一致。
         """
+        own_label_specs: list | None = None
+        if label_specs is None:
+            own_label_specs = []
+            label_specs = own_label_specs
         xmin, ymin, xmax, ymax = fit_extent_to_aspect(self._extent, width, height)
         span_x = xmax - xmin
         span_y = ymax - ymin
@@ -1098,6 +1106,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
             self._prepared.prune(seen_layers)
             self._reprojected.prune(seen_layers)
             self._scalar_images.prune(seen_layers)
+        # 标注最后一遍（按收集序 = 图层自下而上 → 顶层最后画 = 压在最上）。
+        if own_label_specs:
+            self._paint_label_specs(painter, own_label_specs)
 
     def _warn_raster_unprojected(
         self, layer: MapLayerSnapshot, project_crs: str, kind: str

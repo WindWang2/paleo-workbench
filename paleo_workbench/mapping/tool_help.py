@@ -35,6 +35,8 @@ TOOL_LABELS: dict[str, str] = {
     "collect_multipart": "组合多部件",
     "repair_geometry": "修复几何",
     "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
+    "avoid_intersections": "避免重叠", "tracing": "追踪",
+    "vertex_scope": "顶点范围",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -153,9 +155,21 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
     "snapping": _spec(
         "捕捉", "有活动图层",
         "开关采点/编辑捕捉（endpoint/intersection 由桥能力决定）", kinds=_VECTOR),
+    "avoid_intersections": _spec(
+        "避免重叠", "有活动图层",
+        "编辑时裁掉与目标层重叠的部分（QGIS avoid overlap；默认开）",
+        modifies=True, kinds=_VECTOR),
+    "tracing": _spec(
+        "追踪", "原生画布 + 捕捉引擎可用",
+        "采点时沿既有边/已有要素的边继续（点取交点自动加点）",
+        kinds=_VECTOR),
+    "vertex_scope": _spec(
+        "顶点范围", "编辑会话中 + 原生画布",
+        "节点工具的作用范围：全部层（勾选）或当前层（未勾选）",
+        kinds=_VECTOR),
     "topology": _spec(
         "拓扑编辑", "有活动图层 + 工程 CRS 有效",
-        "开关拓扑编辑；保存时执行拓扑校验", modifies=True, kinds=_VECTOR),
+        "开关拓扑编辑（编辑期联动 + 保存时校验）", modifies=True, kinds=_VECTOR),
     "cancel": _spec("取消", "无", "取消当前工具/Esc 数字化", kinds=_ANY_LAYER),
     "layer_new": _spec("新建图层", "已打开工程", "新建空白矢量图层（按模板）", modifies=True),
     "reference_import": _spec(

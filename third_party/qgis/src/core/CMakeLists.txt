@@ -2604,7 +2604,26 @@ if(WITH_INTERNAL_SPATIALINDEX)
     set_source_files_properties(${SIDX_SRCS} PROPERTIES COMPILE_FLAGS -DHAVE_BCOPY=1)
   endif()
 
-  set(QGIS_CORE_SRCS ${QGIS_CORE_SRCS} ${SIDX_SRCS})
+  # paleo-workbench patch (Windows support): upstream appends the internal
+  # libspatialindex translation units straight into QGIS_CORE_SRCS. That works
+  # on Linux, where qgis_core.so exports them by default — but MSVC never
+  # exports third-party symbols from a DLL, so qgis_analysis/qgis_gui fail to
+  # link with:
+  #   LNK2019: unresolved external symbol "SpatialIndex::..." (LNK1120)
+  # Build the internal copy as a STATIC library and link it into qgis_core
+  # below. The legacy (keyword-less) target_link_libraries signature propagates
+  # it to every dependent module, exactly like the system-libspatialindex
+  # branch on line ~2880 does.
+  if(NOT TARGET paleo_internal_spatialindex)
+    add_library(paleo_internal_spatialindex STATIC ${SIDX_SRCS})
+    set_target_properties(paleo_internal_spatialindex PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+    )
+    target_compile_features(paleo_internal_spatialindex PRIVATE cxx_std_20)
+    target_include_directories(paleo_internal_spatialindex PUBLIC
+      ${SPATIALINDEX_INCLUDE_DIR}
+    )
+  endif()
 endif()
 
 if (APPLE)
@@ -2878,6 +2897,13 @@ endif()
 
 if(NOT WITH_INTERNAL_SPATIALINDEX)
   target_link_libraries(qgis_core ${SPATIALINDEX_LIBRARY})
+else()
+  # paleo-workbench patch (Windows support): the internal libspatialindex is
+  # built as a static library (see WITH_INTERNAL_SPATIALINDEX above) and linked
+  # here. Kept in the legacy keyword-less form on purpose — that is what makes
+  # it propagate to qgis_analysis / qgis_gui, which also need the SpatialIndex
+  # symbols and only reach them through qgis_core.
+  target_link_libraries(qgis_core paleo_internal_spatialindex)
 endif()
 
 target_link_libraries(qgis_core

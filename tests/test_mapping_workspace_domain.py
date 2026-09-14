@@ -394,6 +394,26 @@ def test_migration_respects_explicit_role_metadata():
     assert role == LayerRole.INTEGRATED_FACIES
 
 
+def test_migration_respects_snapshot_role_key():
+    """快照键是 metadata["role"]（snapshot_layers 产物，副本继承源角色）。
+
+    只认 "layer_role" 会让复制出来的图层被误判进 LEGACY 兜底组。
+    """
+    role, group, _ = classify_layer_for_migration(
+        _FakeSnapshotLayer("x", metadata={"role": "seismic_facies_prediction"}))
+    assert role == LayerRole.SEISMIC_FACIES_PREDICTION
+    assert group == home_group_for_role(LayerRole.SEISMIC_FACIES_PREDICTION)
+
+
+def test_migration_explicit_layer_role_wins_over_role():
+    role, _, _ = classify_layer_for_migration(
+        _FakeSnapshotLayer("x", metadata={
+            "layer_role": "integrated_facies",
+            "role": "seismic_facies_prediction",
+        }))
+    assert role == LayerRole.INTEGRATED_FACIES
+
+
 # ---------------------------------------------------------------------------
 # readiness
 # ---------------------------------------------------------------------------

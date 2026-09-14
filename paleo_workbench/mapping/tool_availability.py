@@ -153,7 +153,13 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "duplicate_selected", "add_ring", "add_part", "explode_multipart",
         "collect_multipart",
     ),
-    "snapping": ("snapping", "topology", "cancel"),
+    # V12 M1：编辑期联动开关补齐 UI 面——三个能力（避免重叠/追踪/顶点档位）
+    # 的实现早就在 SnappingService + QgsProject 里，此前只有命令 handler、
+    # 没有任何按钮，属"已实现但用户摸不到"。
+    "snapping": (
+        "snapping", "avoid_intersections", "tracing", "vertex_scope",
+        "topology", "cancel",
+    ),
     "layer": (
         "layer_new", "reference_import", "layer_properties",
         "attribute_table", "layer_zoom", "layer_export",
@@ -797,6 +803,35 @@ def _rule_snapping(ctx: ToolContext) -> ToolAvailability:
         reason = "当前环境的捕捉引擎不可用（桥缺少 snapping 配置通道）"
     return _ok("snapping") if reason is None else _no("snapping", reason)
 
+def _rule_avoid_intersections(ctx: ToolContext) -> ToolAvailability:
+    # V12 M1：避免重叠是捕捉引擎的一部分（QgsSnappingConfig.avoidIntersections）；
+    # 与 snapping 同门禁——桥缺该通道时禁用并说明。
+    reason = _project_gate(ctx) or _layer_gate(ctx)
+    if reason is None and not ctx.snapping_available:
+        reason = "当前环境的捕捉引擎不可用（桥缺少避免重叠通道）"
+    return _ok("avoid_intersections") if reason is None else _no(
+        "avoid_intersections", reason)
+
+
+def _rule_tracing(ctx: ToolContext) -> ToolAvailability:
+    # V12 M1：追踪（QgsMapCanvasTracer）注册即对全体捕获/顶点工具生效，
+    # 需要原生画布与捕捉引擎；回退画布无对应实现。
+    reason = _project_gate(ctx) or _layer_gate(ctx)
+    if reason is None and not ctx.native_canvas_available:
+        reason = "追踪需要 QGIS 原生画布（当前为回退画布）"
+    if reason is None and not ctx.snapping_available:
+        reason = "当前环境的捕捉引擎不可用（桥缺少追踪通道）"
+    return _ok("tracing") if reason is None else _no("tracing", reason)
+
+
+def _rule_vertex_scope(ctx: ToolContext) -> ToolAvailability:
+    # V12 M1：顶点档位只在编辑会话内有意义（工具本身也需要会话）。
+    reason = _project_gate(ctx) or _layer_gate(ctx) or _editing_gate(ctx)
+    if reason is None and not ctx.native_canvas_available:
+        reason = "顶点档位需要 QGIS 原生画布（当前为回退画布）"
+    return _ok("vertex_scope") if reason is None else _no("vertex_scope", reason)
+
+
 def _rule_topology(ctx: ToolContext) -> ToolAvailability:
     reason = _project_gate(ctx) or _layer_gate(ctx)
     if reason is None and not ctx.topology_available:
@@ -875,6 +910,9 @@ _RULE_TABLE: dict[str, Rule] = {
     "undo": lambda ctx: _rule_history(ctx, "undo"),
     "redo": lambda ctx: _rule_history(ctx, "redo"),
     "snapping": _rule_snapping,
+    "avoid_intersections": _rule_avoid_intersections,
+    "tracing": _rule_tracing,
+    "vertex_scope": _rule_vertex_scope,
     "topology": _rule_topology,
     "layer_new": lambda ctx: _rule_layer_management(ctx, "layer_new"),
     "reference_import": lambda ctx: _rule_layer_management(ctx, "reference_import"),
@@ -1029,6 +1067,13 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
         checked = ctx.editing
     elif tool_id == "snapping":
         checked = ctx.snapping_enabled
+    elif tool_id == "avoid_intersections":
+        checked = ctx.avoid_intersections_enabled
+    elif tool_id == "tracing":
+        checked = ctx.tracing_enabled
+    elif tool_id == "vertex_scope":
+        # 勾选态 = "全部层档"（未勾 = 当前层档，与 QGIS 顶点工具的双档一致）。
+        checked = ctx.vertex_all_layers
     elif tool_id == "topology":
         checked = ctx.topology_enabled
     elif tool_id in _CHECKED_CANVAS_TOOLS:

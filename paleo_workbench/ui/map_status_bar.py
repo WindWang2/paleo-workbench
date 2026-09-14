@@ -141,6 +141,10 @@ class MapStatusBar(QFrame):
         self.snapping = QLabel("", self)
         self.topology = QLabel("", self)
         self.measure = QLabel("", self)
+        #: 捕捉 chip 的 basal 提示行（apply_context 的权威态）。
+        self._snap_tip_lines: list[str] = []
+        #: 最近一次原生捕捉命中（V12 M0-4：snap_feedback 的宿主消费方）。
+        self._last_snap_match: dict | None = None
         self._labels = {
             "render": self.render,
             "measure": self.measure,
@@ -179,6 +183,35 @@ class MapStatusBar(QFrame):
         style.bind(self.topology_issue, lambda: self._render_issue_chip())
         # 可点击读数命中缓存（mouseReleaseEvent 用）。
         self._press_inside: str | None = None
+
+    def _snap_tooltip_text(self) -> str:
+        lines = list(self._snap_tip_lines)
+        match = self._last_snap_match
+        if match:
+            if match.get("matched"):
+                kind = str(match.get("match_type") or "")
+                layer = str(match.get("layer_doc_id") or "")
+                distance = match.get("distance")
+                detail = "、".join(
+                    part for part in (
+                        f"类型 {kind}" if kind else "",
+                        f"图层 {layer}" if layer else "",
+                        f"距离 {float(distance):.4g}" if distance is not None else "",
+                    ) if part)
+                lines.append("最近命中：" + (detail or "已吸附"))
+            else:
+                lines.append("最近命中：无")
+        return "捕捉设置\n" + "\n".join(lines) if lines else ""
+
+    def set_snap_match(self, payload: dict | None) -> None:
+        """最近一次原生捕捉命中（``snap_feedback`` 的接入口，V12 M0-4）。
+
+        只进 tooltip、不动 chip 文本：捕捉反馈是逐像素级事件，直接写标签会
+        与 ``apply_context`` 的权威态互相闪烁（V10 因此一直没接线）。tooltip
+        是"用户主动索要才看见"的通道——既不引入噪声，也不再把事实丢掉。
+        """
+        self._last_snap_match = dict(payload) if payload else None
+        self.snapping.setToolTip(self._snap_tooltip_text())
 
     def _decimals_for(self, crs: str, point: tuple[float, float] | None) -> int:
         """按 CRS 缓存小数位（鼠标移动每帧调用，避免重复解析 pyproj）。"""
@@ -382,6 +415,7 @@ class MapStatusBar(QFrame):
         snapping_enabled = facts.get("snapping_enabled")
         if snapping_enabled is None:
             self.snapping.setText("")
+            self._snap_tip_lines = []
             self.snapping.setToolTip("")
         else:
             self.snapping.setText(f"捕捉: {'开' if snapping_enabled else '关'}")
@@ -403,7 +437,8 @@ class MapStatusBar(QFrame):
                     tip_lines.append("用户自定义（与角色推荐不同）")
             if not facts.get("snapping_available", True):
                 tip_lines.append("当前环境的捕捉引擎不可用")
-            self.snapping.setToolTip("捕捉设置\n" + "\n".join(tip_lines))
+            self._snap_tip_lines = tip_lines
+            self.snapping.setToolTip(self._snap_tooltip_text())
 
         # 拓扑读数（§15）：开关态；错误计数 > 0 → 问题 chip（可点击）。
         topology_enabled = facts.get("topology_enabled")

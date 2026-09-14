@@ -1140,6 +1140,21 @@ set (QGIS_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output)
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${QGIS_OUTPUT_DIRECTORY}/${QGIS_BIN_SUBDIR})
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY ${QGIS_OUTPUT_DIRECTORY}/${QGIS_LIB_SUBDIR})
 
+# paleo-workbench patch (Windows support): on MSVC a shared module's import
+# library is an ARCHIVE artifact, not a LIBRARY artifact, so without this
+# qgis_core.lib / qgis_gui.lib / qgis_analysis.lib land next to their sources
+# (src/core, src/gui, src/analysis) instead of in <build>/output/lib. Every
+# consumer of the vendor build looks for them under output/lib:
+#   - native/qgis_render_bridge/CMakeLists.txt  (the WIN32 branch, lines 22-30)
+#   - native/qgis_render_bridge/setup.py        (_vendor_*_library,
+#     _vendor_artifacts_present) — which otherwise reports the vendor build as
+#     incomplete and raises "vendored QGIS library is missing".
+# Route the archive artifacts to the same directory as the libraries. Scoped to
+# WIN32 so the Linux CI output layout is untouched.
+if (WIN32)
+  set (CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${QGIS_OUTPUT_DIRECTORY}/${QGIS_LIB_SUBDIR})
+endif()
+
 # write a marker with source directory path into the output's bin directory
 # if run from the build directory QGIS will detect it and alter the paths
 file(WRITE ${QGIS_OUTPUT_DIRECTORY}/${QGIS_BIN_SUBDIR}/qgisbuildpath.txt "${CMAKE_SOURCE_DIR}\n${QGIS_OUTPUT_DIRECTORY}")
