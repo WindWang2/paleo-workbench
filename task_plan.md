@@ -1,79 +1,87 @@
-# Task Plan — QGIS Cartography Runtime V11 (qgis-runtime-v11)
+# Task Plan — Paleo UI Workbench (feat/paleo-ui-workbench)
 
 ## Goal
-Build the QGIS Cartography Runtime Control Plane V11: native layer tree as the
-single runtime authority, formal layer ordering engine, minimal tree diff,
-native tree transactions, bidirectional sync, active/edit/tool-target split,
-stage union-tree semantics, mirror lifecycle, layout/legend consistency, and
-topology editing M0 per #1278 spec (#1279–#1286 decisions). QGIS = 2D GIS
-runtime; Paleo = geology semantics only. NO parallel GIS engine, NO qgis_app.
+古地理编图专属 UI 交互工作台与多期次时空联动系统（M1-M5）：层序时间轴期次差分切换
++ 洋葱皮、相带画刷调色板 + 吸色管、单因素约束 HUD + 连井剖面光标联动、交互式 QC
+修复向导、全键盘编图流 + FSM。Document-First → TDD（红绿循环，逐 Ticket 原子提交）
+→ Review（回环/泄漏/视觉回归）。
 
-Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench-qgis-runtime-v11
-Branch: qgis-runtime-v11 (off main 6c08fb7d)
-Docs: docs/development/qgis-cartography-runtime-v11/
+Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench-paleo-ui
+Branch: feat/paleo-ui-workbench (off main e7214566)
+Docs: docs/development/paleo-ui-workbench/
+Loop exit: docs_generated && ui_tdd_all_green && memory_and_leak_free && visual_review_passed
 
-## Locked decisions
-1. Base = main 6c08fb7d. PR #1267 (v10-review-fixes) and #1277
-   (review-convergence) own their fixes — V11 MUST NOT duplicate them;
-   00-overlap-audit.md records file-level ownership.
-2. Parallel V11 lines to avoid: data-fabric-v11 (catalog/well/data page),
-   workbench-ux-v11 (generic UI design system; stacked on #1277).
-3. Topology: #1279–#1286 decision issues are the authority; the referenced
-   docs/specs/topological-editing-migration-spec.md DID NOT EXIST on main or
-   any branch — V11 materialized it (docs/specs/, assembly view).
-4. Vendor QGIS build at C:\Users\wangj.KEVIN\paleo-qgis-build\qgis-vendor
-   (survives); bridge rebuilt in worktree via PALEO_QGIS_REUSE_VENDOR=1.
-5. Test recipe: PALEO_QGIS_BUILD_DIR=neutral vendor + PALEO_QGIS_CONDA_QT=1
-   + QT_QPA_PLATFORM=offscreen; conftest auto-preps loader.
-6. No CI waiting; local targeted verification. Windows/GitBash; explicit cd
-   in every shell (background shells reset cwd to main checkout).
+## Hard constraints
+- subagents ≤ 3 并发（已用 2 Explore，后续 Review ≤ 2）
+- QT_QPA_PLATFORM=offscreen；无交互弹窗
+- 纯 Python/PySide6，不重编 C++ 桥；`-m "not slow and not opengl"`
+- UI 线程零耗时空间运算（O(1) 网格采样/节流）；无 Signal Echo Loop（suppress-flag /
+  source-tag / changed-field 既有模式）
+
+## Environment recipe (verified)
+- 解释器：主仓 .venv（editable finder 在 sys.meta_path 尾部，worktree rootdir 的
+  pythonpath=["."] 前置生效 → 导入 worktree 代码，已验证）
+- `cd /c/Users/wangj.KEVIN/projects/paleo-workbench-paleo-ui && QT_QPA_PLATFORM=offscreen
+  /c/Users/wangj.KEVIN/projects/paleo-workbench/.venv/Scripts/python.exe -m pytest ...`
+- 冒烟：tests/test_facies_taxonomy.py 15 passed @ worktree
+- 无桥 → fallback canvas（测试用 `_force_fallback` monkeypatch 模式，见
+  tests/test_mapping_stage_ui.py L21）
 
 ## Phases
-- [x] PHASE 0: Setup — worktree + branch + submodules + venv + bridge 0.7.0a0
-- [x] PHASE 1: State sync → 00-overlap-audit.md
-- [x] PHASE 2: Deep audit → 01-current-qgis-runtime.md (4 parallel audits)
-- [x] PHASE 3: Architecture 02-authority-model + 03-layer-tree-plan + 04-ordering
-- [x] PHASE 4: Core runtime — layer_order + LayerTreePlan + controller rewire
-      (9a2657fa; D1-ws/D3-ws closed; nested user groups; 36 tests)
-- [x] PHASE 5: TreeDiff keyed-LCS + diff-driven reconcile + call-count tests
-      (0b65621c; 1000层插入=1 move; 22 tests)
-- [x] PHASE 6: Native tree transaction (bridge 0.7.0a0: begin/end window +
-      tree_revision + runtime_facts counters) + echo gate (d6164860, 1cae67f2;
-      10+8 native tests; 50 upserts=1 sync; 1000-layer publish=1 sync)
-- [x] PHASE 7: Five-target edit state (d4dc6b45; EditTargetSnapshot +
-      divergent status presentation; V10 review #1 semantics preserved)
-- [x] PHASE 8: Stage fixes — empty-group materialization (D11-ws), ghost
-      membership pruning (D13-ws), factor titles (D2-ws) (9006c98f)
-- [x] PHASE 11: Layout/legend/tree one order source (62157cc9; P0-1 closed:
-      mirrorTreeOrderTopFirst; flat top-first reversal + parity tests)
-- [x] PHASE 12-M0: Topology spec materialized (docs/specs/) + CRS gate
-      (#1285) + two-phase all-or-nothing Python save (#1283 partial)
-- [x] PHASE 9: Save-intent channel + O(changed) signatures (changed_hints)
-      + raster ledger + lifecycle docs 09 (42146767, 1b228914)
-- [x] PHASE 10: Nested groups (plan + controller + single-mount regression)
-      + restore semantics (order keys persisted; expand-state migration noted
-      in 13-known-limitations as deferred)
-- [x] PHASE 13: Scale structural suite (test_runtime_scale_v11, 8 tests) +
-      docs 12-scale.md
-- [x] PHASE 14: 8 review rounds (4 parallel agents R1–R4 + R5 CRS / R6
-      fallback / R7 scale / R8 final) — P0×7 + P1/P2 batch fixed (40b8c2e6)
-- [x] PHASE 15: Docs 00–14 complete (15 files) + milestone commits + PR
+- [x] PHASE 0: worktree + branch + geo-viz-engine 子模块 + 冒烟
+- [ ] PHASE 1: 规划文件 + 文档 00-decisions / 01-interaction-specs /
+      02-state-machine-design / 03-tdd-ui-test-plan / 04-known-limitations
+- [ ] PHASE 2 / Ticket 1: ui/components/stratigraphic_timeline_slider.py +
+      workflow/stratigraphic_epochs.py + mapping_workspace/epoch_switching.py +
+      composite_document/layer_groups 接线；tests/ui/test_stratigraphic_timeline.py
+- [ ] PHASE 3 / Ticket 2: ui/components/facies_palette_widget.py +
+      facies_eyedropper.py + facies_selector.py 画刷上下文；tests/ui/test_facies_palette.py
+- [ ] PHASE 4 / Ticket 3: ui/components/constraint_factor_hud.py +
+      连井光标桥（view_coordination 扩展）；tests/ui/test_constraint_hud.py
+- [ ] PHASE 5 / Ticket 4: ui/components/interactive_qc_hub.py +
+      mapping/qc_quickfix.py + cartographic_qa.py 接线；tests/ui/test_interactive_qc_hub.py
+- [ ] PHASE 6 / Ticket 5: workstation/keybinding_manager.py + mode_state.py(FSM) +
+      shortcuts.py + shell.py 组装 + 提示条；tests/ui/test_keybinding_flow.py
+- [ ] PHASE 7: 全量回归 + echo-loop 审计 + parentless 泄漏审计 + 视觉回归快照 +
+      04-visual-qa-verification.md + 原子 commit 序列 + PR
+
+## Key architecture anchors (from Explore reports)
+- Shell = WorkstationFrame (ui/workstation/shell.py L96)；dock 注册 dock_framework.py
+  WORKSTATION_DOCKS + shell._PANEL_TOGGLE_TABLE/_shell_docks()
+- CompositeDocument：canvas=QgisCanvasShim|UnifiedMapCanvas；signals map_position_changed/
+  native_identified；set_layer_snapshot(snapshot, changed_hints) 增量镜像；
+  set_extent(extent, record_history, coalesce_history)；无动画 pan
+- 期次锚点：stratigraphy.target_horizon（workflow/stratigraphy.py：set_target_from_boundary/
+  active_target_horizon/horizons_from_data/ensure_horizon_catalog）；PaleoMapDocument.
+  linked_target_horizon；现无按 horizon 换层逻辑（GAP=本任务补齐）
+- 相：resources/facies_taxonomy.json（8相/24亚相/66微相）；属性 facies/sub_facies/
+  micro_facies/level；现无"当前相带"状态（每次捕获弹模态框）；颜色=stage_actions.
+  _categorized_facies_style；花纹=mapping/facies_patterns.py
+- 拾取：composite_editing.identify_all(point, base_layers) L2802（双画布可用）；
+  FeatureQueryIndex.query 顶层优先
+- 撤销：无 QUndoStack；VectorEditSession.begin/end_edit_command（fallback）+
+  NativeEditSessionController gesture（native）
+- 快捷键：shortcuts.register_shortcut（ApplicationShortcut + 同 id 重注册替换）；
+  已占用 Ctrl+S/N/O/F、1-5(hub)、Alt+1/2/3、Ctrl+K、Ctrl+Alt+D、F5、F1、Delete、
+  Ctrl+Z、Ctrl+Shift+Z、Esc(map)
+- QC：TopologyCheckerPanel(zoom/highlight/fix 信号已有)；cartographic_qa.py 纯检测
+  无 UI 无修复；issue dict=make_issue(workflow/qc.py L27)
+- 跨视图：ViewCoordinationController.set_link_cursor_sink((well,md)→engine crosshair)
+  已有；连井 CrossWellHost 未接入 SelectionContext（本任务接线）
+- 泄漏审计：conftest cleanup_qt_deferred_deletes L153 autouse（reap 匿名 parentless）
+- 视觉：visual_qa_v11.py v11_shot_table 模式；像素 diff 非 gate（V5 D8），本任务按
+  prompt 做带阈值 diff 并记录数值
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| vendor build thought lost (V7 worktree deleted) | 1 | neutral copy survives at paleo-qgis-build\qgis-vendor |
-| uv install geoviz_common missing | 1 | geo-viz-engine submodule not inited; local clone + pin 08851951f |
-| PySide6 6.8.3 vs conda Qt 6.11.2 mismatch | 1 | corrected to 6.11.2 |
-| sed replace over-reached into own syncCanvasesAll impl | 1 | infinite recursion → probe4 hang; fixed + rebuilt |
-| tree_transaction tests hung (teardown) | 1 | json.loads(dict) bug in MY test; C++ shutdown window reset added |
-| worktree well-log-engine dirty on arrival | 1 | restored to pinned f845e7ab (not mine) |
-| flush all-or-nothing: gate failure still committed others | 1 | phase-1 gate aborts whole save; fixed |
-| CRS gate: layer-cleared decl still blocked by project CRS | 1 | layer-only declaration check per #1285 guided-fix semantics |
+| (none yet) | | |
 
-## Environment facts
-- VS2022 cmake + MSVC 14.38; Qt6 = paleo-qgis-deps\Library (6.11.2)
-- Vendor build: C:\Users\wangj.KEVIN\paleo-qgis-build\qgis-vendor
-- Venv .venv cp312 (PySide6 6.11.2); bridge 0.7.0a0 built in worktree
-- Pre-existing env failures: test_mapping_stage_ui multi-test AV (main too);
-  test_authoring_ux registry-flags (owned by #1267/#1255)
+## Decisions
+1. 复用主仓 .venv（已验证 import 解析到 worktree）——不为 worktree 另建 venv
+2. 时间轴期次 = 项目 horizon 目录（权威）+ 内置地质年代方案（寒武系…第四系）标签
+   合并；排序 age 优先（见 00-decisions D3）
+3. 期次差分切换 = 纯计划器（epoch_switching.py）算 show/hide/onion 集合 → 增量可见
+   性/透明度应用（零画布重建）
+4. 相带数字键 1-9 与 hub 导航 1-5 冲突 → 画布域 WidgetWithChildrenShortcut + 工具
+   激活期动态注册；Ticket 2 先以测试实证 Qt 跨上下文优先级再定稿（00-decisions D6）
