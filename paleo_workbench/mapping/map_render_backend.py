@@ -736,7 +736,14 @@ class FallbackMapRenderBackend(MapRenderBackend):
         )
         self._vector_lod_disabled = os.environ.get(
             "PWB_DISABLE_VECTOR_LOD", "").strip() not in ("", "0")
+        # Ticket 4：分组批处理开关（关闭 = 旧逐要素两遍绘制；能力回退 +
+        # 逐像素 parity 测试的参照路径）。
+        self._facies_batch_disabled = os.environ.get(
+            "PWB_DISABLE_FACIES_BATCH", "").strip() not in ("", "0")
         self._facies_patterns = FaciesPatternBrushCache()
+        # Ticket 4：全部花纹 × 档位一次性烘焙进图集（首个绘制帧零 SVG 解析；
+        # 资产缺失时 prebake 返回 0，懒渲染回退不变）。
+        self._facies_patterns.prebake()
         _LIVE_FALLBACKS.add(self)
         self._diagnostics = {
             "prepared_layers": 0,
@@ -1432,11 +1439,37 @@ class FallbackMapRenderBackend(MapRenderBackend):
 
         # Polygons: rings of one feature share a path so OddEvenFill keeps
         # holes correct; category fills switch brushes between features.
+        # Ticket 4（vector-perf-increment）：按（类别色 × 花纹）分组批处理——
+        # 基色每色一次 drawPath、花纹每纹一次 drawPath（图集笔刷）。相邻
+        # 平铺（相带契约：无叠置）下与逐要素绘制逐像素一致（parity 钉）；
+        # 逐分支的 graduated/非分类路径保持原逐要素行为。
         current_feature = -1
         path: QPainterPath | None = None
+        color_paths: dict[str, QPainterPath] = {}
+        plain_path = QPainterPath()
+        has_plain = False
+        pattern_paths: dict[str, QPainterPath] = {}
+        pattern_of_feature: dict[int, str] = {}
+        late_paths: list[tuple[QPainterPath, QColor | None]] = []
+
+        def _draw_immediate(feature_path: QPainterPath, color_name: str,
+                            pattern_id) -> None:
+            painter.save()
+            painter.setBrush(self._color(color_name, style.fill))
+            painter.drawPath(feature_path)
+            painter.restore()
+            if pattern_id:
+                pattern_brush = self._facies_patterns.brush_for(
+                    pattern_id, scale=dpi_scale)
+                if pattern_brush is not None:
+                    painter.save()
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(pattern_brush)
+                    painter.drawPath(feature_path)
+                    painter.restore()
 
         def flush_polygon() -> None:
-            nonlocal path, current_feature
+            nonlocal path, current_feature, has_plain
             if path is not None and not path.isEmpty():
                 if categories is not None and current_feature >= 0:
                     key = str(
@@ -1444,20 +1477,27 @@ class FallbackMapRenderBackend(MapRenderBackend):
                     )
                     color_name = categories.get(key)
                     if color_name is not None:
-                        painter.save()
-                        painter.setBrush(self._color(color_name, style.fill))
-                        painter.drawPath(path)
-                        painter.restore()
+                        if self._facies_batch_disabled:
+                            _draw_immediate(
+                                path, color_name,
+                                patterns.get(key) if patterns else None)
+                            path = None
+                            current_feature = -1
+                            return
+                        group = color_paths.get(color_name)
+                        if group is None:
+                            group = QPainterPath()
+                            group.setFillRule(Qt.FillRule.OddEvenFill)
+                            color_paths[color_name] = group
+                        group.addPath(path)
                         if patterns is not None:
-                            pattern_brush = self._facies_patterns.brush_for(
-                                patterns.get(key), scale=dpi_scale
-                            )
-                            if pattern_brush is not None:
-                                painter.save()
-                                painter.setPen(Qt.PenStyle.NoPen)
-                                painter.setBrush(pattern_brush)
-                                painter.drawPath(path)
-                                painter.restore()
+                            pattern_id = patterns.get(key)
+                            if pattern_id and pattern_id not in pattern_paths:
+                                merged = QPainterPath()
+                                merged.setFillRule(Qt.FillRule.OddEvenFill)
+                                pattern_paths[pattern_id] = merged
+                            if pattern_id:
+                                pattern_paths[pattern_id].addPath(path)
                         path = None
                         current_feature = -1
                         return
@@ -1467,14 +1507,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
                         val = prepared.features[current_feature].properties.get("value")
                     color_name = _range_color(val, style)
                     if color_name is not None:
-                        painter.save()
-                        painter.setBrush(self._color(color_name, style.fill))
-                        painter.drawPath(path)
-                        painter.restore()
+                        late_paths.append((path, self._color(color_name, style.fill)))
                         path = None
                         current_feature = -1
                         return
-                painter.drawPath(path)
+                plain_path.addPath(path)
+                has_plain = True
             path = None
             current_feature = -1
 
@@ -1501,6 +1539,31 @@ class FallbackMapRenderBackend(MapRenderBackend):
             for x, y in coordinates[1:]:
                 path.lineTo(x, y)
         flush_polygon()
+        # -- 分组落笔：基色每色一次，花纹每纹一次（图集笔刷）。 ----------
+        for color_name, group_path in color_paths.items():
+            painter.save()
+            painter.setBrush(self._color(color_name, style.fill))
+            painter.drawPath(group_path)
+            painter.restore()
+        if has_plain:
+            painter.drawPath(plain_path)
+        for late_path, late_color in late_paths:
+            painter.save()
+            painter.setBrush(late_color)
+            painter.drawPath(late_path)
+            painter.restore()
+        if pattern_paths:
+            for pattern_id, group_path in pattern_paths.items():
+                pattern_brush = self._facies_patterns.brush_for(
+                    pattern_id, scale=dpi_scale
+                )
+                if pattern_brush is None:
+                    continue
+                painter.save()
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(pattern_brush)
+                painter.drawPath(group_path)
+                painter.restore()
         self._diagnostics["vertices_simplified"] += visible_vertices - drawn_vertices
 
     def _paint_layer_points(
