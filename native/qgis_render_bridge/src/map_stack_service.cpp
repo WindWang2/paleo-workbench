@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cmath>
 #include <limits>
 #include <filesystem>
@@ -1133,6 +1134,13 @@ struct QgisMapStack::Impl {
     std::uintptr_t canvas = 0;
     QJsonObject last_config;
     QStringList last_layer_docs;
+    // Ticket 2（vector-perf-increment）：增量拓扑状态 + 沿用错误所属的
+    // 退休检查实例（保活——QgsGeometryCheckError 持 check 裸指针）。
+    TopoIncrementalState incremental;
+    QList<QgsGeometryCheck*> retired_checks;
+    // Ticket 2：错误几何 GeoJSON 缓存（错误对象稳定——重证才换实例）；
+    // serialize 每次全量重渲染 28k 错误几何是秒级，缓存后仅新错误付出。
+    QHash<const QgsGeometryCheckError*, QJsonValue> error_geometry_json;
 
     ~CheckerSession() { reset(nullptr); }
 
@@ -1142,11 +1150,15 @@ struct QgisMapStack::Impl {
       native_by_id.clear();
       qDeleteAll(checks);
       checks.clear();
+      qDeleteAll(retired_checks);
+      retired_checks.clear();
+      error_geometry_json.clear();
       qDeleteAll(pools);
       pools.clear();
       context.reset();
       remainders.clear();
       last_layer_docs.clear();
+      incremental.clear();
       if (allowed_gaps && project != nullptr) {
         project->removeMapLayer(allowed_gaps.data());
       }
@@ -6057,6 +6069,36 @@ QString checkerRuleId(const QgsGeometryCheck* check) {
   return id;
 }
 
+// Ticket 2：沿用错误 vs 新证错误等价判定（去重用——受限池会为池内干净
+// 邻居重证其（干净,干净）对，与缓存携带的同一错误重复）。
+bool equivalentCheckerErrors(const QgsGeometryCheckError& a,
+                             const QgsGeometryCheckError& b) {
+  if (checkerRuleId(a.check()) != checkerRuleId(b.check())) return false;
+  if (a.layerId() != b.layerId() || a.featureId() != b.featureId()) {
+    return false;
+  }
+  const auto* overlap_a =
+      dynamic_cast<const QgsGeometryOverlapCheckError*>(&a);
+  const auto* overlap_b =
+      dynamic_cast<const QgsGeometryOverlapCheckError*>(&b);
+  if ((overlap_a == nullptr) != (overlap_b == nullptr)) return false;
+  if (overlap_a != nullptr && overlap_b != nullptr) {
+    const auto& other_a = overlap_a->overlappedFeature();
+    const auto& other_b = overlap_b->overlappedFeature();
+    if (other_a.layerId() != other_b.layerId()
+        || other_a.featureId() != other_b.featureId()) {
+      return false;
+    }
+    const double area_a = a.value().toDouble();
+    const double area_b = b.value().toDouble();
+    if (std::abs(area_a - area_b)
+        > 1e-9 * std::max(1.0, std::abs(area_a))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 QJsonValue geometryToJsonValue(const QgsGeometry& geom) {
   if (geom.isNull() || geom.isEmpty()) return QJsonValue();
   QJsonParseError err{};
@@ -6073,9 +6115,15 @@ QJsonArray bboxToJson(const QgsRectangle& box) {
 
 class PwbLayerFeaturePool : public QgsVectorLayerFeaturePool {
  public:
+  // 全量池（原语义）。
   explicit PwbLayerFeaturePool(QgsVectorLayer* layer)
       : QgsVectorLayerFeaturePool(layer) {
     const QgsFeatureIds ids = getFeatures(QgsFeatureRequest());
+    setFeatureIds(ids);
+  }
+  // Ticket 2：受限池（脏要素 ∪ 脏区邻居）——检查只遍历池内要素。
+  PwbLayerFeaturePool(QgsVectorLayer* layer, const QgsFeatureIds& ids)
+      : QgsVectorLayerFeaturePool(layer) {
     setFeatureIds(ids);
   }
 };
@@ -6168,7 +6216,14 @@ std::string QgisMapStack::serializeCheckerSession() const {
     item.insert(QStringLiteral("message"), error->description());
     item.insert(QStringLiteral("value"), QJsonValue::fromVariant(error->value()));
     const QgsGeometry geom = error->geometry();
-    const QJsonValue geom_json = geometryToJsonValue(geom);
+    QJsonValue geom_json;
+    const auto cached = impl_->checker.error_geometry_json.constFind(error);
+    if (cached != impl_->checker.error_geometry_json.constEnd()) {
+      geom_json = cached.value();
+    } else {
+      geom_json = geometryToJsonValue(geom);
+      impl_->checker.error_geometry_json.insert(error, geom_json);
+    }
     if (!geom_json.isNull()) item.insert(QStringLiteral("geometry"), geom_json);
     QgsRectangle box = error->affectedAreaBBox();
     if (box.isNull() || box.isEmpty()) box = geom.boundingBox();
@@ -6360,8 +6415,6 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
     throw std::invalid_argument("run_geometry_checks config must be a JSON object");
   }
   const QJsonObject config = doc.object();
-  impl_->checker.reset(project());
-  impl_->checker.last_config = config;
   impl_->checker.canvas = canvas_addr;
 
   QStringList layer_docs;
@@ -6396,8 +6449,6 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
   if (!map_crs.isValid()) map_crs = project()->crs();
   if (!map_crs.isValid()) map_crs = layers.front()->crs();
   const int precision = std::max(1, config.value(QStringLiteral("precision")).toInt(8));
-  impl_->checker.context = std::make_unique<QgsGeometryCheckContext>(
-      precision, map_crs, project()->transformContext(), project());
 
   QSet<QString> rules;
   if (config.value(QStringLiteral("rules")).isArray()) {
@@ -6412,6 +6463,50 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
     rules.insert(QStringLiteral("workspace_remainder"));
     rules.insert(QStringLiteral("dangle"));
   }
+
+  // -- Ticket 2（vector-perf-increment）：增量通道 ---------------------------
+  // 当前要素戳（一次遍历：WKB 指纹 + 包围盒）——差分出脏集后，无变化走
+  // 缓存直返快路径；有变化且规则可子集化（无 gap）走受限复检。
+  QHash<QString, QHash<qint64, TopoFidStamp>> current_stamps;
+  for (QgsVectorLayer* layer : layers) {
+    auto& table = current_stamps[layer->id()];
+    QgsFeature stamp_feature;
+    QgsFeatureIterator stamp_cursor = layer->getFeatures();
+    while (stamp_cursor.nextFeature(stamp_feature)) {
+      if (!stamp_feature.hasGeometry()) continue;
+      const QgsGeometry geom = stamp_feature.geometry();
+      if (geom.isNull() || geom.isEmpty()) continue;
+      TopoFidStamp stamp;
+      stamp.hash = topoFingerprint(geom);
+      const QgsRectangle box = geom.boundingBox();
+      stamp.minx = box.xMinimum();
+      stamp.miny = box.yMinimum();
+      stamp.maxx = box.xMaximum();
+      stamp.maxy = box.yMaximum();
+      table.insert(static_cast<qint64>(stamp_feature.id()), stamp);
+    }
+  }
+  if (!incrementalTopologyDisabledByEnv()
+      && impl_->checker.incremental.sameRequest(config, layer_docs,
+                                                map_crs.authid())) {
+    const TopoDiff diff =
+        topoDiff(impl_->checker.incremental, current_stamps);
+    if (diff.empty()) {
+      // 快路径：几何零变化（含 gap 规则）——会话错误/余量仍有效。
+      impl_->checker.last_config = config;
+      return serializeCheckerSession();
+    }
+    if (!rules.contains(QStringLiteral("gap"))) {
+      return runIncrementalGeometryChecks(canvas, layers, layer_docs, config,
+                                          rules, current_stamps, diff);
+    }
+  }
+  impl_->checker.reset(project());
+  impl_->checker.last_config = config;
+  // 上下文在 reset 之后创建（Ticket 2：reset 会销毁旧上下文——增量路径
+  // 复用上次会话上下文，请求相同 ⇒ 同 precision/CRS/transformContext）。
+  impl_->checker.context = std::make_unique<QgsGeometryCheckContext>(
+      precision, map_crs, project()->transformContext(), project());
 
   if (config.value(QStringLiteral("allowed_gaps")).isObject()
       && rules.contains(QStringLiteral("gap"))) {
@@ -6487,48 +6582,191 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
   }
 
   if (rules.contains(QStringLiteral("workspace_remainder"))) {
-    QgsGeometry work;
-    if (config.value(QStringLiteral("workspace")).isObject()) {
-      const QJsonObject ws = config.value(QStringLiteral("workspace")).toObject();
-      work = QgsJsonUtils::geometryFromGeoJson(
-          QString::fromUtf8(QJsonDocument(ws).toJson(QJsonDocument::Compact)));
-    } else if (canvas != nullptr) {
-      work = QgsGeometry::fromRect(canvas->extent());
-    }
-    if (!work.isEmpty()) {
-      QgsGeometry combined;
-      bool first = true;
-      for (QgsVectorLayer* layer : layers) {
-        if (layer->geometryType() != Qgis::GeometryType::Polygon) continue;
-        QgsFeature feature;
-        QgsFeatureIterator iterator = layer->getFeatures();
-        while (iterator.nextFeature(feature)) {
-          if (!feature.hasGeometry() || feature.geometry().isEmpty()) continue;
-          QgsGeometry geom = feature.geometry();
-          if (first) {
-            combined = geom;
-            first = false;
-          } else {
-            combined = combined.combine(geom);
-          }
+    computeWorkspaceRemainders(canvas, layers, layer_docs, config);
+  }
+
+  // Ticket 2：记录本次请求与要素戳——下次同请求可增量。
+  impl_->checker.incremental.valid = true;
+  impl_->checker.incremental.config = config;
+  impl_->checker.incremental.layer_docs = layer_docs;
+  impl_->checker.incremental.map_crs_id = map_crs.authid();
+  impl_->checker.incremental.stamps = current_stamps;
+  return serializeCheckerSession();
+}
+
+void QgisMapStack::computeWorkspaceRemainders(
+    QgsMapCanvas* canvas, const QList<QgsVectorLayer*>& layers,
+    const QStringList& layer_docs, const QJsonObject& config) {
+  QgsGeometry work;
+  if (config.value(QStringLiteral("workspace")).isObject()) {
+    const QJsonObject ws = config.value(QStringLiteral("workspace")).toObject();
+    work = QgsJsonUtils::geometryFromGeoJson(
+        QString::fromUtf8(QJsonDocument(ws).toJson(QJsonDocument::Compact)));
+  } else if (canvas != nullptr) {
+    work = QgsGeometry::fromRect(canvas->extent());
+  }
+  if (!work.isEmpty()) {
+    QgsGeometry combined;
+    bool first = true;
+    for (QgsVectorLayer* layer : layers) {
+      if (layer->geometryType() != Qgis::GeometryType::Polygon) continue;
+      QgsFeature feature;
+      QgsFeatureIterator iterator = layer->getFeatures();
+      while (iterator.nextFeature(feature)) {
+        if (!feature.hasGeometry() || feature.geometry().isEmpty()) continue;
+        QgsGeometry geom = feature.geometry();
+        if (first) {
+          combined = geom;
+          first = false;
+        } else {
+          combined = combined.combine(geom);
         }
       }
-      QgsGeometry remainder;
-      try {
-        remainder = first ? work : work.difference(combined);
-      } catch (...) {
-        remainder = QgsGeometry();
-      }
-      const double min_area = impl_->checker.context->reducedTolerance;
-      if (!remainder.isEmpty() && remainder.area() > min_area) {
-        QgisMapStack::Impl::CheckerSession::Remainder rem;
-        rem.id = QStringLiteral("ws-0");
-        rem.layer_doc_id = layer_docs.isEmpty() ? QString() : layer_docs.front();
-        rem.geometry = remainder;
-        rem.bbox = remainder.boundingBox();
-        impl_->checker.remainders.push_back(std::move(rem));
+    }
+    QgsGeometry remainder;
+    try {
+      remainder = first ? work : work.difference(combined);
+    } catch (...) {
+      remainder = QgsGeometry();
+    }
+    const double min_area = impl_->checker.context->reducedTolerance;
+    if (!remainder.isEmpty() && remainder.area() > min_area) {
+      Impl::CheckerSession::Remainder rem;
+      rem.id = QStringLiteral("ws-0");
+      rem.layer_doc_id = layer_docs.isEmpty() ? QString() : layer_docs.front();
+      rem.geometry = remainder;
+      rem.bbox = remainder.boundingBox();
+      impl_->checker.remainders.push_back(std::move(rem));
+    }
+  }
+}
+
+std::string QgisMapStack::runIncrementalGeometryChecks(
+    QgsMapCanvas* canvas, const QList<QgsVectorLayer*>& layers,
+    const QStringList& layer_docs, const QJsonObject& config,
+    const QSet<QString>& rules,
+    const QHash<QString, QHash<qint64, TopoFidStamp>>& current_stamps,
+    const TopoDiff& diff) {
+  // 脏区：差分盒并集外扩 2×容差（容差沿用上次会话 context——请求相同
+  // ⇒ 同 precision/CRS/transformContext）。
+  const double tolerance = impl_->checker.context
+      ? impl_->checker.context->reducedTolerance
+      : 0.0;
+  const QgsRectangle dirty_box = expandDirtyBox(diff.dirty_box, tolerance);
+
+  // 旧错误划分：本要素脏（或 overlap 对端脏/已删）→ 丢弃重证；其余沿用。
+  QList<QgsGeometryCheckError*> carried;
+  for (QgsGeometryCheckError* error : impl_->checker.native_errors) {
+    const auto dirty_a = diff.dirty.constFind(error->layerId());
+    const bool clean_a =
+        (dirty_a == diff.dirty.constEnd()
+         || !dirty_a.value().contains(error->featureId()))
+        && current_stamps.value(error->layerId())
+               .contains(static_cast<qint64>(error->featureId()));
+    bool keep = clean_a;
+    if (keep) {
+      if (auto* overlap =
+              dynamic_cast<QgsGeometryOverlapCheckError*>(error)) {
+        const auto& other = overlap->overlappedFeature();
+        const auto dirty_b = diff.dirty.constFind(other.layerId());
+        keep = (dirty_b == diff.dirty.constEnd()
+                || !dirty_b.value().contains(other.featureId()))
+            && current_stamps.value(other.layerId())
+                   .contains(static_cast<qint64>(other.featureId()));
       }
     }
+    if (keep) {
+      carried.append(error);
+    } else {
+      impl_->checker.error_geometry_json.remove(error);
+      delete error;
+    }
+  }
+  impl_->checker.native_errors = carried;
+
+  // 旧检查实例退休保活（沿用错误持 check 裸指针）；受限池重建。
+  impl_->checker.retired_checks += impl_->checker.checks;
+  impl_->checker.checks.clear();
+  qDeleteAll(impl_->checker.pools);
+  impl_->checker.pools.clear();
+
+  for (QgsVectorLayer* layer : layers) {
+    QgsFeatureIds ids;
+    const QSet<qint64> dirty_fids = diff.dirty.value(layer->id());
+    for (const qint64 fid : dirty_fids) {
+      ids << static_cast<QgsFeatureId>(fid);
+    }
+    if (!dirty_box.isNull() && !dirty_box.isEmpty()) {
+      QgsFeature neighbor;
+      QgsFeatureIterator cursor =
+          layer->getFeatures(QgsFeatureRequest(dirty_box));
+      while (cursor.nextFeature(neighbor)) {
+        if (!dirty_fids.contains(static_cast<qint64>(neighbor.id()))) {
+          ids << neighbor.id();  // 脏区相交的干净邻居（只读参与配对）
+        }
+      }
+    }
+    impl_->checker.pools.insert(layer->id(),
+                                new PwbLayerFeaturePool(layer, ids));
+  }
+
+  QVariantMap overlap_config;
+  overlap_config.insert(
+      QStringLiteral("maxOverlapArea"),
+      config.value(QStringLiteral("max_overlap_area")).toDouble(0.0));
+  if (rules.contains(QStringLiteral("is_valid"))) {
+    impl_->checker.checks.append(new QgsGeometryIsValidCheck(
+        impl_->checker.context.get(), QVariantMap()));
+  }
+  if (rules.contains(QStringLiteral("overlap"))) {
+    impl_->checker.checks.append(new QgsGeometryOverlapCheck(
+        impl_->checker.context.get(), overlap_config));
+  }
+  if (rules.contains(QStringLiteral("dangle"))) {
+    impl_->checker.checks.append(new QgsGeometryDangleCheck(
+        impl_->checker.context.get(), QVariantMap()));
+  }
+
+  QList<QgsGeometryCheckError*> fresh;
+  QgsFeedback feedback;
+  QStringList messages;
+  for (QgsGeometryCheck* check : impl_->checker.checks) {
+    try {
+      check->collectErrors(impl_->checker.pools, fresh, messages, &feedback);
+    } catch (const std::exception&) {
+      continue;
+    } catch (...) {
+      continue;
+    }
+  }
+  // 去重：受限池会为池内干净邻居重证其（干净,干净）对——与缓存携带的
+  // 同一错误重复，丢弃 fresh 侧。
+  for (QgsGeometryCheckError* error : fresh) {
+    bool duplicate = false;
+    for (const QgsGeometryCheckError* kept : impl_->checker.native_errors) {
+      if (equivalentCheckerErrors(*error, *kept)) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      impl_->checker.error_geometry_json.remove(error);
+      delete error;
+    } else {
+      impl_->checker.native_errors.append(error);
+    }
+  }
+
+  // workspace_remainder 依赖全体并集，不可子集化：全量重算。
+  if (rules.contains(QStringLiteral("workspace_remainder"))) {
+    impl_->checker.remainders.clear();
+    computeWorkspaceRemainders(canvas, layers, layer_docs, config);
+  }
+
+  impl_->checker.incremental.stamps = current_stamps;
+  impl_->checker.native_by_id.clear();
+  for (int i = 0; i < impl_->checker.native_errors.size(); ++i) {
+    impl_->checker.native_by_id.insert(QString::number(i), i);
   }
   return serializeCheckerSession();
 }

@@ -6,12 +6,19 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <QHash>
+#include <QJsonObject>
+#include <QList>
+#include <QSet>
+#include <QStringList>
 // M1 原生编辑会话声明需要 committed* 信号的全部值类型。
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
 #include <qgsvectorlayer.h>
 
 #include "edit_tools.hpp"
+#include "incremental_topology.hpp"
 
 class QgsMapCanvas;
 class QgsLayerTreeView;
@@ -360,6 +367,19 @@ public:
   // gap_threshold, max_overlap_area}。返回 {errors:[...]}。
   std::string runGeometryChecks(std::uintptr_t canvas_addr,
                                 const std::string& config_json);
+  // Ticket 2（vector-perf-increment）：工区余量（全量并集差，不可子集
+  // 化）；受限复检（脏 ∪ 邻居池 + 沿用错误补丁合入）。fix 无需全量池
+  // ——QgsFeaturePool::getFeature 缓存未命中自动回源取层。
+  void computeWorkspaceRemainders(QgsMapCanvas* canvas,
+                                  const QList<QgsVectorLayer*>& layers,
+                                  const QStringList& layer_docs,
+                                  const QJsonObject& config);
+  std::string runIncrementalGeometryChecks(
+      QgsMapCanvas* canvas, const QList<QgsVectorLayer*>& layers,
+      const QStringList& layer_docs, const QJsonObject& config,
+      const QSet<QString>& rules,
+      const QHash<QString, QHash<qint64, TopoFidStamp>>& current_stamps,
+      const TopoDiff& diff);
   std::string fixGeometryError(std::uintptr_t canvas_addr,
                                const std::string& error_id, int method);
   std::string fixGeometryErrors(std::uintptr_t canvas_addr,
