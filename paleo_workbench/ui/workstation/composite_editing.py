@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import json
 import math
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
@@ -46,6 +47,8 @@ from paleo_workbench.mapping.map_tools import (
     AddLineTool,
     AddPointTool,
     AddPolygonTool,
+    BoundaryReshapeTool,
+    FaultCutTool,
     IdentifyTool,
     MapToolController,
     MeasureDistanceTool,
@@ -640,6 +643,8 @@ class CompositeEditController(QObject):
     sessions_committed = Signal()
     # M2 §3：全部层档手势波及邻层被门禁拒绝（场景 7——状态条提示）。
     native_join_refused = Signal(str)
+    # geotopo Ticket 4：地质守卫违规上报（error 已拦截时随拦截发出；warning 放行时发出）。
+    geology_blocked = Signal(object)
     # 捕获工具落地一个新要素（layer_id, feature_id）——相带层的「指定
     # 相带」弹窗由此触发（原生/回退两条捕获路径同源）。
     feature_captured = Signal(str, str)
@@ -650,6 +655,8 @@ class CompositeEditController(QObject):
         super().__init__(parent)
         self.project_crs = str(project_crs)
         self.tools = MapToolController()
+        # geotopo Ticket 5：compound_macro 聚合捕获（None = 非活动）。
+        self._compound_capture: dict | None = None
         self._snapping = SnappingService()
         self._topology = TopologyService()
         self._layers: dict[str, VectorLayer] = {}
@@ -1579,18 +1586,81 @@ class CompositeEditController(QObject):
         return None
 
     def _commit_native_sessions(self) -> str | None:
-        """M1 原生会话整集合提交（§3 全或无）；成功返回 None。"""
+        """M1 原生会话整集合提交（§3 全或无）；成功返回 None。
+
+        geotopo Ticket 4/5：并联地质不变量门（error 拦截 / warning 经
+        ``geology_blocked`` 信号上报，不阻塞）。违规只算一次（审查
+        Standards#2），同一结果喂前置判定与 commit_all 的 geology 谓词。"""
+        violations = (self._collect_geology_violations()
+                      if self._geology_gate_enabled() else [])
+        errors = [v for v in violations
+                  if getattr(v, "severity", "error") == "error"]
+        if errors:
+            self.geology_blocked.emit(violations)
+            return (f"地质不变量校验未通过：{errors[0].code}："
+                    f"{errors[0].message}（全部编辑未提交）")
         ok, reason = self.native_editing.commit_all(
             gate=self.can_edit_layer,
             topology=self._topology,
+            geology=(lambda _records: violations) if self._geology_gate_enabled() else None,
             on_committed=self._on_native_committed,
         )
         if not ok:
             return reason
+        warnings = [v for v in violations
+                    if getattr(v, "severity", "error") == "warning"]
+        if warnings:
+            self.geology_blocked.emit(warnings)
         self._rebind_active_tool()
         self.sessions_committed.emit()
         self.state_changed.emit()
         return None
+
+    def _geology_gate_enabled(self) -> bool:
+        """地质门开关（与拓扑门同款拓扑开关语义；默认随拓扑门）。"""
+        return bool(getattr(self._topology, "enabled", False))
+
+    # LayerRole 词表 → 守卫地质角色（Spec 审查 #2b）：词表无剥蚀边界
+    # 词条，erosion_boundary 仅经显式 roles 注入（测试覆盖），工程接入
+    # 待词表扩展（04-known-limitations #16）。
+    _GEOLOGY_ROLE_BY_LAYER_ROLE = {
+        "fault_constraint": "fault_line",
+        "factor_contour": "isopath_line",
+    }
+
+    def _collect_geology_violations(self, records=None) -> list:
+        """会话集合的地质不变量违规（编辑真值读回 = 镜像缓冲）。
+
+        ``records`` 由 commit_all 的 geology 谓词回填（同一真值二次
+        判定时复用入口）；None = 现场读回。"""
+        from paleo_workbench.mapping.geological_invariants import run_geology_gate
+
+        if records is None:
+            records = {}
+            for layer_id in self.native_editing.session_layer_ids():
+                stack = self.native_editing.stack_for(layer_id)
+                layer = self._layers.get(layer_id)
+                if stack is None or layer is None:
+                    continue
+                try:
+                    records[layer_id] = self.native_editing.readback_features(
+                        stack, layer_id)
+                except Exception:  # noqa: BLE001 — 门禁读回失败按空处理并留日志
+                    logging.getLogger(__name__).exception(
+                        "geology gate readback failed: %s", layer_id)
+                    records[layer_id] = []
+        if not records:
+            return []
+        roles = {
+            layer_id: self._GEOLOGY_ROLE_BY_LAYER_ROLE.get(
+                self._layer_roles.get(layer_id, ""), "")
+            for layer_id in records
+        }
+        try:
+            return run_geology_gate(records, roles=roles)
+        except Exception:  # noqa: BLE001 — 守卫自身异常不阻塞提交主链
+            logging.getLogger(__name__).exception("geology gate crashed")
+            return []
 
     def _on_native_committed(self, layer: VectorLayer) -> None:
         """每层提交后：台账直跳新基线（M0 align——镜像即编辑发生地，
@@ -1707,15 +1777,49 @@ class CompositeEditController(QObject):
 
     def record_native_gesture(self, payload: Mapping[str, object]) -> None:
         """桥 edit_gesture 回调记账（§2 手势管理器 = 审计源）。M2 起手势
-        可跨层（payload["layers"] 有序层表；单层回落 layer_doc_id）。"""
+        可跨层（payload["layers"] 有序层表；单层回落 layer_doc_id）。
+        geotopo Ticket 5：compound_macro 活动期改为**聚合捕获**（不落
+        独立手势，块退出时归并为单手势）。"""
         gesture_id = str(payload.get("gesture_id") or new_feature_id("g"))
         layer_ids = [str(doc) for doc in (payload.get("layers") or [])]
         if not layer_ids:
             layer_ids = [str(payload.get("layer_doc_id") or "")]
+        capture = self._compound_capture
+        if capture is not None:
+            for layer_id in layer_ids:
+                if layer_id:
+                    capture["layer_ids"].append(layer_id)
+            return
         self.native_editing.gestures.finish(
             gesture_id,
             undo_text=str(payload.get("undo_text") or ""),
             layer_ids=layer_ids)
+
+    def note_compound_layer(self, layer_id: str) -> None:
+        """compound_macro 块内经控制器入口的层触达记账（§4.4）。"""
+        capture = self._compound_capture
+        if capture is not None and layer_id:
+            capture["layer_ids"].append(str(layer_id))
+
+    @contextmanager
+    def compound_macro(self, undo_text: str):
+        """复合宏事务（geotopo Ticket 5）：块内一切控制器触达的编辑（原生
+        手势回执 / 数字化捕获 / Python 会话几何命令）归并为**单手势**——
+        一次 Ctrl+Z 跨层同步撤销。绕过控制器的裸 session 写入不追踪。"""
+        if self._compound_capture is not None:
+            yield  # 嵌套块：并入外层宏
+            return
+        self._compound_capture = {"layer_ids": [], "undo_text": undo_text}
+        try:
+            yield
+        finally:
+            capture = self._compound_capture
+            self._compound_capture = None
+            if capture and capture["layer_ids"]:
+                self.native_editing.gestures.finish(
+                    new_feature_id("gesture"),
+                    undo_text=str(capture["undo_text"]),
+                    layer_ids=capture["layer_ids"])
 
     def rollback_edits(self) -> None:
         layer = self.active_layer
@@ -2104,6 +2208,35 @@ class CompositeEditController(QObject):
                     tool.native_digitize_kind = {
                         "point": "addPoint", "line": "addLine", "polygon": "addPolygon",
                     }.get(self._kinds.get(layer.id, ""), "pan")
+                elif action_id == "fault_cut":
+                    # geotopo Ticket 2：断层截断 native-only——数字化与切割
+                    # 全在 C++ PwbFaultCutTool（kind=faultCut），宿主仅挂占位
+                    # 工具供 shim 路由；非原生画布/非面层/旧桥一律拒激活。
+                    if not hasattr(self._canvas, "canvas_address"):
+                        return
+                    if self._kinds.get(layer.id) != "polygon":
+                        return
+                    fault_stack = self.native_editing.stack_for(layer.id)
+                    if fault_stack is None or not callable(
+                            getattr(fault_stack, "fault_cut_mirror_features", None)):
+                        return
+                    tool = FaultCutTool()
+                elif action_id == "boundary_reshape":
+                    # geotopo Ticket 3：共边重塑 native-only——需当前面层
+                    # 处于原生会话且**恰好两个相邻要素**被选中；数字化与
+                    # 守恒校验全在 C++ PwbBoundaryReshapeTool。
+                    if not hasattr(self._canvas, "canvas_address"):
+                        return
+                    if self._kinds.get(layer.id) != "polygon":
+                        return
+                    if len(layer.selection) != 2:
+                        return
+                    reshape_stack = self.native_editing.stack_for(layer.id)
+                    if reshape_stack is None or not callable(
+                            getattr(reshape_stack,
+                                    "reshape_mirror_shared_boundary", None)):
+                        return
+                    tool = BoundaryReshapeTool()
                 else:
                     return
         self._active_tool_action = action_id
@@ -2433,12 +2566,14 @@ class CompositeEditController(QObject):
             return polygon_layer, polygon_id, line_feature
         return None
 
-    def geometry_command(self, command_id: str) -> tuple[bool, str]:
-        """执行 split / merge；返回 (是否成功, 用户可读消息)。
+    def geometry_command(self, command_id: str, curve: dict | None = None) -> tuple[bool, str]:
+        """执行 split / merge / fault_cut；返回 (是否成功, 用户可读消息)。
 
         几何计算：Python 会话走 ``geometry_service`` / ``vector_operations``
         并落 ``VectorEditSession``；原生会话走桥 ``split_mirror_features`` /
-        ``merge_mirror_features``（镜像缓冲一宏，手势由桥 ``edit_gesture`` 记账）。
+        ``merge_mirror_features`` / ``fault_cut_mirror_features``（镜像缓冲
+        一宏，手势由桥 ``edit_gesture`` 记账）。``fault_cut`` 的 ``curve``
+        为程序化断层折线 GeoJSON（交互路径走 C++ PwbFaultCutTool 数字化）。
         """
         from paleo_workbench.mapping.vector_operations import (
             merge_selected_polygons,
@@ -2448,10 +2583,14 @@ class CompositeEditController(QObject):
         layer = self.active_layer
         if layer is None:
             return False, "没有活动的矢量图层"
+        if command_id == "fault_cut" and layer.edit_session is not None:
+            # 断层截断是镜像编辑缓冲原生能力（属性克隆 + fault_bounded 标记
+            # 同宏原子生效）——Python 会话没有等价物，诚实拒绝而非降级。
+            return False, "断层截断需要原生编辑会话（QGIS 桥）"
         session = layer.edit_session
         if session is None:
             if self.native_editing.is_open(layer.id):
-                return self._native_geometry_command(command_id, layer)
+                return self._native_geometry_command(command_id, layer, curve)
             return False, "请先开始编辑（几何操作需要编辑会话）"
         mutated_layers: list = [layer]
         try:
@@ -2502,8 +2641,9 @@ class CompositeEditController(QObject):
                         pass
         return False, f"未知几何命令 {command_id}"
 
-    def _native_geometry_command(self, command_id: str, layer) -> tuple[bool, str]:
-        """原生会话 split/merge：切线走画布数字化，合并走确认对话框。"""
+    def _native_geometry_command(self, command_id: str, layer,
+                                 curve: dict | None = None) -> tuple[bool, str]:
+        """原生会话 split/merge/fault_cut：切线走画布数字化，合并走确认对话框。"""
         stack = self.native_editing.stack_for(layer.id)
         if stack is None:
             return False, "该图层没有进行中的原生编辑会话"
@@ -2511,8 +2651,38 @@ class CompositeEditController(QObject):
             return self._native_merge(layer, stack)
         if command_id == "split":
             return self._native_split_begin(layer, stack)
+        if command_id == "fault_cut":
+            return self._native_fault_cut(layer, stack, curve)
         return False, (
             "该图层处于原生编辑会话——请先保存或回滚编辑")
+
+    def _native_fault_cut(self, layer, stack, curve: dict | None) -> tuple[bool, str]:
+        """断-相协同截断：桥 ``fault_cut_mirror_features`` 单宏原子分割。
+
+        属性延续（沉积相代码等）由桥内 splitFeatures 克隆保证；断裂标记
+        ``fault_bounded`` 在同一宏内写入两侧新面。选集为空时由桥自动拾取
+        穿越面（PWB-GT-102 = 无穿越）。
+        """
+        if not callable(getattr(stack, "fault_cut_mirror_features", None)):
+            return False, "当前 QGIS 桥不支持原生断层截断（需重建桥扩展）"
+        if not isinstance(curve, dict) or curve.get("type") != "LineString":
+            return False, "断层截断需要一条断层折线（LineString GeoJSON）"
+        feature_ids = sorted(str(fid) for fid in layer.selection)
+        options = {"mark_field": "fault_bounded"}
+        try:
+            error = str(stack.fault_cut_mirror_features(
+                layer.id,
+                json.dumps(curve),
+                json.dumps(feature_ids),
+                json.dumps(options),
+            ) or "")
+        except (AttributeError, TypeError, ValueError) as exc:
+            return False, f"断层截断调用失败：{exc}"
+        if error:
+            return False, error
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return True, "断层已截断相带（两侧属性延续并标记 fault_bounded）"
 
     def _selected_native_records(self, layer, stack) -> list[dict]:
         selected = {str(fid) for fid in layer.selection}

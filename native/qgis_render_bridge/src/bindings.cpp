@@ -5,6 +5,7 @@
 #include <array>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,10 @@
 // Qt DOM (v7 raster_renderer_info): AFTER pybind11 per the rule above.
 #include <QDomDocument>
 #include <QDomElement>
+// geotopo JSON adapter (QJsonDocument) — likewise after pybind11.
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <qgis.h>
 #include <qgsconfig.h>  // _QGIS_VERSION（capability manifest 的版本串）
@@ -22,6 +27,7 @@
 #include <qgsrendercontext.h>
 #include <qgssymbol.h>
 
+#include "geological_topology_core.hpp"
 #include "geometry_service.hpp"
 #include "gui_service.hpp"
 #include "map_stack_service.hpp"
@@ -721,6 +727,199 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                           geometry_arg(source), parse_extent(extent));
                   });
 
+    // Geological topology core (geotopo tickets): JSON-envelope contract,
+    // never raises — malformed input returns an error envelope string
+    // (02-interface-contracts §1/§3).
+    auto geotopo = module.def_submodule(
+        "geotopo", "Geological planar-topology core (DCEL polygonizer)");
+    geotopo.def(
+        "polygonize_control_lines",
+        [](const std::string& lines_json, const std::string& options_json) {
+            namespace gt = pwb::geotopo;
+            const auto error_envelope = [](gt::ErrorCode code, const QString& message) {
+                gt::PolygonizeResult bad;
+                bad.error = code;
+                bad.message = message.toStdString();
+                return gt::polygonize_result_to_json(bad);
+            };
+            QJsonParseError parse_error{};
+            const QJsonDocument lines_doc = QJsonDocument::fromJson(
+                QByteArray::fromStdString(lines_json), &parse_error);
+            if (parse_error.error != QJsonParseError::NoError || !lines_doc.isObject()) {
+                return error_envelope(gt::ErrorCode::MalformedJson,
+                                      QString("malformed json: %1")
+                                          .arg(parse_error.errorString()));
+            }
+            gt::PolygonizeOptions options;
+            if (!options_json.empty()) {
+                const QJsonDocument options_doc = QJsonDocument::fromJson(
+                    QByteArray::fromStdString(options_json), &parse_error);
+                if (parse_error.error != QJsonParseError::NoError || !options_doc.isObject()) {
+                    return error_envelope(gt::ErrorCode::MalformedJson,
+                                          QString("malformed options json: %1")
+                                              .arg(parse_error.errorString()));
+                }
+                const QJsonObject obj = options_doc.object();
+                options.tolerance = obj.value("tolerance").toDouble(1e-6);
+                options.min_ring_area = obj.value("min_ring_area").toDouble(0.0);
+                if (obj.contains("clip_envelope")) {
+                    const QJsonArray clip = obj.value("clip_envelope").toArray();
+                    if (clip.size() == 4) {
+                        options.has_clip = true;
+                        options.clip_xmin = clip.at(0).toDouble();
+                        options.clip_ymin = clip.at(1).toDouble();
+                        options.clip_xmax = clip.at(2).toDouble();
+                        options.clip_ymax = clip.at(3).toDouble();
+                    }
+                }
+            }
+            std::vector<gt::ControlLineInput> lines;
+            const QJsonArray lines_array = lines_doc.object().value("lines").toArray();
+            for (const QJsonValue& value : lines_array) {
+                const QJsonObject record = value.toObject();
+                gt::ControlLineInput line;
+                line.id = record.value("id").toString().toStdString();
+                const QJsonArray path = record.value("path").toArray();
+                for (const QJsonValue& point : path) {
+                    const QJsonArray xy = point.toArray();
+                    if (xy.size() != 2) {
+                        return error_envelope(
+                            gt::ErrorCode::InvalidInput,
+                            QString("line '%1' has a non-2D vertex").arg(
+                                QString::fromStdString(line.id)));
+                    }
+                    line.xy.push_back(xy.at(0).toDouble());
+                    line.xy.push_back(xy.at(1).toDouble());
+                }
+                lines.push_back(std::move(line));
+            }
+            // NaN survives QJsonValue round-trip; the core rejects non-finite
+            // vertices with PWB-GT-001.
+            gt::PolygonizeResult result;
+            {
+                py::gil_scoped_release release;
+                result = gt::polygonize_control_lines(lines, options);
+            }
+            return gt::polygonize_result_to_json(result);
+        },
+        py::arg("lines"), py::arg("options") = "{}",
+        "Polygonize a control-line network into bounded facies faces "
+        "(JSON envelope per docs/development/geotopo-editor/02-interface-contracts.md).");
+
+    // geotopo Ticket 3：纯几何共边查找/联动重塑（GeoJSON 折线数组进，
+    // JSON 信封出；坐标数组形如 [[x,y],...]，也可带 coordinates 包装）。
+    const auto chain_arg = [](const std::string& geojson, const char* what,
+                              std::vector<double>& out) -> std::string {
+        QJsonParseError parse_error{};
+        const QJsonDocument doc = QJsonDocument::fromJson(
+            QByteArray::fromStdString(geojson), &parse_error);
+        if (parse_error.error != QJsonParseError::NoError
+            || (!doc.isArray() && !doc.isObject())) {
+            return std::string("PWB-GT-003: malformed json for ") + what;
+        }
+        const QJsonArray chain = doc.isArray()
+            ? doc.array()
+            : doc.object().value(QStringLiteral("coordinates")).toArray();
+        for (const QJsonValue& value : chain) {
+            const QJsonArray xy = value.toArray();
+            if (xy.size() != 2) {
+                return std::string("PWB-GT-001: ") + what + " must be [[x,y],...]";
+            }
+            out.push_back(xy.at(0).toDouble());
+            out.push_back(xy.at(1).toDouble());
+        }
+        return "";
+    };
+    const auto polygon_ring_arg = [](const std::string& geojson,
+                                     std::vector<double>& out) -> std::string {
+        QJsonParseError parse_error{};
+        const QJsonDocument doc = QJsonDocument::fromJson(
+            QByteArray::fromStdString(geojson), &parse_error);
+        if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
+            return std::string("PWB-GT-003: malformed json for polygon");
+        }
+        const QJsonArray rings =
+            doc.object().value(QStringLiteral("coordinates")).toArray();
+        if (rings.isEmpty()) return "PWB-GT-001: polygon without coordinates";
+        for (const QJsonValue& value : rings.at(0).toArray()) {
+            const QJsonArray xy = value.toArray();
+            if (xy.size() != 2) return "PWB-GT-001: polygon vertex must be [x,y]";
+            out.push_back(xy.at(0).toDouble());
+            out.push_back(xy.at(1).toDouble());
+        }
+        return "";
+    };
+    geotopo.def(
+        "find_shared_arcs",
+        [chain_arg, polygon_ring_arg](const std::string& polygon_a_json,
+                                      const std::string& polygon_b_json,
+                                      double tolerance) {
+            namespace gt = pwb::geotopo;
+            std::vector<double> a_xy, b_xy;
+            std::string error = polygon_ring_arg(polygon_a_json, a_xy);
+            if (!error.empty()) {
+                gt::SharedArcsResult bad;
+                bad.error = gt::ErrorCode::MalformedJson;
+                bad.message = error;
+                return gt::shared_arcs_result_to_json(bad);
+            }
+            error = polygon_ring_arg(polygon_b_json, b_xy);
+            if (!error.empty()) {
+                gt::SharedArcsResult bad;
+                bad.error = gt::ErrorCode::MalformedJson;
+                bad.message = error;
+                return gt::shared_arcs_result_to_json(bad);
+            }
+            gt::SharedArcsResult result;
+            {
+                py::gil_scoped_release release;
+                result = gt::find_shared_arcs(a_xy, b_xy, tolerance);
+            }
+            return gt::shared_arcs_result_to_json(result);
+        },
+        py::arg("polygon_a"), py::arg("polygon_b"), py::arg("tolerance") = 1e-6,
+        "Find every shared boundary arc (tolerance-chained vertex sequences) "
+        "between two polygons; JSON envelope with arcs [[x,y],...].");
+    geotopo.def(
+        "reshape_shared_arc",
+        [chain_arg, polygon_ring_arg](const std::string& polygon_a_json,
+                                      const std::string& polygon_b_json,
+                                      const std::string& arc_json,
+                                      const std::string& curve_json,
+                                      double tolerance) {
+            namespace gt = pwb::geotopo;
+            std::vector<double> a_xy, b_xy, arc_xy, curve_xy;
+            for (const auto& item : std::vector<std::tuple<std::string, std::vector<double>*,
+                                                           const char*>>{
+                     {polygon_a_json, &a_xy, "polygon_a"},
+                     {polygon_b_json, &b_xy, "polygon_b"},
+                     {arc_json, &arc_xy, "arc"},
+                     {curve_json, &curve_xy, "curve"}}) {
+                const std::string& json = std::get<0>(item);
+                const char* what = std::get<2>(item);
+                const std::string error = std::string(what).find("polygon") == 0
+                    ? polygon_ring_arg(json, *std::get<1>(item))
+                    : chain_arg(json, what, *std::get<1>(item));
+                if (!error.empty()) {
+                    gt::ReshapePairResult bad;
+                    bad.error = gt::ErrorCode::MalformedJson;
+                    bad.message = error;
+                    return gt::reshape_pair_result_to_json(bad);
+                }
+            }
+            gt::ReshapePairResult result;
+            {
+                py::gil_scoped_release release;
+                result = gt::reshape_shared_arc(a_xy, b_xy, arc_xy, curve_xy, tolerance);
+            }
+            return gt::reshape_pair_result_to_json(result);
+        },
+        py::arg("polygon_a"), py::arg("polygon_b"), py::arg("arc"),
+        py::arg("curve"), py::arg("tolerance") = 1e-6,
+        "Reshape the shared arc of two adjacent polygons with one curve; "
+        "refuses (zero change) on unmatched arc (201), invalid ring (202), "
+        "overlap (203) or area non-conservation (204).");
+
     auto mapstack = module.def_submodule("mapstack", "QGIS native map stack");
     py::class_<pwb::qgis_render::QgisMapStack>(mapstack, "QgisMapStack")
         .def(py::init<>())
@@ -952,6 +1151,29 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              "M3 topo-editing: split selected (or listed) features by a "
              "LineString curve; topologicalEditing + neighbor topo points; "
              "one undoable macro 'Features split'.")
+        .def("fault_cut_mirror_features",
+             &pwb::qgis_render::QgisMapStack::faultCutMirrorFeatures,
+             py::arg("doc_id"), py::arg("curve_geojson"),
+             py::arg("feature_ids_json") = "", py::arg("options_json") = "{}",
+             "geotopo Ticket 2: fault-facies truncation — auto-pick crossing "
+             "facies polygons (or explicit host ids), split in one macro, "
+             "clone attributes and stamp mark_field (default fault_bounded) "
+             "true plus optional side_field (hanging/footwall). Errors carry "
+             "a PWB-GT-1xx prefix (02-interface-contracts §3).")
+        .def("reshape_mirror_shared_boundary",
+             &pwb::qgis_render::QgisMapStack::reshapeMirrorSharedBoundary,
+             py::arg("doc_id_a"), py::arg("doc_id_b"), py::arg("feature_id_a"),
+             py::arg("feature_id_b"), py::arg("arc_geojson"),
+             py::arg("curve_geojson"), py::arg("tolerance") = 1e-6,
+             "geotopo Ticket 3: coincident-boundary reshape — replace the "
+             "shared arc of two adjacent mirror features with one curve in a "
+             "single gesture (conservation-checked, zero-change on refusal).")
+        .def("restore_mirror_snapshot",
+             &pwb::qgis_render::QgisMapStack::restoreMirrorSnapshot,
+             py::arg("doc_id"), py::arg("features_json"),
+             "geotopo Ticket 5: compensating snapshot restore — one macro "
+             "delete-all + re-add from a mirror_features_json snapshot "
+             "(content-equivalent; feature ids may be reassigned).")
         .def("merge_mirror_features",
              &pwb::qgis_render::QgisMapStack::mergeMirrorFeatures,
              py::arg("doc_id"), py::arg("feature_ids_json"),

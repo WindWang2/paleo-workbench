@@ -41,6 +41,12 @@ def _register_qgis_dll_directories() -> None:
     only triggers it before PySide6 is imported (the conda recipe's Qt
     preload must win the race against the wheel's bundled Qt — ADR 0059
     private-ABI rule).
+
+    geotopo: DLL 目录注册后立即预导入桥。Windows 加载器按**模块名**复用
+    已载入 DLL——CPython 自带的 libcrypto-3.dll / sqlite3.dll（hashlib /
+    sqlite3 触发）与桥链接的 vcpkg 同名构建导出表不同，一旦先载入，
+    桥的 qgis_core/gdal 解析到它们即 0xC0000139（找不到指定的程序）。
+    采集期先导入桥即锁死正确顺序（无桥环境静默跳过）。
     """
     if os.name != "nt":
         return
@@ -48,6 +54,11 @@ def _register_qgis_dll_directories() -> None:
         from paleo_workbench.qgis_runtime.loader import prepare_bridge_load
 
         prepare_bridge_load()
+    except Exception:
+        pass
+        return
+    try:
+        import qgis_render_bridge  # noqa: F401
     except Exception:
         pass
 

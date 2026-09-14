@@ -38,8 +38,13 @@
 #include <QUuid>
 #include <QWidget>
 #include <qgscurve.h>
+#include <qgscurvepolygon.h>
+#include <qgslinestring.h>
+#include <qgspolygon.h>
 #include <qgsvectorlayereditutils.h>
 #include <qgswkbtypes.h>
+
+#include "geological_topology_core.hpp"  // geotopo Ticket 3 共边重塑核心
 
 #include <qgsapplication.h>
 #include <qgstextformat.h>
@@ -3730,6 +3735,457 @@ std::string QgisMapStack::splitMirrorFeatures(
   return "";
 }
 
+std::string QgisMapStack::faultCutMirrorFeatures(
+    const std::string& doc_id, const std::string& curve_geojson,
+    const std::string& feature_ids_json, const std::string& options_json) {
+  // geotopo Ticket 2：断-相协同截断（02-interface-contracts §2.1）。
+  // 与 splitMirrorFeatures 的差异：bbox+intersects 自动拾取、mark/side
+  // 字段同宏补列与写入、fault_cut 手势回执；未贯穿幂等无痕（PWB-GT-104）。
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "PWB-GT-103: layer not in an edit session: " + doc_id;
+  QgsGeometry curve_geom = curveGeometryFromJson(curve_geojson);
+  if (curve_geom.isNull() || curve_geom.type() != Qgis::GeometryType::Line) {
+    return "PWB-GT-101: invalid fault curve";
+  }
+  const QgsCurve* curve = qgsgeometry_cast<const QgsCurve*>(curve_geom.constGet());
+  if (curve == nullptr) return "PWB-GT-101: invalid fault curve";
+
+  QString mark_field = QStringLiteral("fault_bounded");
+  QString side_field;  // 空 = 不打盘侧标记
+  {
+    QJsonParseError options_error{};
+    const QJsonDocument options_doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString(options_json), &options_error);
+    if (options_error.error == QJsonParseError::NoError && options_doc.isObject()) {
+      const QJsonObject obj = options_doc.object();
+      mark_field = obj.value(QStringLiteral("mark_field")).toString(mark_field);
+      if (obj.contains(QStringLiteral("side_field"))) {
+        side_field = obj.value(QStringLiteral("side_field")).toString();
+      }
+    }
+  }
+
+  const QStringList host_ids = parseHostIdList(feature_ids_json);
+  QgsFeatureIds selected;
+  if (!host_ids.isEmpty()) {
+    auto table = impl_->mirror_feature_fids.find(doc_id);
+    const std::unordered_map<long long, std::string> empty;
+    const auto& lookup = table == impl_->mirror_feature_fids.end() ? empty : table->second;
+    for (const QString& host_id : host_ids) {
+      const QgsFeatureId fid = fidForHostId(lookup, host_id);
+      if (fid != FID_NULL) selected.insert(fid);
+    }
+    if (selected.isEmpty()) return "PWB-GT-102: no matching features to cut";
+  } else {
+    // 自动拾取：bbox 预过滤 + 精确相交（QGIS4：ExactIntersect 归并到
+    // Qgis::FeatureRequestFlag，这里直接逐件 intersects 等价且更直观）。
+    QgsFeatureRequest request;
+    request.setFilterRect(curve_geom.boundingBox());
+    QgsFeatureIterator it = layer->getFeatures(request);
+    QgsFeature feature;
+    while (it.nextFeature(feature)) {
+      if (feature.hasGeometry() && feature.geometry().intersects(curve_geom)) {
+        selected.insert(feature.id());
+      }
+    }
+    if (selected.isEmpty()) return "PWB-GT-102: no features intersect the fault curve";
+  }
+  const QgsFeatureIds selection_backup = layer->selectedFeatureIds();
+  const auto restore_selection = [layer, selection_backup]() {
+    if (selection_backup.isEmpty()) {
+      layer->removeSelection();
+    } else {
+      layer->selectByIds(selection_backup);
+    }
+  };
+  layer->selectByIds(selected);
+
+  QgsProject* proj = project();
+  const QgsFeatureIds before_ids = layer->allFeatureIds();
+
+  layer->beginEditCommand(QStringLiteral("Fault cut"));
+  int mark_idx = layer->fields().indexOf(mark_field);
+  if (mark_idx < 0) {
+    if (!layer->addAttribute(QgsField(mark_field, QMetaType::Type::Bool))) {
+      layer->destroyEditCommand();
+      return "PWB-GT-104: cannot add mark field " + mark_field.toStdString();
+    }
+    mark_idx = layer->fields().indexOf(mark_field);  // QGIS4 fields() 含未保存字段
+  }
+  int side_idx = -1;
+  if (!side_field.isEmpty()) {
+    side_idx = layer->fields().indexOf(side_field);
+    if (side_idx < 0) {
+      if (!layer->addAttribute(QgsField(side_field, QMetaType::Type::QString))) {
+        layer->destroyEditCommand();
+        return "PWB-GT-104: cannot add side field " + side_field.toStdString();
+      }
+      side_idx = layer->fields().indexOf(side_field);
+    }
+  }
+
+  QgsPointSequence topology_test_points;
+  const Qgis::GeometryOperationResult result =
+      layer->splitFeatures(curve, topology_test_points, true, true);
+  if (result != Qgis::GeometryOperationResult::Success) {
+    layer->destroyEditCommand();
+    restore_selection();
+    return "PWB-GT-104: split engine failed: " + splitResultMessage(result);
+  }
+  const QgsFeatureIds after_ids = layer->allFeatureIds();
+  QList<QgsFeatureId> added;
+  for (QgsFeatureId fid : after_ids) {
+    if (!before_ids.contains(fid)) added.append(fid);
+  }
+  if (added.isEmpty()) {
+    // 断层未贯穿（部分穿越/仅触边界）：QGIS 未分割——拒绝式幂等，不留痕。
+    layer->destroyEditCommand();
+    restore_selection();
+    return "PWB-GT-104: fault curve does not fully cross any selected feature";
+  }
+
+  // 属性延续由 splitFeatures 克隆；断裂标记 + 盘侧写入两侧（原 fid + 新增）。
+  // QGIS4 changeAttributeValues 是逐要素签名（fid, QgsAttributeMap）。
+  QgsFeatureIds affected = selected;
+  for (QgsFeatureId fid : added) affected.insert(fid);
+  const QgsPoint fault_first = curve->startPoint();
+  const QgsPoint fault_last = curve->endPoint();
+  const QgsPointXY fault_start(fault_first.x(), fault_first.y());
+  const QgsPointXY fault_end(fault_last.x(), fault_last.y());
+  const double dir_x = fault_end.x() - fault_start.x();
+  const double dir_y = fault_end.y() - fault_start.y();
+  QgsFeatureIterator it = layer->getFeatures(QgsFeatureRequest(affected));
+  QgsFeature feature;
+  while (it.nextFeature(feature)) {
+    QgsAttributeMap values;
+    values[mark_idx] = QVariant(true);
+    if (side_idx >= 0 && feature.hasGeometry()) {
+      const QgsGeometry centroid = feature.geometry().centroid();
+      if (!centroid.isNull()) {
+        const QgsPointXY c = centroid.asPoint();
+        const double cross = dir_x * (c.y() - fault_start.y())
+                           - dir_y * (c.x() - fault_start.x());
+        const double scale = std::max({1.0, std::fabs(dir_x), std::fabs(dir_y)});
+        if (cross > 1e-9 * scale) values[side_idx] = QStringLiteral("hanging");
+        else if (cross < -1e-9 * scale) values[side_idx] = QStringLiteral("footwall");
+        else values[side_idx] = QString();
+      }
+    }
+    if (!layer->changeAttributeValues(feature.id(), values)) {
+      layer->destroyEditCommand();
+      restore_selection();
+      return "PWB-GT-104: cannot stamp fault-bounded markers";
+    }
+  }
+  layer->endEditCommand();
+  // 簿记延迟到宏成功之后（审查 Standards#5）：失败路径不再残留孤儿映射。
+  for (QgsFeatureId fid : added) {
+    const std::string host =
+        "fault-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+    impl_->pending_added_host_ids[doc_id].push_back(host);
+    impl_->mirror_feature_fids[doc_id][static_cast<long long>(fid)] = host;
+  }
+
+  // 邻层拓扑点散布（同 split §4）+ fault_cut 多层手势回执。
+  std::vector<std::string> affected_layers{doc_id};
+  if (!topology_test_points.isEmpty() && proj != nullptr) {
+    const QgsCoordinateReferenceSystem crs = layer->crs();
+    const QMap<QString, QgsMapLayer*> layers = proj->mapLayers();
+    for (auto lt = layers.constBegin(); lt != layers.constEnd(); ++lt) {
+      QgsVectorLayer* other = qobject_cast<QgsVectorLayer*>(lt.value());
+      if (other == nullptr || other == layer || !other->isEditable()
+          || !other->isSpatial()) {
+        continue;
+      }
+      if (other->geometryType() != Qgis::GeometryType::Line
+          && other->geometryType() != Qgis::GeometryType::Polygon) {
+        continue;
+      }
+      if (other->crs() != crs) continue;
+      const QString other_doc =
+          other->customProperty(QStringLiteral("pwb/doc_id")).toString();
+      if (other_doc.isEmpty()) continue;
+      other->beginEditCommand(
+          QStringLiteral("Topological points from fault cut"));
+      const int inserted = other->addTopologicalPoints(topology_test_points);
+      if (inserted == 0) {
+        other->endEditCommand();
+        affected_layers.push_back(other_doc.toStdString());
+      } else {
+        other->destroyEditCommand();
+      }
+    }
+  }
+
+  QJsonObject payload;
+  payload.insert(QStringLiteral("layer_doc_id"), QString::fromStdString(doc_id));
+  QJsonArray layer_docs;
+  for (const std::string& id : affected_layers) {
+    layer_docs.append(QString::fromStdString(id));
+  }
+  payload.insert(QStringLiteral("layers"), layer_docs);
+  payload.insert(QStringLiteral("gesture"), QStringLiteral("fault_cut"));
+  payload.insert(QStringLiteral("undo_text"), QStringLiteral("断层截断"));
+  QJsonArray host_refs;
+  const auto live_table = impl_->mirror_feature_fids.find(doc_id);
+  if (live_table != impl_->mirror_feature_fids.end()) {
+    for (QgsFeatureId fid : affected) {
+      const auto hit = live_table->second.find(static_cast<long long>(fid));
+      if (hit != live_table->second.end()) {
+        host_refs.append(QString::fromStdString(hit->second));
+      }
+    }
+  }
+  payload.insert(QStringLiteral("features"), host_refs);
+  const std::string payload_json =
+      QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  for (auto& kv : impl_->edit_pick_callbacks) {
+    if (kv.second) kv.second("edit_gesture", payload_json);
+  }
+  return "";
+}
+
+std::string QgisMapStack::reshapeMirrorSharedBoundary(
+    const std::string& doc_id_a, const std::string& doc_id_b,
+    const std::string& feature_id_a, const std::string& feature_id_b,
+    const std::string& arc_geojson, const std::string& curve_geojson,
+    double tolerance) {
+  // geotopo Ticket 3（02-interface-contracts §2.2）：核心守恒校验在
+  // pwb::geotopo::reshape_shared_arc（纯 std），此处只做 fid 解析、GEOS
+  // 复核与 EditBuffer 落盘；任一失败两侧零变更。
+  namespace gt = pwb::geotopo;
+  QgsVectorLayer* layer_a = editingLayerFor(doc_id_a);
+  QgsVectorLayer* layer_b = doc_id_b == doc_id_a
+      ? layer_a
+      : editingLayerFor(doc_id_b);
+  if (layer_a == nullptr) return "PWB-GT-103: layer not in an edit session: " + doc_id_a;
+  if (layer_b == nullptr) return "PWB-GT-103: layer not in an edit session: " + doc_id_b;
+  if (layer_a->crs() != layer_b->crs()) {
+    return "PWB-GT-301: layer CRS mismatch between the two polygon layers";
+  }
+  const auto fid_of = [&](const std::string& doc_id, const std::string& host_id,
+                          QgsVectorLayer* layer) -> QgsFeatureId {
+    auto table = impl_->mirror_feature_fids.find(doc_id);
+    if (table == impl_->mirror_feature_fids.end()) return FID_NULL;
+    return fidForHostId(table->second, QString::fromStdString(host_id));
+  };
+  const QgsFeatureId fid_a = fid_of(doc_id_a, feature_id_a, layer_a);
+  const QgsFeatureId fid_b = fid_of(doc_id_b, feature_id_b, layer_b);
+  if (fid_a == FID_NULL || fid_b == FID_NULL) {
+    return "PWB-GT-201: feature id not found in mirror layer";
+  }
+  QgsFeature feature_a, feature_b;
+  if (!layer_a->getFeatures(QgsFeatureRequest(fid_a)).nextFeature(feature_a)
+      || !feature_a.hasGeometry()
+      || !layer_b->getFeatures(QgsFeatureRequest(fid_b)).nextFeature(feature_b)
+      || !feature_b.hasGeometry()) {
+    return "PWB-GT-201: features have no geometry";
+  }
+  const auto exterior_xy = [](const QgsGeometry& geometry,
+                              std::vector<double>& out) -> bool {
+    const QgsCurvePolygon* polygon =
+        qgsgeometry_cast<const QgsCurvePolygon*>(geometry.constGet());
+    if (polygon == nullptr || polygon->exteriorRing() == nullptr) return false;
+    const QgsCurve* ring = polygon->exteriorRing();
+    out.clear();
+    const int total = ring->numPoints();
+    for (int i = 0; i < total; ++i) {
+      const QgsPoint point = ring->vertexAt(QgsVertexId(0, 0, i));
+      out.push_back(point.x());
+      out.push_back(point.y());
+    }
+    return out.size() >= 6;
+  };
+  std::vector<double> a_xy, b_xy, arc_xy, curve_xy;
+  if (!exterior_xy(feature_a.geometry(), a_xy)
+      || !exterior_xy(feature_b.geometry(), b_xy)) {
+    return "PWB-GT-201: polygon exterior rings unavailable";
+  }
+  const auto parse_chain = [](const std::string& geojson, std::vector<double>& out,
+                              const char* what) -> std::string {
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString(geojson), &err);
+    if (err.error != QJsonParseError::NoError) {
+      return std::string("PWB-GT-003: malformed json for ") + what;
+    }
+    const QJsonArray chain = doc.isArray()
+        ? doc.array()
+        : doc.object().value(QStringLiteral("coordinates")).toArray();
+    for (const QJsonValue& value : chain) {
+      const QJsonArray xy = value.toArray();
+      if (xy.size() != 2) return std::string("PWB-GT-001: ") + what + " must be [[x,y],...]";
+      out.push_back(xy.at(0).toDouble());
+      out.push_back(xy.at(1).toDouble());
+    }
+    return "";
+  };
+  std::string parse_error = parse_chain(arc_geojson, arc_xy, "arc");
+  if (!parse_error.empty()) return parse_error;
+  parse_error = parse_chain(curve_geojson, curve_xy, "curve");
+  if (!parse_error.empty()) return parse_error;
+
+  gt::ReshapePairResult reshaped;
+  {
+    // 守恒三校验为纯计算；数据规模为单对面，无需释放 GIL。
+    reshaped = gt::reshape_shared_arc(a_xy, b_xy, arc_xy, curve_xy, tolerance);
+  }
+  if (reshaped.error != gt::ErrorCode::Ok) {
+    return std::string(gt::error_code_string(reshaped.error)) + ": " + reshaped.message;
+  }
+
+  const auto ring_from_xy = [](const std::vector<double>& xy) {
+    auto line = std::make_unique<QgsLineString>();
+    const int total = static_cast<int>(xy.size() / 2);
+    for (int i = 0; i < total; ++i) {
+      line->addVertex(QgsPoint(xy[2 * i], xy[2 * i + 1]));
+    }
+    auto polygon = std::make_unique<QgsPolygon>();
+    polygon->setExteriorRing(line.release());
+    return QgsGeometry(polygon.release());
+  };
+  QgsGeometry new_geom_a = ring_from_xy(reshaped.polygon_a_xy);
+  QgsGeometry new_geom_b = ring_from_xy(reshaped.polygon_b_xy);
+  if (!new_geom_a.isGeosValid() || !new_geom_b.isGeosValid()) {
+    return "PWB-GT-202: reshaped ring invalid (GEOS)";
+  }
+
+  if (doc_id_a == doc_id_b) {
+    layer_a->beginEditCommand(QStringLiteral("Boundary reshape"));
+    const bool ok_a = layer_a->changeGeometry(fid_a, new_geom_a);
+    const bool ok_b = layer_a->changeGeometry(fid_b, new_geom_b);
+    if (!ok_a || !ok_b) {
+      layer_a->destroyEditCommand();
+      return "PWB-GT-301: changeGeometry failed";
+    }
+    layer_a->endEditCommand();
+  } else {
+    layer_a->beginEditCommand(QStringLiteral("Boundary reshape"));
+    layer_b->beginEditCommand(QStringLiteral("Boundary reshape"));
+    const bool ok_a = layer_a->changeGeometry(fid_a, new_geom_a);
+    const bool ok_b = layer_b->changeGeometry(fid_b, new_geom_b);
+    if (!ok_a || !ok_b) {
+      layer_a->destroyEditCommand();
+      layer_b->destroyEditCommand();
+      return "PWB-GT-301: changeGeometry failed";
+    }
+    layer_a->endEditCommand();
+    layer_b->endEditCommand();
+  }
+
+  // 邻层拓扑点散布（同 split/fault_cut §4 语义）。
+  QgsProject* proj = project();
+  std::vector<std::string> affected_layers{doc_id_a};
+  if (doc_id_b != doc_id_a) affected_layers.push_back(doc_id_b);
+  if (proj != nullptr) {
+    QgsPointSequence topo_points;
+    for (std::size_t k = 0; k + 1 < curve_xy.size(); k += 2) {
+      topo_points.append(QgsPoint(curve_xy[k], curve_xy[k + 1]));
+    }
+    const QgsCoordinateReferenceSystem crs = layer_a->crs();
+    const QMap<QString, QgsMapLayer*> layers = proj->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+      QgsVectorLayer* other = qobject_cast<QgsVectorLayer*>(it.value());
+      if (other == nullptr || other == layer_a || other == layer_b
+          || !other->isEditable() || !other->isSpatial()
+          || other->crs() != crs) {
+        continue;
+      }
+      const QString other_doc =
+          other->customProperty(QStringLiteral("pwb/doc_id")).toString();
+      if (other_doc.isEmpty()) continue;
+      other->beginEditCommand(QStringLiteral("Topological points from boundary reshape"));
+      const int inserted = other->addTopologicalPoints(topo_points);
+      if (inserted == 0) {
+        other->endEditCommand();
+        affected_layers.push_back(other_doc.toStdString());
+      } else {
+        other->destroyEditCommand();
+      }
+    }
+  }
+
+  QJsonObject payload;
+  payload.insert(QStringLiteral("layer_doc_id"), QString::fromStdString(doc_id_a));
+  QJsonArray layer_docs;
+  for (const std::string& id : affected_layers) {
+    layer_docs.append(QString::fromStdString(id));
+  }
+  payload.insert(QStringLiteral("layers"), layer_docs);
+  payload.insert(QStringLiteral("gesture"), QStringLiteral("boundary_reshape"));
+  payload.insert(QStringLiteral("undo_text"), QStringLiteral("共边重塑"));
+  QJsonArray host_refs;
+  host_refs.append(QString::fromStdString(feature_id_a));
+  host_refs.append(QString::fromStdString(feature_id_b));
+  payload.insert(QStringLiteral("features"), host_refs);
+  const std::string payload_json =
+      QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  for (auto& kv : impl_->edit_pick_callbacks) {
+    if (kv.second) kv.second("edit_gesture", payload_json);
+  }
+  return "";
+}
+
+std::string QgisMapStack::restoreMirrorSnapshot(
+    const std::string& doc_id, const std::string& features_json) {
+  // geotopo Ticket 5（02-interface-contracts §4.3）：补偿恢复 = 单宏
+  // delete-all + 快照重加。快照来自 mirror_features_json（编辑缓冲真值）。
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "PWB-GT-103: layer not in an edit session: " + doc_id;
+  QJsonParseError parse_error{};
+  const QJsonDocument document = QJsonDocument::fromJson(
+      QByteArray::fromStdString(features_json), &parse_error);
+  if (parse_error.error != QJsonParseError::NoError || !document.isObject()) {
+    return "PWB-GT-003: malformed snapshot json: "
+        + parse_error.errorString().toStdString();
+  }
+  const QJsonArray features = document.object()
+                                  .value(QStringLiteral("features"))
+                                  .toArray();
+  if (features.isEmpty()) return "PWB-GT-001: snapshot without features";
+
+  const QgsFeatureList restored = parseGeoJsonFeatures(
+      QString::fromUtf8(QJsonDocument(document.object()).toJson(
+          QJsonDocument::Compact)),
+      layer->fields());
+  if (restored.isEmpty()) return "PWB-GT-001: snapshot features parsed to nothing";
+
+  layer->beginEditCommand(QStringLiteral("Restore snapshot"));
+  const QgsFeatureIds current = layer->allFeatureIds();
+  if (!current.isEmpty() && !layer->deleteFeatures(current)) {
+    layer->destroyEditCommand();
+    return "PWB-GT-301: snapshot restore could not clear features";
+  }
+  bool added_any = false;
+  for (const QgsFeature& record : restored) {
+    QgsFeature copy = record;  // addFeature 取非 const 引用
+    added_any = layer->addFeature(copy) || added_any;
+  }
+  if (!added_any) {
+    layer->destroyEditCommand();
+    return "PWB-GT-301: snapshot restore added nothing";
+  }
+  layer->endEditCommand();
+
+  // fid→宿主 id 映射表 + pending 列表重建（审查 Standards#6：恢复后的
+  // 会话提交时 committedAdded 需与宿主 id 正确配对，否则退化为数值 fid）。
+  impl_->mirror_feature_fids[doc_id].clear();
+  impl_->pending_added_host_ids.erase(doc_id);
+  auto& pending_hosts = impl_->pending_added_host_ids[doc_id];
+  const QgsFeatureIds live = layer->allFeatureIds();
+  QgsFeatureIterator it = layer->getFeatures(QgsFeatureRequest(live));
+  QgsFeature feature;
+  while (it.nextFeature(feature)) {
+    const QString host = feature.attribute(QStringLiteral("__pwb_fid")).toString();
+    if (!host.isEmpty()) {
+      impl_->mirror_feature_fids[doc_id][static_cast<long long>(feature.id())] =
+          host.toStdString();
+      pending_hosts.push_back(host.toStdString());
+    }
+  }
+  return "";
+}
+
 std::string QgisMapStack::mergeMirrorFeatures(
     const std::string& doc_id, const std::string& feature_ids_json,
     const std::string& attrs_json) {
@@ -4497,6 +4953,149 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
   }
   if (kind == "vertex" || kind == "move") {
     canvas->setMapTool(editToolFor(canvas_addr, canvas, kind == "vertex"));
+    return;
+  }
+  if (kind == "boundaryReshape") {
+    // geotopo Ticket 3（Spec 审查 #1 补全）：两选中相邻面的共享弧数字化
+    // 重塑——applier 解析最近共享弧后走 reshapeMirrorSharedBoundary。
+    std::weak_ptr<char> reshape_alive = alive_token_;
+    PwbFaultCutTool::FaultCutApplier applier =
+        [this, reshape_alive, canvas](const QgsGeometry& curve) -> std::string {
+          if (reshape_alive.expired()) return "PWB-GT-301: map stack gone";
+          QgsVectorLayer* current =
+              qobject_cast<QgsVectorLayer*>(canvas->currentLayer());
+          if (current == nullptr) return "PWB-GT-103: no current vector layer";
+          const QString doc =
+              current->customProperty(QStringLiteral("pwb/doc_id")).toString();
+          if (doc.isEmpty() || !current->isEditable()) {
+            return "PWB-GT-103: layer not in an edit session";
+          }
+          const QgsFeatureIds selection = current->selectedFeatureIds();
+          if (selection.size() != 2) {
+            return "PWB-GT-301: boundary reshape needs exactly two selected "
+                   "adjacent features";
+          }
+          const std::string doc_id = doc.toStdString();
+          auto table = impl_->mirror_feature_fids.find(doc_id);
+          if (table == impl_->mirror_feature_fids.end()) {
+            return "PWB-GT-201: feature id table unavailable";
+          }
+          QgsFeatureList picked;
+          for (QgsFeatureId fid : selection) {
+            QgsFeature feature;
+            if (!current->getFeatures(QgsFeatureRequest(fid)).nextFeature(feature)
+                || !feature.hasGeometry()) {
+              return "PWB-GT-201: selected features have no geometry";
+            }
+            picked.append(feature);
+          }
+          std::vector<double> ring_a, ring_b;
+          for (int which = 0; which < 2; ++which) {
+            const QgsGeometry& geometry = picked[which].geometry();
+            const QgsCurvePolygon* polygon =
+                qgsgeometry_cast<const QgsCurvePolygon*>(geometry.constGet());
+            if (polygon == nullptr || polygon->exteriorRing() == nullptr) {
+              return "PWB-GT-201: polygon exterior rings unavailable";
+            }
+            const QgsCurve* ring = polygon->exteriorRing();
+            const int total = ring->numPoints();
+            std::vector<double>& target = which == 0 ? ring_a : ring_b;
+            for (int i = 0; i < total; ++i) {
+              const QgsPoint point = ring->vertexAt(QgsVertexId(0, 0, i));
+              target.push_back(point.x());
+              target.push_back(point.y());
+            }
+          }
+          const pwb::geotopo::SharedArcsResult arcs =
+              pwb::geotopo::find_shared_arcs(ring_a, ring_b, 1e-6);
+          if (arcs.error != pwb::geotopo::ErrorCode::Ok || arcs.arcs.empty()) {
+            return "PWB-GT-201: no shared arc between the selected features";
+          }
+          // 离数字化曲线中点最近的共享弧。
+          const QgsPointXY mid = curve.centroid().asPoint();
+          const pwb::geotopo::SharedArc* best = &arcs.arcs[0];
+          double best_distance = std::numeric_limits<double>::max();
+          for (const pwb::geotopo::SharedArc& arc : arcs.arcs) {
+            const double distance = std::hypot(arc.start_x + arc.end_x - 2 * mid.x(),
+                                               arc.start_y + arc.end_y - 2 * mid.y());
+            if (distance < best_distance) {
+              best_distance = distance;
+              best = &arc;
+            }
+          }
+          QJsonArray arc_array;
+          for (std::size_t k = 0; k + 1 < best->arc_xy.size(); k += 2) {
+            arc_array.append(QJsonArray{best->arc_xy[k], best->arc_xy[k + 1]});
+          }
+          QJsonArray curve_array;
+          const QgsCurve* curve_ring =
+              qgsgeometry_cast<const QgsCurve*>(curve.constGet());
+          if (curve_ring != nullptr) {
+            const int total = curve_ring->numPoints();
+            for (int i = 0; i < total; ++i) {
+              const QgsPoint point = curve_ring->vertexAt(QgsVertexId(0, 0, i));
+              curve_array.append(QJsonArray{point.x(), point.y()});
+            }
+          }
+          const QString host_a =
+              QString::fromStdString(table->second.count(
+                  static_cast<long long>(picked[0].id()))
+                  ? table->second[static_cast<long long>(picked[0].id())]
+                  : std::to_string(picked[0].id()));
+          const QString host_b =
+              QString::fromStdString(table->second.count(
+                  static_cast<long long>(picked[1].id()))
+                  ? table->second[static_cast<long long>(picked[1].id())]
+                  : std::to_string(picked[1].id()));
+          return reshapeMirrorSharedBoundary(
+              doc_id, doc_id, host_a.toStdString(), host_b.toStdString(),
+              QJsonDocument(arc_array).toJson(QJsonDocument::Compact).toStdString(),
+              QJsonDocument(curve_array).toJson(QJsonDocument::Compact).toStdString());
+        };
+    PwbFaultCutTool::FaultCutReporter reporter =
+        [this, reshape_alive, canvas_addr](const std::string& action,
+                                           const std::string& payload_json) {
+          if (reshape_alive.expired()) return;
+          auto cb = impl_->edit_pick_callbacks.find(canvas_addr);
+          if (cb != impl_->edit_pick_callbacks.end() && cb->second) {
+            cb->second(action == "fault_cut_failed" ? "boundary_reshape_failed"
+                                                    : action,
+                       payload_json);
+          }
+        };
+    impl_->tools[canvas_addr] = std::make_unique<PwbBoundaryReshapeTool>(
+        canvas, std::move(applier), std::move(reporter));
+    canvas->setMapTool(impl_->tools[canvas_addr].get());
+    return;
+  }
+  if (kind == "faultCut") {
+    // geotopo Ticket 2：断层折线数字化 → faultCutMirrorFeatures（当前会话层）。
+    std::weak_ptr<char> fault_alive = alive_token_;
+    PwbFaultCutTool::FaultCutApplier applier =
+        [this, fault_alive, canvas](const QgsGeometry& curve) -> std::string {
+          if (fault_alive.expired()) return "PWB-GT-301: map stack gone";
+          QgsVectorLayer* current = qobject_cast<QgsVectorLayer*>(canvas->currentLayer());
+          if (current == nullptr) return "PWB-GT-103: no current vector layer";
+          const QString doc =
+              current->customProperty(QStringLiteral("pwb/doc_id")).toString();
+          if (doc.isEmpty() || !current->isEditable()) {
+            return "PWB-GT-103: layer not in an edit session";
+          }
+          return faultCutMirrorFeatures(
+              doc.toStdString(), curve.asJson().toStdString(), "", "{}");
+        };
+    PwbFaultCutTool::FaultCutReporter reporter =
+        [this, fault_alive, canvas_addr](const std::string& action,
+                                         const std::string& payload_json) {
+          if (fault_alive.expired()) return;
+          auto cb = impl_->edit_pick_callbacks.find(canvas_addr);
+          if (cb != impl_->edit_pick_callbacks.end() && cb->second) {
+            cb->second(action, payload_json);
+          }
+        };
+    impl_->tools[canvas_addr] =
+        std::make_unique<PwbFaultCutTool>(canvas, std::move(applier), std::move(reporter));
+    canvas->setMapTool(impl_->tools[canvas_addr].get());
     return;
   }
   if (kind == "select" || kind == "identify") {
