@@ -59,3 +59,16 @@
   修复执行→单一撤销命令→mark_resolved→即时重组；cartographic_qa 增
   issues_for_interactive_hub 适配器（bbox/layer_id 定位字段）
 - tests/ui/test_interactive_qc_hub.py 15/15；回归（ui/topo/stage）全绿
+
+### PHASE 6 / Ticket 5 (complete)
+- workstation/mode_state.py：5 态 FSM（02 转移表全实现 + 瞬态 pan_held +
+  mode_before_travel 回退）+ MODE_HINTS 查找表
+- workstation/keybinding_manager.py：composite/canvas 双挂事件过滤器
+  （Space 临时平移/Tab 循环/Z-X 中心缩放/Ctrl+D 吸属性/Esc 退出链）+
+  提示条 KeybindingHintBar；文本输入聚焦全让路
+- shortcuts.py：register_shortcut 增 context 参数（默认应用域不变）
+- composite_document：tab_cycle_selection/ctrl_d_pick_facies + FSM 事件桥
+  （工具/时间轴/QC 面板显隐）；修复中发现并修正 VectorLayer.selection
+  为 property 的调用形态
+- tests/ui/test_mode_state 8 + test_keybinding_flow 10 全绿；
+  全壳回归（workstation_shell/keyboard_shortcuts/dock_framework）59 passed

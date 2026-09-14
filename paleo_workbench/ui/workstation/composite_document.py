@@ -1370,6 +1370,31 @@ class CompositeDocument(QWidget):
         # 外部提交（自动化/壳层直调）后的部件高亮回同步（幂等，无回环）。
         self.epoch_timeline.epoch_changed.connect(self.timeline.set_current_epoch)
 
+        # M5 全键盘编图流：FSM 投影层 + 底部提示条 + 键过滤器（composite/
+        # canvas 双挂；文本输入聚焦让路，见 keybinding_manager 模块注释）。
+        from paleo_workbench.ui.workstation.mode_state import (
+            ModeEvent,
+            ModeStateMachine,
+        )
+        from paleo_workbench.ui.workstation.keybinding_manager import (
+            KeybindingHintBar,
+            WorkstationKeyBindingManager,
+        )
+
+        self.mode_state = ModeStateMachine(self)
+        self.hint_bar = KeybindingHintBar(self)
+        self.hint_bar.apply_mode(self.mode_state.mode)
+        layout.addWidget(self.hint_bar)
+        self.mode_state.mode_changed.connect(self.hint_bar.apply_mode)
+        self.keybinding = WorkstationKeyBindingManager(self, self)
+        self.keybinding.install()
+        self.timeline.scrub_started.connect(
+            lambda: self.mode_state.dispatch(ModeEvent.SCRUB_START))
+        self.timeline.epoch_committed.connect(
+            lambda *_: self.mode_state.dispatch(ModeEvent.EPOCH_COMMIT))
+        self.timeline.onion_toggled.connect(
+            lambda *_: self.mode_state.dispatch(ModeEvent.ONION_TOGGLED))
+
         self._build_toolbar()
         self.set_project(project)
 
@@ -2576,6 +2601,39 @@ class CompositeDocument(QWidget):
             return
         self.qc_hub.set_issues("carto", issues)
         self.status_message.emit(f"制图 QA 完成：{len(issues)} 处问题")
+
+    def tab_cycle_selection(self) -> None:
+        """M5 Tab：当前层要素循环选中（环序；无层/无要素为无操作）。"""
+        layer = self.edit_controller.active_layer
+        if layer is None:
+            return
+        ids = [f.feature_id for f in layer.features()]
+        if not ids:
+            return
+        selection = layer.selection  # property（VectorLayer.selection）
+        current = next(iter(selection)) if len(selection) == 1 else None
+        index = ids.index(current) if current in ids else -1
+        layer.set_selection([ids[(index + 1) % len(ids)]])
+
+    def ctrl_d_pick_facies(self) -> None:
+        """M5 Ctrl+D：吸取选中要素相带属性装备画刷（吸色管键盘路径）。"""
+        layer = self.edit_controller.active_layer
+        if layer is None:
+            return
+        selection = layer.selection  # property（VectorLayer.selection）
+        if not selection:
+            return
+        feature = layer.feature(next(iter(selection)))
+        attributes = dict(feature.attributes)
+        if not str(attributes.get("facies") or "").strip():
+            return
+        self.facies_brush.equip({
+            "facies": attributes.get("facies", ""),
+            "sub_facies": attributes.get("sub_facies", ""),
+            "micro_facies": attributes.get("micro_facies", ""),
+        })
+        self.status_message.emit(
+            f"已吸取选中要素相带：{attributes.get('facies', '')}")
 
     def open_qc_hub(self) -> None:
         """M4：打开交互式质检修复向导（供宿主命令/面板入口调用）。"""
