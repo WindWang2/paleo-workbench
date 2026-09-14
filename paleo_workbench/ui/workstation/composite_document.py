@@ -1025,6 +1025,25 @@ class CompositeDocument(QWidget):
         self.timeline = StratigraphicTimelineWidget(self)
         layout.insertWidget(0, self.timeline)
 
+        # M3 单因素约束 HUD：画布右上角浮动只读条（鼠标穿透、行控件固定）
+        # + 光标最近井 → 连井剖面联动发布（宿主壳注入 view_coordination）。
+        from paleo_workbench.ui.components.constraint_factor_hud import (
+            ConstraintFactorHud,
+            HudController,
+        )
+
+        self.constraint_hud = ConstraintFactorHud(self.canvas)
+        self._hud_factor_grid = None
+        self.hud_controller = HudController(self)
+        self.hud_controller.bind(
+            hud=self.constraint_hud,
+            factor_grid_provider=lambda: self._hud_factor_grid,
+            wells_provider=lambda: list(
+                getattr(self._project, "wells", None) or []),
+        )
+        self.canvas.map_position_changed.connect(
+            lambda pos: self.hud_controller.handle_position(*tuple(pos)))
+
         # 识别结果（多图层 Identify）与运行状态栏：图件主视图的诚实附属层。
         self.identify_results = IdentifyResultsPanel(self)
         self.identify_results.setMaximumHeight(200)
@@ -4644,10 +4663,38 @@ class CompositeDocument(QWidget):
                 expand()
         self.input_tree.refresh(project)
         self._refresh_timeline_epochs()
+        self._refresh_hud_grid_cache()
         try:
             self.facies_palette.set_taxonomy(self.facies_taxonomy())
         except Exception:
             pass
+
+    def _refresh_hud_grid_cache(self) -> None:
+        """HUD 网格缓存刷新（工程装载时一次；刷新循环只读缓存，D7）。"""
+        grid = None
+        project = self._project
+        if project is not None:
+            try:
+                from paleo_workbench.project.factor_grid_artifacts import (
+                    peek_live_factor_grid,
+                )
+
+                tasks = list(getattr(project, "factor_map_tasks", None) or [])
+                candidates = [
+                    task for task in tasks
+                    if "砂地" in f"{getattr(task, 'name', '')}"
+                    f"{getattr(task, 'factor_type', '')}"
+                ] or tasks[-1:]
+                for task in candidates:
+                    task_id = (getattr(task, "task_id", None)
+                               or getattr(task, "id", None))
+                    result = peek_live_factor_grid(task_id)
+                    if result is not None:
+                        grid = result
+                        break
+            except Exception:
+                grid = None
+        self._hud_factor_grid = grid
 
     def _refresh_timeline_epochs(self) -> None:
         """时间轴期次目录刷新（工程装载/切换；M1，00-decisions D1）。"""

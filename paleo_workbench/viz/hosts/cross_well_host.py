@@ -17,6 +17,8 @@ class CrossWellHost:
     def __init__(self) -> None:
         self.widget = CrossWellCanvas()
         self.inner = self.widget.widget  # CrossWellWidget
+        # M3 联动指示消费端：最近一次装载的井序（井位级光标的 x 定位）。
+        self.last_well_names: list[str] = []
 
     def clear(self) -> None:
         self.inner.clear_all()
@@ -38,6 +40,7 @@ class CrossWellHost:
             base = names[0] if names else "Well"
             names = [f"{base}-1", f"{base}-2"]
 
+        self.last_well_names = [str(n) for n in names]
         self.inner.clear_all()
         for index, data in enumerate(logs):
             name = (

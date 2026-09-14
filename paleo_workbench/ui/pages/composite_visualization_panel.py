@@ -15,6 +15,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+class _SectionCursorBand(QWidget):
+    """连井剖面井位级联动指示条（鼠标穿透、无布局参与）。
+
+    引擎（geoviz_cross_well）无逐道 crosshair API——联动为井位级指示：
+    竖带落在目标井道的中心 x（按 last_well_names 序近似），见
+    docs/development/paleo-ui-workbench/04 已知限制 #11。
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setObjectName("SectionCursorBand")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setFixedWidth(6)
+        self.hide()
+
+
 from paleo_workbench.ui import style, tokens
 from paleo_workbench.viz.facies_hierarchy_service import AUTO_LEVEL, level_choices
 from paleo_workbench.viz.adapter import VizAdapter
@@ -104,6 +120,9 @@ class VisualizationWorkspace(QFrame):
         self.seismic_view = self.seismic_host.widget
         self.cross_well_canvas = self.cross_well_host.widget
         self.cross_well_widget = self.cross_well_host.inner
+        # M3 联动指示：井位级半透明竖带（引擎无逐道 crosshair API，见
+        # docs/development/paleo-ui-workbench/04 #11）。
+        self._section_cursor_band = _SectionCursorBand(self.cross_well_widget)
         self.map_canvas = self.map_host.widget
         self.well_tie_canvas = self.well_tie_host.widget
         self.engine_preview = self.engine_host.widget
@@ -160,6 +179,25 @@ class VisualizationWorkspace(QFrame):
         value = self.level_combo.currentData()
         # Empty map → auto; otherwise lock to the chosen facies level.
         self.map_host.set_level(value or AUTO_LEVEL)
+
+    def show_section_cursor(self, well_name: str) -> None:
+        """M3 协调总线 sink：井位级剖面联动指示（空串清除；未知井隐藏）。"""
+        name = str(well_name or "").strip()
+        if not name:
+            self._section_cursor_band.hide()
+            return
+        names = [str(n) for n in
+                 (getattr(self.cross_well_host, "last_well_names", None) or [])]
+        if name not in names:
+            self._section_cursor_band.hide()
+            return
+        host_widget = self.cross_well_widget
+        width = max(1, host_widget.width())
+        x = int(width * (names.index(name) + 0.5) / len(names)) - 3
+        self._section_cursor_band.setGeometry(
+            x, 0, 6, max(1, host_widget.height()))
+        self._section_cursor_band.raise_()
+        self._section_cursor_band.show()
 
     def set_project(self, project, project_path=None) -> None:
         """Bind project for Stage-12 well-log correlation top overlays.

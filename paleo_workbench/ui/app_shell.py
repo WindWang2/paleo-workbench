@@ -407,6 +407,12 @@ class AppShell(QWidget):
         self.workstation.setMinimumSize(0, 0)
         outer.addWidget(self.workstation, 1)
 
+        # M3 光标联动：地图 HUD 最近井 → 连井剖面井位级指示（协调总线）。
+        self.view_coordination.set_section_cursor_sink(
+            self.visualization_page.composite_panel.show_section_cursor)
+        self.workstation.composite.hud_controller.set_view_coordination(
+            self.view_coordination)
+
         # 状态栏是整个软件的状态信息：有 dock 宿主（顶层 QMainWindow）时
         # 占宿主的原生状态栏槽位——它位于所有 dock 区域（含底部 Agent/
         # 任务中心）之下、贯穿窗口全宽，dock 浮动/停靠都不影响它。

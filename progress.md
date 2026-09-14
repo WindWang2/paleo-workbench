@@ -37,3 +37,14 @@
 - app_shell：hub 页导航"绘图期"守卫（D6 双保险；offscreen 无法实证路由）
 - dock：facies_palette 描述符 + shell 停靠 + 面板菜单
 - tests/ui/test_facies_palette.py 18/18；回归 97 passed
+
+### PHASE 4 / Ticket 3 (complete)
+- ui/components/constraint_factor_hud.py：O(1) 采样纯函数（双线性/钳制差分坡度/
+  方差置信度/线性最近井）+ HUD 部件（画布子控件、鼠标穿透、8 标签固定）+
+  HudController（60ms 合并节流、井位联动发布、300ms 延迟清除、同井去重）
+- view_coordination：set_section_cursor_sink/publish_section_cursor（去重+单次
+  清除，clear 不节流）；CompositeDocument 挂 HUD+网格缓存；app_shell 注入
+  view_coordination + sink → CompositeVisualizationPanel.show_section_cursor
+  （井位级竖带指示；引擎无 crosshair API，04 #11 已更新）
+- tests/ui/test_constraint_hud.py 15/15；回归（含 view_coordination/visualization
+  panel/workstation shell）151 passed
