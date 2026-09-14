@@ -1071,6 +1071,41 @@ class CompositeDocument(QWidget):
         self.edit_controller.facies_taxonomy_provider = self._facies_taxonomy
         self.edit_controller.feature_captured.connect(self._on_feature_captured)
         self._facies_style_signature: dict[str, frozenset[str]] = {}
+        # M2 相带画刷：装备上下文 + 调色板 + 吸色管（连续数字化免模态，
+        # 00-decisions D10/D11）。调色板默认隐藏——宿主 dock 挂载时 reparent。
+        from paleo_workbench.ui.workstation.facies_selector import (
+            FaciesBrushContext,
+        )
+        from paleo_workbench.ui.components.facies_palette_widget import (
+            FaciesPaletteWidget,
+        )
+        from paleo_workbench.ui.components.facies_eyedropper import (
+            FaciesEyedropper,
+        )
+
+        self.facies_brush = FaciesBrushContext(self)
+        self.facies_palette = FaciesPaletteWidget(self)
+        self.facies_palette.set_brush(self.facies_brush)
+        try:
+            self.facies_palette.set_taxonomy(self.facies_taxonomy())
+        except Exception:
+            pass
+        self.facies_palette.hide()
+        self.facies_eyedropper = FaciesEyedropper(self)
+        self.facies_eyedropper.bind(
+            lambda point: self.edit_controller.identify_all(point))
+        self.facies_eyedropper.picked.connect(self._on_eyedropper_picked)
+        self.facies_eyedropper.pick_missed.connect(
+            lambda: self.status_message.emit(
+                "吸色管未命中相带要素——保持当前装备"))
+        self.facies_palette.eyedropper_toggled.connect(
+            self.set_eyedropper_active)
+        self._eyedropper_cursor = False
+        self._digit_shortcuts: list = []
+        self.edit_controller.state_changed.connect(self._sync_digit_keys)
+        map_clicked = getattr(self.canvas, "map_clicked", None)
+        if map_clicked is not None:
+            map_clicked.connect(self._on_canvas_map_clicked)
         self.edit_controller.content_changed.connect(
             self._refresh_facies_layer_style)
         # 引用矢量图层：外部 GDAL 源的只读参考（渲染要素经源修订缓存，
@@ -4212,7 +4247,79 @@ class CompositeDocument(QWidget):
         return is_facies_template_layer(self.edit_controller._templates, layer_id)
 
     def _on_feature_captured(self, layer_id: str, feature_id: str) -> None:
+        if self.facies_brush.is_armed:
+            # M2 画刷优先：捕获即赋值（单一撤销命令），零模态打断。
+            ok, reason = self.edit_controller.apply_facies_selection(
+                layer_id, feature_id, self.facies_brush.selection())
+            if ok:
+                selection = self.facies_brush.selection()
+                label = " / ".join(
+                    part for part in (
+                        selection.get("facies"),
+                        selection.get("sub_facies"),
+                        selection.get("micro_facies")) if part)
+                self.status_message.emit(f"已按画刷赋值相带：{label}")
+            else:
+                self.status_message.emit(f"相带属性未写入：{reason}")
+            return
         self._assign_facies_dialog(layer_id, feature_id)
+
+    def set_eyedropper_active(self, active: bool) -> None:
+        """吸色管会话开关（M2；按钮态回同步抑制，无回环）。"""
+        from PySide6.QtGui import QCursor, QGuiApplication
+
+        self.facies_eyedropper.set_active(bool(active))
+        self.facies_palette.set_eyedropper_active(bool(active))
+        if active and not self._eyedropper_cursor:
+            QGuiApplication.setOverrideCursor(
+                QCursor(Qt.CursorShape.CrossCursor))
+            self._eyedropper_cursor = True
+        elif not active and self._eyedropper_cursor:
+            QGuiApplication.restoreOverrideCursor()
+            self._eyedropper_cursor = False
+
+    def handle_eyedropper_click(self, point) -> None:
+        if self.facies_eyedropper.active:
+            self.facies_eyedropper.handle_click(tuple(point))
+
+    def _on_canvas_map_clicked(self, point) -> None:
+        if self.facies_eyedropper.active:
+            self.facies_eyedropper.handle_click(tuple(point))
+
+    def _on_eyedropper_picked(self, picked: dict) -> None:
+        self.facies_brush.equip({
+            key: picked.get(key, "")
+            for key in ("facies", "sub_facies", "micro_facies")})
+        label = " / ".join(
+            part for part in (
+                picked.get("facies"), picked.get("sub_facies"),
+                picked.get("micro_facies")) if part)
+        self.status_message.emit(
+            f"吸色管已装备：{label}（颜色 {picked.get('color') or '—'}）")
+
+    def _sync_digit_keys(self) -> None:
+        """数字键 1-9 画布域装备（M2；仅绘图工具激活期注册，D6）。"""
+        tool = getattr(self.edit_controller.tools, "active_tool", None)
+        active_id = str(getattr(tool, "tool_id", "") or "")
+        drawing = active_id.startswith("add_")
+        if drawing and not self._digit_shortcuts:
+            from PySide6.QtGui import QKeySequence, QShortcut
+
+            for index in range(1, 10):
+                shortcut = QShortcut(QKeySequence(str(index)), self)
+                shortcut.setContext(
+                    Qt.ShortcutContext.WidgetWithChildrenShortcut)
+                shortcut.activated.connect(
+                    lambda i=index: self.facies_palette.equip_by_index(i - 1))
+                self._digit_shortcuts.append(shortcut)
+        elif not drawing and self._digit_shortcuts:
+            for shortcut in self._digit_shortcuts:
+                shortcut.setParent(None)
+                shortcut.deleteLater()
+            self._digit_shortcuts = []
+
+    def _digit_keys_active(self) -> bool:
+        return bool(self._digit_shortcuts)
 
     def _assign_facies_dialog(self, layer_id: str, feature_id: str) -> None:
         from paleo_workbench.ui.workstation.facies_selector import (
@@ -4537,6 +4644,10 @@ class CompositeDocument(QWidget):
                 expand()
         self.input_tree.refresh(project)
         self._refresh_timeline_epochs()
+        try:
+            self.facies_palette.set_taxonomy(self.facies_taxonomy())
+        except Exception:
+            pass
 
     def _refresh_timeline_epochs(self) -> None:
         """时间轴期次目录刷新（工程装载/切换；M1，00-decisions D1）。"""

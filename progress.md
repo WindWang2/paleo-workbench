@@ -27,3 +27,13 @@
 - 外科修复 canvas_shim 半构造残件 resizeEvent AttributeError（_canvas_created
   防护）——同时解除了既有 test_mapping_stage_ui 在本机的环境性失败
 - tests/ui/test_stratigraphic_timeline.py 24/24 绿；回归 63 passed
+
+### PHASE 3 / Ticket 2 (complete)
+- facies_selector.py + FaciesBrushContext（幂等装备/清空）；stage_actions 抽出
+  facies_category_color 单一取色真源；新组件 facies_palette_widget /
+  facies_eyedropper（pick_facies_at 纯函数双栈一致）
+- composite_document：画刷优先捕获赋值（单一撤销命令零模态）、吸色管点击
+  （fallback map_clicked / Python identify_all）、数字键 1-9 绘图期动态注册
+- app_shell：hub 页导航"绘图期"守卫（D6 双保险；offscreen 无法实证路由）
+- dock：facies_palette 描述符 + shell 停靠 + 面板菜单
+- tests/ui/test_facies_palette.py 18/18；回归 97 passed

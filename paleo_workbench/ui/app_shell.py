@@ -1062,7 +1062,17 @@ class AppShell(QWidget):
     def _shortcut_switch_page(self, idx: int) -> None:
         if shortcuts.focus_in_text_input():
             return
+        if self._workstation_drawing_active():
+            # M2（00-decisions D6 双保险）：绘图工具激活期数字键归相带画刷
+            # （画布域 WidgetWithChildrenShortcut），hub 页导航此时不切页——
+            # 即便 Qt 在真实窗口环境里双触发也保持行为正确。
+            return
         self.navigate_to(idx)
+
+    def _workstation_drawing_active(self) -> bool:
+        composite = getattr(getattr(self, "workstation", None), "composite", None)
+        probe = getattr(composite, "_digit_keys_active", None)
+        return bool(callable(probe) and probe())
 
     def set_theme(self, mode) -> None:
         """Switch the application theme (#1047): palette change, same tokens."""

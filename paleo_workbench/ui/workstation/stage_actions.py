@@ -66,6 +66,27 @@ _FACIES_FALLBACK_PALETTE = (
 )
 
 
+def facies_category_color(value: str, feature_color: str = "") -> str:
+    """分类渲视频道的相类取色（单一取色真源；调色板/图例/地图共用）。
+
+    优先级：要素自带 color > geological_symbols 同名类色 > 值哈希回退
+    调色板（与输入顺序无关的稳定映射）。
+    """
+    import hashlib
+
+    try:
+        from paleo_workbench.mapping.geological_symbols import _FACIES_CLASSES
+    except Exception:
+        _FACIES_CLASSES = ()
+    known_fill = {str(v): str(fill) for v, fill, _label in _FACIES_CLASSES}
+    name = str(value)
+    fill = str(feature_color or "").strip() or known_fill.get(name)
+    if fill:
+        return fill
+    digest = int(hashlib.md5(name.encode("utf-8")).hexdigest(), 16)
+    return _FACIES_FALLBACK_PALETTE[digest % len(_FACIES_FALLBACK_PALETTE)]
+
+
 def _categorized_facies_style(features: Any, *, field: str = "") -> dict:
     """由要素属性构造带图案的沉积相分类样式 dict（无有效相名 → {}）。
 
@@ -77,16 +98,8 @@ def _categorized_facies_style(features: Any, *, field: str = "") -> dict:
     color，其次 geological_symbols 同名类色，最后稳定哈希取回退调色板；
     label 即值本身；fill_patterns 只收录有 SVG 映射的类。
     """
-    import hashlib
-
     from paleo_workbench.mapping.facies_patterns import pattern_id_for_facies
     from paleo_workbench.mapping.map_styles import VectorStyle
-
-    try:
-        from paleo_workbench.mapping.geological_symbols import _FACIES_CLASSES
-    except Exception:
-        _FACIES_CLASSES = ()
-    known_fill = {str(value): str(fill) for value, fill, _label in _FACIES_CLASSES}
 
     buckets: list[dict] = []
     for item in features or ():
@@ -135,10 +148,7 @@ def _categorized_facies_style(features: Any, *, field: str = "") -> dict:
     categories: list[tuple[str, str, str]] = []
     patterns: list[tuple[str, str]] = []
     for value in values:
-        fill = first_color.get(value) or known_fill.get(value)
-        if not fill:
-            digest = int(hashlib.md5(value.encode("utf-8")).hexdigest(), 16)
-            fill = _FACIES_FALLBACK_PALETTE[digest % len(_FACIES_FALLBACK_PALETTE)]
+        fill = facies_category_color(value, first_color.get(value, ""))
         categories.append((value, fill, value))
         pattern_id = pattern_id_for_facies(value)
         if pattern_id is not None:

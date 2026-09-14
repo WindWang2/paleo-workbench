@@ -276,6 +276,11 @@ class WorkstationFrame(QWidget):
         self.composite_layer_dock = self._add_dock(
             "composite_layer", self.composite.layer_manager
         )
+        # M2 相带画刷调色板（装备上下文/吸色管在 composite 上，本壳只停靠）。
+        self.composite.facies_palette.show()
+        self.facies_palette_dock = self._add_dock(
+            "facies_palette", self.composite.facies_palette
+        )
         self.composite_input_dock = self._add_dock(
             "composite_input", self.composite.input_tree
         )
@@ -1501,6 +1506,7 @@ class WorkstationFrame(QWidget):
         ("inspector_dock", "显示检查器"),
         ("composite_input_dock", "显示输入与结果"),
         ("composite_layer_dock", "显示图层管理"),
+        ("facies_palette_dock", "显示相带画刷"),
         ("composite_linked_dock", "显示联动视图"),
         ("mapping_stage_dock", "显示编图阶段"),
         ("well_dock", "显示测井轨道"),
@@ -1559,6 +1565,7 @@ class WorkstationFrame(QWidget):
             self.logs_dock,
             self.console_dock,
             self.composite_layer_dock,
+            self.facies_palette_dock,
             self.composite_input_dock,
             self.composite_linked_dock,
             self.well_dock,

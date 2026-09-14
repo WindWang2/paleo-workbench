@@ -60,9 +60,13 @@
 ## D6 相带数字键 1–9 与 hub 导航 1–5 冲突
 - 方案：相带快捷键注册为 **画布域 WidgetWithChildrenShortcut**（parent=CompositeDocument），
   且仅当"绘图工具激活"时注册（工具退出即 unregister，动态生命周期）。
-- 前提待实证：Qt 同键跨上下文（WidgetWithChildren vs Application）分发只触发
-  作用域更近者。Ticket 2 首个测试 `test_digit_key_scope_precedence` 实证；
-  若实测为双触发，降级方案 = 改用 Shift+1…9 并更新本表（D6-rev1）。
+- 实证结论（D6-rev0，2026-09-14）：offscreen 平台无活动窗口，QTest 模拟键
+  不驱动 QShortcutMap（仓库既有经验 tests/test_keyboard_shortcuts.py），跨
+  上下文路由无法在无头环境直接观测。落地双保险：
+  1) 相带键仍是画布域 WidgetWithChildrenShortcut（Qt 语义上最近作用域优先）；
+  2) hub 页导航回调加"绘图工具激活期"守卫（app_shell._workstation_drawing_active）
+     ——即便真实窗口环境双触发，hub 也不切页，行为仍正确。
+  结构契约由 test_digit_key_scope_and_hub_guard 钉住。
 
 ## D7 HUD 刷新与内存预算
 - 光标→HUD 更新走 `map_position_changed`，**60ms 合并节流**（QTimer 单实例，仅保
