@@ -344,6 +344,15 @@ public:
   std::string mergeMirrorFeatures(const std::string& doc_id,
                                   const std::string& feature_ids_json,
                                   const std::string& attrs_json);
+  // geotopo Ticket 2 断-相协同截断：curve_geojson = 断层 LineString；
+  // feature_ids_json 空 = bbox+intersects 自动拾取穿越面。同宏内
+  // splitFeatures（属性克隆）+ mark_field（缺省 fault_bounded）置 true +
+  // 可选 side_field（hanging/footwall，质心对断层向叉积）。错误串带
+  // PWB-GT-10x 前缀（02-interface-contracts §3）。
+  std::string faultCutMirrorFeatures(const std::string& doc_id,
+                                     const std::string& curve_geojson,
+                                     const std::string& feature_ids_json = "",
+                                     const std::string& options_json = "{}");
   // M4 §5 拓扑检查器：analysis 检查（overlap/gap/is_valid）+ 工区余量。
   // config_json: {layer_ids, rules, precision, workspace, allowed_gaps,
   // gap_threshold, max_overlap_area}。返回 {errors:[...]}。

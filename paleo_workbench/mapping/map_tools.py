@@ -23,6 +23,7 @@ __all__ = [
     "AddLineTool",
     "AddPointTool",
     "AddPolygonTool",
+    "FaultCutTool",
     "IdentifyTool",
     "MapTool",
     "MapToolController",
@@ -130,6 +131,20 @@ class MapToolController:
 
 class PanTool(MapTool):
     tool_id = "pan"
+
+
+class FaultCutTool(MapTool):
+    """断层截断占位工具——数字化与切割全在 C++ PwbFaultCutTool。
+
+    原生画布经 ``native_digitize_kind`` 路由到桥 ``set_map_tool(kind)``；
+    宿主侧不承载任何鼠标语义（非原生画布一律拒绝激活）。
+    """
+
+    tool_id = "fault_cut"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.native_digitize_kind = "faultCut"
 
 
 class ZoomTool(MapTool):

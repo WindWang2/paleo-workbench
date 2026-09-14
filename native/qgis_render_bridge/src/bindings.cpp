@@ -1036,6 +1036,15 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              "M3 topo-editing: split selected (or listed) features by a "
              "LineString curve; topologicalEditing + neighbor topo points; "
              "one undoable macro 'Features split'.")
+        .def("fault_cut_mirror_features",
+             &pwb::qgis_render::QgisMapStack::faultCutMirrorFeatures,
+             py::arg("doc_id"), py::arg("curve_geojson"),
+             py::arg("feature_ids_json") = "", py::arg("options_json") = "{}",
+             "geotopo Ticket 2: fault-facies truncation — auto-pick crossing "
+             "facies polygons (or explicit host ids), split in one macro, "
+             "clone attributes and stamp mark_field (default fault_bounded) "
+             "true plus optional side_field (hanging/footwall). Errors carry "
+             "a PWB-GT-1xx prefix (02-interface-contracts §3).")
         .def("merge_mirror_features",
              &pwb::qgis_render::QgisMapStack::mergeMirrorFeatures,
              py::arg("doc_id"), py::arg("feature_ids_json"),

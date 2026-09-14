@@ -99,6 +99,40 @@ class PwbEditPickTool : public QgsMapTool {
   double snap_feedback_y_ = 0.0;
 };
 
+// geotopo Ticket 2：断层截断数字化工具。左键布点、右键/双击收笔、Esc
+// 取消；收笔把折线交给 applier（map_stack_service 绑定为
+// faultCutMirrorFeatures —— v2 直写镜像层缓冲 + fault_cut 手势回执）。
+// applier 返回非空错误串经 digitize 回调上报（action=fault_cut_failed）。
+class PwbFaultCutTool : public QgsMapTool {
+ public:
+  using FaultCutApplier = std::function<std::string(const QgsGeometry& curve)>;
+  using FaultCutReporter =
+      std::function<void(const std::string& action, const std::string& payload_json)>;
+
+  PwbFaultCutTool(QgsMapCanvas* canvas, FaultCutApplier applier,
+                  FaultCutReporter reporter);
+  ~PwbFaultCutTool() override;
+  void activate() override;
+  void deactivate() override;
+
+ protected:
+  void canvasPressEvent(QgsMapMouseEvent* e) override;
+  void canvasMoveEvent(QgsMapMouseEvent* e) override;
+  void canvasReleaseEvent(QgsMapMouseEvent* e) override;
+  void canvasDoubleClickEvent(QgsMapMouseEvent* e) override;
+  void keyPressEvent(QKeyEvent* e) override;
+
+ private:
+  void reset();
+  void finishCut();
+
+  FaultCutApplier applier_;
+  FaultCutReporter reporter_;
+  std::unique_ptr<QgsRubberBand> band_;
+  std::vector<QgsPointXY> points_;
+  bool dragging_ = false;
+};
+
 class PwbVertexTool : public PwbEditPickTool {
  public:
   using PwbEditPickTool::PwbEditPickTool;

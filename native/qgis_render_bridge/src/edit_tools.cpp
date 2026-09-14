@@ -13,6 +13,7 @@
 #include <qgscoordinatereferencesystem.h>
 #include <qgsexception.h>  // QgsCsException lives here in QGIS 4.2 (no qgscsexception.h)
 #include <qgsdistancearea.h>
+#include <qgslinestring.h>
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
 #include <qgsmaptoolselectionhandler.h>
@@ -28,6 +29,103 @@
 #include <qgswkbtypes.h>
 
 namespace pwb::qgis_render {
+
+// ---------------------------------------------------------------------------
+// geotopo Ticket 2：PwbFaultCutTool（断层折线数字化 → applier 截断）。
+PwbFaultCutTool::PwbFaultCutTool(QgsMapCanvas* canvas, FaultCutApplier applier,
+                                 FaultCutReporter reporter)
+    : QgsMapTool(canvas),
+      applier_(std::move(applier)),
+      reporter_(std::move(reporter)) {
+  setCursor(Qt::CrossCursor);
+}
+
+PwbFaultCutTool::~PwbFaultCutTool() = default;
+
+void PwbFaultCutTool::activate() {
+  QgsMapTool::activate();
+}
+
+void PwbFaultCutTool::deactivate() {
+  reset();
+  QgsMapTool::deactivate();
+}
+
+void PwbFaultCutTool::reset() {
+  points_.clear();
+  dragging_ = false;
+  band_.reset();
+}
+
+void PwbFaultCutTool::finishCut() {
+  if (points_.size() < 2) {
+    reset();
+    return;
+  }
+  QVector<QgsPointXY> vertices(points_.begin(), points_.end());
+  QgsGeometry curve(std::make_unique<QgsLineString>(vertices));
+  const std::string error =
+      applier_ ? applier_(curve) : std::string("PWB-GT-301: no fault-cut applier");
+  reset();
+  if (!error.empty() && reporter_) {
+    QString escaped = QString::fromStdString(error);
+    escaped.replace(QLatin1Char('\\'), QLatin1String("\\\\"))
+        .replace(QLatin1Char('"'), QLatin1String("\\\""))
+        .replace(QLatin1Char('\n'), QLatin1String("\\n"));
+    reporter_("fault_cut_failed",
+              "{\"error\":\"" + escaped.toStdString() + "\"}");
+  }
+}
+
+void PwbFaultCutTool::canvasPressEvent(QgsMapMouseEvent* e) {
+  if (e->button() != Qt::LeftButton) {
+    QgsMapTool::canvasPressEvent(e);
+    return;
+  }
+  const QgsPointXY point = toMapCoordinates(e->pos());
+  points_.push_back(point);
+  dragging_ = true;
+  if (!band_) {
+    band_ = std::make_unique<QgsRubberBand>(canvas(), Qgis::GeometryType::Line);
+    band_->setWidth(2);
+    band_->setColor(QColor(255, 80, 80, 200));
+    band_->setLineStyle(Qt::DashLine);
+  }
+  band_->addPoint(point);
+  e->accept();
+}
+
+void PwbFaultCutTool::canvasMoveEvent(QgsMapMouseEvent* e) {
+  if (dragging_ && band_) {
+    band_->movePoint(toMapCoordinates(e->pos()));
+    e->accept();
+    return;
+  }
+  QgsMapTool::canvasMoveEvent(e);
+}
+
+void PwbFaultCutTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
+  if (e->button() == Qt::RightButton && dragging_) {
+    finishCut();
+    e->accept();
+    return;
+  }
+  QgsMapTool::canvasReleaseEvent(e);
+}
+
+void PwbFaultCutTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
+  finishCut();
+  e->accept();
+}
+
+void PwbFaultCutTool::keyPressEvent(QKeyEvent* e) {
+  if (e->key() == Qt::Key_Escape) {
+    reset();
+    e->accept();
+    return;
+  }
+  QgsMapTool::keyPressEvent(e);
+}
 
 PwbEditPickTool::PwbEditPickTool(QgsMapCanvas* canvas, Callback callback,
                                  FeatureIdResolver resolver)

@@ -3730,6 +3730,204 @@ std::string QgisMapStack::splitMirrorFeatures(
   return "";
 }
 
+std::string QgisMapStack::faultCutMirrorFeatures(
+    const std::string& doc_id, const std::string& curve_geojson,
+    const std::string& feature_ids_json, const std::string& options_json) {
+  // geotopo Ticket 2：断-相协同截断（02-interface-contracts §2.1）。
+  // 与 splitMirrorFeatures 的差异：bbox+intersects 自动拾取、mark/side
+  // 字段同宏补列与写入、fault_cut 手势回执；未贯穿幂等无痕（PWB-GT-104）。
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "PWB-GT-103: layer not in an edit session: " + doc_id;
+  QgsGeometry curve_geom = curveGeometryFromJson(curve_geojson);
+  if (curve_geom.isNull() || curve_geom.type() != Qgis::GeometryType::Line) {
+    return "PWB-GT-101: invalid fault curve";
+  }
+  const QgsCurve* curve = qgsgeometry_cast<const QgsCurve*>(curve_geom.constGet());
+  if (curve == nullptr) return "PWB-GT-101: invalid fault curve";
+
+  QString mark_field = QStringLiteral("fault_bounded");
+  QString side_field;  // 空 = 不打盘侧标记
+  {
+    QJsonParseError options_error{};
+    const QJsonDocument options_doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString(options_json), &options_error);
+    if (options_error.error == QJsonParseError::NoError && options_doc.isObject()) {
+      const QJsonObject obj = options_doc.object();
+      mark_field = obj.value(QStringLiteral("mark_field")).toString(mark_field);
+      if (obj.contains(QStringLiteral("side_field"))) {
+        side_field = obj.value(QStringLiteral("side_field")).toString();
+      }
+    }
+  }
+
+  const QStringList host_ids = parseHostIdList(feature_ids_json);
+  QgsFeatureIds selected;
+  if (!host_ids.isEmpty()) {
+    auto table = impl_->mirror_feature_fids.find(doc_id);
+    const std::unordered_map<long long, std::string> empty;
+    const auto& lookup = table == impl_->mirror_feature_fids.end() ? empty : table->second;
+    for (const QString& host_id : host_ids) {
+      const QgsFeatureId fid = fidForHostId(lookup, host_id);
+      if (fid != FID_NULL) selected.insert(fid);
+    }
+    if (selected.isEmpty()) return "PWB-GT-102: no matching features to cut";
+  } else {
+    // 自动拾取：bbox 预过滤 + 精确相交（QGIS4：ExactIntersect 归并到
+    // Qgis::FeatureRequestFlag，这里直接逐件 intersects 等价且更直观）。
+    QgsFeatureRequest request;
+    request.setFilterRect(curve_geom.boundingBox());
+    QgsFeatureIterator it = layer->getFeatures(request);
+    QgsFeature feature;
+    while (it.nextFeature(feature)) {
+      if (feature.hasGeometry() && feature.geometry().intersects(curve_geom)) {
+        selected.insert(feature.id());
+      }
+    }
+    if (selected.isEmpty()) return "PWB-GT-102: no features intersect the fault curve";
+  }
+  layer->selectByIds(selected);
+
+  QgsProject* proj = project();
+  const QgsFeatureIds before_ids = layer->allFeatureIds();
+
+  layer->beginEditCommand(QStringLiteral("Fault cut"));
+  int mark_idx = layer->fields().indexOf(mark_field);
+  if (mark_idx < 0) {
+    if (!layer->addAttribute(QgsField(mark_field, QMetaType::Type::Bool))) {
+      layer->destroyEditCommand();
+      return "PWB-GT-104: cannot add mark field " + mark_field.toStdString();
+    }
+    mark_idx = layer->fields().indexOf(mark_field);  // QGIS4 fields() 含未保存字段
+  }
+  int side_idx = -1;
+  if (!side_field.isEmpty()) {
+    side_idx = layer->fields().indexOf(side_field);
+    if (side_idx < 0) {
+      if (!layer->addAttribute(QgsField(side_field, QMetaType::Type::QString))) {
+        layer->destroyEditCommand();
+        return "PWB-GT-104: cannot add side field " + side_field.toStdString();
+      }
+      side_idx = layer->fields().indexOf(side_field);
+    }
+  }
+
+  QgsPointSequence topology_test_points;
+  const Qgis::GeometryOperationResult result =
+      layer->splitFeatures(curve, topology_test_points, true, true);
+  if (result != Qgis::GeometryOperationResult::Success) {
+    layer->destroyEditCommand();
+    return "PWB-GT-104: split engine failed: " + splitResultMessage(result);
+  }
+  const QgsFeatureIds after_ids = layer->allFeatureIds();
+  QList<QgsFeatureId> added;
+  for (QgsFeatureId fid : after_ids) {
+    if (!before_ids.contains(fid)) added.append(fid);
+  }
+  if (added.isEmpty()) {
+    // 断层未贯穿（部分穿越/仅触边界）：QGIS 未分割——拒绝式幂等，不留痕。
+    layer->destroyEditCommand();
+    return "PWB-GT-104: fault curve does not fully cross any selected feature";
+  }
+  for (QgsFeatureId fid : added) {
+    const std::string host =
+        "fault-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+    impl_->pending_added_host_ids[doc_id].push_back(host);
+    impl_->mirror_feature_fids[doc_id][static_cast<long long>(fid)] = host;
+  }
+
+  // 属性延续由 splitFeatures 克隆；断裂标记 + 盘侧写入两侧（原 fid + 新增）。
+  // QGIS4 changeAttributeValues 是逐要素签名（fid, QgsAttributeMap）。
+  QgsFeatureIds affected = selected;
+  for (QgsFeatureId fid : added) affected.insert(fid);
+  const QgsPoint fault_first = curve->startPoint();
+  const QgsPoint fault_last = curve->endPoint();
+  const QgsPointXY fault_start(fault_first.x(), fault_first.y());
+  const QgsPointXY fault_end(fault_last.x(), fault_last.y());
+  const double dir_x = fault_end.x() - fault_start.x();
+  const double dir_y = fault_end.y() - fault_start.y();
+  QgsFeatureIterator it = layer->getFeatures(QgsFeatureRequest(affected));
+  QgsFeature feature;
+  while (it.nextFeature(feature)) {
+    QgsAttributeMap values;
+    values[mark_idx] = QVariant(true);
+    if (side_idx >= 0 && feature.hasGeometry()) {
+      const QgsGeometry centroid = feature.geometry().centroid();
+      if (!centroid.isNull()) {
+        const QgsPointXY c = centroid.asPoint();
+        const double cross = dir_x * (c.y() - fault_start.y())
+                           - dir_y * (c.x() - fault_start.x());
+        const double scale = std::max({1.0, std::fabs(dir_x), std::fabs(dir_y)});
+        if (cross > 1e-9 * scale) values[side_idx] = QStringLiteral("hanging");
+        else if (cross < -1e-9 * scale) values[side_idx] = QStringLiteral("footwall");
+        else values[side_idx] = QString();
+      }
+    }
+    if (!layer->changeAttributeValues(feature.id(), values)) {
+      layer->destroyEditCommand();
+      return "PWB-GT-104: cannot stamp fault-bounded markers";
+    }
+  }
+  layer->endEditCommand();
+
+  // 邻层拓扑点散布（同 split §4）+ fault_cut 多层手势回执。
+  std::vector<std::string> affected_layers{doc_id};
+  if (!topology_test_points.isEmpty() && proj != nullptr) {
+    const QgsCoordinateReferenceSystem crs = layer->crs();
+    const QMap<QString, QgsMapLayer*> layers = proj->mapLayers();
+    for (auto lt = layers.constBegin(); lt != layers.constEnd(); ++lt) {
+      QgsVectorLayer* other = qobject_cast<QgsVectorLayer*>(lt.value());
+      if (other == nullptr || other == layer || !other->isEditable()
+          || !other->isSpatial()) {
+        continue;
+      }
+      if (other->geometryType() != Qgis::GeometryType::Line
+          && other->geometryType() != Qgis::GeometryType::Polygon) {
+        continue;
+      }
+      if (other->crs() != crs) continue;
+      const QString other_doc =
+          other->customProperty(QStringLiteral("pwb/doc_id")).toString();
+      if (other_doc.isEmpty()) continue;
+      other->beginEditCommand(
+          QStringLiteral("Topological points from fault cut"));
+      const int inserted = other->addTopologicalPoints(topology_test_points);
+      if (inserted == 0) {
+        other->endEditCommand();
+        affected_layers.push_back(other_doc.toStdString());
+      } else {
+        other->destroyEditCommand();
+      }
+    }
+  }
+
+  QJsonObject payload;
+  payload.insert(QStringLiteral("layer_doc_id"), QString::fromStdString(doc_id));
+  QJsonArray layer_docs;
+  for (const std::string& id : affected_layers) {
+    layer_docs.append(QString::fromStdString(id));
+  }
+  payload.insert(QStringLiteral("layers"), layer_docs);
+  payload.insert(QStringLiteral("gesture"), QStringLiteral("fault_cut"));
+  payload.insert(QStringLiteral("undo_text"), QStringLiteral("断层截断"));
+  QJsonArray host_refs;
+  const auto live_table = impl_->mirror_feature_fids.find(doc_id);
+  if (live_table != impl_->mirror_feature_fids.end()) {
+    for (QgsFeatureId fid : affected) {
+      const auto hit = live_table->second.find(static_cast<long long>(fid));
+      if (hit != live_table->second.end()) {
+        host_refs.append(QString::fromStdString(hit->second));
+      }
+    }
+  }
+  payload.insert(QStringLiteral("features"), host_refs);
+  const std::string payload_json =
+      QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  for (auto& kv : impl_->edit_pick_callbacks) {
+    if (kv.second) kv.second("edit_gesture", payload_json);
+  }
+  return "";
+}
+
 std::string QgisMapStack::mergeMirrorFeatures(
     const std::string& doc_id, const std::string& feature_ids_json,
     const std::string& attrs_json) {
@@ -4497,6 +4695,36 @@ void QgisMapStack::setMapTool(std::uintptr_t canvas_addr, const std::string& kin
   }
   if (kind == "vertex" || kind == "move") {
     canvas->setMapTool(editToolFor(canvas_addr, canvas, kind == "vertex"));
+    return;
+  }
+  if (kind == "faultCut") {
+    // geotopo Ticket 2：断层折线数字化 → faultCutMirrorFeatures（当前会话层）。
+    std::weak_ptr<char> fault_alive = alive_token_;
+    PwbFaultCutTool::FaultCutApplier applier =
+        [this, fault_alive, canvas](const QgsGeometry& curve) -> std::string {
+          if (fault_alive.expired()) return "PWB-GT-301: map stack gone";
+          QgsVectorLayer* current = qobject_cast<QgsVectorLayer*>(canvas->currentLayer());
+          if (current == nullptr) return "PWB-GT-103: no current vector layer";
+          const QString doc =
+              current->customProperty(QStringLiteral("pwb/doc_id")).toString();
+          if (doc.isEmpty() || !current->isEditable()) {
+            return "PWB-GT-103: layer not in an edit session";
+          }
+          return faultCutMirrorFeatures(
+              doc.toStdString(), curve.asJson().toStdString(), "", "{}");
+        };
+    PwbFaultCutTool::FaultCutReporter reporter =
+        [this, fault_alive, canvas_addr](const std::string& action,
+                                         const std::string& payload_json) {
+          if (fault_alive.expired()) return;
+          auto cb = impl_->edit_pick_callbacks.find(canvas_addr);
+          if (cb != impl_->edit_pick_callbacks.end() && cb->second) {
+            cb->second(action, payload_json);
+          }
+        };
+    impl_->tools[canvas_addr] =
+        std::make_unique<PwbFaultCutTool>(canvas, std::move(applier), std::move(reporter));
+    canvas->setMapTool(impl_->tools[canvas_addr].get());
     return;
   }
   if (kind == "select" || kind == "identify") {

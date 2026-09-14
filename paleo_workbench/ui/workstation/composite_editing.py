@@ -46,6 +46,7 @@ from paleo_workbench.mapping.map_tools import (
     AddLineTool,
     AddPointTool,
     AddPolygonTool,
+    FaultCutTool,
     IdentifyTool,
     MapToolController,
     MeasureDistanceTool,
@@ -2104,6 +2105,19 @@ class CompositeEditController(QObject):
                     tool.native_digitize_kind = {
                         "point": "addPoint", "line": "addLine", "polygon": "addPolygon",
                     }.get(self._kinds.get(layer.id, ""), "pan")
+                elif action_id == "fault_cut":
+                    # geotopo Ticket 2：断层截断 native-only——数字化与切割
+                    # 全在 C++ PwbFaultCutTool（kind=faultCut），宿主仅挂占位
+                    # 工具供 shim 路由；非原生画布/非面层/旧桥一律拒激活。
+                    if not hasattr(self._canvas, "canvas_address"):
+                        return
+                    if self._kinds.get(layer.id) != "polygon":
+                        return
+                    fault_stack = self.native_editing.stack_for(layer.id)
+                    if fault_stack is None or not callable(
+                            getattr(fault_stack, "fault_cut_mirror_features", None)):
+                        return
+                    tool = FaultCutTool()
                 else:
                     return
         self._active_tool_action = action_id
@@ -2433,12 +2447,14 @@ class CompositeEditController(QObject):
             return polygon_layer, polygon_id, line_feature
         return None
 
-    def geometry_command(self, command_id: str) -> tuple[bool, str]:
-        """执行 split / merge；返回 (是否成功, 用户可读消息)。
+    def geometry_command(self, command_id: str, curve: dict | None = None) -> tuple[bool, str]:
+        """执行 split / merge / fault_cut；返回 (是否成功, 用户可读消息)。
 
         几何计算：Python 会话走 ``geometry_service`` / ``vector_operations``
         并落 ``VectorEditSession``；原生会话走桥 ``split_mirror_features`` /
-        ``merge_mirror_features``（镜像缓冲一宏，手势由桥 ``edit_gesture`` 记账）。
+        ``merge_mirror_features`` / ``fault_cut_mirror_features``（镜像缓冲
+        一宏，手势由桥 ``edit_gesture`` 记账）。``fault_cut`` 的 ``curve``
+        为程序化断层折线 GeoJSON（交互路径走 C++ PwbFaultCutTool 数字化）。
         """
         from paleo_workbench.mapping.vector_operations import (
             merge_selected_polygons,
@@ -2448,10 +2464,14 @@ class CompositeEditController(QObject):
         layer = self.active_layer
         if layer is None:
             return False, "没有活动的矢量图层"
+        if command_id == "fault_cut" and layer.edit_session is not None:
+            # 断层截断是镜像编辑缓冲原生能力（属性克隆 + fault_bounded 标记
+            # 同宏原子生效）——Python 会话没有等价物，诚实拒绝而非降级。
+            return False, "断层截断需要原生编辑会话（QGIS 桥）"
         session = layer.edit_session
         if session is None:
             if self.native_editing.is_open(layer.id):
-                return self._native_geometry_command(command_id, layer)
+                return self._native_geometry_command(command_id, layer, curve)
             return False, "请先开始编辑（几何操作需要编辑会话）"
         mutated_layers: list = [layer]
         try:
@@ -2502,8 +2522,9 @@ class CompositeEditController(QObject):
                         pass
         return False, f"未知几何命令 {command_id}"
 
-    def _native_geometry_command(self, command_id: str, layer) -> tuple[bool, str]:
-        """原生会话 split/merge：切线走画布数字化，合并走确认对话框。"""
+    def _native_geometry_command(self, command_id: str, layer,
+                                 curve: dict | None = None) -> tuple[bool, str]:
+        """原生会话 split/merge/fault_cut：切线走画布数字化，合并走确认对话框。"""
         stack = self.native_editing.stack_for(layer.id)
         if stack is None:
             return False, "该图层没有进行中的原生编辑会话"
@@ -2511,8 +2532,38 @@ class CompositeEditController(QObject):
             return self._native_merge(layer, stack)
         if command_id == "split":
             return self._native_split_begin(layer, stack)
+        if command_id == "fault_cut":
+            return self._native_fault_cut(layer, stack, curve)
         return False, (
             "该图层处于原生编辑会话——请先保存或回滚编辑")
+
+    def _native_fault_cut(self, layer, stack, curve: dict | None) -> tuple[bool, str]:
+        """断-相协同截断：桥 ``fault_cut_mirror_features`` 单宏原子分割。
+
+        属性延续（沉积相代码等）由桥内 splitFeatures 克隆保证；断裂标记
+        ``fault_bounded`` 在同一宏内写入两侧新面。选集为空时由桥自动拾取
+        穿越面（PWB-GT-102 = 无穿越）。
+        """
+        if not callable(getattr(stack, "fault_cut_mirror_features", None)):
+            return False, "当前 QGIS 桥不支持原生断层截断（需重建桥扩展）"
+        if not isinstance(curve, dict) or curve.get("type") != "LineString":
+            return False, "断层截断需要一条断层折线（LineString GeoJSON）"
+        feature_ids = sorted(str(fid) for fid in layer.selection)
+        options = {"mark_field": "fault_bounded"}
+        try:
+            error = str(stack.fault_cut_mirror_features(
+                layer.id,
+                json.dumps(curve),
+                json.dumps(feature_ids),
+                json.dumps(options),
+            ) or "")
+        except (AttributeError, TypeError, ValueError) as exc:
+            return False, f"断层截断调用失败：{exc}"
+        if error:
+            return False, error
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return True, "断层已截断相带（两侧属性延续并标记 fault_bounded）"
 
     def _selected_native_records(self, layer, stack) -> list[dict]:
         selected = {str(fid) for fid in layer.selection}
