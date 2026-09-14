@@ -977,6 +977,61 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              py::arg("canvas"), py::arg("error_ids_json"),
              "M4 topo-editing: rubber-band highlight of checker error geometries.")
         .def(
+            "set_event_bus_enabled",
+            [](pwb::qgis_render::QgisMapStack& self, bool enabled) {
+              self.setEventBusEnabled(enabled);
+            },
+            py::arg("enabled"),
+            "vector-perf Ticket 5: enable the zero-copy 64B-POD SPSC event "
+            "ring (JSON callbacks unchanged; opt-in).")
+        .def(
+            "bus_drain_into",
+            [](pwb::qgis_render::QgisMapStack& self, py::buffer dst,
+               int max_events) {
+              py::buffer_info info = dst.request(true);  // writable
+              if (info.itemsize != 1) {
+                throw std::invalid_argument(
+                    "bus_drain_into destination must be a byte buffer");
+              }
+              const std::size_t capacity =
+                  static_cast<std::size_t>(info.size)
+                  / sizeof(pwb::qgis_render::PwbEditEventPod);
+              if (info.size % sizeof(pwb::qgis_render::PwbEditEventPod) != 0) {
+                throw std::invalid_argument(
+                    "destination size must be a multiple of the POD size");
+              }
+              if (max_events > 0
+                  && static_cast<std::size_t>(max_events) < capacity) {
+                return self.busDrain(
+                    reinterpret_cast<pwb::qgis_render::PwbEditEventPod*>(
+                        info.ptr),
+                    static_cast<std::size_t>(max_events));
+              }
+              return self.busDrain(
+                  reinterpret_cast<pwb::qgis_render::PwbEditEventPod*>(
+                      info.ptr),
+                  capacity);
+            },
+            py::arg("dst"), py::arg("max_events") = 0,
+            "vector-perf Ticket 5: drain queued events into a preallocated "
+            "writable buffer (single FFI call, zero per-event Python "
+            "objects); returns the number of events written.")
+        .def(
+            "bus_stats",
+            [](pwb::qgis_render::QgisMapStack& self) {
+              return self.busStats();
+            },
+            "vector-perf Ticket 5: bus JSON stats "
+            "{enabled, capacity, pushed, dropped}.")
+        .def(
+            "bus_emit_bench",
+            [](pwb::qgis_render::QgisMapStack& self, int count) {
+              self.busEmitBench(count);
+            },
+            py::arg("count"),
+            "vector-perf Ticket 5: inject n events through the real "
+            "producer path (tool sink -> ring); diagnostic benchmark face.")
+        .def(
             "vertex_pick_query",
             [](pwb::qgis_render::QgisMapStack& self, const std::string& doc_id,
                double x, double y, double radius) {

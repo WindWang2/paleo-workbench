@@ -17,6 +17,7 @@
 #include <qgsgeometry.h>
 #include <qgsvectorlayer.h>
 
+#include "edit_delta_pod.hpp"
 #include "edit_tools.hpp"
 #include "incremental_topology.hpp"
 
@@ -339,6 +340,13 @@ public:
   std::string redoMirrorEdit(const std::string& doc_id);
   // Ticket 1（vector-perf-increment）顶点拾取诊断面：生产 verticesNear 同
   // 路径（索引/线性回退由 QueryVerticesNear 决定）。基准与等价性测试用。
+  // Ticket 5（vector-perf-increment）：零拷贝事件总线。默认关闭；启用后
+  // 工具发射点并行写 64B POD SPSC 环（JSON 回调不变）。drain 单次 FFI
+  // 批量搬运到调用方缓冲。
+  void setEventBusEnabled(bool enabled);
+  std::size_t busDrain(PwbEditEventPod* out, std::size_t out_capacity);
+  std::string busStats();
+  void busEmitBench(int count);
   std::vector<PwbVertexHit> vertexPickQuery(const std::string& doc_id,
                                             double x, double y, double radius,
                                             bool& indexed);

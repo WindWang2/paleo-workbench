@@ -116,6 +116,9 @@
 #include "style_codec.hpp"
 #include <qgsrasterlayer.h>
 #include <qgsrasterrenderer.h>
+#include <atomic>
+
+#include "edit_delta_pod.hpp"
 #include "edit_tools.hpp"
 
 #include <qgsfeedback.h>
@@ -1116,6 +1119,10 @@ struct QgisMapStack::Impl {
       committed_callbacks;
   std::vector<std::function<void(const std::string&, const std::string&)>>
       orphan_committed_callbacks;
+  // Ticket 5（vector-perf-increment）：零拷贝事件环（set_event_bus_enabled
+  // 显式启用；默认 nullptr = 关闭，工具 sink 判空零开销）。
+  std::unique_ptr<EditEventRing> event_ring;
+  std::atomic<std::uint64_t> event_sequence{0};
   // M4 §5：检查器会话（错误对象生命周期绑在栈上，下次 run/shutdown 释放）。
   struct CheckerSession {
     std::unique_ptr<QgsGeometryCheckContext> context;
@@ -3426,6 +3433,56 @@ QgsVectorLayer* QgisMapStack::editingLayerFor(const std::string& doc_id) const {
   return layer;
 }
 
+void QgisMapStack::setEventBusEnabled(bool enabled) {
+  if (!impl_ || !impl_->initialized) {
+    throw std::runtime_error("map stack is not initialized");
+  }
+  if (enabled) {
+    if (impl_->event_ring == nullptr) {
+      // 4096 条 × 64B = 256KB/画布栈；满则丢弃最旧交互流（新事件优先）。
+      impl_->event_ring = std::make_unique<EditEventRing>(4096);
+      impl_->event_sequence.store(0, std::memory_order_relaxed);
+    }
+  } else {
+    impl_->event_ring.reset();
+    impl_->event_sequence.store(0, std::memory_order_relaxed);
+  }
+}
+
+std::size_t QgisMapStack::busDrain(PwbEditEventPod* out,
+                                   std::size_t out_capacity) {
+  if (!impl_ || !impl_->initialized || impl_->event_ring == nullptr) return 0;
+  return impl_->event_ring->drain(out, out_capacity);
+}
+
+std::string QgisMapStack::busStats() {
+  if (!impl_ || !impl_->initialized || impl_->event_ring == nullptr) {
+    return "{\"enabled\":false}";
+  }
+  return "{\"enabled\":true,\"capacity\":" +
+         std::to_string(impl_->event_ring->capacity()) +
+         ",\"pushed\":" + std::to_string(impl_->event_ring->pushed()) +
+         ",\"dropped\":" + std::to_string(impl_->event_ring->dropped()) + "}";
+}
+
+// Ticket 5 基准面：经真实生产者路径（工具 sink → 环）注入 n 条事件——
+// 排水侧的 Python 分配测量不走此入口。
+void QgisMapStack::busEmitBench(int count) {
+  if (!impl_ || !impl_->initialized || impl_->event_ring == nullptr) {
+    throw std::runtime_error("event bus is not enabled");
+  }
+  for (int i = 0; i < count; ++i) {
+    const std::uint64_t seq =
+        impl_->event_sequence.fetch_add(1, std::memory_order_relaxed);
+    impl_->event_ring->tryPush(MakeEditEvent(
+        kEventSnapFeedback, 0u, seq, static_cast<double>(i) * 0.001,
+        static_cast<double>(i) * 0.002, 0.0, 0.0,
+        static_cast<qint64>(i % 1000), 0, 0, -1,
+        static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count())));
+  }
+}
+
 std::vector<PwbVertexHit> QgisMapStack::vertexPickQuery(
     const std::string& doc_id, double x, double y, double radius,
     bool& indexed) {
@@ -4721,11 +4778,25 @@ QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
     if (cbIt == impl_->edit_pick_callbacks.end() || !cbIt->second) return;
     cbIt->second(action, payload);
   };
+  // Ticket 5：二进制事件汇（环未启用时 sink 内判空 = 零开销 no-op）。
+  EditEventSink sink =
+      [this, alive, canvas_addr](const PwbEditEventRaw& raw) {
+        if (alive.expired() || impl_->event_ring == nullptr) return;
+        const std::uint64_t seq =
+            impl_->event_sequence.fetch_add(1, std::memory_order_relaxed);
+        impl_->event_ring->tryPush(MakeEditEvent(
+            raw.kind, static_cast<std::uint32_t>(canvas_addr & 0xFFFFFFFFu),
+            seq, raw.x, raw.y, raw.dx, raw.dy, raw.feature_ref, raw.part,
+            raw.ring, raw.vertex_nr,
+            static_cast<std::uint64_t>(
+                std::chrono::steady_clock::now().time_since_epoch().count())));
+      };
   PwbEditPickTool::FeatureIdResolver resolver = fidResolver();
   if (vertex) {
     auto& slot = impl_->vertex_tools[canvas_addr];
     if (slot == nullptr) {
       slot = new PwbVertexTool(canvas, std::move(cb), std::move(resolver));
+      slot->setEventSink(sink);
       // 拓扑编辑迁移 M1（§4 顶点 v2 当前层档）：编辑目标 = 画布当前层
       // 且处于 M1 原生会话（无会话 → nullptr → 工具保持 v1 回调模式）。
       // 工具 parent=画布，画布亡则工具亡——canvas 裸指针安全。
@@ -4777,6 +4848,7 @@ QgsMapTool* QgisMapStack::editToolFor(std::uintptr_t canvas_addr,
     auto& slot = impl_->move_tools[canvas_addr];
     if (slot == nullptr) {
       slot = new PwbMoveTool(canvas, std::move(cb), std::move(resolver));
+      slot->setEventSink(sink);
       // M2 §4 移动复刻：与会话当前层的原生模式。
       slot->setEditLayerProvider([this, alive,
                                   canvas]() -> QgsVectorLayer* {

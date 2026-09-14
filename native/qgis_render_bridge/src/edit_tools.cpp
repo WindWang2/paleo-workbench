@@ -412,6 +412,11 @@ void PwbEditPickTool::updateSnapIndicator(
               QString::number(m.distance(), 'g', 12).toStdString() + "}";
     snap_feedback_x_ = m.point().x();
     snap_feedback_y_ = m.point().y();
+    // Ticket 5：吸附高频流走二进制环（不经过 JSON 拼装）。
+    emitRawEvent({/*kind*/ 1u, /*x*/ m.point().x(), /*y*/ m.point().y(),
+                  /*dx*/ 0.0, /*dy*/ 0.0,
+                  /*feature_ref*/ static_cast<qint64>(m.featureId()),
+                  /*part*/ 0, /*ring*/ 0, /*vertex_nr*/ -1});
   } else {
     payload = "{\"matched\":false}";
   }
@@ -1199,6 +1204,16 @@ void PwbVertexTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   }
   cancelDrag();
   clearHover();  // 提交后镜像异步刷新（120ms 防抖）：立即失效，防止 stale 几何上删点
+  {
+    const QgsPoint orig = pick.geometry.constGet()->vertexAt(vid);
+    // Ticket 5：顶点落位原语走二进制环。
+    emitRawEvent({/*kind*/ 2u, /*x*/ p.x(), /*y*/ p.y(),
+                  /*dx*/ p.x() - orig.x(), /*dy*/ p.y() - orig.y(),
+                  /*feature_ref*/ static_cast<qint64>(pick.fid),
+                  /*part*/ static_cast<std::uint16_t>(vid.part),
+                  /*ring*/ static_cast<std::uint16_t>(vid.ring),
+                  /*vertex_nr*/ vid.vertex});
+  }
   std::string payload = "{" + basePayload(pick) + ",\"path\":" +
                         vertexPathJson(pick.geometry.wkbType(), vid) +
                         ",\"x\":" + QString::number(p.x(), 'g', 12).toStdString() +
