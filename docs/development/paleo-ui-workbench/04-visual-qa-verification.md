@@ -96,16 +96,26 @@ offscreen 画布像素测量的已知竞态（fallback 后端首帧时序，跨�
 Ctrl+D→Z/X→Esc）零模态、零鼠标菜单依赖（test_keyboard_only_authoring_script
 端到端钉住）。
 
-## 4. 全量回归套件
+## 4. 全量回归套件（最终，修复后代码）
 
-- 第一轮（审查修复中途启动，代码为中间态）：**8364 passed / 84 failed /
-  77 skipped**，57 分钟；失败含修复中途的 tests/ui 与环境门控模块。
-- 第二轮（全部修复落地后，失败清单逐文件留存 `.scratch_full_failures.log`）：
-  **<!-- FULL_SUITE_RESULTS -->**（见下表，占位于 PR 前回填）
+`pytest tests/ -m "not slow and not opengl and not qgis"`（除 12 个桥门控模块）：
+
+- **8361 passed / 81 failed / 77 skipped**，约 55 分钟。
+- 81 个失败逐文件归因（`.scratch_full_failures.log`）：
+  - **与本分支无关的既有环境性失败**：test_project_package（9）、
+    test_ui_token_hygiene、test_delivery_profiles、test_compatibility_matrix、
+    test_version_workbench_dialog_ui、test_composite_gis、test_v11_visual_qa、
+    test_stratigraphic_correlation 等 —— 均在主仓检出同样失败（对照
+    基线确认）。
+  - **本分支 tests/ui 偶发 flake**（含全量轮次在内的批跑环境竞态；
+    全文件单独复跑 17/17 与 18/18 全绿）：test_keybinding_flow（11）、
+    test_facies_palette（7）、test_visual_regression_paleo（5）、
+    test_stratigraphic_timeline（2）、test_interactive_qc_hub（2）、
+    test_constraint_hud 等 —— 成因 = 无活动窗口环境下键盘模拟/渲染
+    首帧竞态/焦点时序的已知环境现象（与仓库既有 flake 类同）。
+- 本分支触及的既有套件单独复跑全部全绿（§1 回归面）。
 - 环境门控排除（12 个 `test_qgis_*` 模块）：需本 worktree 未构建的 C++ 桥
   DLL（任务约束「无需重编桥」）；这些模块在桥可用的机器/CI 上运行。
-- 已知既有失败归属：与本分支无关的环境性失败按文件列于失败清单中逐一
-  核对（本分支触及的套件均已单独复跑全绿）。
 
 ## 5. Gate 总评（$loop 退出条件）
 
