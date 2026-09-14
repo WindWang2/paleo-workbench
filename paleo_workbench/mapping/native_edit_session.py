@@ -26,6 +26,7 @@ import uuid
 
 from paleo_workbench.mapping.edit_gesture_manager import EditGestureManager
 from paleo_workbench.mapping.edit_session_set import SESSION_SET
+from paleo_workbench.mapping.geometry_schema import new_feature_id
 
 __all__ = ["NativeEditSessionController"]
 
@@ -40,6 +41,8 @@ class NativeEditSessionController:
         self._sessions: dict[str, dict] = {}
         # doc_id → 提交时桥回传的 committed 增量（同步回调收集）。
         self._pending_commits: dict[str, dict] = {}
+        # geotopo Ticket 5：补偿恢复事件（层 id，诊断/审计通道）。
+        self._compensations: list[str] = []
         self.gestures = EditGestureManager()
 
     # -- 能力与状态 ---------------------------------------------------------
@@ -197,11 +200,16 @@ class NativeEditSessionController:
 
     # -- 保存：整集合全或无（§3）---------------------------------------------
 
-    def commit_all(self, *, gate, topology, on_committed=None) -> tuple[bool, str]:
+    def commit_all(self, *, gate, topology, geology=None,
+                   on_committed=None) -> tuple[bool, str]:
         """提交会话集合：全过逐层 commit + 写回 + 对齐；任一失败全保持。
 
         ``on_committed(layer)`` 在每层增量写回成功后调用（宿主做台账对齐
         —— M0 ``align_publish_ledger`` —— 与 content_changed 通知）。
+        geotopo Ticket 5：① ``geology`` 谓词（编辑真值 → InvariantViolation
+        列表）作为第三提交门（error 级拦截，warning 放行）；② 中途失败时
+        已提交层按快照**补偿恢复**（重开会话 + restore_mirror_snapshot 一宏，
+        会话保持可撤销——补偿可用 Ctrl+Z 回退的逃生口，D9）。
         """
         if not self._sessions:
             return True, ""
@@ -232,7 +240,41 @@ class NativeEditSessionController:
                     f"图层「{getattr(layer, 'name', first_layer)}」"
                     f"{len(issues)} 个要素未通过拓扑检查：{details}{more}"
                     f"（全部编辑未提交）")
-        # 逐层 commit（会话集合序）；失败 → 剩余层 rollBack（全或无）。
+        # 提交前段 ②'：地质不变量门（geotopo Ticket 4 接入，§4.3）——
+        # error 级违规拦截全集合；warning 级放行（宿主另行上报）。
+        if geology is not None:
+            records = {
+                layer_id: self.readback_features(session["stack"], layer_id)
+                for layer_id, session in self._sessions.items()
+            }
+            violations = list(geology(records) or [])
+            errors = [v for v in violations
+                      if getattr(v, "severity", "error") == "error"]
+            if errors:
+                first = errors[0]
+                layer = (self._sessions.get(first.layer_id) or {"layer": None})["layer"] \
+                    if hasattr(first, "layer_id") else None
+                names = "、".join(sorted({getattr(
+                    (self._sessions.get(v.layer_id) or {"layer": None})["layer"]
+                    if (self._sessions.get(v.layer_id) or {}).get("layer") is not None
+                    else v.layer_id, "name", v.layer_id)
+                    for v in errors if hasattr(v, "layer_id")})) or "图件"
+                return False, (
+                    f"地质不变量校验未通过（{names}）：{first.code}："
+                    f"{first.message}——共 {len(errors)} 个 error 级违规"
+                    f"（全部编辑未提交）")
+        # 快照（补偿恢复的输入）：提交前捕获每层镜像真值。
+        snapshots: dict[str, str] = {}
+        if callable(getattr(next(iter(self._sessions.values()), {}).get("stack")
+                            if self._sessions else None,
+                            "restore_mirror_snapshot", None)):
+            for layer_id, session in self._sessions.items():
+                try:
+                    snapshots[layer_id] = str(
+                        session["stack"].mirror_features_json(layer_id, 0))
+                except Exception:
+                    logger.exception("snapshot capture failed: %s", layer_id)
+        # 逐层 commit（会话集合序）；失败 → 剩余层 rollBack + 已提交层补偿。
         ordered = list(self._sessions.items())
         committed: list[tuple[str, dict]] = []
         for layer_id, session in ordered:
@@ -242,12 +284,13 @@ class NativeEditSessionController:
             except Exception as exc:
                 error = str(exc)
             if error:
-                # 全或无（§3）：失败层 X 保持会话（QGIS commit 失败缓冲未清
-                # ——修复后可重试）；X 之后的剩余层 rollBack；已提交层照常
-                # 留在已提交态（on_committed 已跑，出宿主会话表）。
+                # 全或无（§3）+ Ticket 5 补偿：失败层 X 保持会话（QGIS
+                # commit 失败缓冲未清——修复后可重试）；X 之后的剩余层
+                # rollBack；已提交层重开会话按快照恢复（内容等价），
+                # 恢复宏保留在 undo 栈（逃生口），会话保持打开。
                 failed_reason = (
                     f"图层「{getattr(session['layer'], 'name', layer_id)}」"
-                    f"提交失败：{error}（其后图层已回滚）")
+                    f"提交失败：{error}（其后图层已回滚，已提交层已补偿恢复）")
                 for remaining_id, remaining in self._sessions.items():
                     if remaining_id in {lid for lid, _s in committed}:
                         continue
@@ -258,11 +301,15 @@ class NativeEditSessionController:
                     except Exception:
                         logger.exception("post-failure rollback failed: %s",
                                          remaining_id)
+                compensated_ids = self._compensate_committed(
+                    committed, snapshots)
                 for done_id, _done in committed:
+                    if done_id in compensated_ids:
+                        continue  # 补偿层保持会话（恢复宏可撤销）
                     self._sessions.pop(done_id, None)
                     SESSION_SET.discard(done_id)
                 for rolled_id in list(self._sessions):
-                    if rolled_id != layer_id:
+                    if rolled_id != layer_id and rolled_id not in compensated_ids:
                         self._sessions.pop(rolled_id, None)
                         SESSION_SET.discard(rolled_id)
                 # 停发窗口收敛为失败层（可重试提交）。
@@ -281,6 +328,47 @@ class NativeEditSessionController:
         SESSION_SET.close()
         self.gestures.clear()
         return True, ""
+
+    def _compensate_committed(self, committed, snapshots) -> list[str]:
+        """已提交层补偿恢复（D9）：重开会话 + restore 一宏 + 登记手势。
+
+        返回成功补偿的层 id；失败层尽力回滚会话并记录（不抛出——补偿
+        在失败路径上，绝不再制造异常窗口）。
+        """
+        compensated: list[str] = []
+        for done_id, session in committed:
+            snapshot = snapshots.get(done_id)
+            stack = session["stack"]
+            if snapshot is None or not callable(
+                    getattr(stack, "restore_mirror_snapshot", None)):
+                continue
+            try:
+                reopen_error = str(stack.start_mirror_layer_editing(done_id) or "")
+                if reopen_error:
+                    logger.error("compensation reopen failed: %s: %s",
+                                 done_id, reopen_error)
+                    continue
+                restore_error = str(stack.restore_mirror_snapshot(done_id, snapshot) or "")
+                if restore_error:
+                    logger.error("compensation restore failed: %s: %s",
+                                 done_id, restore_error)
+                    stack.roll_back_mirror_layer(done_id)
+                    continue
+            except Exception:
+                logger.exception("compensation failed: %s", done_id)
+                continue
+            self._compensations.append(done_id)
+            self.gestures.finish(
+                new_feature_id("gesture"),
+                undo_text="撤销复合提交",
+                layer_ids=[done_id])
+            compensated.append(done_id)
+        return compensated
+
+    @property
+    def compensations(self) -> list[str]:
+        """补偿恢复事件（只读视图；诊断/审计）。"""
+        return list(self._compensations)
 
     # -- 手势（undo/redo 桥侧宏的宿主计划）-----------------------------------
 

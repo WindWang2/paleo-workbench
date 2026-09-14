@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import json
 import math
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
@@ -641,6 +642,8 @@ class CompositeEditController(QObject):
     sessions_committed = Signal()
     # M2 §3：全部层档手势波及邻层被门禁拒绝（场景 7——状态条提示）。
     native_join_refused = Signal(str)
+    # geotopo Ticket 4：地质守卫违规上报（error 已拦截时随拦截发出；warning 放行时发出）。
+    geology_blocked = Signal(object)
     # 捕获工具落地一个新要素（layer_id, feature_id）——相带层的「指定
     # 相带」弹窗由此触发（原生/回退两条捕获路径同源）。
     feature_captured = Signal(str, str)
@@ -651,6 +654,8 @@ class CompositeEditController(QObject):
         super().__init__(parent)
         self.project_crs = str(project_crs)
         self.tools = MapToolController()
+        # geotopo Ticket 5：compound_macro 聚合捕获（None = 非活动）。
+        self._compound_capture: dict | None = None
         self._snapping = SnappingService()
         self._topology = TopologyService()
         self._layers: dict[str, VectorLayer] = {}
@@ -1580,18 +1585,64 @@ class CompositeEditController(QObject):
         return None
 
     def _commit_native_sessions(self) -> str | None:
-        """M1 原生会话整集合提交（§3 全或无）；成功返回 None。"""
+        """M1 原生会话整集合提交（§3 全或无）；成功返回 None。
+
+        geotopo Ticket 4/5：并联地质不变量门（error 拦截 / warning 经
+        ``geology_blocked`` 信号上报，不阻塞）。"""
+        violations_before = self._collect_geology_violations()
+        errors = [v for v in violations_before
+                  if getattr(v, "severity", "error") == "error"]
+        if errors:
+            self.geology_blocked.emit(violations_before)
+            return (f"地质不变量校验未通过：{errors[0].code}："
+                    f"{errors[0].message}（全部编辑未提交）")
         ok, reason = self.native_editing.commit_all(
             gate=self.can_edit_layer,
             topology=self._topology,
+            geology=self._collect_geology_violations if self._geology_gate_enabled() else None,
             on_committed=self._on_native_committed,
         )
         if not ok:
             return reason
+        warnings = [v for v in violations_before
+                    if getattr(v, "severity", "error") == "warning"]
+        if warnings:
+            self.geology_blocked.emit(warnings)
         self._rebind_active_tool()
         self.sessions_committed.emit()
         self.state_changed.emit()
         return None
+
+    def _geology_gate_enabled(self) -> bool:
+        """地质门开关（与拓扑门同款拓扑开关语义；默认随拓扑门）。"""
+        return bool(getattr(self._topology, "enabled", False))
+
+    def _collect_geology_violations(self) -> list:
+        """会话集合的地质不变量违规（编辑真值读回 = 镜像缓冲）。"""
+        from paleo_workbench.mapping.geological_invariants import run_geology_gate
+
+        records: dict[str, list[dict]] = {}
+        roles: dict[str, str] = {}
+        for layer_id in self.native_editing.session_layer_ids():
+            stack = self.native_editing.stack_for(layer_id)
+            layer = self._layers.get(layer_id)
+            if stack is None or layer is None:
+                continue
+            try:
+                records[layer_id] = self.native_editing.readback_features(
+                    stack, layer_id)
+            except Exception:  # noqa: BLE001 — 门禁读回失败按空处理并留日志
+                logging.getLogger(__name__).exception(
+                    "geology gate readback failed: %s", layer_id)
+                records[layer_id] = []
+            roles[layer_id] = self._layer_roles.get(layer_id, "")
+        if not records:
+            return []
+        try:
+            return run_geology_gate(records, roles=roles)
+        except Exception:  # noqa: BLE001 — 守卫自身异常不阻塞提交主链
+            logging.getLogger(__name__).exception("geology gate crashed")
+            return []
 
     def _on_native_committed(self, layer: VectorLayer) -> None:
         """每层提交后：台账直跳新基线（M0 align——镜像即编辑发生地，
@@ -1708,15 +1759,49 @@ class CompositeEditController(QObject):
 
     def record_native_gesture(self, payload: Mapping[str, object]) -> None:
         """桥 edit_gesture 回调记账（§2 手势管理器 = 审计源）。M2 起手势
-        可跨层（payload["layers"] 有序层表；单层回落 layer_doc_id）。"""
+        可跨层（payload["layers"] 有序层表；单层回落 layer_doc_id）。
+        geotopo Ticket 5：compound_macro 活动期改为**聚合捕获**（不落
+        独立手势，块退出时归并为单手势）。"""
         gesture_id = str(payload.get("gesture_id") or new_feature_id("g"))
         layer_ids = [str(doc) for doc in (payload.get("layers") or [])]
         if not layer_ids:
             layer_ids = [str(payload.get("layer_doc_id") or "")]
+        capture = self._compound_capture
+        if capture is not None:
+            for layer_id in layer_ids:
+                if layer_id:
+                    capture["layer_ids"].append(layer_id)
+            return
         self.native_editing.gestures.finish(
             gesture_id,
             undo_text=str(payload.get("undo_text") or ""),
             layer_ids=layer_ids)
+
+    def note_compound_layer(self, layer_id: str) -> None:
+        """compound_macro 块内经控制器入口的层触达记账（§4.4）。"""
+        capture = self._compound_capture
+        if capture is not None and layer_id:
+            capture["layer_ids"].append(str(layer_id))
+
+    @contextmanager
+    def compound_macro(self, undo_text: str):
+        """复合宏事务（geotopo Ticket 5）：块内一切控制器触达的编辑（原生
+        手势回执 / 数字化捕获 / Python 会话几何命令）归并为**单手势**——
+        一次 Ctrl+Z 跨层同步撤销。绕过控制器的裸 session 写入不追踪。"""
+        if self._compound_capture is not None:
+            yield  # 嵌套块：并入外层宏
+            return
+        self._compound_capture = {"layer_ids": [], "undo_text": undo_text}
+        try:
+            yield
+        finally:
+            capture = self._compound_capture
+            self._compound_capture = None
+            if capture and capture["layer_ids"]:
+                self.native_editing.gestures.finish(
+                    new_feature_id("gesture"),
+                    undo_text=str(capture["undo_text"]),
+                    layer_ids=capture["layer_ids"])
 
     def rollback_edits(self) -> None:
         layer = self.active_layer
