@@ -101,6 +101,8 @@ class QgisLayerTreePanel(QWidget):
     remove_group_requested = Signal(str)
     # 组勾选/结构变化经 controller 处理后的额外持久化通知。
     group_state_changed = Signal()
+    # V12 任务2：应用渲染预设（模板/类型 → 符号 + 标注）。
+    render_preset_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None, *, menu_probe=None,
                  repair_probe=None):
@@ -559,6 +561,7 @@ class QgisLayerTreePanel(QWidget):
                 action.setEnabled(False)
                 action.setToolTip(f"不可用：{verdict.disabled_reason or '当前不可用'}")
         self._add_raw_draft_action(menu, doc_id, facts)
+        self._add_render_preset_action(menu, doc_id)
 
     def _add_raw_draft_action(self, menu, doc_id: str, facts) -> None:
         """给 RAW 保护层补上「复制为草稿…」（C++ 菜单的缺口）。
@@ -588,6 +591,25 @@ class QgisLayerTreePanel(QWidget):
         )
         # 插到 QGIS 内建项（Zoom / Feature Count）之后、第一个分隔符之前，
         # 与回退树里「复制为草稿…」紧跟只读查看项的位置相称。
+        before = next(
+            (item for item in menu.actions() if item.isSeparator()), None)
+        if before is not None:
+            menu.insertAction(before, action)
+        else:
+            menu.addAction(action)
+
+    def _add_render_preset_action(self, menu, doc_id: str) -> None:
+        """右键补「应用渲染预设」（C++ 菜单无此项；同复制为草稿的挂法）。"""
+        if menu is None or not doc_id:
+            return
+        text = "应用渲染预设"
+        if any(action.text() == text for action in menu.actions()):
+            return
+        action = QAction(text, menu)
+        action.setToolTip("按图层模板/类型恢复默认符号与标注")
+        action.triggered.connect(
+            lambda _checked=False, lid=str(doc_id):
+            self.render_preset_requested.emit(lid))
         before = next(
             (item for item in menu.actions() if item.isSeparator()), None)
         if before is not None:

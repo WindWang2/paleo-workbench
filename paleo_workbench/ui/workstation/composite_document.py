@@ -366,6 +366,8 @@ class LayerManagerPanel(QFrame):
     duplicate_layer_requested = Signal(str)
     export_layer_requested = Signal(str)
     repair_layer_requested = Signal(str)
+    # V12 任务2：把模板/类型渲染预设（符号 + 标注）重新套到图层。
+    render_preset_requested = Signal(str)
     # 当前图层变化（无可编辑图层时携带 None）。
     active_layer_changed = Signal(object)
     # V7 §7：双击定位（zoom to layer；由 CompositeDocument 落地）。
@@ -561,6 +563,9 @@ class LayerManagerPanel(QFrame):
         )
         symbology = menu.addAction("符号系统…")
         labeling = menu.addAction("标注…")
+        # V12 任务2：一键恢复该类型应有的渲染（符号 + 标注预设）。
+        render_preset = menu.addAction("应用渲染预设")
+        render_preset.setToolTip("按图层模板/类型恢复默认符号与标注")
         export = menu.addAction("导出图层…")
         rename = duplicate = remove = repair = draft = toggle_edit = None
         # V10 M5/R2-6：编辑入口的可用性与禁用原因来自 canonical evaluator
@@ -642,6 +647,8 @@ class LayerManagerPanel(QFrame):
             self.repair_layer_requested.emit(layer_id)
         elif chosen is export:
             self.export_layer_requested.emit(layer_id)
+        elif chosen is render_preset:
+            self.render_preset_requested.emit(layer_id)
 
     def set_editing_layer(self, layer_id: str | None) -> None:
         """标记正在编辑的图层（树项前缀 ✏，QGIS 的 in-edit 视觉语义）。"""
@@ -1220,6 +1227,11 @@ class CompositeDocument(QWidget):
         snap_feedback = getattr(self.canvas, "snap_feedback", None)
         if snap_feedback is not None:
             snap_feedback.connect(self.status_bar.set_snap_match)
+        # V12 任务3：画布右键 → 相带要素换相菜单（回退画布无此信号，鸭子
+        # 类型跳过）。
+        canvas_context_menu = getattr(self.canvas, "canvas_context_menu", None)
+        if canvas_context_menu is not None:
+            canvas_context_menu.connect(self._on_canvas_context_menu)
         measure_canceled = getattr(self.canvas, "measure_canceled", None)
         if measure_canceled is not None:
             measure_canceled.connect(lambda: self.status_bar.set_measure(""))
@@ -1293,6 +1305,8 @@ class CompositeDocument(QWidget):
         self.layer_manager.duplicate_layer_requested.connect(self._duplicate_vector_layer)
         self.layer_manager.export_layer_requested.connect(self._export_layer)
         self.layer_manager.repair_layer_requested.connect(self._repair_layer)
+        # V12 任务2：应用渲染预设（原生树面板与回退面板共用同一信号契约）。
+        self.layer_manager.render_preset_requested.connect(self._apply_render_preset)
         if self.uses_native_stack:
             # 显示态回写只有原生树面板产生（回退面板的显示态经自身信号即时生效）。
             self.layer_manager.display_state_changed.connect(self.notify_display_changed)
@@ -4549,6 +4563,137 @@ class CompositeDocument(QWidget):
 
     def _digit_keys_active(self) -> bool:
         return bool(self._digit_shortcuts)
+
+    def _apply_render_preset(self, layer_id) -> None:
+        """把该图层的渲染预设（符号 + 标注）重新套上（V12 任务2）。
+
+        相带层走分类样式重算（分类渲染不是单符号预设，且标注字段随相带
+        分级——相图 facies / 亚相图 sub_facies / 微相图 micro_facies）；
+        其余图层套模板/类型预设。
+        """
+        layer_id = str(layer_id or "")
+        if not layer_id:
+            return
+        if self._is_facies_layer(layer_id):
+            controller = self.edit_controller
+            layer = controller.layer(layer_id)
+            if layer is None:
+                return
+            source = (layer.edit_session.features()
+                      if layer.edit_session is not None else layer.features())
+            field = self._facies_layer_anchor_level(layer_id)
+            from paleo_workbench.ui.workstation.stage_actions import (
+                _categorized_facies_style,
+            )
+            # 分类器吃属性字典形态（VectorFeature 要先解包）。
+            style = _categorized_facies_style(
+                [dict(f.attributes) for f in source], field=field)
+            if style:
+                controller.set_layer_style(layer_id, style)
+                self._sync_composition()
+                self.status_message.emit(f"已应用「{layer.name}」的相带渲染预设")
+                return
+        ok, reason = self.edit_controller.apply_render_preset(layer_id)
+        if not ok:
+            self.status_message.emit(f"渲染预设未应用：{reason}")
+            return
+        self._sync_composition()
+        layer = self.edit_controller.layer(layer_id)
+        self.status_message.emit(
+            f"已应用渲染预设：{layer.name if layer is not None else layer_id}")
+
+    def _on_canvas_context_menu(self, map_point, global_pos) -> None:
+        """画布右键：命中活动相带层要素 → 弹出相选择列表（V12 任务3）。
+
+        只在「活动图层是相带层 + 光标命中其要素」时接管；其余情况不弹
+        （右键空白不该出现无语义菜单）。
+        """
+        try:
+            point = (float(map_point[0]), float(map_point[1]))
+        except Exception:
+            return
+        controller = self.edit_controller
+        layer_id = controller.active_layer_id
+        if not layer_id or not self._is_facies_layer(layer_id):
+            return
+        try:
+            results = controller.identify_all(point, base_layers=self._base_layers)
+        except Exception:
+            logging.getLogger(__name__).debug("context-menu identify failed", exc_info=True)
+            return
+        target = next((
+            result for result in results
+            if result.get("layer_id") == layer_id
+            and result.get("editable")
+            and result.get("feature_id")
+        ), None)
+        if target is None:
+            return
+        self._open_facies_context_menu(
+            str(layer_id), str(target["feature_id"]), global_pos)
+
+    def _build_facies_context_menu(self, layer_id: str, feature_id: str):
+        """相选择列表（纯构建，不 exec；供右键与测试共用）。
+
+        返回 ``(menu, actions)``：``actions`` 把 QAction 映射到相名
+        （级联入口映射为 None）。
+        """
+        from PySide6.QtWidgets import QMenu
+
+        taxonomy = self.facies_taxonomy()
+        names = taxonomy.names("facies")
+        layer = self.edit_controller.layer(layer_id)
+        current = ""
+        if layer is not None:
+            source = (layer.edit_session.features()
+                      if layer.edit_session is not None else layer.features())
+            feature = next(
+                (f for f in source if f.feature_id == feature_id), None)
+            if feature is not None:
+                current = str(
+                    (feature.attributes or {}).get("facies") or "").strip()
+        menu = QMenu(self)
+        header = menu.addAction(
+            f"要素 {feature_id}" + (f"（当前：{current}）" if current else ""))
+        header.setEnabled(False)
+        menu.addSeparator()
+        actions: dict = {}
+        for name in names:
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == current)
+            actions[action] = name
+        menu.addSeparator()
+        cascade = menu.addAction("级联选择（亚相 / 微相）…")
+        actions[cascade] = None
+        return menu, actions
+
+    def _open_facies_context_menu(self, layer_id: str, feature_id: str,
+                                  global_pos) -> None:
+        """弹出相选择列表并应用所选（V12 任务3 用户入口）。"""
+        menu, actions = self._build_facies_context_menu(layer_id, feature_id)
+        chosen = menu.exec(global_pos)
+        if chosen is None:
+            return
+        value = actions.get(chosen)
+        if value is None:
+            # 级联入口：走既有三級选择对话框（亚相/微相）。
+            self._assign_facies_dialog(layer_id, feature_id)
+            return
+        self._apply_context_menu_facies(layer_id, feature_id, value)
+
+    def _apply_context_menu_facies(self, layer_id: str, feature_id: str,
+                                   value: str) -> bool:
+        """右键所选相写入要素（新相生效即清空亚相/微相）→ 刷新分类样式。"""
+        ok, reason = self.edit_controller.apply_facies_selection(
+            str(layer_id), str(feature_id),
+            {"facies": str(value), "sub_facies": "", "micro_facies": ""})
+        if not ok:
+            self.status_message.emit(f"相未写入：{reason}")
+            return False
+        self.status_message.emit(f"相已改为「{value}」")
+        self._refresh_facies_layer_style(layer_id)
+        return True
 
     def _assign_facies_dialog(self, layer_id: str, feature_id: str) -> None:
         from paleo_workbench.ui.workstation.facies_selector import (

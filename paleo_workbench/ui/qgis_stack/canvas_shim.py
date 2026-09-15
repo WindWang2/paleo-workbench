@@ -22,7 +22,7 @@ import sys
 import time
 import weakref
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QObject, Qt, Signal
 from PySide6.QtGui import QKeyEvent, QPainter
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
@@ -405,6 +405,9 @@ class QgisCanvasShim(QWidget):
     # 回退 pan 并同步工具条 checked——按钮亮着但画布工具没换是「点了没
     # 反应」类 UX 缺陷，必须可检测。
     native_tool_activation_failed = Signal(str, str)
+    # V12 任务3：画布右键 → ((map_x, map_y), QPoint(global))。宿主用它做
+    # 相带要素的右键换相菜单（坐标换算在这里做完，消费方只拿地图坐标）。
+    canvas_context_menu = Signal(tuple, object)
 
     #: 最近一次**推送成功**的画布当前层 doc_id（V12 M0-2a）。只服务旧桥
     #: 退化路径：桥有 ``current_layer_query`` 时读回权威，不读本影子。
@@ -462,6 +465,16 @@ class QgisCanvasShim(QWidget):
         self._tools_original_set_active = None
         self._tools_wrapped_target = None
         self._wrapped_func = None
+        # V12 任务3：右键换相入口——画布右键策略切到 CustomContextMenu，
+        # 请求坐标在 viewport 里换算成地图坐标后上浮（QGIS 画布默认无
+        # 右键菜单，接管不与其抢占语义）。
+        try:
+            self.canvas.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self.canvas.customContextMenuRequested.connect(
+                self._on_canvas_context_menu_requested)
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "canvas context-menu wiring unavailable", exc_info=True)
         # B8：量距事件路由（仅 measure_distance 激活期挂画布视口过滤器）。
         self._measure_router = _CanvasMouseRouter(self)
         self._last_measure_emit: float | None = None
@@ -914,6 +927,27 @@ class QgisCanvasShim(QWidget):
                     "native current-layer read-back failed", exc_info=True)
                 return ""
         return str(getattr(self, "_pushed_current_layer", "") or "")
+
+    def _on_canvas_context_menu_requested(self, pos) -> None:
+        """画布右键请求 → 地图坐标信号（V12 任务3：相带右键换相入口）。"""
+        if getattr(self, "_shutdown_done", False):
+            return
+        try:
+            vp = self._canvas_viewport()
+            extent = self.view_extent
+            if vp is None or extent is None or len(extent) != 4:
+                return
+            xmin, ymin, xmax, ymax = (float(v) for v in extent)
+            width, height = float(vp.width()), float(vp.height())
+            if width <= 0.0 or height <= 0.0 or xmax <= xmin or ymax <= ymin:
+                return
+            x_map = xmin + (float(pos.x()) / width) * (xmax - xmin)
+            y_map = ymax - (float(pos.y()) / height) * (ymax - ymin)
+            global_pos = vp.mapToGlobal(QPoint(int(pos.x()), int(pos.y())))
+            self.canvas_context_menu.emit((x_map, y_map), global_pos)
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "canvas context-menu dispatch failed", exc_info=True)
 
     def native_tool_busy(self) -> bool:
         """原生工具是否占有 Esc 语义（M3 Task 5）：采点中/顶点·移动拖动中。

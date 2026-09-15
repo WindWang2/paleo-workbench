@@ -931,6 +931,25 @@ class CompositeEditController(QObject):
         """图层的科学角色值（"" = 无角色，走 legacy 无 schema 路径）。"""
         return self._layer_roles.get(str(layer_id), "")
 
+    def apply_render_preset(self, layer_id: str) -> tuple[bool, str]:
+        """把该图层的**渲染预设**（符号 + 标注）重新套上（V12 任务2）。
+
+        预设来源：图层模板（GEO_TEMPLATES）优先，无模板按几何类型回落
+        STYLE_LIBRARY。相带层的分类样式由宿主按要素重算（分类渲染不是
+        单符号预设），控制器只负责模板/库预设这一层。
+        """
+        layer = self._layers.get(str(layer_id))
+        if layer is None:
+            return False, "图层不存在"
+        template = _TEMPLATE_BY_KEY.get(self._templates.get(str(layer_id), ""))
+        if template is not None:
+            preset = template.style
+        else:
+            kind = self._kinds.get(str(layer_id), "")
+            preset = default_style_for(_KIND_STYLE_PRESET.get(kind, "facies"))
+        self.set_layer_style(str(layer_id), preset.to_dict())
+        return True, ""
+
     def set_layer_style(self, layer_id: str, style: Mapping[str, object]) -> None:
         """写入图层样式（图层属性 / 符号系统 / 标注对话框的落地路径）。"""
         layer = self._layers.get(str(layer_id))
