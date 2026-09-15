@@ -526,16 +526,15 @@ def execute_ingest_plan(
     if execute_unconfirmed:
         pending = [
             item for item in plan.items
-            if item.decision in ("accept", "pending") or (
-                item.decision == "skip" and item.duplicate_of_version
-            )
+            if item.decision in ("accept", "pending", "skip")
         ]
     else:
+        # 确认模式：accept 执行；显式 skip（含非重复项）进列表只为**如实
+        # 记入 report.skipped**（循环首分支跳过它们，不注册）；pending
+        # 未经确认绝不执行（execute_unconfirmed 契约不变）。
         pending = [
             item for item in plan.items
-            if item.decision == "accept" or (
-                item.decision == "skip" and item.duplicate_of_version
-            )
+            if item.decision in ("accept", "skip")
         ]
     total = len(pending)
     done = 0
