@@ -10,11 +10,9 @@
   [docs/research/topological-editing-baseline.md](../research/topological-editing-baseline.md)
 - 机制考证（拓扑编辑缓冲区行为、桌面 undo 真相、避免重叠生效点、splitFeatures 语义、
   QgsTracer、qgis_app 结论）：
-  [research/qgis-topo-editing 分支](https://github.com/WindWang2/paleo-workbench/tree/research/qgis-topo-editing)
-  `docs/research/qgis-native-topological-editing.md`
+  [docs/research/qgis-native-topological-editing.md](../research/qgis-native-topological-editing.md)
 - 检查框架考证（analysis 检查器体系、插件可移植性、缝隙语义）：
-  [research/qgs-geometry-check 分支](https://github.com/WindWang2/paleo-workbench/tree/research/qgs-geometry-check)
-  `docs/research/qgs-geometry-check-framework.md`
+  [docs/research/qgs-geometry-check-framework.md](../research/qgs-geometry-check-framework.md)
 - 路线基调（访谈锁定）：**编辑权迁移 QGIS**（镜像层升级真可编辑，Python 会话改同步方）；
   相图草稿先行；终点 = 本规格 + 路线图（实施不在地图内）。
 
