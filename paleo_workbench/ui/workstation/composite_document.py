@@ -4645,6 +4645,7 @@ class CompositeDocument(QWidget):
                     from PySide6.QtWidgets import QMenu
                     menu = QMenu(self)
                     ring = menu.addAction("删除内环")
+                    fill = menu.addAction("填充内环")
                     part = menu.addAction("删除部件")
                     menu.addSeparator()
                     rev = menu.addAction("反转方向")
@@ -4661,6 +4662,8 @@ class CompositeDocument(QWidget):
                     chosen = menu.exec(global_pos)
                     if chosen is ring:
                         self._run_context_geometry_command("delete_ring", map_point)
+                    elif chosen is fill:
+                        self._run_fill_ring(map_point)
                     elif chosen is part:
                         self._run_context_geometry_command("delete_part", map_point)
                     elif chosen is rev:
@@ -4738,6 +4741,15 @@ class CompositeDocument(QWidget):
             self._assign_facies_dialog(layer_id, feature_id)
             return
         self._apply_context_menu_facies(layer_id, feature_id, value)
+
+    def _run_fill_ring(self, map_point) -> None:
+        """填充内环分发（M5-B2）：右键落点 → 环转面，原因上浮。"""
+        try:
+            point = (float(map_point[0]), float(map_point[1]))
+        except Exception:
+            return
+        ok, message = self.edit_controller.fill_ring_at_point(point)
+        self.status_message.emit(message if message else "已填充内环")
 
     def _run_context_geometry_command(self, command_id: str, map_point) -> None:
         """右键环/部件命令分发（M5-A1）：落点 → 交互命令，原因上浮。"""

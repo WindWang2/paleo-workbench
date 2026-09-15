@@ -148,7 +148,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     # V12 M5-A1 shape：矩形/圆/圆弧/正多边形数字化器。
     "capture": ("add_point", "add_line", "add_polygon",
                 "add_rectangle", "add_circle", "add_arc",
-                "add_regular_polygon", "add_ellipse"),
+                "add_regular_polygon", "add_ellipse", "add_sector"),
     "geometry": (
         "move_feature", "vertex", "reshape", "undo", "redo", "delete_selected",
         "split", "merge", "repair_geometry",
@@ -275,7 +275,7 @@ _BASIC_GROUPS = frozenset({"navigate", "selection", "inspection", "layer"})
 _CHECKED_CANVAS_TOOLS = frozenset({
     "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
     "measure_distance", "add_point", "add_line", "add_polygon",
-    "add_rectangle", "add_circle", "add_arc", "add_regular_polygon", "add_ellipse",
+    "add_rectangle", "add_circle", "add_arc", "add_regular_polygon", "add_ellipse", "add_sector",
     "move_feature", "vertex", "reshape", "add_ring", "add_part",
     "fault_cut", "boundary_reshape",
 })
@@ -375,7 +375,8 @@ def _backend_gate(ctx: ToolContext) -> str | None:
 _KIND_REQUIRED = {"add_point": "point", "add_line": "line", "add_polygon": "polygon",
                 "add_rectangle": "polygon", "add_circle": "polygon",
                 "add_regular_polygon": "polygon", "add_arc": "line",
-                "add_ellipse": "polygon"}
+                "add_ellipse": "polygon",
+                "add_sector": "polygon"}
 
 def _kind_gate(ctx: ToolContext, tool_id: str) -> str | None:
     expected = _KIND_REQUIRED[tool_id]
@@ -646,7 +647,8 @@ def _rule_edit_tool(ctx: ToolContext, tool_id: str, native_kind: str) -> ToolAva
             {"move_feature": "移动", "vertex": "节点编辑",
              "add_rectangle": "添加矩形", "add_circle": "添加圆",
              "add_arc": "添加圆弧", "add_regular_polygon": "添加正多边形",
-             "add_ellipse": "添加椭圆"}.get(
+             "add_ellipse": "添加椭圆",
+             "add_sector": "添加扇形"}.get(
                 tool_id, tool_id))
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
@@ -1012,6 +1014,7 @@ _RULE_TABLE: dict[str, Rule] = {
     "extend_line": lambda ctx: _rule_selection_op(ctx, "extend_line"),
     "fill_ring": lambda ctx: _rule_ring_part(ctx, "fill_ring"),
     "add_ellipse": lambda ctx: _rule_edit_tool(ctx, "add_ellipse", "__python_fallback__"),
+    "add_sector": lambda ctx: _rule_edit_tool(ctx, "add_sector", "__python_fallback__"),
     "delete_selected": _rule_delete_selected,
     "split": _rule_split,
     "merge": _rule_merge,

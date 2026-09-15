@@ -743,6 +743,61 @@ class EllipseCaptureTool(_CaptureTool):
         return True
 
 
+class SectorCaptureTool(_CaptureTool):
+    """扇形数字化器（V12 M5-B2 shape）：中心 + 起角点 + 止角点。
+
+    三次左键：C（中心）→ P0（起角点，定半径与起始方位）→ P1（止角点，
+    定终止方位）。圆弧经 P0 逆时针扫到 P1（扫过角 0 则按整圆落盘），
+    32 段采样 + 两条半径边闭合。退化（半径 0）回落折线。
+    只在面图层激活。
+    """
+
+    tool_id = "add_sector"
+    geometry_type = "Polygon"
+    SEGMENTS = 32
+
+    def mouse_press(self, point, *, button: str = "left", modifiers=()) -> bool:
+        if button == "right":
+            return self.finish()
+        if button != "left":
+            return False
+        self.points.append(self._snap(point))
+        return self.finish() if len(self.points) == 3 else True
+
+    def finish(self) -> bool:
+        import math as _math
+
+        if len(self.points) != 3:
+            return False
+        (cx, cy), (sx, sy), (ex, ey) = (
+            (float(p[0]), float(p[1])) for p in self.points)
+        radius = _math.hypot(float(sx) - float(cx), float(sy) - float(cy))
+        if radius <= 0.0:
+            self.points.clear()
+            return False
+        a0 = _math.atan2(float(sy) - float(cy), float(sx) - float(cx))
+        a1 = _math.atan2(float(ey) - float(cy), float(ex) - float(cx))
+        two_pi = 2.0 * _math.pi
+        sweep = (a1 - a0) % two_pi
+        if sweep <= 0.0:
+            sweep = two_pi  # 起止同方位 = 整圆
+        ring = [[float(cx), float(cy)]]
+        ring.extend(
+            [float(cx) + radius * _math.cos(a0 + sweep * i / self.SEGMENTS),
+             float(cy) + radius * _math.sin(a0 + sweep * i / self.SEGMENTS)]
+            for i in range(self.SEGMENTS + 1))
+        ring.append(list(ring[0]))
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            feature_id = self._feature_id_factory()
+            self.session.add_feature(
+                VectorFeature(feature_id,
+                              {"type": "Polygon", "coordinates": [ring]},
+                              self._default_attributes))
+        self.points.clear()
+        self._notify_captured(feature_id)
+        return True
+
+
 class SnapGeometriesTool(MapTool):
     """批量捕捉对齐（V12 M5-A）：选集顶点逐个吸附到捕捉命中处（单宏）。
 

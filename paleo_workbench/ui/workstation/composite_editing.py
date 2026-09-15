@@ -362,7 +362,8 @@ _LAYER_BOUND_TOOLS = frozenset(
 _KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon",
                 "add_rectangle": "polygon", "add_circle": "polygon",
                 "add_regular_polygon": "polygon", "add_arc": "line",
-                "add_ellipse": "polygon"}
+                "add_ellipse": "polygon",
+                "add_sector": "polygon"}
 
 
 def pick_topmost_visible_layer_id(layer_ids_bottom_up, visible_ids) -> str | None:
@@ -2257,6 +2258,7 @@ class CompositeEditController(QObject):
                         "add_arc": _mt.ArcCaptureTool,
                         "add_regular_polygon": _mt.RegularPolygonCaptureTool,
                         "add_ellipse": _mt.EllipseCaptureTool,
+                        "add_sector": _mt.SectorCaptureTool,
                     }[action_id]
                     tool = shape_tool(session, snap=self._snap,
                                       attributes=defaults, on_captured=captured)

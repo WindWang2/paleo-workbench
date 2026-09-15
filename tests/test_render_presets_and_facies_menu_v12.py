@@ -637,3 +637,44 @@ def test_fill_ring_registered():
     for tool_id in ("fill_ring", "add_ellipse"):
         assert tool_id in TOOL_LABELS and tool_id in TOOL_HELP
         assert ACTION_SPECS[tool_id].icon
+
+
+# ---------------------------------------------------------------------------
+# M5-B2：扇形数字化器（fill_ring 在既有用例）
+# ---------------------------------------------------------------------------
+
+def test_sector_capture_quarter(qapp):
+    import math
+
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.map_tools import SectorCaptureTool
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("面", "polygon")
+    controller._open_session(layer)
+
+    tool = SectorCaptureTool(layer.edit_session, snap=lambda p: p)
+    assert tool.mouse_press((0.0, 0.0)) is True
+    assert tool.mouse_press((2.0, 0.0)) is True   # 起角 0°
+    assert tool.mouse_press((0.0, 2.0)) is True   # 止角 90°
+    features = layer.edit_session.features()
+    assert len(features) == 1
+    ring = features[0].geometry["coordinates"][0]
+    assert ring[0] == ring[-1], "扇形未闭合"
+    # 1/4 圆面积 = pi（r=2）→ 约 3.14。
+    from shapely.geometry import shape as _shape
+    area = _shape(features[0].geometry).area
+    assert abs(area - math.pi) < 0.05, f"扇形面积异常: {area}"
+
+
+def test_sector_tools_registered():
+    from paleo_workbench.mapping.action_registry import ACTION_SPECS
+    from paleo_workbench.mapping.tool_availability import TOOL_GROUPS
+    from paleo_workbench.mapping.tool_help import TOOL_HELP, TOOL_LABELS
+
+    assert "add_sector" in TOOL_GROUPS["capture"]
+    for tool_id in ("add_sector", "fill_ring"):
+        assert tool_id in TOOL_LABELS and tool_id in TOOL_HELP
+        assert ACTION_SPECS[tool_id].icon
