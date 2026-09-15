@@ -68,10 +68,20 @@
 | M1-6 容差单位 | C++ `setUnits` 解硬编码：全局 `units`（px/map/layer）+ 逐层 `units` 覆盖（缺省跟随全局）+ 参考层条目跟随全局；模型 `tolerance_units`/`layer_tolerance_units` + 持久化往返；对话框容差单位下拉；控制器下推 `units`（逐层同） |
 | M4-3a 比例依赖 | C++ `scale_dependent.minimum_scale`（Global 模式：只在画布比例尺分母 ≥ 该值时捕捉）；模型 `scale_minimum` + 持久化往返；对话框「比例依赖（1:）」自旋（0=关闭）；控制器下推 `scale_dependent` |
 | M5-B 旋转/缩放 | `transform_selection`——绕选集质心（shapely affinity），单宏可撤销；右键菜单经对话框取角度/因子 |
-| M5-B 剪切/复制/粘贴 | 内部剪贴板（源层/源 CRS/entries）；粘贴时字段按目标 schema 映射（多余键丢弃并注明）、源目标 CRS 声明不同则拒绝（不静默重投影） |
+| M5-B 剪切/复制/粘贴 | 内部剪贴板（源层/源 CRS/条目）；粘贴按目标 schema 字段映射（多余键丢弃并注明）、源目标 CRS 声明不同则**拒绝**（不静默重投影） |
 | 注册面 | 9 个新动作（工具组/求值规则/帮助/控制器注册/8 张新图标/右键菜单接线） |
 | 用例 | 单位+比例持久化与下推、旋转语义、剪贴字段映射与 CRS 拒绝 |
 | 验证 | 编辑/拓扑/预设/右键/开关/范围/段移动/单位组合 **56 passed** |
+
+## 第六轮｜M4-3b 逐层优先级 / M5-A1 shape 与批量吸附（落地）
+
+| 项 | 落地内容 |
+|---|---|
+| M4-3b 逐层优先级 | QGIS 下推按 `layer_priority` 排序（数值小者优先排出），与回退栈 `SnappingService.snap` 等距裁决同序（`IndividualLayerSettings` 无优先级字段——按配置顺序尝试的实现面补齐） |
+| M5-A1 shape | `RectangleCaptureTool`（两次左键定对角 → 自动闭合）/ `CircleCaptureTool`（圆心 + 半径点，64 边近似圆）；Kind 门绑定面图层（与 AddPolygon 同）；捕获组新增两个 id |
+| M5-A1 snap_geometries | `SnapGeometriesTool`（选集顶点逐个吸附，0 位移不开宏——"吸附到自身"不产生空宏）+ 控制器 `snap_geometries`（容差缺省 = 全局 × 视图比例；门禁/拓扑刷新/内容信号同选择集算子） |
+| 注册面 | 3 个 id（工具组/求值/帮助/注册/控制器/QAction/图标）+ 右键「吸附对齐」 |
+| 用例 | 登记面、矩形闭合、圆半径、批量吸附无变更诚实拒绝、优先级等距裁决 |
 
 ---
 
