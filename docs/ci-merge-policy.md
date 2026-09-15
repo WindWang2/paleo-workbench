@@ -1,7 +1,7 @@
 # CI merge policy
 
-Last updated 2026-08-29 with the production-readiness quality convergence
-(advisory suite promoted to a required gate).
+Last updated 2026-09-15: PR-gate real-format smoke (#1230) added as a
+required product gate; 3.13 remains observe-only.
 
 ## Product merge gates (required)
 
@@ -13,7 +13,8 @@ A PR is merge-ready when these are green on the head SHA:
 | **Full monorepo Tests (CPython 3.12)** | `CI` → `Tests` matrix on `ubuntu-latest` + `windows-latest` (both **required**; native extensions built on both legs) |
 | **Well Log Workstation (host)** | `CI` → `Well Log Workstation (host)` (CPython 3.12) |
 | **3D OpenGL viewport (software Mesa)** | `CI` → `3D OpenGL viewport (software Mesa)` — the `opengl`-marked 3D tests on a real X server under llvmpipe (required since 2026-08-29, after the #1112 xvfb + queued-handler fixes) |
-| **Merge gate** | `CI` → `Merge gate (full monorepo + workstation)` — `needs:` the full Tests matrix and the workstation host matrix |
+| **Real-format smoke (PR)** | `CI` → `Real-format smoke (PR)` — LAS/DAT/SEGY prepare() against tiny committed fixtures (`tests/fixtures/realdata/`, marker `realdata_smoke`); fail-closed, no skip-pass (#1230) |
+| **Merge gate** | `CI` → `Merge gate (full monorepo + workstation)` — `needs:` the full Tests matrix, workstation host, 3D OpenGL, and real-format smoke |
 
 Cross-workflow: GitHub does not `needs:` across workflows; reviewers confirm **WellLogEngine C++** on the same commit as the CI host gate. The `WellLogEngine C++` workflow (`well-log-engine.yml`) is triggered on well-log-engine submodule **gitlink bumps** (paths cover the bare `well-log-engine` entry and `well-log-engine/**`), so any engine-pointer change re-runs it.
 
@@ -37,17 +38,30 @@ built (developer environments; a future binding CI leg should select
 
 ## Slow tests (nightly leg, packaging #442)
 
-The fast gate deliberately deselects the `slow` family (12 tests: real-data
-vendor-format smoke + interpolation perf). They run only in the dedicated
-`Slow tests (nightly)` workflow (`.github/workflows/slow-tests.yml`,
+The fast gate deliberately deselects the `slow` family (real-data vendor-format
+smoke against the large `data/` tree + interpolation perf). They run only in the
+dedicated `Slow tests (nightly)` workflow (`.github/workflows/slow-tests.yml`,
 schedule + manual dispatch), which is fail-closed: it asserts the slow family
-stays ≥ 12 collected, and fails with an explicit error when the
+stays ≥ its baseline collected, and fails with an explicit error when the
 representative `data/` tree is absent so the real-data tests can never
 silently skip to green. The main `Tests` job runs the same collect guard. The
 geoviz dependency install in `ci.yml` is fail-closed too — no `|| true`;
 `requirements-geoviz.txt` is the single source of truth (the old eight-line
 fallback list had drifted, missing `geoviz_well_seismic_3d`), followed by an
 `import geoviz, geoviz_well_seismic_3d` smoke.
+
+## Real-format smoke on PRs (#1230)
+
+Nightly `slow` coverage of the large vendor `data/` tree is necessary but not
+sufficient for merge safety: a PR that breaks LAS/DAT/SEGY prepare could still
+green the fast gate and only fail overnight. Since 2026-09-15 the dedicated
+`test-realdata-smoke` job runs `tests/test_geoviz_pr_realdata_smoke.py`
+(`-m realdata_smoke`) against tiny committed fixtures under
+`tests/fixtures/realdata/` (real format bytes, <<1 MB total). The job is
+fail-closed, has no `continue-on-error` / `|| true`, and is in `merge-gate`
+`needs`. Missing fixtures fail (no skip-pass). The nightly slow family remains
+the home for large-tree / perf coverage. Product `requires-python` is
+`>=3.12,<3.13`; 3.13 legs stay observe-only diagnostics — do not fail-close them.
 
 ## QGIS renderer coverage (opt-in, packaging #437)
 
@@ -110,3 +124,9 @@ Code staged in #234 that makes the Windows build clean:
 ## Review follow-up (2026-09-13)
 
 QGIS renderer path filters now also include paleo_workbench/ui/workstation/** and paleo_workbench/qgis_runtime/** so 编图 host / runtime loader changes re-run the bridge gate.
+
+## Review follow-up (2026-09-15)
+
+PR merge gate now includes real-format smoke (`test-realdata-smoke`, #1230):
+tiny in-tree LAS/DAT/SEGY fixtures exercise GeoVizEngine.prepare on every PR.
+The slow vendor-data family stays nightly; 3.13 remains observe-only.
