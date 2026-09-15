@@ -606,18 +606,39 @@ std::vector<PwbVertexTool::VertexRef> PwbVertexTool::verticesNear(
   return out;
 }
 
+namespace {
+
+//: 两层坐标是否可比（§2 跨层拓扑只在同 CRS 层间成立）。
+//: 双方都未声明 CRS（工程未声明坐标系时镜像层 CRS 为空）→ 可比：画布此时
+//: 按原坐标渲染，逐字比较坐标才是正确语义。只有一方声明时不可比——
+//: 混着比会得到看似成功、实则错位的拓扑联动。
+bool coordinatesComparable(QgsVectorLayer* a, QgsVectorLayer* b) {
+  if (a == nullptr || b == nullptr) return false;
+  const QgsCoordinateReferenceSystem& ca = a->crs();
+  const QgsCoordinateReferenceSystem& cb = b->crs();
+  if (!ca.isValid() && !cb.isValid()) return true;
+  if (!ca.isValid() || !cb.isValid()) return false;
+  return ca == cb;
+}
+
+}  // namespace
+
 std::vector<PwbVertexTool::VertexRef> PwbVertexTool::discoverAllLayers(
     const QgsPointXY& mapPoint, double pick_radius) {
   // 候选层内最近顶点为锚（同 CRS 层才可比坐标——§2 跨层拓扑仅同 CRS）。
+  // V12 M0-2d：未声明 CRS 的层**不再直接丢弃**。旧写法 `if
+  // (!ref.layer->crs().isValid()) continue;` 在工程坐标系未声明的工程里
+  // （镜像层 CRS 为空，工作站的常见形态）会让候选**全部**落空，press 于是
+  // 走"点空处"分支 → 框选 → 短按即 pick_miss：用户看到的就是节点工具
+  // "完全拖不动"，且没有任何提示。
   const auto candidates = candidateLayers();
   std::vector<VertexRef> picked;
   for (QgsVectorLayer* layer : candidates) {
     if (layer == nullptr) continue;
     for (VertexRef& ref : verticesNear(layer, mapPoint, pick_radius)) {
-      if (!ref.layer->crs().isValid()) continue;
       if (!picked.empty()
-          && ref.layer->crs() != picked.front().layer->crs()) {
-        continue;  // 与首个命中层不同 CRS：不参与本轮发现
+          && !coordinatesComparable(ref.layer, picked.front().layer)) {
+        continue;  // 与首个命中层不可比（一方声明 CRS、一方没有）：不参与
       }
       picked.push_back(std::move(ref));
     }
@@ -625,14 +646,11 @@ std::vector<PwbVertexTool::VertexRef> PwbVertexTool::discoverAllLayers(
   if (picked.empty()) return picked;
   const QgsPointXY anchor = picked.front().pos;
   // 同 CRS 过滤（§2）：坐标只在同 CRS 层间可比——异层 CRS 直接不参与。
-  const QgsCoordinateReferenceSystem primary_crs =
-      picked.front().layer != nullptr ? picked.front().layer->crs()
-                                      : QgsCoordinateReferenceSystem();
+  QgsVectorLayer* primary = picked.front().layer;
   std::vector<VertexRef> shared;
   std::vector<std::string> join_ids;
   for (QgsVectorLayer* layer : candidates) {
-    if (layer == nullptr || !layer->crs().isValid()
-        || (primary_crs.isValid() && layer->crs() != primary_crs)) {
+    if (layer == nullptr || !coordinatesComparable(layer, primary)) {
       continue;
     }
     for (const VertexRef& ref : verticesNear(layer, anchor,
@@ -790,6 +808,85 @@ void PwbVertexTool::beginTranslateDrag(const QgsPointXY& anchor,
   }
 }
 
+bool PwbVertexTool::beginSegmentDrag(const QgsPointXY& mapPoint) {
+  // V12 M2-1 段移动：命中段（未命中顶点）→ 收集该段两端点位置的全部
+  // 共位节点（跨层共享节点联动），一次平移拖动（复用 beginTranslateDrag
+  // 的全部语义：每层恰一宏 + 避免重叠 + 拓扑点 + 一次 edit_gesture）。
+  QgsVectorLayer* layer = editLayer();
+  if (layer == nullptr) return false;
+  const double mup = canvas()->mapSettings().mapUnitsPerPixel();
+  const double radius = kTolerancePx * mup;
+  QgsFeature feature;
+  QgsFeatureIterator cursor =
+      layer->getFeatures(QgsFeatureRequest(QgsRectangle(
+          mapPoint.x() - radius, mapPoint.y() - radius,
+          mapPoint.x() + radius, mapPoint.y() + radius)));
+  std::vector<QgsPointXY> endpoints;
+  while (cursor.nextFeature(feature)) {
+    if (!feature.hasGeometry()) continue;
+    const QgsGeometry geometry = feature.geometry();
+    const QgsAbstractGeometry* raw = geometry.constGet();
+    if (raw == nullptr) continue;
+    const int total = static_cast<int>(raw->vertexCount());
+    for (int nr = 0; nr + 1 < total; ++nr) {
+      const QgsPoint a = raw->vertexAt(
+          [&] { QgsVertexId vid; geometry.vertexIdFromVertexNr(nr, vid); return vid; }());
+      const QgsPoint b = raw->vertexAt(
+          [&] { QgsVertexId vid; geometry.vertexIdFromVertexNr(nr + 1, vid); return vid; }());
+      const QgsPointXY pa(a.x(), a.y());
+      const QgsPointXY pb(b.x(), b.y());
+      // 点到段距离（简线段算子，落点仅在段内投影时有效）。
+      const double vx = pb.x() - pa.x(), vy = pb.y() - pa.y();
+      const double len2 = vx * vx + vy * vy;
+      double t = 0.0;
+      if (len2 > 0.0) {
+        t = ((mapPoint.x() - pa.x()) * vx + (mapPoint.y() - pa.y()) * vy) / len2;
+        t = std::clamp(t, 0.0, 1.0);
+      }
+      const double dx = mapPoint.x() - (pa.x() + t * vx);
+      const double dy = mapPoint.y() - (pa.y() + t * vy);
+      if (std::hypot(dx, dy) <= radius) {
+        endpoints.push_back(pa);
+        endpoints.push_back(pb);
+      }
+    }
+  }
+  if (endpoints.empty()) return false;
+  // 收集两端点位置的共位节点集（与顶点拖动同一共享语义）。
+  std::vector<VertexRef> selected;
+  std::vector<QgsVectorLayer*> candidate_layers;
+  if (allLayersScope()) {
+    candidate_layers = candidateLayers();
+  } else {
+    candidate_layers.push_back(layer);
+  }
+  for (QgsVectorLayer* candidate : candidate_layers) {
+    if (candidate == nullptr) continue;
+    for (const QgsPointXY& at : endpoints) {
+      for (VertexRef& ref : verticesNear(candidate, at, kSharedNodeEpsilon)) {
+        if (coordinatesComparable(ref.layer, candidate_layers.front())) {
+          selected.push_back(std::move(ref));
+        }
+      }
+    }
+  }
+  if (selected.empty()) return false;
+  // 去重（两锚点本就近时可能重复收集）。
+  std::vector<VertexRef> deduped;
+  for (VertexRef& ref : selected) {
+    const bool known = std::any_of(deduped.begin(), deduped.end(),
+                                   [&ref](const VertexRef& other) {
+      return other.layer == ref.layer && other.fid == ref.fid
+          && other.vid.part == ref.vid.part && other.vid.ring == ref.vid.ring
+          && other.vid.vertex == ref.vid.vertex;
+    });
+    if (!known) deduped.push_back(std::move(ref));
+  }
+  const QgsPointXY anchor = endpoints.front();
+  beginTranslateDrag(anchor, std::move(deduped));
+  return true;
+}
+
 void PwbVertexTool::finishTranslateDrag(const QgsPointXY& target) {
   const std::vector<VertexRef> refs = std::move(shared_drag_);
   const QgsPointXY anchor = drag_anchor_;
@@ -798,7 +895,10 @@ void PwbVertexTool::finishTranslateDrag(const QgsPointXY& target) {
   const double dx = target.x() - anchor.x();
   const double dy = target.y() - anchor.y();
   const double mup = canvas()->mapSettings().mapUnitsPerPixel();
-  if (std::hypot(dx, dy) < kTolerancePx * mup) return;
+  if (std::hypot(dx, dy) < kTolerancePx * mup) {
+    callback_("vertex_no_move", "{}");  // V12 M2-4：零位移也上浮
+    return;
+  }
   std::map<QgsVectorLayer*, std::map<QgsFeatureId, std::vector<VertexRef>>> grouped;
   for (const VertexRef& ref : refs) {
     if (ref.layer == nullptr || !ref.layer->isEditable()) continue;
@@ -992,10 +1092,13 @@ void PwbVertexTool::finishSharedDrag(const QgsPointXY& target) {
   cancelDrag();
   clearSharedMarkers();
   const QgsPointXY anchor = drag_anchor_;
-  // 零位移抑制（v1 同语义）：单击不是拖动。
+  // 零位移抑制（v1 同语义）：单击不是拖动。V12 M2-4：抑制不再无声——
+  // 发 vertex_no_move 回执，宿主提示"单击不移动节点"（消除"是不是坏了"
+  // 的疑惑）。
   const double mup = canvas()->mapSettings().mapUnitsPerPixel();
   if (std::hypot(target.x() - anchor.x(), target.y() - anchor.y())
       < kTolerancePx * mup) {
+    callback_("vertex_no_move", "{}");
     return;
   }
   // release 时按当前可编辑层重组（join_requested 同步入集的层此刻已可编辑）。
@@ -1215,6 +1318,10 @@ void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
       }
     }
     if (shared.empty()) {
+      // V12 M2-1 段移动：未命中顶点但命中段 → 段拖动（两端点同步平移；
+      // 端点同位的共享节点联动）。判定失败才落到框选——框选仍是"点空处"
+      // 的语义，段命中不应被吞成框选。
+      if (beginSegmentDrag(e->mapPoint())) return;
       // §4 框选多节点：点空处拖出矩形。
       startBoxSelect(e->mapPoint());
       return;
@@ -1225,7 +1332,12 @@ void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
       return;
     }
     boxed_selection_.clear();
-    beginSharedDrag(shared.front().pos, std::move(shared));
+    // 先取锚点、再移动容器：MSVC 的实参求值顺序是从右往左，写成
+    // ``beginSharedDrag(shared.front().pos, std::move(shared))`` 时 move 先执行，
+    // 容器的缓冲区已经易主 → front() 对空容器解引用（空指针 + 偏移），
+    // 拖动工具在 Windows 上按下即崩。GCC/Clang 自左向右，故只在 MSVC 复现。
+    const QgsPointXY anchor = shared.front().pos;
+    beginSharedDrag(anchor, std::move(shared));
     return;
   }
   Pick pick;
@@ -1252,6 +1364,10 @@ void PwbVertexTool::canvasMoveEvent(QgsMapMouseEvent* e) {
     return;
   }
   if (!dragging_) {
+    // V12 M2-3：记录光标地图位置——Delete 成功后在同位置对最新缓冲重建
+    // hover（连续删除免"晃动鼠标找回悬停"，v10 #3 关闭）。
+    last_cursor_map_ = e->mapPoint();
+    has_last_cursor_ = true;
     const QgsPointLocator::Match m = updateHoverMatch(e->mapPoint());
     updateSnapIndicator(e->mapPoint(), &m);
     return;
@@ -1409,6 +1525,9 @@ void PwbVertexTool::keyPressEvent(QKeyEvent* e) {
         const QgsPoint hover_point =
             hover_.pick.geometry.constGet()->vertexAt(hover_.vertex);
         finishSharedDeleteAt(QgsPointXY(hover_point.x(), hover_point.y()));
+        // V12 M2-3：删除已落缓冲（镜像即编辑发生地，无滞后），在同一光标
+        // 位置重建 hover——密集几何下连续 Delete 不再要求晃动鼠标找回悬停。
+        if (has_last_cursor_) updateHover(last_cursor_map_);
       } else {
         callback_("vertex_delete_rejected", "{}");
       }
@@ -1604,7 +1723,8 @@ void PwbMoveTool::canvasPressEvent(QgsMapMouseEvent* e) {
     return;
   }
   current_ = pick;
-  origin_ = e->mapPoint();
+  // V12 M2-2：参考点吸附（QGIS 移动语义——落点吸附到捕捉命中处）。
+  origin_ = snapOrRaw(e->mapPoint());
   dragging_ = true;
   // M2（§4 移动复刻）：目标处于原生会话 → 平移直写缓冲。
   native_dragging_ = editLayer() != nullptr && pick.layer == editLayer();
@@ -1619,8 +1739,12 @@ void PwbMoveTool::canvasPressEvent(QgsMapMouseEvent* e) {
 
 void PwbMoveTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   if (!dragging_) return;
-  const double dx = e->mapPoint().x() - origin_.x();
-  const double dy = e->mapPoint().y() - origin_.y();
+  // V12 M2-2：目标点吸附跟随 + 捕捉指示器（与顶点工具同一捕捉面）。
+  const QgsPointLocator::Match snap = snapMatch(e->mapPoint());
+  const QgsPointXY target = snap.isValid() ? snap.point() : e->mapPoint();
+  updateSnapIndicator(e->mapPoint(), &snap);
+  const double dx = target.x() - origin_.x();
+  const double dy = target.y() - origin_.y();
   QgsGeometry moved = current_.geometry;
   moved.translate(dx, dy);
   rubber_->setToGeometry(moved, nullptr);
@@ -1628,8 +1752,11 @@ void PwbMoveTool::canvasMoveEvent(QgsMapMouseEvent* e) {
 
 void PwbMoveTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   if (!dragging_ || e->button() != Qt::LeftButton) return;
-  const double dx = e->mapPoint().x() - origin_.x();
-  const double dy = e->mapPoint().y() - origin_.y();
+  // V12 M2-2：落点与拖动预览同用吸附结果（预览即所得）。
+  const QgsPointLocator::Match snap = snapMatch(e->mapPoint());
+  const QgsPointXY target = snap.isValid() ? snap.point() : e->mapPoint();
+  const double dx = target.x() - origin_.x();
+  const double dy = target.y() - origin_.y();
   const Pick pick = current_;
   const bool native = native_dragging_;
   native_dragging_ = false;

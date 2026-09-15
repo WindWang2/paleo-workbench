@@ -370,6 +370,14 @@ class SnappingService:
         self.pixel_tolerance = max(0.0, float(pixel_tolerance))
         self.modes: set[str] = {"vertex", "segment", "midpoint"}
         self.current_layer_only = False
+        #: V12 M1-6：全局容差单位（"px" 像素 / "map" 地图单位 / "layer" 层单位）。
+        #: 缺省像素（历史语义）；单位随 snapshot_state 持久化。
+        self.tolerance_units: str = "px"
+        #: 逐层容差单位覆盖（doc_id → 单位词表；缺省跟随全局）。
+        self.layer_tolerance_units: dict[str, str] = {}
+        #: V12 M4-3a：比例依赖捕捉的最小比例尺分母（None/<=0 = 关闭）。
+        #: 只在画布比例尺分母 >= 该值时参与捕捉。
+        self.scale_minimum: float | None = None
         self.layer_enabled: dict[str, bool] = {}
         self.layer_modes: dict[str, set[str]] = {}
         # 每图层覆盖：容差（像素）与优先级（数值小者优先，仅作等距平手裁决）。
@@ -489,7 +497,9 @@ class SnappingService:
         真正有覆盖的图层（四个覆盖通道键的并集），不携带索引/last_match
         等会话内活动对象。带 ``schema_version`` 供工程文档持久化。
         """
-        layer_ids = set(self.layer_enabled) | set(self.layer_modes) | set(self.layer_tolerance) | set(self.layer_priority)
+        layer_ids = (set(self.layer_enabled) | set(self.layer_modes)
+                     | set(self.layer_tolerance) | set(self.layer_priority)
+                     | set(self.layer_tolerance_units))
         overrides: dict[str, dict] = {}
         for layer_id in sorted(layer_ids):
             override: dict = {}
@@ -501,6 +511,8 @@ class SnappingService:
                 override["tolerance"] = float(self.layer_tolerance[layer_id])
             if layer_id in self.layer_priority:
                 override["priority"] = int(self.layer_priority[layer_id])
+            if layer_id in self.layer_tolerance_units:
+                override["units"] = str(self.layer_tolerance_units[layer_id])
             overrides[layer_id] = override
         return {
             "schema_version": 1,
@@ -508,6 +520,9 @@ class SnappingService:
             "pixel_tolerance": float(self.pixel_tolerance),
             "modes": sorted(self.modes),
             "current_layer_only": bool(self.current_layer_only),
+            "tolerance_units": str(self.tolerance_units),
+            "scale_minimum": (None if self.scale_minimum is None
+                              else float(self.scale_minimum)),
             "layer_overrides": overrides,
             "grid_origin": [float(self.grid_origin[0]), float(self.grid_origin[1])],
             "grid_spacing": None
@@ -538,6 +553,14 @@ class SnappingService:
             self.modes = set(modes)
         if isinstance(state.get("current_layer_only"), bool):
             self.current_layer_only = state["current_layer_only"]
+        units = state.get("tolerance_units")
+        if isinstance(units, str) and units in {"px", "map", "layer"}:
+            self.tolerance_units = units
+        scale_min = state.get("scale_minimum")
+        if scale_min is None:
+            self.scale_minimum = None
+        elif isinstance(scale_min, (int, float)) and float(scale_min) > 0.0:
+            self.scale_minimum = float(scale_min)
         overrides = state.get("layer_overrides")
         if isinstance(overrides, dict):
             for layer_id, override in overrides.items():
@@ -554,6 +577,9 @@ class SnappingService:
                 priority = override.get("priority")
                 if isinstance(priority, int) and not isinstance(priority, bool):
                     self.layer_priority[layer_id] = priority
+                layer_units = override.get("units")
+                if isinstance(layer_units, str) and layer_units in {"px", "map", "layer"}:
+                    self.layer_tolerance_units[layer_id] = layer_units
         origin = _point(state["grid_origin"]) if "grid_origin" in state else None
         if origin is not None:
             self.grid_origin = origin

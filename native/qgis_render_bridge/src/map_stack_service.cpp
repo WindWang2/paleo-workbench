@@ -453,6 +453,14 @@ QgsFeatureList parseGeoJsonFeatures(const QString& text, const QgsFields& fields
     return out;
 }
 
+Qgis::MapToolUnit parseMapToolUnit(const QString& raw) {
+  // V12 M1-6：容差单位（缺省像素——与历史硬编码一致，旧配置零行为变化）。
+  // vendored QGIS 3.32 词表：Layer / Pixels / Project（地图单位 = Project）。
+  if (raw == QLatin1String("map")) return Qgis::MapToolUnit::Project;
+  if (raw == QLatin1String("layer")) return Qgis::MapToolUnit::Layer;
+  return Qgis::MapToolUnit::Pixels;
+}
+
 Qgis::SnappingTypes parseSnappingTypes(const QJsonArray& arr) {
 
     Qgis::SnappingTypes types;
@@ -964,8 +972,14 @@ class PwbDigitizeTool : public QgsMapToolDigitizeFeature {
 };
 
 struct QgisMapStack::Impl {
+  // V12 M0-2a：层移除收口钩子（连接见 QgisMapStack::initialize）。必须在这里
+  // 显式断开：处理器要遍历 canvas_refs，而该成员声明在 owned_project **之后**，
+  // 按逆序析构会先于工程销毁——工程还活着时信号再来一次就是野指针。
+  ~Impl() { QObject::disconnect(project_remove_connection); }
+
   bool initialized = false;
   bool display_mode = false;
+  QMetaObject::Connection project_remove_connection;
   // V11 树事务窗口：depth>0 时全部画布同步挂起（pending 标记），收口一次
   // 执行；revision 随每次图层集同步递增（程序化 + 用户树编辑）；计数器
   // 进 runtime_facts 供规模测试做结构性断言。
@@ -1441,6 +1455,31 @@ void QgisMapStack::initialize(bool display) {
   if (display) {
     impl_->owned_project = std::make_unique<QgsProject>();
     impl_->display_mode = true;
+  }
+  // V12 M0-2a：层被移出工程时清空画布 current layer。vendored
+  // QgsMapCanvas 只在 setCurrentLayer() 里写 mCurrentLayer
+  // （third_party/qgis/src/gui/qgsmapcanvas.cpp:387-392），removeMapLayer
+  // 之后那个裸指针就悬挂——顶点工具的 editLayer()、identify 与
+  // zoomToSelected 都会解引用它（镜像层失效重建/删除路径可达）。挂在
+  // QgsProject 的移除信号上，是为了覆盖全部 erase 出口而不是逐个调用点
+  // （含 upsertMirrorLayer 的失效重建分支）。
+  if (QgsProject* prj = project(); prj != nullptr) {
+    // 信号有两个重载（QString / QgsMapLayer*），必须显式消歧。
+    void (QgsProject::*removed_by_id)(const QString&) =
+        &QgsProject::layerWillBeRemoved;
+    impl_->project_remove_connection = QObject::connect(
+        prj, removed_by_id, prj,
+        [impl = impl_.get()](const QString& layer_id) {
+          if (impl == nullptr) return;
+          for (auto& entry : impl->canvas_refs) {
+            QgsMapCanvas* canvas = entry.second.data();
+            if (canvas == nullptr) continue;
+            QgsMapLayer* current = canvas->currentLayer();
+            if (current != nullptr && current->id() == layer_id) {
+              canvas->setCurrentLayer(nullptr);
+            }
+          }
+        });
   }
   impl_->initialized = true;
 }
@@ -2472,6 +2511,14 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
         break;
       }
     }
+  }
+  if (existing && !existing->isValid()) {
+    // 既有镜像已失效（memory provider 异常 / 项目重载残留坏层）：既有分支
+    // 只往层里塞数据，修不了无效状态——层会永久不上画布，直到用户手动
+    // 「修复无效几何」改数据触发重建。与 #1153 同源：无效即重建。
+    SuppressGuard guard(&impl_->suppress_tree_callbacks);
+    impl_->eraseMirrorByDocId(doc_id);
+    existing = nullptr;
   }
   if (existing) {
     SuppressGuard guard(&impl_->suppress_tree_callbacks);
@@ -4927,7 +4974,24 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
     config.setMode(Qgis::SnappingMode::AllLayers);
   }
   config.setTolerance(obj.value(QStringLiteral("tolerance_px")).toDouble(12.0));
-  config.setUnits(Qgis::MapToolUnit::Pixels);
+  // V12 M1-6：全局容差单位（"px"|"map"|"mm"；缺省像素）。
+  config.setUnits(parseMapToolUnit(
+      obj.value(QStringLiteral("units")).toString()));
+  // M4-3a：比例依赖捕捉（"scale_dependent": {"minimum_scale": 分母}）——
+  // 只在画布比例尺分母 >= 该值时参与捕捉；QGIS 语义 ScaleGreaterThan。
+  if (obj.contains(QStringLiteral("scale_dependent"))) {
+    const double minimum_scale =
+        obj.value(QStringLiteral("scale_dependent"))
+            .toObject()
+            .value(QStringLiteral("minimum_scale"))
+            .toDouble(0.0);
+    if (minimum_scale > 0.0) {
+      // vendored QGIS 3.14+：Global 模式 = 比例尺分母 >= minimum_scale 才参与。
+      config.setScaleDependencyMode(
+          QgsSnappingConfig::ScaleDependencyMode::Global);
+      config.setMinimumScale(minimum_scale);
+    }
+  }
   config.setTypeFlag(parseSnappingTypes(
       obj.value(QStringLiteral("types")).toArray()));
   // V7：交点捕捉（Python SnappingService 的 intersection 模式）——
@@ -4949,7 +5013,9 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
               parseSnappingTypes(ls.value(QStringLiteral("types")).toArray()),
               ls.value(QStringLiteral("tolerance_px"))
                   .toDouble(config.tolerance()),
-              Qgis::MapToolUnit::Pixels));
+              // V12 M1-6：逐层单位覆盖（缺省跟随全局单位）。
+              parseMapToolUnit(ls.value(QStringLiteral("units")).toString(
+                  obj.value(QStringLiteral("units")).toString()))));
     }
     // 参考点捕捉（井位等 pwb/reference 镜像层）：Python 侧 "reference" 模式
     // 的 QGIS 对应物——参考图层顶点参与捕捉；显式条目优先。
@@ -4964,7 +5030,7 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
         config.setIndividualLayerSettings(
             vl, QgsSnappingConfig::IndividualLayerSettings(
                     true, Qgis::SnappingType::Vertex, config.tolerance(),
-                    Qgis::MapToolUnit::Pixels));
+                    config.units()));
       }
     }
   }
@@ -5557,6 +5623,20 @@ void QgisMapStack::setCurrentLayer(std::uintptr_t canvas_addr,
   if (layer == nullptr)
     throw std::invalid_argument("unknown doc_id for current layer: " + doc_id);
   canvas->setCurrentLayer(layer);
+}
+
+std::string QgisMapStack::currentLayerId(std::uintptr_t canvas_addr) {
+  ensureNotStale(canvas_addr);
+  QgsMapCanvas* canvas = canvasOrThrow(canvas_addr);
+  // V12 M0-2a（D2）：宿主的幂等重推需要"画布现在到底认哪一层"这个事实——
+  // 此前宿主只能在 Python 侧维护影子，而层被移除/重建后影子必然漂移。
+  // 返回 pwb/doc_id；无当前层或当前层不是镜像层时返回空串（两者对宿主
+  // 同义：都不是我的目标层，需要重推）。
+  QgsMapLayer* current = canvas->currentLayer();
+  if (current == nullptr) return std::string();
+  return current->customProperty(QStringLiteral("pwb/doc_id"))
+      .toString()
+      .toStdString();
 }
 
 void QgisMapStack::highlightFeatures(std::uintptr_t canvas_addr,

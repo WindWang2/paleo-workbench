@@ -173,6 +173,12 @@ class ToolContext:
     snapping_enabled: bool = False
     topology_available: bool = True
     topology_enabled: bool = False
+    #: V12 M1：编辑期联动开关的三个**既有**子能力（实现早在
+    #: SnappingService/QgsProject 里，此前没有任何 UI 面）。纯呈现事实：
+    #: 求值器据此给工具条勾选态，不做第二判定。
+    avoid_intersections_enabled: bool = True
+    tracing_enabled: bool = False
+    vertex_all_layers: bool = True
     crs_valid: bool = True
     #: 声明式工程/图层 CRS（"" = 未声明；解析一律经 crs_contract，不静默 4326）。
     project_crs: str = ""
@@ -339,6 +345,10 @@ def build_tool_context(
         snapping_enabled=bool(state.get("snapping_enabled", False)),
         topology_available=bool(state.get("topology_available", derived_topology)),
         topology_enabled=bool(state.get("topology_enabled", False)),
+        avoid_intersections_enabled=bool(
+            state.get("avoid_intersections_enabled", True)),
+        tracing_enabled=bool(state.get("tracing_enabled", False)),
+        vertex_all_layers=bool(state.get("vertex_all_layers", True)),
         crs_valid=bool(state.get("crs_valid", True)),
         project_crs=str(state.get("project_crs") or ""),
         layer_crs=str(state.get("layer_crs") or ""),

@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sys
 import time
 import weakref
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QObject, Qt, Signal
 from PySide6.QtGui import QKeyEvent, QPainter
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
@@ -74,6 +75,36 @@ def _load_mapstack():
 # 注册表，无 QGIS init 成本；缓存避免每次调用重读）。桥不可导入 → 空表
 # （所有特性诚实为 False，消费方按旧语义降级）。
 _BRIDGE_FEATURES: dict[str, bool] | None = None
+
+# 渲染桥可用性（进程级缓存）。构造 QgisCanvasShim *之前*必须探测：
+# 壳层重建（_refresh_shell）时先构造一个注定失败的 QWidget 会在第二次
+# 触发访问冲突（0xC0000005）——桥缺失时连构造都不能发生，必须直接走
+# fallback。与 display_canvas.create_display_canvas 的"先探测后构造"一致。
+_BRIDGE_AVAILABLE: bool | None = None
+
+
+
+_DIAG_FLAG = "PALEO_EDIT_DIAG"
+
+
+def _edit_diag_enabled() -> bool:
+    """发布诊断开关（V12 M0-4）：PALEO_EDIT_DIAG=1/true/yes/on 打开。"""
+    return os.environ.get(_DIAG_FLAG, "").strip().lower() in {
+        "1", "true", "yes", "on"}
+
+def bridge_available() -> bool:
+    """``qgis_render_bridge`` 是否可导入（缓存一次，不加载模块）。"""
+    global _BRIDGE_AVAILABLE
+    if _BRIDGE_AVAILABLE is None:
+        try:
+            import importlib.util
+
+            _BRIDGE_AVAILABLE = (
+                importlib.util.find_spec("qgis_render_bridge") is not None
+            )
+        except (ImportError, ValueError):
+            _BRIDGE_AVAILABLE = False
+    return _BRIDGE_AVAILABLE
 
 
 def _bridge_features() -> dict[str, bool]:
@@ -248,6 +279,22 @@ class _LegendChrome(QWidget):
         painter.end()
 
 
+#: 节点工具"无编辑目标"提示（V12 M0-2c）。按内容去重：画布 current layer
+#: 为空时用户每点一次都会收到 pick_miss，但同一句提示只该出现一次。
+_VERTEX_NO_TARGET_MESSAGE = (
+    "节点编辑没有编辑目标：请在图层树选中该图层并「开始编辑」")
+
+
+def _warn_vertex_without_target(shim) -> None:
+    if getattr(shim, "_vertex_no_target_warned", False):
+        return
+    shim._vertex_no_target_warned = True
+    try:
+        shim.commit_rejected.emit(_VERTEX_NO_TARGET_MESSAGE)
+    except Exception:
+        pass
+
+
 def dispatch_edit_pick(shim, tool, action: str, payload: dict) -> bool:
     """edit-pick 回执的单一分发点（与 C++ ``edit_tools.cpp`` 回执词表对齐）。
 
@@ -310,9 +357,12 @@ def dispatch_edit_pick(shim, tool, action: str, payload: dict) -> bool:
         except Exception:
             pass
         return True
-    if not rejection and action in {"vertex_inserted", "vertex_deleted"}:
-        # ADV-2 同款回执（review-5 #25）：被拒绝的节点编辑必须可感知，
-        # 不做无声死键（最常见原因：守卫拒绝/陈旧镜像路径）。
+    if not rejection and action in {
+            "vertex_inserted", "vertex_deleted", "vertex_moved"}:
+        # ADV-2 同款回执（review-5 #25）：被拒绝的节点编辑必须可感知，不做
+        # 无声死键（最常见原因：守卫拒绝/陈旧镜像路径）。
+        # V12 M0-2c：vertex_moved 此前漏在集合外——拖动是最高频的节点操作，
+        # 它的失败恰恰最容易被误读成"功能坏了但没人告诉我"。
         rejection = (
             "节点编辑未写入：会话校验未通过（目标要素/路径已变化或低于最少顶点）")
     if rejection:
@@ -355,6 +405,18 @@ class QgisCanvasShim(QWidget):
     # 回退 pan 并同步工具条 checked——按钮亮着但画布工具没换是「点了没
     # 反应」类 UX 缺陷，必须可检测。
     native_tool_activation_failed = Signal(str, str)
+    # V12 任务3：画布右键 → ((map_x, map_y), QPoint(global))。宿主用它做
+    # 相带要素的右键换相菜单（坐标换算在这里做完，消费方只拿地图坐标）。
+    canvas_context_menu = Signal(tuple, object)
+    # V12 M2-4：画布交互的轻提示（如"单击不移动节点：拖动以编辑"）。
+    # 与 commit_rejected 分开——这不是失败，是不该炸出来的解释。
+    status_hint = Signal(str)
+
+    #: 最近一次**推送成功**的画布当前层 doc_id（V12 M0-2a）。只服务旧桥
+    #: 退化路径：桥有 ``current_layer_query`` 时读回权威，不读本影子。
+    _pushed_current_layer: str = ""
+    #: "节点工具无编辑目标"提示去重（V12 M0-2c）：目标层就位后复位。
+    _vertex_no_target_warned: bool = False
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -406,6 +468,16 @@ class QgisCanvasShim(QWidget):
         self._tools_original_set_active = None
         self._tools_wrapped_target = None
         self._wrapped_func = None
+        # V12 任务3：右键换相入口——画布右键策略切到 CustomContextMenu，
+        # 请求坐标在 viewport 里换算成地图坐标后上浮（QGIS 画布默认无
+        # 右键菜单，接管不与其抢占语义）。
+        try:
+            self.canvas.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self.canvas.customContextMenuRequested.connect(
+                self._on_canvas_context_menu_requested)
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "canvas context-menu wiring unavailable", exc_info=True)
         # B8：量距事件路由（仅 measure_distance 激活期挂画布视口过滤器）。
         self._measure_router = _CanvasMouseRouter(self)
         self._last_measure_emit: float | None = None
@@ -828,11 +900,57 @@ class QgisCanvasShim(QWidget):
                     self.stack.set_current_layer(self.canvas_address, "")
                 except Exception:
                     pass
+                else:
+                    self._pushed_current_layer = ""
             return
         try:
             self.stack.set_current_layer(self.canvas_address, str(doc_id))
         except Exception:
-            pass
+            # 未命中镜像（层还没发布 / 已被移除）：影子保持原值，调用方按
+            # "未就位"重推——宿主的幂等重推依赖这个语义（V12 M0-2b）。
+            return
+        self._pushed_current_layer = str(doc_id)
+        # 目标层就位：复位"无编辑目标"提示去重（用户下次真遇到问题还要看得见）。
+        self._vertex_no_target_warned = False
+
+    def current_layer_doc_id(self) -> str:
+        """画布当前层的 doc_id（"" = 没有当前层或不是镜像层）。
+
+        V12 M0-2a：桥有 ``current_layer_query`` 时读回权威——层被移除/重建
+        会让任何本地影子漂移（vendored 画布不清 mCurrentLayer，甚至悬挂）；
+        旧桥退化为本地影子：推送成功才更新，失败保持 ""，宁可多推一次。
+        """
+        if getattr(self, "_shutdown_done", False) or not self.canvas_address:
+            return ""
+        if self._bridge_feature("current_layer_query"):
+            try:
+                return str(self.stack.current_layer_id(self.canvas_address) or "")
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "native current-layer read-back failed", exc_info=True)
+                return ""
+        return str(getattr(self, "_pushed_current_layer", "") or "")
+
+    def _on_canvas_context_menu_requested(self, pos) -> None:
+        """画布右键请求 → 地图坐标信号（V12 任务3：相带右键换相入口）。"""
+        if getattr(self, "_shutdown_done", False):
+            return
+        try:
+            vp = self._canvas_viewport()
+            extent = self.view_extent
+            if vp is None or extent is None or len(extent) != 4:
+                return
+            xmin, ymin, xmax, ymax = (float(v) for v in extent)
+            width, height = float(vp.width()), float(vp.height())
+            if width <= 0.0 or height <= 0.0 or xmax <= xmin or ymax <= ymin:
+                return
+            x_map = xmin + (float(pos.x()) / width) * (xmax - xmin)
+            y_map = ymax - (float(pos.y()) / height) * (ymax - ymin)
+            global_pos = vp.mapToGlobal(QPoint(int(pos.x()), int(pos.y())))
+            self.canvas_context_menu.emit((x_map, y_map), global_pos)
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "canvas context-menu dispatch failed", exc_info=True)
 
     def native_tool_busy(self) -> bool:
         """原生工具是否占有 Esc 语义（M3 Task 5）：采点中/顶点·移动拖动中。
@@ -1143,6 +1261,9 @@ class QgisCanvasShim(QWidget):
                     elif tool_id == "add_part":
                         # V10 捕获部件：digitizer 随图层 kind（控制器注入属性）。
                         kind = getattr(tool, "native_digitize_kind", "pan")
+                    elif tool_id in {"fault_cut", "boundary_reshape"}:
+                        # V12 M4-2：geotopo 交互工具（C++ 全语义，宿主占位）。
+                        kind = getattr(tool, "native_digitize_kind", "pan")
                     try:
                         shim.stack.set_map_tool(addr, kind)
                         # V8/M1：记录最近一次成功的原生工具（可检测一致性的
@@ -1261,6 +1382,21 @@ class QgisCanvasShim(QWidget):
             if shim is None or getattr(shim, "_shutdown_done", False):
                 return
             if action == "pick_miss":
+                # V12 M0-2c：普通的"点空处"不是错误（顶点工具允许点空白拖框选），
+                # 不提示。只有"工具已 armed 但画布根本没有编辑目标"才提示——
+                # 那正是 D-B 的现场形态：用户以为功能坏了，实际是 current layer
+                # 为空（新建草稿的首次推送早于镜像发布被拒）。
+                if (getattr(shim, "_last_native_tool", ("", ""))[0] == "vertex"
+                        and not shim.current_layer_doc_id()):
+                    _warn_vertex_without_target(shim)
+                return
+            if action == "vertex_no_move":
+                # V12 M2-4：单击（非拖动）命中节点——语义抑制，但要说一声，
+                # 消除"是不是坏了"的疑惑（诚实呈现，M2-4）。
+                try:
+                    shim.status_hint.emit("单击不移动节点：拖动以编辑顶点位置")
+                except Exception:
+                    pass
                 return
             controller = getattr(shim, "_tool_controller", None)
             if action == "join_requested":
@@ -1408,6 +1544,10 @@ class QgisCanvasShim(QWidget):
             self.stack, self.canvas_address, snapshot,
             groups=bool(getattr(self, "layer_groups_enabled", False)),
             changed_hints=changed_hints)
+        # 发布诊断脚手架（V12 M0-4）：默认关闭——每次发布都写盘 + 抓控件
+        # 截图 + dump 整棵树是性能与噪声隐患；PALEO_EDIT_DIAG=1 时才走。
+        if _edit_diag_enabled():
+            self._trace_publish(snapshot, mirrored_qgis_ids, seen, failures)
         # B8：保留最近快照供矢量导出（export_svg/export_pdf 经桥级
         # export_vector 以同一份快照离屏渲染，见 _export_vector）。
         self._last_snapshot = snapshot
@@ -1423,6 +1563,90 @@ class QgisCanvasShim(QWidget):
             pass
         try:
             self.backend_status_changed.emit(self.backend_status)
+        except Exception:
+            pass
+
+    def _trace_publish(self, snapshot, mirrored_qgis_ids, seen, failures) -> None:
+        """现场调试：把一次镜像发布的全量事实追加落盘（PALEO_EDIT_DIAG=1）。
+
+        开启后写 .workbuddy/publish_trace.txt（快照/镜像结果/画布层数/树可见
+        层/兄弟画布状态）并落一张画布截图——定位“层发布了对不上”这类现场问
+        题用；平时不该出现在热路径上。
+        """
+        # TEMP-DIAG（现场调试）：逐次发布把 seen/failures/画布层数追加落盘。
+        try:
+            import json as _json
+            import time as _time
+            from pathlib import Path as _Path
+
+            diags_tail = locals().get("diags")
+            lines = [
+                f"--- publish @ {_time.strftime('%H:%M:%S')} ---",
+                f"snapshot_layers={[getattr(l, 'id', '?') for l in getattr(snapshot, 'layers', ())]}",
+                f"mirrored={mirrored_qgis_ids}",
+                f"seen={seen}",
+                f"failures={failures}",
+                f"project_crs={getattr(self, '_project_crs_hint', '')!r}",
+            ]
+            try:
+                extra = getattr(self, "_last_publish_diags", None)
+                if extra:
+                    lines.append(f"diags={extra}")
+            except Exception:
+                pass
+            try:
+                lines.append(
+                    f"canvas_layer_count={self.stack.canvas_layer_count(self.canvas_address)}")
+            except Exception as exc:
+                lines.append(f"canvas_layer_count err={exc!r}")
+            try:
+                import json as _j
+
+                tree = _j.loads(self.stack.tree_snapshot_json())
+                visible_layers: list[str] = []
+
+                def _walk(nodes):
+                    for node in nodes:
+                        if node.get("type") == "layer" and node.get("visible"):
+                            visible_layers.append(str(node.get("id")))
+                        _walk(node.get("children") or [])
+
+                _walk(tree.get("children") or [])
+                lines.append(f"tree_visible_layers({len(visible_layers)})={visible_layers}")
+            except Exception as exc:
+                lines.append(f"tree dump err={exc!r}")
+            try:
+                frame = self.canvas.grab()
+                frame_path = f".workbuddy/live_frame_{_time.strftime('%H%M%S')}.png"
+                frame.save(frame_path, "PNG")
+                lines.append(f"widget_frame={frame_path}")
+            except Exception as exc:
+                lines.append(f"grab err={exc!r}")
+            try:
+                peers = []
+                for shim in list(_LIVE_SHIMS):
+                    try:
+                        peers.append({
+                            "addr": getattr(shim, "canvas_address", 0),
+                            "is_self": shim is self,
+                            "visible": bool(shim.isVisible()),
+                            "size": [shim.width(), shim.height()],
+                            "canvas_visible": bool(
+                                getattr(shim, "canvas", None) is not None
+                                and shim.canvas.isVisible()),
+                            "layers": shim.stack.canvas_layer_count(
+                                shim.canvas_address)
+                            if getattr(shim, "stack", None) else None,
+                            "shutdown": bool(getattr(shim, "_shutdown_done", False)),
+                        })
+                    except Exception as exc:
+                        peers.append({"err": repr(exc)})
+                lines.append(f"live_shims({len(peers)})={peers}")
+            except Exception as exc:
+                lines.append(f"shims err={exc!r}")
+            _p = _Path(".workbuddy/publish_trace.txt")
+            with _p.open("a", encoding="utf-8") as _fh:
+                _fh.write("\n".join(lines) + "\n")
         except Exception:
             pass
 

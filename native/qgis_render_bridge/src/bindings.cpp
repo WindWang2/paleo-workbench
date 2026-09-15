@@ -381,7 +381,8 @@ py::dict capability_manifest() {
     py::list native_tools;
     for (const char* kind :
          {"pan", "zoomIn", "zoomOut", "addPoint", "addLine", "addPolygon",
-          "vertex", "move", "select", "identify", "measure"}) {
+          "vertex", "move", "select", "identify", "measure",
+          "faultCut", "boundaryReshape"}) {
         native_tools.append(kind);
     }
     manifest["native_tools"] = native_tools;
@@ -430,7 +431,10 @@ py::dict capability_manifest() {
           // runtime_facts 结构性计数）；expand-preserving placements。
           "tree_update_window",
           // 0.10.0a0 (topo-editing M4): analysis checker run/fix.
-          "geometry_checker"}) {
+          "geometry_checker",
+          // 0.12.0a0 (V12 M0)：current-layer 读回——宿主幂等重推需要
+          // "画布现在认哪一层"这一事实（编辑工具链 D-B）。
+          "current_layer_query"}) {
         features.append(feature);
     }
     manifest["features"] = features;
@@ -468,7 +472,10 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
     // 0.10.0a0 (topo-editing M4): run_geometry_checks /
     // fix_geometry_error(s) / highlight_checker_errors (analysis
     // overlap/gap/is_valid + workspace remainder).
-    module.attr("__version__") = "0.11.0a0";
+    // 0.12.0a0 (V12 M0): current_layer_id read-back（宿主幂等重推）；
+    // 层被移出工程时清空画布 current layer（修悬挂裸指针）；顶点拖动
+    // 锚点先取后用（修 MSVC 求值顺序导致的按下即崩）。
+    module.attr("__version__") = "0.12.0a0";
     module.attr("__build_commit__") = "unknown";
     py::register_exception<GeometryServiceError>(module, "QgisGeometryError");
 
@@ -1340,6 +1347,8 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              })
         .def("set_current_layer",
              &pwb::qgis_render::QgisMapStack::setCurrentLayer)
+        .def("current_layer_id",
+             &pwb::qgis_render::QgisMapStack::currentLayerId)
         .def("highlight_features",
              &pwb::qgis_render::QgisMapStack::highlightFeatures)
         .def("clear_highlights",

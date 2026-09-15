@@ -145,15 +145,36 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "inspection": ("identify", "measure_distance"),
     "edit_session": ("toggle_editing", "save_edits", "rollback"),
-    "capture": ("add_point", "add_line", "add_polygon"),
+    # V12 M5-A1 shape：矩形/圆/圆弧/正多边形数字化器。
+    "capture": ("add_point", "add_line", "add_polygon",
+                "add_rectangle", "add_circle", "add_arc",
+                "add_regular_polygon"),
     "geometry": (
         "move_feature", "vertex", "reshape", "undo", "redo", "delete_selected",
         "split", "merge", "repair_geometry",
         # V10：复杂几何/要素命令族（duplicate / 环 / 部件 / 单多部件转换）。
         "duplicate_selected", "add_ring", "add_part", "explode_multipart",
         "collect_multipart",
+        # V12 M4-2：geotopo 交互工具（C++ 实现早在，缺的是登记面）。
+        "fault_cut", "boundary_reshape",
+        # V12 M5-A：环/部件交互删除 + 选择集几何算子。
+        "delete_ring", "delete_part", "reverse_line", "simplify_feature",
+        "smooth_feature", "offset_curve",
+        # V12 M5-B：旋转/缩放 + 剪切/复制/粘贴。
+        "rotate_feature", "scale_feature", "cut_features", "copy_features",
+        "paste_features",
+        # V12 M5-A1：批量捕捉对齐（选集几何吸附到目标层）。
+        "snap_geometries",
+        # V12 M5-A1：修剪/延伸线（选集线按边界裁剪/延长）。
+        "trim_line", "extend_line",
     ),
-    "snapping": ("snapping", "topology", "cancel"),
+    # V12 M1：编辑期联动开关补齐 UI 面——三个能力（避免重叠/追踪/顶点档位）
+    # 的实现早就在 SnappingService + QgsProject 里，此前只有命令 handler、
+    # 没有任何按钮，属"已实现但用户摸不到"。
+    "snapping": (
+        "snapping", "avoid_intersections", "tracing", "vertex_scope",
+        "topology", "cancel",
+    ),
     "layer": (
         "layer_new", "reference_import", "layer_properties",
         "attribute_table", "layer_zoom", "layer_export",
@@ -194,7 +215,11 @@ _POLYGON_ROLES = frozenset({
 })
 
 #: 需要 QGIS 原生后端的工具（桥缺失/降级时禁用 + 原因；不隐藏能力假象）
-_NATIVE_ONLY_TOOLS = frozenset({"style_manager", "reshape", "add_ring", "add_part"})
+_NATIVE_ONLY_TOOLS = frozenset({
+    "style_manager", "reshape", "add_ring", "add_part",
+    # V12 M4-2：geotopo 交互工具（C++ PwbFaultCutTool / PwbBoundaryReshapeTool）。
+    "fault_cut", "boundary_reshape",
+})
 
 #: 需要活动图层（矢量或任意）的工具
 _NEEDS_ANY_LAYER = frozenset({
@@ -213,7 +238,7 @@ _NEEDS_EDITING = frozenset({
     "move_feature", "vertex", "reshape", "undo", "redo", "delete_selected",
     "split", "merge", "repair_geometry",
     "duplicate_selected", "add_ring", "add_part", "explode_multipart",
-    "collect_multipart",
+    "collect_multipart", "fault_cut", "boundary_reshape",
 })
 
 #: 需要活动图层的组（无活动图层时整组隐藏，layer_new/reference_import 除外）
@@ -248,7 +273,9 @@ _BASIC_GROUPS = frozenset({"navigate", "selection", "inspection", "layer"})
 _CHECKED_CANVAS_TOOLS = frozenset({
     "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
     "measure_distance", "add_point", "add_line", "add_polygon",
+    "add_rectangle", "add_circle", "add_arc", "add_regular_polygon",
     "move_feature", "vertex", "reshape", "add_ring", "add_part",
+    "fault_cut", "boundary_reshape",
 })
 
 # ---------------------------------------------------------------------------
@@ -325,6 +352,8 @@ def _editing_gate(ctx: ToolContext) -> str | None:
 
 def _native_tool_gate(ctx: ToolContext, kind: str, native_name: str) -> str | None:
     """Native-canvas-only requirement; the fallback canvas runs the Python tool."""
+    if kind == "__python_fallback__":
+        return None  # V12 M5-A1 shape：宿主 Python 工具，无原生 kind 门
     if ctx.native_canvas_available and kind not in {
         flag.removeprefix("qgis.native_tool.") for flag in ctx.capability_flags
     }:
@@ -341,7 +370,9 @@ def _backend_gate(ctx: ToolContext) -> str | None:
     reason = ctx.backend_reason or ("能力未知" if mode == "unknown" else "桥不可用")
     return f"需要 QGIS 原生编辑后端（{reason}）"
 
-_KIND_REQUIRED = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}
+_KIND_REQUIRED = {"add_point": "point", "add_line": "line", "add_polygon": "polygon",
+                "add_rectangle": "polygon", "add_circle": "polygon",
+                "add_regular_polygon": "polygon", "add_arc": "line"}
 
 def _kind_gate(ctx: ToolContext, tool_id: str) -> str | None:
     expected = _KIND_REQUIRED[tool_id]
@@ -607,7 +638,69 @@ def _rule_edit_tool(ctx: ToolContext, tool_id: str, native_kind: str) -> ToolAva
 
     )
     if reason is None:
-        reason = _native_tool_gate(ctx, native_kind, {"move_feature": "移动", "vertex": "节点编辑"}[tool_id])
+        reason = _native_tool_gate(
+            ctx, native_kind,
+            {"move_feature": "移动", "vertex": "节点编辑",
+             "add_rectangle": "添加矩形", "add_circle": "添加圆",
+             "add_arc": "添加圆弧", "add_regular_polygon": "添加正多边形"}.get(
+                tool_id, tool_id))
+    return _ok(tool_id) if reason is None else _no(tool_id, reason)
+
+def _rule_geotopo_tool(ctx: ToolContext, tool_id: str) -> ToolAvailability:
+    """geotopo 交互工具（断层切割 / 共边重塑）门禁（V12 M4-2）。
+
+    面 + 编辑会话 + 原生画布 + 桥 kind（faultCut/boundaryReshape）。
+    boundary_reshape 的「恰好两个相邻要素」选集约束由激活分支复查
+    （复合谓词，evaluator 只表达粗门）。
+    """
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+    )
+    if reason is None and ctx.active_layer_kind != "polygon":
+        reason = "仅面图层可用"
+    if reason is None:
+        kind = "faultCut" if tool_id == "fault_cut" else "boundaryReshape"
+        reason = _native_tool_gate(ctx, kind, "断层切割" if tool_id == "fault_cut" else "共边重塑")
+    return _ok(tool_id) if reason is None else _no(tool_id, reason)
+
+def _rule_ring_part(ctx: ToolContext, tool_id: str) -> ToolAvailability:
+    """环/部件交互删除（M5-A1）：面/多部件 + 编辑会话 + 选中一个要素。
+
+    交互在宿主右键定位；evaluator 只表达粗门（面/多部件 kind 在
+    composite_editing.geometry_command_at_point 里复核）。
+    """
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+    )
+    if reason is None and ctx.selection_count != 1:
+        reason = "需要恰好选中一个要素"
+    return _ok(tool_id) if reason is None else _no(tool_id, reason)
+
+def _rule_selection_op(ctx: ToolContext, tool_id: str) -> ToolAvailability:
+    """选择集几何算子（M5-A2）：编辑会话 + 选中要素。"""
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+    )
+    if reason is None and ctx.selection_count <= 0:
+        reason = "没有选中的要素"
+    return _ok(tool_id) if reason is None else _no(tool_id, reason)
+
+def _rule_copy_paste(ctx: ToolContext, tool_id: str) -> ToolAvailability:
+    """剪切/复制/粘贴（M5-B）：复制需选集；剪切/粘贴需选集 + 编辑会话。"""
+    reason = _project_gate(ctx) or _layer_gate(ctx) or _role_gate(ctx)
+    if tool_id != "copy_features":
+        reason = reason or _editing_gate(ctx)
+    if reason is None and ctx.selection_count <= 0:
+        reason = "没有选中的要素"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
 def _rule_delete_selected(ctx: ToolContext) -> ToolAvailability:
@@ -797,6 +890,35 @@ def _rule_snapping(ctx: ToolContext) -> ToolAvailability:
         reason = "当前环境的捕捉引擎不可用（桥缺少 snapping 配置通道）"
     return _ok("snapping") if reason is None else _no("snapping", reason)
 
+def _rule_avoid_intersections(ctx: ToolContext) -> ToolAvailability:
+    # V12 M1：避免重叠是捕捉引擎的一部分（QgsSnappingConfig.avoidIntersections）；
+    # 与 snapping 同门禁——桥缺该通道时禁用并说明。
+    reason = _project_gate(ctx) or _layer_gate(ctx)
+    if reason is None and not ctx.snapping_available:
+        reason = "当前环境的捕捉引擎不可用（桥缺少避免重叠通道）"
+    return _ok("avoid_intersections") if reason is None else _no(
+        "avoid_intersections", reason)
+
+
+def _rule_tracing(ctx: ToolContext) -> ToolAvailability:
+    # V12 M1：追踪（QgsMapCanvasTracer）注册即对全体捕获/顶点工具生效，
+    # 需要原生画布与捕捉引擎；回退画布无对应实现。
+    reason = _project_gate(ctx) or _layer_gate(ctx)
+    if reason is None and not ctx.native_canvas_available:
+        reason = "追踪需要 QGIS 原生画布（当前为回退画布）"
+    if reason is None and not ctx.snapping_available:
+        reason = "当前环境的捕捉引擎不可用（桥缺少追踪通道）"
+    return _ok("tracing") if reason is None else _no("tracing", reason)
+
+
+def _rule_vertex_scope(ctx: ToolContext) -> ToolAvailability:
+    # V12 M1：顶点档位只在编辑会话内有意义（工具本身也需要会话）。
+    reason = _project_gate(ctx) or _layer_gate(ctx) or _editing_gate(ctx)
+    if reason is None and not ctx.native_canvas_available:
+        reason = "顶点档位需要 QGIS 原生画布（当前为回退画布）"
+    return _ok("vertex_scope") if reason is None else _no("vertex_scope", reason)
+
+
 def _rule_topology(ctx: ToolContext) -> ToolAvailability:
     reason = _project_gate(ctx) or _layer_gate(ctx)
     if reason is None and not ctx.topology_available:
@@ -862,6 +984,28 @@ _RULE_TABLE: dict[str, Rule] = {
     "add_polygon": lambda ctx: _rule_capture(ctx, "add_polygon"),
     "move_feature": lambda ctx: _rule_edit_tool(ctx, "move_feature", "move"),
     "vertex": lambda ctx: _rule_edit_tool(ctx, "vertex", "vertex"),
+    "fault_cut": lambda ctx: _rule_geotopo_tool(ctx, "fault_cut"),
+    "boundary_reshape": lambda ctx: _rule_geotopo_tool(ctx, "boundary_reshape"),
+    "delete_ring": lambda ctx: _rule_ring_part(ctx, "delete_ring"),
+    "delete_part": lambda ctx: _rule_ring_part(ctx, "delete_part"),
+    "reverse_line": lambda ctx: _rule_selection_op(ctx, "reverse_line"),
+    "simplify_feature": lambda ctx: _rule_selection_op(ctx, "simplify_feature"),
+    "smooth_feature": lambda ctx: _rule_selection_op(ctx, "smooth_feature"),
+    "offset_curve": lambda ctx: _rule_selection_op(ctx, "offset_curve"),
+    "rotate_feature": lambda ctx: _rule_selection_op(ctx, "rotate_feature"),
+    "scale_feature": lambda ctx: _rule_selection_op(ctx, "scale_feature"),
+    "cut_features": lambda ctx: _rule_selection_op(ctx, "cut_features"),
+    "copy_features": lambda ctx: _rule_copy_paste(ctx, "copy_features"),
+    "paste_features": lambda ctx: _rule_copy_paste(ctx, "paste_features"),
+    "add_rectangle": lambda ctx: _rule_edit_tool(ctx, "add_rectangle", "__python_fallback__"),
+    "add_circle": lambda ctx: _rule_edit_tool(ctx, "add_circle", "__python_fallback__"),
+    "snap_geometries": lambda ctx: _rule_selection_op(ctx, "snap_geometries"),
+    "add_arc": lambda ctx: _rule_edit_tool(ctx, "add_arc", "__python_fallback__"),
+    "add_rectangle": lambda ctx: _rule_edit_tool(ctx, "add_rectangle", "__python_fallback__"),
+    "add_circle": lambda ctx: _rule_edit_tool(ctx, "add_circle", "__python_fallback__"),
+    "add_regular_polygon": lambda ctx: _rule_edit_tool(ctx, "add_regular_polygon", "__python_fallback__"),
+    "trim_line": lambda ctx: _rule_selection_op(ctx, "trim_line"),
+    "extend_line": lambda ctx: _rule_selection_op(ctx, "extend_line"),
     "delete_selected": _rule_delete_selected,
     "split": _rule_split,
     "merge": _rule_merge,
@@ -875,6 +1019,9 @@ _RULE_TABLE: dict[str, Rule] = {
     "undo": lambda ctx: _rule_history(ctx, "undo"),
     "redo": lambda ctx: _rule_history(ctx, "redo"),
     "snapping": _rule_snapping,
+    "avoid_intersections": _rule_avoid_intersections,
+    "tracing": _rule_tracing,
+    "vertex_scope": _rule_vertex_scope,
     "topology": _rule_topology,
     "layer_new": lambda ctx: _rule_layer_management(ctx, "layer_new"),
     "reference_import": lambda ctx: _rule_layer_management(ctx, "reference_import"),
@@ -1029,6 +1176,13 @@ def evaluate_tool(tool_id: str, ctx: ToolContext) -> ToolAvailability:
         checked = ctx.editing
     elif tool_id == "snapping":
         checked = ctx.snapping_enabled
+    elif tool_id == "avoid_intersections":
+        checked = ctx.avoid_intersections_enabled
+    elif tool_id == "tracing":
+        checked = ctx.tracing_enabled
+    elif tool_id == "vertex_scope":
+        # 勾选态 = "全部层档"（未勾 = 当前层档，与 QGIS 顶点工具的双档一致）。
+        checked = ctx.vertex_all_layers
     elif tool_id == "topology":
         checked = ctx.topology_enabled
     elif tool_id in _CHECKED_CANVAS_TOOLS:

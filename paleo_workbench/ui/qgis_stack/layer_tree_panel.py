@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QSlider,
@@ -33,6 +34,10 @@ _MENU_GATED_TEXTS = {
     "repair": "修复无效几何…",
     "remove_layer": "删除图层",
 }
+
+#: RAW 保护层（模型预测 / 原始相图）的派生入口文案。与回退树
+#: ``LayerManagerPanel._on_context_menu`` 的同一项同名，两栈语义一致。
+_RAW_DRAFT_MENU_TEXT = "复制为草稿…"
 
 
 def _icon(name: str):
@@ -96,6 +101,8 @@ class QgisLayerTreePanel(QWidget):
     remove_group_requested = Signal(str)
     # 组勾选/结构变化经 controller 处理后的额外持久化通知。
     group_state_changed = Signal()
+    # V12 任务2：应用渲染预设（模板/类型 → 符号 + 标注）。
+    render_preset_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None, *, menu_probe=None,
                  repair_probe=None):
@@ -394,39 +401,52 @@ class QgisLayerTreePanel(QWidget):
                 pass
         self._notify_display_changed()
 
-    def move_layer(self, layer_id: str, direction: int) -> None:
+    def move_layer(self, layer_id: str, direction: int) -> bool:
+        """在组装序里上/下移一层并推给镜像树；返回是否**真的应用**。
+
+        调用方必须看返回值：分组模式下 root 平铺序不是权威（见
+        ``_push_mirror_order``），此时本方法只改本地列表、画布不动——
+        静默返回 True 会让"置顶/上移"看起来生效（V12 D-C）。
+        """
         layer = self.layer_by_id(layer_id)
         if layer is None:
-            return
+            return False
         index = self._layers.index(layer)
         target = index - direction
         if not 0 <= target < len(self._layers):
-            return
+            return False
         self._layers[index], self._layers[target] = (
             self._layers[target],
             self._layers[index],
         )
-        self._push_mirror_order()
+        applied = self._push_mirror_order()
         self._notify_display_changed()
+        return applied
 
-    def _push_mirror_order(self) -> None:
-        """把 _layers 的顶层顺序（top-first）推到镜像树（程序化，不 echo）。
+    def _push_mirror_order(self) -> bool:
+        """把组装序推到镜像树（程序化，不 echo）；返回是否已应用。
+
+        ``_layers`` 是**组装序（自下而上）**，桥的 ``set_mirror_layer_order``
+        约定是 **top-first**——必须反转。此前漏了这一反转，整栈被倒置：
+        用户/程序化"置顶"实际落到底（同一反转在回声路径
+        ``_on_tree_change`` 与镜像发布 ``qgis_mirror`` 都是既有权约定）。
 
         V5 分组模式：root 平铺顺序不再是权威（组内顺序 + 放置由
-        LayerGroupController reconcile），此处不再推送。
+        LayerGroupController reconcile），此处不推送并返回 False。
         """
         if self._canvas is None or self.tree_host is None:
-            return
+            return False
         if self._group_controller is not None:
-            return
+            return False
         self._publishing = True
         try:
             self._canvas.stack.set_mirror_layer_order(
-                [str(layer.id) for layer in self._layers])
+                [str(layer.id) for layer in reversed(self._layers)])
         except Exception:
-            pass
+            return False
         finally:
             self._publishing = False
+        return True
 
     # -- 树回调 ---------------------------------------------------------------
 
@@ -540,6 +560,62 @@ class QgisLayerTreePanel(QWidget):
             if verdict is not None and not verdict.enabled:
                 action.setEnabled(False)
                 action.setToolTip(f"不可用：{verdict.disabled_reason or '当前不可用'}")
+        self._add_raw_draft_action(menu, doc_id, facts)
+        self._add_render_preset_action(menu, doc_id)
+
+    def _add_raw_draft_action(self, menu, doc_id: str, facts) -> None:
+        """给 RAW 保护层补上「复制为草稿…」（C++ 菜单的缺口）。
+
+        C++ provider（``map_stack_service.cpp`` 的 ``PwbLayerTreeMenuProvider``）
+        只按 ``pwb/reference`` / ``pwb/editable`` 分两支产出派生与编辑项，
+        其余（含 RAW 保护层）落进最简的 ``else`` 支 —— 于是「复制为草稿…」
+        在原生树上根本不可达，只剩 Qt 回退树有它。而 QgsLayerTreeView 是在
+        ``createContextMenu()`` 之后、``exec()`` 之前 emit
+        ``contextMenuAboutToShow(menu)``，所以在这里补一个动作有效，
+        **不需要重编 C++ 桥**。
+
+        RAW → 草稿的分流由宿主 ``_duplicate_vector_layer`` 负责
+        （源角色 raw_protected → DERIVED 草稿），本处只负责呈现与转发。
+        """
+        if menu is None or not doc_id or facts is None:
+            return
+        if not bool(getattr(facts, "raw_protected", False)):
+            return
+        if any(action.text() == _RAW_DRAFT_MENU_TEXT for action in menu.actions()):
+            return
+        action = QAction(_RAW_DRAFT_MENU_TEXT, menu)
+        action.setToolTip("复制本图层为可编辑草稿（RAW/模型结果不可直接编辑）")
+        action.triggered.connect(
+            lambda _checked=False, lid=str(doc_id):
+            self.duplicate_layer_requested.emit(lid)
+        )
+        # 插到 QGIS 内建项（Zoom / Feature Count）之后、第一个分隔符之前，
+        # 与回退树里「复制为草稿…」紧跟只读查看项的位置相称。
+        before = next(
+            (item for item in menu.actions() if item.isSeparator()), None)
+        if before is not None:
+            menu.insertAction(before, action)
+        else:
+            menu.addAction(action)
+
+    def _add_render_preset_action(self, menu, doc_id: str) -> None:
+        """右键补「应用渲染预设」（C++ 菜单无此项；同复制为草稿的挂法）。"""
+        if menu is None or not doc_id:
+            return
+        text = "应用渲染预设"
+        if any(action.text() == text for action in menu.actions()):
+            return
+        action = QAction(text, menu)
+        action.setToolTip("按图层模板/类型恢复默认符号与标注")
+        action.triggered.connect(
+            lambda _checked=False, lid=str(doc_id):
+            self.render_preset_requested.emit(lid))
+        before = next(
+            (item for item in menu.actions() if item.isSeparator()), None)
+        if before is not None:
+            menu.insertAction(before, action)
+        else:
+            menu.addAction(action)
 
     def _on_native_menu_about_to_show(self, menu) -> None:
         """原生菜单弹出前：右键已置当前图层（selection 回调先于本信号），

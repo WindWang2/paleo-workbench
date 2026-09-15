@@ -35,6 +35,18 @@ TOOL_LABELS: dict[str, str] = {
     "collect_multipart": "组合多部件",
     "repair_geometry": "修复几何",
     "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
+    "avoid_intersections": "避免重叠", "tracing": "追踪",
+    "vertex_scope": "顶点范围",
+    "fault_cut": "断层切割", "boundary_reshape": "共边重塑",
+    "delete_ring": "删除内环", "delete_part": "删除部件",
+    "reverse_line": "反转方向", "simplify_feature": "简化要素",
+    "smooth_feature": "平滑要素", "offset_curve": "偏移曲线",
+    "rotate_feature": "旋转要素", "scale_feature": "缩放要素",
+    "cut_features": "剪切", "copy_features": "复制", "paste_features": "粘贴",
+    "add_rectangle": "添加矩形", "add_circle": "添加圆",
+    "snap_geometries": "吸附对齐",
+    "add_arc": "添加圆弧", "add_regular_polygon": "添加正多边形",
+    "trim_line": "修剪线", "extend_line": "延伸线",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -153,9 +165,83 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
     "snapping": _spec(
         "捕捉", "有活动图层",
         "开关采点/编辑捕捉（endpoint/intersection 由桥能力决定）", kinds=_VECTOR),
+    "avoid_intersections": _spec(
+        "避免重叠", "有活动图层",
+        "编辑时裁掉与目标层重叠的部分（QGIS avoid overlap；默认开）",
+        modifies=True, kinds=_VECTOR),
+    "tracing": _spec(
+        "追踪", "原生画布 + 捕捉引擎可用",
+        "采点时沿既有边/已有要素的边继续（点取交点自动加点）",
+        kinds=_VECTOR),
+    "vertex_scope": _spec(
+        "顶点范围", "编辑会话中 + 原生画布",
+        "节点工具的作用范围：全部层（勾选）或当前层（未勾选）",
+        kinds=_VECTOR),
+    "fault_cut": _spec(
+        "断层切割", "面图层编辑会话中 + 原生画布",
+        "数字化切割线，把面沿断层截断（C++ 守恒校验）", modifies=True,
+        kinds=_VECTOR),
+    "boundary_reshape": _spec(
+        "共边重塑", "面图层编辑会话中 + 恰好选中两个相邻要素 + 原生画布",
+        "数字化新界线联动重塑两面的共享弧（守恒校验失败零变更）",
+        modifies=True, kinds=_VECTOR),
+    "delete_ring": _spec(
+        "删除内环", "面图层编辑会话中 + 选中一个要素",
+        "右键内环定位 → 删除该内环", modifies=True, kinds=_VECTOR),
+    "delete_part": _spec(
+        "删除部件", "多部件要素编辑会话中 + 选中一个要素",
+        "右键部件定位 → 删除该部件", modifies=True, kinds=_VECTOR),
+    "reverse_line": _spec(
+        "反转方向", "编辑会话中 + 选中要素",
+        "反转所选线/环的方向", modifies=True, kinds=_VECTOR),
+    "simplify_feature": _spec(
+        "简化要素", "编辑会话中 + 选中要素",
+        "按容差抽稀所选要素几何（Visvalingam/Douglas-Peucker）", modifies=True, kinds=_VECTOR),
+    "smooth_feature": _spec(
+        "平滑要素", "编辑会话中 + 选中要素",
+        "平滑所选要素几何（Chaikin）", modifies=True, kinds=_VECTOR),
+    "offset_curve": _spec(
+        "偏移曲线", "编辑会话中 + 选中要素",
+        "按距离偏移所选线", modifies=True, kinds=_VECTOR),
+    "rotate_feature": _spec(
+        "旋转要素", "编辑会话中 + 选中要素",
+        "绕选集质心旋转所选要素", modifies=True, kinds=_VECTOR),
+    "scale_feature": _spec(
+        "缩放要素", "编辑会话中 + 选中要素",
+        "绕选集质心缩放所选要素", modifies=True, kinds=_VECTOR),
+    "cut_features": _spec(
+        "剪切", "选中要素 + 编辑会话",
+        "剪切所选要素到内部剪贴板", modifies=True, kinds=_VECTOR),
+    "copy_features": _spec(
+        "复制", "选中要素",
+        "复制所选要素到内部剪贴板", kinds=_VECTOR),
+    "paste_features": _spec(
+        "粘贴", "编辑会话中",
+        "把内部剪贴板粘贴到活动图层（字段按 schema 映射）", modifies=True, kinds=_VECTOR),
+    "add_rectangle": _spec(
+        "添加矩形", "面图层编辑会话中",
+        "两次左键定对角，自动闭合矩形面", modifies=True, kinds=_VECTOR),
+    "add_circle": _spec(
+        "添加圆", "面图层编辑会话中",
+        "圆心 + 半径点，64 边近似圆面", modifies=True, kinds=_VECTOR),
+    "snap_geometries": _spec(
+        "吸附对齐", "编辑会话中 + 选中要素",
+        "把选中要素顶点逐个吸附到捕捉命中处", modifies=True, kinds=_VECTOR),
+    "add_arc": _spec(
+        "添加圆弧", "线图层编辑会话中",
+        "起点 + 过弧点 + 终点三点定圆弧（退化回落折线）", modifies=True, kinds=_VECTOR),
+    "add_regular_polygon": _spec(
+        "添加正多边形", "面图层编辑会话中",
+        "中心 + 半径点，默认 6 边", modifies=True, kinds=_VECTOR),
+    "trim_line": _spec(
+        "修剪线", "线图层编辑会话中 + 选中要素",
+        "按边界裁剪所选线（保留内部/外部）", modifies=True, kinds=_VECTOR),
+    "extend_line": _spec(
+        "延伸线", "线图层编辑会话中 + 选中要素",
+        "把所选线端点沿方向延伸到边界", modifies=True, kinds=_VECTOR),
     "topology": _spec(
         "拓扑编辑", "有活动图层 + 工程 CRS 有效",
-        "开关拓扑编辑；保存时执行拓扑校验", modifies=True, kinds=_VECTOR),
+        "开关拓扑编辑（编辑期联动 + 保存时校验）", modifies=True, kinds=_VECTOR),
     "cancel": _spec("取消", "无", "取消当前工具/Esc 数字化", kinds=_ANY_LAYER),
     "layer_new": _spec("新建图层", "已打开工程", "新建空白矢量图层（按模板）", modifies=True),
     "reference_import": _spec(

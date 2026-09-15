@@ -131,8 +131,19 @@ def _merge_container_order(
     members: list[PlanLayerRecord],
     observed: Sequence[str] | None,
     factor_container: bool,
+    *,
+    system_container: bool = True,
 ) -> list[str]:
-    """容器内最终顺序：观察序（存活成员）+ 新成员默认序尾部并入。"""
+    """容器内最终顺序：观察序（存活成员）+ 新成员默认序并入。
+
+    新成员的并入端分两类（V12 D9/R10）：
+
+    * **系统组 / factor 组 → 尾部**（最下）。角色带序是该容器的不变量，
+      置顶会让新层越过带序（例如新基底压到综合相之上）。
+    * **用户组 / root → 头部**（最上）。对齐 QGIS「新图层在最上」的约定：
+      用户新建的图层应当出现在能立刻看见的位置，而不是所在组的最下；
+      扁平模式（root）此前也已是"领域列表尾部 = 顶层"，这里与之一致。
+    """
     by_id = {record.layer_id: record for record in members}
     ordered: list[str] = []
     if observed:
@@ -145,7 +156,11 @@ def _merge_container_order(
             (r for r in members if r.layer_id not in seen),
             key=lambda r: _default_layer_sort_key(r, factor_container),
         )
-        ordered.extend(r.layer_id for r in fresh)
+        fresh_ids = [r.layer_id for r in fresh]
+        if system_container:
+            ordered.extend(fresh_ids)
+        else:
+            ordered[:0] = fresh_ids
         return ordered
     fresh = sorted(members, key=lambda r: _default_layer_sort_key(r, factor_container))
     return [r.layer_id for r in fresh]
@@ -195,7 +210,8 @@ def build_plan(plan_input: LayerTreePlanInput) -> tuple[LayerTreeSnapshot, Layer
         factor_container = group_id.startswith("factor.")
         merged = _merge_container_order(
             group_id, members,
-            plan_input.container_orders.get(group_id), factor_container)
+            plan_input.container_orders.get(group_id), factor_container,
+            system_container=factor_container or group_id in system_ids)
         orders[group_id] = merged
         new_keys = assign_keys_for_order(merged, keys)
         keys.update(new_keys)
@@ -270,17 +286,21 @@ def build_plan(plan_input: LayerTreePlanInput) -> tuple[LayerTreeSnapshot, Layer
                 children.append(LayerRef(
                     layer_id=node_id, order_key=keys.get(node_id, "")))
                 placed.add(node_id)
-        # 观察序未覆盖的成员：嵌套组（键序）+ 新图层（默认序）补齐。
+        # V12 D9/R10：观察序未覆盖的**新图层**置顶并入（用户组语义 =
+        # "新图层出现在组内最上"，与 QGIS 及 root 平铺一致）；随后是观察序
+        # 未覆盖的嵌套组（键序）。
+        member_ids = orders.get(group_id, [])
+        fresh_ids = [layer_id for layer_id in member_ids if layer_id not in placed]
+        if fresh_ids:
+            children = [
+                LayerRef(layer_id=layer_id, order_key=keys.get(layer_id, ""))
+                for layer_id in fresh_ids
+            ] + children
+            placed.update(fresh_ids)
         for child in user_children_of.get(group_id, []):
             if child not in placed:
                 children.append(make_user_group(child, visiting))
                 placed.add(child)
-        member_ids = orders.get(group_id, [])
-        for layer_id in member_ids:
-            if layer_id not in placed:
-                children.append(LayerRef(
-                    layer_id=layer_id, order_key=keys.get(layer_id, "")))
-                placed.add(layer_id)
         return GroupNode(
             group_id=group_id,
             name=info.name or group_id,

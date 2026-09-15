@@ -68,7 +68,10 @@ from paleo_workbench.mapping.tool_context import build_tool_context
 from paleo_workbench.ui.map_action_controller import MapActionController
 from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
 from paleo_workbench.ui.map_status_bar import MapStatusBar
-from paleo_workbench.ui.qgis_stack.canvas_shim import QgisCanvasShim
+from paleo_workbench.ui.qgis_stack.canvas_shim import (
+    QgisCanvasShim,
+    bridge_available,
+)
 from paleo_workbench.ui.qgis_stack.layer_tree_panel import QgisLayerTreePanel
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.ui.workstation.common import workstation_icon
@@ -363,6 +366,8 @@ class LayerManagerPanel(QFrame):
     duplicate_layer_requested = Signal(str)
     export_layer_requested = Signal(str)
     repair_layer_requested = Signal(str)
+    # V12 任务2：把模板/类型渲染预设（符号 + 标注）重新套到图层。
+    render_preset_requested = Signal(str)
     # 当前图层变化（无可编辑图层时携带 None）。
     active_layer_changed = Signal(object)
     # V7 §7：双击定位（zoom to layer；由 CompositeDocument 落地）。
@@ -558,6 +563,9 @@ class LayerManagerPanel(QFrame):
         )
         symbology = menu.addAction("符号系统…")
         labeling = menu.addAction("标注…")
+        # V12 任务2：一键恢复该类型应有的渲染（符号 + 标注预设）。
+        render_preset = menu.addAction("应用渲染预设")
+        render_preset.setToolTip("按图层模板/类型恢复默认符号与标注")
         export = menu.addAction("导出图层…")
         rename = duplicate = remove = repair = draft = toggle_edit = None
         # V10 M5/R2-6：编辑入口的可用性与禁用原因来自 canonical evaluator
@@ -639,6 +647,8 @@ class LayerManagerPanel(QFrame):
             self.repair_layer_requested.emit(layer_id)
         elif chosen is export:
             self.export_layer_requested.emit(layer_id)
+        elif chosen is render_preset:
+            self.render_preset_requested.emit(layer_id)
 
     def set_editing_layer(self, layer_id: str | None) -> None:
         """标记正在编辑的图层（树项前缀 ✏，QGIS 的 in-edit 视觉语义）。"""
@@ -1208,11 +1218,24 @@ class CompositeDocument(QWidget):
         if measure_updated is not None:
             measure_updated.connect(self._on_measure_updated)
         # V10（review-5 #20）：捕获过程反馈接到测距栏（数字化与测距互斥，
-        # 标签复用零 UI 改动）；snap_feedback 保持纯信号面（消费方按需接线，
-        # 状态栏 snapping 标签归 update_state 所有——避免高频闪烁）。
+        # 标签复用零 UI 改动）。
         capture_progress = getattr(self.canvas, "capture_progress", None)
         if capture_progress is not None:
             capture_progress.connect(self._on_capture_progress)
+        # V12 M0-4：捕捉命中反馈接状态条（只进 snapping chip 的 tooltip——
+        # chip 文本归 update_state 权威，逐像素写标签会与它互相闪烁）。
+        snap_feedback = getattr(self.canvas, "snap_feedback", None)
+        if snap_feedback is not None:
+            snap_feedback.connect(self.status_bar.set_snap_match)
+        # V12 M2-4：画布交互轻提示（零位移单击等）→ 状态条。
+        status_hint = getattr(self.canvas, "status_hint", None)
+        if status_hint is not None:
+            status_hint.connect(self.status_message.emit)
+        # V12 任务3：画布右键 → 相带要素换相菜单（回退画布无此信号，鸭子
+        # 类型跳过）。
+        canvas_context_menu = getattr(self.canvas, "canvas_context_menu", None)
+        if canvas_context_menu is not None:
+            canvas_context_menu.connect(self._on_canvas_context_menu)
         measure_canceled = getattr(self.canvas, "measure_canceled", None)
         if measure_canceled is not None:
             measure_canceled.connect(lambda: self.status_bar.set_measure(""))
@@ -1286,6 +1309,8 @@ class CompositeDocument(QWidget):
         self.layer_manager.duplicate_layer_requested.connect(self._duplicate_vector_layer)
         self.layer_manager.export_layer_requested.connect(self._export_layer)
         self.layer_manager.repair_layer_requested.connect(self._repair_layer)
+        # V12 任务2：应用渲染预设（原生树面板与回退面板共用同一信号契约）。
+        self.layer_manager.render_preset_requested.connect(self._apply_render_preset)
         if self.uses_native_stack:
             # 显示态回写只有原生树面板产生（回退面板的显示态经自身信号即时生效）。
             self.layer_manager.display_state_changed.connect(self.notify_display_changed)
@@ -1408,6 +1433,15 @@ class CompositeDocument(QWidget):
         fallback 渲染器；原生专属分支（QgsVectorLayerProperties 等）以
         ``uses_native_stack`` 显式判断。桥构建指引见 canvas_shim 的报错文案。
         """
+        # 桥缺失时**不能**构造 QgisCanvasShim：壳层重建会第二次走进这里，
+        # 而"构造注定失败的 QWidget"在第二次会触发访问冲突（0xC0000005）。
+        # 所以先探测、再决定构造（与 display_canvas.create_display_canvas
+        # 同一模式）。
+        if not bridge_available():
+            logging.getLogger(__name__).debug(
+                "QGIS 渲染桥不可用，直接使用 fallback 画布"
+            )
+            return UnifiedMapCanvas(parent=self), False
         try:
             return QgisCanvasShim(parent=self), True
         except Exception:
@@ -3253,9 +3287,20 @@ class CompositeDocument(QWidget):
 
         source_role = self.stage_controller.state.role_of(str(layer_id))
         if source_role.is_raw_protected:
+            # 相预测（井/震）与初始相图同源：副本是「拿去改的解释草稿」，
+            # 一律落 INITIAL_FACIES_DRAFT（home = phase1.interpretation）。
+            # 不能退 USER_GENERAL——它的 home 就是 LEGACY 未分类兜底组
+            # （z 序垫底），副本与源同几何同样式，被源完全遮盖，画布上
+            # 表现为「复制出来的图层不显示」。
             draft_role = (
                 LayerRole.INITIAL_FACIES_DRAFT
-                if source_role == LayerRole.INITIAL_FACIES_SOURCE
+                if source_role in (
+                    LayerRole.INITIAL_FACIES_SOURCE,
+                    LayerRole.WELL_FACIES_PREDICTION,
+                    LayerRole.SEISMIC_FACIES_PREDICTION,
+                    LayerRole.WELL_FACIES_CONFIDENCE,
+                    LayerRole.SEISMIC_FACIES_CONFIDENCE,
+                )
                 else LayerRole.USER_GENERAL
             )
             self.stage_controller.state.set_membership(
@@ -4523,6 +4568,244 @@ class CompositeDocument(QWidget):
     def _digit_keys_active(self) -> bool:
         return bool(self._digit_shortcuts)
 
+    def _apply_render_preset(self, layer_id) -> None:
+        """把该图层的渲染预设（符号 + 标注）重新套上（V12 任务2）。
+
+        相带层走分类样式重算（分类渲染不是单符号预设，且标注字段随相带
+        分级——相图 facies / 亚相图 sub_facies / 微相图 micro_facies）；
+        其余图层套模板/类型预设。
+        """
+        layer_id = str(layer_id or "")
+        if not layer_id:
+            return
+        if self._is_facies_layer(layer_id):
+            controller = self.edit_controller
+            layer = controller.layer(layer_id)
+            if layer is None:
+                return
+            source = (layer.edit_session.features()
+                      if layer.edit_session is not None else layer.features())
+            field = self._facies_layer_anchor_level(layer_id)
+            from paleo_workbench.ui.workstation.stage_actions import (
+                _categorized_facies_style,
+            )
+            # 分类器吃属性字典形态（VectorFeature 要先解包）。
+            style = _categorized_facies_style(
+                [dict(f.attributes) for f in source], field=field)
+            if style:
+                controller.set_layer_style(layer_id, style)
+                self._sync_composition()
+                self.status_message.emit(f"已应用「{layer.name}」的相带渲染预设")
+                return
+        ok, reason = self.edit_controller.apply_render_preset(layer_id)
+        if not ok:
+            self.status_message.emit(f"渲染预设未应用：{reason}")
+            return
+        self._sync_composition()
+        layer = self.edit_controller.layer(layer_id)
+        self.status_message.emit(
+            f"已应用渲染预设：{layer.name if layer is not None else layer_id}")
+
+    def _on_canvas_context_menu(self, map_point, global_pos) -> None:
+        """画布右键：命中活动相带层要素 → 弹出相选择列表（V12 任务3）。
+
+        只在「活动图层是相带层 + 光标命中其要素」时接管；其余情况不弹
+        （右键空白不该出现无语义菜单）。
+        """
+        try:
+            point = (float(map_point[0]), float(map_point[1]))
+        except Exception:
+            return
+        controller = self.edit_controller
+        layer_id = controller.active_layer_id
+        if not layer_id or not self._is_facies_layer(layer_id):
+            return
+        try:
+            results = controller.identify_all(point, base_layers=self._base_layers)
+        except Exception:
+            logging.getLogger(__name__).debug("context-menu identify failed", exc_info=True)
+            return
+        target = next((
+            result for result in results
+            if result.get("layer_id") == layer_id
+            and result.get("editable")
+            and result.get("feature_id")
+        ), None)
+        if target is None:
+            return
+        # 交互式环/部件命令：命中可编辑面/多部件要素的右键落点 →
+        # 删除内环 / 删除部件（选择集驱动，见 geometry_command_at_point）。
+        kind = controller._kinds.get(layer_id, "")
+        if kind in {"polygon"}:
+            menu_items = []
+            try:
+                layer = controller.layer(layer_id)
+                selection = getattr(layer, "selection", set()) or set()
+                if len(selection) == 1 and controller.native_editing.is_open(layer_id) is False:
+                    from PySide6.QtWidgets import QMenu
+                    menu = QMenu(self)
+                    ring = menu.addAction("删除内环")
+                    part = menu.addAction("删除部件")
+                    menu.addSeparator()
+                    rev = menu.addAction("反转方向")
+                    simp = menu.addAction("简化要素…")
+                    sm = menu.addAction("平滑要素")
+                    off = menu.addAction("偏移曲线…")
+                    snp = menu.addAction("吸附对齐")
+                    menu.addSeparator()
+                    rot = menu.addAction("旋转要素…")
+                    sca = menu.addAction("缩放要素…")
+                    cut = menu.addAction("剪切")
+                    copy = menu.addAction("复制")
+                    paste = menu.addAction("粘贴")
+                    chosen = menu.exec(global_pos)
+                    if chosen is ring:
+                        self._run_context_geometry_command("delete_ring", map_point)
+                    elif chosen is part:
+                        self._run_context_geometry_command("delete_part", map_point)
+                    elif chosen is rev:
+                        self._run_selection_geometry_op("reverse_line")
+                    elif chosen is simp:
+                        self._run_selection_geometry_op("simplify_feature")
+                    elif chosen is sm:
+                        self._run_selection_geometry_op("smooth_feature")
+                    elif chosen is off:
+                        self._run_selection_geometry_op("offset_curve")
+                    elif chosen is snp:
+                        self._run_snap_geometries()
+                    elif chosen is rot:
+                        self._run_rotate_selection()
+                    elif chosen is sca:
+                        self._run_scale_selection()
+                    elif chosen is cut:
+                        self._run_clipboard(cut=True)
+                    elif chosen is copy:
+                        self._run_clipboard(cut=False)
+                    elif chosen is paste:
+                        self._run_clipboard_paste()
+                    return
+            except Exception:
+                pass
+        self._open_facies_context_menu(
+            str(layer_id), str(target["feature_id"]), global_pos)
+
+    def _build_facies_context_menu(self, layer_id: str, feature_id: str):
+        """相选择列表（纯构建，不 exec；供右键与测试共用）。
+
+        返回 ``(menu, actions)``：``actions`` 把 QAction 映射到相名
+        （级联入口映射为 None）。
+        """
+        from PySide6.QtWidgets import QMenu
+
+        taxonomy = self.facies_taxonomy()
+        names = taxonomy.names("facies")
+        layer = self.edit_controller.layer(layer_id)
+        current = ""
+        if layer is not None:
+            source = (layer.edit_session.features()
+                      if layer.edit_session is not None else layer.features())
+            feature = next(
+                (f for f in source if f.feature_id == feature_id), None)
+            if feature is not None:
+                current = str(
+                    (feature.attributes or {}).get("facies") or "").strip()
+        menu = QMenu(self)
+        header = menu.addAction(
+            f"要素 {feature_id}" + (f"（当前：{current}）" if current else ""))
+        header.setEnabled(False)
+        menu.addSeparator()
+        actions: dict = {}
+        for name in names:
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == current)
+            actions[action] = name
+        menu.addSeparator()
+        cascade = menu.addAction("级联选择（亚相 / 微相）…")
+        actions[cascade] = None
+        return menu, actions
+
+    def _open_facies_context_menu(self, layer_id: str, feature_id: str,
+                                  global_pos) -> None:
+        """弹出相选择列表并应用所选（V12 任务3 用户入口）。"""
+        menu, actions = self._build_facies_context_menu(layer_id, feature_id)
+        chosen = menu.exec(global_pos)
+        if chosen is None:
+            return
+        value = actions.get(chosen)
+        if value is None:
+            # 级联入口：走既有三級选择对话框（亚相/微相）。
+            self._assign_facies_dialog(layer_id, feature_id)
+            return
+        self._apply_context_menu_facies(layer_id, feature_id, value)
+
+    def _run_context_geometry_command(self, command_id: str, map_point) -> None:
+        """右键环/部件命令分发（M5-A1）：落点 → 交互命令，原因上浮。"""
+        try:
+            point = (float(map_point[0]), float(map_point[1]))
+        except Exception:
+            return
+        ok, message = self.edit_controller.geometry_command_at_point(command_id, point)
+        self.status_message.emit(message if message else (
+            "已执行" if ok else f"{command_id} 未执行"))
+
+    def _run_rotate_selection(self) -> None:
+        """旋转要素对话框（M5-B）：角度 → 控制器 transform_selection。"""
+        from PySide6.QtWidgets import QInputDialog
+        value, ok = QInputDialog.getDouble(
+            self, "旋转要素", "角度（度，逆时针为正）",
+            90.0, -360.0, 360.0, 1)
+        if not ok:
+            return
+        ok_, message = self.edit_controller.transform_selection(
+            "rotate_feature", angle_degrees=float(value))
+        self.status_message.emit(message if message else "已旋转")
+
+    def _run_scale_selection(self) -> None:
+        """缩放要素对话框（M5-B）：因子 → 控制器 transform_selection。"""
+        from PySide6.QtWidgets import QInputDialog
+        value, ok = QInputDialog.getDouble(
+            self, "缩放要素", "比例因子",
+            1.0, 0.01, 100.0, 2)
+        if not ok:
+            return
+        ok_, message = self.edit_controller.transform_selection(
+            "scale_feature", xfact=float(value), yfact=float(value))
+        self.status_message.emit(message if message else "已缩放")
+
+    def _run_clipboard(self, *, cut: bool) -> None:
+        ok, message = self.edit_controller.clipboard_copy_selection(cut=cut)
+        self.status_message.emit(message if message else (
+            "已剪切" if cut else "已复制"))
+
+    def _run_clipboard_paste(self) -> None:
+        ok, message = self.edit_controller.clipboard_paste()
+        self.status_message.emit(message if message else "已粘贴")
+
+    def _run_snap_geometries(self) -> None:
+        """批量捕捉对齐（M5-A1）：选集吸附，原因上浮。"""
+        ok, message = self.edit_controller.snap_geometries()
+        self.status_message.emit(message if message else "已吸附对齐")
+
+    def _run_selection_geometry_op(self, op_id: str) -> None:
+        """右键选择集算子分发（M5-A2）：选择集 → 算子，原因上浮。"""
+        ok, message = self.edit_controller.selection_geometry_op(op_id)
+        self.status_message.emit(message if message else (
+            "已执行" if ok else f"{op_id} 未执行"))
+
+    def _apply_context_menu_facies(self, layer_id: str, feature_id: str,
+                                   value: str) -> bool:
+        """右键所选相写入要素（新相生效即清空亚相/微相）→ 刷新分类样式。"""
+        ok, reason = self.edit_controller.apply_facies_selection(
+            str(layer_id), str(feature_id),
+            {"facies": str(value), "sub_facies": "", "micro_facies": ""})
+        if not ok:
+            self.status_message.emit(f"相未写入：{reason}")
+            return False
+        self.status_message.emit(f"相已改为「{value}」")
+        self._refresh_facies_layer_style(layer_id)
+        return True
+
     def _assign_facies_dialog(self, layer_id: str, feature_id: str) -> None:
         from paleo_workbench.ui.workstation.facies_selector import (
             FaciesSelectionDialog,
@@ -4773,6 +5056,15 @@ class CompositeDocument(QWidget):
                 expand()
         except Exception:
             logging.getLogger(__name__).exception("stage workspace reconcile failed")
+        # V12 M0-2b：镜像 upsert 完成后补推画布当前层。这是本缺陷的兜底口——
+        # 首次推送总发生在镜像入项目之前（create_layer 先激活、后发布），
+        # 桥必然以 unknown doc_id 拒绝；发布之后再确认一次，编辑目标才真正
+        # 就位（否则顶点工具/原生 identify 永远拿不到 editLayer）。
+        try:
+            self.edit_controller.repush_canvas_current_layer()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "canvas current-layer repush failed")
 
     # -- 工程绑定 -------------------------------------------------------------
 

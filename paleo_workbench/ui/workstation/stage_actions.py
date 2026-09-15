@@ -99,7 +99,7 @@ def _categorized_facies_style(features: Any, *, field: str = "") -> dict:
     label 即值本身；fill_patterns 只收录有 SVG 映射的类。
     """
     from paleo_workbench.mapping.facies_patterns import pattern_id_for_facies
-    from paleo_workbench.mapping.map_styles import VectorStyle
+    from paleo_workbench.mapping.map_styles import TextStyle, VectorStyle
 
     buckets: list[dict] = []
     for item in features or ():
@@ -157,6 +157,9 @@ def _categorized_facies_style(features: Any, *, field: str = "") -> dict:
         fill="#b0bec5", stroke="#26364d", stroke_width=0.6,
         renderer="categorized", field=field,
         categories=tuple(categories), fill_patterns=tuple(patterns),
+        # V12 渲染预设：相带面标注 = 分类字段值（相图/亚相图/微相图各随其字段）。
+        labels=TextStyle(field=field, size=9.0, color="#1f2937",
+                         halo_color="#f8f9fa", halo_width=1.0),
     ).to_dict()
     # 存活图层样式的既定线格式：原生快照线（buildSpecFromLegacyJson）与
     # 图层属性对话框都只接受 dict 形 categories（{"值": "填充色"}），

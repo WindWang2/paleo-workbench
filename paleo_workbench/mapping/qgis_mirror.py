@@ -865,6 +865,28 @@ def mirror_snapshot_to_stack(
             ledger_active = layer_revision != 0
             if not ledger_active:
                 entry = None
+            # 台账自愈：条目声称「已发布」但桥上镜像对象已被删或已失效
+            #（工程重载 / clear_project_layers / mock 运行链外删除 / 同名
+            # 残留坏层）时，no-op 会把「缺数据 / 坏数据」冻结成永久隐身
+            # ——副本（新 id 无台账）与「修复无效几何」（改数据 → 台账判变
+            # → 重建）却一切正常。健康信号以桥自省面为准：
+            # ``mirror_provider_facts`` 的 ``exists``/``is_valid`` 任一为
+            # 假即作废条目、走完整 upsert 重建。**任何异常都视为无法验证，
+            # 保持条目**——桥不支持该调用 / 假体栈没实现时绝不能误杀健康
+            # 台账，否则 no-op 优化全废。
+            if entry is not None:
+                try:
+                    facts = stack.mirror_provider_facts(str(layer.id)) or {}
+                    mirror_broken = (
+                        facts.get("exists") is False
+                        or facts.get("is_valid") is False)
+                except Exception:
+                    mirror_broken = False
+                if mirror_broken:
+                    _MIRROR_LEDGER.pop(_ledger_key(stack, layer.id), None)
+                    entry = None
+                    _sink(layer.id,
+                          "ledger entry invalidated: mirror layer missing/invalid on bridge")
             if layer.id in edit_window:
                 # M0 §3 停发窗口：集合内层数据重发短路（镜像即编辑发生地——
                 # M1 起编辑直接发生在镜像层上，宿主重发会覆盖编辑缓冲）。

@@ -359,7 +359,9 @@ def _normalize_layer_role(role: object) -> str:
 _LAYER_BOUND_TOOLS = frozenset(
     {"identify", "select", "select_rectangle", "move_feature", "vertex"}
 )
-_KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}
+_KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon",
+                "add_rectangle": "polygon", "add_circle": "polygon",
+                "add_regular_polygon": "polygon", "add_arc": "line"}
 
 
 def pick_topmost_visible_layer_id(layer_ids_bottom_up, visible_ids) -> str | None:
@@ -689,6 +691,8 @@ class CompositeEditController(QObject):
         # 用户仍可切回当前层。
         self.vertex_all_layers: bool = True
         self.avoid_intersections_enabled: bool = True
+        #: V12 M5-B：内部要素剪贴板（源图层 id, 源 CRS, entries）。
+        self._feature_clipboard: tuple[str, str, list] | None = None
         self.tracing_enabled: bool = False
         # M3：原生分割切线手势——geometry_command("split") 打开 addLine，
         # digitize completed 经 commit_native_capture 拦截进 split_mirror_features。
@@ -930,6 +934,35 @@ class CompositeEditController(QObject):
     def layer_role(self, layer_id: str) -> str:
         """图层的科学角色值（"" = 无角色，走 legacy 无 schema 路径）。"""
         return self._layer_roles.get(str(layer_id), "")
+
+    def set_snapping_scope(self, current_layer_only: bool) -> None:
+        """捕捉范围（V12 M1-1）：False = 所有图层，True = 仅当前图层。
+
+        权威在 SnappingService（current_layer_only），这里只写权威并统一下推
+        （_push_snapping_config 据此派生 QGIS 模式 AllLayers/ActiveLayer）。
+        """
+        self._snapping.current_layer_only = bool(current_layer_only)
+        self._push_snapping_config()
+        self.state_changed.emit()
+
+    def apply_render_preset(self, layer_id: str) -> tuple[bool, str]:
+        """把该图层的**渲染预设**（符号 + 标注）重新套上（V12 任务2）。
+
+        预设来源：图层模板（GEO_TEMPLATES）优先，无模板按几何类型回落
+        STYLE_LIBRARY。相带层的分类样式由宿主按要素重算（分类渲染不是
+        单符号预设），控制器只负责模板/库预设这一层。
+        """
+        layer = self._layers.get(str(layer_id))
+        if layer is None:
+            return False, "图层不存在"
+        template = _TEMPLATE_BY_KEY.get(self._templates.get(str(layer_id), ""))
+        if template is not None:
+            preset = template.style
+        else:
+            kind = self._kinds.get(str(layer_id), "")
+            preset = default_style_for(_KIND_STYLE_PRESET.get(kind, "facies"))
+        self.set_layer_style(str(layer_id), preset.to_dict())
+        return True, ""
 
     def set_layer_style(self, layer_id: str, style: Mapping[str, object]) -> None:
         """写入图层样式（图层属性 / 符号系统 / 标注对话框的落地路径）。"""
@@ -1280,11 +1313,52 @@ class CompositeEditController(QObject):
         return (layer.edit_session is not None
                 or self.native_editing.is_open(layer.id))
 
+    def current_canvas_layer_id(self) -> str:
+        """画布当前层的 doc_id（"" = 没有 / 不是镜像层）。无桥面时恒 ""。"""
+        canvas = self._canvas
+        getter = getattr(canvas, "current_layer_doc_id", None)
+        if not callable(getter):
+            return ""
+        try:
+            return str(getter() or "")
+        except Exception:
+            return ""
+
+    def repush_canvas_current_layer(self) -> bool:
+        """把活动层重新推成画布当前层（幂等；已就位则空操作）。
+
+        V12 M0-2b（编辑工具链 D-B）：宿主过去只在 ``set_active_layer`` 里推
+        一次，而那一推往往发生在镜像发布**之前**（``create_layer`` 先激活、
+        后 emit ``layers_changed`` → 快照发布），桥以 ``unknown doc_id`` 拒绝
+        且无人重试——画布 current layer 于是永远为空/陈旧，顶点工具的
+        ``editLayer()`` 恒为 nullptr，v2 档失活、拖动退化成 v1 静默失败。
+
+        凡"目标层可能刚刚变得可解析"的时刻都要调本方法：原生会话开启后、
+        镜像发布后、树选中被同 id 短路时。
+        """
+        layer_id = self._active_layer_id
+        canvas = self._canvas
+        if not layer_id or canvas is None:
+            return False
+        if not hasattr(canvas, "set_current_layer"):
+            return False
+        if self.current_canvas_layer_id() == str(layer_id):
+            return False
+        try:
+            canvas.set_current_layer(str(layer_id))
+        except Exception:
+            return False
+        return True
+
     def set_active_layer(self, layer_id: str | None) -> None:
         layer_id = str(layer_id) if layer_id else None
         if layer_id is not None and layer_id not in self._layers:
             layer_id = None
         if layer_id == self._active_layer_id:
+            # V12 M0-2b：同 id 不代表画布已接收——首次推送可能早于镜像发布
+            # 而被拒（见 repush_canvas_current_layer）。这里补一次幂等重推，
+            # 否则"点树里这一层"这个最自然的用户动作救不回画布侧。
+            self.repush_canvas_current_layer()
             return
         previous = self.active_layer
         if previous is not None and previous.edit_session is not None:
@@ -1389,6 +1463,11 @@ class CompositeEditController(QObject):
                 stack, layer, gate=self.can_edit_layer,
                 canvas_address=address)
             if ok:
+                # V12 M0-2b：会话层此刻必定已在镜像里（open 走的
+                # start_mirror_layer_editing 按 doc_id 解析成功），把画布
+                # current layer 补上——这是 v2 顶点工具/原生 identify 的
+                # 目标层，此前全靠 set_active_layer 那一推（常常已被拒绝）。
+                self.repush_canvas_current_layer()
                 self._rebind_active_tool()
                 self.state_changed.emit()
                 return
@@ -1734,6 +1813,10 @@ class CompositeEditController(QObject):
                 canvas_address=getattr(self._canvas, "canvas_address", 0))
             if not ok:
                 refused.append(f"「{layer.name}」{reason}")
+        # V12 M0-2b：入集的邻层是"候选层"，编辑目标仍是活动层——这里只把
+        # 活动层重新确认一次（press 期间同步入集可能刚重建过镜像树，
+        # 画布 current layer 若被清空，本次拖动就白拖了）。
+        self.repush_canvas_current_layer()
         if refused:
             self.native_join_refused.emit(
                 "邻层未参与编辑：" + "；".join(refused))
@@ -2123,6 +2206,18 @@ class CompositeEditController(QObject):
                 session = layer.edit_session
                 if session is None and not self.native_editing.is_open(layer.id):
                     return  # M1：原生会话同样允许激活（vertex v2 / 数字化路由）
+                if action_id in {
+                    "vertex", "move_feature", "fault_cut", "boundary_reshape",
+                } and self.native_editing.is_open(layer.id):
+                    # V12 M1-8（R6 激活预检）：原生会话下编辑权威在镜像缓冲，
+                    # 顶点/移动工具只在「画布当前层 == 目标层」时才有可写
+                    # 目标。先补推（M0-2b），仍不就位则放弃绑定本次工具——
+                    # 不再制造"按钮亮着但拖不动"的哑态（工具保持原状，
+                    # 门禁原因由状态条/evaluate 呈现）。
+                    self.repush_canvas_current_layer()
+                    if self.current_canvas_layer_id() != layer.id:
+                        self.state_changed.emit()
+                        return
                 # 加点 / 加线 / 加面只在与图层几何类型一致时激活，
                 # 否则保持当前工具（不劫持用户的图层选择）。
                 kind_required = _KIND_BOUND_TOOLS.get(action_id)
@@ -2148,6 +2243,21 @@ class CompositeEditController(QObject):
                 elif action_id == "add_polygon":
                     tool = AddPolygonTool(session, snap=self._snap, attributes=defaults,
                                           on_captured=captured)
+                elif action_id in {
+                    "add_rectangle", "add_circle",
+                    "add_arc", "add_regular_polygon",
+                }:
+                    # V12 M5-A1 shape：kind 何几何类型由各自工具决定
+                    # （矩形/圆/正多边形 = 面；圆弧 = 线）。
+                    from paleo_workbench.mapping import map_tools as _mt
+                    shape_tool = {
+                        "add_rectangle": _mt.RectangleCaptureTool,
+                        "add_circle": _mt.CircleCaptureTool,
+                        "add_arc": _mt.ArcCaptureTool,
+                        "add_regular_polygon": _mt.RegularPolygonCaptureTool,
+                    }[action_id]
+                    tool = shape_tool(session, snap=self._snap,
+                                      attributes=defaults, on_captured=captured)
                 elif action_id == "move_feature":
                     tool = MoveFeatureTool(session, identify=lambda point: index.identify(point, self._tolerance()))
                 elif action_id == "vertex":
@@ -2354,6 +2464,7 @@ class CompositeEditController(QObject):
         config: dict[str, object] = {
             "enabled": bool(snapping.enabled),
             "mode": "active_layer" if snapping.current_layer_only else "all_layers",
+            "units": str(getattr(snapping, "tolerance_units", "px")),
             "tolerance_px": float(snapping.pixel_tolerance),
             "types": types,
             "reference_enabled": "reference" in snapping.modes,
@@ -2365,16 +2476,31 @@ class CompositeEditController(QObject):
         # 仍是权威（两层同向，无双真源）。
         if "snapping_topological_editing" in features:
             config["topological_editing"] = bool(self._topology.enabled)
+        # V12 M4-3a：比例依赖捕捉（画布比例尺分母 < minimum_scale 即停捕）。
+        scale_min = getattr(snapping, "scale_minimum", None)
+        if isinstance(scale_min, (int, float)) and float(scale_min) > 0.0:
+            config["scale_dependent"] = {"minimum_scale": float(scale_min)}
         # M2 §4 避免重叠：enabled 无层表 = 当前编辑层（默认语义）。
         config["avoid_intersections"] = {
             "enabled": self.avoid_intersections_enabled,
         }
         if not snapping.current_layer_only:
+            # V12 M4-3b：逐层捕捉优先级（数值小者优先——回退栈
+            # SnappingService.snap 的等距裁决同序）。QGIS 原生端
+            # IndividualLayerSettings 无优先级字段：这里按优先级**排序下发**
+            # （QGIS 按配置顺序尝试，排在前面 = 优先），与回退语义同序。
             layers: dict[str, dict[str, object]] = {}
-            for layer_id in self._layers:
+            for layer_id in sorted(
+                    self._layers,
+                    key=lambda lid: int(
+                        getattr(snapping, "layer_priority", {}).get(lid, 0))):
                 modes = snapping.layer_modes.get(layer_id)
                 layers[layer_id] = {
                     "enabled": bool(snapping.layer_enabled.get(layer_id, True)),
+                    # V12 M1-6：逐层容差单位（缺省跟随全局）。
+                    "units": str(getattr(snapping, "layer_tolerance_units", {})
+                                 .get(layer_id,
+                                      getattr(snapping, "tolerance_units", "px"))),
                     "types": (
                         [
                             m
@@ -2566,6 +2692,29 @@ class CompositeEditController(QObject):
             return polygon_layer, polygon_id, line_feature
         return None
 
+    def geometry_command_at_point(self, command_id: str, point) -> tuple[bool, str]:
+        """交互式环/部件命令（V12 M5-A1）：把右键落点换算成 pick_point。
+
+        用户右键 → 画布坐标 → identify 定位选中要素 → 调用既有
+        ``_ring_and_part_commands``（delete_ring / delete_part）。选择集
+        未锁定该要素时先选中它——与 QGIS「点击即选即删」的环/部件语义对齐。
+        """
+        try:
+            point = (float(point[0]), float(point[1]))
+        except Exception:
+            return False, "无效的定位点"
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        results = self.identify_all(point, base_layers=())
+        hit = next((
+            result for result in results
+            if result.get("layer_id") == layer.id and result.get("editable")
+        ), None)
+        if hit is not None and layer.selection != {str(hit.get("feature_id"))}:
+            layer.set_selection({str(hit["feature_id"])})
+        return self._ring_and_part_commands(command_id, point)
+
     def geometry_command(self, command_id: str, curve: dict | None = None) -> tuple[bool, str]:
         """执行 split / merge / fault_cut；返回 (是否成功, 用户可读消息)。
 
@@ -2640,6 +2789,280 @@ class CompositeEditController(QObject):
                     except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
                         pass
         return False, f"未知几何命令 {command_id}"
+
+    # -- V12 M5-B：旋转 / 缩放 / 剪切·复制·粘贴 ---------------------------------
+
+    def transform_selection(self, op_id: str, **params) -> tuple[bool, str]:
+        """选择集仿射变换（M5-B）：rotate_feature / scale_feature——Shapely
+        affinity 绕选集质心，单宏可撤销。"""
+        from shapely import affinity as _affinity
+        from shapely.geometry import shape as _shape, mapping as _mapping
+        from shapely.ops import unary_union as _union_all
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        geoms = []
+        for feature_id in sorted(layer.selection):
+            geoms.append(_shape(session.feature(feature_id).as_record()["geometry"]))
+        if not geoms:
+            return False, "选中要素没有几何"
+        center = _union_all(geoms).centroid
+        with session.edit_source(f"{op_id}(command)"):
+            changed = 0
+            for feature_id in sorted(layer.selection):
+                feature = session.feature(feature_id)
+                geometry = feature.as_record()["geometry"]
+                shape = _shape(geometry)
+                if op_id == "rotate_feature":
+                    angle = float(params.get("angle_degrees", 0.0))
+                    transformed = _affinity.rotate(
+                        shape, angle, origin=(center.x, center.y), use_radians=False)
+                elif op_id == "scale_feature":
+                    xf = float(params.get("xfact", 1.0))
+                    yf = float(params.get("yfact", xf))
+                    transformed = _affinity.scale(
+                        shape, xfact=xf, yfact=yf,
+                        origin=(center.x, center.y))
+                else:
+                    return False, f"未知变换 {op_id}"
+                session.set_geometry(feature_id, dict(_mapping(transformed)))
+                changed += 1
+        self._topology.refresh_error_count(layer)
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return True, f"已应用{op_id}（{changed} 个要素）"
+
+    def clipboard_copy_selection(self, *, cut: bool = False) -> tuple[bool, str]:
+        """剪切/复制选中要素到内部剪贴板（M5-B；复制不删、剪切删且须会话）。
+
+        剪贴板条目 = (源图层 id, 源 CRS, [(geometry, attributes), ...])。
+        粘贴时按目标层字段映射（schema 交集，多余键丢弃并注明）。
+        """
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        session = layer.edit_session
+        if cut and session is None:
+            return False, "剪切需要先开始编辑"
+        source = session.features() if session is not None else layer.features()
+        entries = []
+        for feature in source:
+            if str(feature.feature_id) in layer.selection:
+                entries.append((
+                    feature.as_record()["geometry"],
+                    dict(feature.attributes or {}),
+                ))
+        if not entries:
+            return False, "选中要素没有可复制的几何"
+        self._feature_clipboard = (
+            str(layer.id),
+            str(getattr(layer, "crs", "") or ""),
+            entries,
+        )
+        if cut:
+            with session.edit_source("cut_features(command)"):
+                for feature in source:
+                    if str(feature.feature_id) in layer.selection:
+                        session.delete_feature(str(feature.feature_id))
+            self.content_changed.emit(layer.id)
+            self.state_changed.emit()
+            return True, f"已剪切 {len(entries)} 个要素"
+        return True, f"已复制 {len(entries)} 个要素"
+
+    def clipboard_paste(self) -> tuple[bool, str]:
+        """粘贴内部剪贴板到活动图层（M5-B；目标须编辑会话，门禁复查）。
+
+        字段映射：schema 交集（目标 schema 缺失的键丢弃并注明）；源/目标
+        CRS 都声明且不同 → 拒绝（不静默重投影）。
+        """
+        clipboard = getattr(self, "_feature_clipboard", None)
+        if not clipboard:
+            return False, "剪贴板为空"
+        source_layer_id, source_crs, entries = clipboard
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "粘贴需要先开始编辑"
+        target_crs = str(getattr(layer, "crs", "") or "")
+        if source_crs and target_crs and source_crs != target_crs:
+            return False, (
+                f"源/目标坐标系不同（{source_crs} → {target_crs}），"
+                "不静默重投影——请改目标层坐标或分层粘贴")
+        schema = layer.schema or {}
+        allowed = set(schema.keys()) if schema else None
+        dropped: set[str] = set()
+        with session.edit_source("paste_features(command)"):
+            for geometry, attributes in entries:
+                mapped = {}
+                for key, value in (attributes or {}).items():
+                    if allowed is None or key in allowed:
+                        mapped[key] = value
+                    else:
+                        dropped.add(key)
+                session.add_feature(VectorFeature(
+                    feature_id=f"f{new_feature_id('feature')}",
+                    geometry=geometry,
+                    attributes=mapped,
+                ))
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        message = f"已粘贴 {len(entries)} 个要素"
+        if dropped:
+            message += f"（丢弃字段：{'、'.join(sorted(dropped))}）"
+        return True, message
+
+    def trim_extend_selection(self, op_id: str, boundary: dict,
+                                *, keep: str = "inside",
+                                max_extend: float = 1e9) -> tuple[bool, str]:
+        """修剪/延伸选集（V12 M5-A1 trim/extend）：选集线按 boundary 裁剪/延长。
+
+        boundary = boundary 要素的 GeoJSON geometry（交互由右键 element
+        定位的第二要素或当前图层的其余选中要素提供）。
+        """
+        from paleo_workbench.mapping import geometry_operations as geo_ops
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        with session.edit_source(f"{op_id}(command)"):
+            changed = 0
+            for feature_id in sorted(layer.selection):
+                feature = session.feature(feature_id)
+                geometry = feature.as_record()["geometry"]
+                try:
+                    if op_id == "trim_line":
+                        new_geometry = geo_ops.trim_line(
+                            geometry, boundary, keep=keep)
+                    elif op_id == "extend_line":
+                        new_geometry = geo_ops.extend_line_to_boundary(
+                            geometry, boundary, max_extend=max_extend)
+                    else:
+                        return False, f"未知命令 {op_id}"
+                except Exception:
+                    continue
+                session.set_geometry(feature_id, new_geometry)
+                changed += 1
+        if changed == 0:
+            return False, "选中要素无法按该边界修剪/延伸"
+        self._topology.refresh_error_count(layer)
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return True, f"已应用{op_id}（{changed} 个要素）"
+
+    def snap_geometries(self, *, tolerance: float | None = None) -> tuple[bool, str]:
+        """批量捕捉对齐（V12 M5-A1）：选集顶点逐个吸附到捕捉命中处。
+
+        容差缺省 = 全局容差 × 视图比例（_tolerance()，与 _snap 一致）。
+        """
+        from paleo_workbench.mapping import map_tools as _mt
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        canvas = self._canvas
+        mupp = canvas.map_units_per_pixel if canvas is not None else 1.0
+        tol = max(1e-12, float(tolerance if tolerance is not None else self._tolerance()))
+        snapper = self._snapping
+
+        def _snap_vertex(point):
+            try:
+                return snapper.snap(
+                    (float(point[0]), float(point[1])),
+                    tolerance=tol,
+                    layers=[layer],
+                    map_units_per_pixel=mupp,
+                )
+            except Exception:
+                return point
+
+        tool = _mt.SnapGeometriesTool(session, snap_vertex=_snap_vertex)
+        attached = getattr(session, "layer", None)
+        if attached is None:
+            object.__setattr__(session, "layer", layer)
+            try:
+                changed = tool.run()
+            finally:
+                try:
+                    delattr(session, "layer")
+                except Exception:
+                    pass
+        else:
+            changed = tool.run()
+        if not changed:
+            return False, "选集无人可吸附"
+        self._topology.refresh_error_count(layer)
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return True, "已把选中要素吸附到捕捉命中"
+
+    def selection_geometry_op(self, op_id: str, **params) -> tuple[bool, str]:
+        """选择集几何算子（V12 M5-A2）：reverse_line / simplify / smooth /
+        offset_curve——把选中要素（线/面）写入新几何（单宏，可撤销）。
+
+        算子实现经 ``geometry_operations``（桥优先、Shapely 回落），会话
+        ``set_geometry`` 落写——与 split/merge 同一编辑权威与撤销语义。
+        """
+        from paleo_workbench.mapping import geometry_operations as geo_ops
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        changed = 0
+        with session.edit_source(f"{op_id}(command)"):
+            for feature_id in sorted(layer.selection):
+                feature = session.feature(feature_id)
+                geometry = feature.as_record()["geometry"]
+                try:
+                    if op_id == "reverse_line":
+                        new_geometry = geo_ops.reverse_geometry(geometry)
+                    elif op_id == "simplify_feature":
+                        new_geometry = geo_ops.simplify(
+                            geometry, float(params.get("tolerance", 0.5))).geometry
+                    elif op_id == "smooth_feature":
+                        new_geometry = geo_ops.smooth(
+                            geometry,
+                            int(params.get("iterations", 1)),
+                            float(params.get("offset", 0.25))).geometry
+                    elif op_id == "offset_curve":
+                        new_geometry = geo_ops.offset_curve(
+                            geometry, float(params.get("distance", 1.0))).geometry
+                    else:
+                        return False, f"未知算子 {op_id}"
+                except Exception:
+                    continue
+                session.set_geometry(feature_id, new_geometry)
+                changed += 1
+        if changed == 0:
+            return False, "选中要素无法应用该算子"
+        self._topology.refresh_error_count(layer)
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return changed > 0, f"已应用{op_id}（{changed} 个要素）"
 
     def _native_geometry_command(self, command_id: str, layer,
                                  curve: dict | None = None) -> tuple[bool, str]:
@@ -3410,6 +3833,10 @@ class CompositeEditController(QObject):
             "collect_ready": self._selection_geometry_facts(layer, session)[1],
             "snapping_enabled": self._snapping.enabled,
             "topology_enabled": self._topology.enabled,
+            # V12 M1：编辑期联动开关（三个既有子能力 → 工具条勾选态）。
+            "avoid_intersections_enabled": bool(self.avoid_intersections_enabled),
+            "tracing_enabled": bool(self.tracing_enabled),
+            "vertex_all_layers": bool(self.vertex_all_layers),
             # V10 M3：捕捉配置事实（呈现详情——容差/模式/角色推荐态）。
             # 全部读 SnappingService 既有权威（全局值 + per-layer 覆盖通道），
             # 不建第二配置源；采集 O(1)。

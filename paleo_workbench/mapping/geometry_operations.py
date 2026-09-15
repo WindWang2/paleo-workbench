@@ -285,6 +285,119 @@ def buffer(geometry: dict, distance: float, segments: int = 8) -> GeometryResult
     return GeometryResult(_geojson(out.__geo_interface__), ENGINE_SHAPELY)
 
 
+def trim_line(line: dict, boundary: dict, *, keep: str = "inside") -> dict:
+    """修剪线（QGIS trim 同语义，V12 M5-A1）：line ∩ boundary。
+
+    ``keep="inside"`` = 保留 boundary 内部段（修掉外部悬挂）；
+    ``keep="outside"`` = 保留外部段（修掉内部）。返回裁剪后的 GeoJSON
+    geometry（intersection 结果；空 → ValueError）。
+    """
+    result = intersection(line, boundary)
+    if result.geometry.get("type") not in {"LineString", "MultiLineString"}:
+        raise ValueError("trim produced no line segments")
+    return result.geometry
+
+
+def extend_line_to_boundary(line: dict, boundary: dict, *,
+                            max_extend: float = 1e9) -> dict:
+    """延伸线到边界（QGIS extend 同语义，V12 M5-A1）。
+
+    把线的两个端点沿端边方向延长（最长 max_extend），取延长线与 boundary
+    第一交点；两侧都命中的延伸整条到边界。延长无命中 → ValueError。
+    """
+    from shapely.geometry import shape as _shape, mapping as _mapping
+
+    source = _shape(line)
+    if source.geom_type not in {"LineString", "MultiLineString"}:
+        raise ValueError("extend supports lines only")
+    target = _shape(boundary)
+
+    def _extend_one(coords):
+        import math as _math
+
+        xs = [list(pt) for pt in coords]
+        if len(xs) < 2:
+            return xs
+        out = xs[:]
+        # 两端各自沿端边方向延长
+        for end in (0, -1):
+            if end == 0:
+                tip, nxt = xs[0], xs[1]
+            else:
+                tip, nxt = xs[-1], xs[-2]
+            dx, dy = tip[0] - nxt[0], tip[1] - nxt[1]
+            length = _math.hypot(dx, dy)
+            if length <= 0.0:
+                continue
+            ray_end = [tip[0] + dx / length * max_extend,
+                       tip[1] + dy / length * max_extend]
+            from shapely.geometry import LineString as _LineString
+
+            ray = _LineString([tip, ray_end])
+            hit = ray.intersection(target.boundary if hasattr(target, "boundary") else target)
+            if hit.is_empty:
+                continue
+            # 取离 tip 最近的交点
+            nearest = None
+            best = None
+            for geom in (hit.geoms if hasattr(hit, "geoms") else [hit]):
+                for coord in getattr(geom, "coords", []):
+                    dist = _math.hypot(coord[0] - tip[0], coord[1] - tip[1])
+                    if best is None or dist < best:
+                        best = dist
+                        nearest = [coord[0], coord[1]]
+            if nearest is not None:
+                if end == 0:
+                    out[0] = nearest
+                else:
+                    out[-1] = nearest
+        return out
+
+    if source.geom_type == "LineString":
+        return {"type": "LineString", "coordinates": _extend_one(list(source.coords))}
+    return {"type": "MultiLineString",
+            "coordinates": [_extend_one(list(part.coords))
+                            for part in source.geoms]}
+
+
+def reverse_geometry(geometry: dict) -> dict:
+    """反转线/环方向（QGIS reverseLine 语义；递归反转坐标数组）。
+
+    LineString / MultiLineString / Polygon(环) / MultiPolygon 统一处理：
+    坐标序列倒序 + 保证环闭合（首尾相同）。写回原 dict 的新副本。
+    """
+    import copy as _copy
+
+    def _rev_points(points):
+        out = list(reversed([list(pt) for pt in points]))
+        if len(points) >= 2 and list(points[0]) == list(points[-1]):
+            # 原环闭合：反转后仍须闭合（新首 = 新尾）。
+            out = [out[0]] + out[1:] + [list(out[0])]
+        return out
+
+    def _walk(node):
+        if isinstance(node, list):
+            if node and isinstance(node[0], (int, float)):
+                return list(node)
+            if node and isinstance(node[0][0], (int, float)):
+                return _rev_points(node)
+            return [_walk(child) for child in node]
+        return node
+
+    out = _copy.deepcopy(geometry)
+    coords = out.get("coordinates")
+    geom_type = out.get("type", "")
+    if geom_type in {"LineString", "MultiLineString"}:
+        if geom_type == "LineString":
+            out["coordinates"] = list(reversed([list(pt) for pt in coords]))
+        else:
+            out["coordinates"] = [list(reversed([list(pt) for pt in part]))
+                                  for part in coords]
+    elif geom_type in {"Polygon", "MultiPolygon"}:
+        out["coordinates"] = _walk(coords)
+    return out
+
+
 def offset_curve(line: dict, distance: float) -> GeometryResult:
     native = _bridge_geometry()
     if native is not None:

@@ -202,3 +202,75 @@ def test_mirror_failures_collected_not_swallowed():
     assert ("bad", "boom-crs") in diags
     assert ("<tail>", "tail-boom") in diags
     assert failures, "failures stay surfaced on the return path too"
+
+
+def test_mirror_ledger_self_heals_when_bridge_layer_deleted():
+    """镜像对象在桥上被删后，台账不得把「缺数据」冻结成 no-op。
+
+    场景：源层发布过（台账有条目）→ 桥侧对象被删（clear_project_layers /
+    mock 链外删除）→ 下次发布 token 全匹配，若无存在性校验会 no-op，
+    图层永久隐身；副本（新 id 无台账）却正常。存在性探针失败必须作废
+    条目、走完整 upsert 重建镜像。
+    """
+    from types import SimpleNamespace
+
+    from paleo_workbench.mapping import qgis_mirror
+    from paleo_workbench.mapping.qgis_mirror import mirror_snapshot_to_stack
+
+    def _layer(lid):
+        return SimpleNamespace(
+            id=lid, name=lid, crs="EPSG:4326", visible=True, opacity=1.0,
+            layer_type="vector", metadata={}, style={}, data_revision=1,
+            features=[{
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [1.0, 2.0]},
+                "properties": {},
+            }],
+        )
+
+    class FakeStack:
+        def __init__(self):
+            self.deleted = set()
+            self.upserts = []
+
+        def upsert_mirror_layer(self, doc_id, *args, **kwargs):
+            self.upserts.append(doc_id)
+            self.deleted.discard(doc_id)
+            return "qgis-" + doc_id
+
+        def mirror_features_json(self, doc_id, limit=0):
+            # 与真桥一致：缺失层返回 exists:false（不抛异常）。
+            import json as _json
+            return _json.dumps({"exists": doc_id not in self.deleted})
+
+        def mirror_provider_facts(self, doc_id):
+            # 真桥自省面：缺失/失效层都如实上报（不存在返回 None 等价体）。
+            if doc_id in self.deleted:
+                return {"exists": False, "is_valid": False}
+            return {"exists": True, "is_valid": True}
+
+        def remove_mirror_layers_except(self, seen):
+            pass
+
+        def set_mirror_layer_order(self, seen):
+            pass
+
+        def refresh_canvas(self, addr):
+            pass
+
+    stack = FakeStack()
+    snap = SimpleNamespace(project_crs="EPSG:4326", layers=[_layer("src")])
+    diags: list = []
+
+    # 第一次发布：建台账。
+    mirror_snapshot_to_stack(stack, 0, snap, diags)
+    assert stack.upserts == ["src"]
+
+    # 模拟桥侧对象被删（ledger 不知情）。
+    stack.deleted.add("src")
+    stack.upserts.clear()
+
+    # 第二次发布：存在性探针必须让条目失效并重建。
+    mirror_snapshot_to_stack(stack, 0, snap, diags)
+    assert stack.upserts == ["src"], \
+        "deleted mirror layer must be re-upserted, not frozen as no-op"

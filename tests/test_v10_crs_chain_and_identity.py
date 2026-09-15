@@ -63,6 +63,23 @@ def test_entry_unknown_canvas_allows_when_runtime_not_capable():
     assert verdict.allowed
 
 
+def test_entry_unknown_canvas_allows_projected_layer():
+    """投影（非经纬度）图层 + 画布 authid 未知 = 合法，不是故障。
+
+    本地/自定义投影（如 proj4 tmerc）没有 EPSG authid：桥的
+    ``canvasDestinationCrs`` 回读 ``authid()`` 得空串，被当成「画布未知」。
+    但此时图层与画布都按同一套投影米渲染（no-OTF 恒等），坐标帧一致，
+    不存在错帧风险。fail-closed 只保留给经纬度图层（画布未知时经纬度
+    数据会被按米错绘）。
+    """
+    proj4 = ("+proj=tmerc +lat_0=0 +lon_0=0 +k=1 +x_0=0 +y_0=0 "
+             "+ellps=WGS84 +units=m +no_defs")
+    verdict = evaluate_edit_entry(
+        [LayerCrsFacts("draft-1", crs=proj4)],
+        canvas_crs="", runtime_crs_capable=True)
+    assert verdict.allowed
+
+
 def test_entry_storage_undeclared_allows_raw_frame():
     assert evaluate_edit_entry(
         [LayerCrsFacts("draft-1", crs="")],

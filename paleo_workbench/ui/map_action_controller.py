@@ -43,7 +43,8 @@ class MapActionController(QObject):
     _TOOL_IDS = (
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon", "move_feature", "vertex",
-        "reshape", "add_ring", "add_part",
+        "reshape", "add_ring", "add_part", "fault_cut", "boundary_reshape",
+        "add_rectangle", "add_circle", "add_arc", "add_regular_polygon",
     )
 
     #: 命令面动作（区别于画布 MapTool：触发一次命令，不置 current_tool）。
@@ -55,7 +56,13 @@ class MapActionController(QObject):
         "save_edits", "rollback", "delete_selected",
         "undo", "redo", "split", "merge",
         "duplicate_selected", "explode_multipart", "collect_multipart",
-        "snapping", "topology", "cancel",
+        "delete_ring", "delete_part", "reverse_line", "simplify_feature",
+        "smooth_feature", "offset_curve",
+        "rotate_feature", "scale_feature", "cut_features", "copy_features",
+        "paste_features", "snap_geometries",
+        "trim_line", "extend_line",
+        "snapping", "avoid_intersections", "tracing", "vertex_scope",
+        "topology", "cancel",
     )
 
     #: 词表单一来源（V8 M4：action_help.TOOL_LABELS；帮助/QAction 同名）。
@@ -108,7 +115,10 @@ class MapActionController(QObject):
         shortcut_registry = dict(TOOL_SHORTCUTS)
         for action_id in self._COMMAND_IDS:
             shortcut = shortcut_registry.get(action_id, "")
-            action = self._action(action_id, checkable=action_id in {"snapping", "topology", "toggle_editing"}, shortcut=shortcut)
+            action = self._action(action_id, checkable=action_id in {
+                "snapping", "topology", "toggle_editing",
+                "avoid_intersections", "tracing", "vertex_scope",
+            }, shortcut=shortcut)
             action.triggered.connect(lambda checked=False, name=action_id: self.command_requested.emit(name))
         self.actions["pan"].setChecked(True)
         # V7 专业分组扩展（Layer / Symbology / Factor / QA / Layout·Export）。

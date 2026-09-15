@@ -271,6 +271,9 @@ class PwbVertexTool : public PwbEditPickTool {
   void beginSharedDrag(const QgsPointXY& anchor, std::vector<VertexRef> shared);
   void beginTranslateDrag(const QgsPointXY& anchor,
                           std::vector<VertexRef> selected);
+  // V12 M2-1 段移动：命中段 → 两端点（含跨层共位节点）一次平移拖动。
+  // 命中（已开始段拖动）→ true；未命中段 → false（调用方落框选分支）。
+  bool beginSegmentDrag(const QgsPointXY& mapPoint);
   void finishTranslateDrag(const QgsPointXY& target);
   void startBoxSelect(const QgsPointXY& start);
   void updateBoxSelect(const QgsPointXY& now);
@@ -313,6 +316,10 @@ class PwbVertexTool : public PwbEditPickTool {
   QgsPointXY box_start_;
   std::unique_ptr<QgsRubberBand> box_rubber_;
   std::vector<VertexRef> boxed_selection_;
+  // V12 M2-3：最近一次 hover 光标的地图位置（连续 Delete 用——删除成功后
+  // 在同一光标位置对最新缓冲重建 hover，免去"晃动鼠标找回悬停"）。
+  QgsPointXY last_cursor_map_;
+  bool has_last_cursor_ = false;
 };
 
 class PwbMoveTool : public PwbEditPickTool {

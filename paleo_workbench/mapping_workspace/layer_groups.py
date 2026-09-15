@@ -370,7 +370,11 @@ def classify_layer_for_migration(layer) -> tuple[LayerRole, str, str]:
     5. 全部未命中 → LEGACY_UNCLASSIFIED（进兜底组，不猜名字）。
     """
     metadata = dict(getattr(layer, "metadata", None) or {})
-    explicit = layer_role_from_value(metadata.get("layer_role"))
+    # 显式角色两键都认：V5 工程持久化写 "layer_role"，V9 起快照层携带的是
+    # "role"（snapshot_layers 产物）——只认前者会让带角色的快照层（最典型：
+    # 复制图层继承了源角色）被误判进 LEGACY 兜底组。
+    explicit = layer_role_from_value(
+        metadata.get("layer_role") or metadata.get("role"))
     if explicit is not None:
         return explicit, home_group_for_role(explicit), ""
 

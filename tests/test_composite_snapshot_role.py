@@ -128,3 +128,70 @@ def test_create_role_layer_funnel_registers_edit_role() -> None:
     assert stage.state.membership(layer_id).role == LayerRole.SEISMIC_FACIES_PREDICTION
     snapshot = next(snap for snap in controller.snapshot_layers() if snap.id == layer_id)
     assert snapshot.metadata.get("role") == "seismic_facies_prediction"
+
+
+def test_duplicate_prediction_copy_becomes_interpretation_draft() -> None:
+    """RAW 预测相的副本必须落到「人工解释与修编」，不能坠进未分类兜底组。
+
+    USER_GENERAL 的 home 就是 LEGACY 兜底组（z 序垫底）：副本与源同几何
+    同样式，被源完全遮盖——画布上看起来就是「复制出来的图层不显示」。
+    """
+    from paleo_workbench.mapping_workspace.controller import MappingStageController
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+
+    controller = _controller()
+    stage = MappingStageController()
+
+    class _Composite:
+        edit_controller = controller
+        stage_controller = stage
+        _project = object()
+
+        class status_message:
+            messages: list[str] = []
+
+            @classmethod
+            def emit(cls, text: str) -> None:
+                cls.messages.append(text)
+
+    host = _Composite()
+    layer = controller.create_layer(
+        "地震预测相", "polygon", role=LayerRole.SEISMIC_FACIES_PREDICTION)
+    stage.group_controller.register_layer(
+        layer.id, LayerRole.SEISMIC_FACIES_PREDICTION)
+    CompositeDocument._duplicate_vector_layer(host, layer.id)
+
+    copies = [l for l in controller._layers.values() if l.name.endswith(" 副本")]
+    assert len(copies) == 1
+    record = stage.state.membership(copies[0].id)
+    assert record is not None
+    assert record.role == LayerRole.INITIAL_FACIES_DRAFT
+    from paleo_workbench.mapping_workspace.layer_groups import home_group_for_role
+    assert home_group_for_role(record.role) == "phase1.interpretation"
+
+
+def test_duplicate_legacy_source_copy_stays_unclassified() -> None:
+    """源本身无角色（LEGACY）时不硬登记——副本走保守归类兜底。"""
+    from paleo_workbench.mapping_workspace.controller import MappingStageController
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+
+    controller = _controller()
+    stage = MappingStageController()
+
+    class _Composite:
+        edit_controller = controller
+        stage_controller = stage
+        _project = object()
+
+        class status_message:
+            @classmethod
+            def emit(cls, text: str) -> None:
+                pass
+
+    host = _Composite()
+    layer = controller.create_layer("手绘", "line")
+    CompositeDocument._duplicate_vector_layer(host, layer.id)
+
+    copies = [l for l in controller._layers.values() if l.name.endswith(" 副本")]
+    assert len(copies) == 1
+    assert stage.state.membership(copies[0].id) is None

@@ -275,9 +275,15 @@ class VectorStyle:
 STYLE_LIBRARY: dict[str, VectorStyle] = {
     "facies": VectorStyle(
         fill="#6c8ebf", stroke="#26364d", stroke_width=1.0,
+        # V12 渲染预设：相带面标注 = 相名（分类样式按其分类字段覆盖）。
+        labels=TextStyle(field="facies", size=9.0, color="#1f2937",
+                         halo_color="#f8f9fa", halo_width=1.0),
     ),
     "well": VectorStyle(
         fill="#22b8a7", stroke="#182431", marker=MarkerSymbol.WELL, marker_size=7.0,
+        # V12 渲染预设：井位标注 = 井名（模板字段 name）。
+        labels=TextStyle(field="name", size=9.0, color="#1f2937",
+                         halo_color="#f8f9fa", halo_width=1.0),
     ),
     "contour": VectorStyle(
         fill="transparent", stroke="#f08c46", stroke_width=1.0,
@@ -285,9 +291,15 @@ STYLE_LIBRARY: dict[str, VectorStyle] = {
     ),
     "formation_boundary": VectorStyle(
         fill="transparent", stroke="#e8590c", stroke_width=2.0, line_pattern=LinePattern.SOLID,
+        # V12 渲染预设：成图范围标注 = 范围名称。
+        labels=TextStyle(field="name", size=9.0, color="#e8590c",
+                         halo_color="#f8f9fa", halo_width=1.0),
     ),
     "fault": VectorStyle(
         fill="transparent", stroke="#e03131", stroke_width=2.0, line_pattern=LinePattern.FAULT,
+        # V12 渲染预设：断层标注 = 断层名称（红字压长短线，制图惯例）。
+        labels=TextStyle(field="name", size=9.0, color="#c92a2a",
+                         halo_color="#f8f9fa", halo_width=1.0),
     ),
     "line": VectorStyle(
         fill="transparent", stroke="#f08c46", stroke_width=2.0,

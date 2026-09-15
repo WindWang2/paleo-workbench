@@ -48,6 +48,7 @@ def _small_button_size() -> object:
 
 from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
+    DataStage,
     IntegrityState,
     VersionView,
     asset_view_from_object,
@@ -595,6 +596,21 @@ class InspectorPanel(QFrame):
         tag_row.addWidget(self.version_tag_remove_btn)
         tag_row.addStretch()
         version_layout.addWidget(self.version_tags_bar)
+
+        # RAW → DERIVED: derive an editable copy of the selected RAW asset.
+        # Same lifecycle action the asset context menu exposes
+        # (asset_context_menu "ctx_create_derived"); wired here so the inspector
+        # is a first-class entry point instead of the context menu only.
+        # `create_derived_requested` is consumed by DataPage._create_derived_copy.
+        self.create_derived_btn = QPushButton("创建派生副本")
+        self.create_derived_btn.setObjectName("SecondaryButton")
+        style.track_control_height(self.create_derived_btn)
+        self.create_derived_btn.clicked.connect(self._on_create_derived_clicked)
+        version_layout.addWidget(self.create_derived_btn)
+        self.create_derived_hint = QLabel("")
+        self.create_derived_hint.setObjectName("WorkFieldLabel")
+        self.create_derived_hint.setWordWrap(True)
+        version_layout.addWidget(self.create_derived_hint)
         version_layout.addStretch(1)
 
         self.tabs.addTab(version_tab, "版本")
@@ -661,6 +677,7 @@ class InspectorPanel(QFrame):
             self.tabs.hide()
             self.empty_label.show()
             self.title_label.setText("数据资产检查器")
+            self._sync_derived_controls(None)
             return
 
         self.empty_label.hide()
@@ -826,6 +843,7 @@ class InspectorPanel(QFrame):
         )
         self.versions_table.setMaximumHeight(min(max(height, 60), 340))
         self._sync_version_tag_controls()
+        self._sync_derived_controls(view)
 
     # --- Version tags (F6) ---------------------------------------------------
 
@@ -854,6 +872,37 @@ class InspectorPanel(QFrame):
         self.version_tag_remove_btn.setEnabled(
             has_version and bool(self._selected_version.tags)
         )
+
+    # --- Derived copy (RAW → DERIVED) ----------------------------------------
+
+    def _sync_derived_controls(self, view: AssetView | None = None) -> None:
+        """派生副本只有 RAW 阶段资产才有意义。
+
+        与资产右键菜单同一门禁（``asset_context_menu`` 只在
+        ``view.stage == DataStage.RAW`` 时挂出 ``ctx_create_derived``）。
+        非 RAW 时按钮置灰并说明原因，避免点了没反应。
+        """
+        resolved = view if view is not None else self._current_view
+        if resolved is None:
+            self.create_derived_btn.setEnabled(False)
+            self.create_derived_hint.setText("")
+            return
+        is_raw = resolved.stage == DataStage.RAW
+        self.create_derived_btn.setEnabled(is_raw)
+        if is_raw:
+            self.create_derived_hint.setText(
+                "从该 RAW 资产派生一个可编辑副本：原件保持不变，"
+                "副本落到「派生数据 (DERIVED)」阶段并钉住来源版本。"
+            )
+        else:
+            self.create_derived_hint.setText(
+                f"当前为「{stage_label(resolved.stage)}」阶段，不可再派生；"
+                "派生副本只对 RAW 阶段资产开放。"
+            )
+
+    def _on_create_derived_clicked(self) -> None:
+        if self._current_asset is not None:
+            self.create_derived_requested.emit(self._current_asset)
 
     def _on_version_tag_add(self) -> None:
         version = self._selected_version

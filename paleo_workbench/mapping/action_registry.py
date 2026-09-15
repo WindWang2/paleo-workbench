@@ -77,6 +77,8 @@ def _specs() -> dict[str, ActionSpec]:
         "symbology": "rb-colorbar", "style_manager": "rb-settings",
         "factor_workbench": "rb-grid", "factor_overlay": "btn-contour-draft",
         "qa_run": "rb-qc", "map_product_assemble": "rb-finalize",
+        "cut_features": "delete_selected", "copy_features": "duplicate_selected",
+        "paste_features": "duplicate_selected",
         "map_export": "rb-export", "repair_geometry": "btn-health",
     }
     # 画布交互工具（checked ← current_tool；与求值器 _CHECKED_CANVAS_TOOLS
@@ -86,10 +88,15 @@ def _specs() -> dict[str, ActionSpec]:
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon",
         "move_feature", "vertex", "reshape", "add_ring", "add_part",
+        "fault_cut", "boundary_reshape",
+        "add_rectangle", "add_circle", "add_arc", "add_regular_polygon",
     }
     # 原生专属（桥缺失/降级时 disabled + 原因；不隐藏能力假象）。
     # V10（#1255）：与求值器 _NATIVE_ONLY_TOOLS 同集，两表由测试互钉。
-    native_only = {"style_manager", "reshape", "add_ring", "add_part"}
+    native_only = {
+        "style_manager", "reshape", "add_ring", "add_part",
+        "fault_cut", "boundary_reshape",
+    }
     # 写风险动作（修改图层/工程数据；Agent WRITE 授权与评审语义）。
     # V10（#1255）：duplicate_selected / add_ring / add_part /
     # explode_multipart / collect_multipart 也是数据改写作，此前被误登记
@@ -102,7 +109,14 @@ def _specs() -> dict[str, ActionSpec]:
         "split", "merge", "repair_geometry", "undo", "redo", "topology",
         "layer_new", "factor_overlay", "map_product_assemble",
         "duplicate_selected", "add_ring", "add_part", "explode_multipart",
-        "collect_multipart",
+        "collect_multipart", "fault_cut", "boundary_reshape",
+        "add_rectangle", "add_circle", "snap_geometries",
+        "delete_ring", "delete_part", "reverse_line", "simplify_feature",
+        "smooth_feature", "offset_curve",
+        "rotate_feature", "scale_feature", "cut_features", "copy_features",
+        "paste_features",
+        # V12 M5-A1 shape/修剪延伸（写动作，不得标 read）。
+        "add_arc", "add_regular_polygon", "trim_line", "extend_line",
     }
     # 选择集动作（改选择集，不改数据）。
     selection_tools = {
@@ -123,6 +137,8 @@ def _specs() -> dict[str, ActionSpec]:
         "select_all", "invert_selection", "clear_selection", "toggle_editing",
         "save_edits", "snapping", "topology", "layer_properties",
         "attribute_table",
+        # V12 M1：编辑期联动开关（地图右键即可切换，与工具条同一求值器）。
+        "avoid_intersections", "tracing", "vertex_scope",
     }
     specs: dict[str, ActionSpec] = {}
     for tool_id in TOOL_IDS:
