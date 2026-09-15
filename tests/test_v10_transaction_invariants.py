@@ -51,7 +51,8 @@ def test_every_command_type_has_delta_operation_mapping():
         "add_feature", "duplicate_feature", "delete_feature", "move_feature",
         "set_vertex", "insert_vertex", "delete_vertex", "change_attribute",
         "split_feature", "merge_features", "set_geometry", "add_ring",
-        "delete_ring", "add_part", "delete_part", "move_part", "compound",
+        "delete_ring", "add_part", "delete_part", "move_part", "fill_ring",
+        "compound",
     }
     assert set(_COMMAND_OPERATION) <= known_types
     unmapped = known_types - set(_COMMAND_OPERATION) - {"compound"}

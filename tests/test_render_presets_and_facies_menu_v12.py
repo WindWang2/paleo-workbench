@@ -177,13 +177,20 @@ def test_geotopo_tools_registered_and_gated():
     verdict = evaluate_tool("fault_cut", ctx)
     assert verdict.enabled is False and "面图层" in verdict.disabled_reason
 
-    # 面层 + 编辑会话 + 原生 + 桥 kind 声明 → 可用（flags 取真桥 manifest，
-    # 顺带钉住 C++ 清单确实声明了 faultCut/boundaryReshape）。
-    import qgis_render_bridge as bridge
-    native_tools = set(bridge.capability_manifest()["native_tools"])
-    flags = {f"qgis.native_tool.{kind}" for kind in native_tools}
-    assert "qgis.native_tool.faultCut" in flags
-    assert "qgis.native_tool.boundaryReshape" in flags
+    # 面层 + 编辑会话 + 原生 + 桥 kind 声明 → 可用。
+    # 主 Tests 矩阵无 qgis_render_bridge：用契约 flags 走 gating；桥在位时
+    # 额外钉住 C++ manifest 声明了 faultCut/boundaryReshape。
+    try:
+        import qgis_render_bridge as bridge
+    except ImportError:
+        bridge = None
+    if bridge is not None:
+        native_tools = set(bridge.capability_manifest()["native_tools"])
+        flags = {f"qgis.native_tool.{kind}" for kind in native_tools}
+        assert "qgis.native_tool.faultCut" in flags
+        assert "qgis.native_tool.boundaryReshape" in flags
+    else:
+        flags = {"qgis.native_tool.faultCut", "qgis.native_tool.boundaryReshape"}
     ok_ctx = ToolContext(
         project_open=True, active_layer_id="L1", active_layer_kind="polygon",
         editing=True, native_canvas_available=True, capability_flags=flags,

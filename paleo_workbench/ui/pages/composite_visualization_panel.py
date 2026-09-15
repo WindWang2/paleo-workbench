@@ -27,7 +27,8 @@ class _SectionCursorBand(QWidget):
         super().__init__(parent)
         self.setObjectName("SectionCursorBand")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setFixedWidth(6)
+        self.setMinimumWidth(6)
+        self.setMaximumWidth(6)
         self.hide()
 
 

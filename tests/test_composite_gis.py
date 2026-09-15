@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.qgis_support import QGIS_SKIP_REASON, qgis_bridge_available
-
+from paleo_workbench.mapping.edit_session_set import reset_session_set
+from paleo_workbench.mapping.qgis_mirror import reset_publish_ledger
 from paleo_workbench.mapping.vector_layer import VectorFeature
 from paleo_workbench.project.domain import WellEntity
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
@@ -418,31 +418,62 @@ def test_topology_gate_blocks_save_on_invalid_geometry(qtbot, tmp_path, monkeypa
     assert not controller.editing
 
 
+def _attach_fake_native_stack(doc, controller):
+    """Main Tests has no qgis_render_bridge — attach FakeCheckerStack so the
+    product native-session path (topo gate / split) still runs without the
+    C++ bridge. Prefer product path over ``@pytest.mark.qgis`` skip-only.
+    """
+    canvas = getattr(doc, "canvas", None)
+    if canvas is None:
+        return None
+    existing = getattr(canvas, "stack", None)
+    if existing is not None and hasattr(canvas, "canvas_address"):
+        # Real QGIS shim already present (qgis-renderer leg).
+        return existing
+    from tests.test_topo_m4_checker import FakeCheckerStack
+
+    reset_session_set()
+    reset_publish_ledger()
+    stack = FakeCheckerStack()
+    canvas.stack = stack
+    # UnifiedMapCanvas has no canvas_address; native eligibility requires it.
+    if not hasattr(canvas, "canvas_address"):
+        canvas.canvas_address = 0
+    return stack
+
+
 def _native_layer_with_bowtie(doc, controller, name="相带"):
-    """真实原生会话 + 无效几何（自相交蝴蝶结）基线要素。
+    """原生会话 + 无效几何（自相交蝴蝶结）基线要素。
+
+    无 QGIS 桥时挂 FakeCheckerStack（假原生面），使门禁/分割产品路径在
+    main Tests 上仍可跑通——不是 skip-only。
 
     导入后必须先同步重组（stage_actions 同款）：镜像层是编辑缓冲的事实
     源，基线要素在发布前不进镜像。
     """
+    stack = _attach_fake_native_stack(doc, controller)
     layer = controller.create_layer(name, "polygon", template="facies")
-    controller.import_layer_features(layer.id, [VectorFeature(
-        "bad",
-        {
-            "type": "Polygon",
-            "coordinates": [
-                [[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0], [0.0, 0.0]]
-            ],
-        },
-    )])
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0], [0.0, 0.0]]
+        ],
+    }
+    controller.import_layer_features(layer.id, [VectorFeature("bad", bowtie)])
     doc._sync_composition_now()
+    # Seed mirror buffer so FakeChecker / bridge-style topo sees the bowtie.
+    if stack is not None and isinstance(getattr(stack, "mirror", None), dict):
+        stack.mirror[layer.id] = [{
+            "id": "bad",
+            "geometry": bowtie,
+            "properties": {"__pwb_fid": "bad"},
+        }]
     controller.set_active_layer(layer.id)
     controller.start_editing()
     assert controller.native_editing.is_open(layer.id), "应进入原生会话"
     return layer
 
 
-@pytest.mark.qgis
-@pytest.mark.skipif(not qgis_bridge_available(), reason=QGIS_SKIP_REASON)
 def test_topo_native_gate_blocks_save(qtbot, tmp_path):
     """原生会话：门禁开 → 无效几何阻断保存，会话保持打开。"""
     doc = CompositeDocument(_project(tmp_path))
@@ -455,8 +486,6 @@ def test_topo_native_gate_blocks_save(qtbot, tmp_path):
     assert controller.native_editing.is_open(layer.id), "阻断后会话必须保持打开"
 
 
-@pytest.mark.qgis
-@pytest.mark.skipif(not qgis_bridge_available(), reason=QGIS_SKIP_REASON)
 def test_topo_native_gate_off_allows_save(qtbot, tmp_path):
     """原生会话：门禁关 → 同一无效几何保存放行（补此前缺失的方向）。"""
     doc = CompositeDocument(_project(tmp_path))
@@ -469,8 +498,6 @@ def test_topo_native_gate_off_allows_save(qtbot, tmp_path):
     assert layer.feature_ids() == ("bad",), "提交必须把要素写回宿主基线"
 
 
-@pytest.mark.qgis
-@pytest.mark.skipif(not qgis_bridge_available(), reason=QGIS_SKIP_REASON)
 def test_split_native_reports_selection_first(qtbot, tmp_path):
     """原生分割：先要选中要素；有选中则转入切线数字化（两步式）。"""
     doc = CompositeDocument(_project(tmp_path))

@@ -122,10 +122,7 @@ class FakeCheckerStack:
     def set_committed_callback(self, canvas, callback):
         self.committed_callback = callback
 
-    def run_geometry_checks(self, canvas, config_json):
-        self.calls.append(("check", json.loads(config_json)
-                           if isinstance(config_json, str) else config_json))
-        return json.dumps({"errors": list(self.check_errors)})
+    # run_geometry_checks defined below with auto is_valid
 
     def fix_geometry_error(self, canvas, error_id, method):
         self.fixed.append((str(error_id), int(method)))
@@ -150,6 +147,61 @@ class FakeCheckerStack:
 
     def canvas_extent(self, canvas):
         return list(self.extent)
+
+    # -- M3 split / map-tool surface (main-Tests fake-native path) ----------
+
+    def set_map_tool(self, canvas, tool_id):
+        self.calls.append(("set_map_tool", str(tool_id)))
+        return ""
+
+    def split_mirror_features(self, doc_id, curve_json, feature_ids_json):
+        """Stub: selection+curve accepted; no geometry mutation needed for gate tests."""
+        self.calls.append(("split", str(doc_id), curve_json, feature_ids_json))
+        return ""
+
+    def run_geometry_checks(self, canvas, config_json):
+        self.calls.append(("check", json.loads(config_json)
+                           if isinstance(config_json, str) else config_json))
+        if self.check_errors:
+            return json.dumps({"errors": list(self.check_errors)})
+        # Auto is_valid from mirror so bowtie/self-intersect features block
+        # save on the fake-native path the same way a real bridge would.
+        errors: list[dict] = []
+        try:
+            from shapely.geometry import shape
+            from shapely.validation import explain_validity
+        except Exception:
+            shape = None  # type: ignore[assignment]
+            explain_validity = None  # type: ignore[assignment]
+        cfg = json.loads(config_json) if isinstance(config_json, str) else dict(config_json or {})
+        layer_ids = [str(x) for x in (cfg.get("layer_ids") or [])]
+        eid = 0
+        for layer_id in layer_ids:
+            for feature in self.mirror.get(layer_id, []):
+                if not isinstance(feature, dict):
+                    continue
+                geom = feature.get("geometry") or {}
+                if not geom or shape is None:
+                    continue
+                try:
+                    g = shape(geom)
+                except Exception:
+                    continue
+                if g.is_valid:
+                    continue
+                msg = explain_validity(g) if explain_validity else "invalid geometry"
+                errors.append({
+                    "id": str(eid),
+                    "rule": "is_valid",
+                    "layer_id": layer_id,
+                    "feature_id": str(feature.get("id") or ""),
+                    "message": str(msg),
+                    "fixable": True,
+                    "bbox": list(g.bounds) if hasattr(g, "bounds") else [],
+                    "methods": [{"id": 0, "name": "MakeValid", "description": "修复"}],
+                })
+                eid += 1
+        return json.dumps({"errors": errors})
 
 
 def _layer(layer_id="draft-1", features=("a",)) -> VectorLayer:

@@ -1,0 +1,5 @@
+#WellHead File From SMI
+#Name X Y KB TotalDepth BottomX BottomY WellType
+A1 100.0 500.0 0 2000 100 500 0
+B2 130.0 480.0 0 2100 130 480 0
+C3 125.0 525.0 0 2200 125 525 0

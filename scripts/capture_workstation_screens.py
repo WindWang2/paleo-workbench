@@ -103,6 +103,15 @@ def main() -> int:
         str(settings_dir),
     )
     app = QApplication.instance() or QApplication([])
+    # Offscreen CI: pyqtgraph GLViewWidget may still be constructed by hidden
+    # sibling pages; paintGL without a context SIGSEGVs (see main.py). Install
+    # the same guard the production entry uses before any window is shown.
+    try:
+        from paleo_workbench.main import _install_glview_paint_guard
+        _install_glview_paint_guard()
+    except Exception:
+        pass
+
     # 用生产顶层窗口（dock_host = 窗口本体 + setCentralWidget），
     # 孤立 AppShell 没有 dock 宿主装配，抓不到真实布局。
     from paleo_workbench.app import PaleoWorkbenchWindow

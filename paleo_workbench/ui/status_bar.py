@@ -8,6 +8,11 @@ from paleo_workbench.ui import style, tokens
 
 def _probe_opengl() -> bool:
     """True only if an offscreen GL context can actually be created."""
+    import os
+    # QT offscreen QPA: QOpenGLWidget/context is unsupported; probing still
+    # emits "QOpenGLWidget is not supported" and has crashed capture shots.
+    if os.environ.get("QT_QPA_PLATFORM", "") == "offscreen":
+        return False
     try:
         from PySide6.QtGui import QOffscreenSurface, QOpenGLContext, QSurfaceFormat
     except Exception:

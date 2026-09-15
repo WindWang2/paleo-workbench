@@ -97,6 +97,10 @@ class _AttributeTableView(QTableView):
 
         return _Header(str(model.headerData(column, Qt.Orientation.Horizontal) or ""))
 
+    def sortItems(self, column: int, order=Qt.SortOrder.AscendingOrder) -> None:  # noqa: N802
+        """QTableWidget-compatible sort for differential / review tests."""
+        self.sortByColumn(int(column), order)
+
 
 class _AttributeTableModel(QAbstractTableModel):
     def __init__(self, dialog) -> None:
@@ -497,11 +501,25 @@ class CompositeAttributeTableDialog(QDialog):
         return f"{field.label}{mark}"
 
     @staticmethod
+    def _apply_display(item, field, value) -> None:
+        """Numeric-aware DisplayRole payload (V9 schema contract / review tests)."""
+        if getattr(field, "numeric", False):
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                item.setData(Qt.ItemDataRole.DisplayRole, float(value))
+                return
+            try:
+                item.setData(Qt.ItemDataRole.DisplayRole, float(str(value).strip()))
+                return
+            except (TypeError, ValueError):
+                pass
+        item.setData(Qt.ItemDataRole.DisplayRole, value if value is not None else "")
+
+    @staticmethod
     def _status_text(feature_count, column_count, layer, editable, gate_reason,
                      parity_state, parity_detail) -> str:
         parity_mark = {
             "synced": " · QGIS provider schema 一致",
-            "drift": f" · ⚠ {parity_detail}",
+            "drift": f" · {parity_detail}",
             "unavailable": "",
         }.get(parity_state, "")
         base = (

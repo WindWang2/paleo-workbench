@@ -58,16 +58,16 @@ BASIC_MAP_CHROME = ("比例尺", "指北针")
 
 
 def ensure_basic_map_chrome(decorations: Mapping[str, Any] | None) -> dict[str, Any]:
-    """保证比例尺与指北针出现在 decorations.elements 里。"""
+    """默认补齐比例尺与指北针；调用方显式列出 elements 时尊重白名单。
+
+    空/缺省 elements → 注入基础 chrome（比例尺 + 指北针）。非空白名单
+    （例如导出测试只要标题栏）不再被强制追加，否则高 DPI 下指北针
+    挤进标题测高窗口，破坏 dpi/96 字号缩放契约。
+    """
     out = dict(decorations or {})
     elements = [str(item) for item in (out.get("elements") or ())]
-    aliases = {
-        "比例尺": ("比例尺", "scale_bar"),
-        "指北针": ("指北针", "north_arrow"),
-    }
-    for name, keys in aliases.items():
-        if not any(key in elements for key in keys):
-            elements.append(name)
+    if not elements:
+        elements = ["比例尺", "指北针"]
     out["elements"] = elements
     return out
 

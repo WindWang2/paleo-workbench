@@ -1,0 +1,16 @@
+# XYZInlineCrossline Format Horizon File From SMI
+# Type: scattered data
+# Field: 1 x
+# Field: 2 y
+# Field: 3 z ms
+# Field: 4 Inline
+# Field: 5 Crossline
+0.0  0.0 1000.0 10 20
+10.0 0.0 1010.0 11 20
+20.0 0.0 1005.0 12 20
+0.0 10.0 1020.0 10 21
+10.0 10.0 1030.0 11 21
+20.0 10.0 1025.0 12 21
+0.0 20.0 1015.0 10 22
+10.0 20.0 1035.0 11 22
+20.0 20.0 1028.0 12 22
