@@ -93,44 +93,71 @@ class KrigingInterpolator(Interpolator):
 
             model_name = options.variogram_model if options.variogram_model in ("spherical", "exponential", "gaussian") else "spherical"
             fit_params = fit_variogram(xs, ys, zs, model=model_name)
-
-            # Run 2D Kriging grid
-            grid_z, grid_var = kriging_grid(
-                xs, ys, zs, grid_x, grid_y,
-                variogram_model=model_name,
-                range_=fit_params["range"],
-                sill=fit_params["sill"],
-                nugget=fit_params["nugget"],
-            )
-
-            # Cross validation LOO
-            loo_preds, z_dedup = leave_one_out_predictions(
-                xs, ys, zs,
-                variogram_model=model_name,
-                range_=fit_params["range"],
-                sill=fit_params["sill"],
-                nugget=fit_params["nugget"],
-            )
-            # Compute R²
-            tot_ss = float(np.sum((z_dedup - np.mean(z_dedup)) ** 2))
-            res_ss = float(np.sum((z_dedup - loo_preds) ** 2))
-            r2 = max(0.0, 1.0 - (res_ss / tot_ss)) if tot_ss > 1e-12 else 1.0
-
-            algo_params = {
-                "method": "kriging",
-                "model": model_name,
-                "range": fit_params["range"],
-                "sill": fit_params["sill"],
-                "nugget": fit_params["nugget"],
-                "variogram_fit": "engine-wls",
-                "r_squared": float(r2),
-                "grid_n": grid_n,
-                "n_samples": len(xs),
-                "sample_points": [
+            sample_var = float(np.var(zs)) if len(zs) else 0.0
+            partial_sill = float(fit_params["sill"])
+            # Engine WLS can collapse on sparse/geographic samples (partial
+            # sill ≪ sample variance → nugget-dominated → near-constant
+            # field → contour levels miss everything). Fall back to the
+            # disclosed numpy grid-OLS path instead of shipping a flat map.
+            if sample_var > 1e-12 and partial_sill < 0.05 * sample_var:
+                grid_z, grid_var, algo_params = _pure_numpy_kriging(
+                    xs, ys, zs, grid_x, grid_y, model=model_name
+                )
+                algo_params["sample_points"] = [
                     {"well": p.well_name or p.well_id, "x": p.x, "y": p.y, "value": p.value}
                     for p in dataset.valid_points
-                ],
-            }
+                ]
+                algo_params["degraded"] = True
+                algo_params["degraded_reason"] = (
+                    "engine WLS variogram collapsed (partial sill "
+                    f"{partial_sill:.4g} << sample variance {sample_var:.4g}); "
+                    "numpy grid-OLS fit used instead"
+                )
+                algo_params["engine_wls_attempt"] = {
+                    "range": float(fit_params["range"]),
+                    "sill": partial_sill,
+                    "nugget": float(fit_params["nugget"]),
+                }
+                algo_params["variogram_fit"] = "numpy-grid-ols-after-wls-collapse"
+                algo_params["r_squared"] = None
+            else:
+                # Run 2D Kriging grid
+                grid_z, grid_var = kriging_grid(
+                    xs, ys, zs, grid_x, grid_y,
+                    variogram_model=model_name,
+                    range_=fit_params["range"],
+                    sill=fit_params["sill"],
+                    nugget=fit_params["nugget"],
+                )
+
+                # Cross validation LOO
+                loo_preds, z_dedup = leave_one_out_predictions(
+                    xs, ys, zs,
+                    variogram_model=model_name,
+                    range_=fit_params["range"],
+                    sill=fit_params["sill"],
+                    nugget=fit_params["nugget"],
+                )
+                # Compute R²
+                tot_ss = float(np.sum((z_dedup - np.mean(z_dedup)) ** 2))
+                res_ss = float(np.sum((z_dedup - loo_preds) ** 2))
+                r2 = max(0.0, 1.0 - (res_ss / tot_ss)) if tot_ss > 1e-12 else 1.0
+
+                algo_params = {
+                    "method": "kriging",
+                    "model": model_name,
+                    "range": fit_params["range"],
+                    "sill": fit_params["sill"],
+                    "nugget": fit_params["nugget"],
+                    "variogram_fit": "engine-wls",
+                    "r_squared": float(r2),
+                    "grid_n": grid_n,
+                    "n_samples": len(xs),
+                    "sample_points": [
+                        {"well": p.well_name or p.well_id, "x": p.x, "y": p.y, "value": p.value}
+                        for p in dataset.valid_points
+                    ],
+                }
 
         except ImportError:
             # Fallback pure-numpy Ordinary Kriging. V8 M1: the fallback's

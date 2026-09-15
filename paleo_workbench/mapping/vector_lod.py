@@ -168,10 +168,21 @@ def visvalingam_keep_mask(
         if not remove.any():
             remove = below & ~(left_below | right_below)
         if not remove.any():
-            # 整带同面积平局：按索引序取一个打破。
-            first = np.nonzero(below)[0]
+            # 整带同面积平局：每条连续 below 带内隔点剔除（每轮 O(带数)
+            # 进度，避免「全局只剔 1 点」在万级顶点上退化成 O(n²) 帧挂死
+            # ——CI render threaded/cancel 与大图层交互的根因）。
+            below_idx = np.nonzero(below)[0]
             remove = np.zeros(n, dtype=bool)
-            remove[first[0]] = True
+            if below_idx.size:
+                run_starts = np.empty(below_idx.size, dtype=bool)
+                run_starts[0] = True
+                if below_idx.size > 1:
+                    run_starts[1:] = np.diff(below_idx) > 1
+                # 带内位置：相对本带起点的偏移。
+                start_pos = np.maximum.accumulate(
+                    np.where(run_starts, np.arange(below_idx.size), 0))
+                pos_in_run = np.arange(below_idx.size) - start_pos
+                remove[below_idx[pos_in_run % 2 == 0]] = True
         # remove 本轮剔除：落 keep 位 + 退出候选；带内非极小点留待下轮
         # 以新邻居重算——仍候选。
         keep &= ~remove

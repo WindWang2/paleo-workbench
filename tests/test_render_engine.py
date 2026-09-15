@@ -137,9 +137,12 @@ def test_viewport_culling_draws_only_visible_features() -> None:
     assert diagnostics["features_drawn"] == 1
 
 
-def test_pixel_grid_lod_simplifies_dense_lines() -> None:
+def test_pixel_grid_lod_simplifies_dense_lines(monkeypatch) -> None:
     # Sub-pixel vertex spacing at the 200px/100-unit viewport forces the
-    # pixel-grid simplification to collapse most vertices.
+    # pixel-grid simplification to collapse most vertices. Dataset-level
+    # Visvalingam LOD (Ticket 3) would pre-thin the same dense lines and
+    # leave the pixel-grid counter at 0 — isolate the frame-level contract.
+    monkeypatch.setenv("PWB_DISABLE_VECTOR_LOD", "1")
     dense = _line_features(10, vertices=500, step=0.05)
     backend = FallbackMapRenderBackend()
     _configure(backend, MapRenderSnapshot(project_crs="", layers=(_layer(dense),)))

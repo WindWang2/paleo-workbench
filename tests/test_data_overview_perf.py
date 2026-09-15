@@ -99,6 +99,7 @@ class FakeCatalogService:
     def __init__(self, *, total: int = _LARGE_TOTAL, trashed: int = 4):
         self.calls = {
             "list_assets": 0,
+            "list_asset_identities": 0,
             "get_trashed_assets": 0,
             "catalog_aggregates": 0,
             "count_assets_trashed": 0,
@@ -148,6 +149,20 @@ class FakeCatalogService:
         if include_trashed:
             return list(self.document.assets)
         return [a for a in self.document.assets if not a.trashed]
+
+    def list_asset_identities(self, include_trashed: bool = False) -> list:
+        """Lightweight (id, name, legacy) triples — the data-page hot path."""
+        self.calls["list_asset_identities"] += 1
+        rows = []
+        for asset in self.document.assets:
+            if not include_trashed and getattr(asset, "trashed", False):
+                continue
+            rows.append((
+                str(asset.id),
+                str(getattr(asset, "name", "") or ""),
+                str(getattr(asset, "legacy_resource_id", "") or ""),
+            ))
+        return rows
 
     def get_trashed_assets(self) -> list:
         self.calls["get_trashed_assets"] += 1
@@ -269,11 +284,11 @@ class TestAssetMapRevisionCache:
 
         first = page._asset_legacy_map()
         assert page._asset_legacy_map() is first  # same object → reused
-        assert service.calls["list_assets"] == 1
+        assert service.calls["list_asset_identities"] == 1
 
         service.document.catalog_revision = 8
         second = page._asset_legacy_map()
-        assert service.calls["list_assets"] == 2  # revision bump → rebuild
+        assert service.calls["list_asset_identities"] == 2  # revision bump → rebuild
         assert second == first
         page.shutdown_workers()
 
@@ -286,13 +301,13 @@ class TestAssetMapRevisionCache:
 
         first = page._asset_name_map()
         assert page._asset_name_map() is first  # same object → reused
-        assert service.calls["list_assets"] == 1
+        assert service.calls["list_asset_identities"] == 1
 
         # A catalog mutation (revision bump) must invalidate even when the
         # legacy resource count is unchanged.
         service.document.catalog_revision = 9
         page._asset_name_map()
-        assert service.calls["list_assets"] == 2
+        assert service.calls["list_asset_identities"] == 2
         page.shutdown_workers()
 
 
