@@ -50,6 +50,17 @@
 
 **M4-1 复核**：拓扑错误 → 画布高亮通道（`_highlight` → `highlight_checker_errors`）与定位缩放已在既有代码中接通，无需新增；残余仅为 QC hub 差分面板的呈现增强（paleo-ui 域）。
 
+## 第四轮｜M2-1 / M5-A（落地）
+
+| 项 | 落地内容 |
+|---|---|
+| M2-1 段移动 | `PwbVertexTool::beginSegmentDrag`——按下未命中顶点但命中段 → 收集两端点共位节点集 → 一次平移拖动（复用平移管道：每层恰一宏 + 避免重叠 + 拓扑点 + 一次 `edit_gesture`）；按下落空先判段、后框选，"点空处"框选语义不被吞 |
+| M5-A1 删环/删部件 | `geometry_command_at_point`——右键落点 → identify 锁定选中 → 既有 `_ring_and_part_commands`；右键菜单接线 |
+| M5-A2 选择集算子 | `selection_geometry_op`——reverse_line / simplify_feature / smooth_feature / offset_curve（桥优先、Shapely 回落；单宏 `set_geometry` 可撤销）；`geometry_operations.reverse_geometry` 递归统一 |
+| 用例 | `test_qgis_segment_drag_v12.py` 3 项（单面层一宏撤销 / 空白框选不被吞 / 全层档跨层共享边联动）+ M5-A 11 项（登记面 + 反转/简化语义） |
+| 性能基线 | 绕行注释历史化（D-A 修复后，≥20k 的 crash workaround 不再成立——可恢复手势级全规模计时） |
+| 验证 | 编辑/拓扑/预设/右键/开关/范围/段移动组合 **52 passed** |
+
 ---
 
 ### 本轮评审发现（三态 bisect，已定案）
