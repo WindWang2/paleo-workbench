@@ -737,3 +737,36 @@ def test_thousand_layer_refresh_structural_bound(qtbot, fallback_doc):
     document._sync_action_state()
     sync_seconds = time.perf_counter() - start
     assert sync_seconds < 2.0, f"_sync_action_state {sync_seconds:.2f}s @1000 层"
+
+
+# -- 录入端抗脆：裸字符串角色不得冻死帧级事实链 --------------------------------
+
+def test_str_role_membership_never_breaks_frame_level_facts(doc):
+    """角色成员资格写入裸字符串时，事实采集/求值链不得抛异常。
+
+    用户可见症状（本机实测复现过）：``role_of`` 返回 str → 宿主门禁
+    ``role.is_raw_protected`` AttributeError → ``tool_context()`` 整条抛
+    异常 → 工具条停在旧态（点不动）、图层树右键探针同样抛 → 菜单根本不弹
+    （「右键图层也无效」）。修法是读取边界归一 + 写入点归一。
+    """
+    from paleo_workbench.mapping_workspace.layer_roles import LayerRole
+    from paleo_workbench.mapping_workspace.stage_state import LayerMembershipRecord
+
+    layer = doc.edit_controller.create_layer("相带草稿", "polygon", template="facies")
+    state = doc.stage_controller.state
+    # ① 宽松写入：set_membership 归一到枚举。
+    state.set_membership(LayerMembershipRecord(
+        layer_id=str(layer.id), role="initial_facies_draft"))
+    assert state.role_of(str(layer.id)) is LayerRole.INITIAL_FACIES_DRAFT
+    # ② 直写字典（绕过录入归一）：读取边界兜底为 LEGACY（不猜、不抛）。
+    state.memberships[str(layer.id)] = LayerMembershipRecord(
+        layer_id=str(layer.id), role="phase1.interpretation")
+    assert state.role_of(str(layer.id)) is LayerRole.LEGACY_UNCLASSIFIED
+    # ③ 帧级事实链照常给出结论（工具条/右键菜单共用）。
+    doc.edit_controller.set_active_layer(str(layer.id))
+    ctx = doc.tool_context()
+    assert ctx.edit_gate_open in (True, False, None)
+    availability = doc.tool_availability()      # 不抛 = 工具条能继续刷新
+    assert "toggle_editing" in availability
+    doc._sync_action_state()
+    assert doc.layer_menu_facts(str(layer.id)) is not None   # 右键探针不抛

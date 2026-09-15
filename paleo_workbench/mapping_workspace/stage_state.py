@@ -228,12 +228,27 @@ class MappingWorkspaceState:
         return self.memberships.get(str(layer_id))
 
     def role_of(self, layer_id: str) -> LayerRole:
+        """图层角色（**恒为枚举**）。
+
+        录入端可能写入裸字符串（``role="…"`` 的宽松构造、外部导入），
+        这里在读取边界归一：调用方普遍按枚举用（``role.is_raw_protected``
+        / ``role.value``），漏一个就是 AttributeError——而该异常发生在
+        帧级刷新链（工具条/右键菜单探针）上，会让整个编辑面静默冻死。
+        未知值回落 LEGACY_UNCLASSIFIED（与缺记录同义，不猜）。
+        """
         record = self.memberships.get(str(layer_id))
-        return record.role if record is not None else LayerRole.LEGACY_UNCLASSIFIED
+        if record is None:
+            return LayerRole.LEGACY_UNCLASSIFIED
+        return layer_role_from_value(record.role) or LayerRole.LEGACY_UNCLASSIFIED
 
     def set_membership(self, record: LayerMembershipRecord) -> None:
         if not record.layer_id:
             return
+        # 录入即归一：字符串角色在写入点转枚举（读取边界再兜一层，防
+        # 绕过本方法直写 memberships 的路径）。
+        parsed = layer_role_from_value(record.role)
+        if parsed is not None and parsed is not record.role:
+            record = replace(record, role=parsed)
         self.memberships[record.layer_id] = record
 
     def drop_membership(self, layer_id: str) -> None:
