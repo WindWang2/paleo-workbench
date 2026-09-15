@@ -689,6 +689,8 @@ class CompositeEditController(QObject):
         # 用户仍可切回当前层。
         self.vertex_all_layers: bool = True
         self.avoid_intersections_enabled: bool = True
+        #: V12 M5-B：内部要素剪贴板（源图层 id, 源 CRS, entries）。
+        self._feature_clipboard: tuple[str, str, list] | None = None
         self.tracing_enabled: bool = False
         # M3：原生分割切线手势——geometry_command("split") 打开 addLine，
         # digitize completed 经 commit_native_capture 拦截进 split_mirror_features。
@@ -2445,6 +2447,7 @@ class CompositeEditController(QObject):
         config: dict[str, object] = {
             "enabled": bool(snapping.enabled),
             "mode": "active_layer" if snapping.current_layer_only else "all_layers",
+            "units": str(getattr(snapping, "tolerance_units", "px")),
             "tolerance_px": float(snapping.pixel_tolerance),
             "types": types,
             "reference_enabled": "reference" in snapping.modes,
@@ -2456,6 +2459,10 @@ class CompositeEditController(QObject):
         # 仍是权威（两层同向，无双真源）。
         if "snapping_topological_editing" in features:
             config["topological_editing"] = bool(self._topology.enabled)
+        # V12 M4-3a：比例依赖捕捉（画布比例尺分母 < minimum_scale 即停捕）。
+        scale_min = getattr(snapping, "scale_minimum", None)
+        if isinstance(scale_min, (int, float)) and float(scale_min) > 0.0:
+            config["scale_dependent"] = {"minimum_scale": float(scale_min)}
         # M2 §4 避免重叠：enabled 无层表 = 当前编辑层（默认语义）。
         config["avoid_intersections"] = {
             "enabled": self.avoid_intersections_enabled,
@@ -2466,6 +2473,10 @@ class CompositeEditController(QObject):
                 modes = snapping.layer_modes.get(layer_id)
                 layers[layer_id] = {
                     "enabled": bool(snapping.layer_enabled.get(layer_id, True)),
+                    # V12 M1-6：逐层容差单位（缺省跟随全局）。
+                    "units": str(getattr(snapping, "layer_tolerance_units", {})
+                                 .get(layer_id,
+                                      getattr(snapping, "tolerance_units", "px"))),
                     "types": (
                         [
                             m
@@ -2754,6 +2765,137 @@ class CompositeEditController(QObject):
                     except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
                         pass
         return False, f"未知几何命令 {command_id}"
+
+    # -- V12 M5-B：旋转 / 缩放 / 剪切·复制·粘贴 ---------------------------------
+
+    def transform_selection(self, op_id: str, **params) -> tuple[bool, str]:
+        """选择集仿射变换（M5-B）：rotate_feature / scale_feature——Shapely
+        affinity 绕选集质心，单宏可撤销。"""
+        from shapely import affinity as _affinity
+        from shapely.geometry import shape as _shape, mapping as _mapping
+        from shapely.ops import unary_union as _union_all
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        geoms = []
+        for feature_id in sorted(layer.selection):
+            geoms.append(_shape(session.feature(feature_id).as_record()["geometry"]))
+        if not geoms:
+            return False, "选中要素没有几何"
+        center = _union_all(geoms).centroid
+        with session.edit_source(f"{op_id}(command)"):
+            changed = 0
+            for feature_id in sorted(layer.selection):
+                feature = session.feature(feature_id)
+                geometry = feature.as_record()["geometry"]
+                shape = _shape(geometry)
+                if op_id == "rotate_feature":
+                    angle = float(params.get("angle_degrees", 0.0))
+                    transformed = _affinity.rotate(
+                        shape, angle, origin=(center.x, center.y), use_radians=False)
+                elif op_id == "scale_feature":
+                    xf = float(params.get("xfact", 1.0))
+                    yf = float(params.get("yfact", xf))
+                    transformed = _affinity.scale(
+                        shape, xfact=xf, yfact=yf,
+                        origin=(center.x, center.y))
+                else:
+                    return False, f"未知变换 {op_id}"
+                session.set_geometry(feature_id, dict(_mapping(transformed)))
+                changed += 1
+        self._topology.refresh_error_count(layer)
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return True, f"已应用{op_id}（{changed} 个要素）"
+
+    def clipboard_copy_selection(self, *, cut: bool = False) -> tuple[bool, str]:
+        """剪切/复制选中要素到内部剪贴板（M5-B；复制不删、剪切删且须会话）。
+
+        剪贴板条目 = (源图层 id, 源 CRS, [(geometry, attributes), ...])。
+        粘贴时按目标层字段映射（schema 交集，多余键丢弃并注明）。
+        """
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        session = layer.edit_session
+        if cut and session is None:
+            return False, "剪切需要先开始编辑"
+        source = session.features() if session is not None else layer.features()
+        entries = []
+        for feature in source:
+            if str(feature.feature_id) in layer.selection:
+                entries.append((
+                    feature.as_record()["geometry"],
+                    dict(feature.attributes or {}),
+                ))
+        if not entries:
+            return False, "选中要素没有可复制的几何"
+        self._feature_clipboard = (
+            str(layer.id),
+            str(getattr(layer, "crs", "") or ""),
+            entries,
+        )
+        if cut:
+            with session.edit_source("cut_features(command)"):
+                for feature in source:
+                    if str(feature.feature_id) in layer.selection:
+                        session.delete_feature(str(feature.feature_id))
+            self.content_changed.emit(layer.id)
+            self.state_changed.emit()
+            return True, f"已剪切 {len(entries)} 个要素"
+        return True, f"已复制 {len(entries)} 个要素"
+
+    def clipboard_paste(self) -> tuple[bool, str]:
+        """粘贴内部剪贴板到活动图层（M5-B；目标须编辑会话，门禁复查）。
+
+        字段映射：schema 交集（目标 schema 缺失的键丢弃并注明）；源/目标
+        CRS 都声明且不同 → 拒绝（不静默重投影）。
+        """
+        clipboard = getattr(self, "_feature_clipboard", None)
+        if not clipboard:
+            return False, "剪贴板为空"
+        source_layer_id, source_crs, entries = clipboard
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "粘贴需要先开始编辑"
+        target_crs = str(getattr(layer, "crs", "") or "")
+        if source_crs and target_crs and source_crs != target_crs:
+            return False, (
+                f"源/目标坐标系不同（{source_crs} → {target_crs}），"
+                "不静默重投影——请改目标层坐标或分层粘贴")
+        schema = layer.schema or {}
+        allowed = set(schema.keys()) if schema else None
+        dropped: set[str] = set()
+        with session.edit_source("paste_features(command)"):
+            for geometry, attributes in entries:
+                mapped = {}
+                for key, value in (attributes or {}).items():
+                    if allowed is None or key in allowed:
+                        mapped[key] = value
+                    else:
+                        dropped.add(key)
+                session.add_feature(VectorFeature(
+                    feature_id=f"f{new_feature_id('feature')}",
+                    geometry=geometry,
+                    attributes=mapped,
+                ))
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        message = f"已粘贴 {len(entries)} 个要素"
+        if dropped:
+            message += f"（丢弃字段：{'、'.join(sorted(dropped))}）"
+        return True, message
 
     def selection_geometry_op(self, op_id: str, **params) -> tuple[bool, str]:
         """选择集几何算子（V12 M5-A2）：reverse_line / simplify / smooth /

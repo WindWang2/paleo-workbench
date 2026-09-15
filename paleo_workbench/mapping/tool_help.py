@@ -41,6 +41,8 @@ TOOL_LABELS: dict[str, str] = {
     "delete_ring": "删除内环", "delete_part": "删除部件",
     "reverse_line": "反转方向", "simplify_feature": "简化要素",
     "smooth_feature": "平滑要素", "offset_curve": "偏移曲线",
+    "rotate_feature": "旋转要素", "scale_feature": "缩放要素",
+    "cut_features": "剪切", "copy_features": "复制", "paste_features": "粘贴",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -197,6 +199,21 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
     "offset_curve": _spec(
         "偏移曲线", "编辑会话中 + 选中要素",
         "按距离偏移所选线", modifies=True, kinds=_VECTOR),
+    "rotate_feature": _spec(
+        "旋转要素", "编辑会话中 + 选中要素",
+        "绕选集质心旋转所选要素", modifies=True, kinds=_VECTOR),
+    "scale_feature": _spec(
+        "缩放要素", "编辑会话中 + 选中要素",
+        "绕选集质心缩放所选要素", modifies=True, kinds=_VECTOR),
+    "cut_features": _spec(
+        "剪切", "选中要素 + 编辑会话",
+        "剪切所选要素到内部剪贴板", modifies=True, kinds=_VECTOR),
+    "copy_features": _spec(
+        "复制", "选中要素",
+        "复制所选要素到内部剪贴板", kinds=_VECTOR),
+    "paste_features": _spec(
+        "粘贴", "编辑会话中",
+        "把内部剪贴板粘贴到活动图层（字段按 schema 映射）", modifies=True, kinds=_VECTOR),
     "topology": _spec(
         "拓扑编辑", "有活动图层 + 工程 CRS 有效",
         "开关拓扑编辑（编辑期联动 + 保存时校验）", modifies=True, kinds=_VECTOR),

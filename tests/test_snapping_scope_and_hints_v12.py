@@ -146,3 +146,57 @@ def test_zero_displacement_click_emits_hint(qtbot):
     qtbot.wait(200)
     assert any("单击不移动节点" in hint for hint in hints), (
         f"零位移点击无提示：{hints}")
+
+
+# ---------------------------------------------------------------------------
+# M1-6 容差单位 + M4-3a 比例依赖
+# ---------------------------------------------------------------------------
+
+def test_snapping_units_and_scale_roundtrip():
+    from paleo_workbench.mapping.map_interaction import SnappingService
+
+    service = SnappingService()
+    service.tolerance_units = "map"
+    service.layer_tolerance_units["L1"] = "layer"
+    service.scale_minimum = 25000.0
+    snapshot = service.snapshot_state()
+    assert snapshot["tolerance_units"] == "map"
+    assert snapshot["layer_overrides"]["L1"]["units"] == "layer"
+    assert snapshot["scale_minimum"] == 25000.0
+
+    restored = SnappingService()
+    assert restored.restore_state(snapshot) is True
+    assert restored.tolerance_units == "map"
+    assert restored.layer_tolerance_units["L1"] == "layer"
+    assert restored.scale_minimum == 25000.0
+
+    closed = SnappingService()
+    closed.scale_minimum = 0.0
+    assert closed.snapshot_state()["scale_minimum"] in (None, 0.0)
+
+
+@pytest.mark.qgis
+def test_snapping_push_carries_units_and_scale(qtbot):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    qtbot.addWidget(doc)
+    controller = doc.edit_controller
+    controller.snapping.tolerance_units = "map"
+    controller.snapping.scale_minimum = 10000.0
+
+    pushed = {}
+
+    def fake_set_snapping_config(config):
+        pushed.update(config if isinstance(config, dict) else {})
+        return True
+
+    shim = doc.canvas
+    shim.set_snapping_config = fake_set_snapping_config
+    try:
+        controller._push_snapping_config()
+    finally:
+        del shim.set_snapping_config
+    assert pushed.get("units") == "map"
+    assert pushed.get("scale_dependent", {}).get("minimum_scale") == 10000.0

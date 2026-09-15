@@ -157,6 +157,9 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         # V12 M5-A：环/部件交互删除 + 选择集几何算子。
         "delete_ring", "delete_part", "reverse_line", "simplify_feature",
         "smooth_feature", "offset_curve",
+        # V12 M5-B：旋转/缩放 + 剪切/复制/粘贴。
+        "rotate_feature", "scale_feature", "cut_features", "copy_features",
+        "paste_features",
     ),
     # V12 M1：编辑期联动开关补齐 UI 面——三个能力（避免重叠/追踪/顶点档位）
     # 的实现早就在 SnappingService + QgsProject 里，此前只有命令 handler、
@@ -674,6 +677,15 @@ def _rule_selection_op(ctx: ToolContext, tool_id: str) -> ToolAvailability:
         reason = "没有选中的要素"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
+def _rule_copy_paste(ctx: ToolContext, tool_id: str) -> ToolAvailability:
+    """剪切/复制/粘贴（M5-B）：复制需选集；剪切/粘贴需选集 + 编辑会话。"""
+    reason = _project_gate(ctx) or _layer_gate(ctx) or _role_gate(ctx)
+    if tool_id != "copy_features":
+        reason = reason or _editing_gate(ctx)
+    if reason is None and ctx.selection_count <= 0:
+        reason = "没有选中的要素"
+    return _ok(tool_id) if reason is None else _no(tool_id, reason)
+
 def _rule_delete_selected(ctx: ToolContext) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
@@ -963,6 +975,11 @@ _RULE_TABLE: dict[str, Rule] = {
     "simplify_feature": lambda ctx: _rule_selection_op(ctx, "simplify_feature"),
     "smooth_feature": lambda ctx: _rule_selection_op(ctx, "smooth_feature"),
     "offset_curve": lambda ctx: _rule_selection_op(ctx, "offset_curve"),
+    "rotate_feature": lambda ctx: _rule_selection_op(ctx, "rotate_feature"),
+    "scale_feature": lambda ctx: _rule_selection_op(ctx, "scale_feature"),
+    "cut_features": lambda ctx: _rule_selection_op(ctx, "cut_features"),
+    "copy_features": lambda ctx: _rule_copy_paste(ctx, "copy_features"),
+    "paste_features": lambda ctx: _rule_copy_paste(ctx, "paste_features"),
     "delete_selected": _rule_delete_selected,
     "split": _rule_split,
     "merge": _rule_merge,

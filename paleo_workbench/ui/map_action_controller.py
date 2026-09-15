@@ -57,6 +57,8 @@ class MapActionController(QObject):
         "duplicate_selected", "explode_multipart", "collect_multipart",
         "delete_ring", "delete_part", "reverse_line", "simplify_feature",
         "smooth_feature", "offset_curve",
+        "rotate_feature", "scale_feature", "cut_features", "copy_features",
+        "paste_features",
         "snapping", "avoid_intersections", "tracing", "vertex_scope",
         "topology", "cancel",
     )

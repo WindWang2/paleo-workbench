@@ -77,6 +77,8 @@ def _specs() -> dict[str, ActionSpec]:
         "symbology": "rb-colorbar", "style_manager": "rb-settings",
         "factor_workbench": "rb-grid", "factor_overlay": "btn-contour-draft",
         "qa_run": "rb-qc", "map_product_assemble": "rb-finalize",
+        "cut_features": "delete_selected", "copy_features": "duplicate_selected",
+        "paste_features": "duplicate_selected",
         "map_export": "rb-export", "repair_geometry": "btn-health",
     }
     # 画布交互工具（checked ← current_tool；与求值器 _CHECKED_CANVAS_TOOLS
@@ -109,6 +111,8 @@ def _specs() -> dict[str, ActionSpec]:
         "collect_multipart", "fault_cut", "boundary_reshape",
         "delete_ring", "delete_part", "reverse_line", "simplify_feature",
         "smooth_feature", "offset_curve",
+        "rotate_feature", "scale_feature", "cut_features", "copy_features",
+        "paste_features",
     }
     # 选择集动作（改选择集，不改数据）。
     selection_tools = {

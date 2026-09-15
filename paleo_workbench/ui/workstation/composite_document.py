@@ -4651,6 +4651,12 @@ class CompositeDocument(QWidget):
                     simp = menu.addAction("简化要素…")
                     sm = menu.addAction("平滑要素")
                     off = menu.addAction("偏移曲线…")
+                    menu.addSeparator()
+                    rot = menu.addAction("旋转要素…")
+                    sca = menu.addAction("缩放要素…")
+                    cut = menu.addAction("剪切")
+                    copy = menu.addAction("复制")
+                    paste = menu.addAction("粘贴")
                     chosen = menu.exec(global_pos)
                     if chosen is ring:
                         self._run_context_geometry_command("delete_ring", map_point)
@@ -4664,6 +4670,16 @@ class CompositeDocument(QWidget):
                         self._run_selection_geometry_op("smooth_feature")
                     elif chosen is off:
                         self._run_selection_geometry_op("offset_curve")
+                    elif chosen is rot:
+                        self._run_rotate_selection()
+                    elif chosen is sca:
+                        self._run_scale_selection()
+                    elif chosen is cut:
+                        self._run_clipboard(cut=True)
+                    elif chosen is copy:
+                        self._run_clipboard(cut=False)
+                    elif chosen is paste:
+                        self._run_clipboard_paste()
                     return
             except Exception:
                 pass
@@ -4729,6 +4745,39 @@ class CompositeDocument(QWidget):
         ok, message = self.edit_controller.geometry_command_at_point(command_id, point)
         self.status_message.emit(message if message else (
             "已执行" if ok else f"{command_id} 未执行"))
+
+    def _run_rotate_selection(self) -> None:
+        """旋转要素对话框（M5-B）：角度 → 控制器 transform_selection。"""
+        from PySide6.QtWidgets import QInputDialog
+        value, ok = QInputDialog.getDouble(
+            self, "旋转要素", "角度（度，逆时针为正）",
+            90.0, -360.0, 360.0, 1)
+        if not ok:
+            return
+        ok_, message = self.edit_controller.transform_selection(
+            "rotate_feature", angle_degrees=float(value))
+        self.status_message.emit(message if message else "已旋转")
+
+    def _run_scale_selection(self) -> None:
+        """缩放要素对话框（M5-B）：因子 → 控制器 transform_selection。"""
+        from PySide6.QtWidgets import QInputDialog
+        value, ok = QInputDialog.getDouble(
+            self, "缩放要素", "比例因子",
+            1.0, 0.01, 100.0, 2)
+        if not ok:
+            return
+        ok_, message = self.edit_controller.transform_selection(
+            "scale_feature", xfact=float(value), yfact=float(value))
+        self.status_message.emit(message if message else "已缩放")
+
+    def _run_clipboard(self, *, cut: bool) -> None:
+        ok, message = self.edit_controller.clipboard_copy_selection(cut=cut)
+        self.status_message.emit(message if message else (
+            "已剪切" if cut else "已复制"))
+
+    def _run_clipboard_paste(self) -> None:
+        ok, message = self.edit_controller.clipboard_paste()
+        self.status_message.emit(message if message else "已粘贴")
 
     def _run_selection_geometry_op(self, op_id: str) -> None:
         """右键选择集算子分发（M5-A2）：选择集 → 算子，原因上浮。"""

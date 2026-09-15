@@ -256,3 +256,92 @@ def test_selection_geometry_op_simplify(qapp):
     session = layer.edit_session
     feature = next(f for f in session.features() if f.feature_id == "f1")
     assert len(feature.geometry["coordinates"]) < len(dense), "未抽稀"
+
+
+# ---------------------------------------------------------------------------
+# M5-B：旋转/缩放 + 剪切/复制/粘贴
+# ---------------------------------------------------------------------------
+
+def test_transform_selection_rotate(qapp):
+    import math
+
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("线", "line")
+    controller.import_layer_features(layer.id, [
+        VectorFeature(feature_id="f1",
+                      geometry={"type": "LineString", "coordinates": [
+                          [0.0, 0.0], [4.0, 0.0]]},
+                      attributes={}),
+    ])
+    layer.set_selection({"f1"})
+    controller._open_session(layer)
+    ok, _msg = controller.transform_selection("rotate_feature", angle_degrees=90.0)
+    assert ok
+    session = layer.edit_session
+    feature = next(f for f in session.features() if f.feature_id == "f1")
+    coords = feature.geometry["coordinates"]
+    # 质心 (2,0) 旋转 90° 逆时针 → 线竖起来：x≈2、y 对称分布。
+    xs = [c[0] for c in coords]
+    assert max(xs) - min(xs) < 1e-6, f"未竖起: {coords}"
+
+
+def test_clipboard_copy_paste_with_field_mapping(qapp):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    source = controller.create_layer("源线", "line")
+    controller.import_layer_features(source.id, [
+        VectorFeature(feature_id="f1",
+                      geometry={"type": "LineString", "coordinates": [
+                          [0.0, 0.0], [1.0, 1.0]]},
+                      attributes={"name": "N1", "throw": "10", "extra": "x"}),
+    ])
+    controller.set_active_layer(source.id)
+    source.set_selection({"f1"})
+    ok, _msg = controller.clipboard_copy_selection(cut=False)
+    assert ok
+
+    target = controller.create_layer("目标线", "line")
+    controller.set_active_layer(target.id)
+    controller._open_session(target)
+    ok, message = controller.clipboard_paste()
+    assert ok, message
+    session = target.edit_session
+    pasted = [f for f in session.features() if f.feature_id != "f1"]
+    assert pasted, "无粘贴要素"
+    assert pasted[0].geometry["coordinates"][0][0] == 0.0
+
+
+def test_clipboard_paste_refuses_crs_mismatch(qapp):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    source = controller.create_layer("源", "line")
+    source.crs = "EPSG:4326"
+    controller.import_layer_features(source.id, [
+        VectorFeature(feature_id="f1",
+                      geometry={"type": "LineString", "coordinates": [
+                          [0.0, 0.0], [1.0, 1.0]]},
+                      attributes={}),
+    ])
+    controller.set_active_layer(source.id)
+    source.set_selection({"f1"})
+    controller.clipboard_copy_selection(cut=False)
+
+    target = controller.create_layer("目标", "line")
+    target.crs = "EPSG:3857"
+    controller.set_active_layer(target.id)
+    controller._open_session(target)
+    ok, message = controller.clipboard_paste()
+    assert ok is False and "坐标系" in message

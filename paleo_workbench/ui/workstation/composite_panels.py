@@ -202,6 +202,26 @@ class SnappingSettingsDialog(QDialog):
         self._global_tolerance.setSuffix(" px")
         self._global_tolerance.setValue(float(self._snapping.pixel_tolerance))
         global_form.addRow(self._global_enable)
+        # V12 M1-6：容差单位（像素 / 地图单位 / 层单位；原生 QGIS 对照）。
+        self._units_combo = QComboBox(self)
+        for key, label in (("px", "像素"), ("map", "地图单位"), ("layer", "层单位")):
+            self._units_combo.addItem(label, key)
+        self._units_combo.setCurrentIndex({"px": 0, "map": 1, "layer": 2}.get(
+            str(getattr(self._snapping, "tolerance_units", "px")), 0))
+        self._units_combo.setToolTip("捕捉容差的单位：像素（屏幕）/ 地图单位（随缩放）/ 层单位")
+        global_form.addRow("容差单位", self._units_combo)
+        # V12 M4-3a：比例依赖捕捉（只在放大到该比例尺时捕捉）。
+        from PySide6.QtWidgets import QSpinBox  # noqa: PLC0415 局部导入避循环
+        self._scale_spin = QSpinBox(self)
+        self._scale_spin.setRange(0, 10000000)
+        self._scale_spin.setSingleStep(1000)
+        self._scale_spin.setSpecialValueText("关闭（全比例捕捉）")
+        current_min = getattr(self._snapping, "scale_minimum", None)
+        self._scale_spin.setValue(
+            int(current_min) if isinstance(current_min, (int, float))
+            and float(current_min) > 0.0 else 0)
+        self._scale_spin.setToolTip("最小比例尺分母：画布比例尺 >= 该值时才捕捉（0 = 关闭）")
+        global_form.addRow("比例依赖（1:）", self._scale_spin)
         global_form.addRow("默认容差（像素）", self._global_tolerance)
         modes_row = QHBoxLayout()
         self._mode_boxes: dict[str, QCheckBox] = {}
@@ -409,6 +429,10 @@ class SnappingSettingsDialog(QDialog):
         snapping = self._snapping
         snapping.enabled = self._global_enable.isChecked()
         snapping.pixel_tolerance = float(self._global_tolerance.value())
+        # V12 M1-6/M4-3a：容差单位与比例依赖随对话框落权威。
+        snapping.tolerance_units = str(self._units_combo.currentData() or "px")
+        scale_value = int(self._scale_spin.value())
+        snapping.scale_minimum = float(scale_value) if scale_value > 0 else None
         # V12 M1-1：范围随对话框落权威（republish 经 set_snapping 下推）。
         snapping.current_layer_only = self._scope_combo.currentIndex() == 1
         snapping.modes = {

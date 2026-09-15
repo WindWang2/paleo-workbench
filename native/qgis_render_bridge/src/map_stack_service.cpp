@@ -453,6 +453,14 @@ QgsFeatureList parseGeoJsonFeatures(const QString& text, const QgsFields& fields
     return out;
 }
 
+Qgis::MapToolUnit parseMapToolUnit(const QString& raw) {
+  // V12 M1-6：容差单位（缺省像素——与历史硬编码一致，旧配置零行为变化）。
+  // vendored QGIS 3.32 词表：Layer / Pixels / Project（地图单位 = Project）。
+  if (raw == QLatin1String("map")) return Qgis::MapToolUnit::Project;
+  if (raw == QLatin1String("layer")) return Qgis::MapToolUnit::Layer;
+  return Qgis::MapToolUnit::Pixels;
+}
+
 Qgis::SnappingTypes parseSnappingTypes(const QJsonArray& arr) {
 
     Qgis::SnappingTypes types;
@@ -4966,7 +4974,24 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
     config.setMode(Qgis::SnappingMode::AllLayers);
   }
   config.setTolerance(obj.value(QStringLiteral("tolerance_px")).toDouble(12.0));
-  config.setUnits(Qgis::MapToolUnit::Pixels);
+  // V12 M1-6：全局容差单位（"px"|"map"|"mm"；缺省像素）。
+  config.setUnits(parseMapToolUnit(
+      obj.value(QStringLiteral("units")).toString()));
+  // M4-3a：比例依赖捕捉（"scale_dependent": {"minimum_scale": 分母}）——
+  // 只在画布比例尺分母 >= 该值时参与捕捉；QGIS 语义 ScaleGreaterThan。
+  if (obj.contains(QStringLiteral("scale_dependent"))) {
+    const double minimum_scale =
+        obj.value(QStringLiteral("scale_dependent"))
+            .toObject()
+            .value(QStringLiteral("minimum_scale"))
+            .toDouble(0.0);
+    if (minimum_scale > 0.0) {
+      // vendored QGIS 3.14+：Global 模式 = 比例尺分母 >= minimum_scale 才参与。
+      config.setScaleDependencyMode(
+          QgsSnappingConfig::ScaleDependencyMode::Global);
+      config.setMinimumScale(minimum_scale);
+    }
+  }
   config.setTypeFlag(parseSnappingTypes(
       obj.value(QStringLiteral("types")).toArray()));
   // V7：交点捕捉（Python SnappingService 的 intersection 模式）——
@@ -4988,7 +5013,9 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
               parseSnappingTypes(ls.value(QStringLiteral("types")).toArray()),
               ls.value(QStringLiteral("tolerance_px"))
                   .toDouble(config.tolerance()),
-              Qgis::MapToolUnit::Pixels));
+              // V12 M1-6：逐层单位覆盖（缺省跟随全局单位）。
+              parseMapToolUnit(ls.value(QStringLiteral("units")).toString(
+                  obj.value(QStringLiteral("units")).toString()))));
     }
     // 参考点捕捉（井位等 pwb/reference 镜像层）：Python 侧 "reference" 模式
     // 的 QGIS 对应物——参考图层顶点参与捕捉；显式条目优先。
@@ -5003,7 +5030,7 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
         config.setIndividualLayerSettings(
             vl, QgsSnappingConfig::IndividualLayerSettings(
                     true, Qgis::SnappingType::Vertex, config.tolerance(),
-                    Qgis::MapToolUnit::Pixels));
+                    config.units()));
       }
     }
   }
