@@ -41,6 +41,8 @@ CALIBRATED_TD = "calibrated_td"
 QC_REPORT = "qc_report"
 EXPORT = "export"
 INTERPRETATION = "interpretation"
+#: 人工修改产物（working-copy 提交）——manual-edit run 的输出端口。
+MANUAL_EDIT = "manual_edit"
 
 _REGISTRY: dict[str, str] = {}
 
@@ -72,6 +74,7 @@ _register(CALIBRATED_TD, display="标定时深")
 _register(QC_REPORT, display="QC 报告")
 _register(EXPORT, display="导出")
 _register(INTERPRETATION, display="解释成果")
+_register(MANUAL_EDIT, display="人工修改")
 
 
 def display_for(role: str) -> str:

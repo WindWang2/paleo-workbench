@@ -168,6 +168,7 @@ class EditSession:
         *,
         new_name: str | None = None,
         as_new_asset: bool = False,
+        actor: str = "",
     ) -> EditSessionReport:
         """Promote every checkout to a new immutable version.
 
@@ -175,9 +176,33 @@ class EditSession:
         already-committed files committed and reports the split honestly
         (a session is a macro, not a transaction — commit_working_copy owns
         atomicity at the version level).
+
+        V13 W-E：提交同时登记 ``manual_edit`` DataRun（输入=源版本，输出=
+        提交版本 + typed ports），人工修改不再是无 run 的 lineage 黑洞。
+        簿记失败不阻断提交（回退为无 run 的旧行为并如实上报 issue）。
         """
+        from paleo_workbench.catalog.lifecycle import (
+            complete_manual_edit_run,
+            register_manual_edit_run,
+        )
+
         report = EditSessionReport()
         self._refresh_registry_state()
+        run_id: str | None = None
+        try:
+            run = register_manual_edit_run(
+                self._service,
+                source_version_ids=[c.source_version_id for c in self.checkouts],
+                entity_type=self.entity_type,
+                entity_id=self.entity_id,
+                business_role=self.role,
+                actor=actor,
+                note=new_name or "",
+                as_new_asset=as_new_asset,
+            )
+            run_id = run.id
+        except Exception as exc:
+            report.issues.append(f"provenance 预订失败（提交继续，无 run 记录）: {exc}")
         for checkout in self.checkouts:
             try:
                 source_version = self._service.get_version(checkout.source_version_id)
@@ -188,6 +213,7 @@ class EditSession:
                         name=new_name or checkout.asset_name,
                         stage=self.stage,
                         parent_version_ids=[checkout.source_version_id],
+                        run_id=run_id,
                     )
                 else:
                     version = self._service.commit_working_copy(
@@ -196,6 +222,7 @@ class EditSession:
                         name=new_name or checkout.asset_name,
                         stage=self.stage,
                         parent_version_ids=[checkout.source_version_id],
+                        run_id=run_id,
                     )
                 report.committed_version_ids.append(version.id)
             except CatalogError as exc:
@@ -206,6 +233,13 @@ class EditSession:
                 report.issues.append(
                     f"{checkout.asset_name}: 提交异常 — {exc.__class__.__name__}: {exc}"
                 )
+        complete_manual_edit_run(
+            self._service,
+            run_id,
+            committed_version_ids=report.committed_version_ids,
+            business_role=self.role,
+            failed_count=len(report.issues),
+        )
         return report
 
     def cancel(self) -> EditSessionReport:

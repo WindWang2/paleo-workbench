@@ -272,16 +272,44 @@ class LayerGroupController:
         factor_task_id: str = "",
         constraint_kind: str = "",
         source_version_id: str = "",
+        source_asset_id: str = "",
+        binding_kind: str = "",
+        bound_at: str = "",
     ) -> None:
-        """显式注册图层成员资格（RAW→DERIVED 建稿 / 约束创建 / factor 运行）。"""
-        self.state.set_membership(LayerMembershipRecord(
+        """显式注册图层成员资格（RAW→DERIVED 建稿 / 约束创建 / factor 运行）。
+
+        V13 W-I：``source_version_id`` 非空时默认 ``binding_kind=
+        catalog_version``（调用方未显式给定时）；约束类图层应显式传
+        ``content_fingerprint``。更新已有绑定时以新值覆盖（重钉版本）。
+        """
+        from paleo_workbench.mapping_workspace.stage_state import (
+            BINDING_CATALOG_VERSION,
+        )
+
+        if source_version_id and not binding_kind:
+            binding_kind = BINDING_CATALOG_VERSION
+        existing = self.state.membership(str(layer_id))
+        record = LayerMembershipRecord(
             layer_id=str(layer_id),
             role=role,
             factor_task_id=str(factor_task_id),
             constraint_kind=str(constraint_kind),
-            created_stage=self.state.current_stage.value,
+            created_stage=(
+                existing.created_stage
+                if existing is not None and existing.created_stage
+                else self.state.current_stage.value
+            ),
             source_version_id=str(source_version_id),
-        ))
+            created_at=(
+                existing.created_at
+                if existing is not None and existing.created_at
+                else ""
+            ),
+            source_asset_id=str(source_asset_id),
+            binding_kind=str(binding_kind),
+            bound_at=str(bound_at),
+        )
+        self.state.set_membership(record)
         # 新图层直接进入 home 组（未观察到的旧放置不覆盖）。
         self._placements.pop(str(layer_id), None)
 
@@ -727,6 +755,21 @@ class LayerGroupController:
         self._last_group_visibility[group_id] = bool(visible)
         self.state.view_state(self.state.current_stage).record_group_visibility(
             group_id, bool(visible))
+
+    def record_layer_visibility_event(self, layer_id: str, visible: bool) -> None:
+        """用户改变单个图层显隐 → 记录本阶段视图覆盖层（V13 W-P）。
+
+        只应从**用户手势**入口调用（原生树勾选回声 / 面板复选），程序化
+        批量应用（stage visibility 推送、epoch 切换）不得经此——否则阶段
+        默认被冻成用户覆盖。
+        """
+        self.state.view_state(self.state.current_stage).record_layer_visibility(
+            str(layer_id), bool(visible))
+
+    def record_layer_opacity_event(self, layer_id: str, opacity: float) -> None:
+        """用户调整图层不透明度 → 记录本阶段视图覆盖层（V13 W-P）。"""
+        self.state.view_state(self.state.current_stage).record_layer_opacity(
+            str(layer_id), float(opacity))
 
     # -- 查询 ---------------------------------------------------------------------
 

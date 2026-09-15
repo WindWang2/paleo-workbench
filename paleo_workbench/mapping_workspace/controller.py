@@ -67,6 +67,8 @@ class MappingStageController(QObject):
         self._layer_snapshot_provider: Callable[[], list] | None = None
         #: 编辑目标解析回调（role → layer_id；宿主按角色查现有图层）。
         self._target_resolver: Callable[[LayerRole], str | None] | None = None
+        #: 目标图层存在性探针（layer_id → bool；宿主注入，见 set_target_validator）。
+        self._target_validator: Callable[[str], bool] | None = None
         #: 活动编辑目标（stage-aware；切换阶段时重指派）。
         self._active_target_layer_id: str | None = None
         self._readiness: StageReadiness | None = None
@@ -90,6 +92,17 @@ class MappingStageController(QObject):
 
     def set_target_resolver(self, resolver: Callable[[LayerRole], str | None]) -> None:
         self._target_resolver = resolver
+
+    def set_target_validator(
+        self, validator: Callable[[str], bool] | None
+    ) -> None:
+        """注入「图层 id 仍存在」探针（CompositeDocument 按真实图层表回答）。
+
+        V13 W-P：阶段切换/工程重开时，用户为本阶段显式选择的活动编辑
+        目标（``StageViewState.active_layer_id``）优先恢复——图层仍在就
+        不重算。无探针时退回 membership 存在性（保守近似）。
+        """
+        self._target_validator = validator
 
     # -- 阶段 -------------------------------------------------------------------
 
@@ -141,13 +154,22 @@ class MappingStageController(QObject):
     def _reassign_active_target(self) -> None:
         """按阶段 profile 的编辑角色重指派活动编辑目标。
 
-        解析顺序：profile.active_editing_roles 中首个有现存图层的角色；
-        全部缺省 → None（编辑动作禁用并显示原因，绝不悄悄指向上一个
-        可编辑图层——「画物源线写进相带边界」级业务风险）。
+        解析顺序（V13 W-P 起）：
+
+        1. 本阶段持久化的 ``active_layer_id``（用户显式选择或上次活动），
+           图层仍存在 → 恢复（**不跨阶段继承**的规则不变——读的是本阶段
+           自己的视图状态；此前这里无条件重算，用户显式选择被覆盖）；
+        2. profile.active_editing_roles 中首个有现存图层的角色；
+        3. 全部缺省 → None（编辑动作禁用并显示原因，绝不悄悄指向上一个
+           可编辑图层——「画物源线写进相带边界」级业务风险）。
         """
         profile = stage_profile(self.state.current_stage)
+        view_state = self.state.view_state(self.state.current_stage)
         target_id: str | None = None
-        if self._target_resolver is not None:
+        stored = view_state.active_layer_id
+        if stored and self._target_layer_exists(stored):
+            target_id = stored
+        if target_id is None and self._target_resolver is not None:
             for role in profile.active_editing_roles:
                 resolved = self._target_resolver(role)
                 if resolved:
@@ -157,6 +179,16 @@ class MappingStageController(QObject):
             self._active_target_layer_id = target_id
             self.state.view_state(self.state.current_stage).active_layer_id = target_id
             self.active_target_changed.emit(target_id)
+
+    def _target_layer_exists(self, layer_id: str) -> bool:
+        """目标图层是否仍存在（探针优先；membership 存在性保守近似）。"""
+        if self._target_validator is not None:
+            try:
+                return bool(self._target_validator(str(layer_id)))
+            except Exception:
+                logger.debug("target validator failed", exc_info=True)
+                return False
+        return self.state.membership(str(layer_id)) is not None
 
     @property
     def active_target_layer_id(self) -> str | None:

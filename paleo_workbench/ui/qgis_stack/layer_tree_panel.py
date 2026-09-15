@@ -686,6 +686,12 @@ class QgisLayerTreePanel(QWidget):
             # 变更的迟到回显/窗口内竞态由修订号门控（旧桥 revision=0 恒通过）。
             if controller.echo_is_stale(batch.revision):
                 return
+            # V13 W-P：图层级勾选（用户手势）落本阶段视图覆盖层——此前
+            # 只更新 _layers 快照，用户显隐在阶段往返/重开后丢失。
+            for doc_id, visible in changes.visibility.items():
+                if self.layer_by_id(doc_id) is not None:
+                    controller.record_layer_visibility_event(doc_id, visible)
+                    group_touched = True
             if batch.tree:
                 controller.observe_tree_nodes(list(batch.tree))
                 group_touched = True
@@ -734,4 +740,11 @@ class QgisLayerTreePanel(QWidget):
     def _apply_opacity(self, value: int) -> None:
         layer_id = self._current_doc_id()
         if layer_id is not None:
+            # 用户手势（滑条）→ 本阶段视图覆盖层（V13 W-P）。
+            if self._group_controller is not None:
+                try:
+                    self._group_controller.record_layer_opacity_event(
+                        layer_id, value / 100.0)
+                except Exception:
+                    pass
             self.set_layer_opacity(layer_id, value / 100.0)

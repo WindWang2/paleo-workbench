@@ -1355,6 +1355,10 @@ class CompositeDocument(QWidget):
         self.stage_controller.set_snapshot_provider(
             lambda: list(self.layer_manager._layers))
         self.stage_controller.set_target_resolver(self._resolve_editing_target)
+        # V13 W-P：目标图层存在性探针——阶段往返/工程重开时恢复用户为本
+        # 阶段显式选择的编辑目标（此前被 profile 重算无条件覆盖）。
+        self.stage_controller.set_target_validator(
+            lambda layer_id: self.layer_manager.layer_by_id(layer_id) is not None)
         # 编辑目标信号 → 编辑权威 active layer（阶段切换重指派；用户点选经
         # set_active_target 记录，无回环）。
         self.stage_controller.active_target_changed.connect(self._apply_active_target)

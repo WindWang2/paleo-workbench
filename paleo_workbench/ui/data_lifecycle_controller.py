@@ -916,16 +916,20 @@ class DataLifecycleController:
         if dlg.exec() != QDialog.DialogCode.Accepted:
             page._set_action_status(f"已创建可编辑工作副本（未提交）: {working_path}")
             return
-        # Provenance: record the working-copy commit DataRun first so the
-        # service can atomically attach the committed version as its output.
-        # Best-effort — on booking failure the commit falls back to no run
-        # (the commit itself must never fail because of bookkeeping).
+        # Provenance: record the manual-edit DataRun first so the service can
+        # atomically attach the committed version as its output. Best-effort —
+        # on booking failure the commit falls back to no run (the commit itself
+        # must never fail because of bookkeeping). V13 W-E：与 EditSession 共用
+        # 同一 lifecycle 助手（manual_edit operation），单一 provenance 路径。
         run_id = None
         try:
-            run = service.register_run(
-                "working_copy_commit",
-                input_version_ids=[version_id],
-                parameters={"stage": dlg.stage().value, "name": dlg.version_name()},
+            from paleo_workbench.catalog.lifecycle import register_manual_edit_run
+
+            run = register_manual_edit_run(
+                service,
+                source_version_ids=[version_id],
+                note=dlg.version_name(),
+                extra_parameters={"stage": dlg.stage().value},
             )
             run_id = run.id
         except Exception:
@@ -941,6 +945,18 @@ class DataLifecycleController:
             )
 
         def _commit_done(version) -> None:
+            if run_id:
+                try:
+                    from paleo_workbench.catalog.lifecycle import (
+                        complete_manual_edit_run,
+                    )
+
+                    complete_manual_edit_run(
+                        service, run_id,
+                        committed_version_ids=[version.id],
+                    )
+                except Exception:
+                    pass
             page._refresh()
             page._set_action_status(
                 f"已提交新版本: {version.id} (v{version.version_number}, {version.stage.value})"

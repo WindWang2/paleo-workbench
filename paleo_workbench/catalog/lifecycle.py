@@ -1013,3 +1013,129 @@ def register_modeling_run(
         _fail_run(cat, run.run_id)
         raise
     return run, version
+
+
+# ---------------------------------------------------------------- manual edits
+#: 人工修改（working-copy 提交）的 run operation —— V13 W-E：人工修改不得
+#: 成为 lineage 黑洞，每一次提交都是一个可解释的 DataRun。
+MANUAL_EDIT_OPERATION = "manual_edit"
+MANUAL_EDIT_GENERATOR = "paleo-workbench/manual-edit"
+
+# 业务角色（project/roles.py）→ typed port role。端口词汇表是开放的：
+# 未映射的业务角色原样透传（port_roles.display_for 会归入 "other"）。
+_BUSINESS_ROLE_TO_PORT_ROLE: dict[str, str] = {
+    "well_log": _port_roles.WELL_LOGS,
+    "trajectory": _port_roles.TRAJECTORY,
+    "tops": _port_roles.TOPS,
+    "time_depth": _port_roles.TIME_DEPTH,
+    "seismic_volume": _port_roles.SEISMIC_VOLUME,
+    "horizon": _port_roles.HORIZON,
+    "fault": _port_roles.FAULTS,
+    "interpretation": _port_roles.INTERPRETATION,
+}
+
+
+def port_role_for_business_role(role: str) -> str:
+    """把实体业务角色映射为 typed-lineage 端口角色（开放词汇，原样回退）。"""
+    key = str(role or "").strip()
+    if not key:
+        return ""
+    return _BUSINESS_ROLE_TO_PORT_ROLE.get(key, key)
+
+
+def register_manual_edit_run(
+    service: Any,
+    *,
+    source_version_ids: "Iterable[str]",
+    entity_type: str = "",
+    entity_id: str = "",
+    business_role: str = "",
+    actor: str = "",
+    note: str = "",
+    as_new_asset: bool = False,
+    extra_parameters: dict[str, Any] | None = None,
+):
+    """为一次人工修改预订 provenance run（在提交 working copy **之前**调用）。
+
+    run 以 ``running`` 状态登记（输入版本 + 输入端口 + 业务上下文参数），
+    提交方把返回的 ``run.id`` 传给 ``commit_working_copy(run_id=...)``，
+    最后用 :func:`complete_manual_edit_run` 关闭。簿记失败绝不能阻断提交
+    本身 —— 调用方应捕获异常后以 ``run_id=None`` 继续（与
+    ``working_copy_commit`` 旧路径的既定语义一致）。
+    """
+    inputs = [str(v) for v in source_version_ids if str(v)]
+    parameters: dict[str, Any] = {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "business_role": business_role,
+        "as_new_asset": bool(as_new_asset),
+    }
+    if actor:
+        parameters["actor"] = actor
+    if note:
+        parameters["note"] = note
+    if extra_parameters:
+        parameters.update(extra_parameters)
+    input_ports = None
+    role = port_role_for_business_role(business_role)
+    if role and inputs:
+        input_ports = [
+            {"role": role, "version_id": vid, "ordinal": ordinal}
+            for ordinal, vid in enumerate(inputs)
+        ]
+    return service.register_run(
+        MANUAL_EDIT_OPERATION,
+        input_version_ids=inputs,
+        parameters=parameters,
+        generator=MANUAL_EDIT_GENERATOR,
+        status="running",
+        input_ports=input_ports,
+    )
+
+
+def complete_manual_edit_run(
+    service: Any,
+    run_id: str | None,
+    *,
+    committed_version_ids: "Iterable[str]",
+    business_role: str = "",
+    failed_count: int = 0,
+) -> None:
+    """关闭一次人工修改 run：输出端口 + 终态。
+
+    零提交 → ``failed``（补偿：不留幻影 RUNNING）；有提交 → ``complete``，
+    失败数记入参数（会话是宏不是事务，部分成功如实入账）。输出端口引用
+    已提交版本，``set_run_ports`` 会同步扩展 run 的 flat output 列表
+    （ports ⊆ flat 不变量由单一写入核维护）。
+    """
+    if not run_id:
+        return
+    committed = [str(v) for v in committed_version_ids if str(v)]
+    if not committed:
+        try:
+            service.update_run_status(run_id, "failed")
+        except Exception:
+            _log.warning("manual-edit run %s 补偿关闭失败", run_id, exc_info=True)
+        return
+    role = port_role_for_business_role(business_role)
+    if role:
+        try:
+            service.set_run_ports(
+                run_id,
+                output_ports=[
+                    {"role": _port_roles.MANUAL_EDIT, "version_id": vid,
+                     "ordinal": ordinal}
+                    for ordinal, vid in enumerate(committed)
+                ],
+            )
+        except Exception:
+            # 端口是细化信息；失败不改变 run 事实本身。
+            _log.debug("manual-edit output ports skipped for run %s", run_id,
+                       exc_info=True)
+    extra: dict[str, Any] = {}
+    if failed_count:
+        extra["failed_checkouts"] = int(failed_count)
+    try:
+        service.update_run_status(run_id, "complete", extra_parameters=extra)
+    except Exception:
+        _log.warning("manual-edit run %s 关闭失败", run_id, exc_info=True)

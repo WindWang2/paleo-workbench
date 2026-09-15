@@ -3766,6 +3766,7 @@ class DataCatalogService(DataFabricV11Mixin):
         always_producing = {
             "materialize",
             "working_copy_commit",
+            "manual_edit",
             "map_product_assembly",
             "interchange.import",
         }
