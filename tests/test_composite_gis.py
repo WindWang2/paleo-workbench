@@ -1153,13 +1153,13 @@ def test_composite_imports_reference_vector_layer(qtbot, tmp_path):
     assert reference is not None
     assert len(reference.features) == 2
     assert reference.metadata.get("geometry_kind") == "point"
-    # 合成顺序（显示序自上而下）：编修图层 → 引用 → 基础工区——引用在
-    # 用户层之下、基础层之上。
+    # 合成顺序（装配自下而上 = 画笔序）：基础工区 → 引用 → 编修——引用在
+    # 用户层之下、基础层之上（与 layer_order_parity_v11 / 渲染 last-on-top 一致）。
     user = next(
         (layer for layer in layers if layer.metadata.get("editable") == "true"), None
     )
     assert user is not None
-    assert layers.index(reference) > layers.index(user)
+    assert layers.index(reference) < layers.index(user)
 
     # 工程持久化（内存写回；磁盘保存走工程保存流程）。
     assert len(project.workstation_reference_layers) == 1

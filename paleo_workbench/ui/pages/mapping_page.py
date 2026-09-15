@@ -177,18 +177,52 @@ class MappingPage(QWidget):
         toolbar_layout = QHBoxLayout(self.map_toolbars)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
         toolbar_layout.setSpacing(tokens.SPACE_1)
-        # Single command strip (QGIS-theme icons); logical groups are
-        # separated by toolbar separators.
+        # Single command strip: every registered core action (everything the
+        # controller registers minus ``_SURFACE_ICONS`` extension-surface ids).
+        # V12 shape/transform/clipboard commands join the strip; ribbon /
+        # layer-tree menus keep the extension surface alone.
+        core_ids = tuple(
+            action_id
+            for action_id in self.action_controller.actions
+            if action_id not in self.action_controller._SURFACE_ICONS
+        )
+        # Preserve logical groups where possible; append any V12 leftovers
+        # so the strip never drifts from the registry.
+        grouped = (
+            ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh"),
+            ("identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection"),
+            ("toggle_editing", "save_edits", "rollback"),
+            (
+                "add_point", "add_line", "add_polygon", "add_rectangle", "add_circle",
+                "add_ellipse", "add_arc", "add_regular_polygon", "add_sector",
+                "move_feature", "vertex", "reshape", "add_ring", "add_part",
+                "fault_cut", "boundary_reshape",
+            ),
+            ("undo", "redo", "delete_selected", "duplicate_selected",
+             "cut_features", "copy_features", "paste_features"),
+            (
+                "split", "merge", "explode_multipart", "collect_multipart",
+                "delete_ring", "delete_part", "reverse_line", "simplify_feature",
+                "smooth_feature", "offset_curve", "rotate_feature", "scale_feature",
+                "snap_geometries", "trim_line", "extend_line", "fill_ring",
+                "change_facies",
+            ),
+            (
+                "snapping", "avoid_intersections", "tracing", "vertex_scope",
+                "topology", "cancel",
+            ),
+        )
+        core_set = set(core_ids)
+        filtered = tuple(
+            tuple(action_id for action_id in group if action_id in core_set)
+            for group in grouped
+        )
+        filtered = tuple(group for group in filtered if group)
+        listed = {action_id for group in filtered for action_id in group}
+        leftovers = tuple(action_id for action_id in core_ids if action_id not in listed)
+        strip_groups = filtered + ((leftovers,) if leftovers else ())
         toolbar_layout.addWidget(self.action_controller.toolbar(
-            "Map Authoring", (
-                ("pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh"),
-                ("identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection"),
-                ("toggle_editing", "save_edits", "rollback"),
-                ("add_point", "add_line", "add_polygon", "move_feature", "vertex", "reshape"),
-                ("undo", "redo", "delete_selected"),
-                ("split", "merge"),
-                ("snapping", "topology", "cancel"),
-            ), self.map_toolbars
+            "Map Authoring", strip_groups, self.map_toolbars
         ), 1)
         outer.addWidget(self.map_toolbars)
 

@@ -122,8 +122,17 @@ class VectorAdapter(FormatAdapter):
                 geometry = layer.GetSpatialRef()
                 crs = None
                 if geometry is not None:
-                    authority = geometry.GetAuthorityCode(None)
-                    crs = f"EPSG:{authority}" if authority else geometry.GetName()
+                    # Shapefile .prj is often ESRI WKT without EPSG auth —
+                    # AutoIdentifyEPSG recovers EPSG:4326 etc. so inspect
+                    # matches the writer intent (and warnings stay empty).
+                    try:
+                        clone = geometry.Clone()
+                        clone.AutoIdentifyEPSG()
+                        authority = clone.GetAuthorityCode(None)
+                    except Exception:
+                        authority = geometry.GetAuthorityCode(None)
+                        clone = geometry
+                    crs = f"EPSG:{authority}" if authority else (clone.GetName() or geometry.GetName())
                 if crs is None:
                     result.warnings.append(f"图层 {layer.GetName()} 缺少 CRS")
                 geometry_types = self._layer_geometry_types(layer)

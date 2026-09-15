@@ -60,7 +60,13 @@ class LegacyDocumentSceneAdapter:
     ):
         """Synchronize revisions into the scene and return its render snapshot."""
         if self.scene is None:
-            return None
+            # Init may have failed before native extensions were importable
+            # (or stale); retry so update_state can wire unified_scene once
+            # layer_model_core / grid_render_core are fresh (CI path).
+            try:
+                self.scene = MapScene()
+            except Exception:
+                return None
         if document is None:
             self.clear()
             if self.scene is None:
@@ -68,7 +74,11 @@ class LegacyDocumentSceneAdapter:
             return self.scene.render_snapshot(project_crs=str(project_crs or ""))
         document_id = str(getattr(document, "id", "") or "map")
         if document_id != self._document_id:
-            self.scene = MapScene()
+            try:
+                self.scene = MapScene()
+            except Exception:
+                self.scene = None
+                return None
             self._document_id = document_id
             self._legacy_layer_ids.clear()
             self._synced_state.clear()
