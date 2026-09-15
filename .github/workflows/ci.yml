@@ -454,13 +454,97 @@ print(int(m.group(1)) if m else 0)
             --timeout-method=thread \
             well-log-engine/apps/wellplot-desktop/tests
 
+
+  # PR-gate real-format smoke (#1230): LAS/DAT/SEGY prepare() against tiny
+  # committed fixtures under tests/fixtures/realdata/. Fail-closed; no
+  # continue-on-error / || true. Complements the nightly slow family (large
+  # vendor data/) without pulling QGIS or the full native/GDAL build graph.
+  test-realdata-smoke:
+    name: Real-format smoke (PR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Only geo-viz-engine is required for GeoVizEngine.prepare / SeismicLoader.
+          submodules: false
+
+      - name: Fetch geo-viz-engine submodule
+        run: git submodule update --init geo-viz-engine
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System libraries (Qt offscreen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libdbus-1-3 \
+            libegl1 \
+            libxcb-cursor0 \
+            libfontconfig1 \
+            libfreetype6
+
+      - name: Install Python + geoviz deps
+        run: |
+          python -m pip install --upgrade pip
+          # Lightweight product install: no native extras / no GDAL / no QGIS.
+          python -m pip install --prefer-binary -e ".[dev]"
+          python -m pip install --prefer-binary -r requirements-geoviz.txt
+          python -c "import geoviz, geoviz_seismic"
+
+      - name: Assert fixtures are committed (no skip-pass)
+        run: |
+          python - <<'EOF'
+          from pathlib import Path
+          root = Path("tests/fixtures/realdata")
+          required = [
+              "A1.Las",
+              "ExportWellHead.dat",
+              "DC.dat",
+              "C3.dat",
+              "A1_td.dat",
+              "tiny.sgy",
+          ]
+          missing = [n for n in required if not (root / n).is_file() or (root / n).stat().st_size == 0]
+          if missing:
+              raise SystemExit(f"realdata fixtures missing/empty: {missing}")
+          total = sum((root / n).stat().st_size for n in required)
+          print(f"fixtures ok: {len(required)} files, {total} bytes")
+          EOF
+
+      - name: Run real-format smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          python -m pytest -v --tb=short \
+            --timeout=60 \
+            --timeout-method=thread \
+            -m realdata_smoke \
+            tests/test_geoviz_pr_realdata_smoke.py
+
+      - name: Assert realdata_smoke family has not silently shrunk
+        run: |
+          count="$(python -m pytest --collect-only -q -m realdata_smoke tests/test_geoviz_pr_realdata_smoke.py 2>&1 | awk -F': ' '/\.py: [0-9]+$/ {s+=$NF} END {print s+0}')"
+          echo "realdata_smoke tests collected: ${count} (baseline 7)"
+          test -n "${count}" && test "${count}" -ge 7
+
   # Explicit product merge gate. See docs/ci-merge-policy.md.
-  # Requires the FULL monorepo Tests matrix (CPython 3.12) plus the Well Log
-  # Workstation host matrix. Cross-workflow: WellLogEngine C++ must also be
-  # green (separate workflow well-log-engine.yml — required, not edited here).
+  # Requires the FULL monorepo Tests matrix (CPython 3.12), Well Log
+  # Workstation host, 3D OpenGL, and real-format smoke (#1230). Cross-workflow:
+  # WellLogEngine C++ must also be green (well-log-engine.yml — not edited here).
+  # 3.13 legs remain observe-only (continue-on-error); do not fail-close them.
   merge-gate:
     name: Merge gate (full monorepo + workstation)
-    needs: [test, well-log-workstation, test-3d-opengl]
+    needs: [test, well-log-workstation, test-3d-opengl, test-realdata-smoke]
     # Fail closed (#436): the implicit `if: success()` on a `needs` job makes
     # it SKIP — never fail — whenever a needed job fails, so the gate could
     # not block merging while the workstation matrix was red. `if: always()`
@@ -474,14 +558,16 @@ print(int(m.group(1)) if m else 0)
           echo "Full monorepo Tests (CPython 3.12) matrix is green."
           echo "Well Log Workstation (host) matrix is green."
           echo "3D OpenGL viewport (software Mesa) leg is green."
+          echo "Real-format smoke (PR) leg is green."
           echo "Also require workflow 'WellLogEngine C++' on the same SHA."
           echo "Policy: docs/ci-merge-policy.md."
 
       - name: Fail closed unless every product gate is green
-        if: ${{ needs.test.result != 'success' || needs.well-log-workstation.result != 'success' || needs.test-3d-opengl.result != 'success' }}
+        if: ${{ needs.test.result != 'success' || needs.well-log-workstation.result != 'success' || needs.test-3d-opengl.result != 'success' || needs.test-realdata-smoke.result != 'success' }}
         run: |
           echo "A required product gate is not green:"
           echo "  Tests: ${{ needs.test.result }}"
           echo "  Well Log Workstation: ${{ needs.well-log-workstation.result }}"
           echo "  3D OpenGL viewport: ${{ needs.test-3d-opengl.result }}"
+          echo "  Real-format smoke: ${{ needs.test-realdata-smoke.result }}"
           exit 1
