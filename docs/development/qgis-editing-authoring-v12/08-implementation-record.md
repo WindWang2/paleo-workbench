@@ -40,6 +40,18 @@
 | M4-2 geotopo 工具面 | `fault_cut`/`boundary_reshape` 进 geometry 组：evaluator 规则（面 + 编辑会话 + 原生 kind 门禁）、registry 风险/呈现面、帮助、两张新图标、shim kind 路由（复用占位工具的 `native_digitize_kind`）、M1-8 预检覆盖；桥 manifest `native_tools` 补声明 `faultCut`/`boundaryReshape` |
 | 用例 | `tests/test_snapping_scope_and_hints_v12.py` 5 项 + geotopo 登记/门禁断言（并入 render/facies 文件） |
 
+## 第三轮｜M2-2 / M2-3（落地）
+
+| 项 | 落地内容 |
+|---|---|
+| M2-2 移动捕捉跟随 | `PwbMoveTool` 参考点与目标点吸附（`snapOrRaw`/`snapMatch`）+ 拖动期捕捉指示器——预览即所得，与顶点工具同一捕捉面 |
+| M2-3 连续 Delete | hover 光标位置入 `last_cursor_map_`；Delete 成功后在同位置对**最新缓冲**重建 hover——密集几何下连续删除免"晃动鼠标找回悬停"（v10 #3 关闭；镜像即编辑发生地，重建无滞后风险） |
+| 验证 | 编辑/捕捉/拓扑/预设全量相关套件 **53 passed**（含 v10 采点·捕捉·移动工具），复跑一致 |
+
+**M4-1 复核**：拓扑错误 → 画布高亮通道（`_highlight` → `highlight_checker_errors`）与定位缩放已在既有代码中接通，无需新增；残余仅为 QC hub 差分面板的呈现增强（paleo-ui 域）。
+
+---
+
 ### 本轮评审发现（三态 bisect，已定案）
 
 **Polygon 图层经 `snap_to_map` 直查（含顶点 hover 反馈）不命中，Point 正常** —— 三态对照：
