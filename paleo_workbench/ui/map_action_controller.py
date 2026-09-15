@@ -43,7 +43,7 @@ class MapActionController(QObject):
     _TOOL_IDS = (
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon", "move_feature", "vertex",
-        "reshape", "add_ring", "add_part",
+        "reshape", "add_ring", "add_part", "fault_cut", "boundary_reshape",
     )
 
     #: 命令面动作（区别于画布 MapTool：触发一次命令，不置 current_tool）。

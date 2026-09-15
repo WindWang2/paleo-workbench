@@ -381,7 +381,8 @@ py::dict capability_manifest() {
     py::list native_tools;
     for (const char* kind :
          {"pan", "zoomIn", "zoomOut", "addPoint", "addLine", "addPolygon",
-          "vertex", "move", "select", "identify", "measure"}) {
+          "vertex", "move", "select", "identify", "measure",
+          "faultCut", "boundaryReshape"}) {
         native_tools.append(kind);
     }
     manifest["native_tools"] = native_tools;

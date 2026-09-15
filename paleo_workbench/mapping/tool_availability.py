@@ -152,6 +152,8 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         # V10：复杂几何/要素命令族（duplicate / 环 / 部件 / 单多部件转换）。
         "duplicate_selected", "add_ring", "add_part", "explode_multipart",
         "collect_multipart",
+        # V12 M4-2：geotopo 交互工具（C++ 实现早在，缺的是登记面）。
+        "fault_cut", "boundary_reshape",
     ),
     # V12 M1：编辑期联动开关补齐 UI 面——三个能力（避免重叠/追踪/顶点档位）
     # 的实现早就在 SnappingService + QgsProject 里，此前只有命令 handler、
@@ -200,7 +202,11 @@ _POLYGON_ROLES = frozenset({
 })
 
 #: 需要 QGIS 原生后端的工具（桥缺失/降级时禁用 + 原因；不隐藏能力假象）
-_NATIVE_ONLY_TOOLS = frozenset({"style_manager", "reshape", "add_ring", "add_part"})
+_NATIVE_ONLY_TOOLS = frozenset({
+    "style_manager", "reshape", "add_ring", "add_part",
+    # V12 M4-2：geotopo 交互工具（C++ PwbFaultCutTool / PwbBoundaryReshapeTool）。
+    "fault_cut", "boundary_reshape",
+})
 
 #: 需要活动图层（矢量或任意）的工具
 _NEEDS_ANY_LAYER = frozenset({
@@ -219,7 +225,7 @@ _NEEDS_EDITING = frozenset({
     "move_feature", "vertex", "reshape", "undo", "redo", "delete_selected",
     "split", "merge", "repair_geometry",
     "duplicate_selected", "add_ring", "add_part", "explode_multipart",
-    "collect_multipart",
+    "collect_multipart", "fault_cut", "boundary_reshape",
 })
 
 #: 需要活动图层的组（无活动图层时整组隐藏，layer_new/reference_import 除外）
@@ -255,6 +261,7 @@ _CHECKED_CANVAS_TOOLS = frozenset({
     "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
     "measure_distance", "add_point", "add_line", "add_polygon",
     "move_feature", "vertex", "reshape", "add_ring", "add_part",
+    "fault_cut", "boundary_reshape",
 })
 
 # ---------------------------------------------------------------------------
@@ -616,6 +623,26 @@ def _rule_edit_tool(ctx: ToolContext, tool_id: str, native_kind: str) -> ToolAva
         reason = _native_tool_gate(ctx, native_kind, {"move_feature": "移动", "vertex": "节点编辑"}[tool_id])
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
+def _rule_geotopo_tool(ctx: ToolContext, tool_id: str) -> ToolAvailability:
+    """geotopo 交互工具（断层切割 / 共边重塑）门禁（V12 M4-2）。
+
+    面 + 编辑会话 + 原生画布 + 桥 kind（faultCut/boundaryReshape）。
+    boundary_reshape 的「恰好两个相邻要素」选集约束由激活分支复查
+    （复合谓词，evaluator 只表达粗门）。
+    """
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+    )
+    if reason is None and ctx.active_layer_kind != "polygon":
+        reason = "仅面图层可用"
+    if reason is None:
+        kind = "faultCut" if tool_id == "fault_cut" else "boundaryReshape"
+        reason = _native_tool_gate(ctx, kind, "断层切割" if tool_id == "fault_cut" else "共边重塑")
+    return _ok(tool_id) if reason is None else _no(tool_id, reason)
+
 def _rule_delete_selected(ctx: ToolContext) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
@@ -897,6 +924,8 @@ _RULE_TABLE: dict[str, Rule] = {
     "add_polygon": lambda ctx: _rule_capture(ctx, "add_polygon"),
     "move_feature": lambda ctx: _rule_edit_tool(ctx, "move_feature", "move"),
     "vertex": lambda ctx: _rule_edit_tool(ctx, "vertex", "vertex"),
+    "fault_cut": lambda ctx: _rule_geotopo_tool(ctx, "fault_cut"),
+    "boundary_reshape": lambda ctx: _rule_geotopo_tool(ctx, "boundary_reshape"),
     "delete_selected": _rule_delete_selected,
     "split": _rule_split,
     "merge": _rule_merge,

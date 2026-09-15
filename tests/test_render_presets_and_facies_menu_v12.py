@@ -149,3 +149,44 @@ def test_context_menu_missing_feature_opens_nothing(qtbot):
     assert doc._on_canvas_context_menu((50.0, 50.0), None) is None
     feature = next(f for f in layer.features() if f.feature_id == "f1")
     assert feature.attributes.get("facies") == "砂岩", "未命中也要零写入"
+
+
+# ---------------------------------------------------------------------------
+# M4-2：geotopo 交互工具面（断层切割 / 共边重塑）
+# ---------------------------------------------------------------------------
+
+def test_geotopo_tools_registered_and_gated():
+    from paleo_workbench.mapping.action_registry import ACTION_SPECS
+    from paleo_workbench.mapping.tool_availability import (
+        TOOL_GROUPS, evaluate_tool,
+    )
+    from paleo_workbench.mapping.tool_help import TOOL_HELP, TOOL_LABELS
+    from paleo_workbench.mapping.tool_context import ToolContext
+
+    for tool_id in ("fault_cut", "boundary_reshape"):
+        assert tool_id in TOOL_GROUPS["geometry"]
+        assert tool_id in TOOL_LABELS and tool_id in TOOL_HELP
+        spec = ACTION_SPECS[tool_id]
+        assert spec.canvas_interaction and spec.requires_native
+
+    # 非面层 → 拒绝并给原因。
+    ctx = ToolContext(
+        project_open=True, active_layer_id="L1", active_layer_kind="line",
+        editing=True, native_canvas_available=True,
+    )
+    verdict = evaluate_tool("fault_cut", ctx)
+    assert verdict.enabled is False and "面图层" in verdict.disabled_reason
+
+    # 面层 + 编辑会话 + 原生 + 桥 kind 声明 → 可用（flags 取真桥 manifest，
+    # 顺带钉住 C++ 清单确实声明了 faultCut/boundaryReshape）。
+    import qgis_render_bridge as bridge
+    native_tools = set(bridge.capability_manifest()["native_tools"])
+    flags = {f"qgis.native_tool.{kind}" for kind in native_tools}
+    assert "qgis.native_tool.faultCut" in flags
+    assert "qgis.native_tool.boundaryReshape" in flags
+    ok_ctx = ToolContext(
+        project_open=True, active_layer_id="L1", active_layer_kind="polygon",
+        editing=True, native_canvas_available=True, capability_flags=flags,
+    )
+    assert evaluate_tool("fault_cut", ok_ctx).enabled is True
+    assert evaluate_tool("boundary_reshape", ok_ctx).enabled is True

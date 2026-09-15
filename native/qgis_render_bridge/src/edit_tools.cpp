@@ -1,6 +1,7 @@
 #include "edit_tools.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -1282,6 +1283,9 @@ void PwbVertexTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   }
   if (!dragging_) {
     const QgsPointLocator::Match m = updateHoverMatch(e->mapPoint());
+    std::fprintf(stderr, "[PWB] move map=(%.3f,%.3f) valid=%d type=%d\n",
+                 e->mapPoint().x(), e->mapPoint().y(),
+                 m.isValid() ? 1 : 0, static_cast<int>(m.type()));
     updateSnapIndicator(e->mapPoint(), &m);
     return;
   }

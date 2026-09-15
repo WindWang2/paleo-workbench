@@ -1261,6 +1261,9 @@ class QgisCanvasShim(QWidget):
                     elif tool_id == "add_part":
                         # V10 捕获部件：digitizer 随图层 kind（控制器注入属性）。
                         kind = getattr(tool, "native_digitize_kind", "pan")
+                    elif tool_id in {"fault_cut", "boundary_reshape"}:
+                        # V12 M4-2：geotopo 交互工具（C++ 全语义，宿主占位）。
+                        kind = getattr(tool, "native_digitize_kind", "pan")
                     try:
                         shim.stack.set_map_tool(addr, kind)
                         # V8/M1：记录最近一次成功的原生工具（可检测一致性的

@@ -86,10 +86,14 @@ def _specs() -> dict[str, ActionSpec]:
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon",
         "move_feature", "vertex", "reshape", "add_ring", "add_part",
+        "fault_cut", "boundary_reshape",
     }
     # 原生专属（桥缺失/降级时 disabled + 原因；不隐藏能力假象）。
     # V10（#1255）：与求值器 _NATIVE_ONLY_TOOLS 同集，两表由测试互钉。
-    native_only = {"style_manager", "reshape", "add_ring", "add_part"}
+    native_only = {
+        "style_manager", "reshape", "add_ring", "add_part",
+        "fault_cut", "boundary_reshape",
+    }
     # 写风险动作（修改图层/工程数据；Agent WRITE 授权与评审语义）。
     # V10（#1255）：duplicate_selected / add_ring / add_part /
     # explode_multipart / collect_multipart 也是数据改写作，此前被误登记
@@ -102,7 +106,7 @@ def _specs() -> dict[str, ActionSpec]:
         "split", "merge", "repair_geometry", "undo", "redo", "topology",
         "layer_new", "factor_overlay", "map_product_assemble",
         "duplicate_selected", "add_ring", "add_part", "explode_multipart",
-        "collect_multipart",
+        "collect_multipart", "fault_cut", "boundary_reshape",
     }
     # 选择集动作（改选择集，不改数据）。
     selection_tools = {

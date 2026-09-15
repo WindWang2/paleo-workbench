@@ -37,6 +37,7 @@ TOOL_LABELS: dict[str, str] = {
     "snapping": "捕捉", "topology": "拓扑编辑", "cancel": "取消",
     "avoid_intersections": "避免重叠", "tracing": "追踪",
     "vertex_scope": "顶点范围",
+    "fault_cut": "断层切割", "boundary_reshape": "共边重塑",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -167,6 +168,14 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
         "顶点范围", "编辑会话中 + 原生画布",
         "节点工具的作用范围：全部层（勾选）或当前层（未勾选）",
         kinds=_VECTOR),
+    "fault_cut": _spec(
+        "断层切割", "面图层编辑会话中 + 原生画布",
+        "数字化切割线，把面沿断层截断（C++ 守恒校验）", modifies=True,
+        kinds=_VECTOR),
+    "boundary_reshape": _spec(
+        "共边重塑", "面图层编辑会话中 + 恰好选中两个相邻要素 + 原生画布",
+        "数字化新界线联动重塑两面的共享弧（守恒校验失败零变更）",
+        modifies=True, kinds=_VECTOR),
     "topology": _spec(
         "拓扑编辑", "有活动图层 + 工程 CRS 有效",
         "开关拓扑编辑（编辑期联动 + 保存时校验）", modifies=True, kinds=_VECTOR),

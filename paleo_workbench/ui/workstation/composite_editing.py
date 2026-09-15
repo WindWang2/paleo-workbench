@@ -2202,8 +2202,9 @@ class CompositeEditController(QObject):
                 session = layer.edit_session
                 if session is None and not self.native_editing.is_open(layer.id):
                     return  # M1：原生会话同样允许激活（vertex v2 / 数字化路由）
-                if action_id in {"vertex", "move_feature"} \
-                        and self.native_editing.is_open(layer.id):
+                if action_id in {
+                    "vertex", "move_feature", "fault_cut", "boundary_reshape",
+                } and self.native_editing.is_open(layer.id):
                     # V12 M1-8（R6 激活预检）：原生会话下编辑权威在镜像缓冲，
                     # 顶点/移动工具只在「画布当前层 == 目标层」时才有可写
                     # 目标。先补推（M0-2b），仍不就位则放弃绑定本次工具——

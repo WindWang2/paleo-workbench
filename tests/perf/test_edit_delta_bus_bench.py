@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gc
 import json
+import time
 import tracemalloc
 
 import numpy as np
@@ -166,6 +167,15 @@ def test_tool_sink_writes_ring(stack, qtbot, qapp):
         for pos in (QPoint(200, 200), QPoint(320, 200), QPoint(200, 200)):
             QTest.mouseMove(view.viewport(), pos)
             QTest.qWait(80)
+        # V12 评审加固：满载机器上 80ms 定额等待会漏掉 hover 节拍（整进程
+        # 全量跑时偶发）——改为"等到 JSON 通道出现 matched 命中"的轮询，
+        # 上限 2s；二进制环与 JSON 是同一发射点的并行通道，等价且稳健。
+        deadline = time.perf_counter() + 2.0
+        while not any('"matched":true' in p for _, p in json_events):
+            QTest.mouseMove(view.viewport(), QPoint(200, 200))
+            QTest.qWait(50)
+            if time.perf_counter() > deadline:
+                break
         events = bus.drain()
         snaps = [e for e in events if e["kind"] == EVENT_SNAP_FEEDBACK]
         matched_json = [a for a, p in json_events
