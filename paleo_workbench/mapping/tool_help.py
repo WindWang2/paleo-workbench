@@ -45,6 +45,8 @@ TOOL_LABELS: dict[str, str] = {
     "cut_features": "剪切", "copy_features": "复制", "paste_features": "粘贴",
     "add_rectangle": "添加矩形", "add_circle": "添加圆",
     "snap_geometries": "吸附对齐",
+    "add_arc": "添加圆弧", "add_regular_polygon": "添加正多边形",
+    "trim_line": "修剪线", "extend_line": "延伸线",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -225,6 +227,18 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
     "snap_geometries": _spec(
         "吸附对齐", "编辑会话中 + 选中要素",
         "把选中要素顶点逐个吸附到捕捉命中处", modifies=True, kinds=_VECTOR),
+    "add_arc": _spec(
+        "添加圆弧", "线图层编辑会话中",
+        "起点 + 过弧点 + 终点三点定圆弧（退化回落折线）", modifies=True, kinds=_VECTOR),
+    "add_regular_polygon": _spec(
+        "添加正多边形", "面图层编辑会话中",
+        "中心 + 半径点，默认 6 边", modifies=True, kinds=_VECTOR),
+    "trim_line": _spec(
+        "修剪线", "线图层编辑会话中 + 选中要素",
+        "按边界裁剪所选线（保留内部/外部）", modifies=True, kinds=_VECTOR),
+    "extend_line": _spec(
+        "延伸线", "线图层编辑会话中 + 选中要素",
+        "把所选线端点沿方向延伸到边界", modifies=True, kinds=_VECTOR),
     "topology": _spec(
         "拓扑编辑", "有活动图层 + 工程 CRS 有效",
         "开关拓扑编辑（编辑期联动 + 保存时校验）", modifies=True, kinds=_VECTOR),

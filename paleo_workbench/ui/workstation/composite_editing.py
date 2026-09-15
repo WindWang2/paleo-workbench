@@ -360,7 +360,8 @@ _LAYER_BOUND_TOOLS = frozenset(
     {"identify", "select", "select_rectangle", "move_feature", "vertex"}
 )
 _KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon",
-                "add_rectangle": "polygon", "add_circle": "polygon"}
+                "add_rectangle": "polygon", "add_circle": "polygon",
+                "add_regular_polygon": "polygon", "add_arc": "line"}
 
 
 def pick_topmost_visible_layer_id(layer_ids_bottom_up, visible_ids) -> str | None:
@@ -2242,11 +2243,19 @@ class CompositeEditController(QObject):
                 elif action_id == "add_polygon":
                     tool = AddPolygonTool(session, snap=self._snap, attributes=defaults,
                                           on_captured=captured)
-                elif action_id in {"add_rectangle", "add_circle"}:
-                    # V12 M5-A1 shape：只在面图层激活（与 AddPolygon 同门）。
+                elif action_id in {
+                    "add_rectangle", "add_circle",
+                    "add_arc", "add_regular_polygon",
+                }:
+                    # V12 M5-A1 shape：kind 何几何类型由各自工具决定
+                    # （矩形/圆/正多边形 = 面；圆弧 = 线）。
                     from paleo_workbench.mapping import map_tools as _mt
-                    shape_tool = (_mt.RectangleCaptureTool if action_id == "add_rectangle"
-                                  else _mt.CircleCaptureTool)
+                    shape_tool = {
+                        "add_rectangle": _mt.RectangleCaptureTool,
+                        "add_circle": _mt.CircleCaptureTool,
+                        "add_arc": _mt.ArcCaptureTool,
+                        "add_regular_polygon": _mt.RegularPolygonCaptureTool,
+                    }[action_id]
                     tool = shape_tool(session, snap=self._snap,
                                       attributes=defaults, on_captured=captured)
                 elif action_id == "move_feature":
@@ -2911,6 +2920,49 @@ class CompositeEditController(QObject):
         if dropped:
             message += f"（丢弃字段：{'、'.join(sorted(dropped))}）"
         return True, message
+
+    def trim_extend_selection(self, op_id: str, boundary: dict,
+                                *, keep: str = "inside",
+                                max_extend: float = 1e9) -> tuple[bool, str]:
+        """修剪/延伸选集（V12 M5-A1 trim/extend）：选集线按 boundary 裁剪/延长。
+
+        boundary = boundary 要素的 GeoJSON geometry（交互由右键 element
+        定位的第二要素或当前图层的其余选中要素提供）。
+        """
+        from paleo_workbench.mapping import geometry_operations as geo_ops
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        with session.edit_source(f"{op_id}(command)"):
+            changed = 0
+            for feature_id in sorted(layer.selection):
+                feature = session.feature(feature_id)
+                geometry = feature.as_record()["geometry"]
+                try:
+                    if op_id == "trim_line":
+                        new_geometry = geo_ops.trim_line(
+                            geometry, boundary, keep=keep)
+                    elif op_id == "extend_line":
+                        new_geometry = geo_ops.extend_line_to_boundary(
+                            geometry, boundary, max_extend=max_extend)
+                    else:
+                        return False, f"未知命令 {op_id}"
+                except Exception:
+                    continue
+                session.set_geometry(feature_id, new_geometry)
+                changed += 1
+        if changed == 0:
+            return False, "选中要素无法按该边界修剪/延伸"
+        self._topology.refresh_error_count(layer)
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return True, f"已应用{op_id}（{changed} 个要素）"
 
     def snap_geometries(self, *, tolerance: float | None = None) -> tuple[bool, str]:
         """批量捕捉对齐（V12 M5-A1）：选集顶点逐个吸附到捕捉命中处。

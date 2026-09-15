@@ -572,6 +572,120 @@ class CircleCaptureTool(_CaptureTool):
         return True
 
 
+class ArcCaptureTool(_CaptureTool):
+    """圆弧数字化器（V12 M5-A1 shape）：起点 + 中点 + 终点 → 三点定圆弧。
+
+    三次左键：P0（起点）→ P1（过弧点）→ P2（终点）→ 按三点圆弧采样 32 段
+    落线。圆弧退化（共线）时回落折线 P0→P1→P2——永不丢用户输入。
+    """
+
+    tool_id = "add_arc"
+    geometry_type = "LineString"
+    SEGMENTS = 32
+
+    def mouse_press(self, point, *, button: str = "left", modifiers=()) -> bool:
+        if button == "right":
+            return self.finish()
+        if button != "left":
+            return False
+        self.points.append(self._snap(point))
+        return self.finish() if len(self.points) == 3 else True
+
+    def finish(self) -> bool:
+        import math as _math
+
+        if len(self.points) != 3:
+            return False
+        (x0, y0), (x1, y1), (x2, y2) = (
+            (float(p[0]), float(p[1])) for p in self.points)
+        # 三点圆心（行列式法）；退化共线 → 折线回落。
+        divisor = 2.0 * (x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1))
+        if abs(divisor) < 1e-12:
+            coords = [[x0, y0], [x1, y1], [x2, y2]]
+        else:
+            sq = lambda x, y: x * x + y * y
+            ux = ((sq(x0, y0) * (y1 - y2) + sq(x1, y1) * (y2 - y0)
+                   + sq(x2, y2) * (y0 - y1)) / divisor)
+            uy = ((sq(x0, y0) * (x2 - x1) + sq(x1, y1) * (x0 - x2)
+                   + sq(x2, y2) * (x1 - x0)) / divisor)
+            r0 = _math.hypot(x0 - ux, y0 - uy)
+            a0 = _math.atan2(y0 - uy, x0 - ux)
+            a1 = _math.atan2(y1 - uy, x1 - ux)
+            a2 = _math.atan2(y2 - uy, x2 - ux)
+            # 弧向：经 P1 的那条弧（短弧/长弧二选一）。
+            two_pi = 2.0 * _math.pi
+            sweep_ccw = (a2 - a0) % two_pi   # 逆时针扫过角
+            mid_ccw = (a1 - a0) % two_pi     # P1 在逆时针弧上？
+            if mid_ccw <= sweep_ccw:
+                angles = [a0 + sweep_ccw * i / self.SEGMENTS
+                          for i in range(self.SEGMENTS + 1)]
+            else:
+                sweep_cw = sweep_ccw - two_pi
+                angles = [a0 + sweep_cw * i / self.SEGMENTS
+                          for i in range(self.SEGMENTS + 1)]
+            coords = [[ux + r0 * _math.cos(a), uy + r0 * _math.sin(a)]
+                      for a in angles]
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            feature_id = self._feature_id_factory()
+            self.session.add_feature(
+                VectorFeature(feature_id,
+                              {"type": "LineString", "coordinates": coords},
+                              self._default_attributes))
+        self.points.clear()
+        self._notify_captured(feature_id)
+        return True
+
+
+class RegularPolygonCaptureTool(_CaptureTool):
+    """正多边形数字化器（V12 M5-A1 shape）：中心 + 半径点 + 边数 → 正多边形。
+
+    两次左键定中心与外接圆半径；边数默认 6（右键菜单/对话框可改）。
+    只在面图层激活。
+    """
+
+    tool_id = "add_regular_polygon"
+    geometry_type = "Polygon"
+    DEFAULT_SIDES = 6
+
+    def __init__(self, *args, sides: int = 6, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.sides = max(3, int(sides or self.DEFAULT_SIDES))
+
+    def mouse_press(self, point, *, button: str = "left", modifiers=()) -> bool:
+        if button == "right":
+            return self.finish()
+        if button != "left":
+            return False
+        self.points.append(self._snap(point))
+        return self.finish() if len(self.points) == 2 else True
+
+    def finish(self) -> bool:
+        import math as _math
+
+        if len(self.points) != 2:
+            return False
+        (cx, cy), (ex, ey) = (
+            (float(p[0]), float(p[1])) for p in self.points)
+        radius = _math.hypot(float(ex) - float(cx), float(ey) - float(cy))
+        if radius <= 0.0:
+            self.points.clear()
+            return False
+        base = _math.atan2(float(ey) - float(cy), float(ex) - float(cx))
+        ring = [[float(cx) + radius * _math.cos(base + 2.0 * _math.pi * i / self.sides),
+                 float(cy) + radius * _math.sin(base + 2.0 * _math.pi * i / self.sides)]
+                for i in range(self.sides)]
+        ring.append(list(ring[0]))
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            feature_id = self._feature_id_factory()
+            self.session.add_feature(
+                VectorFeature(feature_id,
+                              {"type": "Polygon", "coordinates": [ring]},
+                              self._default_attributes))
+        self.points.clear()
+        self._notify_captured(feature_id)
+        return True
+
+
 class SnapGeometriesTool(MapTool):
     """批量捕捉对齐（V12 M5-A）：选集顶点逐个吸附到捕捉命中处（单宏）。
 

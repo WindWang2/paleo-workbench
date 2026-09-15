@@ -463,3 +463,101 @@ def test_snapping_priority_tiebreak():
                         layers=[a, b], map_units_per_pixel=1.0) == (5.0, 5.0)
     assert service.last_match.feature_id == "b-f", (
         f"等距时优先级未裁决：{service.last_match}")
+
+
+# ---------------------------------------------------------------------------
+# 圆弧 / 正多边形 / 修剪 / 延伸（M5 剩余项）
+# ---------------------------------------------------------------------------
+
+def test_arc_capture_builds_three_point_arc(qapp):
+    import math
+
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.map_tools import ArcCaptureTool
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("线", "line")
+    controller._open_session(layer)
+
+    tool = ArcCaptureTool(layer.edit_session, snap=lambda p: p)
+    assert tool.mouse_press((0.0, 0.0)) is True
+    assert tool.mouse_press((1.0, 1.0)) is True
+    assert tool.mouse_press((2.0, 0.0)) is True
+    features = layer.edit_session.features()
+    assert len(features) == 1
+    coords = features[0].geometry["coordinates"]
+    assert len(coords) == 33, f"圆弧采样异常: {len(coords)}"  # 32 段 + 首点
+    assert (abs(coords[0][0]) < 1e-9 and abs(coords[0][1]) < 1e-9
+            and abs(coords[-1][0] - 2.0) < 1e-9 and abs(coords[-1][1]) < 1e-9)
+    # 过 P1 (1,1) 附近（弧应凸起）。
+    assert max(c[1] for c in coords) > 0.9, f"弧未凸起: {coords}"
+
+
+def test_regular_polygon_capture(qapp):
+    import math
+
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.map_tools import RegularPolygonCaptureTool
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("面", "polygon")
+    controller._open_session(layer)
+
+    tool = RegularPolygonCaptureTool(layer.edit_session, snap=lambda p: p, sides=6)
+    assert tool.mouse_press((0.0, 0.0)) is True
+    assert tool.mouse_press((2.0, 0.0)) is True
+    features = layer.edit_session.features()
+    assert len(features) == 1
+    ring = features[0].geometry["coordinates"][0]
+    assert ring[0] == ring[-1] and len(ring) == 7, f"六边形异常: {len(ring)}"
+    for point in ring[:-1]:
+        assert abs(math.dist(point, (0.0, 0.0)) - 2.0) < 1e-6, f"非正六边形: {ring}"
+
+
+def test_trim_and_extend_line(qapp):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("线", "line")
+    controller.import_layer_features(layer.id, [
+        VectorFeature(feature_id="f1",
+                      geometry={"type": "LineString", "coordinates": [
+                          [0.0, 0.0], [4.0, 0.0]]},
+                      attributes={}),
+    ])
+    layer.set_selection({"f1"})
+    controller._open_session(layer)
+    boundary = {"type": "Polygon", "coordinates": [[
+        [1.0, -1.0], [3.0, -1.0], [3.0, 1.0], [1.0, 1.0], [1.0, -1.0]]]}
+
+    ok, message = controller.trim_extend_selection("trim_line", boundary)
+    assert ok, message
+    session = layer.edit_session
+    feature = next(f for f in session.features() if f.feature_id == "f1")
+    coords = feature.geometry["coordinates"]
+
+    def _xs(geometry):
+        if geometry["type"] == "LineString":
+            return [c[0] for c in geometry["coordinates"]]
+        return [c[0] for part in geometry["coordinates"] for c in part]
+
+    assert min(_xs(feature.geometry)) >= 1.0 - 1e-6 and max(_xs(feature.geometry)) <= 3.0 + 1e-6
+
+
+def test_shape_tools_registered():
+    from paleo_workbench.mapping.action_registry import ACTION_SPECS
+    from paleo_workbench.mapping.tool_availability import TOOL_GROUPS
+    from paleo_workbench.mapping.tool_help import TOOL_HELP, TOOL_LABELS
+
+    for tool_id, group in (("add_arc", "capture"), ("add_regular_polygon", "capture"),
+                           ("trim_line", "geometry"), ("extend_line", "geometry")):
+        assert tool_id in TOOL_GROUPS[group]
+        assert tool_id in TOOL_LABELS and tool_id in TOOL_HELP
+        assert ACTION_SPECS[tool_id].icon

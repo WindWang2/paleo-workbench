@@ -44,7 +44,7 @@ class MapActionController(QObject):
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
         "measure_distance", "add_point", "add_line", "add_polygon", "move_feature", "vertex",
         "reshape", "add_ring", "add_part", "fault_cut", "boundary_reshape",
-        "add_rectangle", "add_circle",
+        "add_rectangle", "add_circle", "add_arc", "add_regular_polygon",
     )
 
     #: 命令面动作（区别于画布 MapTool：触发一次命令，不置 current_tool）。
@@ -60,6 +60,7 @@ class MapActionController(QObject):
         "smooth_feature", "offset_curve",
         "rotate_feature", "scale_feature", "cut_features", "copy_features",
         "paste_features", "snap_geometries",
+        "trim_line", "extend_line",
         "snapping", "avoid_intersections", "tracing", "vertex_scope",
         "topology", "cancel",
     )
