@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -141,6 +142,19 @@ def test_damaged_shapefile_missing_sidecar_fails_closed(tmp_path):
     assert report.recommendation == "unavailable"
 
 
+def _retry_write_bytes(path: Path, data: bytes, *, attempts: int = 8) -> None:
+    """Windows CI: Defender briefly locks freshly-published package files."""
+    last: OSError | None = None
+    for attempt in range(attempts):
+        try:
+            path.write_bytes(data)
+            return
+        except PermissionError as exc:
+            last = exc
+            time.sleep(0.05 * (2 ** attempt))
+    raise last  # type: ignore[misc]
+
+
 def test_checksum_mismatch_detected_by_package_verify(tmp_path):
     """The damaged-package case: bytes flip after packaging."""
     project_path = tmp_path / "proj" / "demo.paleo.json"
@@ -150,7 +164,7 @@ def test_checksum_mismatch_detected_by_package_verify(tmp_path):
 
     result = PackageBuilder(project_path).build(tmp_path / "out")
     target = result.package_dir / "demo.paleo.json"
-    target.write_bytes(bytes([b ^ 0x01 for b in target.read_bytes()]))
+    _retry_write_bytes(target, bytes([b ^ 0x01 for b in target.read_bytes()]))
     report = verify_package(result.package_dir)
     assert not report.ok
     assert any(i.code == "checksum-mismatch" for i in report.issues)
@@ -165,45 +179,47 @@ def test_cross_root_package_with_changed_external(tmp_path):
     project_path = tmp_path / "proj" / "demo.paleo.json"
     project_path.parent.mkdir(parents=True)
     project_path.write_text("{}", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    external = fx.write_valid_las(outside / "ext.las", rows=4)
     catalog = DataCatalogService.open(project_path)
     try:
-        outside = tmp_path / "outside"
-        outside.mkdir()
-        external = fx.write_valid_las(outside / "ext.las", rows=4)
         catalog.link_external(external, name="ext", type="well_log", format="las")
-
         from paleo_workbench.interchange.package import PackageBuilder
 
         build = PackageBuilder(project_path, catalog=catalog).build(tmp_path / "out")
-
-        # relocate the package to a brand-new root
-        new_root = tmp_path / "newroot"
-        new_root.mkdir()
-        relocated = new_root / "demo"
-        shutil.copytree(build.package_dir, relocated)
-        # the external source has vanished in this scenario
-        shutil.rmtree(outside)
-
-        reopened = DataCatalogService.open(relocated / "demo.paleo.json")
-        try:
-            from paleo_workbench.interchange.dependency_audit import (
-                DependencyStatus,
-                ExternalDependencyAuditor,
-            )
-
-            audit = ExternalDependencyAuditor(reopened).audit()
-            externals = [r for r in audit.records if not r.managed]
-            assert externals, "外部引用必须在新根仍显式存在"
-            assert all(r.status is DependencyStatus.MISSING for r in externals)
-            # managed content (project file) survives
-            assert (relocated / "demo.paleo.json").is_file()
-        finally:
-            reopened.close()
     finally:
+        # Close before rmtree: Windows cannot delete files still opened by the catalog.
         catalog.close()
+
+    # relocate the package to a brand-new root
+    new_root = tmp_path / "newroot"
+    new_root.mkdir()
+    relocated = new_root / "demo"
+    shutil.copytree(build.package_dir, relocated)
+    # the external source has vanished in this scenario
+    shutil.rmtree(outside)
+
+    reopened = DataCatalogService.open(relocated / "demo.paleo.json")
+    try:
+        from paleo_workbench.interchange.dependency_audit import (
+            DependencyStatus,
+            ExternalDependencyAuditor,
+        )
+
+        audit = ExternalDependencyAuditor(reopened).audit()
+        externals = [r for r in audit.records if not r.managed]
+        assert externals, "外部引用必须在新根仍显式存在"
+        assert all(r.status is DependencyStatus.MISSING for r in externals)
+        # managed content (project file) survives
+        assert (relocated / "demo.paleo.json").is_file()
+    finally:
+        reopened.close()
 
 
 def test_cross_root_relative_path_resolution(tmp_path):
+    import os
+
     project_path = tmp_path / "proj" / "demo.paleo.json"
     project_path.parent.mkdir(parents=True)
     project_path.write_text("{}", encoding="utf-8")
@@ -216,17 +232,20 @@ def test_cross_root_relative_path_resolution(tmp_path):
         from paleo_workbench.interchange.package import PackageBuilder
 
         build = PackageBuilder(project_path, catalog=catalog).build(tmp_path / "out")
-        relocated = tmp_path / "moved"
-        shutil.copytree(build.package_dir, relocated)
-        reopened = DataCatalogService.open(relocated / "demo.paleo.json")
-        try:
-            for asset in reopened.list_assets():
-                for version in reopened.list_versions(asset.id):
-                    # managed paths are project-relative and must resolve
-                    resolved = reopened.resolve_path(version)
-                    assert resolved.is_file()
-                    assert str(relocated) in str(resolved)  # truly the new root
-        finally:
-            reopened.close()
     finally:
         catalog.close()
+
+    relocated = tmp_path / "moved"
+    shutil.copytree(build.package_dir, relocated)
+    reopened = DataCatalogService.open(relocated / "demo.paleo.json")
+    try:
+        root = os.path.normcase(str(relocated.resolve()))
+        for asset in reopened.list_assets():
+            for version in reopened.list_versions(asset.id):
+                # managed paths are project-relative and must resolve
+                resolved = reopened.resolve_path(version)
+                assert resolved.is_file()
+                # Windows: case / slash differ — compare normalized absolute prefixes.
+                assert os.path.normcase(str(resolved.resolve())).startswith(root)
+    finally:
+        reopened.close()

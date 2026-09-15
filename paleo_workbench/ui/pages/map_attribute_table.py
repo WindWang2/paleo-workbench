@@ -254,8 +254,13 @@ class MapAttributeTable(QFrame):
     def _on_search_changed(self, text: str) -> None:
         self._search_needle = str(text or "")
         # 评审 P1-1：过滤是全量 O(n) 扫描（10 万要素层每次击键 100ms+）——
-        # 200ms 防抖（与 TagManagerDialog 同口径）。
-        self._search_debounce.start()
+        # 200ms 防抖（与 TagManagerDialog 同口径）。程序化 setText（无焦点）
+        # 立即应用：属性同步测试与宿主脚本依赖同步收窄窗口的契约。
+        if self.feature_search.hasFocus():
+            self._search_debounce.start()
+        else:
+            self._search_debounce.stop()
+            self._apply_search_now()
 
     def _apply_search_now(self) -> None:
         self._suppress_feature_selection = True

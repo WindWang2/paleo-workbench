@@ -202,13 +202,13 @@ def os_replace_atomic(temp_path: Path, target_path: Path) -> None:
     giving up; the standard pattern for atomic publish on Windows.
     """
     last: OSError | None = None
-    for attempt in range(5):
+    for attempt in range(10):
         try:
             os.replace(temp_path, target_path)
             break
         except PermissionError as exc:  # transient filter-driver lock
             last = exc
-            time.sleep(0.05 * (2**attempt))
+            time.sleep(0.05 * (2**min(attempt, 6)))
     else:
         logging.getLogger(__name__).warning(
             "atomic replace of %s kept failing after retries: %s", target_path, last
