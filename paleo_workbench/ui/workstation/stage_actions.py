@@ -1104,16 +1104,22 @@ class StageActionDispatcher:
             for descriptor in factor_group_layers(document, task, grid=grid):
                 role = descriptor["role"]
                 layer_id = str(descriptor.get("layer_id") or "")
+                # V13 W-I：格网衍生子层钉住任务的产品格网版本（井点输入层
+                # 除外——它的源是井数据，不是格网；不伪造绑定）。
+                grid_version_id = (
+                    str(getattr(task, "grid_artifact_version_id", "") or "")
+                    if role != LayerRole.FACTOR_INPUT else ""
+                )
                 # 幂等（按子层角色独立判定）：首个动作只建了井点（无 live
                 # 网格）时，第二次点击仍能补齐其余子层。
                 if descriptor.get("geometry_kind") == "raster":
                     if state.membership(layer_id) is not None:
                         continue
-                    state.set_membership(LayerMembershipRecord(
-                        layer_id=layer_id, role=role,
+                    self.stage_controller.group_controller.register_layer(
+                        layer_id, role,
                         factor_task_id=task_id,
-                        created_stage=state.current_stage.value,
-                    ))
+                        source_version_id=grid_version_id,
+                    )
                     raster_registered += 1
                     continue
                 present = any(
@@ -1132,7 +1138,8 @@ class StageActionDispatcher:
                     continue
                 created = self._create_role_layer(
                     descriptor["title"], descriptor["geometry_kind"], role,
-                    factor_task_id=task_id, features=features)
+                    factor_task_id=task_id, features=features,
+                    source_version_id=grid_version_id)
                 vector_added += 1 if created else 0
         message = (f"已叠加单因素组：矢量子层 {vector_added}，标量子层登记 "
                    f"{raster_registered}（descriptor-only，画布标量发布待接入）")
@@ -1611,6 +1618,7 @@ class StageActionDispatcher:
             return
         # 标量 descriptor-only 登记（幂等：按 layer_id 已存在则跳过）。
         registered = 0
+        fusion_version_id = str(summary.get("catalog_version_id") or "")
         for descriptor in (
             summary["likelihood_descriptor"],
             summary["confidence_descriptor"],
@@ -1621,10 +1629,14 @@ class StageActionDispatcher:
             layer_id = str(descriptor.get("layer_id") or "")
             if not layer_id or state.membership(layer_id) is not None:
                 continue
-            state.set_membership(LayerMembershipRecord(
-                layer_id=layer_id, role=descriptor["role"],
-                created_stage=state.current_stage.value,
-            ))
+            # V13 W-I：融合子层钉住产出它的融合结果版本（descriptor 携带
+            # artifact_version_id；无 catalog 时为空 = 不伪造绑定）。
+            pinned = str(descriptor.get("artifact_version_id")
+                         or fusion_version_id or "")
+            self.stage_controller.group_controller.register_layer(
+                layer_id, descriptor["role"],
+                source_version_id=pinned,
+            )
             registered += 1
         # 融合初稿（仅有分级多边形且无既有草稿时创建；绝不覆盖人工解释）。
         features = list(summary.get("classification_features") or [])
@@ -1632,6 +1644,7 @@ class StageActionDispatcher:
             created = self._create_role_layer(
                 "综合沉积相（融合初稿）", "polygon", LayerRole.INTEGRATED_FACIES,
                 features=features,
+                source_version_id=fusion_version_id,
             )
             if created:
                 self.stage_controller.state.set_maturity(

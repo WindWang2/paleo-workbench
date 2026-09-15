@@ -9,6 +9,7 @@ from __future__ import annotations
 def register_all(registry) -> list[str]:
     from paleo_workbench.harness.actions import (
         data,
+        data_lineage,
         geology_workflow,
         interpretation_v9,
         mapping,
@@ -26,6 +27,7 @@ def register_all(registry) -> list[str]:
         workspace,
         project,
         data,
+        data_lineage,
         well,
         seismic,
         mapping,

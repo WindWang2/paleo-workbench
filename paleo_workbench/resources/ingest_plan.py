@@ -526,16 +526,15 @@ def execute_ingest_plan(
     if execute_unconfirmed:
         pending = [
             item for item in plan.items
-            if item.decision in ("accept", "pending") or (
-                item.decision == "skip" and item.duplicate_of_version
-            )
+            if item.decision in ("accept", "pending", "skip", "as_new_version")
         ]
     else:
+        # 确认模式：accept/as_new_version 执行；显式 skip（含非重复项）进
+        # 列表只为**如实记入 report.skipped**（循环首分支跳过它们，不注
+        # 册）；pending 未经确认绝不执行（execute_unconfirmed 契约不变）。
         pending = [
             item for item in plan.items
-            if item.decision == "accept" or (
-                item.decision == "skip" and item.duplicate_of_version
-            )
+            if item.decision in ("accept", "skip", "as_new_version")
         ]
     total = len(pending)
     done = 0
@@ -559,8 +558,10 @@ def execute_ingest_plan(
                     continue
                 # F5: idempotency — an interrupted earlier execution may
                 # have imported this very (source, content) already.
+                # ``as_new_version`` 有意绕过该幂等（重复内容也作为新资产
+                # 入库——这正是该决策存在的意义）。
                 existing = None
-                if item.sha256:
+                if item.sha256 and item.decision != "as_new_version":
                     try:
                         key = item.path.resolve().as_posix()
                     except OSError:

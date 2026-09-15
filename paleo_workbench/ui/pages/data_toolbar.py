@@ -17,6 +17,8 @@ def _icon(name: str) -> QIcon:
 class DataToolbar(QWidget):
     import_files_requested = Signal()
     import_folder_requested = Signal()
+    # V13 W-G: professional planned ingest (two-phase, confirmation-gated).
+    plan_import_requested = Signal()
     rescan_requested = Signal()
     remove_requested = Signal()
     open_folder_requested = Signal()
@@ -55,6 +57,16 @@ class DataToolbar(QWidget):
         self.import_folder_btn.setToolTip("导入整个目录")
         self.import_folder_btn.clicked.connect(self.import_folder_requested.emit)
         layout.addWidget(self.import_folder_btn)
+
+        # V13 W-G：规划导入（扫描→分类→确认→原子执行；两阶段零副作用）。
+        self.plan_import_btn = QPushButton(_icon("btn-import"), "规划导入…")
+        self.plan_import_btn.setObjectName("SecondaryButton")
+        style.track_control_height(self.plan_import_btn)
+        self.plan_import_btn.setToolTip(
+            "规划导入：扫描/分类/身份匹配/查重 → 逐项确认 → 分块执行"
+            "（与 Agent 导入共用同一计划服务）")
+        self.plan_import_btn.clicked.connect(self.plan_import_requested.emit)
+        layout.addWidget(self.plan_import_btn)
 
         # D4: visible only while an import runs; cooperative cancel.
         self.cancel_import_btn = QPushButton("取消导入")
