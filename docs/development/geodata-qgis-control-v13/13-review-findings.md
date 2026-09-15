@@ -36,3 +36,34 @@
 - IngestPlanDialog 实体覆盖的"新建候选去重"：候选列表可能含重复井——
   低危（选错可改），留 UX 打磨；
 - 组级 opacity：QGS 无此概念，不伪造 UI。
+
+## 独立对抗性审查轮（Phase 6，子 agent 全 diff 审查）
+
+11 项发现全部处置（commit 18360589）：
+
+**P1（3）**
+1. IngestPlanDialog teardown 可销毁运行中的 QThread（UB）+ 5s GUI 冻结
+   → cancel→quit→wait，超时走 finished→deleteLater 兜底；执行期计划只读。
+2. `as_new_version` 决策在 execute 中静默消失（UI 提供、harness 接受、
+   执行层丢弃）→ 纳入执行，有意绕过幂等（语义即"重复内容作新资产"）。
+3. Inspector 地图用途对桥接 legacy 行键错（AssetView.id=res_… vs
+   asset_…）静默为空 → `service.asset_id_for_legacy()` 公开解析。
+
+**P2（6）**
+4. 预订 RUNNING run 后 copy worker 拒绝 → 幻影 RUNNING 泄漏 → 预订前查忙。
+5. impact 门 fail-open（计算异常静默放行破坏性操作）→ fail-closed。
+6. `data.commit_working_copy` 恒另立新资产（与 UI/EditSession 语义分叉）
+   → 缺省同资产升版。
+7. composite「版本缺失」行不可达（get_version 抛错不返回 None）→
+   except 分支。
+8. `data.ingest` decisions 键大小写/分隔符静默不匹配 → normcase 归一。
+9. intermediate_policy 无生产接线 → 诚实标注 advisory（测试 pin 口径，
+   接线入 known-limitations）。
+
+**P3（2）**：10. 执行期间计划可编辑（跨线程改决策）→ 面板禁用；
+11. EditSession failed_count 计入 provenance 预订失败 → 只数失败提交。
+
+审查确认无问题的角度：EditSession 补偿完整性、panel echo 早退路径
+（基线即有）、旧工程 from_dict 兼容、register_layer 放置丢弃风险
+（所有调用点均已守卫）、source_usage 并发、ingest skip-only 分块
+行为。
