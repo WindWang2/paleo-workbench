@@ -1,7 +1,32 @@
 # 08 — 实施记录（Implementation Record）
 
-状态：**M0 全部落地 ｜ M3 主干落地 ｜ M1 部分落地**。本文件记录"实际改了什么、验证到什么程度、还差什么"；
-设计与决策仍以 00–07 为准。
+状态：**M0 全部落地 ｜ M3 主干落地 ｜ M1 部分落地 ｜ PR #1303 已合并并评审 ｜ 渲染预设 + 右键换相已落地**。
+本文件记录"实际改了什么、验证到什么程度、还差什么"；设计与决策仍以 00–07 为准。
+
+---
+
+## PR 合并（#1303 vector-perf-increment）
+
+- 本地解决两处构建文件冲突（源清单两边都保留）后合并入 `main` 并推送（GitHub MERGED）；桥按合并后源码重编。
+- **评审结论**：
+  1. `tests/perf` 在合并+rebase 后 **67 passed / 2 failed**——`test_mirror_publish_scale[50]` 是该 PR 文档自认的本机预算级既有失败；`test_tool_sink_writes_ring` 单跑/连跑均通过（满载时 hover 节拍抖动的时序脆弱项）。
+  2. `test_vector_perf_baseline::test_baseline_snap_press_pick` 的段错误**不是** R-Tree 的错：20k 档 `cell≈1.587` 使 (6.25,4.75) 距网格顶点仅 0.10 单位（< 10px 拾取半径）→ 命中顶点 → 触发**主干的 D-A use-after-move**（PR 作者在 04-known-limitations #8 记录过同一崩溃并绕行）。M0 修复 rebase 后该用例通过。
+  3. 零拷贝总线是 opt-in（JSON 通道默认不变）、SPSC + 序号/CRC 双完整性、static_assert 钉布局——集成面安全。
+  4. 增量拓扑的 gap 规则不做子集化（全局属性），其余规则增量且与全量等价有测试钉住。
+  5. LOD 只进绘制管线、永不写回要素几何（拾取/拓扑仍在原始几何上）——与编辑链路无语义冲突。
+- wip 分支（M0/M3/M1 + 工作区在制改动）已 rebase 到合并后 main（零文本冲突），逐点核验关键缝合（锚点修复/CRS 可比性/current-layer 钩子/标注帧末绘制）全部完好；rebuild 后编辑链路 23 passed、`-m qgis` 门禁 **912 passed**（3 个既有失败不变）。
+
+## 任务2｜矢量类型渲染预设
+
+- `STYLE_LIBRARY` 核心类型补**标注默认**：井位→井名、断层线→断层名称、相带→相名、成图范围→范围名称（含描边色，制图惯例配色）。模板引用库预设 → 新建图层即得"该有的样子"。
+- 分类相样式按其分类字段带标注（相图 facies / 亚相图 sub_facies / 微相图 micro_facies）。
+- 一键恢复：控制器 `apply_render_preset`（模板/库预设）+ 图层右键「应用渲染预设」（原生树面板与回退面板同信号契约）；相带层走分类样式重算。
+
+## 任务3｜相带右键换相
+
+- 画布右键策略切 `CustomContextMenu` → shim 换算地图坐标发 `canvas_context_menu((x,y), global_pos)`。
+- 宿主：活动相带层 + 光标命中要素 → 相选择列表（词表一级相、当前相勾选、"级联选择（亚相/微相）…"入口）→ `apply_facies_selection` 单命令写入（自动经门禁开会话；RAW/原生会话占用等拒绝原因上浮状态条）→ 分类样式刷新。
+- 测试：`tests/test_render_presets_and_facies_menu_v12.py` 7 项（预设标注、模板引用、一键恢复、相带分类重算、菜单列表、换相写入+样式刷新、未命中零写入）。
 
 ---
 
