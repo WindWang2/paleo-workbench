@@ -43,6 +43,8 @@ TOOL_LABELS: dict[str, str] = {
     "smooth_feature": "平滑要素", "offset_curve": "偏移曲线",
     "rotate_feature": "旋转要素", "scale_feature": "缩放要素",
     "cut_features": "剪切", "copy_features": "复制", "paste_features": "粘贴",
+    "add_rectangle": "添加矩形", "add_circle": "添加圆",
+    "snap_geometries": "吸附对齐",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -214,6 +216,15 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
     "paste_features": _spec(
         "粘贴", "编辑会话中",
         "把内部剪贴板粘贴到活动图层（字段按 schema 映射）", modifies=True, kinds=_VECTOR),
+    "add_rectangle": _spec(
+        "添加矩形", "面图层编辑会话中",
+        "两次左键定对角，自动闭合矩形面", modifies=True, kinds=_VECTOR),
+    "add_circle": _spec(
+        "添加圆", "面图层编辑会话中",
+        "圆心 + 半径点，64 边近似圆面", modifies=True, kinds=_VECTOR),
+    "snap_geometries": _spec(
+        "吸附对齐", "编辑会话中 + 选中要素",
+        "把选中要素顶点逐个吸附到捕捉命中处", modifies=True, kinds=_VECTOR),
     "topology": _spec(
         "拓扑编辑", "有活动图层 + 工程 CRS 有效",
         "开关拓扑编辑（编辑期联动 + 保存时校验）", modifies=True, kinds=_VECTOR),

@@ -345,3 +345,121 @@ def test_clipboard_paste_refuses_crs_mismatch(qapp):
     controller._open_session(target)
     ok, message = controller.clipboard_paste()
     assert ok is False and "坐标系" in message
+
+
+# ---------------------------------------------------------------------------
+# M5-A1 shape + 批量吸附（矩形/圆：两步交互；snap_geometries：选集吸附）
+# ---------------------------------------------------------------------------
+
+def test_shape_tools_registered_in_capture_group():
+    from paleo_workbench.mapping.action_registry import ACTION_SPECS
+    from paleo_workbench.mapping.tool_availability import TOOL_GROUPS
+    from paleo_workbench.mapping.tool_help import TOOL_HELP, TOOL_LABELS
+
+    for tool_id in ("add_rectangle", "add_circle", "snap_geometries"):
+        assert tool_id in (TOOL_GROUPS["capture"] + TOOL_GROUPS["geometry"])
+        assert tool_id in TOOL_LABELS and tool_id in TOOL_HELP
+        assert ACTION_SPECS[tool_id].icon
+
+
+def test_rectangle_capture_builds_closed_rect(qapp):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+    from paleo_workbench.mapping.map_tools import RectangleCaptureTool
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("面", "polygon")
+    controller._open_session(layer)
+
+    tool = RectangleCaptureTool(layer.edit_session, snap=lambda p: p)
+    assert tool.mouse_press((1.0, 1.0)) is True
+    assert tool.mouse_press((4.0, 3.0)) is True
+    features = layer.edit_session.features()
+    assert len(features) == 1
+    ring = features[0].geometry["coordinates"][0]
+    assert ring[0] == ring[-1] and len(ring) == 5, f"矩形未闭合: {ring}"
+    xs = sorted({c[0] for c in ring})
+    ys = sorted({c[1] for c in ring})
+    assert xs == [1.0, 4.0] and ys == [1.0, 3.0], f"对角未展开: {ring}"
+
+
+def test_circle_capture_builds_closed_ring(qapp):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.map_tools import CircleCaptureTool
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("面", "polygon")
+    controller._open_session(layer)
+
+    tool = CircleCaptureTool(layer.edit_session, snap=lambda p: p)
+    assert tool.mouse_press((2.0, 2.0)) is True
+    assert tool.mouse_press((5.0, 2.0)) is True
+    features = layer.edit_session.features()
+    assert len(features) == 1
+    ring = features[0].geometry["coordinates"][0]
+    assert ring[0] == ring[-1] and len(ring) == 65, f"圆环异常: {len(ring)}"
+    import math
+    dist = math.dist(ring[0], (2.0, 2.0))
+    assert abs(dist - 3.0) < 1e-6, f"半径错误: {dist}"
+
+
+def test_snap_geometries_command(qapp):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("线", "line")
+    controller.import_layer_features(layer.id, [
+        VectorFeature(feature_id="f1",
+                      geometry={"type": "LineString", "coordinates": [
+                          [0.0, 0.0], [1.1, 0.1]]},
+                      attributes={}),
+        VectorFeature(feature_id="f2",
+                      geometry={"type": "LineString", "coordinates": [
+                          [5.0, 5.0], [6.0, 5.0]]},
+                      attributes={}),
+    ])
+    # 只吸附 f1：候选含 f2 的 (6,5)——(1.1,0.1) 距它远超容差，应命中
+    # 自层最近顶点 (1.1,0.1) 自身 → 无变更（诚实拒绝，不开空宏）。
+    layer.set_selection({"f1"})
+    controller._open_session(layer)
+    controller._snapping.modes = {"vertex", "segment"}
+    ok, message = controller.snap_geometries(tolerance=0.2)
+    assert (ok, message) == (False, "选集无人可吸附"), (ok, message)
+
+
+def test_snapping_priority_tiebreak():
+    """M4-3b：等距候选按 layer_priority 裁决（小值优先，回退栈）。"""
+    from paleo_workbench.mapping.map_interaction import SnappingService
+    from paleo_workbench.mapping.vector_layer import VectorLayer
+
+    service = SnappingService()
+    service.enabled = True
+    service.modes = {"vertex"}
+    from paleo_workbench.mapping.vector_layer import VectorFeature, VectorLayer
+
+    def _layer_with_point(layer_id: str):
+        layer = VectorLayer(id=layer_id, name=layer_id, crs="",
+                            schema={}, style={},
+                            features=[VectorFeature(
+                                feature_id=f"{layer_id}-f",
+                                geometry={"type": "LineString", "coordinates": [
+                                    [5.0, 5.0], [9.0, 5.0]]},
+                                attributes={})])
+        service.index_for(layer)  # 索引建在挂载后
+        return layer
+
+    a = _layer_with_point("a")
+    b = _layer_with_point("b")
+    service.layer_priority["a"] = 10
+    service.layer_priority["b"] = 1
+    assert service.snap((5.1, 5.0), tolerance=1.0,
+                        layers=[a, b], map_units_per_pixel=1.0) == (5.0, 5.0)
+    assert service.last_match.feature_id == "b-f", (
+        f"等距时优先级未裁决：{service.last_match}")

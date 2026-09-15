@@ -145,7 +145,9 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "inspection": ("identify", "measure_distance"),
     "edit_session": ("toggle_editing", "save_edits", "rollback"),
-    "capture": ("add_point", "add_line", "add_polygon"),
+    # V12 M5-A1 shape：矩形/圆两步数字化器（面图层）。
+    "capture": ("add_point", "add_line", "add_polygon",
+                "add_rectangle", "add_circle"),
     "geometry": (
         "move_feature", "vertex", "reshape", "undo", "redo", "delete_selected",
         "split", "merge", "repair_geometry",
@@ -160,6 +162,8 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         # V12 M5-B：旋转/缩放 + 剪切/复制/粘贴。
         "rotate_feature", "scale_feature", "cut_features", "copy_features",
         "paste_features",
+        # V12 M5-A1：批量捕捉对齐（选集几何吸附到目标层）。
+        "snap_geometries",
     ),
     # V12 M1：编辑期联动开关补齐 UI 面——三个能力（避免重叠/追踪/顶点档位）
     # 的实现早就在 SnappingService + QgsProject 里，此前只有命令 handler、
@@ -266,6 +270,7 @@ _BASIC_GROUPS = frozenset({"navigate", "selection", "inspection", "layer"})
 _CHECKED_CANVAS_TOOLS = frozenset({
     "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
     "measure_distance", "add_point", "add_line", "add_polygon",
+    "add_rectangle", "add_circle",
     "move_feature", "vertex", "reshape", "add_ring", "add_part",
     "fault_cut", "boundary_reshape",
 })
@@ -344,6 +349,8 @@ def _editing_gate(ctx: ToolContext) -> str | None:
 
 def _native_tool_gate(ctx: ToolContext, kind: str, native_name: str) -> str | None:
     """Native-canvas-only requirement; the fallback canvas runs the Python tool."""
+    if kind == "__python_fallback__":
+        return None  # V12 M5-A1 shape：宿主 Python 工具，无原生 kind 门
     if ctx.native_canvas_available and kind not in {
         flag.removeprefix("qgis.native_tool.") for flag in ctx.capability_flags
     }:
@@ -360,7 +367,8 @@ def _backend_gate(ctx: ToolContext) -> str | None:
     reason = ctx.backend_reason or ("能力未知" if mode == "unknown" else "桥不可用")
     return f"需要 QGIS 原生编辑后端（{reason}）"
 
-_KIND_REQUIRED = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}
+_KIND_REQUIRED = {"add_point": "point", "add_line": "line", "add_polygon": "polygon",
+                "add_rectangle": "polygon", "add_circle": "polygon"}
 
 def _kind_gate(ctx: ToolContext, tool_id: str) -> str | None:
     expected = _KIND_REQUIRED[tool_id]
@@ -626,7 +634,11 @@ def _rule_edit_tool(ctx: ToolContext, tool_id: str, native_kind: str) -> ToolAva
 
     )
     if reason is None:
-        reason = _native_tool_gate(ctx, native_kind, {"move_feature": "移动", "vertex": "节点编辑"}[tool_id])
+        reason = _native_tool_gate(
+            ctx, native_kind,
+            {"move_feature": "移动", "vertex": "节点编辑",
+             "add_rectangle": "添加矩形", "add_circle": "添加圆"}.get(
+                tool_id, tool_id))
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
 def _rule_geotopo_tool(ctx: ToolContext, tool_id: str) -> ToolAvailability:
@@ -980,6 +992,9 @@ _RULE_TABLE: dict[str, Rule] = {
     "cut_features": lambda ctx: _rule_selection_op(ctx, "cut_features"),
     "copy_features": lambda ctx: _rule_copy_paste(ctx, "copy_features"),
     "paste_features": lambda ctx: _rule_copy_paste(ctx, "paste_features"),
+    "add_rectangle": lambda ctx: _rule_edit_tool(ctx, "add_rectangle", "__python_fallback__"),
+    "add_circle": lambda ctx: _rule_edit_tool(ctx, "add_circle", "__python_fallback__"),
+    "snap_geometries": lambda ctx: _rule_selection_op(ctx, "snap_geometries"),
     "delete_selected": _rule_delete_selected,
     "split": _rule_split,
     "merge": _rule_merge,

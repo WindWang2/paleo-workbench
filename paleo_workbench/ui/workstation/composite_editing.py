@@ -359,7 +359,8 @@ def _normalize_layer_role(role: object) -> str:
 _LAYER_BOUND_TOOLS = frozenset(
     {"identify", "select", "select_rectangle", "move_feature", "vertex"}
 )
-_KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon"}
+_KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon",
+                "add_rectangle": "polygon", "add_circle": "polygon"}
 
 
 def pick_topmost_visible_layer_id(layer_ids_bottom_up, visible_ids) -> str | None:
@@ -2241,6 +2242,13 @@ class CompositeEditController(QObject):
                 elif action_id == "add_polygon":
                     tool = AddPolygonTool(session, snap=self._snap, attributes=defaults,
                                           on_captured=captured)
+                elif action_id in {"add_rectangle", "add_circle"}:
+                    # V12 M5-A1 shape：只在面图层激活（与 AddPolygon 同门）。
+                    from paleo_workbench.mapping import map_tools as _mt
+                    shape_tool = (_mt.RectangleCaptureTool if action_id == "add_rectangle"
+                                  else _mt.CircleCaptureTool)
+                    tool = shape_tool(session, snap=self._snap,
+                                      attributes=defaults, on_captured=captured)
                 elif action_id == "move_feature":
                     tool = MoveFeatureTool(session, identify=lambda point: index.identify(point, self._tolerance()))
                 elif action_id == "vertex":
@@ -2468,8 +2476,15 @@ class CompositeEditController(QObject):
             "enabled": self.avoid_intersections_enabled,
         }
         if not snapping.current_layer_only:
+            # V12 M4-3b：逐层捕捉优先级（数值小者优先——回退栈
+            # SnappingService.snap 的等距裁决同序）。QGIS 原生端
+            # IndividualLayerSettings 无优先级字段：这里按优先级**排序下发**
+            # （QGIS 按配置顺序尝试，排在前面 = 优先），与回退语义同序。
             layers: dict[str, dict[str, object]] = {}
-            for layer_id in self._layers:
+            for layer_id in sorted(
+                    self._layers,
+                    key=lambda lid: int(
+                        getattr(snapping, "layer_priority", {}).get(lid, 0))):
                 modes = snapping.layer_modes.get(layer_id)
                 layers[layer_id] = {
                     "enabled": bool(snapping.layer_enabled.get(layer_id, True)),
@@ -2896,6 +2911,57 @@ class CompositeEditController(QObject):
         if dropped:
             message += f"（丢弃字段：{'、'.join(sorted(dropped))}）"
         return True, message
+
+    def snap_geometries(self, *, tolerance: float | None = None) -> tuple[bool, str]:
+        """批量捕捉对齐（V12 M5-A1）：选集顶点逐个吸附到捕捉命中处。
+
+        容差缺省 = 全局容差 × 视图比例（_tolerance()，与 _snap 一致）。
+        """
+        from paleo_workbench.mapping import map_tools as _mt
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        canvas = self._canvas
+        mupp = canvas.map_units_per_pixel if canvas is not None else 1.0
+        tol = max(1e-12, float(tolerance if tolerance is not None else self._tolerance()))
+        snapper = self._snapping
+
+        def _snap_vertex(point):
+            try:
+                return snapper.snap(
+                    (float(point[0]), float(point[1])),
+                    tolerance=tol,
+                    layers=[layer],
+                    map_units_per_pixel=mupp,
+                )
+            except Exception:
+                return point
+
+        tool = _mt.SnapGeometriesTool(session, snap_vertex=_snap_vertex)
+        attached = getattr(session, "layer", None)
+        if attached is None:
+            object.__setattr__(session, "layer", layer)
+            try:
+                changed = tool.run()
+            finally:
+                try:
+                    delattr(session, "layer")
+                except Exception:
+                    pass
+        else:
+            changed = tool.run()
+        if not changed:
+            return False, "选集无人可吸附"
+        self._topology.refresh_error_count(layer)
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return True, "已把选中要素吸附到捕捉命中"
 
     def selection_geometry_op(self, op_id: str, **params) -> tuple[bool, str]:
         """选择集几何算子（V12 M5-A2）：reverse_line / simplify / smooth /

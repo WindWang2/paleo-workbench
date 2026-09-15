@@ -4651,6 +4651,7 @@ class CompositeDocument(QWidget):
                     simp = menu.addAction("简化要素…")
                     sm = menu.addAction("平滑要素")
                     off = menu.addAction("偏移曲线…")
+                    snp = menu.addAction("吸附对齐")
                     menu.addSeparator()
                     rot = menu.addAction("旋转要素…")
                     sca = menu.addAction("缩放要素…")
@@ -4670,6 +4671,8 @@ class CompositeDocument(QWidget):
                         self._run_selection_geometry_op("smooth_feature")
                     elif chosen is off:
                         self._run_selection_geometry_op("offset_curve")
+                    elif chosen is snp:
+                        self._run_snap_geometries()
                     elif chosen is rot:
                         self._run_rotate_selection()
                     elif chosen is sca:
@@ -4778,6 +4781,11 @@ class CompositeDocument(QWidget):
     def _run_clipboard_paste(self) -> None:
         ok, message = self.edit_controller.clipboard_paste()
         self.status_message.emit(message if message else "已粘贴")
+
+    def _run_snap_geometries(self) -> None:
+        """批量捕捉对齐（M5-A1）：选集吸附，原因上浮。"""
+        ok, message = self.edit_controller.snap_geometries()
+        self.status_message.emit(message if message else "已吸附对齐")
 
     def _run_selection_geometry_op(self, op_id: str) -> None:
         """右键选择集算子分发（M5-A2）：选择集 → 算子，原因上浮。"""

@@ -489,6 +489,145 @@ class AddPolygonTool(_CaptureTool):
     geometry_type = "Polygon"
 
 
+class RectangleCaptureTool(_CaptureTool):
+    """矩形数字化器（V12 M5-A1 shape）：两次左键定对角 → 自动闭合矩形面。
+
+    两步交互（QGIS 矩形范围工具同语义）；第二点落下即 finish。走原生桥时
+    宿主按 active_layer kind 路由——本工具只在面图层激活（与 AddPolygon 同）。
+    """
+
+    tool_id = "add_rectangle"
+    geometry_type = "Polygon"
+
+    def mouse_press(self, point, *, button: str = "left", modifiers=()) -> bool:
+        if button == "right":
+            return self.finish()
+        if button != "left":
+            return False
+        self.points.append(self._snap(point))
+        return self.finish() if len(self.points) == 2 else True
+
+    def finish(self) -> bool:
+        if len(self.points) != 2:
+            return False
+        (x0, y0), (x1, y1) = self.points
+        xmin, xmax = sorted((float(x0), float(x1)))
+        ymin, ymax = sorted((float(y0), float(y1)))
+        if xmax - xmin <= 0.0 or ymax - ymin <= 0.0:
+            self.points.clear()
+            return False
+        ring = [[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax],
+                [xmin, ymin]]
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            feature_id = self._feature_id_factory()
+            self.session.add_feature(
+                VectorFeature(feature_id,
+                              {"type": "Polygon", "coordinates": [ring]},
+                              self._default_attributes))
+        self.points.clear()
+        self._notify_captured(feature_id)
+        return True
+
+
+class CircleCaptureTool(_CaptureTool):
+    """圆数字化器（V12 M5-A1 shape）：圆心 + 半径点 → 64 边近似圆面。
+
+    两步交互（QGIS 圆心-半径圆同语义）；第二点落下即 finish。只在面图层。
+    """
+
+    tool_id = "add_circle"
+    geometry_type = "Polygon"
+    SEGMENTS = 64
+
+    def mouse_press(self, point, *, button: str = "left", modifiers=()) -> bool:
+        if button == "right":
+            return self.finish()
+        if button != "left":
+            return False
+        self.points.append(self._snap(point))
+        return self.finish() if len(self.points) == 2 else True
+
+    def finish(self) -> bool:
+        if len(self.points) != 2:
+            return False
+        import math as _math
+
+        (cx, cy), (ex, ey) = self.points
+        radius = _math.hypot(float(ex) - float(cx), float(ey) - float(cy))
+        if radius <= 0.0:
+            self.points.clear()
+            return False
+        ring = [[float(cx) + radius * _math.cos(2.0 * _math.pi * i / self.SEGMENTS),
+                 float(cy) + radius * _math.sin(2.0 * _math.pi * i / self.SEGMENTS)]
+                for i in range(self.SEGMENTS)]
+        ring.append(list(ring[0]))
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            feature_id = self._feature_id_factory()
+            self.session.add_feature(
+                VectorFeature(feature_id,
+                              {"type": "Polygon", "coordinates": [ring]},
+                              self._default_attributes))
+        self.points.clear()
+        self._notify_captured(feature_id)
+        return True
+
+
+class SnapGeometriesTool(MapTool):
+    """批量捕捉对齐（V12 M5-A）：选集顶点逐个吸附到捕捉命中处（单宏）。
+
+    QGIS「Snap Geometries to Layer」同语义：每个顶点按捕捉命中移动，
+    使用全局容差（调用方已换算地图单位）。
+    """
+
+    tool_id = "snap_geometries"
+    edits_data = True
+
+    def __init__(self, session, *, snap_vertex) -> None:
+        super().__init__()
+        self.session = session
+        # snap_vertex(point) -> 吸附后的点（未命中返回原点）。
+        self._snap_vertex = snap_vertex
+
+    def run(self) -> bool:
+        """对会话全部选中要素执行吸附；返回是否有要素被改变。"""
+        layer = getattr(self.session, "layer", None)
+        changed = False
+        with self.session.edit_source(f"{self.tool_id}(command)"):
+            for feature_id in sorted(getattr(layer, "selection", set()) or ()):
+                if self._apply_to_feature(feature_id):
+                    changed = True
+        return changed
+
+    def _apply_to_feature(self, feature_id: str) -> bool:
+        from paleo_workbench.mapping.vector_layer import VectorFeature
+
+        before = self.session.feature(feature_id)
+        geometry = before.as_record()["geometry"]
+        self._moved_points = 0
+
+        moved = [0]
+
+        def _snap_coords(node):
+            if isinstance(node, list):
+                if node and isinstance(node[0], (int, float)):
+                    snapped = list(self._snap_vertex((float(node[0]), float(node[1]))))
+                    if (abs(snapped[0] - node[0]) > 1e-9
+                            or abs(snapped[1] - node[1]) > 1e-9):
+                        moved[0] += 1
+                    return snapped
+                return [_snap_coords(child) for child in node]
+            return node
+
+        coordinates = _snap_coords(geometry.get("coordinates"))
+        self._moved_points = moved[0]
+        if self._moved_points == 0:
+            return False  # 全部顶点都吸附到自身——无变更，不开宏
+        after = dict(geometry)
+        after["coordinates"] = coordinates
+        self.session.set_geometry(feature_id, after)
+        return True
+
+
 class MoveFeatureTool(MapTool):
     tool_id = "move_feature"
     edits_data = True
