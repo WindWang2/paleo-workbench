@@ -195,7 +195,7 @@ class StratigraphicTimelineWidget(QWidget):
         self._next_button.clicked.connect(lambda: self._step(1))
         self.onion_button = QToolButton(self)
         self.onion_button.setObjectName("TimelineOnionButton")
-        self.onion_button.setText("🧅")
+        self.onion_button.setText("洋葱皮")
         self.onion_button.setToolTip("洋葱皮：30% 半透明叠加相邻前一期次相带边界")
         self.onion_button.setCheckable(True)
         self.onion_button.toggled.connect(self.onion_toggled.emit)

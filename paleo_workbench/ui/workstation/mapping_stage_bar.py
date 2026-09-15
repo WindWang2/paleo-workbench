@@ -180,7 +180,8 @@ class MappingStageBar(QFrame):
                 track.setFixedSize(20, 2)
                 row.addWidget(track, 0, Qt.AlignmentFlag.AlignVCenter)
                 self._tracks.append(track)
-        row.addStretch(1)
+        # 无尾 stretch：阶段条 sizeHint 必须等于内容宽。尾 stretch 会把 hint
+        # 膨胀到「半窗装不下」，破坏 V7 同行 AppBar+阶段条 ≥1440 完整可见契约。
 
     def set_viewport_class(self, viewport) -> None:
         """V9 viewport 策略：紧凑视口隐藏「层位」前缀标签（下拉自带占位

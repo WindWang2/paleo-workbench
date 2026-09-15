@@ -48,7 +48,7 @@ MODE_HINTS: dict[WorkstationMode, str] = {
     WorkstationMode.INSPECTING_QC: (
         "质检向导：↑↓ 选择 · Enter 定位 · F 修复 · Esc 关闭"),
     WorkstationMode.TIME_TRAVELLING: (
-        "期次对比：←→ 步进 · 🧅 洋葱皮 · Esc 返回编图"),
+        "期次对比：←→ 步进 · 洋葱皮 · Esc 返回编图"),
 }
 
 

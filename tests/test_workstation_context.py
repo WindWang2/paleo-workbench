@@ -113,8 +113,6 @@ def test_agent_context_label_reflects_real_state(qtbot, tmp_path):
 
 
 def test_shell_undo_restores_previous_well(qtbot, tmp_path):
-    from unittest.mock import patch
-
     from paleo_workbench.ui.app_shell import AppShell
 
     project = _project(tmp_path)
@@ -128,18 +126,17 @@ def test_shell_undo_restores_previous_well(qtbot, tmp_path):
     qtbot.addWidget(shell)
     ws = shell.workstation
 
-    with patch.object(ws.linked_workspace, "open_well") as open_well:
-        ws.show_well("A12")
-        assert ws._current_well_name == "A12"
-        ws._open_well_from_agent("W23")
-        assert open_well.call_args_list[-1].args == ("W23",)
-        # 撤销 Agent 动作：恢复动作前的井 A12，而不是编造默认井名。
-        ws._undo_agent_gui({})
-        assert open_well.call_args_list[-1].args == ("A12",)
-        assert ws._agent_undo_stack == []
-        # 撤销历史为空时诚实提示，不伪造成功。
-        ws._undo_agent_gui({})
-        assert open_well.call_args_list[-1].args == ("A12",)
+    ws.show_well("A12")
+    assert ws._current_well_name == "A12"
+    ws._open_well_from_agent("W23")
+    assert ws._current_well_name == "W23"
+    # 撤销 Agent 动作：恢复动作前的井 A12，而不是编造默认井名。
+    ws._undo_agent_gui({})
+    assert ws._current_well_name == "A12"
+    assert ws._agent_undo_stack == []
+    # 撤销历史为空时诚实提示，不伪造成功。
+    ws._undo_agent_gui({})
+    assert ws._current_well_name == "A12"
 
 
 # ---------------------------------------------------------------------------

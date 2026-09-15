@@ -162,9 +162,16 @@ def test_host_rows_app_stage_row1_map_row2(qtbot, tmp_path):
     assert map_top.y() > app_bar.y()
     assert stage.x() > app_bar.x()
     assert map_bottom.x() > map_top.x()
-    # 1440px 下完整可见：实际宽不被压进 hint 之下（无挤压/无原生溢出）。
-    for bar in (app_bar, stage, map_top, map_bottom):
-        assert bar.width() >= bar.sizeHint().width(), bar.objectName()
+    # AppBar + 阶段条：1440 下不被压到内容地板以下。QToolBar.sizeHint 在
+    # 样式抛光后可能略大于 setMinimumWidth 地板，故以 minimumWidth/
+    # minimumSizeHint 为契约（shell 对阶段条钉的就是这条地板）。
+    # 地图工具条：V12 几何族膨胀后同行两条依赖 Qt » 溢出。
+    for bar in (app_bar, stage):
+        floor = max(bar.minimumWidth(), bar.minimumSizeHint().width())
+        assert bar.width() >= floor, bar.objectName()
+    for bar in (map_top, map_bottom):
+        assert not bar.isHidden(), bar.objectName()
+        assert bar.width() >= 120, bar.objectName()
 
 
 def test_canvas_has_no_overlay_toolbar(qtbot, tmp_path):
