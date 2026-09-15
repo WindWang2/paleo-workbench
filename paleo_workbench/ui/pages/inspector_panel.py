@@ -725,9 +725,42 @@ class InspectorPanel(QFrame):
             rows.insert(1, ("回收站状态", view.trashed_label))
         if view.crs:
             rows.append(("CRS", view.crs))
+        # V13 W-M：反向定位——这个资产被哪些地图内容引用（派生投影）。
+        usage_rows = self._map_usage_rows(view)
+        rows.extend(usage_rows)
         self.overview_table.load_table(("属性", "值"), tuple(rows))
         # 概要行数较多（11+），上限放宽到 520，尽量避免出现纵向滚动条。
         _fit_key_value_table(self.overview_table, cap_height=True, max_height=520)
+
+    def set_map_usage_provider(self, provider) -> None:
+        """注入 (asset_id) -> VersionUsageReport（DataPage 装配时给）。"""
+        self._map_usage_provider = provider
+
+    def _map_usage_rows(self, view: AssetView) -> list[tuple[str, str]]:
+        provider = getattr(self, "_map_usage_provider", None)
+        asset_id = str(getattr(view, "id", "") or "")
+        if provider is None or not asset_id:
+            return []
+        try:
+            report = provider(asset_id)
+        except Exception:
+            return []
+        if report is None or not report.usages:
+            return []
+        layers = [u.label for u in report.usages if u.kind == "layer"]
+        products = [u.label for u in report.usages if u.kind != "layer"]
+        rows: list[tuple[str, str]] = []
+        if layers:
+            rows.append(("编图图层引用", f"{len(layers)} 个（"
+                         + "、".join(layers[:3])
+                         + ("…" if len(layers) > 3 else "") + "）"))
+        if products:
+            rows.append(("地图产品/输入集", f"{len(products)} 个（"
+                         + "、".join(products[:3])
+                         + ("…" if len(products) > 3 else "") + "）"))
+        if report.truncated:
+            rows.append(("用途提示", "（结果有截断）"))
+        return rows
 
     def _populate_metadata(self, view: AssetView) -> None:
         from paleo_workbench.catalog.governance import (

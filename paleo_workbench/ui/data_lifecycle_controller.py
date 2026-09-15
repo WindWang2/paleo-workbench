@@ -435,10 +435,56 @@ class DataLifecycleController:
         domain_asset_ids = {str(item_id) for item_id in target_ids if item_id}
         trashed_assets: list = []
 
+        # V13 W-C/W-F：破坏性操作先分析 impact（catalog 血缘 + 地图用途）。
+        # 只对目录内真实存在的资产门控（legacy-only 行无 catalog 影响）；
+        # 无下游影响时静默放行（不打扰单文件清理）。
+        service = self.catalog_service()
+        if service is not None:
+            from paleo_workbench.catalog.models import DataAsset as _GateAsset
+            from paleo_workbench.ui.pages.paged_asset_model import (
+                SqlCatalogAssetRef as _GateRef,
+            )
+
+            gate_ids: set[str] = set()
+            for item in items:
+                unwrapped = unwrap_asset(item)
+                if isinstance(unwrapped, (_GateRef, _GateAsset)):
+                    gate_ids.add(str(unwrapped.id))
+                elif isinstance(unwrapped, ResourceItem):
+                    _svc, ref = self.catalog_bridge(unwrapped)
+                    if ref is not None:
+                        gate_ids.add(str(ref.asset_id))
+            try:
+                maps = service._ensure_maps()
+                gate_ids = {a for a in gate_ids if a in maps.asset_by_id}
+            except Exception:
+                gate_ids = set()
+            if gate_ids:
+                from paleo_workbench.mapping_workspace.stage_state import (
+                    MappingWorkspaceState,
+                )
+                from paleo_workbench.ui.pages.impact_preview_dialog import (
+                    confirm_trash_impact,
+                )
+
+                workspace = MappingWorkspaceState.from_dict(
+                    getattr(page.project, "mapping_workspace", None) or {})
+                asset_names = [
+                    str(getattr(unwrap_asset(it), "name", "") or "") for it in items
+                ]
+                confirmed = confirm_trash_impact(
+                    page, service, page.project,
+                    asset_ids=sorted(gate_ids),
+                    asset_names=[n for n in asset_names if n],
+                    workspace=workspace,
+                )
+                if not confirmed:
+                    page._set_action_status("已取消移出（影响预览未确认）")
+                    return False
+
         # Catalog-only rows (no legacy companion) trash directly in the
         # catalog. They surface as AssetView rows whose raw_asset is a Core
         # DataAsset (unwrap_asset resolves to it).
-        service = self.catalog_service()
         if service is not None:
             from paleo_workbench.catalog.models import DataAsset as _DataAsset
             from paleo_workbench.ui.pages.paged_asset_model import SqlCatalogAssetRef

@@ -369,6 +369,8 @@ class DataPage(QWidget):
         self.asset_table = self.workspace.asset_table
         self.reader_panel = self.workspace.reader_panel
         self.inspector_panel = self.workspace.inspector_panel
+        # V13 W-M：数据→地图反查（资产被哪些图层/产品引用）注入检查器。
+        self.inspector_panel.set_map_usage_provider(self._map_usage_of_asset)
         self.main_splitter = self.workspace.main_splitter
         self.right_splitter = self.workspace.right_splitter
         # Embedded well-location map (former standalone page): lives in the
@@ -454,6 +456,7 @@ class DataPage(QWidget):
         # Wire toolbar buttons
         self.data_toolbar.import_files_requested.connect(self.begin_import_files_from_dialog)
         self.data_toolbar.import_folder_requested.connect(self.begin_import_folder_from_dialog)
+        self.data_toolbar.plan_import_requested.connect(self.begin_plan_import)
         self.data_toolbar.verify_requested.connect(self._verify_current_or_all_assets)
         self.data_toolbar.health_check_requested.connect(self._open_catalog_health)
         self.data_toolbar.cancel_import_requested.connect(self._cancel_import)
@@ -2297,6 +2300,48 @@ class DataPage(QWidget):
     def _catalog_service(self):
         """The active Core DataCatalogService, or None (no project catalog)."""
         return self._lifecycle.catalog_service()
+
+    def _map_usage_of_asset(self, asset_id: str):
+        """资产 → 地图用途（W-M 反查；无目录/无工作区时诚实返回 None）。"""
+        service = self._catalog_service()
+        if service is None:
+            return None
+        from paleo_workbench.mapping_workspace.source_usage import (
+            usages_of_asset,
+        )
+        from paleo_workbench.mapping_workspace.stage_state import (
+            MappingWorkspaceState,
+        )
+
+        workspace = MappingWorkspaceState.from_dict(
+            getattr(self.project, "mapping_workspace", None) or {})
+        return usages_of_asset(
+            asset_id, workspace=workspace, project=self.project,
+            catalog=service)
+
+    def begin_plan_import(self) -> None:
+        """规划导入（V13 W-G）：目录选择 → IngestPlanDialog（确认后执行）。
+
+        与旧 begin_import_files_from_dialog 并存：规划导入是面向批量/陌生
+        目录的确认式路径；急速单文件导入仍走旧路径。两者最终都落到
+        catalog 登记与实体绑定。
+        """
+        from paleo_workbench.ui.pages.ingest_plan_dialog import (
+            IngestPlanDialog,
+            choose_ingest_root,
+        )
+
+        service = self._catalog_service()
+        if service is None:
+            self._set_action_status("规划导入需要活动数据目录（数据未桥接）")
+            return
+        root = choose_ingest_root(self)
+        if root is None:
+            return
+        dialog = IngestPlanDialog(
+            self, service=service, project=self.project, root=root)
+        dialog.ingest_finished.connect(self._refresh)
+        dialog.exec()
 
     def open_entity_detail(self, entity_id: str) -> None:
         """V11 entity data view: assemble the per-well/per-survey view.
