@@ -155,6 +155,7 @@ class CoreCatalogAdapter:
             format=version.format,
             legacy_resource_id=asset.legacy_resource_id if asset else None,
             trashed=version.trashed,
+            version_number=version.version_number,
         )
 
     @staticmethod
