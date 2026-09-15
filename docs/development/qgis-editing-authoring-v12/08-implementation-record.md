@@ -102,6 +102,15 @@
 | 注册面 | geometry 组 fill_ring / capture 组 add_ellipse（门禁/帮助/注册/控制器/QAction/图标） |
 | 用例 | 椭圆半轴精度、环转面 + 属性克隆 + 一次 undo 原子恢复、登记面 |
 
+## 第九轮｜M5-B2 扇形数字化器 + 填充内环右键接线（落地，直接合 main）
+
+| 项 | 落地内容 |
+|---|---|
+| add_sector | `SectorCaptureTool`（中心 + 起角点 + 止角点；逆时针扫过角；起止同方位按整圆落盘；32 段采样 + 两条半径边闭合；捕获组 id，Kind 门绑定面） |
+| fill_ring 右键 | 「填充内环」→ `_run_fill_ring` → `fill_ring_at_point`（与删除内环同入口：单选 + 非原生会话时出现） |
+| 注册面 | capture 组 add_sector（求值/帮助/注册/控制器/QAction/图标） |
+| 用例 | 扇形面积（1/4 圆 π 精度）、登记面 |
+
 ---
 
 ### 本轮评审发现（三态 bisect，已定案）
