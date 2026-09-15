@@ -561,3 +561,79 @@ def test_shape_tools_registered():
         assert tool_id in TOOL_GROUPS[group]
         assert tool_id in TOOL_LABELS and tool_id in TOOL_HELP
         assert ACTION_SPECS[tool_id].icon
+
+
+# ---------------------------------------------------------------------------
+# M5-B2：椭圆数字化器 + 填充环
+# ---------------------------------------------------------------------------
+
+def test_ellipse_capture_axes(qapp):
+    import math
+
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.map_tools import EllipseCaptureTool
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("面", "polygon")
+    controller._open_session(layer)
+
+    tool = EllipseCaptureTool(layer.edit_session, snap=lambda p: p)
+    assert tool.mouse_press((0.0, 0.0)) is True
+    assert tool.mouse_press((4.0, 0.0)) is True   # a=4
+    assert tool.mouse_press((0.0, 3.0)) is True   # b=3
+    features = layer.edit_session.features()
+    assert len(features) == 1
+    ring = features[0].geometry["coordinates"][0]
+    assert ring[0] == ring[-1] and len(ring) == 65, f"椭圆采样异常: {len(ring)}"
+    xs = [c[0] for c in ring[:-1]]
+    ys = [c[1] for c in ring[:-1]]
+    assert abs(max(xs) - 4.0) < 1e-6 and abs(min(xs) + 4.0) < 1e-6
+    assert abs(max(ys) - 3.0) < 1e-6 and abs(min(ys) + 3.0) < 1e-6
+
+
+def test_fill_ring_converts_hole_to_polygon(qapp):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("面", "polygon")
+    outer = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]
+    hole = [(2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (2.0, 4.0), (2.0, 2.0)]
+    controller.import_layer_features(layer.id, [
+        VectorFeature(feature_id="f1",
+                      geometry={"type": "Polygon", "coordinates": [outer, hole]},
+                      attributes={"facies": "砂岩"}),
+    ])
+    layer.set_selection({"f1"})
+    controller._open_session(layer)
+
+    ok, message = controller.fill_ring_at_point((3.0, 3.0))
+    assert ok, message
+    session = layer.edit_session
+    # 原面去环 + 新面要素（属性克隆）。
+    host = next(f for f in session.features() if f.feature_id == "f1")
+    assert len(host.geometry["coordinates"]) == 1, "原面仍有内环"
+    filled = [f for f in session.features() if f.feature_id != "f1"]
+    assert len(filled) == 1
+    assert list(filled[0].geometry["coordinates"][0][0][:2]) == [2.0, 2.0]
+    assert filled[0].attributes.get("facies") == "砂岩"
+
+    # 撤销原子性：一次 undo 同时恢复原面内环并删除新面。
+    session.undo()
+    assert len(session.feature("f1").geometry["coordinates"]) == 2
+
+
+def test_fill_ring_registered():
+    from paleo_workbench.mapping.action_registry import ACTION_SPECS
+    from paleo_workbench.mapping.tool_availability import TOOL_GROUPS
+    from paleo_workbench.mapping.tool_help import TOOL_HELP, TOOL_LABELS
+
+    assert "fill_ring" in TOOL_GROUPS["geometry"]
+    assert "add_ellipse" in TOOL_GROUPS["capture"]
+    for tool_id in ("fill_ring", "add_ellipse"):
+        assert tool_id in TOOL_LABELS and tool_id in TOOL_HELP
+        assert ACTION_SPECS[tool_id].icon

@@ -252,6 +252,21 @@ class DeleteRingCommand(SetGeometryCommand):
         EditCommand.__init__(self, "delete_ring", {before.feature_id: before}, {after.feature_id: after})
 
 
+class FillRingCommand(EditCommand):
+    """填充内环（V12 M5-B2）：原面删环 + 新增面要素（原子一宏，可撤销）。
+
+    before/after 都是多要素字典：原面 after 无该环、新要素 after 为面；
+    revert/apply 走标准 EditCommand 路径。
+    """
+
+    def __init__(self, before: VectorFeature, after: VectorFeature,
+                 new_feature: VectorFeature) -> None:
+        EditCommand.__init__(
+            self, "fill_ring",
+            {before.feature_id: before, new_feature.feature_id: None},
+            {before.feature_id: after, new_feature.feature_id: new_feature})
+
+
 class DuplicateFeatureCommand(EditCommand):
     """复制要素（V10）：全属性 + 几何复制，新 id；审计流与 add 区分。"""
 
@@ -735,6 +750,32 @@ class VectorEditSession:
         geometry["coordinates"].append(points)
         after = VectorFeature(before.feature_id, geometry, before.attributes)
         self._record(AddRingCommand(before, after))
+
+    def fill_ring(self, feature_id: str, ring_index: int) -> str:
+        """填充内环（QGIS fill_ring 同语义）：指定内环转成新面要素
+        （属性克隆），并从原面删掉该内环。返回新要素 id。"""
+        before = self.feature(feature_id)
+        if before.geometry["type"] != "Polygon":
+            raise ValueError("rings can only be filled in Polygon features")
+        rings = before.geometry.get("coordinates") or []
+        if ring_index <= 0 or ring_index >= len(rings):
+            raise ValueError("only interior Polygon rings may be filled")
+        hole = [list(pt) for pt in rings[ring_index]]
+        if len(hole) < 4:
+            raise ValueError("ring needs at least three vertices")
+        if hole[0] != hole[-1]:
+            hole.append(list(hole[0]))
+        geometry = _thaw(before.geometry)
+        del geometry["coordinates"][ring_index]
+        after = VectorFeature(before.feature_id, geometry, before.attributes)
+        from paleo_workbench.mapping.geometry_schema import new_feature_id
+        new_feature = VectorFeature(
+            f"fill_{new_feature_id('feature')}",
+            {"type": "Polygon", "coordinates": [hole]},
+            dict(before.attributes),
+        )
+        self._record(FillRingCommand(before, after, new_feature))
+        return new_feature.feature_id
 
     def delete_ring(self, feature_id: str, ring_index: int) -> None:
         before = self.feature(feature_id)

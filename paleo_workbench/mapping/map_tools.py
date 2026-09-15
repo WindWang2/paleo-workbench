@@ -686,6 +686,63 @@ class RegularPolygonCaptureTool(_CaptureTool):
         return True
 
 
+class EllipseCaptureTool(_CaptureTool):
+    """椭圆数字化器（V12 M5-B2 shape）：中心 + X 半轴点 + Y 半轴点。
+
+    三次左键：C（中心）→ Px（X 半轴端点，定 a 与长轴方向）→ Py（Y 半轴
+    端点，定 b 的长度；其在长轴上的投影被忽略）。64 段采样落面。
+    只在面图层激活。
+    """
+
+    tool_id = "add_ellipse"
+    geometry_type = "Polygon"
+    SEGMENTS = 64
+
+    def mouse_press(self, point, *, button: str = "left", modifiers=()) -> bool:
+        if button == "right":
+            return self.finish()
+        if button != "left":
+            return False
+        self.points.append(self._snap(point))
+        return self.finish() if len(self.points) == 3 else True
+
+    def finish(self) -> bool:
+        import math as _math
+
+        if len(self.points) != 3:
+            return False
+        (cx, cy), (px, py), (qx, qy) = (
+            (float(p[0]), float(p[1])) for p in self.points)
+        # 长轴：C → Px（方向 + a）。
+        ux, uy = px - cx, py - cy
+        a = _math.hypot(ux, uy)
+        if a <= 0.0:
+            self.points.clear()
+            return False
+        ux, uy = ux / a, uy / a
+        # 短轴长度：Q − C 在长轴法向上的分量。
+        wx, wy = qx - cx, qy - cy
+        normal = (-uy, ux)
+        b = abs(wx * normal[0] + wy * normal[1])
+        if b <= 0.0:
+            self.points.clear()
+            return False
+        ring = [[float(cx) + a * _math.cos(t) * ux - b * _math.sin(t) * uy,
+                 float(cy) + a * _math.cos(t) * uy + b * _math.sin(t) * ux]
+                for t in (2.0 * _math.pi * i / self.SEGMENTS
+                          for i in range(self.SEGMENTS))]
+        ring.append(list(ring[0]))
+        with self.session.edit_source(f"{self.tool_id}(python-fallback)"):
+            feature_id = self._feature_id_factory()
+            self.session.add_feature(
+                VectorFeature(feature_id,
+                              {"type": "Polygon", "coordinates": [ring]},
+                              self._default_attributes))
+        self.points.clear()
+        self._notify_captured(feature_id)
+        return True
+
+
 class SnapGeometriesTool(MapTool):
     """批量捕捉对齐（V12 M5-A）：选集顶点逐个吸附到捕捉命中处（单宏）。
 

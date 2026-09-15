@@ -47,6 +47,7 @@ TOOL_LABELS: dict[str, str] = {
     "snap_geometries": "吸附对齐",
     "add_arc": "添加圆弧", "add_regular_polygon": "添加正多边形",
     "trim_line": "修剪线", "extend_line": "延伸线",
+    "fill_ring": "填充内环", "add_ellipse": "添加椭圆",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -239,6 +240,12 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
     "extend_line": _spec(
         "延伸线", "线图层编辑会话中 + 选中要素",
         "把所选线端点沿方向延伸到边界", modifies=True, kinds=_VECTOR),
+    "fill_ring": _spec(
+        "填充内环", "面图层编辑会话中 + 选中一个要素",
+        "右键内环定位 → 环转面（属性克隆，原面去环）", modifies=True, kinds=_VECTOR),
+    "add_ellipse": _spec(
+        "添加椭圆", "面图层编辑会话中",
+        "中心 + 长半轴点 + 短半轴点", modifies=True, kinds=_VECTOR),
     "topology": _spec(
         "拓扑编辑", "有活动图层 + 工程 CRS 有效",
         "开关拓扑编辑（编辑期联动 + 保存时校验）", modifies=True, kinds=_VECTOR),

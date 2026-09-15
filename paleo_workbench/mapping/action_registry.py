@@ -89,7 +89,7 @@ def _specs() -> dict[str, ActionSpec]:
         "measure_distance", "add_point", "add_line", "add_polygon",
         "move_feature", "vertex", "reshape", "add_ring", "add_part",
         "fault_cut", "boundary_reshape",
-        "add_rectangle", "add_circle", "add_arc", "add_regular_polygon",
+        "add_rectangle", "add_circle", "add_arc", "add_regular_polygon", "add_ellipse",
     }
     # 原生专属（桥缺失/降级时 disabled + 原因；不隐藏能力假象）。
     # V10（#1255）：与求值器 _NATIVE_ONLY_TOOLS 同集，两表由测试互钉。
@@ -116,7 +116,7 @@ def _specs() -> dict[str, ActionSpec]:
         "rotate_feature", "scale_feature", "cut_features", "copy_features",
         "paste_features",
         # V12 M5-A1 shape/修剪延伸（写动作，不得标 read）。
-        "add_arc", "add_regular_polygon", "trim_line", "extend_line",
+        "add_arc", "add_regular_polygon", "trim_line", "extend_line", "fill_ring",
     }
     # 选择集动作（改选择集，不改数据）。
     selection_tools = {

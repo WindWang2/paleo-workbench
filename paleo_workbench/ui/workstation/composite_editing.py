@@ -361,7 +361,8 @@ _LAYER_BOUND_TOOLS = frozenset(
 )
 _KIND_BOUND_TOOLS = {"add_point": "point", "add_line": "line", "add_polygon": "polygon",
                 "add_rectangle": "polygon", "add_circle": "polygon",
-                "add_regular_polygon": "polygon", "add_arc": "line"}
+                "add_regular_polygon": "polygon", "add_arc": "line",
+                "add_ellipse": "polygon"}
 
 
 def pick_topmost_visible_layer_id(layer_ids_bottom_up, visible_ids) -> str | None:
@@ -2255,6 +2256,7 @@ class CompositeEditController(QObject):
                         "add_circle": _mt.CircleCaptureTool,
                         "add_arc": _mt.ArcCaptureTool,
                         "add_regular_polygon": _mt.RegularPolygonCaptureTool,
+                        "add_ellipse": _mt.EllipseCaptureTool,
                     }[action_id]
                     tool = shape_tool(session, snap=self._snap,
                                       attributes=defaults, on_captured=captured)
@@ -2920,6 +2922,41 @@ class CompositeEditController(QObject):
         if dropped:
             message += f"（丢弃字段：{'、'.join(sorted(dropped))}）"
         return True, message
+
+    def fill_ring_at_point(self, point) -> tuple[bool, str]:
+        """填充内环（V12 M5-B2）：右键落点 → 内环定位 + 环转面。
+
+        与 delete_ring 同定位（_nearest_interior_ring）：选中单面要素，
+        落点最近的内环转成新面要素（属性克隆）并从原面移除。
+        """
+        try:
+            point = (float(point[0]), float(point[1]))
+        except Exception:
+            return False, "无效的定位点"
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if len(layer.selection) != 1:
+            return False, "该操作需要恰好选中一个要素"
+        from paleo_workbench.mapping.vector_layer import VectorFeature  # noqa: F401
+        feature_id = next(iter(layer.selection))
+        try:
+            feature = session.feature(feature_id)
+            geometry = feature.as_record()["geometry"]
+            ring_index = _nearest_interior_ring(geometry, point)
+            if ring_index is None:
+                return False, "定位点附近没有内环"
+            with session.edit_source("fill_ring(command)"):
+                new_id = session.fill_ring(feature_id, ring_index)
+            self._topology.refresh_error_count(layer)
+            self.content_changed.emit(layer.id)
+            self.state_changed.emit()
+            return True, f"已填充内环（新要素 {new_id}）"
+        except (KeyError, RuntimeError, ValueError) as exc:
+            return False, str(exc)
 
     def trim_extend_selection(self, op_id: str, boundary: dict,
                                 *, keep: str = "inside",

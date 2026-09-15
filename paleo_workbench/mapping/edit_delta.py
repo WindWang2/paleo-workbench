@@ -69,6 +69,7 @@ _COMMAND_OPERATION: dict[str, str] = {
     "set_geometry": OP_REPLACE_GEOMETRY,
     "add_ring": OP_REPLACE_GEOMETRY,
     "delete_ring": OP_REPLACE_GEOMETRY,
+    "fill_ring": OP_REPLACE_GEOMETRY,
     "add_part": OP_REPLACE_GEOMETRY,
     "delete_part": OP_REPLACE_GEOMETRY,
     "move_part": OP_REPLACE_GEOMETRY,
