@@ -186,11 +186,15 @@ class _LedgerEntry:
     # 属性对话框）现在会触发真实 upsert，C++ upsertMirrorLayer 里的
     # setName 得以执行；此前 no-op 判定漏掉名字，镜像树残留旧名。
     # V10 M-O：scale_range token —— 比例尺可见域变化重新发布。
+    # fields_json：角色到位后的字段 schema 签名——漏记会导致「无字段建层 →
+    # 角色恢复后 fields_json 出现」被误判 no-op，分类渲染永久缺字段。
     __slots__ = ("data_revision", "style_sig", "visible", "opacity",
-                 "geom_kind", "features_by_id", "name", "scale_range", "authoritative")
+                 "geom_kind", "features_by_id", "name", "scale_range",
+                 "authoritative", "fields_json")
 
     def __init__(self, data_revision, style_sig, visible, opacity,
-                 geom_kind, features_by_id, name="", scale_range=None, authoritative=False):
+                 geom_kind, features_by_id, name="", scale_range=None,
+                 authoritative=False, fields_json=""):
         self.data_revision = data_revision
         self.style_sig = style_sig
         self.visible = visible
@@ -202,6 +206,7 @@ class _LedgerEntry:
         # M0 §3 台账对齐：authoritative 标记「镜像=真源」——commit 后经
         # align_publish_ledger 直跳新基线的条目置 True（编辑权威已在镜像侧）。
         self.authoritative = bool(authoritative)
+        self.fields_json = str(fields_json or "")
 
 
 # R2-F8/R3: the ledger is keyed by (stack identity, layer id) — a fresh
@@ -316,7 +321,8 @@ def align_publish_ledger(stack, layer) -> bool:
         layer_revision, tokens["style_sig"], bool(layer.visible),
         float(layer.opacity), tokens["geom_kind"],
         tokens["features_by_id"], name=str(layer.name or layer.id),
-        scale_range=tokens["scale_range"], authoritative=True)
+        scale_range=tokens["scale_range"], authoritative=True,
+        fields_json=str(tokens.get("fields_json") or ""))
     return True
 
 
@@ -408,6 +414,7 @@ def _layer_ledger_tokens(layer) -> dict:
                     legacy_style = None
         except Exception:
             pass  # 发布循环同位置只诊断不阻断；对齐回落 = 多一次重发
+    fields_json = _fields_json_for_metadata(metadata)
     return {
         "style_sig": _style_signature(renderer_xml, labeling_xml, legacy_style),
         "geom_kind": geom,
@@ -416,6 +423,7 @@ def _layer_ledger_tokens(layer) -> dict:
              or (f.get("properties") or {}).get("id") or ""):
             _feature_signature(f) for f in features},
         "scale_range": _scale_range_token(layer),
+        "fields_json": str(fields_json or ""),
     }
 
 
@@ -916,7 +924,8 @@ def mirror_snapshot_to_stack(
                 and entry.opacity == float(layer.opacity)
                 and entry.geom_kind == geom
                 and entry.name == str(layer.name or layer.id)
-                and _scale_range_token(layer) == entry.scale_range)
+                and _scale_range_token(layer) == entry.scale_range
+                and str(getattr(entry, "fields_json", "") or "") == str(fields_json or ""))
             if unchanged:
                 # no-op publish for this layer: tokens unchanged, nothing ships
                 _sink(layer.id, "publish:no-op")
@@ -1077,7 +1086,8 @@ def mirror_snapshot_to_stack(
                     layer_revision, style_sig, bool(layer.visible),
                     float(layer.opacity), geom, dict(post_signatures),
                     name=str(layer.name or layer.id),
-                    scale_range=scale_token)
+                    scale_range=scale_token,
+                    fields_json=str(fields_json or ""))
             seen.append(layer.id)
             mirrored_qgis_ids.append(qgis_id)
             # V9 W6：本次发布了 fields_json 的层做发布后验证（漂移可诊断，

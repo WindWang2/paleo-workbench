@@ -225,8 +225,23 @@ class LayerGroupController:
         if snapshots:
             live_ids = {
                 str(getattr(layer, "id", "") or "") for layer in snapshots}
-            stale = [layer_id for layer_id in self.state.memberships
-                     if layer_id and layer_id not in live_ids]
+            # Descriptor-only 成员（无编辑图层对等体）：factor 栅格/不确定性、
+            # 融合似然等 scalar 登记。V11 幽灵清理只针对「组成里已消失的
+            # 真图层」——把 descriptor 一并砍掉会让 overlay_factor_results /
+            # run_fusion 的登记在下一次 create_layer→ensure_memberships
+            # 时被 POP 掉（CI：六子层缺 FACTOR_GRID、融合无 likelihood）。
+            stale = []
+            for layer_id in self.state.memberships:
+                if not layer_id or layer_id in live_ids:
+                    continue
+                record = self.state.membership(layer_id)
+                role = getattr(record, "role", None) if record is not None else None
+                if role in (LayerRole.FACTOR_GRID, LayerRole.FACTOR_UNCERTAINTY):
+                    continue
+                if (role is LayerRole.ANALYSIS_AID
+                        and not str(layer_id).startswith("composite:")):
+                    continue
+                stale.append(layer_id)
             for layer_id in stale:
                 self.state.drop_membership(layer_id)
                 self._placements.pop(layer_id, None)

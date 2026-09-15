@@ -306,7 +306,10 @@ def test_snapping_dialog_bounded_widgets_for_1000_layers(qtbot):
     assert len(dialog._layer_rows) == 1000
 
     widget_count = len(dialog.findChildren(QWidget))
-    assert widget_count <= 50, (
+    # Chrome grew with global pixel-tolerance / well-snap controls (~60);
+    # the contract is still "not widget-per-cell" (1000 rows ⇒ thousands
+    # of widgets), so keep a tight absolute ceiling far below O(N).
+    assert widget_count <= 80, (
         f"snapping dialog built {widget_count} widgets for 1000 layers; "
         "per-layer rows must not be widget-per-cell"
     )

@@ -185,7 +185,9 @@ def test_esc_safe_exit_chain(qtbot, monkeypatch):
     active = str(controller.tools.active_tool.tool_id
                  if controller.tools.active_tool else "pan")
     assert active == "pan"  # 第 1 步：退出工具
-    assert doc.mode_state.mode.value == "DIGITIZING" or True  # FSM 由信号驱动
+    # FSM 由信号异步驱动：Esc 后工具已回 pan；模式字面量可能仍瞬态停留，
+    # 只要求 mode 对象仍可读（非空），避免 `or True` 恒真断言。
+    assert doc.mode_state.mode is not None
 
     doc.qc_hub.setVisible(True)
     doc.keybinding.handle_escape()

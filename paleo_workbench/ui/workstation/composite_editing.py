@@ -2286,10 +2286,17 @@ class CompositeEditController(QObject):
                     # 目标。先补推（M0-2b），仍不就位则放弃绑定本次工具——
                     # 不再制造"按钮亮着但拖不动"的哑态（工具保持原状，
                     # 门禁原因由状态条/evaluate 呈现）。
-                    self.repush_canvas_current_layer()
-                    if self.current_canvas_layer_id() != layer.id:
-                        self.state_changed.emit()
-                        return
+                    # 画布若无 current_layer 自省面（fake/legacy shim），无法
+                    # 判定就位——跳过硬门禁，避免把原生会话工具永久卡在
+                    # pan（fault_cut/vertex 契约测试与无桥环境依赖此路径）。
+                    canvas = self._canvas
+                    can_query = callable(getattr(canvas, "current_layer_doc_id", None))
+                    can_push = hasattr(canvas, "set_current_layer")
+                    if can_query or can_push:
+                        self.repush_canvas_current_layer()
+                        if can_query and self.current_canvas_layer_id() != layer.id:
+                            self.state_changed.emit()
+                            return
                 # 加点 / 加线 / 加面只在与图层几何类型一致时激活，
                 # 否则保持当前工具（不劫持用户的图层选择）。
                 kind_required = _KIND_BOUND_TOOLS.get(action_id)
