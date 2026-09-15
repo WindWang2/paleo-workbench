@@ -25,6 +25,10 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 _PYTHON = sys.executable
 _HELPER = Path(__file__).parent / "crash_batch_helper.py"
 BATCH = 2_000  # fast by default; scale via PALEO_CRASH_SCALE_BATCH
+# Windows CI: registering 2k assets then post-commit kill exceeds the main
+# Tests --timeout=120 before _kill_self fires (replace kills mid-tx early).
+if sys.platform == "win32":
+    BATCH = 200
 
 
 @pytest.mark.parametrize("mode", ["replace", "bak"])
