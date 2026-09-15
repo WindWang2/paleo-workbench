@@ -2166,12 +2166,14 @@ class CompositeDocument(QWidget):
             "capture", "geometry", "snapping", "layer",
             "symbology", "factor", "qa", "layout_export",
         )
+        # V12 几何工具族膨胀后，geometry 进第 2 条扩展条，保证 1440 顶条
+        # sizeHint 不被挤爆（test_host_rows_app_stage_row1_map_row2）。
         self._toolbar_top_groups = (
             "navigate", "selection", "inspection", "edit_session",
-            "capture", "geometry",
+            "capture",
         )
         self._toolbar_bottom_groups = (
-            "snapping", "layer", "symbology", "factor", "qa",
+            "geometry", "snapping", "layer", "symbology", "factor", "qa",
             "layout_export",
         )
         # 建条时暂挂本部件名下；宿主 addToolBar 时 Qt 自动 reparent 进
@@ -2785,16 +2787,7 @@ class CompositeDocument(QWidget):
 
     # -- 画布右键菜单（V10 M7） -------------------------------------------------
 
-    def _on_canvas_context_menu(self, position) -> None:
-        # R4-1：捕获进行中（有 pending 采点）右键是「完成捕获」手势——
-        # 工具已消费按键，此处不得再弹菜单（双重动作 = 意外提交 + 焦点
-        # 被模态菜单劫走）。无 pending 采点时才提供上下文菜单。
-        tool = self.edit_controller.tools.active_tool
-        if list(getattr(tool, "points", ()) or ()):
-            return
-        menu = self._build_canvas_menu()
-        menu.exec(self.canvas.mapToGlobal(position))
-        menu.deleteLater()  # R4-6：exec 后释放（父挂 canvas，否则逐次累积）
+    # V10 单参右键入口已并入下方 V12 双参 _on_canvas_context_menu
 
     def _copy_canvas_coordinate(self) -> None:
         """复制最近地图坐标（画布右键；无坐标诚实提示，不复制垃圾）。"""
@@ -4614,12 +4607,26 @@ class CompositeDocument(QWidget):
         self.status_message.emit(
             f"已应用渲染预设：{layer.name if layer is not None else layer_id}")
 
-    def _on_canvas_context_menu(self, map_point, global_pos) -> None:
-        """画布右键：命中活动相带层要素 → 弹出相选择列表（V12 任务3）。
+    def _on_canvas_context_menu(self, map_point, global_pos=None) -> None:
+        """画布右键：捕获中抑制；命中相带要素 → 换相菜单（V12）。
 
-        只在「活动图层是相带层 + 光标命中其要素」时接管；其余情况不弹
-        （右键空白不该出现无语义菜单）。
+        Signal 契约为 (map_point, global_pos)。单参调用（旧测试/回退）把
+        视口 QPoint 当作 position，映射为全局坐标后走通用画布菜单。
+        R4-1：有 pending 采点时右键是完成捕获手势——不得弹菜单。
         """
+        tool = self.edit_controller.tools.active_tool
+        if list(getattr(tool, "points", ()) or ()):
+            return
+        # 单参回退：QPoint 视口坐标 → 通用菜单（V10 契约）。
+        if global_pos is None:
+            from PySide6.QtCore import QPoint
+            position = map_point if isinstance(map_point, QPoint) else QPoint(0, 0)
+            menu = self._build_canvas_menu()
+            if menu is None:
+                return
+            menu.exec(self.canvas.mapToGlobal(position))
+            menu.deleteLater()
+            return
         try:
             point = (float(map_point[0]), float(map_point[1]))
         except Exception:

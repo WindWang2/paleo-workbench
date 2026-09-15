@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from paleo_workbench import tokens
 from paleo_workbench.mapping.facies_patterns import (
     pattern_id_for_facies,
     pattern_path_for_facies,
@@ -47,7 +48,7 @@ def _swatch_icon(color_hex: str, pattern_name: str | None) -> QIcon:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.fillRect(1, 1, 16, 16, QColor(str(color_hex)))
-    painter.setPen(QColor("#26364d"))
+    painter.setPen(QColor(tokens.CANVAS_INK))
     painter.drawRect(0, 0, 17, 17)
     painter.end()
     return QIcon(pixmap)
@@ -74,7 +75,7 @@ class FaciesPaletteWidget(QWidget):
         top_row.setSpacing(4)
         self.eyedropper_button = QToolButton(self)
         self.eyedropper_button.setObjectName("FaciesEyedropperButton")
-        self.eyedropper_button.setText("💡 吸色管")
+        self.eyedropper_button.setText("吸色管")
         self.eyedropper_button.setToolTip(
             "激活后在地图上点击已有相带，一键吸取其相带属性/颜色/花纹")
         self.eyedropper_button.setCheckable(True)

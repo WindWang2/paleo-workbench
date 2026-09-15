@@ -324,9 +324,13 @@ class WorkstationFrame(QWidget):
             Qt.ContextMenuPolicy.PreventContextMenu
         )
         self.stage_toolbar.layout().setContentsMargins(0, 0, 0, 0)
+        # Preferred（非 Expanding）：sizeHint 跟内容走。再钉住工具条最小宽
+        # = 内容 hint，避免同行 AppBar（Expanding 搜索框）把阶段条压窄——
+        # V7 ≥1440 完整可见契约。
         self.stage_bar.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.stage_toolbar.addWidget(self.stage_bar)
+        self.stage_toolbar.setMinimumWidth(self.stage_bar.sizeHint().width() + 8)
         self._dock_host.addToolBar(
             Qt.ToolBarArea.TopToolBarArea, self.stage_toolbar)
 
@@ -2085,6 +2089,13 @@ class WorkstationFrame(QWidget):
                 host.addToolBar(Qt.ToolBarArea.TopToolBarArea, bar)
             for bar in bars:
                 bar.show()
+            # 样式/字体在 show 后才定稿：阶段条 minWidth 跟当前 sizeHint，
+            # 防止同行 AppBar 把阶段条压到 hint 之下（V7 1440 契约）。
+            try:
+                self.stage_toolbar.setMinimumWidth(
+                    self.stage_bar.sizeHint().width() + 8)
+            except RuntimeError:
+                pass
         except RuntimeError:
             pass  # 拆壳期迟到调用：C++ 已销毁，忽略
 

@@ -478,6 +478,7 @@ def test_every_edit_pick_callback_has_shim_consumer():
     assert emitted, "未解析到 edit-pick 回执——断言失去意义"
     handled = set(re.findall(
         r'action == "([a-z_]+)"', inspect.getsource(dispatch_edit_pick)))
-    # pick_miss 在 _on_edit_pick 里显式提前返回（无回执语义），不进分发器。
-    unhandled = emitted - handled - {"pick_miss"}
+    # pick_miss / vertex_no_move 在 _on_edit_pick 里显式提前返回
+    # （提示/无会话写入），不进 dispatch_edit_pick 分发器。
+    unhandled = emitted - handled - {"pick_miss", "vertex_no_move"}
     assert not unhandled, f"C++ 回执在 shim 分发层无消费方: {sorted(unhandled)}"

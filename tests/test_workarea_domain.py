@@ -658,13 +658,9 @@ class TestWellIdentityAdapter:
             role="well_log", is_primary=True,
         )
 
-        class Asset:
-            id = "asset_1"
-            legacy_resource_id = "res_1"
-
         class Service:
-            def list_assets(self, include_trashed=False):  # noqa: ARG002
-                return [Asset()]
+            def list_asset_identities(self, include_trashed=False):  # noqa: ARG002
+                return [("asset_1", "A1", "res_1")]
 
         adapter = self._adapter(doc, Service())
         # Direct asset-id hit:
