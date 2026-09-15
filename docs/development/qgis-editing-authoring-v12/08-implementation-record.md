@@ -134,6 +134,25 @@
 
 ---
 
+## 第十轮｜编辑期换相弹窗 + 原生缓冲属性写入（落地，直接合 main）
+
+用户诉求：编辑支持弹窗更换相（弹窗是相的列表 → 选择 → 确定 → 换掉相图
+feature 的特性/label）。**独立方案与实施记录见
+[`docs/development/facies-change-dialog/`](../facies-change-dialog/00-plan.md)**。
+
+| 项 | 落地内容 |
+|---|---|
+| 桥（已重建） | `set_mirror_feature_attributes`（编辑缓冲内一宏改属性 + repaint + edit_gesture）、`mirror_layer_dirty`；manifest 增 `mirror_attribute_write` / `mirror_dirty_query` |
+| 弹窗 | `FaciesChangeDialog`（搜索 + 相列表 + 亚/微相细化 + 确定/取消；当前值预选、N 要素摘要） |
+| 路由 | `apply_facies_selection` 双签名 + 整批；原生会话写镜像缓冲，否则经门禁开/取 Python 会话 |
+| 字段解析 | `resolve_facies_field`——相族两种落盘名（template `facies` vs 角色 spec `facies_name`）按图层实际 schema 解析（原生读镜像 schema） |
+| 入口 | 画布右键「更改相…（列表弹窗）」/ 检查器 / 属性表 / 工具条 `change_facies`（同一实现，登记面四处同步） |
+| 缺陷修复 | ①`dirty` 并入原生脏态 → 原生编辑期「保存编辑/回滚」不再恒灰（用户报障「保存是灰色的」）；②成员资格裸字符串角色归一 → 不再因 `role.is_raw_protected` 抛异常冻死工具条/右键菜单 |
+| 用例 | 弹窗 5 + 路由 6 + 真桥 8（含端到端：开始编辑→弹窗换相→镜像读回→保存可用→提交对齐）+ 抗脆 1 |
+| 回归 | 189 passed（facies/registry/native/编辑链/图像栈全套）；`test_facies_taxonomy` 一条**基线既有**失败用例改写为栈无关（原假设 Python 会话） |
+
+---
+
 ## M0｜编辑链路止血（全部完成）
 
 | 项 | 落地内容 | 代码坐标 |
