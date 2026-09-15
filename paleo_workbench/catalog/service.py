@@ -1387,6 +1387,29 @@ class DataCatalogService(DataFabricV11Mixin):
             return list(self.document.assets)
         return [asset for asset in self.document.assets if not asset.trashed]
 
+    def asset_id_for_legacy(self, legacy_resource_id: str) -> str | None:
+        """legacy ResourceItem id（``res_…``）→ catalog asset id（V13）。
+
+        UI 反查（地图用途/影响预览）拿到的选中行 id 可能是 legacy 资源 id
+        （AssetView.id 对桥接行即 resource.id）——本方法做诚实解析，
+        未知返回 None（调用方自行降级，不猜）。
+        """
+        key = str(legacy_resource_id or "")
+        if not key:
+            return None
+        maps = self._ensure_maps()
+        if key in maps.asset_by_id:
+            return key
+        cached = self._assets_by_legacy_id
+        if cached is None:
+            cached = {}
+            for asset in maps.asset_by_id.values():
+                if asset.legacy_resource_id:
+                    cached.setdefault(asset.legacy_resource_id, asset)
+            self._assets_by_legacy_id = cached
+        asset = cached.get(key)
+        return asset.id if asset is not None else None
+
     def list_asset_identities(
         self, include_trashed: bool = False,
     ) -> list[tuple[str, str, str]]:

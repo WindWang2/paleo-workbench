@@ -277,7 +277,7 @@ class IngestPlanDialog(QDialog):
         self._thread.start()
 
     def _execute(self) -> None:
-        if self._plan is None or self._worker is None:
+        if self._plan is None:
             return
         if self._plan.unresolved and not self._unresolved_skipped():
             from PySide6.QtWidgets import QMessageBox
@@ -290,7 +290,9 @@ class IngestPlanDialog(QDialog):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        self._teardown_worker()
+        # 构建完成后残留的空闲 build worker 在此协作回收（cancel+quit）。
+        if self._thread is not None:
+            self._teardown_worker()
         self._thread = QThread(self)
         self._worker = _PlanWorker(self._service, self._project, self._root)
         self._worker._plan = self._plan  # noqa: SLF001 - 同包协作
@@ -300,6 +302,9 @@ class IngestPlanDialog(QDialog):
         self._worker.failed.connect(self._on_worker_failed)
         self._worker.progress.connect(self._on_progress)
         self.execute_btn.setEnabled(False)
+        self.accept_all_btn.setEnabled(False)
+        self.skip_unresolved_btn.setEnabled(False)
+        self.detail.setEnabled(False)  # 执行期间计划只读（防中途改决策）
         self.cancel_run_btn.setVisible(True)
         self.cancel_run_btn.setEnabled(True)
         self._thread.start()
@@ -310,16 +315,30 @@ class IngestPlanDialog(QDialog):
             self.cancel_run_btn.setEnabled(False)
 
     def _teardown_worker(self) -> None:
-        if self._thread is not None:
-            thread, worker = self._thread, self._worker
-            self._thread, self._worker = None, None
-            thread.quit()
-            thread.wait(5000)
+        """协作停止 worker（先 cancel 再等线程退出；超时不销毁线程——
+        销毁运行中的 QThread 是 UB，由 finished→deleteLater 兜底回收）。"""
+        if self._thread is None:
+            return
+        thread, worker = self._thread, self._worker
+        self._thread, self._worker = None, None
+        if worker is not None:
+            worker.cancel()
+        thread.quit()
+        finished_now = thread.wait(5000)
+        if finished_now:
+            # 事件循环已停：deleteLater 不会再被线程处理，直接安全销毁。
             if worker is not None:
                 worker.deleteLater()
             thread.deleteLater()
+        else:
+            # 线程仍在跑：延迟到真正退出后回收（连接仍有意义——quit 已
+            # 请求，当前槽返回后事件循环退出并发射 finished）。
+            if worker is not None:
+                thread.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        self._cancel_run()
         self._teardown_worker()
         super().closeEvent(event)
 
@@ -339,8 +358,8 @@ class IngestPlanDialog(QDialog):
 
     def _on_execute_done(self, report: IngestExecuteReport) -> None:
         self._report = report
-        self.cancel_run_btn.setVisible(False)
-        self.execute_btn.setEnabled(True)
+        self._teardown_worker()
+        self._set_running(False)
         created = len(report.imported_version_ids)
         skipped = len(report.skipped)
         bound = report.bound_links
@@ -353,9 +372,17 @@ class IngestPlanDialog(QDialog):
         self.ingest_finished.emit()
 
     def _on_worker_failed(self, message: str) -> None:
-        self.cancel_run_btn.setVisible(False)
-        self.execute_btn.setEnabled(self._plan is not None)
+        self._teardown_worker()
+        self._set_running(False)
         self.summary_label.setText(message)
+
+    def _set_running(self, running: bool) -> None:
+        self.cancel_run_btn.setVisible(running)
+        self.execute_btn.setEnabled(not running and self._plan is not None)
+        self.accept_all_btn.setEnabled(not running)
+        self.skip_unresolved_btn.setEnabled(not running)
+        self.detail.setEnabled(
+            not running and self.detail._item is not None)
 
     # -- 计划编辑 -------------------------------------------------------------
     def _on_selection_changed(self, *_args) -> None:

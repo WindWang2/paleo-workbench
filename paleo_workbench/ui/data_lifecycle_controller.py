@@ -962,6 +962,14 @@ class DataLifecycleController:
         if dlg.exec() != QDialog.DialogCode.Accepted:
             page._set_action_status(f"已创建可编辑工作副本（未提交）: {working_path}")
             return
+        # V13 审查修复：预订 RUNNING run 之前先确认 copy worker 空闲——
+        # _run_catalog_action 的拒绝分支不回调 on_fail，预订了就会泄漏
+        # 幻影 RUNNING run（audit 一天后才能发现）。
+        job = getattr(page, "_catalog_copy_job", None)
+        if job is not None and job.is_running:
+            page._set_action_status(
+                "提交新版本：上一个数据操作仍在进行，请稍候（工作副本保留，稍后可重试）")
+            return
         # Provenance: record the manual-edit DataRun first so the service can
         # atomically attach the committed version as its output. Best-effort —
         # on booking failure the commit falls back to no run (the commit itself

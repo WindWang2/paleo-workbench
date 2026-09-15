@@ -23,9 +23,10 @@ OUTPUT       是               OUTPUT                     user
 明确不做：把所有 tempfile 强行 catalog 化（渲染临时体、指北针缓存就是
 EPHEMERAL/CACHE，登记它们只制造噪音）。
 
-生产方约定：新产生的科学文件在写入前用 :func:`policy_for` 查口径；
-``must_register`` 为真的路径必须落到 ``catalog/lifecycle.py`` 的注册助手
-（那里负责 run + version + retention 默认值）。
+**执行状态（诚实）**：本表目前是 advisory（评审意见 #9）——测试 pin 了
+口径本身，生产写入方尚未在写入前强制查询（lifecycle 注册助手按既有
+stage/retention 默认值工作，与本表一致但无断言强制）；把 must_register
+接到注册助手入口是下一个增量（见 14-known-limitations）。
 """
 
 from __future__ import annotations

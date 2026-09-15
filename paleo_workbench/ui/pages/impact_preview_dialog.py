@@ -34,7 +34,12 @@ def collect_trash_impact(
     asset_ids: list[str],
     workspace: Any = None,
 ) -> "TrashImpactSummary":
-    """聚合多个资产的删除影响（catalog 血缘 + 地图用途）。"""
+    """聚合多个资产的删除影响（catalog 血缘 + 地图用途）。
+
+    计算失败**不吞**：`computation_errors` 如实计数——破坏性操作前的
+    影响门必须 fail-closed（调用方见 errors 非零时仍弹确认，而不是
+    静默放行）。
+    """
     from paleo_workbench.catalog.impact import ImpactService
     from paleo_workbench.mapping_workspace.source_usage import (
         usages_of_asset,
@@ -47,6 +52,7 @@ def collect_trash_impact(
             impact = impact_service.delete_impact(
                 asset_id=asset_id, project=project)
         except Exception:
+            summary.computation_errors += 1
             continue
         summary.descendant_count += len(impact.live_descendants)
         summary.descendant_names.extend(
@@ -57,9 +63,13 @@ def collect_trash_impact(
         summary.broken_edges += int(impact.broken_lineage_edges)
         summary.cascade_advice.extend(impact.cascade_advice[:5])
         if workspace is not None:
-            report = usages_of_asset(
-                asset_id, workspace=workspace, project=project,
-                catalog=service)
+            try:
+                report = usages_of_asset(
+                    asset_id, workspace=workspace, project=project,
+                    catalog=service)
+            except Exception:
+                summary.computation_errors += 1
+                continue
             summary.map_usages.extend(
                 (usage.kind, usage.label) for usage in report.usages[:30])
     return summary
@@ -74,14 +84,21 @@ class TrashImpactSummary:
     broken_edges: int = 0
     cascade_advice: list[str] = field(default_factory=list)
     map_usages: list[tuple[str, str]] = field(default_factory=list)
+    #: 影响计算失败次数（fail-closed 依据：>0 时调用方仍须确认）。
+    computation_errors: int = 0
 
     @property
     def has_downstream(self) -> bool:
         return bool(self.descendant_count or self.runs_consuming
-                    or self.map_usages or self.broken_edges)
+                    or self.map_usages or self.broken_edges
+                    or self.computation_errors)
 
     def render_markdown(self) -> str:
         lines: list[str] = []
+        if self.computation_errors:
+            lines.append(
+                f"⚠ {self.computation_errors} 项资产的影响计算失败——"
+                "无法确认是否安全，请按存在影响处理")
         if self.descendant_count:
             lines.append(f"**{self.descendant_count} 个活跃下游版本依赖所选资产**"
                          "（删除后这些成果的谱系将指向回收站对象）")

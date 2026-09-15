@@ -203,6 +203,7 @@ class EditSession:
             run_id = run.id
         except Exception as exc:
             report.issues.append(f"provenance 预订失败（提交继续，无 run 记录）: {exc}")
+        failed_checkouts = 0
         for checkout in self.checkouts:
             try:
                 source_version = self._service.get_version(checkout.source_version_id)
@@ -226,10 +227,12 @@ class EditSession:
                     )
                 report.committed_version_ids.append(version.id)
             except CatalogError as exc:
+                failed_checkouts += 1
                 report.issues.append(
                     f"{checkout.asset_name}: 提交失败 — {exc}"
                 )
             except Exception as exc:  # pragma: no cover - defensive
+                failed_checkouts += 1
                 report.issues.append(
                     f"{checkout.asset_name}: 提交异常 — {exc.__class__.__name__}: {exc}"
                 )
@@ -238,7 +241,7 @@ class EditSession:
             run_id,
             committed_version_ids=report.committed_version_ids,
             business_role=self.role,
-            failed_count=len(report.issues),
+            failed_count=failed_checkouts,
         )
         return report
 

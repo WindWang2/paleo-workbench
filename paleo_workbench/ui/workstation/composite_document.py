@@ -3460,8 +3460,11 @@ class CompositeDocument(QWidget):
             service = get_catalog_service()
             if service is None:
                 return {}
-            version = service.get_version(version_id)
-            if version is None:
+            try:
+                version = service.get_version(version_id)
+            except Exception:
+                # get_version 对未知 id 抛 CatalogError（不返回 None）——
+                # 回收/丢失的钉定版本如实显示，不静默吞掉。
                 return {"数据来源": "版本缺失（可能已被回收）"}
             asset = service.get_asset(version.asset_id)
             rows = {

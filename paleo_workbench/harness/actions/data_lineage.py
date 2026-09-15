@@ -125,6 +125,12 @@ def register(registry) -> None:
                     "stage": {"type": "string", "enum": _STAGE_VALUES},
                     "actor": {"type": "string"},
                     "note": {"type": "string"},
+                    "asset_id": {
+                        "type": "string",
+                        "description": (
+                            "目标资产 id：缺省=同资产升版（取注册行源资产，"
+                            "与 UI/EditSession 一致）；\"new\"=另立新资产"),
+                    },
                 },
                 "required": ["working_path"],
                 "additionalProperties": False,
@@ -254,11 +260,21 @@ def _ingest(context: ActionContext, parameters: dict) -> dict:
     plan = build_ingest_plan(
         Path(parameters["root"]), context.project, service=service)
     decisions = parameters.get("decisions") or {}
+
+    def _norm(path_key: str) -> str:
+        # 决策键归一：大小写（Win32）+ 正斜杠——调用方回显 plan 输出的
+        # 路径可能被 JSON/手工改写分隔符，静默不匹配比报错更糟。
+        import os
+
+        normalized = str(path_key).replace("\\", "/")
+        return os.path.normcase(normalized)
+
+    normalized_decisions = {_norm(k): v for k, v in decisions.items()}
     applied = 0
     for item in plan.items:
-        key = str(item.path)
-        if key in decisions:
-            value = str(decisions[key])
+        key = _norm(item.path)
+        if key in normalized_decisions:
+            value = str(normalized_decisions[key])
             if value in ("accept", "skip", "as_new_version", "pending"):
                 item.decision = value
                 applied += 1
@@ -300,9 +316,25 @@ def _commit_working_copy(context: ActionContext, parameters: dict) -> dict:
     working_path = str(parameters["working_path"])
     stage_value = str(parameters.get("stage") or "derived")
     stage = DataStage(stage_value)
-    # 源版本来自副本注册行（不信任调用方回传——working_copies 是权威）。
+    # 源版本/源资产来自副本注册行（不信任调用方回传——working_copies 是
+    # 权威）。缺省同资产升版（与 UI/EditSession 语义一致）；
+    # asset_id="new" 显式另立新资产。
     state = service.working_copy_state(Path(working_path))
     source_version_id = (state or {}).get("source_version_id") or ""
+    source_asset_id = (state or {}).get("asset_id") or ""
+    if not source_asset_id and source_version_id:
+        try:
+            source_asset_id = service.get_version(
+                source_version_id).asset_id
+        except Exception:
+            source_asset_id = ""
+    requested = str(parameters.get("asset_id") or "")
+    if requested == "new":
+        target_asset_id: str | None = None
+    elif requested:
+        target_asset_id = requested
+    else:
+        target_asset_id = source_asset_id or None
     run_id = None
     try:
         run = register_manual_edit_run(
@@ -317,6 +349,7 @@ def _commit_working_copy(context: ActionContext, parameters: dict) -> dict:
     try:
         version = service.commit_working_copy(
             working_path,
+            asset_id=target_asset_id,
             name=str(parameters.get("name") or "") or None,
             stage=stage,
             run_id=run_id,

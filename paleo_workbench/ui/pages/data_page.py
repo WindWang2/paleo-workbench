@@ -2302,7 +2302,11 @@ class DataPage(QWidget):
         return self._lifecycle.catalog_service()
 
     def _map_usage_of_asset(self, asset_id: str):
-        """资产 → 地图用途（W-M 反查；无目录/无工作区时诚实返回 None）。"""
+        """资产 → 地图用途（W-M 反查；无目录/无工作区时诚实返回 None）。
+
+        选中行可能是 legacy 资源 id（桥接行 AssetView.id=res_…）——先经
+        ``asset_id_for_legacy`` 解析到 catalog 资产 id 再反查。
+        """
         service = self._catalog_service()
         if service is None:
             return None
@@ -2313,10 +2317,17 @@ class DataPage(QWidget):
             MappingWorkspaceState,
         )
 
+        resolved = None
+        try:
+            resolved = service.asset_id_for_legacy(str(asset_id or ""))
+        except Exception:
+            resolved = None
+        if not resolved:
+            return None
         workspace = MappingWorkspaceState.from_dict(
             getattr(self.project, "mapping_workspace", None) or {})
         return usages_of_asset(
-            asset_id, workspace=workspace, project=self.project,
+            resolved, workspace=workspace, project=self.project,
             catalog=service)
 
     def begin_plan_import(self) -> None:
