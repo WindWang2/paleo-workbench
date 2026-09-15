@@ -313,6 +313,10 @@ class PwbVertexTool : public PwbEditPickTool {
   QgsPointXY box_start_;
   std::unique_ptr<QgsRubberBand> box_rubber_;
   std::vector<VertexRef> boxed_selection_;
+  // V12 M2-3：最近一次 hover 光标的地图位置（连续 Delete 用——删除成功后
+  // 在同一光标位置对最新缓冲重建 hover，免去"晃动鼠标找回悬停"）。
+  QgsPointXY last_cursor_map_;
+  bool has_last_cursor_ = false;
 };
 
 class PwbMoveTool : public PwbEditPickTool {

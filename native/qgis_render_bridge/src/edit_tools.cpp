@@ -1,7 +1,6 @@
 #include "edit_tools.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -1282,10 +1281,11 @@ void PwbVertexTool::canvasMoveEvent(QgsMapMouseEvent* e) {
     return;
   }
   if (!dragging_) {
+    // V12 M2-3：记录光标地图位置——Delete 成功后在同位置对最新缓冲重建
+    // hover（连续删除免"晃动鼠标找回悬停"，v10 #3 关闭）。
+    last_cursor_map_ = e->mapPoint();
+    has_last_cursor_ = true;
     const QgsPointLocator::Match m = updateHoverMatch(e->mapPoint());
-    std::fprintf(stderr, "[PWB] move map=(%.3f,%.3f) valid=%d type=%d\n",
-                 e->mapPoint().x(), e->mapPoint().y(),
-                 m.isValid() ? 1 : 0, static_cast<int>(m.type()));
     updateSnapIndicator(e->mapPoint(), &m);
     return;
   }
@@ -1442,6 +1442,9 @@ void PwbVertexTool::keyPressEvent(QKeyEvent* e) {
         const QgsPoint hover_point =
             hover_.pick.geometry.constGet()->vertexAt(hover_.vertex);
         finishSharedDeleteAt(QgsPointXY(hover_point.x(), hover_point.y()));
+        // V12 M2-3：删除已落缓冲（镜像即编辑发生地，无滞后），在同一光标
+        // 位置重建 hover——密集几何下连续 Delete 不再要求晃动鼠标找回悬停。
+        if (has_last_cursor_) updateHover(last_cursor_map_);
       } else {
         callback_("vertex_delete_rejected", "{}");
       }
@@ -1637,7 +1640,8 @@ void PwbMoveTool::canvasPressEvent(QgsMapMouseEvent* e) {
     return;
   }
   current_ = pick;
-  origin_ = e->mapPoint();
+  // V12 M2-2：参考点吸附（QGIS 移动语义——落点吸附到捕捉命中处）。
+  origin_ = snapOrRaw(e->mapPoint());
   dragging_ = true;
   // M2（§4 移动复刻）：目标处于原生会话 → 平移直写缓冲。
   native_dragging_ = editLayer() != nullptr && pick.layer == editLayer();
@@ -1652,8 +1656,12 @@ void PwbMoveTool::canvasPressEvent(QgsMapMouseEvent* e) {
 
 void PwbMoveTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   if (!dragging_) return;
-  const double dx = e->mapPoint().x() - origin_.x();
-  const double dy = e->mapPoint().y() - origin_.y();
+  // V12 M2-2：目标点吸附跟随 + 捕捉指示器（与顶点工具同一捕捉面）。
+  const QgsPointLocator::Match snap = snapMatch(e->mapPoint());
+  const QgsPointXY target = snap.isValid() ? snap.point() : e->mapPoint();
+  updateSnapIndicator(e->mapPoint(), &snap);
+  const double dx = target.x() - origin_.x();
+  const double dy = target.y() - origin_.y();
   QgsGeometry moved = current_.geometry;
   moved.translate(dx, dy);
   rubber_->setToGeometry(moved, nullptr);
@@ -1661,8 +1669,11 @@ void PwbMoveTool::canvasMoveEvent(QgsMapMouseEvent* e) {
 
 void PwbMoveTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   if (!dragging_ || e->button() != Qt::LeftButton) return;
-  const double dx = e->mapPoint().x() - origin_.x();
-  const double dy = e->mapPoint().y() - origin_.y();
+  // V12 M2-2：落点与拖动预览同用吸附结果（预览即所得）。
+  const QgsPointLocator::Match snap = snapMatch(e->mapPoint());
+  const QgsPointXY target = snap.isValid() ? snap.point() : e->mapPoint();
+  const double dx = target.x() - origin_.x();
+  const double dy = target.y() - origin_.y();
   const Pick pick = current_;
   const bool native = native_dragging_;
   native_dragging_ = false;
