@@ -19,6 +19,9 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QTreeWidget,
     QTreeWidgetItem,
@@ -210,6 +213,161 @@ class FaciesSelectionDialog(QDialog):
 
     def selection(self) -> dict[str, str]:
         values = self._selector.selection()
+        values["level"] = FaciesTaxonomy.selection_level(values)
+        return values
+
+
+class FaciesChangeDialog(QDialog):
+    """编辑期换相对话框（**列表形态**）：搜索 + 相列表 + 确定/取消。
+
+    用户诉求：弹窗是相的列表，支持选择，然后确定，从而更换相图 feature
+    的特性/label。与 :class:`FaciesSelectionDialog`（三级下拉）的差别只在
+    呈现面——写入契约完全一致（``selection()`` 三字段 + ``level``），宿主
+    两处入口共用同一消费模式。
+
+    列表列的是**该图层的锚定级别**（相图列相、亚相图列亚相）；更细级别
+    用可选细化行指定，未指定时按「新相生效即清空亚相/微相」处理（与右键
+    快捷换相同一语义）。
+    """
+
+    def __init__(
+        self,
+        taxonomy: FaciesTaxonomy,
+        current: Mapping[str, Any] | None = None,
+        *,
+        title: str = "更改相",
+        count: int = 1,
+        anchor_level: str = "facies",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("FaciesChangeDialog")
+        self._taxonomy = taxonomy
+        anchor = anchor_level if anchor_level in FACIES_LEVEL_KEYS else "facies"
+        self._anchor = anchor
+        self._lower = list(FACIES_LEVEL_KEYS[FACIES_LEVEL_KEYS.index(anchor) + 1:])
+        self._all_names = list(taxonomy.names(anchor))
+        values = FaciesTaxonomy.selection_from_attributes(dict(current or {}))
+        self.setWindowTitle(title)
+        self.setMinimumWidth(360)
+
+        layout = QVBoxLayout(self)
+        scope = QLabel(
+            (f"将修改 {count} 个要素的{LEVEL_LABELS[anchor]}属性"
+             if count > 1 else f"修改该要素的{LEVEL_LABELS[anchor]}属性"), self)
+        scope.setObjectName("FaciesChangeScope")
+        layout.addWidget(scope)
+
+        self._search = QLineEdit(self)
+        self._search.setPlaceholderText(f"搜索{LEVEL_LABELS[anchor]}…")
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(lambda _text: self._refill())
+        layout.addWidget(self._search)
+
+        self._list = QListWidget(self)
+        self._list.setObjectName("FaciesChangeList")
+        self._list.setMinimumHeight(220)
+        self._list.currentTextChanged.connect(self._on_list_changed)
+        layout.addWidget(self._list, 1)
+
+        self._refine_rows: dict[str, QComboBox] = {}
+        if self._lower:
+            refine = QHBoxLayout()
+            hint = QLabel("细化（可选）：", self)
+            hint.setMinimumWidth(84)
+            refine.addWidget(hint)
+            for level in self._lower:
+                combo = QComboBox(self)
+                combo.setObjectName(f"FaciesRefine_{level}")
+                combo.currentTextChanged.connect(
+                    lambda _text, lv=level: self._repopulate_lower(lv))
+                refine.addWidget(combo, 1)
+                self._refine_rows[level] = combo
+            refine.addStretch(1)
+            layout.addLayout(refine)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._refill(str(values.get(anchor) or ""))
+
+    # -- 列表装配 -----------------------------------------------------------
+
+    def _refill(self, preselected: str = "") -> None:
+        needle = self._search.text().strip()
+        keep = preselected or self.selected_facies()
+        self._list.blockSignals(True)
+        self._list.clear()
+        for name in self._all_names:
+            if needle and needle not in name:
+                continue
+            self._list.addItem(QListWidgetItem(name))
+        self._list.blockSignals(False)
+        target = keep or (self._list.item(0).text() if self._list.count() else "")
+        if target:
+            self.select_facies(target)
+        self._repopulate_lower(self._lower[0] if self._lower else "")
+
+    def _on_list_changed(self, name: str) -> None:
+        self._repopulate_lower(self._lower[0] if self._lower else "")
+        _ = name
+
+    def _repopulate_lower(self, level: str) -> None:
+        if not level or level not in self._refine_rows:
+            return
+        index = FACIES_LEVEL_KEYS.index(level)
+        parents = tuple(self._selection_chain()[:index])
+        combo = self._refine_rows[level]
+        current = combo.currentText()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(_EMPTY, _EMPTY)  # 任一级可停（不逼假数据）
+        for name in self._taxonomy.names(level, parents):
+            combo.addItem(name, name)
+        found = combo.findText(current) if current else -1
+        combo.setCurrentIndex(found if found >= 0 else 0)
+        combo.blockSignals(False)
+        nxt = self._lower[self._lower.index(level) + 1:] if level in self._lower else []
+        if nxt:
+            self._repopulate_lower(nxt[0])
+
+    def _selection_chain(self) -> list[str]:
+        chain = [self.selected_facies()]
+        for level in self._lower:
+            combo = self._refine_rows.get(level)
+            chain.append(combo.currentText().strip() if combo is not None else "")
+        return chain
+
+    # -- 读写面（宿主/测试共用）---------------------------------------------
+
+    def listed_facies(self) -> list[str]:
+        return [self._list.item(row).text() for row in range(self._list.count())]
+
+    def selected_facies(self) -> str:
+        item = self._list.currentItem()
+        return item.text() if item is not None else ""
+
+    def select_facies(self, name: str) -> None:
+        for row in range(self._list.count()):
+            if self._list.item(row).text() == str(name):
+                self._list.setCurrentRow(row)
+                return
+
+    def set_search_text(self, text: str) -> None:
+        self._search.setText(str(text))
+
+    def selection(self) -> dict[str, str]:
+        chain = self._selection_chain()
+        values = dict(zip(FACIES_LEVEL_KEYS, chain))
+        # 锚定级别以下才允许细化：锚定级别以上保持空（不是本图层语义）。
+        for level in FACIES_LEVEL_KEYS[:FACIES_LEVEL_KEYS.index(self._anchor)]:
+            values[level] = ""
         values["level"] = FaciesTaxonomy.selection_level(values)
         return values
 

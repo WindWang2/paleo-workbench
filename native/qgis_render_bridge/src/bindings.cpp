@@ -434,7 +434,10 @@ py::dict capability_manifest() {
           "geometry_checker",
           // 0.12.0a0 (V12 M0)：current-layer 读回——宿主幂等重推需要
           // "画布现在认哪一层"这一事实（编辑工具链 D-B）。
-          "current_layer_query"}) {
+          "current_layer_query",
+          // V12 换相弹窗：编辑期属性写入（set_mirror_feature_attributes）+
+          // 原生缓冲脏态查询（mirror_layer_dirty）——换相/保存门禁的事实面。
+          "mirror_attribute_write", "mirror_dirty_query"}) {
         features.append(feature);
     }
     manifest["features"] = features;
@@ -1187,6 +1190,18 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
              py::arg("attrs_json") = "",
              "M3 topo-editing: merge listed features (union + attributes); "
              "one undoable macro 'Merged features'.")
+        .def("set_mirror_feature_attributes",
+             &pwb::qgis_render::QgisMapStack::setMirrorFeatureAttributes,
+             py::arg("doc_id"), py::arg("feature_ids_json"),
+             py::arg("attrs_json"),
+             "V12 facies-change: set attributes on listed mirror features "
+             "inside the native edit buffer; one undoable macro, repaints, "
+             "and broadcasts an edit_gesture (host gesture ledger).")
+        .def("mirror_layer_dirty",
+             &pwb::qgis_render::QgisMapStack::mirrorLayerDirty,
+             py::arg("doc_id"),
+             "V12: True while the mirror layer holds uncommitted native "
+             "edits (QgsVectorLayer::isModified) — host dirty fact.")
         .def("run_geometry_checks",
              &pwb::qgis_render::QgisMapStack::runGeometryChecks,
              py::arg("canvas"), py::arg("config_json"),

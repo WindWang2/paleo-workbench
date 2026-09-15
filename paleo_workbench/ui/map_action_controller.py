@@ -62,6 +62,8 @@ class MapActionController(QObject):
         "rotate_feature", "scale_feature", "cut_features", "copy_features",
         "paste_features", "snap_geometries",
         "trim_line", "extend_line", "fill_ring",
+        # V12 换相弹窗（相带图层的属性换相；触发一次命令，不改 current_tool）。
+        "change_facies",
         "snapping", "avoid_intersections", "tracing", "vertex_scope",
         "topology", "cancel",
     )

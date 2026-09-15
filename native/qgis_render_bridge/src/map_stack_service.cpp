@@ -4311,6 +4311,87 @@ std::string QgisMapStack::reshapeMirrorSharedBoundary(
   return "";
 }
 
+std::string QgisMapStack::setMirrorFeatureAttributes(
+    const std::string& doc_id, const std::string& feature_ids_json,
+    const std::string& attrs_json) {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return "layer not in an edit session: " + doc_id;
+  const QStringList host_ids = parseHostIdList(feature_ids_json);
+  if (host_ids.isEmpty()) return "no feature ids given";
+
+  auto table = impl_->mirror_feature_fids.find(doc_id);
+  const std::unordered_map<long long, std::string> empty;
+  const auto& lookup =
+      table == impl_->mirror_feature_fids.end() ? empty : table->second;
+  QgsFeatureIds target_fids;
+  for (const QString& host_id : host_ids) {
+    const QgsFeatureId fid = fidForHostId(lookup, host_id);
+    if (fid == FID_NULL) return "unknown feature id: " + host_id.toStdString();
+    target_fids.insert(fid);
+  }
+
+  QJsonParseError err{};
+  const QJsonDocument attrs_doc = QJsonDocument::fromJson(
+      QByteArray::fromStdString(attrs_json), &err);
+  if (err.error != QJsonParseError::NoError || !attrs_doc.isObject()) {
+    return "invalid attrs_json";
+  }
+  const QJsonObject attr_map = attrs_doc.object();
+  if (attr_map.isEmpty()) return "empty attrs_json";
+
+  const QgsFields fields = layer->fields();
+  QStringList unknown;
+  for (auto it = attr_map.begin(); it != attr_map.end(); ++it) {
+    if (fields.indexOf(it.key()) < 0) unknown.append(it.key());
+  }
+  if (unknown.size() == attr_map.size()) {
+    return ("no matching field on layer: "
+            + unknown.join(QStringLiteral(", "))).toStdString();
+  }
+
+  // 一宏可撤销（与 merge/split/reshape 同规）：begin → 逐要素逐字段 →
+  // end；一个字段都没落上即 destroy（不留半改缓冲）。
+  layer->beginEditCommand(QStringLiteral("Change attributes"));
+  bool changed = false;
+  for (const QgsFeatureId fid : target_fids) {
+    for (auto it = attr_map.begin(); it != attr_map.end(); ++it) {
+      const int index = fields.indexOf(it.key());
+      if (index < 0) continue;  // 未声明字段跳过（模式外属性不伪造）
+      QVariant value = it.value().toVariant();
+      fields.at(index).convertCompatible(value);
+      if (layer->changeAttributeValue(fid, index, value)) changed = true;
+    }
+  }
+  if (!changed) {
+    layer->destroyEditCommand();
+    return "no attribute change applied (unknown feature or identical value)";
+  }
+  layer->endEditCommand();
+  layer->triggerRepaint();
+
+  QJsonObject payload;
+  payload.insert(QStringLiteral("layer_doc_id"), QString::fromStdString(doc_id));
+  payload.insert(QStringLiteral("layers"),
+                 QJsonArray{QString::fromStdString(doc_id)});
+  payload.insert(QStringLiteral("gesture"), QStringLiteral("change_attributes"));
+  payload.insert(QStringLiteral("undo_text"), QStringLiteral("Change attributes"));
+  QJsonArray host_refs;
+  for (const QString& host_id : host_ids) host_refs.append(host_id);
+  payload.insert(QStringLiteral("features"), host_refs);
+  const std::string payload_json =
+      QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+  for (auto& kv : impl_->edit_pick_callbacks) {
+    if (kv.second) kv.second("edit_gesture", payload_json);
+  }
+  return "";
+}
+
+bool QgisMapStack::mirrorLayerDirty(const std::string& doc_id) const {
+  QgsVectorLayer* layer = editingLayerFor(doc_id);
+  if (layer == nullptr) return false;
+  return layer->isModified();
+}
+
 std::string QgisMapStack::restoreMirrorSnapshot(
     const std::string& doc_id, const std::string& features_json) {
   // geotopo Ticket 5（02-interface-contracts §4.3）：补偿恢复 = 单宏

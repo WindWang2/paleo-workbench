@@ -169,6 +169,8 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "trim_line", "extend_line",
         # V12 M5-B2 fill ring + ellipse digitizer.
         "fill_ring",
+        # V12 换相弹窗：相带图层选集的属性换相（编辑期可用，双权威路由）。
+        "change_facies",
     ),
     # V12 M1：编辑期联动开关补齐 UI 面——三个能力（避免重叠/追踪/顶点档位）
     # 的实现早就在 SnappingService + QgsProject 里，此前只有命令 handler、
@@ -700,6 +702,19 @@ def _rule_selection_op(ctx: ToolContext, tool_id: str) -> ToolAvailability:
         reason = "没有选中的要素"
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
+def _rule_change_facies(ctx: ToolContext) -> ToolAvailability:
+    """换相弹窗：相带图层 + 选中要素（编辑中是常态，但非必需）。
+
+    不设 ``_editing_gate``：无会话时控制器经门禁开/取会话，原生会话期
+    则写镜像缓冲——两条路都在 ``apply_facies_selection`` 单点路由。
+    """
+    reason = _project_gate(ctx) or _layer_gate(ctx) or _role_gate(ctx)
+    if reason is None and not ctx.layer_is_facies:
+        reason = "该图层不是相带图层（换相仅对相/亚相/微相图层有效）"
+    if reason is None and ctx.selection_count <= 0:
+        reason = "没有选中的要素"
+    return _ok("change_facies") if reason is None else _no("change_facies", reason)
+
 def _rule_copy_paste(ctx: ToolContext, tool_id: str) -> ToolAvailability:
     """剪切/复制/粘贴（M5-B）：复制需选集；剪切/粘贴需选集 + 编辑会话。"""
     reason = _project_gate(ctx) or _layer_gate(ctx) or _role_gate(ctx)
@@ -1015,6 +1030,7 @@ _RULE_TABLE: dict[str, Rule] = {
     "fill_ring": lambda ctx: _rule_ring_part(ctx, "fill_ring"),
     "add_ellipse": lambda ctx: _rule_edit_tool(ctx, "add_ellipse", "__python_fallback__"),
     "add_sector": lambda ctx: _rule_edit_tool(ctx, "add_sector", "__python_fallback__"),
+    "change_facies": _rule_change_facies,
     "delete_selected": _rule_delete_selected,
     "split": _rule_split,
     "merge": _rule_merge,

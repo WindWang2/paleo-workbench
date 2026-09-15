@@ -2399,6 +2399,14 @@ class CompositeDocument(QWidget):
                     self.edit_controller.start_editing()
         elif command_id == "save_edits":
             self._save_edits_with_feedback()
+        elif command_id == "change_facies":
+            # 换相弹窗（相列表 + 确定）：改的是属性，不是几何——权限/权威
+            # 由控制器 apply_facies_selection 单点路由（原生缓冲或 Python 会话）。
+            verdict = self.tool_availability().get("change_facies")
+            if verdict is not None and not verdict.enabled:
+                self.status_message.emit(f"不可用：{verdict.disabled_reason}")
+            else:
+                self.assign_facies_to_selection()
         elif command_id == "vertex_scope":
             # M2 §4 顶点档位取反（当前层 ⇄ 全部层）。
             enabling = not self.edit_controller.vertex_all_layers
@@ -4701,17 +4709,16 @@ class CompositeDocument(QWidget):
         from PySide6.QtWidgets import QMenu
 
         taxonomy = self.facies_taxonomy()
-        names = taxonomy.names("facies")
-        layer = self.edit_controller.layer(layer_id)
+        # 列该图层的锚定级别（相图列相、亚相图列亚相）；当前值读换相事实源
+        # （原生编辑期为镜像缓冲，不是未提交的 Python 旧态）。
+        anchor = self._facies_layer_anchor_level(layer_id)
+        names = taxonomy.names(anchor)
         current = ""
-        if layer is not None:
-            source = (layer.edit_session.features()
-                      if layer.edit_session is not None else layer.features())
-            feature = next(
-                (f for f in source if f.feature_id == feature_id), None)
-            if feature is not None:
-                current = str(
-                    (feature.attributes or {}).get("facies") or "").strip()
+        feature = next(
+            (f for f in self._facies_features(layer_id)
+             if str(f.feature_id) == str(feature_id)), None)
+        if feature is not None:
+            current = self._facies_level_values(feature.attributes).get(anchor, "")
         menu = QMenu(self)
         header = menu.addAction(
             f"要素 {feature_id}" + (f"（当前：{current}）" if current else ""))
@@ -4724,7 +4731,7 @@ class CompositeDocument(QWidget):
             action.setChecked(name == current)
             actions[action] = name
         menu.addSeparator()
-        cascade = menu.addAction("级联选择（亚相 / 微相）…")
+        cascade = menu.addAction("更改相…（列表弹窗）")
         actions[cascade] = None
         return menu, actions
 
@@ -4818,30 +4825,94 @@ class CompositeDocument(QWidget):
         self._refresh_facies_layer_style(layer_id)
         return True
 
+    def _facies_features(self, layer_id) -> list:
+        """换相读写的事实源（原生会话优先读镜像缓冲）。
+
+        原生编辑期 Python 真源是**未提交的旧态**——换相后据此推导分类
+        样式会把图面颜色/label 拉回旧值（编辑权在镜像，M1 §2）。
+        """
+        controller = self.edit_controller
+        layer = controller.layer(str(layer_id))
+        if layer is None:
+            return []
+        native = controller.native_editing
+        if native.is_open(str(layer_id)):
+            stack = native.stack_for(str(layer_id))
+            if stack is not None:
+                from paleo_workbench.mapping.vector_layer import VectorFeature
+
+                return [
+                    VectorFeature(
+                        feature_id=str(record.get("feature_id") or ""),
+                        geometry=dict(record.get("geometry") or {}),
+                        attributes=dict(record.get("attributes") or {}))
+                    for record in native.readback_features(stack, str(layer_id))
+                ]
+        session = layer.edit_session
+        return list(session.features() if session is not None else layer.features())
+
+    def _facies_level_values(self, attributes) -> dict[str, str]:
+        """要素属性 → 级别规范键（``facies_name`` 等别名归一）。
+
+        弹窗/菜单只认级别键（facies/sub_facies/micro_facies）；落盘字段名
+        因图层而异，读侧在这里归一，避免两套读法。
+        """
+        from paleo_workbench.mapping.facies_taxonomy import (
+            FACIES_LEVEL_KEYS,
+            resolve_facies_field,
+        )
+
+        attrs = dict(attributes or {})
+        available = set(attrs)
+        values: dict[str, str] = {}
+        for level in FACIES_LEVEL_KEYS:
+            field = resolve_facies_field(level, available)
+            values[level] = str(attrs.get(field) or "") if field else ""
+        return values
+
     def _assign_facies_dialog(self, layer_id: str, feature_id: str) -> None:
+        """单要素换相（检查器/右键入口）：与选区批量共用同一弹窗实现。"""
+        self._assign_facies_dialog_bulk(str(layer_id), [str(feature_id)])
+
+    def _assign_facies_dialog_bulk(self, layer_id: str, feature_ids) -> None:
+        """换相弹窗（列表形态）→ 写入**整批**要素 → 刷新分类样式/标注。
+
+        原生会话与 Python 会话都可用：权威路由在控制器
+        （``apply_facies_selection``），宿主不判断权威。
+        """
         from paleo_workbench.ui.workstation.facies_selector import (
-            FaciesSelectionDialog,
+            FaciesChangeDialog,
         )
 
         controller = self.edit_controller
         layer = controller.layer(str(layer_id))
         if layer is None:
             return
-        session = layer.edit_session
-        source = session.features() if session is not None else layer.features()
-        feature = next((f for f in source if f.feature_id == feature_id), None)
-        current = dict(feature.attributes) if feature is not None else {}
-        dialog = FaciesSelectionDialog(
+        ids = [str(fid) for fid in (feature_ids or ()) if str(fid)]
+        if not ids:
+            return
+        source = self._facies_features(layer_id)
+        by_id = {str(feature.feature_id): feature for feature in source}
+        first = by_id.get(ids[0])
+        current = (
+            self._facies_level_values(first.attributes) if first is not None else {}
+        )
+        dialog = FaciesChangeDialog(
             self.facies_taxonomy(), current,
-            title=f"指定相带 — {layer.name}",
+            title=f"更改相 — {layer.name}", count=len(ids),
             anchor_level=self._facies_layer_anchor_level(layer_id),
             parent=self)
-        if dialog.exec() != FaciesSelectionDialog.DialogCode.Accepted:
+        if dialog.exec() != FaciesChangeDialog.DialogCode.Accepted:
             return
         ok, reason = controller.apply_facies_selection(
-            layer_id, feature_id, dialog.selection())
+            layer_id, ids, dialog.selection())
         if not ok:
-            self.status_message.emit(f"相带属性未写入：{reason}")
+            self.status_message.emit(f"相未写入：{reason}")
+            return
+        self._refresh_facies_layer_style(layer_id)
+        self.status_message.emit(
+            f"已更改 {len(ids)} 个要素的相" if len(ids) > 1
+            else f"相已改为「{dialog.selection().get('facies', '')}」")
 
     def _refresh_facies_layer_style(self, layer_id) -> None:
         layer_id = str(layer_id or "")
@@ -4851,9 +4922,16 @@ class CompositeDocument(QWidget):
         layer = controller.layer(layer_id)
         if layer is None:
             return
-        field = self._facies_layer_anchor_level(layer_id)
-        session = layer.edit_session
-        source = session.features() if session is not None else layer.features()
+        source = self._facies_features(layer_id)
+        # 分类/标注字段按图层**实际**字段名解析（模板 schema 用 ``facies``，
+        # 角色 spec 图层用 ``facies_name``）——否则换相后图面颜色/label 不跟随。
+        from paleo_workbench.mapping.facies_taxonomy import resolve_facies_field
+
+        anchor = self._facies_layer_anchor_level(layer_id)
+        available: set[str] = set()
+        for feature in source:
+            available.update(str(key) for key in (feature.attributes or {}))
+        field = resolve_facies_field(anchor, available) or anchor
         values = sorted({
             str(feature.attributes.get(field) or "").strip()
             for feature in source
@@ -4908,18 +4986,18 @@ class CompositeDocument(QWidget):
         self._assign_facies_dialog(layer_id, feature_id)
 
     def assign_facies_to_selection(self, layer_id: str | None = None) -> None:
+        """选区换相：**整选区一次弹窗**（此前是每要素弹一次）。"""
         controller = self.edit_controller
         layer_id = str(layer_id or controller.active_layer_id or "")
         if not layer_id or not self._is_facies_layer(layer_id):
-            self.status_message.emit("指定相带：请先选中相带图层")
+            self.status_message.emit("更改相：请先选中相带图层")
             return
         layer = controller.layer(layer_id)
         selection = sorted(getattr(layer, "selection", ()) or ())
         if not selection:
-            self.status_message.emit("指定相带：请先选中要素")
+            self.status_message.emit("更改相：请先选中要素")
             return
-        for feature_id in selection:
-            self._assign_facies_dialog(str(layer_id), feature_id)
+        self._assign_facies_dialog_bulk(str(layer_id), selection)
 
     def open_facies_taxonomy_dialog(self) -> None:
         from paleo_workbench.ui.workstation.facies_selector import (

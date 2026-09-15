@@ -80,6 +80,7 @@ def _specs() -> dict[str, ActionSpec]:
         "cut_features": "delete_selected", "copy_features": "duplicate_selected",
         "paste_features": "duplicate_selected",
         "map_export": "rb-export", "repair_geometry": "btn-health",
+        "change_facies": "change_facies",
     }
     # 画布交互工具（checked ← current_tool；与求值器 _CHECKED_CANVAS_TOOLS
     # 同集，测试钉一致）。V10（#1256）：add_ring / add_part 与本集同步——
@@ -118,6 +119,8 @@ def _specs() -> dict[str, ActionSpec]:
         # V12 M5-A1 shape/修剪延伸（写动作，不得标 read）。
         "add_arc", "add_regular_polygon", "trim_line", "extend_line", "fill_ring",
         "add_sector",
+        # V12 换相弹窗：改要素相属性 = 数据写作。
+        "change_facies",
     }
     # 选择集动作（改选择集，不改数据）。
     selection_tools = {
@@ -137,7 +140,7 @@ def _specs() -> dict[str, ActionSpec]:
         "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent",
         "select_all", "invert_selection", "clear_selection", "toggle_editing",
         "save_edits", "snapping", "topology", "layer_properties",
-        "attribute_table",
+        "attribute_table", "change_facies",
         # V12 M1：编辑期联动开关（地图右键即可切换，与工具条同一求值器）。
         "avoid_intersections", "tracing", "vertex_scope",
     }

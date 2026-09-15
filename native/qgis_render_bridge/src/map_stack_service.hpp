@@ -342,6 +342,17 @@ public:
   // 编辑工具的 begin/endEditCommand 保证）；手势级编排（跨层逆序）在宿主。
   std::string undoMirrorEdit(const std::string& doc_id);
   std::string redoMirrorEdit(const std::string& doc_id);
+  // 编辑期属性写入（换相等属性编辑的宿主通道）：在镜像编辑缓冲里一宏改
+  // 属性（可撤销、随 commit 落盘），成功后 triggerRepaint 并广播
+  // edit_gesture（宿主手势台账与其它镜像编辑同规）。feature_ids_json =
+  // 宿主 id 数组；attrs_json = {字段: 值}（未见字段跳过，与 merge 同规）。
+  // 错误语义同其它编辑面：返回 "" 成功，否则用户可读原因。
+  std::string setMirrorFeatureAttributes(const std::string& doc_id,
+                                         const std::string& feature_ids_json,
+                                         const std::string& attrs_json);
+  // 原生缓冲是否有未提交修改（宿主 dirty 事实的第二权威；
+  // QgsVectorLayer::isModified）。会话未开 → false。
+  bool mirrorLayerDirty(const std::string& doc_id) const;
   // Ticket 1（vector-perf-increment）顶点拾取诊断面：生产 verticesNear 同
   // 路径（索引/线性回退由 QueryVerticesNear 决定）。基准与等价性测试用。
   // Ticket 5（vector-perf-increment）：零拷贝事件总线。默认关闭；启用后

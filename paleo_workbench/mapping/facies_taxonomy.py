@@ -29,6 +29,31 @@ LEVEL_LABELS: dict[str, str] = {
 #: 选到某级即停时写进要素 ``level`` 属性的值（最细已选级别）。
 _BUILTIN_PATH = Path(__file__).parent.parent / "resources" / "facies_taxonomy.json"
 
+#: 各级别的**域内字段别名**（首项 = 模板 schema 规范名）。
+#: ``geological_layer_spec`` 的相族图层（initial-facies-source/draft、
+#: 井/震预测相）字段是 ``facies_name``/``sub_facies_name``/
+#: ``micro_facies_name``，而 Geo_Template（``create_layer(template="facies")``）
+#: 用 ``facies``/``sub_facies``/``micro_facies``——同一逻辑属性两种落盘名，
+#: 换相/样式必须按**图层实际字段**解析，不能假设其一。
+FACIES_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "facies": ("facies", "facies_name"),
+    "sub_facies": ("sub_facies", "sub_facies_name"),
+    "micro_facies": ("micro_facies", "micro_facies_name"),
+}
+
+
+def resolve_facies_field(level: str, available) -> str:
+    """该级别在给定字段集中实际可用的字段名（都没有 → ""）。
+
+    ``available`` = 图层字段名集合（宿主 schema 或镜像 schema，见调用方）。
+    未知级别按自身名字面判定（不猜别名）。
+    """
+    names = {str(name) for name in (available or ()) if str(name)}
+    for candidate in FACIES_FIELD_ALIASES.get(str(level), (str(level),)):
+        if candidate in names:
+            return candidate
+    return ""
+
 
 def _normalize_tree(tree: Any) -> dict[str, dict]:
     """嵌套名称树规范化：剥掉非 dict 叶子、去空串键，返回纯 dict 树。"""

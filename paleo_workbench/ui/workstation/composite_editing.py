@@ -1576,33 +1576,103 @@ class CompositeEditController(QObject):
         self.project_crs = crs
         return True, ""
 
-    def apply_facies_selection(
-        self, layer_id: str, feature_id: str, selection: Mapping[str, object]
-    ) -> tuple[bool, str]:
-        """把级联选择结果写到要素（三名称字段 + level）。
+    def facies_field_names(self, layer_id: str) -> set[str]:
+        """换相可写的字段名集合（原生会话读**镜像 schema**）。
 
+        镜像 schema 是原生编辑期的落盘权威：宿主 Python schema 与镜像
+        schema 可能不同名（template ``facies`` vs 角色 spec
+        ``facies_name``）——解析必须看实际权威，否则写不进去。
+        无 schema 面时回落 Python schema + 要素属性键的并集。
+        """
+        layer_id = str(layer_id)
+        native = self.native_editing
+        if native.is_open(layer_id):
+            stack = native.stack_for(layer_id)
+            probe = getattr(stack, "mirror_layer_schema_json", None)
+            if callable(probe):
+                try:
+                    raw = probe(layer_id)
+                    payload = raw if isinstance(raw, dict) else json.loads(str(raw))
+                    names = {
+                        str(field.get("name") or "")
+                        for field in (payload.get("fields") or [])
+                        if isinstance(field, Mapping)
+                    }
+                    names.discard("")
+                    if names:
+                        return names
+                except (TypeError, ValueError, AttributeError):
+                    pass
+        names: set[str] = set()
+        for field in (self.layer_schema(layer_id) or {}).get("fields") or []:
+            if isinstance(field, Mapping) and str(field.get("name") or ""):
+                names.add(str(field["name"]))
+        layer = self._layers.get(layer_id)
+        if layer is not None:
+            for feature in layer.features():
+                names.update(str(key) for key in (feature.attributes or {}))
+        return names
+
+    def apply_facies_selection(
+        self, layer_id: str, feature_ids, selection: Mapping[str, object]
+    ) -> tuple[bool, str]:
+        """把相选择结果写到要素（三名称字段 + level；支持整选区批量）。
+
+        ``feature_ids`` 接受单个 id 或 id 序列（单要素签名向后兼容）。
+        编辑权威双轨（M1 §2）：**原生会话打开时走镜像缓冲**
+        （``native_editing.set_feature_attributes``——一宏可撤销、随 commit
+        落盘），否则经门禁开/取 Python 会话；绝不因属性写入另开第二会话。
         ``parent_id`` 不在此写——三矢量模型落地时由跨层选择专门赋值。
         """
-        from paleo_workbench.mapping.facies_taxonomy import FaciesTaxonomy
+        from paleo_workbench.mapping.facies_taxonomy import (
+            FACIES_LEVEL_KEYS,
+            FaciesTaxonomy,
+            resolve_facies_field,
+        )
 
-        session, reason = self.ensure_layer_session(layer_id)
-        if session is None:
-            return False, reason
+        layer_id = str(layer_id)
+        ids = (
+            [str(feature_ids)] if isinstance(feature_ids, str)
+            else [str(fid) for fid in (feature_ids or ()) if str(fid)]
+        )
+        if not ids:
+            return False, "没有要修改的要素"
         values = {
             "facies": str(selection.get("facies") or ""),
             "sub_facies": str(selection.get("sub_facies") or ""),
             "micro_facies": str(selection.get("micro_facies") or ""),
             "level": FaciesTaxonomy.selection_level(selection),
         }
+        available = self.facies_field_names(layer_id)
+        payload: dict[str, object] = {}
+        for level in FACIES_LEVEL_KEYS:
+            field = resolve_facies_field(level, available)
+            if field:
+                payload[field] = values[level]
+        if "level" in available:
+            payload["level"] = values["level"]
+        if not payload:
+            return False, (
+                "图层缺少相字段（facies/facies_name）——请在图层属性中补齐字段")
+        if self.native_editing.is_open(layer_id):
+            ok, reason = self.native_editing.set_feature_attributes(
+                layer_id, ids, payload)
+            if ok:
+                self.content_changed.emit(layer_id)
+            return ok, reason
+        session, reason = self.ensure_layer_session(layer_id)
+        if session is None:
+            return False, reason
         try:
             session.begin_edit_command()
-            for key, value in values.items():
-                session.change_attribute(feature_id, key, value)
+            for feature_id in ids:
+                for key, value in payload.items():
+                    session.change_attribute(feature_id, key, value)
         except KeyError as exc:
             session.destroy_edit_command()
             return False, str(exc)
         session.end_edit_command()
-        self.content_changed.emit(str(layer_id))
+        self.content_changed.emit(layer_id)
         return True, ""
 
     def import_layer_features(self, layer_id: str, features: list) -> None:
@@ -3831,12 +3901,21 @@ class CompositeEditController(QObject):
             "project_open": True,
             "active_layer_id": layer.id if layer is not None else "",
             "active_layer_kind": layer_kind,
+            # 相带家族事实（换相动作门禁）：模板注册表是唯一权威。
+            "layer_is_facies": bool(
+                layer is not None
+                and is_facies_template_layer(self._templates, layer.id)),
             "wkb_type": wkb_type,
             "vector_writable": layer is not None,
             # M1：编辑中 = Python 会话或原生会话（顶点 v2/数字化路由）。
             "editing": session is not None or (
                 layer is not None and self.native_editing.is_open(layer.id)),
-            "dirty": bool(session is not None and session.is_dirty),
+            # 脏态双轨：Python 会话脏 **或** 原生缓冲有未提交修改（桥
+            # mirror_layer_dirty；None=旧桥无查询面 → 不虚构脏态）。
+            # 此前只看 Python 会话 → 原生编辑期「保存/回滚」恒灰。
+            "dirty": bool(session is not None and session.is_dirty)
+            or (layer is not None
+                and self.native_editing.pending_changes(layer.id) is True),
             "edit_gate_open": bool(gate_allowed),
             "edit_gate_reason": str(gate_reason or ""),
             "can_undo": bool(session and session.undo_stack),

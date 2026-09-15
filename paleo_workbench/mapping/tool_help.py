@@ -48,7 +48,7 @@ TOOL_LABELS: dict[str, str] = {
     "add_arc": "添加圆弧", "add_regular_polygon": "添加正多边形",
     "trim_line": "修剪线", "extend_line": "延伸线",
     "fill_ring": "填充内环", "add_ellipse": "添加椭圆",
-    "add_sector": "添加扇形",
+    "add_sector": "添加扇形", "change_facies": "更改相",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -244,6 +244,10 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
     "fill_ring": _spec(
         "填充内环", "面图层编辑会话中 + 选中一个要素",
         "右键内环定位 → 环转面（属性克隆，原面去环）", modifies=True, kinds=_VECTOR),
+    "change_facies": _spec(
+        "更改相", "相带图层 + 选中要素（编辑中亦可）",
+        "弹出相列表（可细化亚相/微相）→ 确定即改所选要素的相属性与标注",
+        modifies=True, kinds=_VECTOR),
     "add_ellipse": _spec(
         "添加椭圆", "面图层编辑会话中",
         "中心 + 长半轴点 + 短半轴点", modifies=True, kinds=_VECTOR),

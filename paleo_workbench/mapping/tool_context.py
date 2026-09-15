@@ -133,6 +133,8 @@ class ToolContext:
     layer_name: str = ""
     layer_role: str = ""                   # LayerRole.value ("" unknown)
     layer_role_label: str = ""
+    #: 相带家族图层（相/亚相/微相模板）——换相动作的门禁事实。
+    layer_is_facies: bool = False
     artifact_maturity: str = ""            # raw/draft/reviewed/frozen/published
     layer_frozen: bool = False
     layer_missing: bool = False
@@ -311,6 +313,7 @@ def build_tool_context(
         layer_name=str(facts.get("layer_name") or ""),
         layer_role=str(facts.get("layer_role") or ""),
         layer_role_label=str(facts.get("layer_role_label") or ""),
+        layer_is_facies=bool(state.get("layer_is_facies", False)),
         artifact_maturity=str(facts.get("artifact_maturity") or ""),
         layer_frozen=bool(facts.get("layer_frozen", False)),
         layer_missing=bool(facts.get("layer_missing", False)),

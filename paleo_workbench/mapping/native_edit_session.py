@@ -175,6 +175,58 @@ class NativeEditSessionController:
             })
         return normalized
 
+    # -- 属性写入（编辑期换相/属性编辑的唯一原生通道）------------------------
+
+    @staticmethod
+    def supports_attribute_write(stack) -> bool:
+        """桥是否具备镜像属性写 op（旧桥诚实降级，不冒充支持）。"""
+        return callable(getattr(stack, "set_mirror_feature_attributes", None))
+
+    def set_feature_attributes(self, layer_id: str, feature_ids,
+                               attributes) -> tuple[bool, str]:
+        """在镜像编辑缓冲改属性（一宏可撤销；随 commit 落盘）。
+
+        编辑权在原生缓冲时宿主**不得**另开 Python 会话（M1 §2）——换相等
+        属性写入走这里，与顶点编辑同一撤销/提交语义。
+        """
+        layer_id = str(layer_id)
+        session = self._sessions.get(layer_id)
+        if session is None:
+            return False, "该图层没有进行中的原生编辑会话"
+        stack = session["stack"]
+        if not self.supports_attribute_write(stack):
+            return False, (
+                "当前 QGIS 桥不支持编辑期属性写入"
+                "（需重建 qgis_render_bridge）")
+        ids = [str(fid) for fid in (feature_ids or ()) if str(fid)]
+        if not ids:
+            return False, "没有要修改的要素"
+        values = {str(key): value for key, value in dict(attributes or {}).items()}
+        if not values:
+            return False, "没有要写入的属性"
+        try:
+            error = str(stack.set_mirror_feature_attributes(
+                layer_id, json.dumps(ids), json.dumps(values)) or "")
+        except Exception as exc:  # 桥侧异常不吞：原因上浮
+            return False, f"属性写入失败：{exc}"
+        if error:
+            return False, error
+        return True, ""
+
+    def pending_changes(self, layer_id: str) -> bool | None:
+        """原生缓冲是否有未提交修改；None = 桥无查询面（未知，不猜）。"""
+        session = self._sessions.get(str(layer_id))
+        if session is None:
+            return False
+        probe = getattr(session["stack"], "mirror_layer_dirty", None)
+        if not callable(probe):
+            return None
+        try:
+            return bool(probe(str(layer_id)))
+        except Exception:
+            logger.debug("mirror_layer_dirty unavailable", exc_info=True)
+            return None
+
     def _topology_gate_issues(self, topology) -> list[dict[str, object]]:
         """M4 检查器门禁；旧桥回落逐层 validate_records。"""
         checker = getattr(topology, "checker", None)

@@ -293,17 +293,25 @@ def test_facies_layer_auto_pattern_style_on_content_change(qtbot, tmp_path):
     controller = document.edit_controller
     layer = controller.create_layer("相带", "polygon", template="facies")
     controller.set_active_layer(layer.id)
-    controller.start_editing()
     from paleo_workbench.mapping.vector_layer import VectorFeature
 
     polygon = {"type": "Polygon",
                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}
-    session = layer.edit_session
-    session.add_feature(VectorFeature("f1", dict(polygon),
-                                      {"facies": "三角洲", "confidence": "中"}))
-    session.add_feature(VectorFeature("f2", dict(polygon),
-                                      {"facies": "碳酸盐台地", "confidence": "中"}))
-    controller.content_changed.emit(layer.id)
+
+    def _add(feature) -> None:
+        """写入一个要素并触发内容变更。
+
+        走领域导入通道（不开编辑会话）：本机桥可用时 ``start_editing`` 会
+        进原生镜像会话，属性事实在镜像缓冲，Python 真源反而不是样式刷新
+        的读取源——本用例验的是内容变更 → 样式刷新链，与会话栈无关。
+        """
+        controller.import_layer_features(layer.id, [feature])
+        controller.content_changed.emit(layer.id)
+
+    _add(VectorFeature("f1", dict(polygon),
+                       {"facies": "三角洲", "confidence": "中"}))
+    _add(VectorFeature("f2", dict(polygon),
+                       {"facies": "碳酸盐台地", "confidence": "中"}))
 
     style = dict(layer.style)
     assert style["renderer"] == "categorized"
@@ -314,18 +322,16 @@ def test_facies_layer_auto_pattern_style_on_content_change(qtbot, tmp_path):
 
     # 类别集合不变（纯几何编辑）→ 不重置样式
     applied_style = dict(layer.style)
-    session.add_feature(VectorFeature("f3", dict(polygon),
-                                      {"facies": "三角洲", "confidence": "中"}))
-    controller.content_changed.emit(layer.id)
+    _add(VectorFeature("f3", dict(polygon),
+                       {"facies": "三角洲", "confidence": "中"}))
     assert layer.style == applied_style
 
     # 用户自定义分类符号（类别不同）→ 不接管
     custom = dict(applied_style)
     custom["categories"] = {"我的分类": "#ff0000"}
     controller.set_layer_style(layer.id, custom)
-    session.add_feature(VectorFeature("f4", dict(polygon),
-                                      {"facies": "潟湖", "confidence": "中"}))
-    controller.content_changed.emit(layer.id)
+    _add(VectorFeature("f4", dict(polygon),
+                       {"facies": "潟湖", "confidence": "中"}))
     assert "潟湖" not in (layer.style.get("categories") or {})
 
 
