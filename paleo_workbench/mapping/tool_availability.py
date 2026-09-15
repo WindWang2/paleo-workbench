@@ -154,6 +154,9 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "collect_multipart",
         # V12 M4-2：geotopo 交互工具（C++ 实现早在，缺的是登记面）。
         "fault_cut", "boundary_reshape",
+        # V12 M5-A：环/部件交互删除 + 选择集几何算子。
+        "delete_ring", "delete_part", "reverse_line", "simplify_feature",
+        "smooth_feature", "offset_curve",
     ),
     # V12 M1：编辑期联动开关补齐 UI 面——三个能力（避免重叠/追踪/顶点档位）
     # 的实现早就在 SnappingService + QgsProject 里，此前只有命令 handler、
@@ -643,6 +646,34 @@ def _rule_geotopo_tool(ctx: ToolContext, tool_id: str) -> ToolAvailability:
         reason = _native_tool_gate(ctx, kind, "断层切割" if tool_id == "fault_cut" else "共边重塑")
     return _ok(tool_id) if reason is None else _no(tool_id, reason)
 
+def _rule_ring_part(ctx: ToolContext, tool_id: str) -> ToolAvailability:
+    """环/部件交互删除（M5-A1）：面/多部件 + 编辑会话 + 选中一个要素。
+
+    交互在宿主右键定位；evaluator 只表达粗门（面/多部件 kind 在
+    composite_editing.geometry_command_at_point 里复核）。
+    """
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+    )
+    if reason is None and ctx.selection_count != 1:
+        reason = "需要恰好选中一个要素"
+    return _ok(tool_id) if reason is None else _no(tool_id, reason)
+
+def _rule_selection_op(ctx: ToolContext, tool_id: str) -> ToolAvailability:
+    """选择集几何算子（M5-A2）：编辑会话 + 选中要素。"""
+    reason = (
+        _project_gate(ctx)
+        or _layer_gate(ctx)
+        or _role_gate(ctx)
+        or _editing_gate(ctx)
+    )
+    if reason is None and ctx.selection_count <= 0:
+        reason = "没有选中的要素"
+    return _ok(tool_id) if reason is None else _no(tool_id, reason)
+
 def _rule_delete_selected(ctx: ToolContext) -> ToolAvailability:
     reason = (
         _project_gate(ctx)
@@ -926,6 +957,12 @@ _RULE_TABLE: dict[str, Rule] = {
     "vertex": lambda ctx: _rule_edit_tool(ctx, "vertex", "vertex"),
     "fault_cut": lambda ctx: _rule_geotopo_tool(ctx, "fault_cut"),
     "boundary_reshape": lambda ctx: _rule_geotopo_tool(ctx, "boundary_reshape"),
+    "delete_ring": lambda ctx: _rule_ring_part(ctx, "delete_ring"),
+    "delete_part": lambda ctx: _rule_ring_part(ctx, "delete_part"),
+    "reverse_line": lambda ctx: _rule_selection_op(ctx, "reverse_line"),
+    "simplify_feature": lambda ctx: _rule_selection_op(ctx, "simplify_feature"),
+    "smooth_feature": lambda ctx: _rule_selection_op(ctx, "smooth_feature"),
+    "offset_curve": lambda ctx: _rule_selection_op(ctx, "offset_curve"),
     "delete_selected": _rule_delete_selected,
     "split": _rule_split,
     "merge": _rule_merge,

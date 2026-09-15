@@ -190,3 +190,69 @@ def test_geotopo_tools_registered_and_gated():
     )
     assert evaluate_tool("fault_cut", ok_ctx).enabled is True
     assert evaluate_tool("boundary_reshape", ok_ctx).enabled is True
+
+
+
+# ---------------------------------------------------------------------------
+# M5-A1/A2：环/部件交互删除 + 选择集几何算子
+# ---------------------------------------------------------------------------
+
+def test_m5_commands_registered():
+    from paleo_workbench.mapping.action_registry import ACTION_SPECS
+    from paleo_workbench.mapping.tool_availability import TOOL_GROUPS
+    from paleo_workbench.mapping.tool_help import TOOL_HELP, TOOL_LABELS
+
+    for tool_id in ("delete_ring", "delete_part", "reverse_line",
+                    "simplify_feature", "smooth_feature", "offset_curve"):
+        assert tool_id in TOOL_GROUPS["geometry"]
+        assert tool_id in TOOL_LABELS and tool_id in TOOL_HELP
+        assert ACTION_SPECS[tool_id].group == "geometry"
+
+
+def test_selection_geometry_op_reverse_line(qapp):
+    """选择集反转方向：坐标序列倒序。"""
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("线", "line")
+    controller.import_layer_features(layer.id, [
+        VectorFeature(feature_id="f1",
+                      geometry={"type": "LineString", "coordinates": [
+                          [0.0, 0.0], [1.0, 1.0], [2.0, 0.0]]},
+                      attributes={}),
+    ])
+    layer.set_selection({"f1"})
+    controller._open_session(layer)
+    ok, _msg = controller.selection_geometry_op("reverse_line")
+    assert ok
+    session = layer.edit_session
+    feature = next(f for f in session.features() if f.feature_id == "f1")
+    coords = feature.geometry["coordinates"]
+    assert coords[0][0] == 2.0 and coords[-1][0] == 0.0, f"未反转: {coords}"
+
+
+def test_selection_geometry_op_simplify(qapp):
+    """简化要素：密度容差抽稀。"""
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.workstation.composite_document import CompositeDocument
+    from paleo_workbench.mapping.vector_layer import VectorFeature
+
+    doc = CompositeDocument(ProjectDocument.new("t"))
+    controller = doc.edit_controller
+    layer = controller.create_layer("线", "line")
+    dense = [[float(i) / 20.0, (i % 2) * 0.01] for i in range(21)]
+    controller.import_layer_features(layer.id, [
+        VectorFeature(feature_id="f1",
+                      geometry={"type": "LineString", "coordinates": dense},
+                      attributes={}),
+    ])
+    layer.set_selection({"f1"})
+    controller._open_session(layer)
+    ok, _msg = controller.selection_geometry_op("simplify_feature", tolerance=0.5)
+    assert ok
+    session = layer.edit_session
+    feature = next(f for f in session.features() if f.feature_id == "f1")
+    assert len(feature.geometry["coordinates"]) < len(dense), "未抽稀"

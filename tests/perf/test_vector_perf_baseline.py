@@ -141,9 +141,8 @@ def test_baseline_snap_press_pick(qtbot, qapp, stack):
         # Press on fractional offsets far from every vertex (>10px pick
         # radius at this extent): verticesNear performs the identical full
         # scan regardless of hits; a vertex hit would additionally begin a
-        # shared drag — which crashes under the current vendor build (known,
-        # pre-existing; see 04-known-limitations.md) without adding any
-        # measurable scan cost. At the densest scale (cell = 1.0 unit,
+        # shared drag.（V12 注：曾在 vendor 构建因 MSVC 实参求值顺序
+        # use-after-move 崩溃——编辑工具链 D-A 已修复，绕行注释历史化。） At the densest scale (cell = 1.0 unit,
         # pick radius = 0.25 unit) the chosen points stay ≥0.35 units from
         # the nearest vertex.
         targets = [(5.4, 5.4), (6.25, 4.75)]

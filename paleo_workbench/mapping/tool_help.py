@@ -38,6 +38,9 @@ TOOL_LABELS: dict[str, str] = {
     "avoid_intersections": "避免重叠", "tracing": "追踪",
     "vertex_scope": "顶点范围",
     "fault_cut": "断层切割", "boundary_reshape": "共边重塑",
+    "delete_ring": "删除内环", "delete_part": "删除部件",
+    "reverse_line": "反转方向", "simplify_feature": "简化要素",
+    "smooth_feature": "平滑要素", "offset_curve": "偏移曲线",
     "layer_new": "新建图层", "reference_import": "导入参考图层",
     "layer_properties": "图层属性", "attribute_table": "属性表",
     "layer_zoom": "缩放到图层", "layer_export": "导出图层",
@@ -176,6 +179,24 @@ TOOL_HELP: dict[str, ToolHelpSpec] = {
         "共边重塑", "面图层编辑会话中 + 恰好选中两个相邻要素 + 原生画布",
         "数字化新界线联动重塑两面的共享弧（守恒校验失败零变更）",
         modifies=True, kinds=_VECTOR),
+    "delete_ring": _spec(
+        "删除内环", "面图层编辑会话中 + 选中一个要素",
+        "右键内环定位 → 删除该内环", modifies=True, kinds=_VECTOR),
+    "delete_part": _spec(
+        "删除部件", "多部件要素编辑会话中 + 选中一个要素",
+        "右键部件定位 → 删除该部件", modifies=True, kinds=_VECTOR),
+    "reverse_line": _spec(
+        "反转方向", "编辑会话中 + 选中要素",
+        "反转所选线/环的方向", modifies=True, kinds=_VECTOR),
+    "simplify_feature": _spec(
+        "简化要素", "编辑会话中 + 选中要素",
+        "按容差抽稀所选要素几何（Visvalingam/Douglas-Peucker）", modifies=True, kinds=_VECTOR),
+    "smooth_feature": _spec(
+        "平滑要素", "编辑会话中 + 选中要素",
+        "平滑所选要素几何（Chaikin）", modifies=True, kinds=_VECTOR),
+    "offset_curve": _spec(
+        "偏移曲线", "编辑会话中 + 选中要素",
+        "按距离偏移所选线", modifies=True, kinds=_VECTOR),
     "topology": _spec(
         "拓扑编辑", "有活动图层 + 工程 CRS 有效",
         "开关拓扑编辑（编辑期联动 + 保存时校验）", modifies=True, kinds=_VECTOR),

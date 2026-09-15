@@ -107,6 +107,8 @@ def _specs() -> dict[str, ActionSpec]:
         "layer_new", "factor_overlay", "map_product_assemble",
         "duplicate_selected", "add_ring", "add_part", "explode_multipart",
         "collect_multipart", "fault_cut", "boundary_reshape",
+        "delete_ring", "delete_part", "reverse_line", "simplify_feature",
+        "smooth_feature", "offset_curve",
     }
     # 选择集动作（改选择集，不改数据）。
     selection_tools = {

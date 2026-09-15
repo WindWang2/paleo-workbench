@@ -2657,6 +2657,29 @@ class CompositeEditController(QObject):
             return polygon_layer, polygon_id, line_feature
         return None
 
+    def geometry_command_at_point(self, command_id: str, point) -> tuple[bool, str]:
+        """交互式环/部件命令（V12 M5-A1）：把右键落点换算成 pick_point。
+
+        用户右键 → 画布坐标 → identify 定位选中要素 → 调用既有
+        ``_ring_and_part_commands``（delete_ring / delete_part）。选择集
+        未锁定该要素时先选中它——与 QGIS「点击即选即删」的环/部件语义对齐。
+        """
+        try:
+            point = (float(point[0]), float(point[1]))
+        except Exception:
+            return False, "无效的定位点"
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        results = self.identify_all(point, base_layers=())
+        hit = next((
+            result for result in results
+            if result.get("layer_id") == layer.id and result.get("editable")
+        ), None)
+        if hit is not None and layer.selection != {str(hit.get("feature_id"))}:
+            layer.set_selection({str(hit["feature_id"])})
+        return self._ring_and_part_commands(command_id, point)
+
     def geometry_command(self, command_id: str, curve: dict | None = None) -> tuple[bool, str]:
         """执行 split / merge / fault_cut；返回 (是否成功, 用户可读消息)。
 
@@ -2731,6 +2754,55 @@ class CompositeEditController(QObject):
                     except Exception:  # noqa: BLE001 — 刷新绝不吞命令结果
                         pass
         return False, f"未知几何命令 {command_id}"
+
+    def selection_geometry_op(self, op_id: str, **params) -> tuple[bool, str]:
+        """选择集几何算子（V12 M5-A2）：reverse_line / simplify / smooth /
+        offset_curve——把选中要素（线/面）写入新几何（单宏，可撤销）。
+
+        算子实现经 ``geometry_operations``（桥优先、Shapely 回落），会话
+        ``set_geometry`` 落写——与 split/merge 同一编辑权威与撤销语义。
+        """
+        from paleo_workbench.mapping import geometry_operations as geo_ops
+
+        layer = self.active_layer
+        if layer is None:
+            return False, "没有活动的矢量图层"
+        session = layer.edit_session
+        if session is None:
+            return False, "请先开始编辑"
+        if not layer.selection:
+            return False, "没有选中的要素"
+        changed = 0
+        with session.edit_source(f"{op_id}(command)"):
+            for feature_id in sorted(layer.selection):
+                feature = session.feature(feature_id)
+                geometry = feature.as_record()["geometry"]
+                try:
+                    if op_id == "reverse_line":
+                        new_geometry = geo_ops.reverse_geometry(geometry)
+                    elif op_id == "simplify_feature":
+                        new_geometry = geo_ops.simplify(
+                            geometry, float(params.get("tolerance", 0.5))).geometry
+                    elif op_id == "smooth_feature":
+                        new_geometry = geo_ops.smooth(
+                            geometry,
+                            int(params.get("iterations", 1)),
+                            float(params.get("offset", 0.25))).geometry
+                    elif op_id == "offset_curve":
+                        new_geometry = geo_ops.offset_curve(
+                            geometry, float(params.get("distance", 1.0))).geometry
+                    else:
+                        return False, f"未知算子 {op_id}"
+                except Exception:
+                    continue
+                session.set_geometry(feature_id, new_geometry)
+                changed += 1
+        if changed == 0:
+            return False, "选中要素无法应用该算子"
+        self._topology.refresh_error_count(layer)
+        self.content_changed.emit(layer.id)
+        self.state_changed.emit()
+        return changed > 0, f"已应用{op_id}（{changed} 个要素）"
 
     def _native_geometry_command(self, command_id: str, layer,
                                  curve: dict | None = None) -> tuple[bool, str]:

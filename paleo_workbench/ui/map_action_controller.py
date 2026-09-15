@@ -55,6 +55,8 @@ class MapActionController(QObject):
         "save_edits", "rollback", "delete_selected",
         "undo", "redo", "split", "merge",
         "duplicate_selected", "explode_multipart", "collect_multipart",
+        "delete_ring", "delete_part", "reverse_line", "simplify_feature",
+        "smooth_feature", "offset_curve",
         "snapping", "avoid_intersections", "tracing", "vertex_scope",
         "topology", "cancel",
     )

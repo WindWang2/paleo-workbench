@@ -285,6 +285,44 @@ def buffer(geometry: dict, distance: float, segments: int = 8) -> GeometryResult
     return GeometryResult(_geojson(out.__geo_interface__), ENGINE_SHAPELY)
 
 
+def reverse_geometry(geometry: dict) -> dict:
+    """反转线/环方向（QGIS reverseLine 语义；递归反转坐标数组）。
+
+    LineString / MultiLineString / Polygon(环) / MultiPolygon 统一处理：
+    坐标序列倒序 + 保证环闭合（首尾相同）。写回原 dict 的新副本。
+    """
+    import copy as _copy
+
+    def _rev_points(points):
+        out = list(reversed([list(pt) for pt in points]))
+        if len(points) >= 2 and list(points[0]) == list(points[-1]):
+            # 原环闭合：反转后仍须闭合（新首 = 新尾）。
+            out = [out[0]] + out[1:] + [list(out[0])]
+        return out
+
+    def _walk(node):
+        if isinstance(node, list):
+            if node and isinstance(node[0], (int, float)):
+                return list(node)
+            if node and isinstance(node[0][0], (int, float)):
+                return _rev_points(node)
+            return [_walk(child) for child in node]
+        return node
+
+    out = _copy.deepcopy(geometry)
+    coords = out.get("coordinates")
+    geom_type = out.get("type", "")
+    if geom_type in {"LineString", "MultiLineString"}:
+        if geom_type == "LineString":
+            out["coordinates"] = list(reversed([list(pt) for pt in coords]))
+        else:
+            out["coordinates"] = [list(reversed([list(pt) for pt in part]))
+                                  for part in coords]
+    elif geom_type in {"Polygon", "MultiPolygon"}:
+        out["coordinates"] = _walk(coords)
+    return out
+
+
 def offset_curve(line: dict, distance: float) -> GeometryResult:
     native = _bridge_geometry()
     if native is not None:

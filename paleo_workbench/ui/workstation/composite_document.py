@@ -4633,6 +4633,40 @@ class CompositeDocument(QWidget):
         ), None)
         if target is None:
             return
+        # 交互式环/部件命令：命中可编辑面/多部件要素的右键落点 →
+        # 删除内环 / 删除部件（选择集驱动，见 geometry_command_at_point）。
+        kind = controller._kinds.get(layer_id, "")
+        if kind in {"polygon"}:
+            menu_items = []
+            try:
+                layer = controller.layer(layer_id)
+                selection = getattr(layer, "selection", set()) or set()
+                if len(selection) == 1 and controller.native_editing.is_open(layer_id) is False:
+                    from PySide6.QtWidgets import QMenu
+                    menu = QMenu(self)
+                    ring = menu.addAction("删除内环")
+                    part = menu.addAction("删除部件")
+                    menu.addSeparator()
+                    rev = menu.addAction("反转方向")
+                    simp = menu.addAction("简化要素…")
+                    sm = menu.addAction("平滑要素")
+                    off = menu.addAction("偏移曲线…")
+                    chosen = menu.exec(global_pos)
+                    if chosen is ring:
+                        self._run_context_geometry_command("delete_ring", map_point)
+                    elif chosen is part:
+                        self._run_context_geometry_command("delete_part", map_point)
+                    elif chosen is rev:
+                        self._run_selection_geometry_op("reverse_line")
+                    elif chosen is simp:
+                        self._run_selection_geometry_op("simplify_feature")
+                    elif chosen is sm:
+                        self._run_selection_geometry_op("smooth_feature")
+                    elif chosen is off:
+                        self._run_selection_geometry_op("offset_curve")
+                    return
+            except Exception:
+                pass
         self._open_facies_context_menu(
             str(layer_id), str(target["feature_id"]), global_pos)
 
@@ -4685,6 +4719,22 @@ class CompositeDocument(QWidget):
             self._assign_facies_dialog(layer_id, feature_id)
             return
         self._apply_context_menu_facies(layer_id, feature_id, value)
+
+    def _run_context_geometry_command(self, command_id: str, map_point) -> None:
+        """右键环/部件命令分发（M5-A1）：落点 → 交互命令，原因上浮。"""
+        try:
+            point = (float(map_point[0]), float(map_point[1]))
+        except Exception:
+            return
+        ok, message = self.edit_controller.geometry_command_at_point(command_id, point)
+        self.status_message.emit(message if message else (
+            "已执行" if ok else f"{command_id} 未执行"))
+
+    def _run_selection_geometry_op(self, op_id: str) -> None:
+        """右键选择集算子分发（M5-A2）：选择集 → 算子，原因上浮。"""
+        ok, message = self.edit_controller.selection_geometry_op(op_id)
+        self.status_message.emit(message if message else (
+            "已执行" if ok else f"{op_id} 未执行"))
 
     def _apply_context_menu_facies(self, layer_id: str, feature_id: str,
                                    value: str) -> bool:
