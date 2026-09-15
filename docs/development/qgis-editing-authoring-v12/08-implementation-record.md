@@ -30,6 +30,37 @@
 
 ---
 
+## 第二轮｜M1-1 / M1-8 / M2-4 / M4-2（全部落地）
+
+| 项 | 落地内容 |
+|---|---|
+| M1-1 捕捉范围 | 捕捉设置对话框新增「捕捉范围」（所有图层 / 仅当前图层）→ `current_layer_only` 权威；控制器 `set_snapping_scope`（下推面由既有 push 测试覆盖） |
+| M1-8 激活预检 | 原生会话下激活 vertex/move_feature/fault_cut/boundary_reshape 前补推当前层，仍不就位则不绑定工具（M1-8/R6：不再制造"按钮亮着但拖不动"） |
+| M2-4 零位移反馈 | C++ `finishSharedDrag`/`finishTranslateDrag` 零位移抑制发 `vertex_no_move` 回执；shim 转 `status_hint` → 状态条（"单击不移动节点：拖动以编辑顶点位置"） |
+| M4-2 geotopo 工具面 | `fault_cut`/`boundary_reshape` 进 geometry 组：evaluator 规则（面 + 编辑会话 + 原生 kind 门禁）、registry 风险/呈现面、帮助、两张新图标、shim kind 路由（复用占位工具的 `native_digitize_kind`）、M1-8 预检覆盖；桥 manifest `native_tools` 补声明 `faultCut`/`boundaryReshape` |
+| 用例 | `tests/test_snapping_scope_and_hints_v12.py` 5 项 + geotopo 登记/门禁断言（并入 render/facies 文件） |
+
+### 本轮评审发现（三态 bisect，已定案）
+
+**Polygon 图层经 `snap_to_map` 直查（含顶点 hover 反馈）不命中，Point 正常** —— 三态对照：
+
+| 构建 | Point 直查 | Polygon 直查 |
+|---|---|---|
+| `9347f6cf`（合并前基线，重建验证） | ✅ | ❌ |
+| `main`（PR #1303 合并后，重建验证） | ✅ | ❌ |
+| wip（main + M0/M3/M1 + 任务2/3） | ✅ | ❌ |
+
+结论：**基线既有缺口**，与 PR #1303、与本轮改动均无关；capture 自吸附（GUI 数字化器路径）不受影响（`test_qgis_v10_capture_flow` 全绿可证）。域属 vendor snapping utils 的 Polygon locator 行为，另开调查项（需要 QGIS 上游对照）。
+
+**测试基建洞见**：`QTest.mouseMove` 走**真实系统光标**（QCursor::setPos），事件落点是桌面最上层窗口——依赖 hover 的用例在本机是桌面态相关的天然脆弱项（v10 snap 反馈用例偶红即此）。`tests/test_qgis_v10_capture_flow.py::_send_move` 已有 sendEvent 直投视口的稳健写法可复用。像素级渲染用例必须请求 `qapp` fixture（缺 QGuiApplication 时字体引擎硬崩、进程静默退出）。
+
+### 本轮验证
+
+- 编辑/预设/右键/开关/范围五组用例 + M1/M2 桥用例 + v10 采点/捕捉：**53 passed**；geotopo 契约 144 passed；最终组合 **42 passed**（-m qgis）。
+- 残余：`test_tool_sink_writes_ring` 满载时偶发（已加 wait-until 加固，桌面光标态仍是上界）；Polygon 直查捕捉缺口（见上）。
+
+---
+
 ## M0｜编辑链路止血（全部完成）
 
 | 项 | 落地内容 | 代码坐标 |
