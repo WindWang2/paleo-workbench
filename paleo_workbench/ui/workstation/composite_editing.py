@@ -931,6 +931,16 @@ class CompositeEditController(QObject):
         """图层的科学角色值（"" = 无角色，走 legacy 无 schema 路径）。"""
         return self._layer_roles.get(str(layer_id), "")
 
+    def set_snapping_scope(self, current_layer_only: bool) -> None:
+        """捕捉范围（V12 M1-1）：False = 所有图层，True = 仅当前图层。
+
+        权威在 SnappingService（current_layer_only），这里只写权威并统一下推
+        （_push_snapping_config 据此派生 QGIS 模式 AllLayers/ActiveLayer）。
+        """
+        self._snapping.current_layer_only = bool(current_layer_only)
+        self._push_snapping_config()
+        self.state_changed.emit()
+
     def apply_render_preset(self, layer_id: str) -> tuple[bool, str]:
         """把该图层的**渲染预设**（符号 + 标注）重新套上（V12 任务2）。
 
@@ -2192,6 +2202,17 @@ class CompositeEditController(QObject):
                 session = layer.edit_session
                 if session is None and not self.native_editing.is_open(layer.id):
                     return  # M1：原生会话同样允许激活（vertex v2 / 数字化路由）
+                if action_id in {"vertex", "move_feature"} \
+                        and self.native_editing.is_open(layer.id):
+                    # V12 M1-8（R6 激活预检）：原生会话下编辑权威在镜像缓冲，
+                    # 顶点/移动工具只在「画布当前层 == 目标层」时才有可写
+                    # 目标。先补推（M0-2b），仍不就位则放弃绑定本次工具——
+                    # 不再制造"按钮亮着但拖不动"的哑态（工具保持原状，
+                    # 门禁原因由状态条/evaluate 呈现）。
+                    self.repush_canvas_current_layer()
+                    if self.current_canvas_layer_id() != layer.id:
+                        self.state_changed.emit()
+                        return
                 # 加点 / 加线 / 加面只在与图层几何类型一致时激活，
                 # 否则保持当前工具（不劫持用户的图层选择）。
                 kind_required = _KIND_BOUND_TOOLS.get(action_id)

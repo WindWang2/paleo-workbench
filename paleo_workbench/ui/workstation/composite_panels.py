@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt, Signal
 from paleo_workbench.ui.workstation.common import workstation_icon
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -218,6 +219,15 @@ class SnappingSettingsDialog(QDialog):
         modes_container = QWidget(self)
         modes_container.setLayout(modes_row)
         global_form.addRow("捕捉类型", modes_container)
+        # V12 M1-1：捕捉范围（QGIS 捕捉工具条的 All Layers / Active Layer）。
+        self._scope_combo = QComboBox(self)
+        self._scope_combo.addItem("所有图层")
+        self._scope_combo.addItem("仅当前图层")
+        self._scope_combo.setCurrentIndex(1 if self._snapping.current_layer_only else 0)
+        self._scope_combo.setToolTip(
+            "所有图层：捕捉全部可见图层（跨层拓扑拼接）\n"
+            "仅当前图层：只捕捉活动图层（避免误吸邻层）")
+        global_form.addRow("捕捉范围", self._scope_combo)
         outer.addLayout(global_form)
 
         outer.addWidget(QLabel("每图层覆盖（矢量图层；容差留空使用全局值）", self))
@@ -399,6 +409,8 @@ class SnappingSettingsDialog(QDialog):
         snapping = self._snapping
         snapping.enabled = self._global_enable.isChecked()
         snapping.pixel_tolerance = float(self._global_tolerance.value())
+        # V12 M1-1：范围随对话框落权威（republish 经 set_snapping 下推）。
+        snapping.current_layer_only = self._scope_combo.currentIndex() == 1
         snapping.modes = {
             mode for mode, box in self._mode_boxes.items() if box.isChecked()
         }

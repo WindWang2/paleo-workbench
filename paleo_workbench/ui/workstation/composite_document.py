@@ -1227,6 +1227,10 @@ class CompositeDocument(QWidget):
         snap_feedback = getattr(self.canvas, "snap_feedback", None)
         if snap_feedback is not None:
             snap_feedback.connect(self.status_bar.set_snap_match)
+        # V12 M2-4：画布交互轻提示（零位移单击等）→ 状态条。
+        status_hint = getattr(self.canvas, "status_hint", None)
+        if status_hint is not None:
+            status_hint.connect(self.status_message.emit)
         # V12 任务3：画布右键 → 相带要素换相菜单（回退画布无此信号，鸭子
         # 类型跳过）。
         canvas_context_menu = getattr(self.canvas, "canvas_context_menu", None)

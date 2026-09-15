@@ -408,6 +408,9 @@ class QgisCanvasShim(QWidget):
     # V12 任务3：画布右键 → ((map_x, map_y), QPoint(global))。宿主用它做
     # 相带要素的右键换相菜单（坐标换算在这里做完，消费方只拿地图坐标）。
     canvas_context_menu = Signal(tuple, object)
+    # V12 M2-4：画布交互的轻提示（如"单击不移动节点：拖动以编辑"）。
+    # 与 commit_rejected 分开——这不是失败，是不该炸出来的解释。
+    status_hint = Signal(str)
 
     #: 最近一次**推送成功**的画布当前层 doc_id（V12 M0-2a）。只服务旧桥
     #: 退化路径：桥有 ``current_layer_query`` 时读回权威，不读本影子。
@@ -1383,6 +1386,14 @@ class QgisCanvasShim(QWidget):
                 if (getattr(shim, "_last_native_tool", ("", ""))[0] == "vertex"
                         and not shim.current_layer_doc_id()):
                     _warn_vertex_without_target(shim)
+                return
+            if action == "vertex_no_move":
+                # V12 M2-4：单击（非拖动）命中节点——语义抑制，但要说一声，
+                # 消除"是不是坏了"的疑惑（诚实呈现，M2-4）。
+                try:
+                    shim.status_hint.emit("单击不移动节点：拖动以编辑顶点位置")
+                except Exception:
+                    pass
                 return
             controller = getattr(shim, "_tool_controller", None)
             if action == "join_requested":

@@ -816,7 +816,10 @@ void PwbVertexTool::finishTranslateDrag(const QgsPointXY& target) {
   const double dx = target.x() - anchor.x();
   const double dy = target.y() - anchor.y();
   const double mup = canvas()->mapSettings().mapUnitsPerPixel();
-  if (std::hypot(dx, dy) < kTolerancePx * mup) return;
+  if (std::hypot(dx, dy) < kTolerancePx * mup) {
+    callback_("vertex_no_move", "{}");  // V12 M2-4：零位移也上浮
+    return;
+  }
   std::map<QgsVectorLayer*, std::map<QgsFeatureId, std::vector<VertexRef>>> grouped;
   for (const VertexRef& ref : refs) {
     if (ref.layer == nullptr || !ref.layer->isEditable()) continue;
@@ -1010,10 +1013,13 @@ void PwbVertexTool::finishSharedDrag(const QgsPointXY& target) {
   cancelDrag();
   clearSharedMarkers();
   const QgsPointXY anchor = drag_anchor_;
-  // 零位移抑制（v1 同语义）：单击不是拖动。
+  // 零位移抑制（v1 同语义）：单击不是拖动。V12 M2-4：抑制不再无声——
+  // 发 vertex_no_move 回执，宿主提示"单击不移动节点"（消除"是不是坏了"
+  // 的疑惑）。
   const double mup = canvas()->mapSettings().mapUnitsPerPixel();
   if (std::hypot(target.x() - anchor.x(), target.y() - anchor.y())
       < kTolerancePx * mup) {
+    callback_("vertex_no_move", "{}");
     return;
   }
   // release 时按当前可编辑层重组（join_requested 同步入集的层此刻已可编辑）。
