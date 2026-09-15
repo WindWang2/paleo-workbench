@@ -93,6 +93,15 @@
 | 注册面 | 4 个 id（捕获组×2 + 几何组×2；门禁/帮助/注册/控制器/QAction/图标齐全） |
 | 用例 | 圆弧端点与弧凸起、正六边形半径、修剪后范围、登记面 |
 
+## 第八轮｜M5-B2 填充环 + 椭圆数字化器（落地，直接合 main）
+
+| 项 | 落地内容 |
+|---|---|
+| fill_ring | `FillRingCommand`（原面删环 + 新增面要素，原子一宏；edit_delta 归入 replace_geometry 家族）+ 会话 `fill_ring`（环转面，属性克隆）+ 控制器 `fill_ring_at_point`（右键落点 → `_nearest_interior_ring` 定位） |
+| add_ellipse | `EllipseCaptureTool`（中心 + 长半轴点 + 短半轴点；短半轴只取法向分量；64 段采样；捕获组 id，Kind 门绑定面） |
+| 注册面 | geometry 组 fill_ring / capture 组 add_ellipse（门禁/帮助/注册/控制器/QAction/图标） |
+| 用例 | 椭圆半轴精度、环转面 + 属性克隆 + 一次 undo 原子恢复、登记面 |
+
 ---
 
 ### 本轮评审发现（三态 bisect，已定案）
