@@ -271,6 +271,9 @@ class PwbVertexTool : public PwbEditPickTool {
   void beginSharedDrag(const QgsPointXY& anchor, std::vector<VertexRef> shared);
   void beginTranslateDrag(const QgsPointXY& anchor,
                           std::vector<VertexRef> selected);
+  // V12 M2-1 段移动：命中段 → 两端点（含跨层共位节点）一次平移拖动。
+  // 命中（已开始段拖动）→ true；未命中段 → false（调用方落框选分支）。
+  bool beginSegmentDrag(const QgsPointXY& mapPoint);
   void finishTranslateDrag(const QgsPointXY& target);
   void startBoxSelect(const QgsPointXY& start);
   void updateBoxSelect(const QgsPointXY& now);
