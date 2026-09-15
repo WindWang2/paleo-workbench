@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.qgis_support import QGIS_SKIP_REASON, qgis_bridge_available
+
 from paleo_workbench.mapping.vector_layer import VectorFeature
 from paleo_workbench.project.domain import WellEntity
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
@@ -439,6 +441,8 @@ def _native_layer_with_bowtie(doc, controller, name="相带"):
     return layer
 
 
+@pytest.mark.qgis
+@pytest.mark.skipif(not qgis_bridge_available(), reason=QGIS_SKIP_REASON)
 def test_topo_native_gate_blocks_save(qtbot, tmp_path):
     """原生会话：门禁开 → 无效几何阻断保存，会话保持打开。"""
     doc = CompositeDocument(_project(tmp_path))
@@ -451,6 +455,8 @@ def test_topo_native_gate_blocks_save(qtbot, tmp_path):
     assert controller.native_editing.is_open(layer.id), "阻断后会话必须保持打开"
 
 
+@pytest.mark.qgis
+@pytest.mark.skipif(not qgis_bridge_available(), reason=QGIS_SKIP_REASON)
 def test_topo_native_gate_off_allows_save(qtbot, tmp_path):
     """原生会话：门禁关 → 同一无效几何保存放行（补此前缺失的方向）。"""
     doc = CompositeDocument(_project(tmp_path))
@@ -463,6 +469,8 @@ def test_topo_native_gate_off_allows_save(qtbot, tmp_path):
     assert layer.feature_ids() == ("bad",), "提交必须把要素写回宿主基线"
 
 
+@pytest.mark.qgis
+@pytest.mark.skipif(not qgis_bridge_available(), reason=QGIS_SKIP_REASON)
 def test_split_native_reports_selection_first(qtbot, tmp_path):
     """原生分割：先要选中要素；有选中则转入切线数字化（两步式）。"""
     doc = CompositeDocument(_project(tmp_path))
@@ -1118,13 +1126,13 @@ def test_composite_imports_reference_vector_layer(qtbot, tmp_path):
     assert reference is not None
     assert len(reference.features) == 2
     assert reference.metadata.get("geometry_kind") == "point"
-    # 合成顺序（显示序自上而下）：编修图层 → 引用 → 基础工区——引用在
-    # 用户层之下、基础层之上。
+    # 合成顺序（装配自下而上 = 画笔序）：基础工区 → 引用 → 编修——引用在
+    # 用户层之下、基础层之上（与 layer_order_parity_v11 / 渲染 last-on-top 一致）。
     user = next(
         (layer for layer in layers if layer.metadata.get("editable") == "true"), None
     )
     assert user is not None
-    assert layers.index(reference) > layers.index(user)
+    assert layers.index(reference) < layers.index(user)
 
     # 工程持久化（内存写回；磁盘保存走工程保存流程）。
     assert len(project.workstation_reference_layers) == 1

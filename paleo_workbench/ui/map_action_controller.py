@@ -81,9 +81,13 @@ class MapActionController(QObject):
         "map_export", "repair_geometry",
     )
 
-    #: id → svg 名（登记处派生；缺省回落 id 本名）。
+    #: 扩展面动作 id → svg 名（仅 ``_SURFACE_EXTENSION_IDS``）。
+    #: 单条工具条契约：``actions.keys() - _SURFACE_ICONS`` = 条上全部核心动作。
+    #: 全词表图标仍经 ACTION_SPECS 在 ``_action`` 里按需取，缺省回落 id 本名。
     _SURFACE_ICONS = {
-        tool_id: spec.icon for tool_id, spec in ACTION_SPECS.items()
+        tool_id: ACTION_SPECS[tool_id].icon
+        for tool_id in _SURFACE_EXTENSION_IDS
+        if tool_id in ACTION_SPECS
     }
 
     def __init__(self, parent: QObject | None = None):
@@ -94,7 +98,12 @@ class MapActionController(QObject):
         self._build_actions()
 
     def _action(self, action_id: str, *, checkable: bool = False, shortcut: str = "") -> QAction:
-        icon_name = self._SURFACE_ICONS.get(action_id, action_id)
+        spec = ACTION_SPECS.get(action_id)
+        icon_name = (
+            self._SURFACE_ICONS.get(action_id)
+            or (spec.icon if spec is not None and getattr(spec, "icon", None) else None)
+            or action_id
+        )
         action = QAction(_map_icon(icon_name), self._LABELS[action_id], self)
         action.setObjectName(f"MapAction:{action_id}")
         action.setCheckable(checkable)
