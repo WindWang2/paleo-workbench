@@ -12,7 +12,7 @@
 
 1. 完整阅读共同协议 `01-parallel-development.md`、总设计、goal-loop、`CLAUDE.md` 和适用 AGENTS。
 2. 工作目录 `C:/Users/wangj.KEVIN/projects/paleo-workbench-cpp-data`；分支 `feat/cpp-data-project`；验证 `cpp-migration-plan-v1` 是祖先。
-3. 若没有 worktree，确认目录/分支都不存在后，从主仓执行 `git worktree add -b feat/cpp-data-project ../paleo-workbench-cpp-data cpp-migration-plan-v1`；已存在则核验复用。
+3. 若没有 worktree，确认目录/分支都不存在后，从主仓执行 `git worktree add --no-checkout -b feat/cpp-data-project ../paleo-workbench-cpp-data cpp-migration-plan-v1`，再按共同协议初始化稀疏 checkout 与空索引；已存在则核验复用。
 4. 原生 goal API 可用时注册本 GOAL；不覆盖别的 active goal。根账本保留历史并追加 CPP-B；最多 15 轮。
 5. 先检查 PR/issues 和现有 V13 模型，避免重做 #1310 已完成工作；目录规范存储按最新代码确认，不能只照抄旧 JSON-canonical 注释。
 6. 三任务共享一个重型槽，零子代理，编译/测试最多 2 jobs；使用资源门禁，启动至少 8 GiB 可用内存。B 不构建 QGIS、GDAL、PROJ 或 well-log-engine。

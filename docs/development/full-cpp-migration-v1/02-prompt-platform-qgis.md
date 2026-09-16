@@ -12,7 +12,7 @@
 
 1. 阅读 `docs/development/full-cpp-migration-v1/01-parallel-development.md` 全文、总设计、goal-loop、`CLAUDE.md` 和适用 AGENTS。
 2. 工作目录必须为 `C:/Users/wangj.KEVIN/projects/paleo-workbench-cpp-platform`；分支必须为 `feat/cpp-platform-qgis`。核验 `cpp-migration-plan-v1` 是当前 HEAD 的祖先。
-3. 若没有 worktree，仅在目标目录和分支都不存在时，从主仓创建：`git worktree add -b feat/cpp-platform-qgis ../paleo-workbench-cpp-platform cpp-migration-plan-v1`。若已存在则核验后使用，不重复创建。
+3. 若没有 worktree，仅在目标目录和分支都不存在时，从主仓创建：`git worktree add --no-checkout -b feat/cpp-platform-qgis ../paleo-workbench-cpp-platform cpp-migration-plan-v1`，再按共同协议初始化稀疏 checkout 与空索引。若已存在则核验后使用，不重复创建。
 4. 使用原生 goal API 注册本 GOAL；已有相同目标则恢复。最多 15 轮，每轮按 skill 更新根账本的 CPP-A 区段。
 5. 只做本分支开发。相关旧 PR #1301/#1304/#1310、V11–V13 文档及历史修复是输入；先检查新 PR/issues 是否重复。
 6. 资源硬限制：三个任务总共一个重型槽；自己不再创建 subagent；编译/测试最多 2 jobs；8 GiB 内存门槛，QGIS 全量构建 12 GiB；必须使用共同资源门禁。资源返回 75 时继续轻量工作，禁止绕过或无限重试。

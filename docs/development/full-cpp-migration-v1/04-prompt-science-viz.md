@@ -12,7 +12,7 @@
 
 1. 阅读共同协议 `01-parallel-development.md`、总设计、goal-loop、`CLAUDE.md` 和适用 AGENTS。
 2. 工作目录 `C:/Users/wangj.KEVIN/projects/paleo-workbench-cpp-science`；分支 `feat/cpp-science-viz`；核验 `cpp-migration-plan-v1` 为祖先。
-3. 缺少 worktree 时，确认目录/branch 都未存在后，从主仓执行 `git worktree add -b feat/cpp-science-viz ../paleo-workbench-cpp-science cpp-migration-plan-v1`；已有则复用。
+3. 缺少 worktree 时，确认目录/branch 都未存在后，从主仓执行 `git worktree add --no-checkout -b feat/cpp-science-viz ../paleo-workbench-cpp-science cpp-migration-plan-v1`，再按共同协议初始化稀疏 checkout 与空索引；已有则复用。
 4. 注册/恢复对应原生 goal；最多 15 轮；根账本追加 CPP-C，遵守 goal-loop 的真实验证和卡住升级。
 5. 审查主仓 #1301/#1303/#1297–#1299 与 geo-viz 最新 PR/issues，沿用固定 gitlink。geo-viz #148 是 secondary layout 的独立任务，本 prompt 消费它的接口/结论，不复制或擅自关闭。
 6. 全局一个重型任务槽，禁止 subagent；编译/测试 2 jobs，线程库限流；至少 8 GiB 可用内存。C 只构建自身/WLE，QGIS SDK 归 A；缺运行时则继续 Qt-free 工作。

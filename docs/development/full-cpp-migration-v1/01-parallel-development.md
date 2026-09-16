@@ -18,6 +18,15 @@
 | B 数据/工程 | `feat/cpp-data-project` | `C:/Users/wangj.KEVIN/projects/paleo-workbench-cpp-data` | `03-prompt-data-project.md` |
 | C 算法/可视化 | `feat/cpp-science-viz` | `C:/Users/wangj.KEVIN/projects/paleo-workbench-cpp-science` | `04-prompt-science-viz.md` |
 
+若以后需要重建缺失的 worktree，使用各 prompt 的 `--no-checkout` 命令；仅针对本次新建、文件目录只有 `.git` 且索引为空的 checkout，依次执行下面两步（`WORKTREE` 替换为表中的明确路径）：
+
+~~~text
+git -C WORKTREE sparse-checkout set --cone --skip-checks .github agent docs paleo_workbench native tests scripts libs apps cmake tools geo-viz-engine well-log-engine
+git -C WORKTREE read-tree -mu HEAD
+~~~
+
+第二步用于填充 `--no-checkout` 的初始空索引，必须先核对是刚创建的空目录，不能对已有用户修改的 worktree 使用。最后验证 `git status --porcelain` 无输出；这一步缺失会把空索引显示成大量待删除文件，而不是真实开发状态。
+
 ## GOAL 与 goal-loop 执行协议
 
 每个 prompt 本身是一个完整开发 GOAL。宿主支持原生 goal API 时，先读取当前 goal：无 active goal 才创建；已有同一目标就继续；已有其他目标不能覆盖。只在所有本轮 Oracle 成立时标记 complete，不因 token 少、资源不足或生成了代码就标记完成。没有 goal API 的宿主，使用 GOAL 模式和 goal-loop 账本；不要编造不存在的 `$goal`/`$loop` 命令或 API 调用结果。
