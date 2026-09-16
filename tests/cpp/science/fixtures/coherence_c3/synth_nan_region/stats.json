@@ -1,0 +1,12 @@
+{
+  "elements": 1024,
+  "max": 1.0,
+  "mean": 0.9817718267440796,
+  "min": 0.8723316788673401,
+  "params": {
+    "win_il": 2,
+    "win_t": 2,
+    "win_xl": 2
+  },
+  "sha256_expected": "759fcba9630c205ba144bf979d5230a62dc0d1d6057aa935e74108fa8362e894"
+}

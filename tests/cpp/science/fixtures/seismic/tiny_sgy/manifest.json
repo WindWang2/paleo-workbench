@@ -1,0 +1,25 @@
+{
+  "dt_ms": 2.0,
+  "iline_start": 1.0,
+  "iline_step": 1.0,
+  "indexed8_stretch": [
+    -2.167734146118164,
+    2.459895610809326
+  ],
+  "last_sample_ms": 62.0,
+  "oracle": "geoviz_seismic.loader + native_backend._py_fast_slice_to_indexed8@671ee426",
+  "shape": [
+    8,
+    8,
+    32
+  ],
+  "slices": {
+    "crossline": 5,
+    "inline": 3,
+    "sample": 16
+  },
+  "source": "tests/fixtures/realdata/tiny.sgy",
+  "storage": "crossline-major",
+  "xline_start": 1.0,
+  "xline_step": 1.0
+}

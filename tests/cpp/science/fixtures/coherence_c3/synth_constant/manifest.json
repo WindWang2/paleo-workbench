@@ -1,0 +1,13 @@
+{
+  "case": "synth_constant",
+  "oracle": "geoviz_seismic.attributes.compute_coherence_c3@08851951",
+  "shape": [
+    8,
+    8,
+    16
+  ],
+  "tolerance_max_abs": 0.002,
+  "win_il": 3,
+  "win_t": 3,
+  "win_xl": 3
+}

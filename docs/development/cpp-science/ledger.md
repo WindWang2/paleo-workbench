@@ -15,21 +15,6 @@ Goal: tag the reviewed migration plan, create three bounded goal-loop prompts an
 
 ---
 
-## CPP-A 平台/QGIS 线（feat/cpp-platform-qgis）— 2026-09-16
-
-Goal: 交付 C++20/Qt/QGIS 平台首轮实现（统一构建、C++ 画布/图层树、原生编辑与工具状态、布局导出、最小安装验证），以真实 QGIS smoke 和本轮全部 8 项 Oracle 为完成依据。上限 15 轮。工作目录 `C:/Users/wangj.KEVIN/projects/paleo-workbench-cpp-platform`。
-
-| Round | Change | Verification | Result | Next |
-|---|---|---|---|---|
-| 1 | 启动侦察：读协议/总设计/CLAUDE/ADR0059/tool_context/tool_availability/stages/stage_profiles/layer_roles/map_stack_service(关键段)/edit_tools 接口；核验 worktree+branch+ancestor；fetch 后无新提交/PR/issue；探明工具链与 SDK | worktree=cpp-platform@d0347da2 ANCESTOR-OK；origin/main 仍 671ee426；Qt 6.8.0 前缀 C:\deps\Qt\6.8.0\msvc2022_64；QGIS 4.2.0 vendor install tree（主仓 qgis-vendor/output，qgis_core/gui/analysis .lib+.dll）+ 源码头 third_party/qgis；MSVC 14.38.33130+SDK 10.0.22621（reg.exe 黑名单→手工组环境）；cmake 3.27.2+ninja 在 VS 目录；空闲内存 3.96GiB<8GiB 门禁（暂不能编译） | 通过（仅侦察） | A0 文档四件套（内存低时先做纯源码/契约工作） |
-| 2 | A0 四件套：00-baseline（ABI=Qt6.8.0/MSVC14.38/C++20、SDK manifest、生命周期决策）、01-contracts（Pwb::Qgis/ToolPolicy/Application targets、EditDeltaV1/StagedAsset、B/C adapter 接口、join key）、02-test-plan（platform.* 测试矩阵映射 Oracle）、03-progress | 文件存在且内容覆盖 prompt A0 全部要求项 | 通过 | A1：顶层 CMake/presets + 全部源码（等内存再编译） |
-| 3 | 全量源码落盘：根 CMake/Presets/PwbQgisSdk.cmake；libs/tool_policy（评估器逐字移植）；libs/qgis（Runtime/MapSession/LayerAdapter/EditController/LayoutService）；libs/application；libs/ui；apps 主程序+--self-check；6+1 测试 + fixtures（GeoTIFF 已提交，GPKG 运行时生成）；Invoke-PlatformBuild.ps1；CI×2；04/05 文档。预编译自查修复 6 处 | 文件齐全；API 签名经 vendored 头核验（commitChanges/validateGeometry/SnappingMode/pageCollection/parallel job/getFeature/Capability 普通枚举） | 通过（未编译） | 等门禁内存 ≥8GiB |
-| 4 | 跨实现契约准备：make_golden.py 用主仓 Python 评估器生成 28 上下文 × 77 工具 golden；新增 test_tool_policy_golden.cpp（QJson 对账 enabled/visible/checked/reason 全等）；PWB_TEST_SRC_DIR 编译期注入修 fixture 路径 | golden JSON 生成成功（28×77）；对账测试注册 | 通过（未编译） | 门禁 Probe ×3 均 75（4.5-5.1GiB）；诊断显示为桌面常态占用，长间隔等待 |
-| 5 | Oracle 7 静态审查半程：逐条复核 C++ 评估器与 Python 的门序/判词/阶段语义/checked/severity（12 个高风险点，未发现语义偏差）；阶段性提交 28c610b6 | git log 确认；审查记录见本行 | 通过 | 长间隔等待内存（8+8 分钟两轮） |
-| 6 | 资源等待结论：累计 7 次门禁 Probe（跨 ~35 分钟）全部 75（4.21–5.06 GiB < 8 GiB）；进程诊断确认占用为桌面应用常态（无本任务遗留进程）；独立轻量工作已穷尽 | Probe 输出留痕；无遗留构建/GUI 进程 | **未完成——外部资源阻塞**（编译/测试/Oracle 1-6/8 未执行） | 详见 ledger.md 与 03-progress.md 的恢复步骤；条件满足后从 Configure 继续 |
-
----
-
 Branch: `feat/geological-data-lineage-qgis-control-v13` (base: origin/main @ 40531741)
 Worktree: `C:\Users\wangj.KEVIN\projects\paleo-workbench-geodata-qgis-v13`
 
@@ -70,19 +55,6 @@ PALEO_QGIS_BUILD_DIR="C:/Users/wangj.KEVIN/projects/paleo-workbench/native/qgis_
 - vendor runtime 经 junction：`native/qgis_render_bridge/build/qgis-vendor` → 主仓同路径（mklink /J），默认解析即可用，无需 PALEO_QGIS_BUILD_DIR。
 - 后台 pytest 与前台 pytest 并行会互相拖慢并可能触发 timeout 假阳性——全量回归必须独占运行。
 
-
----
-
-# CPP-B 数据/工程线 goal-loop 区段（feat/cpp-data-project，2026-09-16 启动）
-
-目标与 Oracle 见 `docs/development/cpp-data/`（Prompt B，总设计 P0/P2/P3 持久化、CPP-20/309/601/602）。迭代上限 15 轮；三线共享重型槽（Invoke-ResourceGate.ps1，8 GiB 门槛，2 jobs）。
-
-| 轮 | 改动 | 验证结果 | 判定 | 下一步 |
-|---|---|---|---|---|
-| B-1 | 侦察：协议/总设计/V13 文档/Python 模型（project/models+manager、catalog/models+db+storage+service 写路径、mapping_workspace/stage_state、paths）；worktree 复用核验（d0347da2，sparse OK，树干净）；工具链（VS2022 14.38 + VS 自带 cmake/ninja）；Python oracle（主仓 .venv 3.12.13 只读可用）；网络可用（sqlite.org 200）；内存 Probe=4.31 GiB → exit 75 | 关键语义已固化：.paleo.json（extra=allow 顶层、原子写+bak、5 路径节 relativize、project_root="."）；catalog.sqlite v5 canonical（16 表、WAL、sync_state 4 键）；artifacts 布局与 {stage}/{asset}/{version}/ 落盘；workspace dict 7 键 | 通过（轻量阶段，未需重型槽） | B0 文档 + 依赖落地（sqlite amalgamation、nlohmann 单头）→ B1 实现 |
-| B-2 | B0 完成：4 份文档（baseline/contracts/schema-map/test-plan）+ oracle 管线（generate_fixtures.py 经真实 ProjectManager.save + DataCatalogService 产 8 fixture + manifest；dump_fixture.py 产 4 类 oracle dump）；vendored sqlite 3.45.1 + nlohmann 3.12.0 | fixture 落盘校验（typical: 2 asset/5 ver/1 run/2 tag + wc/lease/blob/members）；corrupt/future/missing 变体就位 | 通过 | C++ 主体实现 |
-| B-3 | C++ 全量落盘：domain(ids/sha256/json/diagnostics)、project(schema spec 表+normalize+manager 原子写/恢复+paths)、workspace codec、catalog(sqlite RAII+repository+audit)、data_suite(contracts+CommitCoordinator+journal 恢复+facade)、pwb-inspect/migrate、9 个测试文件 + CMake | 未编译（内存门禁 75） | 未验证 | 门禁内 configure/build/test |
-| B-4 | 静态自审两轮（无编译条件下的最大验证）：修复 UTF-8 路径桥、journal 恢复完整性（format/parents/size/ProjectSaved 分支/run+rebind 还原）、catalog 4 表漏加载、stage_states 种子、tmp 命名、.bak rename 语义、corrupt DB 分类、4 处测试结构错误；收尾文档 handoff.md + verification.md（含 6 次门禁探测台账） | 门禁 Probe ×6 全 75（free 4.2–4.7 GiB；Available 同级 → 机器真实吃紧）；按协议不绕过/不轮询 | 未通过（外部条件：可用内存） | 长等待后末次探测；仍 75 → 记录未完成状态并暂停 |
 
 ---
 
