@@ -1,0 +1,8 @@
+add_executable(pwb-inspect main.cpp)
+target_compile_features(pwb-inspect PRIVATE cxx_std_20)
+target_link_libraries(pwb-inspect PRIVATE Pwb::Data)
+target_compile_definitions(pwb-inspect PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+if(MSVC)
+    target_compile_options(pwb-inspect PRIVATE /utf-8 /W4)
+endif()
+install(TARGETS pwb-inspect RUNTIME DESTINATION tools)

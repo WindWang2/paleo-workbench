@@ -1,0 +1,109 @@
+// Minimal RAII wrapper over the SQLite C API (amalgamation vendored in
+// libs/data_suite/third_party/sqlite). Mirrors the Python store's
+// connection discipline: WAL journal, 5000 ms busy timeout, explicit
+// transactions with rollback on scope exit.
+#pragma once
+
+#include "pwb/domain/errors.hpp"
+
+#include <sqlite3.h>
+
+#include <memory>
+#include <string>
+#include <string_view>
+
+namespace pwb::catalog {
+
+enum class SqliteOpenMode { ReadOnly, ReadWrite, Create };
+
+class Statement;
+
+class Database {
+public:
+    Database() = default;
+    ~Database();
+
+    Database(Database&&) noexcept;
+    Database& operator=(Database&&) noexcept;
+    Database(const Database&) = delete;
+    Database& operator=(const Database&) = delete;
+
+    // Opens with journal/busy pragmas applied (WAL + 5000 ms). `create`
+    // controls SQLITE_OPEN_CREATE; read-only opens never write pragmas.
+    static domain::Result<Database> open(const std::filesystem::path& file,
+                                         SqliteOpenMode mode);
+
+    bool is_open() const { return db_ != nullptr; }
+    sqlite3* handle() { return db_; }
+
+    // Executes one or more statements with no parameters (DDL etc.).
+    domain::DataError execute(std::string_view sql);
+
+    // One-shot scalar/row helpers.
+    domain::Result<std::int64_t> scalar_i64(std::string_view sql);
+    bool table_exists(std::string_view name);
+
+    Statement prepare(std::string_view sql);
+
+    // BEGIN IMMEDIATE … COMMIT/ROLLBACK guard.
+    void begin_immediate();
+    void commit();
+    void rollback();
+
+    // Applies the canonical v5 schema (idempotent, IF NOT EXISTS) — the
+    // same statement list db.py runs per connection.
+    domain::DataError ensure_schema();
+
+    int last_extended_error() const { return last_error_; }
+
+private:
+    sqlite3* db_ = nullptr;
+    int last_error_ = SQLITE_OK;
+};
+
+class Statement {
+public:
+    Statement() = default;
+    Statement(sqlite3* db, sqlite3_stmt* stmt);
+    ~Statement();
+
+    Statement(Statement&&) noexcept;
+    Statement& operator=(Statement&&) noexcept;
+
+    void reset();
+    bool is_valid() const { return stmt_ != nullptr; }
+
+    Statement& bind(int index, std::string_view text);
+    Statement& bind(int index, std::int64_t value);
+    Statement& bind(int index, double value);
+    Statement& bind_null(int index);
+
+    // Returns true when a row is available, false when done.
+    bool step();
+    void step_done();
+
+    std::string text(int column) const;
+    std::int64_t int64(int column) const;
+    bool is_null(int column) const;
+    int column_count() const;
+    std::string column_name(int column) const;
+
+private:
+    sqlite3* db_ = nullptr;
+    sqlite3_stmt* stmt_ = nullptr;
+};
+
+class Transaction {
+public:
+    explicit Transaction(Database& db);  // BEGIN IMMEDIATE
+    ~Transaction();                      // ROLLBACK unless committed
+    void commit();
+    void rollback();
+
+private:
+    Database& db_;
+    bool committed_ = false;
+    bool began_ = false;
+};
+
+}  // namespace pwb::catalog

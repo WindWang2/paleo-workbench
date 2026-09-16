@@ -68,3 +68,6 @@ PALEO_QGIS_BUILD_DIR="C:/Users/wangj.KEVIN/projects/paleo-workbench/native/qgis_
 | B-2 | B0 完成：4 份文档（baseline/contracts/schema-map/test-plan）+ oracle 管线（generate_fixtures.py 经真实 ProjectManager.save + DataCatalogService 产 8 fixture + manifest；dump_fixture.py 产 4 类 oracle dump）；vendored sqlite 3.45.1 + nlohmann 3.12.0 | fixture 落盘校验（typical: 2 asset/5 ver/1 run/2 tag + wc/lease/blob/members）；corrupt/future/missing 变体就位 | 通过 | C++ 主体实现 |
 | B-3 | C++ 全量落盘：domain(ids/sha256/json/diagnostics)、project(schema spec 表+normalize+manager 原子写/恢复+paths)、workspace codec、catalog(sqlite RAII+repository+audit)、data_suite(contracts+CommitCoordinator+journal 恢复+facade)、pwb-inspect/migrate、9 个测试文件 + CMake | 未编译（内存门禁 75） | 未验证 | 门禁内 configure/build/test |
 | B-4 | 静态自审两轮（无编译条件下的最大验证）：修复 UTF-8 路径桥、journal 恢复完整性（format/parents/size/ProjectSaved 分支/run+rebind 还原）、catalog 4 表漏加载、stage_states 种子、tmp 命名、.bak rename 语义、corrupt DB 分类、4 处测试结构错误；收尾文档 handoff.md + verification.md（含 6 次门禁探测台账） | 门禁 Probe ×6 全 75（free 4.2–4.7 GiB；Available 同级 → 机器真实吃紧）；按协议不绕过/不轮询 | 未通过（外部条件：可用内存） | 长等待后末次探测；仍 75 → 记录未完成状态并暂停 |
+
+> 区段同步说明：本文件为 `.goal-loop-ledger.md` 的 CPP-B 任务区段快照
+>（含 V13 历史区段，按协议保留不合并）。后续轮次先改根账本再同步到此。
