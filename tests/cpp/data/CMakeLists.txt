@@ -34,6 +34,19 @@ pwb_data_test(data_workspace_codec workspace_codec_test.cpp
 pwb_data_test(data_diagnostics diagnostics_test.cpp data.diagnostics)
 pwb_data_test(data_catalog_read catalog_read_test.cpp data.catalog_read)
 pwb_data_test(data_project_paths project_paths_test.cpp data.project_paths)
+pwb_data_test(data_project_roundtrip project_roundtrip_test.cpp
+    data.project_roundtrip)
+pwb_data_test(data_project_recovery project_recovery_test.cpp
+    data.project_recovery)
+pwb_data_test(data_catalog_write catalog_write_test.cpp data.catalog_write)
+pwb_data_test(data_commit_coordinator commit_coordinator_test.cpp
+    data.commit_coordinator)
+pwb_data_test(data_commit_recovery commit_recovery_test.cpp
+    data.commit_recovery)
+pwb_data_test(data_cli_inspect cli_inspect_test.cpp data.cli_inspect
+    --exe "$<TARGET_FILE:pwb-inspect>")
+pwb_data_test(data_cli_migrate cli_migrate_test.cpp data.cli_migrate
+    --exe "$<TARGET_FILE:pwb-migrate>")
 pwb_data_test(data_build_hygiene build_hygiene_test.cpp data.build_hygiene
     --dumpbin "${PWB_DUMPBIN_EXE}"
     "$<TARGET_FILE:data_build_hygiene>"
