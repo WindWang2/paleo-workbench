@@ -145,6 +145,22 @@ ROLE_RAW_PROTECTED: frozenset[LayerRole] = frozenset({
     LayerRole.FACTOR_CLASSIFICATION,
 })
 
+#: 相带家族（V12 任务3：换相/相刷/分类样式适用）。模板注册表是另一
+#: 正交判定（``is_facies_template_layer``）——角色相图层（预测/草稿/
+#: 综合相，没有模板键）同样是相要素的载体，右键换相必须认它们。
+FACIES_FAMILY_ROLES: frozenset[LayerRole] = frozenset({
+    LayerRole.INITIAL_FACIES_SOURCE,
+    LayerRole.INITIAL_FACIES_DRAFT,
+    LayerRole.WELL_FACIES_PREDICTION,
+    LayerRole.SEISMIC_FACIES_PREDICTION,
+    LayerRole.INTEGRATED_FACIES,
+})
+
+
+def is_facies_family_role(role: object) -> bool:
+    """角色是否属于相带家族（宽容解析；未知/空 = False）。"""
+    return layer_role_from_value(role) in FACIES_FAMILY_ROLES
+
 
 class ConstraintKind(str, Enum):
     """typed geological constraint（V5 §22）。

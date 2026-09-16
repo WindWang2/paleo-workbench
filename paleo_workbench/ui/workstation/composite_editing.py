@@ -338,6 +338,23 @@ def is_facies_template_layer(templates: Mapping[str, str], layer_id: str) -> boo
     return str(templates.get(str(layer_id), "")) in FACIES_TEMPLATE_KEYS
 
 
+def is_facies_family_layer(templates: Mapping[str, str], layer_id: str,
+                           role_value: object = "") -> bool:
+    """相带家族判定（V12 任务3：模板或角色任一命中）。
+
+    模板注册表覆盖手绘/旧相图层；科学角色覆盖预测/草稿/综合相这类无
+    模板键的相图层。换相门禁与画布要素右键菜单共用本函数，杜绝两套
+    「相带」定义分叉。
+    """
+    if is_facies_template_layer(templates, layer_id):
+        return True
+    from paleo_workbench.mapping_workspace.layer_roles import (
+        is_facies_family_role,
+    )
+
+    return is_facies_family_role(role_value)
+
+
 def template_by_key(key: str) -> GeoTemplate | None:
     return _TEMPLATE_BY_KEY.get(str(key))
 
@@ -976,26 +993,42 @@ class CompositeEditController(QObject):
         self.layers_changed.emit()
         self.state_changed.emit()
 
-    def duplicate_layer(self, layer_id: str) -> VectorLayer | None:
-        """复制图层（要素 + 样式 + schema，得到独立的新图层）。"""
+    def duplicate_layer(self, layer_id: str, *, notify: bool = True,
+                        ) -> VectorLayer | None:
+        """复制图层：所见即所得的逐字节独立副本（V12 duplicate 契约）。
+
+        - 内容 = 实时视图（会话打开时读会话工作副本，与快照/画布同源；
+          只读已提交基线会让副本与所见不符）。
+        - 逐字节一致：几何/属性/样式/schema 全部深拷贝，源与副本零共享，
+          且不做任何修复/归一——有效性是「修复无效几何」工具的职责，
+          复制不得静默改数据。
+        - 科学角色登记继承源（快照 schema 同源）；阶段成员资格与树放置
+          由宿主 ``_duplicate_vector_layer`` 登记，此处不动。
+        - ``notify=False`` 时不发射同步信号：宿主在成员资格/放置就绪后
+          统一发射一次，避免中间态的重复发布与树闪烁。
+        """
+        from copy import deepcopy
+
         source = self._layers.get(str(layer_id))
         if source is None:
             return None
         kind = self._kinds.get(str(layer_id), "line")
         layer_id_new = f"{_LAYER_ID_PREFIX}{new_feature_id('layer')}"
+        session = source.edit_session
+        origin = session.features() if session is not None else source.features()
         copy = VectorLayer(
             id=layer_id_new,
             name=f"{source.name} 副本",
             crs=source.crs,
-            schema=dict(source.schema),
-            style=dict(source.style),
+            schema=deepcopy(dict(source.schema)),
+            style=deepcopy(dict(source.style)),
             features=[
                 VectorFeature(
                     feature_id=new_feature_id("copy"),
-                    geometry=dict(feature.geometry),
-                    attributes=dict(feature.attributes),
+                    geometry=deepcopy(dict(feature.geometry)),
+                    attributes=deepcopy(dict(feature.attributes)),
                 )
-                for feature in source.features()
+                for feature in origin
             ],
         )
         copy.style_revision = source.style_revision + 1
@@ -1010,8 +1043,9 @@ class CompositeEditController(QObject):
             self._layer_roles[layer_id_new] = source_role
         # V10 M-G（D4 修复）：同 create_layer——副本成为活动层也要走完整链。
         self.set_active_layer(layer_id_new)
-        self.layers_changed.emit()
-        self.state_changed.emit()
+        if notify:
+            self.layers_changed.emit()
+            self.state_changed.emit()
         return copy
 
     def remove_layer(self, layer_id: str) -> None:
@@ -3908,10 +3942,14 @@ class CompositeEditController(QObject):
             "project_open": True,
             "active_layer_id": layer.id if layer is not None else "",
             "active_layer_kind": layer_kind,
-            # 相带家族事实（换相动作门禁）：模板注册表是唯一权威。
+            # 相带家族事实（换相动作门禁）：模板或科学角色任一命中
+            # （预测/草稿/综合相无模板键，只认模板会把换相挡在门外）。
             "layer_is_facies": bool(
                 layer is not None
-                and is_facies_template_layer(self._templates, layer.id)),
+                and is_facies_family_layer(
+                    self._templates, layer.id,
+                    self.role_of_layer(layer.id)
+                    or self._layer_roles.get(layer.id, ""))),
             "wkb_type": wkb_type,
             "vector_writable": layer is not None,
             # M1：编辑中 = Python 会话或原生会话（顶点 v2/数字化路由）。

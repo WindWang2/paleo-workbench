@@ -822,6 +822,10 @@ bool PwbVertexTool::beginSegmentDrag(const QgsPointXY& mapPoint) {
           mapPoint.x() - radius, mapPoint.y() - radius,
           mapPoint.x() + radius, mapPoint.y() + radius)));
   std::vector<QgsPointXY> endpoints;
+  bool have_first_hit = false;
+  QgsFeatureId first_hit_fid = FID_NULL;
+  int first_hit_nr = -1;
+  QgsGeometry first_hit_geometry;
   while (cursor.nextFeature(feature)) {
     if (!feature.hasGeometry()) continue;
     const QgsGeometry geometry = feature.geometry();
@@ -848,10 +852,32 @@ bool PwbVertexTool::beginSegmentDrag(const QgsPointXY& mapPoint) {
       if (std::hypot(dx, dy) <= radius) {
         endpoints.push_back(pa);
         endpoints.push_back(pb);
+        if (!have_first_hit) {
+          have_first_hit = true;
+          first_hit_fid = feature.id();
+          first_hit_nr = nr;
+          first_hit_geometry = geometry;
+        }
       }
     }
   }
   if (endpoints.empty()) return false;
+  if (!topoOn()) {
+    // 拓扑关：只动命中段自己的两端点，不联动共位邻居（QGIS 语义）。
+    QgsVertexId v0, v1;
+    // 首个命中段（endpoints 按发现顺序成对压入，取第一对）。
+    first_hit_geometry.vertexIdFromVertexNr(first_hit_nr, v0);
+    first_hit_geometry.vertexIdFromVertexNr(first_hit_nr + 1, v1);
+    VertexRef ra, rb;
+    ra.layer = rb.layer = layer;
+    ra.fid = rb.fid = first_hit_fid;
+    ra.vid = v0;
+    rb.vid = v1;
+    ra.pos = endpoints[0];
+    rb.pos = endpoints[1];
+    beginTranslateDrag(endpoints[0], {ra, rb});
+    return true;
+  }
   // 收集两端点位置的共位节点集（与顶点拖动同一共享语义）。
   std::vector<VertexRef> selected;
   std::vector<QgsVectorLayer*> candidate_layers;
@@ -947,6 +973,16 @@ void PwbVertexTool::finishTranslateDrag(const QgsPointXY& target) {
       shared_markers_[i]->setCenter(boxed_selection_[i].pos);
     }
   }
+}
+
+bool PwbVertexTool::topoOn() const {
+  // 事实源优先级：画布工程（display_mode 下有效）→ 进程单例。
+  // 主应用跑非 display 路径（createCanvas 不 setProject），画布工程恒
+  // 为空；setSnappingConfig 把开关同步写栈工程 + 单例（注释见该函数），
+  // 单例即 GUI 数字化基类读的同一面——此处跟随，不另起第三状态源。
+  QgsProject* project = canvas() != nullptr ? canvas()->project() : nullptr;
+  if (project == nullptr) project = QgsProject::instance();
+  return project != nullptr && project->topologicalEditing();
 }
 
 QList<QgsVectorLayer*> PwbVertexTool::avoidLayersFor(
@@ -1113,11 +1149,19 @@ void PwbVertexTool::finishSharedDrag(const QgsPointXY& target) {
   }
   if (live.empty()) return;
   std::vector<QgsFeatureId> all_touched;
+  const bool topo = topoOn();
   for (QgsVectorLayer* layer : layers) {
     // 释放时 vid 可能因伙伴层早前手势而过期——重新按位置对齐：
-    // anchor 位置的顶点（缓冲现值）即本手势目标。
-    std::vector<VertexRef> current = verticesNear(layer, anchor,
-                                                  kSharedNodeEpsilon);
+    // anchor 位置的顶点（缓冲现值）即本手势目标。拓扑关时不对齐到
+    // 共位邻居：只动按下集合里本层的引用（vid 陈旧则 move 时跳过）。
+    std::vector<VertexRef> current;
+    if (topo) {
+      current = verticesNear(layer, anchor, kSharedNodeEpsilon);
+    } else {
+      for (const VertexRef& ref : refs) {
+        if (ref.layer == layer) current.push_back(ref);
+      }
+    }
     for (const QgsFeatureId fid : applyVertexMoves(layer, target, current)) {
       all_touched.push_back(fid);
     }
@@ -1142,10 +1186,18 @@ void PwbVertexTool::finishSharedDrag(const QgsPointXY& target) {
                    layers, all_touched);
 }
 
-void PwbVertexTool::finishSharedDeleteAt(const QgsPointXY& at) {
+void PwbVertexTool::finishSharedDeleteAt(const QgsPointXY& at, bool shared_ok) {
   // 发现（当前层或全部层档候选）同位置节点集；同要素闭合环重复点去重。
+  // 拓扑关（shared_ok=false）：只删悬停命中的那一个顶点，不扩散。
   std::vector<VertexRef> shared;
-  if (allLayersScope()) {
+  if (!shared_ok && hover_.has_vertex && hover_.pick.layer != nullptr) {
+    VertexRef only;
+    only.layer = hover_.pick.layer;
+    only.fid = hover_.pick.fid;
+    only.vid = hover_.vertex;
+    only.pos = at;
+    shared.push_back(only);
+  } else if (allLayersScope()) {
     for (QgsVectorLayer* layer : candidateLayers()) {
       if (layer == nullptr) continue;
       for (const VertexRef& ref : verticesNear(layer, at, kSharedNodeEpsilon))
@@ -1332,6 +1384,24 @@ void PwbVertexTool::canvasPressEvent(QgsMapMouseEvent* e) {
       return;
     }
     boxed_selection_.clear();
+    if (!topoOn() && !shared.empty()) {
+      // 拓扑关：只拖按下的那一个顶点（QGIS 语义），不带共位邻居——
+      // 取离按下点最近的一个（联合集首个未必是命中要素的顶点）。
+      const QgsPointXY pressed = e->mapPoint();
+      auto best = shared.begin();
+      double best_d = std::hypot(best->pos.x() - pressed.x(),
+                                 best->pos.y() - pressed.y());
+      for (auto it = shared.begin() + 1; it != shared.end(); ++it) {
+        const double d = std::hypot(it->pos.x() - pressed.x(),
+                                    it->pos.y() - pressed.y());
+        if (d < best_d) {
+          best_d = d;
+          best = it;
+        }
+      }
+      std::vector<VertexRef> single{*best};
+      shared = std::move(single);
+    }
     // 先取锚点、再移动容器：MSVC 的实参求值顺序是从右往左，写成
     // ``beginSharedDrag(shared.front().pos, std::move(shared))`` 时 move 先执行，
     // 容器的缓冲区已经易主 → front() 对空容器解引用（空指针 + 偏移），
@@ -1524,7 +1594,8 @@ void PwbVertexTool::keyPressEvent(QKeyEvent* e) {
           && hover_.pick.geometry.constGet() != nullptr) {
         const QgsPoint hover_point =
             hover_.pick.geometry.constGet()->vertexAt(hover_.vertex);
-        finishSharedDeleteAt(QgsPointXY(hover_point.x(), hover_point.y()));
+        finishSharedDeleteAt(QgsPointXY(hover_point.x(), hover_point.y()),
+                             topoOn());
         // V12 M2-3：删除已落缓冲（镜像即编辑发生地，无滞后），在同一光标
         // 位置重建 hover——密集几何下连续 Delete 不再要求晃动鼠标找回悬停。
         if (has_last_cursor_) updateHover(last_cursor_map_);

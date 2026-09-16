@@ -55,6 +55,24 @@ def _apply_qt_desktop_policy() -> None:
     QSurfaceFormat.setDefaultFormat(fmt)
 
 
+def _gl_surface_drawable(widget) -> bool:
+    """GL 视口当前是否可绘制（零尺寸直接判否）。
+
+    dock 拖动/浮动↔停靠 reparent 期间，Qt 会投递宽或高为 0 的 paint；
+    pyqtgraph 此时仍会走 setProjection（0 除 → inf/nan 矩阵）再进各
+    item 的 GL 调用，驱动层直接访问违规——Python 侧抓不住。0px 的
+    surface 本来也画不出任何东西，跳过是无损的；尺寸恢复后 Qt 会重
+    发 paint。只读 width()/height()，不碰 GL，无 wrapped-C++ 风险
+    之外的副作用（已删对象抛 RuntimeError → 不可绘制）。
+    """
+    try:
+        return int(widget.width() or 0) > 0 and int(widget.height() or 0) > 0
+    except RuntimeError:  # wrapped C++ object already deleted
+        return False
+    except Exception:
+        return False
+
+
 def _install_glview_paint_guard() -> None:
     """Make pyqtgraph GLViewWidget tolerate paints without a usable context.
 
@@ -65,6 +83,11 @@ def _install_glview_paint_guard() -> None:
     primary fix). Skipping such a paint is invisible — Qt repaints normally
     once the widget is re-attached; the same guard also covers the
     paint-with-no-context case documented for offscreen sessions.
+
+    V12: additionally skip zero-size paints (dock drag delivers 0×N
+    surfaces; pyqtgraph builds an inf/nan projection from them and faults
+    inside item GL calls — uncatchable from Python, see gui_crash.log
+    access violation in GLLinePlotItem.paint while moving viz docks).
     """
     try:
         import pyqtgraph.opengl as _gl
@@ -76,6 +99,8 @@ def _install_glview_paint_guard() -> None:
     def _guarded_paint_gl(self):
         try:
             if not self.isValid() or self.context() is None:
+                return
+            if not _gl_surface_drawable(self):
                 return
         except RuntimeError:  # wrapped C++ object already deleted
             return

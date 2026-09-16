@@ -161,6 +161,11 @@ def test_segment_drag_all_layers_moves_shared_nodes(qtbot, stack):
         ],
     }
     canvas, w, events = _canvas(qtbot, stack, fc, "doc-seg", all_layers=True)
+    # 跨层/跨要素共享联动是拓扑开语义：先推开（应用里用户打开开关同款）。
+    stack.set_snapping_config(canvas, json.dumps({
+        "enabled": True, "mode": "all_layers", "tolerance_px": 12.0,
+        "types": ["vertex", "segment"], "topological_editing": True,
+    }))
 
     # 按在共享边中点 (6,5)，拖到 (7,6)：共享边两端点应两面同步。
     QTest.mousePress(w.viewport(), Qt.LeftButton, Qt.NoModifier,

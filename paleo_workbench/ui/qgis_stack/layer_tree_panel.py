@@ -561,6 +561,7 @@ class QgisLayerTreePanel(QWidget):
                 action.setEnabled(False)
                 action.setToolTip(f"不可用：{verdict.disabled_reason or '当前不可用'}")
         self._add_raw_draft_action(menu, doc_id, facts)
+        self._add_raw_delete_action(menu, doc_id, facts)
         self._add_render_preset_action(menu, doc_id)
 
     def _add_raw_draft_action(self, menu, doc_id: str, facts) -> None:
@@ -591,6 +592,33 @@ class QgisLayerTreePanel(QWidget):
         )
         # 插到 QGIS 内建项（Zoom / Feature Count）之后、第一个分隔符之前，
         # 与回退树里「复制为草稿…」紧跟只读查看项的位置相称。
+        before = next(
+            (item for item in menu.actions() if item.isSeparator()), None)
+        if before is not None:
+            menu.insertAction(before, action)
+        else:
+            menu.addAction(action)
+
+    def _add_raw_delete_action(self, menu, doc_id: str, facts) -> None:
+        """给 RAW 保护层补上「删除图层」（C++ 菜单的缺口，同复制为草稿挂法）。
+
+        C++ provider 只给可编辑层产「删除图层」；RAW（mock 预测/原始相图）
+        落进最简 else 支，无删除入口——mock 结果删不掉只能留着。删除是
+        结构性动作（与复制同级，不是要素编辑），``_remove_gate`` 本就放行
+        RAW，此处只补呈现与转发，不需要重编 C++ 桥。
+        """
+        if menu is None or not doc_id or facts is None:
+            return
+        if not bool(getattr(facts, "raw_protected", False)):
+            return
+        if any(action.text() == "删除图层" for action in menu.actions()):
+            return
+        action = QAction("删除图层", menu)
+        action.setToolTip("从文档删除本图层（源任务/血缘记录保留）")
+        action.triggered.connect(
+            lambda _checked=False, lid=str(doc_id):
+            self.remove_layer_requested.emit(lid)
+        )
         before = next(
             (item for item in menu.actions() if item.isSeparator()), None)
         if before is not None:

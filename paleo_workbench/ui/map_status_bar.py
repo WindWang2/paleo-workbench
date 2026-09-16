@@ -87,6 +87,22 @@ def _format_scale(denominator: float) -> str:
     return "1:—"
 
 
+def short_crs_name(text: object) -> str:
+    """状态栏 CRS 短名：auth id 原样；自定义 +proj 串折成「本地坐标」。
+
+    读数行只放人话——完整声明值进 tooltip（按需查看）。地理/投影的
+    EPSG 形（``EPSG:4490``）本身就短，原样返回；空 = 未声明（调用方
+    另行呈现「未声明」，此处返回空串）。
+    """
+    cleaned = str(text or "").split("/")[0].strip()
+    if not cleaned:
+        return ""
+    if cleaned.startswith("+proj"):
+        units = "（米）" if "+units=m" in cleaned else ""
+        return f"本地坐标{units}"
+    return cleaned
+
+
 def _chip_qss(*, emphasis: bool = False, warning: bool = False) -> str:
     """状态 chip 的 QSS（读当前主题 token——经 style.bind 每次重求值）。"""
     palette = style.palette()
@@ -267,7 +283,7 @@ class MapStatusBar(QFrame):
         elif extent is not None:
             width = max(0.0, extent[2] - extent[0])
             _elide_label(self.scale, f"宽: {width:.6g}")
-        display_crs = str(crs or "unspecified").split("/")[0].strip() or crs
+        display_crs = short_crs_name(crs) or "未声明"
         _elide_label(self.crs, f"CRS: {display_crs}")
         _elide_label(self.render, f"渲染器: {renderer or '—'}")
         self.selection.setText(f"已选 {int(selection_count)}")
@@ -382,20 +398,23 @@ class MapStatusBar(QFrame):
                 self.coordinate,
                 f"X: {point[0]:.{decimals}f}  Y: {point[1]:.{decimals}f}",
             )
-        # CRS 读数（§16）：声明 auth id / 「未声明」；不一致时加 ⚠ 文字
-        # 警示（非仅颜色）并提示图层 CRS。
-        display_crs = crs.split("/")[0].strip() if crs else ""
+        # CRS 读数（§16）：短名呈现（自定义 +proj 串折成「本地坐标」，
+        # 完整声明值只进 tooltip）；未声明显示「未声明」；不一致时加 ⚠
+        # 文字警示（非仅颜色）并提示图层 CRS。
+        full_crs = str(crs or "")
+        display_crs = short_crs_name(full_crs)
         crs_text = f"CRS: {display_crs}" if display_crs else "CRS: 未声明"
         mismatch = facts.get("crs_mismatch")
-        layer_crs = str(facts.get("layer_crs") or "").split("/")[0].strip()
+        layer_full = str(facts.get("layer_crs") or "")
+        layer_crs = short_crs_name(layer_full)
         warning = bool(mismatch and layer_crs)
         if warning:
             crs_text = f"⚠ {crs_text}"
             crs_tip = (
-                f"{crs_text}\n图层 CRS（{layer_crs}）与工程 CRS 不一致——"
+                f"{crs_text}\n图层 CRS（{layer_full or layer_crs}）与工程 CRS 不一致——"
                 "数字化几何将按工程 CRS 落地，注意坐标单位")
         else:
-            crs_tip = crs_text if not crs else f"{crs_text}\n工程坐标系（声明值）"
+            crs_tip = crs_text if not full_crs else f"{crs_text}\n工程坐标系：{full_crs}"
         _elide_label(self.crs, crs_text)
         self.crs.setToolTip(crs_tip)
         if warning != self._crs_warning:

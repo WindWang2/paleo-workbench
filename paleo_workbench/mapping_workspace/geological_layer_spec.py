@@ -505,7 +505,15 @@ def _build_registry() -> dict[LayerRole, GeologicalLayerSpec]:
         label=LabelBinding(enabled=True, field="facies_name")))
     add(_spec(
         "initial-facies-draft-v2", LayerRole.INITIAL_FACIES_DRAFT, "polygon",
-        "初始相校正草稿（DERIVED）", fields=_FACIES_FIELDS,
+        "初始相校正草稿（DERIVED）",
+        # V12 duplicate 契约：草稿是预测/源相图的"拿去改的副本"，字段必须是
+        # 上游的超集——否则复制品在镜像时丢属性，分类渲染（field=facies 等）
+        # 零匹配，画布空白。新增两列均为可选，不影响既有草稿与表单。
+        fields=_FACIES_FIELDS + (
+            _F("facies", "相", kind="text", default=""),
+            _F("probability", "概率", kind="real", value_range=(0.0, 1.0),
+               default=0.0),
+        ),
         renderer=RendererBinding("facies_v1", "facies", "categorized",
                                  field="facies_name"),
         label=LabelBinding(enabled=True, field="facies_name"),

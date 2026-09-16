@@ -65,6 +65,11 @@ def _setup(qtbot, stack, fc=None):
     stack.set_committed_callback(
         canvas, lambda doc, payload: deltas.append(json.loads(payload)))
     stack.set_map_tool(canvas, "vertex")
+    # 共享节点联动是拓扑开语义：先推开（应用里用户打开开关同款推送）。
+    stack.set_snapping_config(canvas, json.dumps({
+        "enabled": True, "mode": "all_layers", "tolerance_px": 12.0,
+        "types": ["vertex", "segment"], "topological_editing": True,
+    }))
     return w, events, deltas
 
 

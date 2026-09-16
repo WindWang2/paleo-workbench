@@ -1232,7 +1232,8 @@ class CompositeDocument(QWidget):
         if status_hint is not None:
             status_hint.connect(self.status_message.emit)
         # V12 任务3：画布右键 → 相带要素换相菜单（回退画布无此信号，鸭子
-        # 类型跳过）。
+        # 类型跳过）。与工具菜单（QPoint）不同槽：本信号带地图坐标，用
+        # 要素命中；未命中相要素时回落工具菜单。
         canvas_context_menu = getattr(self.canvas, "canvas_context_menu", None)
         if canvas_context_menu is not None:
             canvas_context_menu.connect(self._on_canvas_context_menu)
@@ -3270,29 +3271,40 @@ class CompositeDocument(QWidget):
         self.edit_controller.remove_layer(layer_id)
 
     def _duplicate_vector_layer(self, layer_id: str) -> None:
-        # R1-6：结构性动作（内存副本，不写源数据）不进 evaluator 矩阵，
-        # 但保留工程级守卫（无工程无复制）。
+        # V12 duplicate 契约（结构性动作：内存副本，不写源数据；不进
+        # evaluator 矩阵，但保留工程级守卫）。
+        # 可证伪的保证（源可见 ⇒ 副本可见）：
+        # 副本与源逐字节一致（控制器，实时视图）+ 同组紧邻/全局在上
+        # （放置；角色系统拒绝跨组硬塞时走 home）+ 当场验货。
         if self._project is None:
             self.status_message.emit("未打开工程")
             return
-        copy = self.edit_controller.duplicate_layer(layer_id)
+        copy = self.edit_controller.duplicate_layer(layer_id, notify=False)
         if copy is None:
             return
         # R2-2：RAW 源的副本 = DERIVED 草稿（本工作流的语义承诺）——登记
-        # 阶段成员资格为草稿角色，并覆写控制器角色登记。否则副本落在
-        # 角色体系之外：抢主位防护失效、快照仍按 RAW 角色 badge。
+        # 阶段成员资格为草稿角色，并覆写控制器角色登记。
         from paleo_workbench.mapping_workspace.layer_roles import LayerRole
         from paleo_workbench.mapping_workspace.stage_state import (
             LayerMembershipRecord,
         )
 
         source_role = self.stage_controller.state.role_of(str(layer_id))
+        if not source_role.is_raw_protected:
+            # 老工程成员资格缺失时回落到控制器角色登记（快照 metadata 同源）。
+            from paleo_workbench.mapping_workspace.layer_roles import (
+                layer_role_from_value,
+            )
+
+            fallback = layer_role_from_value(
+                self.edit_controller.layer_role(str(layer_id)))
+            if fallback is not None and fallback.is_raw_protected:
+                source_role = fallback
         if source_role.is_raw_protected:
             # 相预测（井/震）与初始相图同源：副本是「拿去改的解释草稿」，
-            # 一律落 INITIAL_FACIES_DRAFT（home = phase1.interpretation）。
-            # 不能退 USER_GENERAL——它的 home 就是 LEGACY 未分类兜底组
-            # （z 序垫底），副本与源同几何同样式，被源完全遮盖，画布上
-            # 表现为「复制出来的图层不显示」。
+            # 一律落 INITIAL_FACIES_DRAFT（home = phase1.interpretation，
+            # 全局序位于预测组之上）。不能退 USER_GENERAL——它的 home 是
+            # LEGACY 未分类兜底组（z 序垫底）。
             draft_role = (
                 LayerRole.INITIAL_FACIES_DRAFT
                 if source_role in (
@@ -3307,10 +3319,62 @@ class CompositeDocument(QWidget):
             self.stage_controller.state.set_membership(
                 LayerMembershipRecord(layer_id=str(copy.id), role=draft_role))
             self.edit_controller.set_layer_role(str(copy.id), draft_role.value)
-            self.status_message.emit(
-                f"已复制为可编辑草稿「{copy.name}」（RAW 源保持不变）")
+            message = f"已复制为可编辑草稿「{copy.name}」（RAW 源保持不变）"
         else:
-            self.status_message.emit(f"已复制图层为「{copy.name}」")
+            message = f"已复制图层为「{copy.name}」"
+        # 放置（同组紧邻源；语义不相容则回家）→ 单次同步发布 → 验货。
+        self.stage_controller.group_controller.place_copy_adjacent(
+            str(layer_id), str(copy.id))
+        self.edit_controller.layers_changed.emit()
+        self.edit_controller.state_changed.emit()
+        verify = getattr(self, "_verify_duplicate_mirror", None)
+        suffix = verify(str(copy.id), str(layer_id)) if callable(verify) else ""
+        self.status_message.emit(message + suffix)
+
+    def _verify_duplicate_mirror(self, copy_id: str, source_id: str) -> str:
+        """复制验货：快照要素数 vs 镜像要素数（现场诊断，失败绝不抛）。
+
+        台账 no-op 冻结 / addFeatures 丢要素 / 几何类型漂移这类发布链
+        故障在 UI 上都表现为「树上有勾、画布空白」，与样式问题无法区分。
+        复制经 layers_changed 走同步发布，返回时镜像已就位，可直接读桥
+        自省面定因。无桥回退时返回空串（不打扰）。
+        """
+        try:
+            if not getattr(self, "uses_native_stack", False):
+                return ""
+            canvas = getattr(self, "canvas", None)
+            probe = getattr(canvas, "mirror_provider_facts", None)
+            if not callable(probe):
+                return ""
+
+            def _live_count(layer_id: str) -> int:
+                layer = self.edit_controller.layer(layer_id)
+                if layer is None:
+                    return -1
+                session = layer.edit_session
+                try:
+                    if session is not None:
+                        return len(session.features())
+                    return len(layer.features())
+                except Exception:
+                    return -1
+
+            host_count = _live_count(copy_id)
+            facts = probe(copy_id) or {}
+            if not facts.get("exists"):
+                return f"｜验货：副本未上镜像（快照{host_count}要素），请报给开发"
+            mirror_count = facts.get("feature_count")
+            geometry = facts.get("geometry_type") or "?"
+            fields = facts.get("field_count")
+            valid = facts.get("is_valid")
+            detail = (f"｜验货：快照{host_count}→镜像{mirror_count}"
+                      f"（{geometry}/{fields}字段/有效{valid}）")
+            if isinstance(mirror_count, int) and host_count >= 0 \
+                    and mirror_count != host_count:
+                detail += "——要素数对不上，请报给开发"
+            return detail
+        except Exception:
+            return ""
 
     def stage_action(self, stage_value: str, action_id: str) -> None:
         """阶段面板上下文动作入口（宿主壳经 _dispatch_stage_action 调用）。
@@ -4470,10 +4534,14 @@ class CompositeDocument(QWidget):
 
     def _is_facies_layer(self, layer_id: str) -> bool:
         from paleo_workbench.ui.workstation.composite_editing import (
-            is_facies_template_layer,
+            is_facies_family_layer,
         )
 
-        return is_facies_template_layer(self.edit_controller._templates, layer_id)
+        controller = self.edit_controller
+        return is_facies_family_layer(
+            controller._templates, layer_id,
+            controller.role_of_layer(str(layer_id))
+            or controller.layer_role(str(layer_id)))
 
     def _on_feature_captured(self, layer_id: str, feature_id: str) -> None:
         if self.facies_brush.is_armed:

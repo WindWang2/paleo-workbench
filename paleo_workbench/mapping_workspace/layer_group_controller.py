@@ -294,6 +294,44 @@ class LayerGroupController:
             if layer_id in order:
                 order.remove(layer_id)
 
+    def place_copy_adjacent(self, source_id: str, copy_id: str) -> str:
+        """复制品放置（V12 duplicate 契约）：能进源组就紧邻源上方。
+
+        - 在当前树序表里找到源所在容器，把副本插到源之后一位，并登记
+          用户放置覆盖（plan 路由优先走覆盖，不走 home 猜）。
+        - 角色语义不相容（``movable_into_system_group`` 拒绝，如草稿进
+          预测组）→ 不硬塞：不登记覆盖，副本走成员资格 home（解释组在
+          全局序上本就位于预测组之上）。硬塞会在下一次用户拖拽回流时
+          被 observe 判非法、整树拉回，造成闪烁。
+        - 源不在任何序表（首同步前）→ 同样不登记覆盖，副本走常规路由
+          （home/保守归类——与源的路由一致，不会分家）。
+        返回副本归属组 id（"" = root；调用方一般不需要用）。
+        """
+        source_id, copy_id = str(source_id), str(copy_id)
+        if not copy_id or copy_id == source_id:
+            return ""
+        container = ""
+        position: int | None = None
+        for group_id, order in self._group_orders.items():
+            if source_id in order and copy_id not in order:
+                container, position = group_id, order.index(source_id) + 1
+                break
+        if position is None and source_id in self._root_order \
+                and copy_id not in self._root_order:
+            container, position = "", self._root_order.index(source_id) + 1
+        if position is None:
+            return ""
+        record = self.state.membership(copy_id)
+        copy_role = record.role if record is not None else None
+        if container and not movable_into_system_group(copy_role, container):
+            return ""
+        self._placements[copy_id] = container
+        if container:
+            self._group_orders[container].insert(position, copy_id)
+        else:
+            self._root_order.insert(position, copy_id)
+        return container
+
     # -- 期望树构建 ---------------------------------------------------------------
 
     def build_desired_tree(self, layer_snapshots: Iterable) -> LayerTreeSnapshot:

@@ -284,7 +284,9 @@ class PwbVertexTool : public PwbEditPickTool {
   // 散布目标层各一宏（bbox 预查）；一次 edit_gesture 回调（多层序列）。
   void finishSharedDrag(const QgsPointXY& target);
   // 同 finishSharedDrag 的删除版（同要素闭合环重复点去重 + 最小顶点守卫）。
-  void finishSharedDeleteAt(const QgsPointXY& at);
+  // shared_ok=false = 拓扑关：只删悬停命中的那一个顶点（QGIS 语义），
+  // 不扩散到共位邻居；框选删除是显式多选，走默认 true。
+  void finishSharedDeleteAt(const QgsPointXY& at, bool shared_ok = true);
   // 一层一宏的顶点几何应用：moveVertex + avoidIntersectionsV2 + 自层
   // addTopologicalPoints；返回该层受影响要素（空 = 无变更，不开宏）。
   std::vector<QgsFeatureId> applyVertexMoves(
@@ -296,6 +298,8 @@ class PwbVertexTool : public PwbEditPickTool {
       const std::vector<QgsVectorLayer*>& extra_layers);
   // 避免重叠层集（QgsProject 模式 → 层表；Allow → 空）。
   QList<QgsVectorLayer*> avoidLayersFor(QgsVectorLayer* edited) const;
+  // 画布工程拓扑开关（QGIS 语义的唯一事实源；关 = 单顶点语义）。
+  bool topoOn() const;
   void clearSharedMarkers();
   void emitGestureMulti(const char* gesture, const char* undo_text,
                         const std::vector<QgsVectorLayer*>& layers,

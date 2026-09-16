@@ -127,6 +127,12 @@ def _setup_all_layers(qtbot, stack, join_approve):
 
     stack.set_edit_pick_callback(addr, _on_edit_pick)
     stack.set_map_tool(addr, "vertex")
+    # 本文件测的是共享节点联动（拓扑开语义）：先推开
+    # （应用里用户打开开关同款推送；不推则按 QGIS 默认单点语义）。
+    stack.set_snapping_config(addr, json.dumps({
+        "enabled": True, "mode": "all_layers", "tolerance_px": 12.0,
+        "types": ["vertex", "segment"], "topological_editing": True,
+    }))
     return addr, view, events
 
 

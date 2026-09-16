@@ -1888,13 +1888,45 @@ void QgisMapStack::reapCanvasTables(std::uintptr_t canvas_addr) {
   impl_->dead_canvas_addrs.insert(canvas_addr);
 }
 
+namespace {
+// V12 自定义 CRS：QString 构造只认 authid（"EPSG:xxxx"），工程里常见
+// 的自定义 +proj 串 / WKT 会直接非法——画布目标 CRS 落空、单位 unknown、
+// 比例尺按度换算出几十亿。按 authid → PROJ → WKT 顺序解析，全部失败
+// 才返回非法（调用方保持原有错误语义）。
+QgsCoordinateReferenceSystem crsFromFlexibleString(const std::string& text) {
+  const QString input = QString::fromStdString(text).trimmed();
+  if (input.isEmpty()) return QgsCoordinateReferenceSystem();
+  // 结构化定义（PROJ 串 / WKT）直走专用解析——先过 authid 构造会让
+  // PROJ 打一次 "unrecognized format" 日志；该调用在每次镜像发布都
+  // 经过（set_destination_crs），噪声与耗时都不可接受。
+  const bool structured = input.startsWith('+')
+      || input.startsWith("GEOGCS", Qt::CaseInsensitive)
+      || input.startsWith("GEOCCS", Qt::CaseInsensitive)
+      || input.startsWith("PROJCS", Qt::CaseInsensitive)
+      || input.startsWith("VERT_CS", Qt::CaseInsensitive)
+      || input.startsWith("COMPD_CS", Qt::CaseInsensitive)
+      || input.startsWith("GEODCRS", Qt::CaseInsensitive)
+      || input.startsWith("PROJECTEDCRS", Qt::CaseInsensitive)
+      || input.startsWith("VERTICALCRS", Qt::CaseInsensitive)
+      || input.startsWith("COMPOUNDCRS", Qt::CaseInsensitive);
+  if (!structured) {
+    QgsCoordinateReferenceSystem auth(input);
+    if (auth.isValid()) return auth;
+  }
+  QgsCoordinateReferenceSystem proj;
+  if (proj.createFromProj(input)) return proj;
+  QgsCoordinateReferenceSystem wkt;
+  if (wkt.createFromWkt(input)) return wkt;
+  return QgsCoordinateReferenceSystem();
+}
+}  // namespace
+
 void QgisMapStack::setCanvasWhiteBackground(std::uintptr_t canvas) {
   canvasOrThrow(canvas)->setCanvasColor(Qt::white);
 }
 
 void QgisMapStack::setDestinationCrs(std::uintptr_t canvas, const std::string& crs) {
-  canvasOrThrow(canvas)->setDestinationCrs(
-      QgsCoordinateReferenceSystem(QString::fromStdString(crs)));
+  canvasOrThrow(canvas)->setDestinationCrs(crsFromFlexibleString(crs));
 }
 
 // V9 W1/W7（见 hpp 注释）：scale/destination-CRS 只读自省面。二者都读
@@ -2305,8 +2337,7 @@ std::string QgisMapStack::runtimeFacts() const {
 std::string QgisMapStack::setProjectCrs(const std::string& authid) {
   if (!impl_->initialized)
     throw std::runtime_error("map stack is not initialized");
-  const QgsCoordinateReferenceSystem crs =
-      QgsCoordinateReferenceSystem(QString::fromStdString(authid));
+  const QgsCoordinateReferenceSystem crs = crsFromFlexibleString(authid);
   if (!crs.isValid()) {
     return "cannot resolve CRS: " + authid;
   }

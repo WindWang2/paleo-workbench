@@ -6,6 +6,7 @@ from paleo_workbench.ui.map_status_bar import (
     _GEO_DECIMALS,
     _PROJECTED_DECIMALS,
     MapStatusBar,
+    short_crs_name,
 )
 
 
@@ -51,3 +52,27 @@ def test_decimal_selection_falls_back_without_pyproj(qtbot, monkeypatch):
     # 度域坐标 → 按量级猜地理；超出度域 → 投影。
     assert bar._decimals_for("EPSG:4326", (113.1, 34.2)) == _GEO_DECIMALS
     assert bar._decimals_for("", (456789.1, 3456789.9)) == _PROJECTED_DECIMALS
+
+
+def test_short_crs_name_unit():
+    assert short_crs_name("") == ""
+    assert short_crs_name("EPSG:4490") == "EPSG:4490"
+    assert short_crs_name("EPSG:4326 / extra") == "EPSG:4326"
+    assert short_crs_name(
+        "+proj=tmerc +lat_0=0 +lon_0=0 +k=1 +x_0=0 +ellps=WGS84 +units=m +no_defs"
+    ) == "本地坐标（米）"
+    assert short_crs_name("+proj=longlat +datum=WGS84 +no_defs") == "本地坐标"
+
+
+def test_status_bar_shows_short_crs_not_proj_string(qtbot):
+    """自定义 +proj 串不进读数行（回归：状态栏贴整串 +proj=tmerc…）。"""
+    bar = _make_bar(qtbot)
+    proj = "+proj=tmerc +lat_0=0 +lon_0=0 +k=1 +x_0=0 +ellps=WGS84 +units=m +no_defs"
+    bar.apply_context({"crs": proj})
+    assert bar.crs.text() == "CRS: 本地坐标（米）"
+    assert "+proj" not in bar.crs.text()
+    assert proj in bar.crs.toolTip()
+    bar.apply_context({"crs": "EPSG:4490"})
+    assert bar.crs.text() == "CRS: EPSG:4490"
+    bar.apply_context({"crs": ""})
+    assert bar.crs.text() == "CRS: 未声明"
