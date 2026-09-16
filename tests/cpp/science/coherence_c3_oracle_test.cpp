@@ -216,7 +216,7 @@ TEST(cancellation_returns_cancelled_without_success) {
     { // stop requested from the progress callback after the first inline
         std::stop_source source;
         int reports = 0;
-        science::ProgressSink sink = [&source, &reports](const ProgressReport& report) {
+        ProgressSink sink = [&source, &reports](const ProgressReport& report) {
             ++reports;
             if (report.fraction >= 0.0 && reports >= 1) {
                 source.request_stop(); // mid-run cancel at the next boundary
@@ -270,7 +270,7 @@ TEST(result_is_deterministic_and_provenance_complete) {
     // Progress reaches 1.0 on the success path and stays monotonic.
     double last = -1.0;
     double final_fraction = -1.0;
-    science::ProgressSink sink = [&last, &final_fraction](const ProgressReport& report) {
+    ProgressSink sink = [&last, &final_fraction](const ProgressReport& report) {
         if (report.fraction < last) {
             PWB_FAIL("progress fraction regressed");
         }

@@ -1,0 +1,553 @@
+{
+  "_file": "typical.paleo.json",
+  "model": {
+    "auxiliary_entities": [],
+    "compilation_input_sets": [
+      {
+        "entries": [
+          {
+            "asset_id": "asset_fixture_b",
+            "pinned_version_id": "ver_fixture_b1"
+          }
+        ],
+        "id": "cis_000000000001",
+        "name": "T1c7 编图输入",
+        "status": "frozen"
+      }
+    ],
+    "compilation_runs": [],
+    "constraint_layers": [],
+    "contour_drafts": [],
+    "coordinate": {
+      "crs_locked": true,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "EPSG:4547",
+      "target_crs": null,
+      "transform_history": []
+    },
+    "correlation_interpretations": [],
+    "entity_asset_links": [
+      {
+        "asset_id": "asset_fixture_a",
+        "created_at": "2026-09-16T08:00:00.000000+00:00",
+        "entity_id": "well000000000002",
+        "entity_type": "well",
+        "id": "link000000000006",
+        "is_primary": true,
+        "metadata": {},
+        "note": "",
+        "role": "tops",
+        "unresolved": false
+      }
+    ],
+    "export_artifacts": [
+      {
+        "catalog_version_id": null,
+        "format": "pdf",
+        "generated_at": "2026-09-16T08:00:00.000000+00:00",
+        "id": "artifact000000000009",
+        "included_map_elements": [
+          "图例",
+          "比例尺"
+        ],
+        "linked_id": "well000000000002",
+        "options": {},
+        "output_path": "payloads/exports/map.pdf",
+        "source_task_ids": []
+      }
+    ],
+    "facies_taxonomy": null,
+    "factor_map_tasks": [
+      {
+        "factor_type": "sand_thickness",
+        "generator_version": null,
+        "grid_artifact_path": "payloads/grids/sand.npz",
+        "grid_artifact_version_id": null,
+        "grid_metadata": {},
+        "id": "factor000000000010",
+        "input_resource_ids": [],
+        "input_snapshot_hash": "",
+        "method": "idw",
+        "name": "砂厚趋势面",
+        "output_resource_ids": [],
+        "parameters": {
+          "power": 2.5
+        },
+        "quality_metrics": {},
+        "seed": null,
+        "source_kind": "real",
+        "status": "complete",
+        "target_horizon": "T1c7",
+        "well_table_id": null
+      }
+    ],
+    "fault_interpretations": [],
+    "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "future_probe_v2": {
+        "keep": true
+      },
+      "measurements": [],
+      "objects": [
+        {
+          "id": "g1",
+          "kind": "horizon"
+        }
+      ],
+      "selected": "",
+      "views": []
+    },
+    "geological_entities": [
+      {
+        "created_at": "2026-09-16T08:00:00.000000+00:00",
+        "description": "",
+        "entity_kind": "horizon",
+        "id": "ent000000000005",
+        "kind": "geological",
+        "metadata": {},
+        "name": "T1c7 层位",
+        "updated_at": "2026-09-16T08:00:00.000000+00:00"
+      }
+    ],
+    "horizon_interpretations": [],
+    "integrated_interpretations": [],
+    "interpretation_revisions": [],
+    "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+    },
+    "map_products": [],
+    "map_qgis_project_xml": "<!DOCTYPE qgis PROJECT><qgis projectname=\"典型工程\" version=\"4.2.0\"><projectlayers/><layer-tree-group/></qgis>",
+    "mapping_workspace": {
+      "artifact_maturity": {
+        "factor000000000001": "reviewed",
+        "map_draft": "draft"
+      },
+      "compilation_input_set": {
+        "factor000000000001": "ver_fixture_b1"
+      },
+      "current_stage": "constraint_factor",
+      "memberships": {
+        "L_constraint": {
+          "binding_kind": "content_fingerprint",
+          "bound_at": "2026-09-16T08:00:00.000000+00:00",
+          "constraint_kind": "",
+          "created_at": "2026-09-16T08:00:00.000000+00:00",
+          "created_stage": "facies_calibration",
+          "factor_task_id": "",
+          "layer_id": "L_constraint",
+          "role": "fault_constraint",
+          "source_asset_id": "",
+          "source_version_id": ""
+        },
+        "L_drafted": {
+          "binding_kind": "catalog_version",
+          "bound_at": "2026-09-16T08:00:00.000000+00:00",
+          "constraint_kind": "",
+          "created_at": "2026-09-16T08:00:00.000000+00:00",
+          "created_stage": "facies_calibration",
+          "factor_task_id": "",
+          "layer_id": "L_drafted",
+          "role": "initial_facies_draft",
+          "source_asset_id": "asset_fixture_a",
+          "source_version_id": "ver_fixture_a1"
+        },
+        "L_grid": {
+          "binding_kind": "catalog_version",
+          "bound_at": "2026-09-16T08:00:00.000000+00:00",
+          "constraint_kind": "",
+          "created_at": "2026-09-16T08:00:00.000000+00:00",
+          "created_stage": "facies_calibration",
+          "factor_task_id": "factor000000000001",
+          "layer_id": "L_grid",
+          "role": "factor_grid",
+          "source_asset_id": "asset_fixture_b",
+          "source_version_id": "ver_fixture_b1"
+        },
+        "L_qc": {
+          "binding_kind": "",
+          "bound_at": "2026-09-16T08:00:00.000000+00:00",
+          "constraint_kind": "",
+          "created_at": "2026-09-16T08:00:00.000000+00:00",
+          "created_stage": "facies_calibration",
+          "factor_task_id": "",
+          "layer_id": "L_qc",
+          "role": "qc_warning",
+          "source_asset_id": "",
+          "source_version_id": ""
+        }
+      },
+      "schema_version": 1,
+      "stage_states": {
+        "constraint_factor": {
+          "active_layer_id": null,
+          "active_tool": null,
+          "customized": false,
+          "group_locked": {},
+          "group_visibility": {},
+          "layer_opacity": {},
+          "layer_visibility": {},
+          "stage": "constraint_factor"
+        },
+        "facies_calibration": {
+          "active_layer_id": "L_drafted",
+          "active_tool": "pan",
+          "customized": true,
+          "group_locked": {},
+          "group_visibility": {
+            "factor_group": null,
+            "qc_group": false
+          },
+          "layer_opacity": {
+            "L_drafted": 0.65
+          },
+          "layer_visibility": {
+            "L_drafted": true,
+            "L_hidden": false
+          },
+          "stage": "facies_calibration"
+        },
+        "integrated_compilation": {
+          "active_layer_id": null,
+          "active_tool": null,
+          "customized": false,
+          "group_locked": {},
+          "group_visibility": {},
+          "layer_opacity": {},
+          "layer_visibility": {},
+          "stage": "integrated_compilation"
+        }
+      },
+      "tree": {
+        "groups": [
+          {
+            "children": [
+              "L_grid"
+            ],
+            "id": "factor_group",
+            "title": "单因素"
+          }
+        ],
+        "order": [
+          "L_drafted",
+          "L_grid"
+        ]
+      }
+    },
+    "meta": {
+      "created_at": "2026-09-16T08:00:00.000000+00:00",
+      "last_recovery": null,
+      "name": "典型工程-演示",
+      "project_root": ".",
+      "region": "鄂尔多斯盆地",
+      "updated_at": "2026-09-16T15:04:11.749077+00:00",
+      "version": "0.2.17a0"
+    },
+    "onboarding_report": {
+      "imported": 2,
+      "skipped": 1
+    },
+    "paleomap_documents": [
+      {
+        "edit_history": [],
+        "facies_polygons": [
+          {
+            "facies": "辫状河三角洲",
+            "id": "p1",
+            "ring": [
+              [
+                0,
+                0
+              ],
+              [
+                2,
+                0
+              ],
+              [
+                2,
+                2
+              ]
+            ]
+          }
+        ],
+        "facies_style": {},
+        "id": "map000000000015",
+        "label_features": [],
+        "layer_state": {},
+        "line_features": [
+          {
+            "id": "l1",
+            "kind": "海岸线"
+          }
+        ],
+        "linked_contour_draft_id": null,
+        "linked_factor_task_id": null,
+        "linked_prediction_task_id": null,
+        "linked_target_horizon": "T1c7",
+        "map_chrome": {},
+        "map_crs": "EPSG:4547",
+        "name": "T1c7 期岩相古地理",
+        "reference_layers": [],
+        "view_state": {},
+        "well_overlays": []
+      }
+    ],
+    "prediction_tasks": [],
+    "quality_reports": [
+      {
+        "coverage": {},
+        "generated_at": "2026-09-16T08:00:00.000000+00:00",
+        "id": "qc000000000016",
+        "issues": [
+          {
+            "rule": "topology",
+            "severity": "warning"
+          }
+        ],
+        "linked_map_document_id": "map000000000015",
+        "provenance_registered": true,
+        "rule_status": {},
+        "rules": [
+          "topology"
+        ],
+        "status": "complete"
+      }
+    ],
+    "resources": [
+      {
+        "artifact_role": null,
+        "checksum": null,
+        "crs": "EPSG:4547",
+        "external": false,
+        "format": "csv",
+        "id": "res000000000007",
+        "name": "井头数据.csv",
+        "parsed_summary": {},
+        "path": "payloads/well_heads.csv",
+        "source": "local",
+        "status": "indexed",
+        "tags": [
+          "井头"
+        ],
+        "type": "well_head"
+      },
+      {
+        "artifact_role": null,
+        "checksum": null,
+        "crs": null,
+        "external": false,
+        "format": "segy",
+        "id": "res000000000008",
+        "name": "原始地震.sgy",
+        "parsed_summary": {},
+        "path": "payloads/external/segy/raw.sgy",
+        "source": "local",
+        "status": "indexed",
+        "tags": [],
+        "type": "seismic"
+      }
+    ],
+    "schema_version": 99,
+    "seismic_surveys": [
+      {
+        "created_at": "2026-09-16T08:00:00.000000+00:00",
+        "crossline_range": [
+          500.0,
+          900.0,
+          10.0
+        ],
+        "crs": "",
+        "dt_ms": 2.0,
+        "extent": [],
+        "id": "svy000000000004",
+        "inline_range": [
+          1000.0,
+          1500.0,
+          10.0
+        ],
+        "metadata": {},
+        "n_samples": 751,
+        "name": "镇泾三维",
+        "survey_type": "3d",
+        "t0_ms": null,
+        "updated_at": "2026-09-16T08:00:00.000000+00:00"
+      }
+    ],
+    "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+    },
+    "unknown_section_from_2099": {
+      "keep": true,
+      "payload": [
+        1,
+        2,
+        3
+      ]
+    },
+    "user_vector_layers": [
+      {
+        "crs": "EPSG:4547",
+        "features": [
+          {
+            "geometry": {
+              "coordinates": [
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.5,
+                  2.25
+                ]
+              ],
+              "type": "LineString"
+            },
+            "id": "feat000000000012",
+            "properties": {
+              "confidence": 0.9,
+              "label": "物源方向↗"
+            }
+          }
+        ],
+        "field_schema": {},
+        "geometry_kind": "line",
+        "id": "uvlayer000000000011",
+        "name": "物源线-A",
+        "opacity": 1.0,
+        "style": {},
+        "template": "source_line",
+        "visible": true
+      },
+      {
+        "crs": "",
+        "features": [],
+        "field_schema": {},
+        "geometry_kind": "polygon",
+        "id": "uvlayer000000000013",
+        "name": "相界多边形",
+        "opacity": 1.0,
+        "style": {},
+        "template": "",
+        "visible": true
+      },
+      {
+        "crs": "",
+        "features": [],
+        "field_schema": {},
+        "geometry_kind": "line",
+        "id": "uvlayer000000000014",
+        "name": "自由图层",
+        "opacity": 1.0,
+        "style": {},
+        "template": "",
+        "visible": true
+      }
+    ],
+    "version_sets": [],
+    "well_tables": [],
+    "wells": [
+      {
+        "aliases": [],
+        "coordinate_status": "projected",
+        "created_at": "2026-09-16T08:00:00.000000+00:00",
+        "id": "well000000000002",
+        "kb": 1050.0,
+        "metadata": {},
+        "name": "镇评1",
+        "project_x": 451000.5,
+        "project_y": 3880100.25,
+        "source_crs": "EPSG:4547",
+        "spatial_scope": "workarea",
+        "status": "active",
+        "surface_x": 451000.5,
+        "surface_y": 3880100.25,
+        "surface_z": null,
+        "tags": [],
+        "td": 2350.5,
+        "updated_at": "2026-09-16T08:00:00.000000+00:00",
+        "uwi": "ZP-0001"
+      },
+      {
+        "aliases": [
+          "镇评2"
+        ],
+        "coordinate_status": "missing",
+        "created_at": "2026-09-16T08:00:00.000000+00:00",
+        "id": "well000000000003",
+        "kb": null,
+        "metadata": {},
+        "name": "ZP-2 井",
+        "project_x": null,
+        "project_y": null,
+        "source_crs": "",
+        "spatial_scope": "reference",
+        "status": "active",
+        "surface_x": null,
+        "surface_y": null,
+        "surface_z": null,
+        "tags": [
+          "评价井"
+        ],
+        "td": null,
+        "updated_at": "2026-09-16T08:00:00.000000+00:00",
+        "uwi": ""
+      }
+    ],
+    "workarea": {
+      "boundary": [
+        [
+          100.0,
+          200.0
+        ],
+        [
+          110.0,
+          200.0
+        ],
+        [
+          110.0,
+          210.0
+        ],
+        [
+          100.0,
+          210.0
+        ]
+      ],
+      "boundary_crs": "EPSG:4547",
+      "created_at": "2026-09-16T08:00:00.000000+00:00",
+      "description": "",
+      "display_crs": "EPSG:4326 / WGS84",
+      "horizontal_units": "",
+      "id": "wa000000000001",
+      "metadata": {},
+      "name": "镇泾工区",
+      "project_crs": "EPSG:4547",
+      "updated_at": "2026-09-16T08:00:00.000000+00:00",
+      "vertical_datum": "",
+      "vertical_units": ""
+    },
+    "workstation_reference_layers": []
+  }
+}

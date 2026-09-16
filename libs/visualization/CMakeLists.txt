@@ -21,7 +21,7 @@ target_include_directories(pwb_visualization
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 if(MSVC)
-    target_compile_options(pwb_visualization PRIVATE /W4 /permissive- /wd4251 /wd4275)
+    target_compile_options(pwb_visualization PRIVATE /utf-8 /W4 /permissive- /wd4251 /wd4275)
 else()
     target_compile_options(pwb_visualization PRIVATE -Wall -Wextra -Wpedantic)
 endif()

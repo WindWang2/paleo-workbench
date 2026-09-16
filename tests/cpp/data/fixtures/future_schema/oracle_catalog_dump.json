@@ -1,0 +1,292 @@
+{
+  "_db": "typical.artifacts/metadata/catalog.sqlite",
+  "_fixture": "future_schema",
+  "tables": {
+    "asset_tags": [
+      {
+        "asset_id": "asset_9da084307b35",
+        "tag_id": "tag_55a1a07fb579"
+      }
+    ],
+    "assets": [
+      {
+        "created_at": "2026-09-16T15:04:11.946616+00:00",
+        "current_version_id": "ver_e12062f4479b",
+        "description": "",
+        "id": "asset_9da084307b35",
+        "legacy_resource_id": null,
+        "metadata": {
+          "format": "csv"
+        },
+        "name": "井头数据",
+        "name_search": "井头数据",
+        "trashed": 0,
+        "trashed_at": null,
+        "type": "well_head",
+        "updated_at": "2026-09-16T15:04:11.946616+00:00"
+      },
+      {
+        "created_at": "2026-09-16T15:04:12.007468+00:00",
+        "current_version_id": "ver_cb694943a427",
+        "description": "",
+        "id": "asset_772fabad497b",
+        "legacy_resource_id": null,
+        "metadata": {
+          "external": true,
+          "format": "segy"
+        },
+        "name": "外部地震体",
+        "name_search": "外部地震体",
+        "trashed": 0,
+        "trashed_at": null,
+        "type": "seismic",
+        "updated_at": "2026-09-16T15:04:12.007468+00:00"
+      }
+    ],
+    "lineage": [
+      {
+        "child_version_id": "ver_5769d208b917",
+        "parent_version_id": "ver_8947c5b5fc4b"
+      },
+      {
+        "child_version_id": "ver_c9b739a9cf40",
+        "parent_version_id": "ver_8947c5b5fc4b"
+      },
+      {
+        "child_version_id": "ver_e12062f4479b",
+        "parent_version_id": "ver_5769d208b917"
+      }
+    ],
+    "model_versions": [],
+    "models": [],
+    "run_inputs": [
+      {
+        "run_id": "run_5cafe8507096",
+        "version_id": "ver_8947c5b5fc4b"
+      }
+    ],
+    "run_outputs": [
+      {
+        "run_id": "run_5cafe8507096",
+        "version_id": "ver_c9b739a9cf40"
+      }
+    ],
+    "run_ports": [
+      {
+        "direction": "input",
+        "entity_id": "",
+        "entity_type": "",
+        "note": "",
+        "ordinal": 0,
+        "required": 1,
+        "role": "tops",
+        "run_id": "run_5cafe8507096",
+        "version_id": "ver_8947c5b5fc4b"
+      }
+    ],
+    "runs": [
+      {
+        "created_at": "2026-09-16T15:04:12.024016+00:00",
+        "generator": "paleo-workbench/manual-edit",
+        "id": "run_5cafe8507096",
+        "model_ref": null,
+        "operation": "manual_edit",
+        "parameters": {
+          "actor": "oracle",
+          "as_new_asset": false,
+          "business_role": "tops",
+          "entity_id": "well_fixture",
+          "entity_type": "well"
+        },
+        "status": "complete"
+      }
+    ],
+    "staging_leases": [
+      {
+        "acquired_at": "2026-09-16T23:04:12",
+        "heartbeat_at": "2026-09-16T23:04:12",
+        "kind": "register",
+        "lease_id": "bba1d90c1ab34ad79546e8db292f862b",
+        "target": "typical.artifacts/raw/asset_9da084307b35"
+      }
+    ],
+    "sync_state": [
+      {
+        "key": "schema_version",
+        "value": "1"
+      },
+      {
+        "key": "catalog_revision",
+        "value": "10"
+      },
+      {
+        "key": "index_schema_version",
+        "value": "5"
+      },
+      {
+        "key": "manifest_mtime_ns",
+        "value": "1789571052093776900"
+      }
+    ],
+    "tags": [
+      {
+        "display_name": "标志-Ω",
+        "id": "tag_55a1a07fb579",
+        "metadata": {},
+        "name": "标志-ω"
+      },
+      {
+        "display_name": "版本标记",
+        "id": "tag_541522ed8534",
+        "metadata": {},
+        "name": "版本标记"
+      }
+    ],
+    "version_members": [
+      {
+        "member_role": "index",
+        "name": "index",
+        "ordinal": 0,
+        "rel_path": "index.json",
+        "required": 1,
+        "sha256": null,
+        "size_bytes": null,
+        "version_id": "ver_e12062f4479b"
+      },
+      {
+        "member_role": "attributes",
+        "name": "attrs",
+        "ordinal": 1,
+        "rel_path": "attrs.parquet",
+        "required": 0,
+        "sha256": null,
+        "size_bytes": null,
+        "version_id": "ver_e12062f4479b"
+      }
+    ],
+    "version_tags": [
+      {
+        "tag_id": "tag_541522ed8534",
+        "version_id": "ver_5769d208b917"
+      }
+    ],
+    "versions": [
+      {
+        "asset_id": "asset_9da084307b35",
+        "created_at": "2026-09-16T15:04:11.949611+00:00",
+        "format": "csv",
+        "id": "ver_8947c5b5fc4b",
+        "managed": 1,
+        "metadata": {},
+        "parent_ids": [],
+        "path": "typical.artifacts/raw/asset_9da084307b35/ver_8947c5b5fc4b/well_heads.csv",
+        "run_id": null,
+        "sha256": "814badd3d6fcd8a9452c50bf40ba481cb33fbbf16923eff91ea20079e0e83b21",
+        "size_bytes": 66,
+        "source_uri": "C:/Users/wangj.KEVIN/projects/paleo-workbench/tests/cpp/data/fixtures/typical/payloads/well_heads.csv",
+        "stage": "raw",
+        "trashed": 0,
+        "trashed_at": null,
+        "version_number": 1
+      },
+      {
+        "asset_id": "asset_9da084307b35",
+        "created_at": "2026-09-16T15:04:11.991210+00:00",
+        "format": "csv",
+        "id": "ver_5769d208b917",
+        "managed": 1,
+        "metadata": {
+          "name": "复核"
+        },
+        "parent_ids": [
+          "ver_8947c5b5fc4b"
+        ],
+        "path": "typical.artifacts/raw/asset_9da084307b35/ver_5769d208b917/well_heads_v2.csv",
+        "run_id": null,
+        "sha256": "59dfadd9b5c564ae2c9950d4d87e52d23a569cc0e27f4ee5bed1d422e86156ba",
+        "size_bytes": 117,
+        "source_uri": "C:/Users/wangj.KEVIN/projects/paleo-workbench/tests/cpp/data/fixtures/typical/payloads/well_heads_v2.csv",
+        "stage": "raw",
+        "trashed": 0,
+        "trashed_at": null,
+        "version_number": 2
+      },
+      {
+        "asset_id": "asset_772fabad497b",
+        "created_at": "2026-09-16T15:04:12.008465+00:00",
+        "format": "segy",
+        "id": "ver_cb694943a427",
+        "managed": 0,
+        "metadata": {
+          "external_stat": {
+            "mtime_ns": 1789571051708007000,
+            "size": 659
+          }
+        },
+        "parent_ids": [],
+        "path": "C:/Users/wangj.KEVIN/projects/paleo-workbench/tests/cpp/data/fixtures/typical/payloads/external/segy/raw.sgy",
+        "run_id": null,
+        "sha256": null,
+        "size_bytes": 659,
+        "source_uri": "C:/Users/wangj.KEVIN/projects/paleo-workbench/tests/cpp/data/fixtures/typical/payloads/external/segy/raw.sgy",
+        "stage": "raw",
+        "trashed": 0,
+        "trashed_at": null,
+        "version_number": 1
+      },
+      {
+        "asset_id": "asset_9da084307b35",
+        "created_at": "2026-09-16T15:04:12.027302+00:00",
+        "format": "csv",
+        "id": "ver_c9b739a9cf40",
+        "managed": 1,
+        "metadata": {},
+        "parent_ids": [
+          "ver_8947c5b5fc4b"
+        ],
+        "path": "typical.artifacts/derived/asset_9da084307b35/ver_c9b739a9cf40/tops_edited.json",
+        "run_id": "run_5cafe8507096",
+        "sha256": "5bbafa6636d10e487ad59f4703f1b232c581864c180d6988f2f49e0f326bce92",
+        "size_bytes": 45,
+        "source_uri": "C:/Users/wangj.KEVIN/projects/paleo-workbench/tests/cpp/data/fixtures/typical/payloads/derived/tops_edited.json",
+        "stage": "derived",
+        "trashed": 0,
+        "trashed_at": null,
+        "version_number": 3
+      },
+      {
+        "asset_id": "asset_9da084307b35",
+        "created_at": "2026-09-16T15:04:12.052158+00:00",
+        "format": "csv",
+        "id": "ver_e12062f4479b",
+        "managed": 1,
+        "metadata": {},
+        "parent_ids": [
+          "ver_5769d208b917"
+        ],
+        "path": "typical.artifacts/intermediate/asset_9da084307b35/ver_e12062f4479b/bundle_index.json",
+        "run_id": null,
+        "sha256": "74ea317d375ac058f131c5de9f18f13fbf82d7f1999e5a49ef8a8cb9fabb0e40",
+        "size_bytes": 17,
+        "source_uri": "C:/Users/wangj.KEVIN/projects/paleo-workbench/tests/cpp/data/fixtures/typical/payloads/derived/bundle_index.json",
+        "stage": "intermediate",
+        "trashed": 0,
+        "trashed_at": null,
+        "version_number": 4
+      }
+    ],
+    "working_copies": [
+      {
+        "created_at": "2026-09-16T23:04:12",
+        "display_name": "well_heads.csv",
+        "path": "typical.artifacts/working/ver_8947c5b5fc4b/well_heads.csv",
+        "payload_mtime_ns": 1789571052075264400,
+        "source_size_bytes": 66,
+        "source_version_id": "ver_8947c5b5fc4b",
+        "state": "checked_out",
+        "updated_at": "2026-09-16T23:04:12",
+        "working_id": "wc-79fe59209a01"
+      }
+    ]
+  }
+}

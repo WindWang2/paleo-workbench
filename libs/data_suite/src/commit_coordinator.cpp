@@ -113,6 +113,10 @@ domain::Result<PlacedPayload> place_payload(const fs::path& source,
         }
         placed.sha256 = digest.hex_digest();
         placed.final_path = target;
+        // Windows: an open handle (even read-only) blocks rename — the
+        // streams must close before the atomic tmp → final move.
+        out.close();
+        in.close();
         fs::rename(tmp, target, ec);
         if (ec) {
             std::error_code remove_ec;
@@ -189,13 +193,19 @@ CommitCoordinator::load_journals() const {
             }
         }
         // Request fragments needed to RESUME an interrupted operation.
-        if (!parsed.value("run_id", "").empty()) {
+        // Note: value() only defaults MISSING keys — explicit nulls throw,
+        // so optional fragments are read null-safely here.
+        const auto run_it = parsed.find("run_id");
+        if (run_it != parsed.end() && run_it->is_string() &&
+            !run_it->get<std::string>().empty()) {
             record.resumed_run_id =
-                domain::RunId(parsed.value("run_id", ""));
+                domain::RunId(run_it->get<std::string>());
         }
-        if (!parsed.value("rebind_layer", "").empty()) {
+        const auto rebind_it = parsed.find("rebind_layer");
+        if (rebind_it != parsed.end() && rebind_it->is_string() &&
+            !rebind_it->get<std::string>().empty()) {
             record.resumed_rebind_layer =
-                domain::LayerId(parsed.value("rebind_layer", ""));
+                domain::LayerId(rebind_it->get<std::string>());
         }
         if (parsed.contains("parent_version_ids") &&
             parsed["parent_version_ids"].is_array()) {
@@ -367,7 +377,7 @@ Result<CommitReceiptV1> CommitCoordinator::commit(
     }
 
     DataVersion version;
-    version.id = domain::VersionId(domain::make_id("ver"));
+    version.id = domain::VersionId(domain::make_id("ver_"));
     version.asset_id = request.asset_id;
     version.stage = request.stage;
     version.managed = true;

@@ -1,0 +1,5 @@
+{
+  "_db": "legacy_abs_paths.artifacts/metadata/catalog.sqlite",
+  "_fixture": "legacy_abs_paths",
+  "error": "no catalog.sqlite"
+}

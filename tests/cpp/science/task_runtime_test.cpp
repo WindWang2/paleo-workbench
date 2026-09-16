@@ -13,6 +13,7 @@
 
 using namespace pwb;
 using namespace pwb::science;
+using namespace pwb::workflow;
 
 namespace {
 
@@ -238,7 +239,8 @@ TEST(runtime_destructor_joins_without_hanging_or_duplicate_publishes) {
 TEST(real_coherence_runs_end_to_end_through_the_runtime) {
     TaskRuntime runtime;
     auto publisher = std::make_shared<RecordingPublisher>();
-    const auto algorithm = algorithms::make_coherence_c3("runtime-e2e");
+    auto algorithm = algorithms::make_coherence_c3("runtime-e2e");
+    std::shared_ptr<IAlgorithm> shared_algorithm = std::move(algorithm);
     std::vector<float> pattern(8 * 8 * 16);
     for (std::size_t i = 0; i < pattern.size(); ++i) {
         pattern[i] = std::sin(0.05f * static_cast<float>(i % 97));
@@ -252,7 +254,7 @@ TEST(real_coherence_runs_end_to_end_through_the_runtime) {
     request.input_refs.push_back(VersionRef{"asset-r", "version-r", ""});
     request.input_volumes.push_back(
         VolumeView{owned->data(), {8, 8, 16}, {0, 0, 0}, owned});
-    TaskHandle handle = runtime.submit(algorithm, std::move(request), publisher);
+    TaskHandle handle = runtime.submit(shared_algorithm, std::move(request), publisher);
     handle.wait();
     const TaskSnapshot snapshot = handle.snapshot();
     PWB_CHECK(snapshot.status == TaskStatus::succeeded);

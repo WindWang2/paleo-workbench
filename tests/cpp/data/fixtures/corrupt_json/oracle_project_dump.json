@@ -1,0 +1,4 @@
+{
+  "_file": "typical.paleo.json",
+  "error": "JSONDecodeError: Unterminated string starting at: line 285 column 21 (char 6601)"
+}

@@ -4,7 +4,9 @@
 #include <nlohmann/json.hpp>
 
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace pwb::domain {

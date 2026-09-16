@@ -24,7 +24,7 @@ endif()
 # The vendored SQLite amalgamation lives under data_suite/third_party so it
 # is shared by every consumer of this library.
 target_sources(pwb_catalog PRIVATE ${PWB_VENDOR_DIR}/sqlite/sqlite3.c)
-target_include_directories(pwb_catalog PRIVATE ${PWB_VENDOR_DIR}/sqlite)
+target_include_directories(pwb_catalog PUBLIC ${PWB_VENDOR_DIR}/sqlite)
 if(MSVC)
     set_source_files_properties(${PWB_VENDOR_DIR}/sqlite/sqlite3.c
         PROPERTIES COMPILE_OPTIONS "/W0;/utf-8")
