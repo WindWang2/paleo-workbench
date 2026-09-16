@@ -1,0 +1,13 @@
+{
+  "case": "synth_nan_region",
+  "oracle": "geoviz_seismic.attributes.compute_coherence_c3@08851951",
+  "shape": [
+    8,
+    8,
+    16
+  ],
+  "tolerance_max_abs": 0.002,
+  "win_il": 2,
+  "win_t": 2,
+  "win_xl": 2
+}
