@@ -1,0 +1,5 @@
+{
+  "_db": "minimal.artifacts/metadata/catalog.sqlite",
+  "_fixture": "minimal",
+  "error": "no catalog.sqlite"
+}

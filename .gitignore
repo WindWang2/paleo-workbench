@@ -34,6 +34,8 @@ data/
 # Golden-value fixtures are small, deterministic, and part of the test contract
 !tests/data/
 !tests/data/**
+!tests/cpp/data/
+!tests/cpp/data/**
 # C++ public headers live under pwb/<module>/ — never sample data
 !libs/**/include/pwb/data/
 !libs/**/include/pwb/data/**

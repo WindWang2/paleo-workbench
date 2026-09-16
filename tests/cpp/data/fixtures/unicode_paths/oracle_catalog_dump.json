@@ -1,0 +1,5 @@
+{
+  "_db": "unicode_paths.artifacts/metadata/catalog.sqlite",
+  "_fixture": "unicode_paths",
+  "error": "no catalog.sqlite"
+}

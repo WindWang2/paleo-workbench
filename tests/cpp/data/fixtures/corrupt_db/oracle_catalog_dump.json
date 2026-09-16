@@ -1,0 +1,54 @@
+{
+  "_db": "typical.artifacts/metadata/catalog.sqlite",
+  "_fixture": "corrupt_db",
+  "tables": {
+    "asset_tags": {
+      "error": "file is not a database"
+    },
+    "assets": {
+      "error": "file is not a database"
+    },
+    "lineage": {
+      "error": "file is not a database"
+    },
+    "model_versions": {
+      "error": "file is not a database"
+    },
+    "models": {
+      "error": "file is not a database"
+    },
+    "run_inputs": {
+      "error": "file is not a database"
+    },
+    "run_outputs": {
+      "error": "file is not a database"
+    },
+    "run_ports": {
+      "error": "file is not a database"
+    },
+    "runs": {
+      "error": "file is not a database"
+    },
+    "staging_leases": {
+      "error": "file is not a database"
+    },
+    "sync_state": {
+      "error": "file is not a database"
+    },
+    "tags": {
+      "error": "file is not a database"
+    },
+    "version_members": {
+      "error": "file is not a database"
+    },
+    "version_tags": {
+      "error": "file is not a database"
+    },
+    "versions": {
+      "error": "file is not a database"
+    },
+    "working_copies": {
+      "error": "file is not a database"
+    }
+  }
+}
