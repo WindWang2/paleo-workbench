@@ -29,6 +29,8 @@ function(pwb_data_test target source ctest_name)
 endfunction()
 
 pwb_data_test(data_domain_ids domain_ids_test.cpp data.domain_ids)
+pwb_data_test(data_workspace_codec workspace_codec_test.cpp
+    data.workspace_codec)
 pwb_data_test(data_build_hygiene build_hygiene_test.cpp data.build_hygiene
     --dumpbin "${PWB_DUMPBIN_EXE}"
     "$<TARGET_FILE:data_build_hygiene>"
