@@ -1,0 +1,77 @@
+# CPP-A platform verification on Linux (noble): builds the vendored QGIS 4.2
+# SDK against the conda Qt 6.11 prefix (same recipe as the verified
+# qgis-renderer workflow), then configures/builds/tests the platform with the
+# prebuilt SDK. NOT yet executed in this round (no runner dispatch from the
+# dev session); local Windows verification is authoritative for round 1.
+name: cpp-platform-linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/cpp-platform-qgis]
+    paths:
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'apps/**'
+      - 'libs/qgis/**'
+      - 'libs/ui/**'
+      - 'libs/application/**'
+      - 'libs/tool_policy/**'
+      - 'tests/cpp/platform/**'
+      - '.github/workflows/cpp-platform-linux.yml'
+
+jobs:
+  linux-app:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      QT_PREFIX: /tmp/qgisqt
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: System libraries (Qt6 / QGIS build deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build build-essential flex bison \
+            qt6-base-dev libqt6svg6-dev qt6-5compat-dev qt6-multimedia-dev \
+            qt6-declarative-dev qt6-tools-dev libqt6opengl6-dev libqt6concurrent6 \
+            libqca-qt6-dev libqscintilla2-qt6-dev qtkeychain-qt6-dev \
+            libgdal-dev libgeos-dev libproj-dev libsqlite3-dev libspatialite-dev \
+            libpq-dev libxml2-dev libexpat1-dev libzip-dev zlib1g-dev \
+            libgsl-dev lib protobuf-dev libprotobuf-c-dev protobuf-compiler
+
+      - name: Create the qgisqt runtime env (Qt 6.11.1 incl. Core5Compat)
+        run: |
+          # Same conda prefix strategy as qgis-renderer.yml: ONE Qt for both
+          # the vendored QGIS build and the platform build/run.
+          wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/mf.sh
+          bash /tmp/mf.sh -b -p /tmp/mf
+          /tmp/mf/bin/conda create -y -p "$QT_PREFIX" -c conda-forge \
+            python=3.12 qt6-main=6.11.1 pyside6
+
+      - name: Build the vendored QGIS SDK (2 jobs, only when cache misses)
+        run: |
+          cmake -S native/qgis_render_bridge -B build/qgis-bridge \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DPALEO_WITH_QGIS_RENDERER=ON \
+            -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
+            -DPALEO_QGIS_BUILD_DIR="$GITHUB_WORKSPACE/build/qgis-vendor"
+          cmake --build build/qgis-bridge --target paleo_qgis_vendor --parallel 2
+
+      - name: Configure + build the platform
+        run: |
+          cmake --preset linux-gcc-release \
+            -DPALEO_QGIS_SDK_DIR="$GITHUB_WORKSPACE/build/qgis-vendor/output" \
+            -DPALEO_QGIS_BUILD_DIR="$GITHUB_WORKSPACE/build/qgis-vendor" \
+            -DCMAKE_PREFIX_PATH="$QT_PREFIX"
+          cmake --build build/cpp-platform --parallel 2
+
+      - name: Test (platform.* suite, offscreen)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ctest --test-dir build/cpp-platform -C Release --output-on-failure \
+            --no-tests=error --timeout 300 -R '^platform\.'

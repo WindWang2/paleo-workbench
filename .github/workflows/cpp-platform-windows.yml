@@ -1,0 +1,45 @@
+# CPP-A platform verification on Windows (self-hosted runner with the
+# documented toolchain; see docs/development/cpp-platform/00-baseline.md).
+# Manual dispatch + path filter. NOT yet executed in this round — local
+# verification is authoritative until the runner exists.
+name: cpp-platform-windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/cpp-platform-qgis]
+    paths:
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'apps/**'
+      - 'libs/qgis/**'
+      - 'libs/ui/**'
+      - 'libs/application/**'
+      - 'libs/tool_policy/**'
+      - 'tests/cpp/platform/**'
+      - '.github/workflows/cpp-platform-windows.yml'
+
+jobs:
+  windows-app:
+    runs-on: [self-hosted, windows, cpp-platform]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure (single Qt ABI 6.8.0 / MSVC 2022)
+        shell: powershell
+        run: |
+          powershell -File scripts/cpp-migration/Invoke-PlatformBuild.ps1 -Action Configure -Configuration Release
+
+      - name: Build (2 jobs, shared resource gate)
+        shell: powershell
+        run: |
+          powershell -File scripts/cpp-migration/Invoke-PlatformBuild.ps1 -Action Build -Configuration Release
+
+      - name: Test (platform.* suite, offscreen)
+        shell: powershell
+        run: |
+          powershell -File scripts/cpp-migration/Invoke-PlatformBuild.ps1 -Action Test -Configuration Release -TestRegex '^platform\.'
