@@ -34,6 +34,9 @@ data/
 # Golden-value fixtures are small, deterministic, and part of the test contract
 !tests/data/
 !tests/data/**
+# C++ public headers live under pwb/<module>/ — never sample data
+!libs/**/include/pwb/data/
+!libs/**/include/pwb/data/**
 
 # Nested engine repo is tracked as a submodule (see .gitmodules)
 # geo-viz-engine/
