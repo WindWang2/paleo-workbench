@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdio>
 #include <ctime>
+#include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -274,6 +276,12 @@ Result<AlgorithmResultV1> CoherenceC3Algorithm::run(const AlgorithmRequestV1& re
         "lambda_max estimated by " + std::to_string(iterations) + " power iterations",
         "info"});
     return result;
+}
+
+} // namespace (anonymous utilities + algorithm class)
+
+std::unique_ptr<IAlgorithm> make_coherence_c3(std::string build_identity) {
+    return std::make_unique<CoherenceC3Algorithm>(std::move(build_identity));
 }
 
 } // namespace pwb::science::algorithms

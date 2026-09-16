@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <set>
 
@@ -234,10 +235,15 @@ std::vector<Diagnostic> validate_request(const AlgorithmDescriptor& descriptor,
                    "parameter '" + spec.name + "' value '" + text + "' is not a JSON scalar");
             continue;
         }
-        const bool kind_ok = [kind = scalar.kind, type = spec.type]() {
+        const bool kind_ok = [kind = scalar.kind, type = spec.type,
+                              number = scalar.number]() {
             switch (type) {
             case ParamSpec::Type::integer:
-                return kind == Scalar::Kind::integer;
+                // Pydantic-lax parity: an integral double ("5.0") is a
+                // valid integer; a fractional one is not.
+                return kind == Scalar::Kind::integer ||
+                       (kind == Scalar::Kind::number &&
+                        std::trunc(number) == number);
             case ParamSpec::Type::number:
                 return kind == Scalar::Kind::integer || kind == Scalar::Kind::number;
             case ParamSpec::Type::boolean:
@@ -274,10 +280,15 @@ Result<long long> request_param_integer(const AlgorithmRequestV1& request, const
     const auto it = request.params_json.find(spec.name);
     const std::string& text = it == request.params_json.end() ? spec.default_json : it->second;
     Scalar scalar;
-    if (!parse_scalar(text, scalar) || scalar.kind != Scalar::Kind::integer) {
+    if (!parse_scalar(text, scalar)) {
         return AlgorithmError{{param_error(spec.name, "not_integer", "expected JSON integer")}};
     }
-    return scalar.integer;
+    if (scalar.kind == Scalar::Kind::integer) return scalar.integer;
+    if (scalar.kind == Scalar::Kind::number &&
+        std::trunc(scalar.number) == scalar.number) {
+        return static_cast<long long>(scalar.number);
+    }
+    return AlgorithmError{{param_error(spec.name, "not_integer", "expected JSON integer")}};
 }
 
 Result<double> request_param_number(const AlgorithmRequestV1& request, const ParamSpec& spec) {

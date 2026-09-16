@@ -13,7 +13,6 @@ public:
     InMemoryVolume(VolumeGeometryV1 geometry, const float* data,
                    std::shared_ptr<const void> lifetime)
         : geometry_(std::move(geometry)), data_(data), lifetime_(std::move(lifetime)) {
-        geometry_.ownership = VolumeOwnership::none;
     }
 
     [[nodiscard]] const VolumeGeometryV1& geometry() const override { return geometry_; }
@@ -56,6 +55,7 @@ private:
 std::unique_ptr<ISeismicVolume> make_in_memory_volume(VolumeGeometryV1 geometry,
                                                       const float* data,
                                                       std::shared_ptr<const void> lifetime) {
+    geometry.ownership = VolumeOwnership::none; // borrowed view, never owning
     return std::make_unique<InMemoryVolume>(std::move(geometry), data, std::move(lifetime));
 }
 

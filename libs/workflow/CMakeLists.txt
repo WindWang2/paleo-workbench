@@ -23,7 +23,7 @@ target_link_libraries(pwb_workflow
         Pwb::Science
 )
 if(MSVC)
-    target_compile_options(pwb_workflow PRIVATE /W4 /permissive- /wd4251 /wd4275)
+    target_compile_options(pwb_workflow PRIVATE /utf-8 /W4 /permissive- /wd4251 /wd4275)
 else()
     target_compile_options(pwb_workflow PRIVATE -Wall -Wextra -Wpedantic)
 endif()

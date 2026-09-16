@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -153,13 +155,18 @@ TEST(out_of_bounds_and_mismatched_spans_are_rejected_without_writes) {
 
     std::vector<float> out(16);
     std::vector<float> guard(16, -7.0f);
-    for (const std::int64_t bad : {std::int64_t{-1}, 4, 5, 100}) {
+    for (const std::int64_t bad :
+         {std::int64_t{-1}, std::int64_t{4}, std::int64_t{5},
+          std::int64_t{100}}) {
         std::copy(guard.begin(), guard.end(), out.begin());
         PWB_CHECK(volume->read_slice(VolumeAxis::inline_, bad, out) == 0);
         PWB_CHECK(out == guard); // untouched on rejection
     }
-    for (const std::int64_t bad : {std::int64_t{-1}, 4}) {
+    for (const std::int64_t bad : {std::int64_t{-1}, std::int64_t{4}}) {
         PWB_CHECK(volume->read_slice(VolumeAxis::crossline, bad, out) == 0);
+    }
+    // NOTE: the sample axis has 8 planes here, so 4 is in-bounds for it.
+    for (const std::int64_t bad : {std::int64_t{-1}, std::int64_t{8}}) {
         PWB_CHECK(volume->read_slice(VolumeAxis::sample, bad, out) == 0);
     }
     // Wrong span size.
@@ -214,7 +221,9 @@ TEST(slice_lifetime_guard_keeps_storage_alive_and_reads_are_not_cached) {
         PWB_CHECK(out[0] == 12345.0f);
         owner.reset(); // drop the caller's reference
         PWB_CHECK(!watch.expired()); // volume lifetime guard still owns it
-        PWB_CHECK(volume->read_slice(VolumeAxis::sample, 0, out) == 16);
+        std::vector<float> sample_out(16);
+        PWB_CHECK(volume->read_slice(VolumeAxis::sample, 0, sample_out) ==
+                  16);
     }
     PWB_CHECK(watch.expired()); // released with the volume
 }
@@ -254,14 +263,15 @@ TEST(indexed8_matches_oracle_semantics) {
         PWB_CHECK(mapped.pixels[2] == 255);
     }
     { // constant slice is degenerate
-        const IndexedSlice mapped = map_slice_to_indexed8({3.5f, 3.5f});
+        const std::vector<float> constant = {3.5f, 3.5f};
+        const IndexedSlice mapped = map_slice_to_indexed8(constant);
         PWB_CHECK(mapped.degenerate);
         PWB_CHECK(mapped.value_min == 0.0 && mapped.value_max == 0.0);
-        PWB_CHECK(mapped.pixels == std::vector<std::uint8_t>{0, 0});
+        PWB_CHECK((mapped.pixels == std::vector<std::uint8_t>{0, 0}));
     }
     { // all-invalid slice is degenerate
-        const IndexedSlice mapped =
-            map_slice_to_indexed8({std::nanf(""), std::nanf("")});
+        const std::vector<float> invalid = {std::nanf(""), std::nanf("")};
+        const IndexedSlice mapped = map_slice_to_indexed8(invalid);
         PWB_CHECK(mapped.degenerate);
     }
 }
@@ -312,8 +322,14 @@ TEST(tiny_sgy_fixture_slices_and_indexed8_match_python_oracle) {
     PWB_CHECK(out == expected_sample);
 
     // indexed8 color mapping against the Python oracle (inline plane 3).
-    const std::vector<std::uint8_t> expected_indexed =
-        fixture_io::read_f32(dir / "expected_inline_indexed8.f32"); // byte payload
+    // The oracle file stores the indexed bytes as float32 values.
+    const std::vector<float> expected_indexed_f32 =
+        fixture_io::read_f32(dir / "expected_inline_indexed8.f32");
+    std::vector<std::uint8_t> expected_indexed;
+    expected_indexed.reserve(expected_indexed_f32.size());
+    for (const float value : expected_indexed_f32) {
+        expected_indexed.push_back(static_cast<std::uint8_t>(value));
+    }
     std::vector<float> inline_plane(expected_inline.size());
     PWB_CHECK(volume->read_slice(VolumeAxis::inline_, 3, inline_plane) ==
               inline_plane.size());
