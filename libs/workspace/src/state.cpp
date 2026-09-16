@@ -224,7 +224,7 @@ MappingWorkspaceState MappingWorkspaceState::from_json(
         state.tree = *tree;
     }
     const auto maturity = data.find("artifact_maturity");
-    if (maturity != maturity.end() && maturity->is_object()) {
+    if (maturity != data.end() && maturity->is_object()) {
         for (auto member = maturity->begin(); member != maturity->end();
              ++member) {
             if (member->is_string() && maturity_known(member->get<std::string>())) {
@@ -240,7 +240,7 @@ MappingWorkspaceState MappingWorkspaceState::from_json(
         }
     }
     const auto input_set = data.find("compilation_input_set");
-    if (input_set != input_set.end() && input_set->is_object()) {
+    if (input_set != data.end() && input_set->is_object()) {
         for (auto member = input_set->begin(); member != input_set->end();
              ++member) {
             if (member->is_string()) {
@@ -265,11 +265,11 @@ Json MappingWorkspaceState::to_json() const {
         }
     }
     out["stage_states"] = std::move(states);
-    Json memberships = Json::object();
+    Json members_json = Json::object();
     for (const auto& [layer_id, binding] : memberships) {
-        memberships[layer_id] = binding_to_dict(binding);
+        members_json[layer_id] = binding_to_dict(binding);
     }
-    out["memberships"] = std::move(memberships);
+    out["memberships"] = std::move(members_json);
     out["tree"] = tree;
     Json maturity = Json::object();
     for (const auto& [key, value] : artifact_maturity) {

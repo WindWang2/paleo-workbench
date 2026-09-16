@@ -4,10 +4,12 @@
 #pragma once
 
 #include "pwb/domain/diagnostics.hpp"
+#include "pwb/domain/errors.hpp"
 #include "pwb/domain/json.hpp"
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace pwb::project {
 

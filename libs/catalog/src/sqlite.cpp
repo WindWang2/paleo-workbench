@@ -6,6 +6,7 @@ namespace pwb::catalog {
 
 using pwb::domain::DataError;
 using pwb::domain::ErrorCode;
+using pwb::domain::Json;
 using pwb::domain::Result;
 
 namespace {

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "pwb/domain/errors.hpp"
+#include "pwb/domain/json.hpp"
 
 #include <sqlite3.h>
 

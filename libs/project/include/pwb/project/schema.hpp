@@ -24,6 +24,8 @@
 
 namespace pwb::project {
 
+using pwb::domain::Json;
+
 enum class FieldType {
     String,          // "x" — null/other → error
     Int,             // pydantic int (lax integral double ok)
