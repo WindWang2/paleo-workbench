@@ -1,0 +1,8 @@
+add_executable(pwb-migrate main.cpp)
+target_compile_features(pwb-migrate PRIVATE cxx_std_20)
+target_link_libraries(pwb-migrate PRIVATE Pwb::Data)
+target_compile_definitions(pwb-migrate PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+if(MSVC)
+    target_compile_options(pwb-migrate PRIVATE /utf-8 /W4)
+endif()
+install(TARGETS pwb-migrate RUNTIME DESTINATION tools)
