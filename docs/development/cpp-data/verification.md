@@ -53,6 +53,8 @@
 | 13:4x | exit 75 | 4.66 |
 | 13:5x | exit 75 | 4.55 |
 | 14:0x | exit 75 | 4.31 |
+| 14:2x | exit 75 | 3.19 |
+| 14:4x | exit 75 | 4.20 |
 
 可用内存（含 standby 的 AvailableBytes）亦仅 ~4.2 GiB——机器被并行会话真实
 占满（top: 多个 ZCode/opencode/ChatGPT/企业应用实例）。按共同协议不绕过
