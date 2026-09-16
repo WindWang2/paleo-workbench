@@ -43,6 +43,8 @@ pwb_data_test(data_commit_coordinator commit_coordinator_test.cpp
     data.commit_coordinator)
 pwb_data_test(data_commit_recovery commit_recovery_test.cpp
     data.commit_recovery)
+pwb_data_test(data_oracle_compare oracle_compare_test.cpp
+    data.oracle_compare)
 pwb_data_test(data_cli_inspect cli_inspect_test.cpp data.cli_inspect
     --exe "$<TARGET_FILE:pwb-inspect>")
 pwb_data_test(data_cli_migrate cli_migrate_test.cpp data.cli_migrate

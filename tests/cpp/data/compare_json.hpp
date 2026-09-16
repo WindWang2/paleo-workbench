@@ -19,6 +19,15 @@ using nlohmann::ordered_json;
 inline std::optional<std::string> json_compare(const ordered_json& left,
                                                const ordered_json& right,
                                                const std::string& path = "$") {
+    // Integer domain compares by value across signedness (Python ints are
+    // unbounded; sqlite/JSON round-trips flip signed/unsigned freely).
+    if (left.is_number_integer() && right.is_number_integer()) {
+        if (left.get<std::int64_t>() != right.get<std::int64_t>()) {
+            return path + ": integer mismatch (" + left.dump() + " vs " +
+                   right.dump() + ")";
+        }
+        return std::nullopt;
+    }
     if (left.type() != right.type()) {
         return path + ": type mismatch (" +
                std::string(left.type_name()) + " vs " +
