@@ -31,6 +31,9 @@ endfunction()
 pwb_data_test(data_domain_ids domain_ids_test.cpp data.domain_ids)
 pwb_data_test(data_workspace_codec workspace_codec_test.cpp
     data.workspace_codec)
+pwb_data_test(data_diagnostics diagnostics_test.cpp data.diagnostics)
+pwb_data_test(data_catalog_read catalog_read_test.cpp data.catalog_read)
+pwb_data_test(data_project_paths project_paths_test.cpp data.project_paths)
 pwb_data_test(data_build_hygiene build_hygiene_test.cpp data.build_hygiene
     --dumpbin "${PWB_DUMPBIN_EXE}"
     "$<TARGET_FILE:data_build_hygiene>"
