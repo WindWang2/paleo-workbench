@@ -291,6 +291,7 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
 
     root = Path(context.project_path).parent if context.project_path else None
     output_dir = parameters.get("output_dir")
+    temp_root: Path | None = None
     if output_dir is not None:
         output_dir = _resolve_volume_path(context, output_dir)
     elif root is not None:
@@ -299,9 +300,13 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
         # /tmp-only.
         output_dir = str(_artifact_root(context) / "derived" / "attr.zarr")
     else:
+        # 无工程的降级路径（V13 W-D）：临时目录按 EPHEMERAL 口径管理——
+        # 失败必清；成功后若产物已被 catalog 收编（move 走）也清掉空壳，
+        # 不留 p2-attribute-* 孤儿。
         import tempfile
 
-        output_dir = str(Path(tempfile.mkdtemp(prefix="p2-attribute-")) / "attr.zarr")
+        temp_root = Path(tempfile.mkdtemp(prefix="p2-attribute-"))
+        output_dir = str(temp_root / "attr.zarr")
     provider_parameters = {"output_dir": output_dir}
     if parameters.get("roi") is not None:
         provider_parameters["roi"] = dict(parameters["roi"])
@@ -310,13 +315,24 @@ def _compute_attribute(context: ActionContext, parameters: dict) -> dict:
     provider_context = context.provider_context(
         workspace_root=str(root) if root is not None else str(Path.cwd())
     )
-    result = execute_provider(
-        _registry(),
-        f"seismic.attribute.{parameters.get('attribute', 'c3')}",
-        inputs={"volume": volume},
-        parameters=provider_parameters,
-        context=provider_context,
-    )
+    try:
+        result = execute_provider(
+            _registry(),
+            f"seismic.attribute.{parameters.get('attribute', 'c3')}",
+            inputs={"volume": volume},
+            parameters=provider_parameters,
+            context=provider_context,
+        )
+    except BaseException:
+        if temp_root is not None:
+            import shutil
+
+            shutil.rmtree(temp_root, ignore_errors=True)
+        raise
+    if temp_root is not None and not temp_root.exists():
+        pass  # 产物已被移动入库，目录随之消失
+    elif temp_root is not None and not any(temp_root.iterdir()):
+        temp_root.rmdir()
     artifacts = result.to_dict()["artifacts"]
     values = [a.value for a in result.artifacts if a.value is not None]
     return {

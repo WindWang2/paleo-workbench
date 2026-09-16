@@ -356,7 +356,7 @@ def test_working_copy_commit_records_run_with_output(qtbot, tmp_path, core, monk
     page._new_version_from_asset(resource)
     _wait_catalog_copy_job(qtbot, page, "已提交新版本")
 
-    runs = [r for r in core.list_runs() if r.operation == "working_copy_commit"]
+    runs = [r for r in core.list_runs() if r.operation == "manual_edit"]
     assert len(runs) == 1
     assert runs[0].input_version_ids == [f"ver_{resource.id}"]
     assert runs[0].parameters["stage"] == "derived"
@@ -385,7 +385,7 @@ def test_working_copy_commit_survives_run_booking_failure(
     page._new_version_from_asset(resource)
     _wait_catalog_copy_job(qtbot, page, "已提交新版本")
 
-    assert [r for r in core.list_runs() if r.operation == "working_copy_commit"] == []
+    assert [r for r in core.list_runs() if r.operation == "manual_edit"] == []
     asset = core.get_asset(resource.id)
     assert asset.current_version_id != f"ver_{resource.id}"  # commit landed anyway
     assert "已提交新版本" in page.data_toolbar.operation_status_label.text()

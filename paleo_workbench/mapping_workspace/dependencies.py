@@ -147,7 +147,12 @@ class MappingDependencyService:
     # -- 内部：版本查询辅助 -----------------------------------------------------
 
     def _asset_current_version(self, catalog, asset_id: str) -> str | None:
-        """资产当前版本 id（list_versions 最大 version_number）。"""
+        """资产当前版本 id（list_versions 最大 version_number）。
+
+        V13 修复：``DataVersionRef`` 的字段是 ``version_id``——此前读
+        ``id``（恒空）导致 current 永远判定为无 → 真 stale 被吞成
+        CURRENT；``version_number`` 缺失时按列表末位兜底（注册序=升序）。
+        """
         if catalog is None or not asset_id:
             return None
         try:
@@ -158,10 +163,15 @@ class MappingDependencyService:
         best_number = -1
         for version in versions:
             number = int(getattr(version, "version_number", 0) or 0)
-            if number > best_number:
-                best_number = number
-                best = str(getattr(version, "id", "") or "")
-        return best
+            vid = str(
+                getattr(version, "version_id", None)
+                or getattr(version, "id", "") or "")
+            # >= 而非 >：同号（含全 0 的无号 ref）时取后见者——注册序即
+            # 升序，末位为最新；有号时严格按最大号选。
+            if best is None or number >= best_number:
+                best = vid
+                best_number = max(number, best_number)
+        return best or None
 
     def _version_info(self, catalog, version_id: str):
         if catalog is None or not version_id:
@@ -255,7 +265,15 @@ class MappingDependencyService:
                     FreshnessStatus.UNKNOWN, "任务尚无插值结果版本"))
                 continue
             info = self._version_info(catalog, grid_version)
-            run_id = str(getattr(info, "run_id", "") or "") if info is not None else ""
+            # DataVersionRef 的字段是 producing_run_id（V13 修复：此前读
+            # run_id 恒为空 → 真实 adapter 下 factor 评估永远 UNKNOWN，
+            # 把真 stale 谎报成不可验证——InMemoryCatalog 测试同样返回
+            # DataVersionRef，旧测试恰好没走 mapping_dependencies 的
+            # factor 分支才未暴露）。
+            run_id = str(
+                getattr(info, "producing_run_id", None)
+                or getattr(info, "run_id", "")
+                or "") if info is not None else ""
             inputs = self._run_input_versions(catalog, run_id)
             if not inputs:
                 results.append(ArtifactFreshness(

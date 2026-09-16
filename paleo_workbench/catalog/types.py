@@ -94,6 +94,7 @@ class DataVersionRef:
         "integrity",
         "legacy_resource_id",
         "trashed",
+        "version_number",
     )
 
     def __init__(
@@ -114,6 +115,7 @@ class DataVersionRef:
         integrity: IntegrityStatus | str = IntegrityStatus.UNKNOWN,
         legacy_resource_id: str | None = None,
         trashed: bool = False,
+        version_number: int = 0,
     ) -> None:
         self.asset_id = asset_id
         self.version_id = version_id
@@ -135,6 +137,11 @@ class DataVersionRef:
         # Tombstone flag mirrored from the canonical DataVersion (H5-a: trashed
         # versions must never be resolved as production inputs).
         self.trashed = trashed
+        # V13：镜像 DataVersion.version_number（additive，默认 0 = 未知）。
+        # 此前缺失导致依赖方（如 mapping _asset_current_version 的
+        # max-by-number 选择）在真实 adapter 下永远选中首个版本，把真
+        # stale 判成 CURRENT。
+        self.version_number = int(version_number or 0)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +159,7 @@ class DataVersionRef:
             "format": self.format,
             "integrity": self.integrity.value,
             "legacy_resource_id": self.legacy_resource_id,
+            "version_number": self.version_number,
         }
 
     @classmethod
@@ -171,6 +179,7 @@ class DataVersionRef:
             format=data.get("format", ""),
             integrity=data.get("integrity", IntegrityStatus.UNKNOWN),
             legacy_resource_id=data.get("legacy_resource_id"),
+            version_number=data.get("version_number", 0),
         )
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid

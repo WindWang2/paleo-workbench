@@ -49,9 +49,22 @@ MATURITY_ORDER: dict[str, int] = {
 }
 
 
+#: 图层源绑定口径词汇（V13 W-I）。空字符串 = 未绑定（UNKNOWN）。
+BINDING_CATALOG_VERSION = "catalog_version"
+BINDING_CONTENT_FINGERPRINT = "content_fingerprint"
+BINDING_KINDS: tuple[str, ...] = (BINDING_CATALOG_VERSION, BINDING_CONTENT_FINGERPRINT)
+
+
 @dataclass
 class LayerMembershipRecord:
-    """图层 → 角色/任务/约束类型的成员资格记录（领域元数据，非运行时树）。"""
+    """图层 → 角色/任务/约束类型的成员资格记录（领域元数据，非运行时树）。
+
+    V13 W-I：``source_version_id`` 从"一处生产写入的裸字符串"升级为完整的
+    MappingLayerSourceBinding 语义——``source_asset_id``（资产反查）、
+    ``binding_kind``（绑定口径）与 ``bound_at`` 为 additive 可选字段，
+    旧工程缺省为空（UNKNOWN，不伪造）。绑定真源仍是本记录（Python 域
+    元数据），QGIS 侧经发布快照携带（不另建平行权威）。
+    """
 
     layer_id: str
     role: LayerRole = LayerRole.LEGACY_UNCLASSIFIED
@@ -64,6 +77,13 @@ class LayerMembershipRecord:
     #: 溯源钉住的 catalog DataVersion（RAW→DERIVED 草稿链的输入版本）。
     source_version_id: str = ""
     created_at: str = ""
+    #: 绑定的 catalog DataAsset（V13；可从 version 反查，显式存省一次跳查）。
+    source_asset_id: str = ""
+    #: 绑定口径：catalog_version（数据层钉版本）/ content_fingerprint
+    #: （约束指纹）/ 空=未绑定（UNKNOWN，不猜测）。
+    binding_kind: str = ""
+    #: 绑定建立时间（ISO；空=历史记录，未知）。
+    bound_at: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -74,6 +94,9 @@ class LayerMembershipRecord:
             "created_stage": self.created_stage,
             "source_version_id": self.source_version_id,
             "created_at": self.created_at,
+            "source_asset_id": self.source_asset_id,
+            "binding_kind": self.binding_kind,
+            "bound_at": self.bound_at,
         }
 
     @classmethod
@@ -90,6 +113,9 @@ class LayerMembershipRecord:
             created_stage=str(data.get("created_stage") or ""),
             source_version_id=str(data.get("source_version_id") or ""),
             created_at=str(data.get("created_at") or ""),
+            source_asset_id=str(data.get("source_asset_id") or ""),
+            binding_kind=str(data.get("binding_kind") or ""),
+            bound_at=str(data.get("bound_at") or ""),
         )
 
 

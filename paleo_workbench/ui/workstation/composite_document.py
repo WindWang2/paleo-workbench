@@ -1356,6 +1356,10 @@ class CompositeDocument(QWidget):
         self.stage_controller.set_snapshot_provider(
             lambda: list(self.layer_manager._layers))
         self.stage_controller.set_target_resolver(self._resolve_editing_target)
+        # V13 W-P：目标图层存在性探针——阶段往返/工程重开时恢复用户为本
+        # 阶段显式选择的编辑目标（此前被 profile 重算无条件覆盖）。
+        self.stage_controller.set_target_validator(
+            lambda layer_id: self.layer_manager.layer_by_id(layer_id) is not None)
         # 编辑目标信号 → 编辑权威 active layer（阶段切换重指派；用户点选经
         # set_active_target 记录，无回环）。
         self.stage_controller.active_target_changed.connect(self._apply_active_target)
@@ -3474,6 +3478,9 @@ class CompositeDocument(QWidget):
                 f"（{reason}）" if not allowed and reason else ""),
             "新鲜度": f"{freshness.glyph} {freshness.label}",
         }
+        # V13 W-M（map→data）：数据来源行——绑定版本/资产/生成 run/上游
+        # 输入（诚实降级：无绑定不显示，不编造）。
+        rows.update(self._layer_data_source_rows(layer_id))
         # V10 M11：几何/CRS/会话/选择（图层级事实，O(1)）。
         layer = self.edit_controller.layer(layer_id)
         if layer is not None:
@@ -3493,6 +3500,50 @@ class CompositeDocument(QWidget):
         if layer_id == str(self.edit_controller.active_layer_id or ""):
             rows["推荐动作"] = self._recommended_action_text(layer_id)
         return rows
+
+    def _layer_data_source_rows(self, layer_id: str) -> dict[str, str]:
+        """图层数据来源行（V13 W-M）：绑定版本 → 资产/阶段/run/上游输入。
+
+        只读、O(1) 点查（get_version/get_run），无目录或未绑定时返回空
+        ——检查器不显示编造的来源。
+        """
+        record = self.stage_controller.state.membership(str(layer_id))
+        version_id = str(getattr(record, "source_version_id", "") or "")
+        if not version_id:
+            return {}
+        try:
+            from paleo_workbench.catalog.runtime import get_catalog_service
+
+            service = get_catalog_service()
+            if service is None:
+                return {}
+            try:
+                version = service.get_version(version_id)
+            except Exception:
+                # get_version 对未知 id 抛 CatalogError（不返回 None）——
+                # 回收/丢失的钉定版本如实显示，不静默吞掉。
+                return {"数据来源": "版本缺失（可能已被回收）"}
+            asset = service.get_asset(version.asset_id)
+            rows = {
+                "数据来源": (f"{asset.name if asset else version.asset_id} "
+                             f"v{version.version_number}"
+                             f"（{version.stage.value}）"),
+            }
+            if version.run_id:
+                run = service.get_run(version.run_id)
+                if run is not None:
+                    rows["生成方式"] = (
+                        f"run {run.operation}"
+                        + ("（人工修改）" if run.operation == "manual_edit"
+                           else ""))
+                    inputs = list(run.input_version_ids or [])
+                    if inputs:
+                        rows["上游输入"] = f"{len(inputs)} 个输入版本"
+            rows["校验和"] = (version.sha256[:12] + "…"
+                              if version.sha256 else "—")
+            return rows
+        except Exception:
+            return {}
 
     def _recommended_action_text(self, layer_id: str) -> str:
         """推荐动作行（V10 M11）：preferred 捕获工具 / toggle_editing 结论。

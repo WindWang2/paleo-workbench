@@ -302,9 +302,12 @@ def _check_run_outputs(report: AuditReport, runs) -> None:
     # #1219: map_product_assembly and interchange.import book runs whose
     # entire purpose is one output version; a terminal-completed run with
     # zero outputs there is a ghost (crash between booking and registration).
+    # V13: manual_edit 取代 working_copy_commit（两个名字都保留监控——
+    # 历史工程里仍有旧 operation 的既有 run）。
     _ALWAYS_PRODUCING = {
         "materialize",
         "working_copy_commit",
+        "manual_edit",
         "map_product_assembly",
         "interchange.import",
     }
