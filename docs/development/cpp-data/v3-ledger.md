@@ -10,7 +10,7 @@
 | V3-3 | 实现：repository 增 publish_result_transaction/finish_run_transaction（单事务）；run_coordinator.cpp（登记/发布/终态/恢复/回滚）；session.cpp；共享助手 coordinator_detail.hpp；commit() 增 pending 闸门+幂等键类型守卫+回滚后重试语义（v1 死代码意图转正）；CLI 查询模式+--recover；pwb-data-loop 例子；readback_v3.py；5 个新测试文件 | 对象级编译全绿；门禁内 configure exit 0；build 暴露基线 MSVC 专属代码 → 修 gmtime/windows.h/ldd/cli 引号/路径字面量（V3-4） | 通过（源码级） | 门禁内构建+全量测试 |
 | V3-4 | Linux 可移植性修复（§5 of v3-verification）；oracle_resolve.json 本机再生成（catalog/model dump 逐字节不变）；例子双 run 语义修正（manual_edit run 关联编辑、算法 run 单结果——同 run 混用两路径被 publish 正确拒绝） | 门禁内 build exit 0；ctest 首轮 11/19 → 修 journal 漏写 new_version_id（真 bug）、回滚后重试语义、例子 staged 目录、readback immutable 零足迹（-shm 创建根因） | 通过（迭代） | 全量 ctest |
 | V3-5 | 全量 `data.*` 19 项门禁内运行 + 关键链路复验 | 发现并修复只读 SQLite 打开创建 `-shm/-wal` 破坏零足迹语义（`Database::open` ReadOnly 改 `immutable=1`，活跃 WAL 时回退保正确性）；一次构建输出被 grep 过滤掩盖门禁拒绝（如实记录）；**ctest 19/19 exit 0（0 失败 0 skip）；关键链路 9 项复验 9/9 exit 0** | 通过 | 交付文档收口 |
-| V3-6 | v3-verification/v3-handoff/v3-ledger 定稿；实现提交 **a228bafb**；最终 handoff SHA 公布 | 文档与本文件一致；SHA 公布于 handoff | 通过 | 交付 |
+| V3-6 | v3-verification/v3-handoff/v3-ledger 定稿；实现 `a228bafb`、零足迹修复+文档 `50075fb0`、收口提交见 `git log -1`（交付公告同步公布） | ctest 19/19 与复验 9/9 记录回填 §4；SHA 表见 v3-handoff §1 | 通过 | 交付 |
 
 恢复命令（若中断）：
 
