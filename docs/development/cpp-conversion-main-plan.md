@@ -47,6 +47,28 @@
 - 井间/三维渲染、多视图联动、更多属性与完整工作流编排（后续版本）。
 - Python 侧功能冻结——转换期内 Python 产品继续可用。
 
+## 全面转换阶梯（M6-M12，目标：替换全部 Python 产品）
+
+> 剩余 Python ~25.4 万行（产品码）+ 21.3 万行测试。方法论沿用 M1-M3：
+> 纯算法核先行 + 冻结 Python oracle 对账 + 逐片接线。
+
+- **M6 编图计算管线**（mapping/geological_pipeline 3.0k 行起步）：
+  contouring（✅ 首片已落地：`libs/mapping_kernel`，
+  168 冻结案例全过）→ interpolator（IDW 等，1.0k）→ polygonization
+  （616 行，需 polygon 环模型）→ pipeline.py 编排（594 行）→
+  factor_layer_products/well_prediction_surface。
+- **M7 工作流引擎核**（workflow/ 2.8 万行中引擎部分：定义/执行器/
+  crs_policy/factor_grid_result）。
+- **M8 viz 其余**（井相关：DTW 对比、地层相关、地质体；2 万行分期）。
+- **M9 prediction/interchange/resources/providers**（~1.5 万行，
+  纯服务层居多）。
+- **M10 UI 层**（9.5 万行，最大块）：先做"原生 QGIS 组件可承接面板"
+  分层清单，再按面板簇分期移植；MainWindow 逐轮长出面板。
+- **M11 测试体系去 Python 化**：oracle 逐模块转 C++ 基准后退役钉死
+  的 Python oracle（geoviz、readback 等）。
+- **M12 默认入口切换 + Python 产品退役**：M5 评审三阻塞清零 +
+  M6-M10 完成 → 切换 → Python 侧转维护模式。
+
 ## 进度记录
 - 2026-09-17：计划建立；M1 开工。
 - 2026-09-17（同日）：**M1 完成**——`AlgorithmRunner` + E 四内核注册 + D 切片
@@ -75,6 +97,12 @@
   无 fixture 时如实跳过）；入口切换评审文档
   `cpp-entry-switch-review.md`（结论：建议并行启动器增量曝光，Windows
   回归+打包+soak 清零后再评默认切换）。门禁 48/48 ×2。
-- 待办：M4 其余（GC/dedup、models 领域读模型——fixtures 现无数据可对账，
-  待有真实使用后补）；M5 硬阻塞三项（Windows 回归需外部环境、正式安装
-  包、长稳 soak）与入口切换决策本身。
+- 2026-09-17：**目标升级为全面转换**，阶梯 M6-M12 入计划（见上）。
+  **M6 首片完成**：`libs/mapping_kernel` 忠实移植 contouring.py 数值核
+  （marching squares 16 例+鞍点、段缝合精确复刻 Python dict 插入序遍历、
+  RDP/Chaikin、nice/quantile 层级阶梯含 np.nanpercentile linear 语义与
+  银行家舍入）；oracle 生成器
+  `tools/oracle/generate_contour_fixtures.py` 冻结 5 网格 ×168 案例
+  （含 NaN 空洞/鞍点场/噪声场），C++ 对账全过（坐标 <1e-9）。
+- 待办：M6 其余（interpolator→polygonization→pipeline 编排）、M7-M12
+  按阶梯推进。

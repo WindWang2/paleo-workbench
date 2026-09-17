@@ -27,6 +27,8 @@ option(PWB_BUILD_SEISMIC_ATTRIBUTES
     "Build the CPP-E seismic attribute library (fails when absent)" OFF)
 option(PWB_BUILD_SEISMIC_IO
     "Build the post-stack SEG-Y reader (libs/seismic_io)" OFF)
+option(PWB_BUILD_MAPPING_KERNEL
+    "Build the contouring kernel ported from the Python mapping pipeline" OFF)
 option(PWB_BUILD_INTEGRATION_TESTS
     "Register tests/cpp/integration (requires platform+data+science)" OFF)
 include(CTest)
@@ -73,6 +75,9 @@ if(PWB_BUILD_SEISMIC_IO)
     if(BUILD_TESTING)
         add_subdirectory(libs/seismic_io/seismic_io_tests)
     endif()
+endif()
+if(PWB_BUILD_MAPPING_KERNEL)
+    add_subdirectory(libs/mapping_kernel)
 endif()
 
 # The integrated configuration is all-or-nothing by definition: the app's
