@@ -33,6 +33,19 @@ option(PWB_BUILD_INTEGRATION_TESTS
     "Register tests/cpp/integration (requires platform+data+science)" OFF)
 include(CTest)
 
+# BEGIN CONV-18
+# Task 18 — FactorGridResult JSON envelope codec (workflow/factor_grid_result.py
+# serialization surface). The codec lives in libs/mapping_kernel next to the
+# ported numerical cores; Pwb::Domain (nlohmann JSON) is required, so set
+# PWB_BUILD_DATA=ON as well when enabling this option directly.
+option(PWB_BUILD_CONV_18
+    "Build the CONV-18 factor-grid JSON envelope codec + oracle test" OFF)
+if(PWB_BUILD_CONV_18 AND NOT PWB_BUILD_MAPPING_KERNEL)
+    message(STATUS "CONV-18: enabling PWB_BUILD_MAPPING_KERNEL for the grid envelope codec")
+    set(PWB_BUILD_MAPPING_KERNEL ON)
+endif()
+# END CONV-18
+
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
 # error, never a silent skip (protocol: independent validation).

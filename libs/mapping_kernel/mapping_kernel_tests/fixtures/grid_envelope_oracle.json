@@ -1,0 +1,4413 @@
+{
+ "generator": "tools/oracle/generate_grid_envelope_fixtures.py",
+ "module": "paleo_workbench.workflow.factor_grid_result",
+ "python": "3.14.6",
+ "numpy": "2.5.3",
+ "n_cases": 45,
+ "n_ok": 30,
+ "n_error": 15,
+ "cases": [
+  {
+   "id": "idw_none_cells",
+   "factor_name": "porosity",
+   "crs": "EPSG:4326",
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [null, 4.0]], \"interp_backend\": \"idw\", \"grid\": \"2x2\", \"power\": 2.0, \"sample_points\": [[0.0, 10.0, 1.0], [1.0, 11.0, 4.0]]}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     null,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.3333333333333335,
+     "std": 1.247219128924647,
+     "valid_count": 3,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": "2x2",
+      "n_points": 2,
+      "power": 2.0,
+      "n_break_lines": 0
+     },
+     "crs": "EPSG:4326",
+     "crs_is_known": true,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.3333333333333335,
+      "std": 1.247219128924647,
+      "valid_count": 3,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": \"2x2\", \"n_points\": 2, \"power\": 2.0, \"n_break_lines\": 0}, \"crs\": \"EPSG:4326\", \"crs_is_known\": true, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.3333333333333335, \"std\": 1.247219128924647, \"valid_count\": 3, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       null,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.3333333333333335,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [null, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.3333333333333335, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      null,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      null,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.3333333333333335,
+      "std": 1.247219128924647,
+      "valid_count": 3,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "backend_fallback_kriging_variance",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": "%",
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"kriging\", \"grid\": \"2x2\", \"n_points\": 4, \"r_squared\": 0.5, \"grid_var\": [[0.1, 0.2], [0.3, 0.4]], \"variance_min\": 0.1, \"variance_max\": 0.4}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": [
+     0.10000000149011612,
+     0.20000000298023224,
+     0.30000001192092896,
+     0.4000000059604645
+    ],
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "kriging",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": "2x2",
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0,
+      "variance_min": 0.1,
+      "variance_max": 0.4
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": "%",
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": true,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"kriging\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": \"2x2\", \"n_points\": null, \"power\": null, \"n_break_lines\": 0, \"variance_min\": 0.1, \"variance_max\": 0.4}, \"crs\": null, \"crs_is_known\": false, \"unit\": \"%\", \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": true, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "kriging",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null,
+     "grid_var": [
+      [
+       0.10000000149011612,
+       0.20000000298023224
+      ],
+      [
+       0.30000001192092896,
+       0.4000000059604645
+      ]
+     ],
+     "variance_min": 0.1,
+     "variance_max": 0.4
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"kriging\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null, \"grid_var\": [[0.10000000149011612, 0.20000000298023224], [0.30000001192092896, 0.4000000059604645]], \"variance_min\": 0.1, \"variance_max\": 0.4}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "kriging"
+    }
+   }
+  },
+  {
+   "id": "unknown_algorithm",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]]}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "unknown",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"unknown\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "unknown",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"unknown\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "unknown"
+    }
+   }
+  },
+  {
+   "id": "descriptor_metadata_full",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\", \"grid\": \"2x2 label\", \"power\": 3.0, \"n_break_lines\": 1, \"sample_points\": [[0.0, 10.0, 1.0]]}",
+   "metadata": "{\"algorithm_id\": \"directional\", \"algorithm_parameters\": {\"r_squared\": 0.9, \"grid_label\": \"old\", \"n_points\": 7, \"power\": 1.5, \"n_break_lines\": 4, \"legacy_extra\": \"keep\"}, \"crs\": \"EPSG:4326\", \"unit\": \"%\", \"generator_version\": \"py-1.2\", \"source_refs\": [\"asset-1\", 2, true], \"run_ref\": 9, \"created_at\": \"2026-09-18T00:00:00Z\"}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "directional",
+     "algorithm_parameters": {
+      "r_squared": 0.9,
+      "grid_label": "2x2 label",
+      "n_points": 1,
+      "power": 3.0,
+      "n_break_lines": 1,
+      "legacy_extra": "keep"
+     },
+     "crs": "EPSG:4326",
+     "crs_is_known": true,
+     "unit": "%",
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": "py-1.2",
+     "source_refs": [
+      "asset-1",
+      2,
+      true
+     ],
+     "input_version_ids": [
+      "asset-1",
+      2,
+      true
+     ],
+     "run_ref": 9,
+     "run_id": 9,
+     "created_at": "2026-09-18T00:00:00Z",
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"directional\", \"algorithm_parameters\": {\"r_squared\": 0.9, \"grid_label\": \"2x2 label\", \"n_points\": 1, \"power\": 3.0, \"n_break_lines\": 1, \"legacy_extra\": \"keep\"}, \"crs\": \"EPSG:4326\", \"crs_is_known\": true, \"unit\": \"%\", \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": \"py-1.2\", \"source_refs\": [\"asset-1\", 2, true], \"input_version_ids\": [\"asset-1\", 2, true], \"run_ref\": 9, \"run_id\": 9, \"created_at\": \"2026-09-18T00:00:00Z\", \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "directional",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": 0.9
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"directional\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": 0.9}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "directional"
+    }
+   }
+  },
+  {
+   "id": "metadata_empty_defaults",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"spline\"}",
+   "metadata": "{}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "spline",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"spline\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "spline",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"spline\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "spline"
+    }
+   }
+  },
+  {
+   "id": "all_nodata",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[null, null], [null, null]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     null,
+     null,
+     null,
+     null
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": null,
+     "max": null,
+     "mean": null,
+     "std": null,
+     "valid_count": 0,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": null,
+      "max": null,
+      "mean": null,
+      "std": null,
+      "valid_count": 0,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": null, \"max\": null, \"mean\": null, \"std\": null, \"valid_count\": 0, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       null,
+       null
+      ],
+      [
+       null,
+       null
+      ]
+     ],
+     "backend": "idw",
+     "min": null,
+     "max": null,
+     "mean": null,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[null, null], [null, null]], \"backend\": \"idw\", \"min\": null, \"max\": null, \"mean\": null, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      null,
+      null
+     ],
+     [
+      null,
+      null
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      null,
+      null,
+      null,
+      null
+     ],
+     "stats_to_dict": {
+      "min": null,
+      "max": null,
+      "mean": null,
+      "std": null,
+      "valid_count": 0,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "nan_inf_cells",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, NaN], [Infinity, -Infinity]], \"backend\": \"constrained_idw\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     null,
+     null,
+     null
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 1.0,
+     "mean": 1.0,
+     "std": 0.0,
+     "valid_count": 1,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "constrained_idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "valid_count": 1,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"constrained_idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 1.0, \"mean\": 1.0, \"std\": 0.0, \"valid_count\": 1, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       null
+      ],
+      [
+       null,
+       null
+      ]
+     ],
+     "backend": "constrained_idw",
+     "min": 1.0,
+     "max": 1.0,
+     "mean": 1.0,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, null], [null, null]], \"backend\": \"constrained_idw\", \"min\": 1.0, \"max\": 1.0, \"mean\": 1.0, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      null
+     ],
+     [
+      null,
+      null
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      null,
+      null,
+      null
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "valid_count": 1,
+      "total_count": 4
+     },
+     "algorithm_id": "constrained_idw"
+    }
+   }
+  },
+  {
+   "id": "kriging_variance_nan",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"kriging\", \"grid_var\": [[0.5, null], [NaN, 1.5]]}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": [
+     0.5,
+     null,
+     null,
+     1.5
+    ],
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "kriging",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0,
+      "variance_min": null,
+      "variance_max": null
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": true,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"kriging\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0, \"variance_min\": null, \"variance_max\": null}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": true, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "kriging",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null,
+     "grid_var": [
+      [
+       0.5,
+       null
+      ],
+      [
+       null,
+       1.5
+      ]
+     ],
+     "variance_min": null,
+     "variance_max": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"kriging\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null, \"grid_var\": [[0.5, null], [null, 1.5]], \"variance_min\": null, \"variance_max\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "kriging"
+    }
+   }
+  },
+  {
+   "id": "azimuth_branch",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"directional\", \"azimuth_deg\": 42.5, \"semi_major\": 5.0}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "directional",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0,
+      "azimuth_deg": 42.5,
+      "semi_major": 5.0,
+      "semi_minor": null
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"directional\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0, \"azimuth_deg\": 42.5, \"semi_major\": 5.0, \"semi_minor\": null}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "directional",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"directional\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "directional"
+    }
+   }
+  },
+  {
+   "id": "azimuth_null_skips_branch",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"directional\", \"azimuth_deg\": null}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "directional",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"directional\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "directional",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"directional\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "directional"
+    }
+   }
+  },
+  {
+   "id": "boundary_closed_ring_int_coords",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\", \"grid_boundary\": [[0, 10], [1, 10], [1, 11], [0, 10]]}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": true,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": true, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null,
+     "boundary": [
+      [
+       0.0,
+       10.0
+      ],
+      [
+       1.0,
+       10.0
+      ],
+      [
+       1.0,
+       11.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null, \"boundary\": [[0.0, 10.0], [1.0, 10.0], [1.0, 11.0], [0.0, 10.0]]}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "empty_boundary",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\", \"grid_boundary\": []}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "crs_from_descriptor",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]]}",
+   "metadata": "{\"crs\": \"EPSG:4326\", \"unit\": \"%\"}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "unknown",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": "EPSG:4326",
+     "crs_is_known": true,
+     "unit": "%",
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"unknown\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": \"EPSG:4326\", \"crs_is_known\": true, \"unit\": \"%\", \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "unknown",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"unknown\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "unknown"
+    }
+   }
+  },
+  {
+   "id": "crs_explicit_overrides_descriptor",
+   "factor_name": "porosity",
+   "crs": "EPSG:32650",
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]]}",
+   "metadata": "{\"crs\": \"EPSG:4326\", \"unit\": \"%\"}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "unknown",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": "EPSG:32650",
+     "crs_is_known": true,
+     "unit": "%",
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"unknown\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": \"EPSG:32650\", \"crs_is_known\": true, \"unit\": \"%\", \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "unknown",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"unknown\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "unknown"
+    }
+   }
+  },
+  {
+   "id": "unit_empty_string_is_explicit",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": "",
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]]}",
+   "metadata": "{\"unit\": \"%\"}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "unknown",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": "",
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"unknown\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": \"\", \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "unknown",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"unknown\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "unknown"
+    }
+   }
+  },
+  {
+   "id": "empty_backend_chain",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"\", \"backend\": \"\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "unknown",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"unknown\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "unknown",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"unknown\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "unknown"
+    }
+   }
+  },
+  {
+   "id": "float32_normalization",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0, 2.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[0.1, 1e+40, -1e+40], [123456789.0, 3.14, 1e-45]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 3,
+    "grid_cells": [
+     0.10000000149011612,
+     null,
+     null,
+     123456792.0,
+     3.140000104904175,
+     1.401298464324817e-45
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0,
+      2.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.401298464324817e-45,
+     "max": 123456792.0,
+     "mean": 30864198.810000025,
+     "std": 53458358.60321201,
+     "valid_count": 4,
+     "total_count": 6
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 3,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      2.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.401298464324817e-45,
+      "max": 123456792.0,
+      "mean": 30864198.810000025,
+      "std": 53458358.60321201,
+      "valid_count": 4,
+      "total_count": 6
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 3, \"height\": 2, \"extent\": [0.0, 10.0, 2.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.401298464324817e-45, \"max\": 123456792.0, \"mean\": 30864198.810000025, \"std\": 53458358.60321201, \"valid_count\": 4, \"total_count\": 6}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0,
+      2.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       0.10000000149011612,
+       null,
+       null
+      ],
+      [
+       123456792.0,
+       3.140000104904175,
+       1.401298464324817e-45
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.401298464324817e-45,
+     "max": 123456792.0,
+     "mean": 30864198.810000025,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0, 2.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[0.10000000149011612, null, null], [123456792.0, 3.140000104904175, 1.401298464324817e-45]], \"backend\": \"idw\", \"min\": 1.401298464324817e-45, \"max\": 123456792.0, \"mean\": 30864198.810000025, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0,
+     2.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      0.10000000149011612,
+      null,
+      null
+     ],
+     [
+      123456792.0,
+      3.140000104904175,
+      1.401298464324817e-45
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      0.10000000149011612,
+      null,
+      null,
+      123456792.0,
+      3.140000104904175,
+      1.401298464324817e-45
+     ],
+     "stats_to_dict": {
+      "min": 1.401298464324817e-45,
+      "max": 123456792.0,
+      "mean": 30864198.810000025,
+      "std": 53458358.60321201,
+      "valid_count": 4,
+      "total_count": 6
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "int_inputs",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0, 1, 2], \"grid_y\": [5, 6], \"grid_z\": [[1, 2, 3], [4, 5, 6]], \"interp_backend\": \"idw\", \"power\": 2}",
+   "metadata": "{\"algorithm_parameters\": {\"n_points\": 6}}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 3,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0,
+     6.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0,
+      2.0
+     ],
+     "grid_y": [
+      5.0,
+      6.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 6.0,
+     "mean": 3.5,
+     "std": 1.707825127659933,
+     "valid_count": 6,
+     "total_count": 6
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "n_points": 6,
+      "r_squared": null,
+      "grid_label": null,
+      "power": 2,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 3,
+     "height": 2,
+     "extent": [
+      0.0,
+      5.0,
+      2.0,
+      6.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 6.0,
+      "mean": 3.5,
+      "std": 1.707825127659933,
+      "valid_count": 6,
+      "total_count": 6
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"n_points\": 6, \"r_squared\": null, \"grid_label\": null, \"power\": 2, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 3, \"height\": 2, \"extent\": [0.0, 5.0, 2.0, 6.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 6.0, \"mean\": 3.5, \"std\": 1.707825127659933, \"valid_count\": 6, \"total_count\": 6}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0,
+      2.0
+     ],
+     "grid_y": [
+      5.0,
+      6.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0,
+       3.0
+      ],
+      [
+       4.0,
+       5.0,
+       6.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 6.0,
+     "mean": 3.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0, 2.0], \"grid_y\": [5.0, 6.0], \"grid_z\": [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 6.0, \"mean\": 3.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0,
+     2.0
+    ],
+    "encode_axis_y": [
+     5.0,
+     6.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0,
+      3.0
+     ],
+     [
+      4.0,
+      5.0,
+      6.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 6.0,
+      "mean": 3.5,
+      "std": 1.707825127659933,
+      "valid_count": 6,
+      "total_count": 6
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "sample_points_empty_falls_back",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\", \"sample_points\": []}",
+   "metadata": "{\"algorithm_parameters\": {\"n_points\": 9}}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "n_points": 9,
+      "r_squared": null,
+      "grid_label": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"n_points\": 9, \"r_squared\": null, \"grid_label\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "single_cell",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0], \"grid_y\": [10.0], \"grid_z\": [[7.5]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 1,
+    "width": 1,
+    "grid_cells": [
+     7.5
+    ],
+    "axes": {
+     "grid_x": [
+      0.0
+     ],
+     "grid_y": [
+      10.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 7.5,
+     "max": 7.5,
+     "mean": 7.5,
+     "std": 0.0,
+     "valid_count": 1,
+     "total_count": 1
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 1,
+     "height": 1,
+     "extent": [
+      0.0,
+      10.0,
+      0.0,
+      10.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 7.5,
+      "max": 7.5,
+      "mean": 7.5,
+      "std": 0.0,
+      "valid_count": 1,
+      "total_count": 1
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 1, \"height\": 1, \"extent\": [0.0, 10.0, 0.0, 10.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 7.5, \"max\": 7.5, \"mean\": 7.5, \"std\": 0.0, \"valid_count\": 1, \"total_count\": 1}}",
+    "legacy": {
+     "grid_x": [
+      0.0
+     ],
+     "grid_y": [
+      10.0
+     ],
+     "grid_z": [
+      [
+       7.5
+      ]
+     ],
+     "backend": "idw",
+     "min": 7.5,
+     "max": 7.5,
+     "mean": 7.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0], \"grid_y\": [10.0], \"grid_z\": [[7.5]], \"backend\": \"idw\", \"min\": 7.5, \"max\": 7.5, \"mean\": 7.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0
+    ],
+    "encode_axis_y": [
+     10.0
+    ],
+    "encode_grid_lists": [
+     [
+      7.5
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      7.5
+     ],
+     "stats_to_dict": {
+      "min": 7.5,
+      "max": 7.5,
+      "mean": 7.5,
+      "std": 0.0,
+      "valid_count": 1,
+      "total_count": 1
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "rectangular_2x3",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0, 2.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0, 3.0], [4.0, 5.0, null]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 3,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0,
+     null
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0,
+      2.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 5.0,
+     "mean": 3.0,
+     "std": 1.4142135623730951,
+     "valid_count": 5,
+     "total_count": 6
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 3,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      2.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 5.0,
+      "mean": 3.0,
+      "std": 1.4142135623730951,
+      "valid_count": 5,
+      "total_count": 6
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 3, \"height\": 2, \"extent\": [0.0, 10.0, 2.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 5.0, \"mean\": 3.0, \"std\": 1.4142135623730951, \"valid_count\": 5, \"total_count\": 6}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0,
+      2.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0,
+       3.0
+      ],
+      [
+       4.0,
+       5.0,
+       null
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 5.0,
+     "mean": 3.0,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0, 2.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0, 3.0], [4.0, 5.0, null]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 5.0, \"mean\": 3.0, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0,
+     2.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0,
+      3.0
+     ],
+     [
+      4.0,
+      5.0,
+      null
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      null
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 5.0,
+      "mean": 3.0,
+      "std": 1.4142135623730951,
+      "valid_count": 5,
+      "total_count": 6
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "grid_null_beats_params_grid_label",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\", \"grid\": null}",
+   "metadata": "{\"algorithm_parameters\": {\"grid_label\": \"old\"}}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "grid_label": null,
+      "r_squared": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"grid_label\": null, \"r_squared\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "n_break_lines_null_in_parameters",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\", \"n_break_lines\": null}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": null
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": null}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "bool_inputs_numericize",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [true, false], \"grid_y\": [10.0, 11.0], \"grid_z\": [[true, false], [3.0, 4.0]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     0.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      1.0,
+      0.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 0.0,
+     "max": 4.0,
+     "mean": 2.0,
+     "std": 1.5811388300841898,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 0.0,
+      "max": 4.0,
+      "mean": 2.0,
+      "std": 1.5811388300841898,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 0.0, \"max\": 4.0, \"mean\": 2.0, \"std\": 1.5811388300841898, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      1.0,
+      0.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       0.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 0.0,
+     "max": 4.0,
+     "mean": 2.0,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [1.0, 0.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 0.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 0.0, \"max\": 4.0, \"mean\": 2.0, \"r_squared\": null}",
+    "encode_axis_x": [
+     1.0,
+     0.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      0.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      0.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 0.0,
+      "max": 4.0,
+      "mean": 2.0,
+      "std": 1.5811388300841898,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "nested_3d_reshapes",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[[1.0, 2.0], [3.0, 4.0]]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "flat_grid_z_reshapes",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [1.0, 2.0, 3.0, 4.0], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "params_grid_label_power_fallback",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\"}",
+   "metadata": "{\"algorithm_parameters\": {\"grid_label\": \"carried\", \"power\": 1.5}}",
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "idw",
+     "algorithm_parameters": {
+      "grid_label": "carried",
+      "power": 1.5,
+      "r_squared": null,
+      "n_points": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"idw\", \"algorithm_parameters\": {\"grid_label\": \"carried\", \"power\": 1.5, \"r_squared\": null, \"n_points\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "idw",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"idw\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "idw"
+    }
+   }
+  },
+  {
+   "id": "grid_var_null_skips",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"kriging\", \"grid_var\": null}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "kriging",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"kriging\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "kriging",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"kriging\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "kriging"
+    }
+   }
+  },
+  {
+   "id": "nan_backend_is_truthy",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": NaN, \"grid\": \"NaN grid\"}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "nan",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": "NaN grid",
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"nan\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": \"NaN grid\", \"n_points\": null, \"power\": null, \"n_break_lines\": 0}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "nan",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"nan\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "nan"
+    }
+   }
+  },
+  {
+   "id": "nan_azimuth_gate_is_not_none",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"directional\", \"azimuth_deg\": NaN}",
+   "metadata": null,
+   "error": null,
+   "error_type": null,
+   "result": {
+    "height": 2,
+    "width": 2,
+    "grid_cells": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "axes": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ]
+    },
+    "variance_cells": null,
+    "stats_to_dict": {
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "std": 1.118033988749895,
+     "valid_count": 4,
+     "total_count": 4
+    },
+    "descriptor": {
+     "factor_name": "porosity",
+     "algorithm_id": "directional",
+     "algorithm_parameters": {
+      "r_squared": null,
+      "grid_label": null,
+      "n_points": null,
+      "power": null,
+      "n_break_lines": 0,
+      "azimuth_deg": null,
+      "semi_major": null,
+      "semi_minor": null
+     },
+     "crs": null,
+     "crs_is_known": false,
+     "unit": null,
+     "width": 2,
+     "height": 2,
+     "extent": [
+      0.0,
+      10.0,
+      1.0,
+      11.0
+     ],
+     "generator_version": null,
+     "source_refs": [],
+     "input_version_ids": [],
+     "run_ref": null,
+     "run_id": null,
+     "created_at": null,
+     "has_variance_grid": false,
+     "has_boundary": false,
+     "statistics": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     }
+    },
+    "descriptor_strict_json": "{\"factor_name\": \"porosity\", \"algorithm_id\": \"directional\", \"algorithm_parameters\": {\"r_squared\": null, \"grid_label\": null, \"n_points\": null, \"power\": null, \"n_break_lines\": 0, \"azimuth_deg\": null, \"semi_major\": null, \"semi_minor\": null}, \"crs\": null, \"crs_is_known\": false, \"unit\": null, \"width\": 2, \"height\": 2, \"extent\": [0.0, 10.0, 1.0, 11.0], \"generator_version\": null, \"source_refs\": [], \"input_version_ids\": [], \"run_ref\": null, \"run_id\": null, \"created_at\": null, \"has_variance_grid\": false, \"has_boundary\": false, \"statistics\": {\"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"std\": 1.118033988749895, \"valid_count\": 4, \"total_count\": 4}}",
+    "legacy": {
+     "grid_x": [
+      0.0,
+      1.0
+     ],
+     "grid_y": [
+      10.0,
+      11.0
+     ],
+     "grid_z": [
+      [
+       1.0,
+       2.0
+      ],
+      [
+       3.0,
+       4.0
+      ]
+     ],
+     "backend": "directional",
+     "min": 1.0,
+     "max": 4.0,
+     "mean": 2.5,
+     "r_squared": null
+    },
+    "legacy_strict_json": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"backend\": \"directional\", \"min\": 1.0, \"max\": 4.0, \"mean\": 2.5, \"r_squared\": null}",
+    "encode_axis_x": [
+     0.0,
+     1.0
+    ],
+    "encode_axis_y": [
+     10.0,
+     11.0
+    ],
+    "encode_grid_lists": [
+     [
+      1.0,
+      2.0
+     ],
+     [
+      3.0,
+      4.0
+     ]
+    ],
+    "roundtrip": {
+     "grid_cells": [
+      1.0,
+      2.0,
+      3.0,
+      4.0
+     ],
+     "stats_to_dict": {
+      "min": 1.0,
+      "max": 4.0,
+      "mean": 2.5,
+      "std": 1.118033988749895,
+      "valid_count": 4,
+      "total_count": 4
+     },
+     "algorithm_id": "directional"
+    }
+   }
+  },
+  {
+   "id": "err_metadata_params_string",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]]}",
+   "metadata": "{\"algorithm_parameters\": \"abc\"}",
+   "error": "dictionary update sequence element #0 has length 1; 2 is required",
+   "error_type": "ValueError"
+  },
+  {
+   "id": "err_null_axis_x",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": null, \"grid_y\": [10.0], \"grid_z\": [[1.0]]}",
+   "metadata": null,
+   "error": "'NoneType' object is not iterable",
+   "error_type": "TypeError"
+  },
+  {
+   "id": "err_float_axis_x",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": 5.5, \"grid_y\": [10.0], \"grid_z\": [[1.0]]}",
+   "metadata": null,
+   "error": "'float' object is not iterable",
+   "error_type": "TypeError"
+  },
+  {
+   "id": "err_bool_axis_x",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": true, \"grid_y\": [10.0], \"grid_z\": [[1.0]]}",
+   "metadata": null,
+   "error": "'bool' object is not iterable",
+   "error_type": "TypeError"
+  },
+  {
+   "id": "err_missing_grid_x",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_y\": [10.0], \"grid_z\": [[1.0]]}",
+   "metadata": null,
+   "error": "'grid_x'",
+   "error_type": "KeyError"
+  },
+  {
+   "id": "err_missing_grid_y",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0], \"grid_z\": [[1.0]]}",
+   "metadata": null,
+   "error": "'grid_y'",
+   "error_type": "KeyError"
+  },
+  {
+   "id": "err_missing_grid_z",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0], \"grid_y\": [10.0]}",
+   "metadata": null,
+   "error": "'grid_z'",
+   "error_type": "KeyError"
+  },
+  {
+   "id": "err_empty_axis_x",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [], \"grid_y\": [], \"grid_z\": [], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": "grid_x must not be empty",
+   "error_type": "ValueError"
+  },
+  {
+   "id": "err_nan_axis_x",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, NaN], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": "grid_x must contain only finite coordinates",
+   "error_type": "ValueError"
+  },
+  {
+   "id": "err_shape_mismatch_x",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0, 2.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": "grid_z shape (2, 2) does not match expected (2, 3)",
+   "error_type": "ValueError"
+  },
+  {
+   "id": "err_shape_mismatch_y",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": "grid_z shape (2, 2) does not match expected (1, 2)",
+   "error_type": "ValueError"
+  },
+  {
+   "id": "err_shape_mismatch_flat",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [1.0, 2.0, 3.0, 4.0, 5.0], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": "grid_z shape (5,) does not match expected (2, 2)",
+   "error_type": "ValueError"
+  },
+  {
+   "id": "err_boundary_nonfinite",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\", \"grid_boundary\": [[0.0, Infinity], [1.0, 10.0]]}",
+   "metadata": null,
+   "error": "boundary must contain only finite coordinates",
+   "error_type": "ValueError"
+  },
+  {
+   "id": "err_axis_2d",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [[0.0, 1.0], [0.0, 1.0]], \"grid_y\": [10.0, 11.0], \"grid_z\": [[1.0, 2.0], [3.0, 4.0]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": "grid_x must be a 1-D coordinate vector, got shape (2, 2)",
+   "error_type": "ValueError"
+  },
+  {
+   "id": "err_shape_mismatch_3d",
+   "factor_name": "porosity",
+   "crs": null,
+   "unit": null,
+   "parameters": "{\"grid_x\": [0.0, 1.0], \"grid_y\": [10.0, 11.0], \"grid_z\": [[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]], \"interp_backend\": \"idw\"}",
+   "metadata": null,
+   "error": "grid_z shape (1, 3, 2) does not match expected (2, 2)",
+   "error_type": "ValueError"
+  }
+ ]
+}

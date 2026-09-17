@@ -24,3 +24,11 @@ target_link_libraries(pwb_mapping_kernel PUBLIC Pwb::Domain)
 if(BUILD_TESTING)
     add_subdirectory(mapping_kernel_tests)
 endif()
+
+# BEGIN CONV-18
+# Task 18 — FactorGridResult JSON envelope codec (factor_grid_io.hpp/.cpp).
+# New sources only; the ported numerical cores above stay untouched.
+if(PWB_BUILD_CONV_18)
+    target_sources(pwb_mapping_kernel PRIVATE src/factor_grid_io.cpp)
+endif()
+# END CONV-18

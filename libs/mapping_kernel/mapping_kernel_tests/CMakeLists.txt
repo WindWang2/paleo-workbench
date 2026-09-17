@@ -69,3 +69,16 @@ target_compile_definitions(mapping_kernel.sample_norm PRIVATE
     PWB_SAMPLE_NORM_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample_norm_oracle.json")
 add_test(NAME mapping_kernel.sample_norm COMMAND mapping_kernel.sample_norm)
 set_tests_properties(mapping_kernel.sample_norm PROPERTIES TIMEOUT 30)
+
+# BEGIN CONV-18
+if(PWB_BUILD_CONV_18)
+    add_executable(mapping_kernel.grid_envelope grid_envelope_test.cpp)
+    target_compile_features(mapping_kernel.grid_envelope PRIVATE cxx_std_20)
+    target_link_libraries(mapping_kernel.grid_envelope PRIVATE
+        Pwb::MappingKernel Pwb::Domain)
+    target_compile_definitions(mapping_kernel.grid_envelope PRIVATE
+        PWB_GRID_ENVELOPE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/grid_envelope_oracle.json")
+    add_test(NAME mapping_kernel.grid_envelope COMMAND mapping_kernel.grid_envelope)
+    set_tests_properties(mapping_kernel.grid_envelope PROPERTIES TIMEOUT 120)
+endif()
+# END CONV-18
