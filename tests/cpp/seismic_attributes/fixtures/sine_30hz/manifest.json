@@ -1,0 +1,82 @@
+{
+  "case": "sine_30hz",
+  "dtype": "float32",
+  "files": {
+    "expected_envelope.f32": {
+      "algorithm": "envelope",
+      "elements": 4096,
+      "max": 0.8000035881996155,
+      "mean": 0.7999999523162842,
+      "min": 0.7999929785728455,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "84f66c25c76be67fc3f2ed0e62156b9b711faf3a963df89af9fc2f25018950a3"
+    },
+    "expected_freq.f32": {
+      "algorithm": "freq",
+      "elements": 4096,
+      "max": 30.000394821166992,
+      "mean": 30.000009536743164,
+      "min": 29.999773025512695,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sample_interval": 0.00390625,
+      "sha256": "1cb6a7d3ce32b2d6d5b013d8c55cfbeba60887eb1e5be60dfa7124aac8db02e6",
+      "unit": "Hz"
+    },
+    "expected_phase.f32": {
+      "algorithm": "phase",
+      "elements": 4096,
+      "max": 3.092508554458618,
+      "mean": -0.02454342134296894,
+      "min": -3.141592502593994,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "01ae4f8767ed66ab4d443939b33c9603f1de7dd27a84f0993684215d0e36cb14"
+    },
+    "expected_rms_w10.f32": {
+      "algorithm": "rms",
+      "elements": 4096,
+      "max": 0.5950478911399841,
+      "mean": 0.5656559467315674,
+      "min": 0.5422897934913635,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "7a0e7ba03c8a63e81aa0b99222416e6d0e74b9c5ffbfad9fd5b63ebd84c702dc",
+      "total_window": 21,
+      "window": 10
+    },
+    "input.f32": {
+      "elements": 4096,
+      "max": 0.800000011920929,
+      "mean": 4.057073965668678e-08,
+      "min": -0.800000011920929,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "1a4bd34bf5f4c7c3793535010e3ffab32e9499bb67eabf9540cbd7246558c42b"
+    }
+  },
+  "order": "C (inline, crossline, sample); sample axis = time",
+  "shape": [
+    4,
+    4,
+    256
+  ],
+  "tolerances": {
+    "envelope": {
+      "max_abs": 1e-05,
+      "max_rel": 0.0001
+    },
+    "freq": {
+      "max_abs": 0.005,
+      "max_rel": 0.01
+    },
+    "phase": {
+      "max_abs": 0.0001
+    },
+    "rms": {
+      "max_abs": 1e-06,
+      "max_rel": 1e-05
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "cases": [
+    "constant_neg",
+    "constant_pos",
+    "impulse",
+    "nan_inf",
+    "sine_30hz",
+    "synth_mixed",
+    "synth_nt1",
+    "synth_nt2",
+    "synth_odd",
+    "synth_prime31",
+    "tiny_sgy_real",
+    "zeros"
+  ],
+  "comparison_rules": {
+    "envelope": "max_abs + max_rel over all elements; NaN masks must match elementwise",
+    "freq": "max_abs + max_rel over finite elements; NaN masks must match",
+    "phase": "circular difference wrapped to [-pi, pi]; NaN masks must match",
+    "rms": "max_abs + max_rel over all elements; NaN masks must match elementwise"
+  },
+  "interpreter": {
+    "executable": "/opt/miniconda3/bin/python3.13",
+    "numpy": "2.4.6",
+    "python": "3.13.14",
+    "scipy": "1.17.1"
+  },
+  "oracle": {
+    "functions": [
+      "compute_envelope",
+      "compute_instantaneous_phase",
+      "compute_instantaneous_frequency",
+      "compute_rms_amplitude"
+    ],
+    "gitlink": "geo-viz-engine@08851951f3bbc0beb90886adf52e1928f4383c16",
+    "module": "geoviz_seismic.attributes"
+  },
+  "tolerances": {
+    "envelope": {
+      "max_abs": 1e-05,
+      "max_rel": 0.0001
+    },
+    "freq": {
+      "max_abs": 0.005,
+      "max_rel": 0.01
+    },
+    "phase": {
+      "max_abs": 0.0001
+    },
+    "rms": {
+      "max_abs": 1e-06,
+      "max_rel": 1e-05
+    }
+  }
+}

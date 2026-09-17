@@ -1,0 +1,70 @@
+{
+  "case": "synth_prime31",
+  "dtype": "float32",
+  "files": {
+    "expected_envelope.f32": {
+      "algorithm": "envelope",
+      "elements": 930,
+      "max": 2.8163962364196777,
+      "mean": 1.08152437210083,
+      "min": 0.04504585266113281,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "bc09a7d2d8c1f2150e54a382bbe0d7463344ad26d01142fb4734ea3158ce39d9"
+    },
+    "expected_freq.f32": {
+      "algorithm": "freq",
+      "elements": 930,
+      "max": 169.4183349609375,
+      "mean": -0.10835620760917664,
+      "min": -199.21238708496094,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sample_interval": 0.002,
+      "sha256": "f1b4a704f1d2c8faddffb314c383d0810778d68abbb8f1b81021eebd3d338de3",
+      "unit": "Hz"
+    },
+    "expected_phase.f32": {
+      "algorithm": "phase",
+      "elements": 930,
+      "max": 2.6153173446655273,
+      "mean": 0.0043839262798428535,
+      "min": -2.7689971923828125,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "a2f2f8385af592b209524a8a4f35b188b8804f0dcb5c9d06c06ae18e8ec6bb19"
+    },
+    "input.f32": {
+      "elements": 930,
+      "max": 1.9530748128890991,
+      "mean": 1.0017184019088745,
+      "min": -0.39034292101860046,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "0ddd9b3e933e3078b842bc8973be6b933425b8afc73cfaff076a07c9ed2b645f"
+    }
+  },
+  "order": "C (inline, crossline, sample); sample axis = time",
+  "shape": [
+    6,
+    5,
+    31
+  ],
+  "tolerances": {
+    "envelope": {
+      "max_abs": 1e-05,
+      "max_rel": 0.0001
+    },
+    "freq": {
+      "max_abs": 0.005,
+      "max_rel": 0.01
+    },
+    "phase": {
+      "max_abs": 0.0001
+    },
+    "rms": {
+      "max_abs": 1e-06,
+      "max_rel": 1e-05
+    }
+  }
+}

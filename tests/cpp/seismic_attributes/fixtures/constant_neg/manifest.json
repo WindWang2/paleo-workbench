@@ -1,0 +1,83 @@
+{
+  "case": "constant_neg",
+  "dtype": "float32",
+  "files": {
+    "expected_envelope.f32": {
+      "algorithm": "envelope",
+      "elements": 200,
+      "max": 2.5,
+      "mean": 2.5,
+      "min": 2.5,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "b07192ae89ca0e98a51f146c4016d245ff0d80de01826858cb3903ff35f78ed3"
+    },
+    "expected_freq.f32": {
+      "algorithm": "freq",
+      "elements": 200,
+      "max": 0.0,
+      "mean": -7.114779236871982e-06,
+      "min": -3.794549047597684e-05,
+      "n_inf": 0,
+      "n_nan": 0,
+      "note": "float32 phase chain leaves ~2e-5 Hz tail noise on constant negative traces; C++ double path returns 0",
+      "sample_interval": 0.002,
+      "sha256": "11d56567f12465926d6ee22f7dd3cf59fce803980e2a0f6c9703b1eb1745584f",
+      "unit": "Hz"
+    },
+    "expected_phase.f32": {
+      "algorithm": "phase",
+      "elements": 200,
+      "max": 3.1415927410125732,
+      "mean": 2.356194496154785,
+      "min": -3.1415927410125732,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "434c39946fab5b8d2b0f0a6495884f4c00b50782e26e7bc363a046ad6b6bc4ff"
+    },
+    "expected_rms_w21.f32": {
+      "algorithm": "rms",
+      "elements": 200,
+      "max": 2.5,
+      "mean": 2.5,
+      "min": 2.5,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "b07192ae89ca0e98a51f146c4016d245ff0d80de01826858cb3903ff35f78ed3",
+      "total_window": 43,
+      "window": 21
+    },
+    "input.f32": {
+      "elements": 200,
+      "max": -2.5,
+      "mean": -2.5,
+      "min": -2.5,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "9dc103bffa399ab960bd3b3a4ef51d96e26c6b03fe4adef2793886b65c87e109"
+    }
+  },
+  "order": "C (inline, crossline, sample); sample axis = time",
+  "shape": [
+    5,
+    5,
+    8
+  ],
+  "tolerances": {
+    "envelope": {
+      "max_abs": 1e-05,
+      "max_rel": 0.0001
+    },
+    "freq": {
+      "max_abs": 0.005,
+      "max_rel": 0.01
+    },
+    "phase": {
+      "max_abs": 0.0001
+    },
+    "rms": {
+      "max_abs": 1e-06,
+      "max_rel": 1e-05
+    }
+  }
+}
