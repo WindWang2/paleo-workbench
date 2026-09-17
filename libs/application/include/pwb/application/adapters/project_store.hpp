@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <pwb/qgis/edit_controller.hpp>
+#include <pwb/qgis/layer_adapter.hpp>
 
 namespace pwb::application {
 
@@ -44,6 +45,7 @@ struct CommitRequestV1 {
 
 struct CommitReceiptV1 {
     bool ok = false;
+    bool duplicate = false;   // B replayed an earlier operation_id
     std::string new_version;
     std::string run_id;
     std::string error;

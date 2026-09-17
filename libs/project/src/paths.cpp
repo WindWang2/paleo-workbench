@@ -1,8 +1,18 @@
 #include "pwb/project/paths.hpp"
 
+// A-line portability fix (handed back to B): the strict UTF-8 <-> wide path
+// bridge is Windows-only; on POSIX the native narrow encoding is UTF-8 and
+// the conversion is pass-through.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <system_error>
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace pwb::project {
 
@@ -12,6 +22,7 @@ using pwb::domain::ErrorCode;
 using pwb::domain::Result;
 
 fs::path path_from_u8(std::string_view utf8) {
+#ifdef _WIN32
     if (utf8.empty()) return fs::path();
     const int wide_length = MultiByteToWideChar(
         CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
@@ -19,12 +30,15 @@ fs::path path_from_u8(std::string_view utf8) {
     if (wide_length <= 0) return fs::path(utf8.begin(), utf8.end());
     std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
-                        static_cast<int>(utf8.size()), wide.data(),
-                        wide_length);
+                        static_cast<int>(utf8.size()), wide.data(), wide_length);
     return fs::path(std::move(wide));
+#else
+    return fs::path(utf8);
+#endif
 }
 
 std::string path_to_u8(const fs::path& path) {
+#ifdef _WIN32
     const std::wstring wide = path.generic_wstring();
     if (wide.empty()) return std::string();
     const int utf8_length = WideCharToMultiByte(
@@ -33,9 +47,12 @@ std::string path_to_u8(const fs::path& path) {
     if (utf8_length <= 0) return std::string();
     std::string utf8(static_cast<std::size_t>(utf8_length), '\0');
     WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.c_str(),
-                        static_cast<int>(wide.size()), utf8.data(),
-                        utf8_length, nullptr, nullptr);
+                        static_cast<int>(wide.size()), utf8.data(), utf8_length,
+                        nullptr, nullptr);
     return utf8;
+#else
+    return path.generic_string();
+#endif
 }
 
 namespace {
@@ -106,12 +123,21 @@ Result<std::string> resolve_project_path(const std::string& stored,
         trimmed.rfind("~\\", 0) == 0) {
         // Wide environment lookup → UTF-8 prefix (narrow getenv would be
         // ANSI-codepage bytes, not the UTF-8 the JSON layer expects).
+#ifdef _WIN32
         const wchar_t* profile = _wgetenv(L"USERPROFILE");
         if (profile != nullptr) {
             const std::string prefix =
                 path_to_u8(fs::path(profile).lexically_normal());
             trimmed = prefix + trimmed.substr(1);
         }
+#else
+        // POSIX: getenv returns native bytes, UTF-8 on this platform.
+        if (const char* profile = std::getenv("HOME")) {
+            const std::string prefix =
+                path_to_u8(fs::path(profile).lexically_normal());
+            trimmed = prefix + trimmed.substr(1);
+        }
+#endif
     }
     fs::path candidate = path_from_u8(trimmed);
     std::error_code ec;
@@ -130,6 +156,7 @@ Result<std::string> resolve_project_path(const std::string& stored,
 }
 
 void fsync_directory(const fs::path& directory) {
+#ifdef _WIN32
     HANDLE handle = CreateFileW(
         directory.wstring().c_str(), GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
@@ -137,6 +164,13 @@ void fsync_directory(const fs::path& directory) {
     if (handle == INVALID_HANDLE_VALUE) return;
     FlushFileBuffers(handle);
     CloseHandle(handle);
+#else
+    // POSIX equivalent: open the directory and fsync it.
+    const int fd = ::open(directory.c_str(), O_RDONLY | O_DIRECTORY);
+    if (fd < 0) return;
+    ::fsync(fd);
+    ::close(fd);
+#endif
 }
 
 bool is_within_directory(const fs::path& path, const fs::path& directory) {
