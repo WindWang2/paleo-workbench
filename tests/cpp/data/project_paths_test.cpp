@@ -31,19 +31,24 @@ std::string read_all(const fs::path& file) {
 }  // namespace
 
 PWB_TEST(relativize_internal_vs_external) {
-    const fs::path project(R"(C:\work\demo.paleo.json)");
+    // Real absolute paths: the semantics under test (inside → relative,
+    // outside → external) are platform-neutral; Windows-literal strings
+    // would be bare filenames on POSIX.
+    const fs::path root = scratch_root();
+    const fs::path project = root / "demo.paleo.json";
     const auto inside =
-        pwb::project::relativize_path(fs::path(R"(C:\work\a.csv)"),
-                                       project);
+        pwb::project::relativize_path(root / "a.csv", project);
     PWB_CHECK(!inside.external);
     PWB_CHECK(inside.stored == "a.csv");
     const auto outside = pwb::project::relativize_path(
-        fs::path(R"(D:\shared\b.csv)"), project);
+        fs::temp_directory_path() / "pwb_data_paths_outside" / "b.csv",
+        project);
     PWB_CHECK(outside.external);
 }
 
 PWB_TEST(resolve_roundtrip_and_escape) {
-    const fs::path project(R"(C:\work\demo.paleo.json)");
+    const fs::path root = scratch_root();
+    const fs::path project = root / "demo.paleo.json";
     auto ok = pwb::project::resolve_project_path("a.csv", project);
     PWB_CHECK(ok.is_ok());
     auto escape = pwb::project::resolve_project_path("../evil.csv", project);

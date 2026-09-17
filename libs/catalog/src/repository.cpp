@@ -707,6 +707,66 @@ DataError CatalogRepository::commit_version_transaction(
     return DataError(ErrorCode::Ok, "");
 }
 
+DataError CatalogRepository::publish_result_transaction(
+    const std::optional<DataAsset>& new_asset, const DataVersion& version,
+    const domain::RunId& run_id) {
+    Transaction transaction(db_);
+    if (new_asset.has_value()) {
+        auto error = upsert_asset_in_transaction(*new_asset);
+        if (error.code != ErrorCode::Ok) return error;
+    }
+    auto error = upsert_version_rows(version);
+    if (error.code != ErrorCode::Ok) return error;
+    Statement pointer = db_.prepare(
+        "UPDATE assets SET current_version_id = ?, updated_at = ? "
+        "WHERE id = ?");
+    pointer.bind(1, version.id.str());
+    pointer.bind(2, version.created_at);
+    pointer.bind(3, version.asset_id.str());
+    pointer.step_done();
+    Statement row = db_.prepare(
+        "INSERT OR IGNORE INTO run_outputs (run_id, version_id) VALUES (?,?)");
+    row.bind(1, run_id.str());
+    row.bind(2, version.id.str());
+    row.step_done();
+    bump_revision();
+    transaction.commit();
+    return DataError(ErrorCode::Ok, "");
+}
+
+DataError CatalogRepository::finish_run_transaction(
+    const domain::RunId& run_id, const std::string& status,
+    const domain::Json& extra_parameters) {
+    Transaction transaction(db_);
+    Json merged;
+    {
+        Statement select =
+            db_.prepare("SELECT parameters FROM runs WHERE id = ?");
+        select.bind(1, run_id.str());
+        if (!select.step()) {
+            return DataError(ErrorCode::NotFound,
+                             "run not found: " + run_id.str());
+        }
+        merged = parse_json_column(select.text(0), "{}");
+        if (!merged.is_object()) merged = Json::object();
+    }
+    if (extra_parameters.is_object()) {
+        for (auto it = extra_parameters.begin();
+             it != extra_parameters.end(); ++it) {
+            merged[it.key()] = *it;
+        }
+    }
+    Statement update =
+        db_.prepare("UPDATE runs SET status = ?, parameters = ? WHERE id = ?");
+    update.bind(1, status);
+    update.bind(2, json_column(merged, "{}"));
+    update.bind(3, run_id.str());
+    update.step_done();
+    bump_revision();
+    transaction.commit();
+    return DataError(ErrorCode::Ok, "");
+}
+
 int CatalogRepository::current_revision() const {
     auto status_result = status();
     return status_result.catalog_revision;
