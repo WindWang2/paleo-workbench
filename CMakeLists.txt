@@ -76,6 +76,18 @@ if(PWB_BUILD_SEISMIC_IO)
         add_subdirectory(libs/seismic_io/seismic_io_tests)
     endif()
 endif()
+# BEGIN CONV-03
+# CONV-03 (swarm task 03): contour/facies GeoJSON layer products live in
+# libs/mapping_kernel (layer_products.*). This switch implies the
+# mapping_kernel build so the slice can be configured/verified without
+# editing any existing block.
+option(PWB_BUILD_CONV_03
+    "Build the CONV-03 layer-products slice (implies PWB_BUILD_MAPPING_KERNEL)"
+    OFF)
+if(PWB_BUILD_CONV_03 AND NOT PWB_BUILD_MAPPING_KERNEL)
+    set(PWB_BUILD_MAPPING_KERNEL ON)
+endif()
+# END CONV-03
 if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)
 endif()
