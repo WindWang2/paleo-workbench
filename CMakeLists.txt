@@ -80,6 +80,21 @@ if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)
 endif()
 
+# BEGIN CONV-19
+# Resource-scan / well-tops / well-location-XML / preview parse cores
+# (libs/ingest), ported from paleo_workbench.resources and frozen against the
+# Python oracle. Requires the domain kernel for JSON/SHA-256 conventions.
+option(PWB_BUILD_CONV_19
+    "Build the ingest parser cores ported from resources/ (libs/ingest)" OFF)
+if(PWB_BUILD_CONV_19)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/ingest/CMakeLists.txt")
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_19=ON but libs/ingest is not present on this branch")
+    endif()
+    add_subdirectory(libs/ingest)
+endif()
+# END CONV-19
+
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
 # it (no substitutes). Fail loudly when the combo is impossible.
