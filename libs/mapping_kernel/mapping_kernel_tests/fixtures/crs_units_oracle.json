@@ -1,0 +1,3535 @@
+{
+  "generator": "tools/oracle/generate_crs_units_fixtures.py",
+  "python": "3.14.6",
+  "pyproj_version": "3.8.0",
+  "kernel": {
+    "pyproj_blocked": true,
+    "geometry_units": {
+      "constants": {
+        "METRES_PER_DEGREE_LAT": 111320.0
+      },
+      "is_geographic_crs": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": false
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": false
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": false
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": true
+        },
+        {
+          "id": "4326_lower",
+          "crs": "epsg:4326",
+          "result": true
+        },
+        {
+          "id": "4326_mixed",
+          "crs": "Epsg:4326",
+          "result": true
+        },
+        {
+          "id": "4326_padded",
+          "crs": "  EPSG:4326  ",
+          "result": true
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS 84",
+          "result": true
+        },
+        {
+          "id": "4326_slash_ns",
+          "crs": "EPSG:4326/WGS84",
+          "result": true
+        },
+        {
+          "id": "4490",
+          "crs": "EPSG:4490",
+          "result": true
+        },
+        {
+          "id": "4214",
+          "crs": "EPSG:4214",
+          "result": true
+        },
+        {
+          "id": "4269",
+          "crs": "EPSG:4269",
+          "result": true
+        },
+        {
+          "id": "4267",
+          "crs": "EPSG:4267",
+          "result": true
+        },
+        {
+          "id": "4610",
+          "crs": "EPSG:4610",
+          "result": true
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": false
+        },
+        {
+          "id": "3857_slash",
+          "crs": "EPSG:3857 / Pseudo-Mercator",
+          "result": false
+        },
+        {
+          "id": "3857_padded",
+          "crs": "  EPSG:3857  ",
+          "result": false
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": false
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": false
+        },
+        {
+          "id": "99999_padded",
+          "crs": "  EPSG:99999  ",
+          "result": false
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": false
+        },
+        {
+          "id": "wgs84_utm",
+          "crs": "WGS 84 / UTM zone 48N",
+          "result": false
+        },
+        {
+          "id": "proj4_utm",
+          "crs": "+proj=utm +zone=48 +datum=WGS84",
+          "result": false
+        }
+      ],
+      "area_unit_label": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": "unknown-unit²"
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": "unknown-unit²"
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": "unknown-unit²"
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_lower",
+          "crs": "epsg:4326",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_mixed",
+          "crs": "Epsg:4326",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_padded",
+          "crs": "  EPSG:4326  ",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS 84",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_slash_ns",
+          "crs": "EPSG:4326/WGS84",
+          "result": "deg²"
+        },
+        {
+          "id": "4490",
+          "crs": "EPSG:4490",
+          "result": "deg²"
+        },
+        {
+          "id": "4214",
+          "crs": "EPSG:4214",
+          "result": "deg²"
+        },
+        {
+          "id": "4269",
+          "crs": "EPSG:4269",
+          "result": "deg²"
+        },
+        {
+          "id": "4267",
+          "crs": "EPSG:4267",
+          "result": "deg²"
+        },
+        {
+          "id": "4610",
+          "crs": "EPSG:4610",
+          "result": "deg²"
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": "EPSG:3857-unit²"
+        },
+        {
+          "id": "3857_slash",
+          "crs": "EPSG:3857 / Pseudo-Mercator",
+          "result": "EPSG:3857 / Pseudo-Mercator-unit²"
+        },
+        {
+          "id": "3857_padded",
+          "crs": "  EPSG:3857  ",
+          "result": "EPSG:3857-unit²"
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": "EPSG:32650-unit²"
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": "EPSG:99999-unit²"
+        },
+        {
+          "id": "99999_padded",
+          "crs": "  EPSG:99999  ",
+          "result": "EPSG:99999-unit²"
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": "WGS84-unit²"
+        },
+        {
+          "id": "wgs84_utm",
+          "crs": "WGS 84 / UTM zone 48N",
+          "result": "WGS 84 / UTM zone 48N-unit²"
+        },
+        {
+          "id": "proj4_utm",
+          "crs": "+proj=utm +zone=48 +datum=WGS84",
+          "result": "+proj=utm +zone=48 +datum=WGS84-unit²"
+        }
+      ],
+      "ring_area_with_unit": [
+        {
+          "id": "unit_projected",
+          "crs": "EPSG:32650",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              100.0,
+              0.0
+            ],
+            [
+              100.0,
+              100.0
+            ],
+            [
+              0.0,
+              100.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 10000.0,
+          "unit_label": "EPSG:32650-unit²",
+          "warning": null
+        },
+        {
+          "id": "equator_001",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01
+            ],
+            [
+              0.0,
+              0.01
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 1239214.2369801102,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "lat60_001",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              60.0
+            ],
+            [
+              0.01,
+              60.0
+            ],
+            [
+              0.01,
+              60.01
+            ],
+            [
+              0.0,
+              60.01
+            ],
+            [
+              0.0,
+              60.0
+            ]
+          ],
+          "area": 619532.1956233591,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "latneg60_001",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              -60.0
+            ],
+            [
+              0.01,
+              -60.0
+            ],
+            [
+              0.01,
+              -60.01
+            ],
+            [
+              0.0,
+              -60.01
+            ],
+            [
+              0.0,
+              -60.0
+            ]
+          ],
+          "area": 619532.1956233591,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "small_unknown_id",
+          "crs": "EPSG:99999",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "EPSG:99999-unit²",
+          "warning": null
+        },
+        {
+          "id": "small_empty_crs",
+          "crs": "",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "unknown-unit²",
+          "warning": "CRS undeclared: area unit is unknown (not metres)"
+        },
+        {
+          "id": "small_null_crs",
+          "crs": null,
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "unknown-unit²",
+          "warning": "CRS undeclared: area unit is unknown (not metres)"
+        },
+        {
+          "id": "small_ws_crs",
+          "crs": "   ",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "unknown-unit²",
+          "warning": "CRS undeclared: area unit is unknown (not metres)"
+        },
+        {
+          "id": "padded_projected",
+          "crs": "  EPSG:3857  ",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              100.0,
+              0.0
+            ],
+            [
+              100.0,
+              100.0
+            ],
+            [
+              0.0,
+              100.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 10000.0,
+          "unit_label": "EPSG:3857-unit²",
+          "warning": null
+        },
+        {
+          "id": "descriptive_4326",
+          "crs": "EPSG:4326 / WGS 84",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01
+            ],
+            [
+              0.0,
+              0.01
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 1239214.2369801102,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326 / WGS 84' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "empty_ring_geo",
+          "crs": "EPSG:4326",
+          "ring": [],
+          "area": 0.0,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "empty_ring_null_crs",
+          "crs": null,
+          "ring": [],
+          "area": 0.0,
+          "unit_label": "unknown-unit²",
+          "warning": "CRS undeclared: area unit is unknown (not metres)"
+        },
+        {
+          "id": "two_point_geo",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "area": 0.0,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "open_square_geo",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01
+            ],
+            [
+              0.0,
+              0.01
+            ]
+          ],
+          "area": 1239214.235281422,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "triangle_projected",
+          "crs": "EPSG:3857",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 0.5,
+          "unit_label": "EPSG:3857-unit²",
+          "warning": null
+        },
+        {
+          "id": "padded_unknown_id",
+          "crs": "  EPSG:99999  ",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "EPSG:99999-unit²",
+          "warning": null
+        }
+      ],
+      "polyline_length_with_unit": [
+        {
+          "id": "proj_2pt",
+          "crs": "EPSG:32650",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              30.0,
+              40.0
+            ]
+          ],
+          "length": 50.0,
+          "unit_label": "EPSG:32650-unit",
+          "warning": null
+        },
+        {
+          "id": "geo_001",
+          "crs": "EPSG:4326",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ]
+          ],
+          "length": 1113.2,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "geo_multiseg",
+          "crs": "EPSG:4326",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01
+            ]
+          ],
+          "length": 2226.3999981161105,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "geo_lat60",
+          "crs": "EPSG:4326",
+          "vertices": [
+            [
+              0.0,
+              60.0
+            ],
+            [
+              0.01,
+              60.0
+            ]
+          ],
+          "length": 556.6000000000001,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "geo_descriptive",
+          "crs": "EPSG:4326 / WGS 84",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ]
+          ],
+          "length": 1113.2,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326 / WGS 84' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "undeclared_empty",
+          "crs": "",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "length": 5.0,
+          "unit_label": "unknown-unit",
+          "warning": "CRS undeclared: length unit is unknown (not metres)"
+        },
+        {
+          "id": "undeclared_null",
+          "crs": null,
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "length": 5.0,
+          "unit_label": "unknown-unit",
+          "warning": "CRS undeclared: length unit is unknown (not metres)"
+        },
+        {
+          "id": "undeclared_ws",
+          "crs": "   ",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "length": 5.0,
+          "unit_label": "unknown-unit",
+          "warning": "CRS undeclared: length unit is unknown (not metres)"
+        },
+        {
+          "id": "padded_projected",
+          "crs": "  EPSG:32650 ",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              30.0,
+              40.0
+            ]
+          ],
+          "length": 50.0,
+          "unit_label": "EPSG:32650-unit",
+          "warning": null
+        },
+        {
+          "id": "empty_geo",
+          "crs": "EPSG:4326",
+          "vertices": [],
+          "length": 0.0,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "single_point_geo",
+          "crs": "EPSG:4326",
+          "vertices": [
+            [
+              5.0,
+              5.0
+            ]
+          ],
+          "length": 0.0,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "unknown_id",
+          "crs": "EPSG:99999",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "length": 5.0,
+          "unit_label": "EPSG:99999-unit",
+          "warning": null
+        }
+      ]
+    },
+    "crs_contract": {
+      "constants": {
+        "GEOGRAPHIC_DEGREE_DOMAIN": [
+          -180.0,
+          -90.0,
+          180.0,
+          90.0
+        ],
+        "DOMAIN_EPSILON": 1e-09,
+        "PROJECTED_DOMAIN_SLACK": 0.02
+      },
+      "normalize_crs": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": ""
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": ""
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": ""
+        },
+        {
+          "id": "ws_tab_nl",
+          "crs": "\t epsg:4326 \n",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_lower",
+          "crs": "epsg:4326",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_mixed",
+          "crs": "Epsg:4326",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_padded",
+          "crs": "  EPSG:4326  ",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS 84",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_slash_ns",
+          "crs": "EPSG:4326/WGS84",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_dot",
+          "crs": "EPSG:4326.",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_letter",
+          "crs": "EPSG:4326x",
+          "result": "EPSG:4326x"
+        },
+        {
+          "id": "4326_underscore",
+          "crs": "EPSG:4326_X",
+          "result": "EPSG:4326_X"
+        },
+        {
+          "id": "4326_leading_zeros",
+          "crs": "EPSG:0123",
+          "result": "EPSG:0123"
+        },
+        {
+          "id": "epsg_no_digits",
+          "crs": "EPSG:",
+          "result": "EPSG:"
+        },
+        {
+          "id": "digits_only",
+          "crs": "4326",
+          "result": "4326"
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": "WGS84"
+        },
+        {
+          "id": "prefix_not_at_start",
+          "crs": "xxxEPSG:4326",
+          "result": "xxxEPSG:4326"
+        },
+        {
+          "id": "proj4",
+          "crs": "+proj=utm +zone=48 +datum=WGS84",
+          "result": "+proj=utm +zone=48 +datum=WGS84"
+        },
+        {
+          "id": "local",
+          "crs": "LOCAL",
+          "result": "LOCAL"
+        }
+      ],
+      "crs_is_geographic": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": null
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": null
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": null
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": true
+        },
+        {
+          "id": "4326_lower",
+          "crs": "epsg:4326",
+          "result": true
+        },
+        {
+          "id": "4326_mixed",
+          "crs": "Epsg:4326",
+          "result": true
+        },
+        {
+          "id": "4326_padded",
+          "crs": "  EPSG:4326  ",
+          "result": true
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS 84",
+          "result": true
+        },
+        {
+          "id": "4326_slash_ns",
+          "crs": "EPSG:4326/WGS84",
+          "result": true
+        },
+        {
+          "id": "4490",
+          "crs": "EPSG:4490",
+          "result": true
+        },
+        {
+          "id": "4214",
+          "crs": "EPSG:4214",
+          "result": true
+        },
+        {
+          "id": "4269",
+          "crs": "EPSG:4269",
+          "result": true
+        },
+        {
+          "id": "4267",
+          "crs": "EPSG:4267",
+          "result": true
+        },
+        {
+          "id": "4610",
+          "crs": "EPSG:4610",
+          "result": true
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": false
+        },
+        {
+          "id": "3857_slash",
+          "crs": "EPSG:3857 / Pseudo-Mercator",
+          "result": false
+        },
+        {
+          "id": "3857_padded",
+          "crs": "  EPSG:3857  ",
+          "result": false
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": null
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": null
+        },
+        {
+          "id": "99999_padded",
+          "crs": "  EPSG:99999  ",
+          "result": null
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": null
+        },
+        {
+          "id": "wgs84_utm",
+          "crs": "WGS 84 / UTM zone 48N",
+          "result": null
+        },
+        {
+          "id": "proj4_utm",
+          "crs": "+proj=utm +zone=48 +datum=WGS84",
+          "result": null
+        }
+      ],
+      "resolve_crs": [
+        {
+          "id": "declared_4326",
+          "value": "EPSG:4326",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:4326",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "declared_padded",
+          "value": "  EPSG:4326  ",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:4326",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "declared_descriptive",
+          "value": "EPSG:4326 / WGS84",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:4326",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "declared_unknown_id",
+          "value": "EPSG:99999",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:99999",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "declared_lower_4490",
+          "value": "epsg:4490",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:4490",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "empty_no_fallback",
+          "value": "",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "null_no_fallback",
+          "value": null,
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "ws_no_fallback",
+          "value": "   ",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "fallback_4326",
+          "value": "",
+          "purpose": "测试",
+          "fallback": "EPSG:4326",
+          "crs": "EPSG:4326",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明，按记录在案的默认 EPSG:4326 处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "fallback_padded_descriptive",
+          "value": "",
+          "purpose": "测试",
+          "fallback": " epsg:4326 / WGS 84 ",
+          "crs": "EPSG:4326",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明，按记录在案的默认 EPSG:4326 处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "fallback_null",
+          "value": null,
+          "purpose": "测试",
+          "fallback": null,
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "fallback_also_empty",
+          "value": "",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "ws_value_fallback",
+          "value": "   ",
+          "purpose": "服务边界",
+          "fallback": "EPSG:4326",
+          "crs": "EPSG:4326",
+          "declared": false,
+          "degraded_reason": "服务边界: CRS 未声明，按记录在案的默认 EPSG:4326 处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "empty_chinese_purpose",
+          "value": "",
+          "purpose": "图层导入",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "图层导入: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        }
+      ],
+      "panel_publish_crs": [
+        {
+          "id": "declared",
+          "value": "EPSG:4326",
+          "purpose": "图层面板发布",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "empty",
+          "value": "",
+          "purpose": "图层面板发布",
+          "result": ""
+        },
+        {
+          "id": "null",
+          "value": null,
+          "purpose": "图层面板发布",
+          "result": ""
+        },
+        {
+          "id": "descriptive",
+          "value": "EPSG:4326 / WGS 84",
+          "purpose": "图层面板发布",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "unknown_id",
+          "value": "EPSG:99999",
+          "purpose": "图层面板发布",
+          "result": "EPSG:99999"
+        },
+        {
+          "id": "explicit_purpose",
+          "value": "",
+          "purpose": "首页面板发布",
+          "result": ""
+        }
+      ],
+      "crs_axis_unit_metres": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": null
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": null
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": null
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": null
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": null
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": null
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": null
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": null
+        }
+      ],
+      "scale_denominator_from_pixels": [
+        {
+          "id": "metric_32650",
+          "mupp": 10.0,
+          "ppi": 96.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "degrees_4326",
+          "mupp": 10.0,
+          "ppi": 96.0,
+          "crs": "EPSG:4326",
+          "result": 0.0
+        },
+        {
+          "id": "empty_crs",
+          "mupp": 10.0,
+          "ppi": 96.0,
+          "crs": "",
+          "result": 0.0
+        },
+        {
+          "id": "null_crs",
+          "mupp": 10.0,
+          "ppi": 96.0,
+          "crs": null,
+          "result": 0.0
+        },
+        {
+          "id": "zero_mupp",
+          "mupp": 0.0,
+          "ppi": 96.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "neg_mupp",
+          "mupp": -1.0,
+          "ppi": 96.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "zero_ppi",
+          "mupp": 10.0,
+          "ppi": 0.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "neg_ppi",
+          "mupp": 10.0,
+          "ppi": -5.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "fractional",
+          "mupp": 2.5,
+          "ppi": 120.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        }
+      ],
+      "crs_coordinate_domain": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": null
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": null
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": null
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ]
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS84",
+          "result": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ]
+        },
+        {
+          "id": "4490_lower",
+          "crs": "epsg:4490",
+          "result": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ]
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": null
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": null
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": null
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": null
+        }
+      ],
+      "coordinate_domain_mismatch": [
+        {
+          "id": "local_under_4326",
+          "crs": "EPSG:4326",
+          "extent": [
+            0.0,
+            0.0,
+            16000.0,
+            8000.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              0.0,
+              0.0,
+              16000.0,
+              8000.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[0, 16000] / y[0, 8000]"
+          }
+        },
+        {
+          "id": "inside_4326",
+          "crs": "EPSG:4326",
+          "extent": [
+            100.0,
+            20.0,
+            120.0,
+            40.0
+          ],
+          "result": null
+        },
+        {
+          "id": "null_extent",
+          "crs": "EPSG:4326",
+          "extent": null,
+          "result": null
+        },
+        {
+          "id": "undeclared_crs",
+          "crs": "",
+          "extent": [
+            0.0,
+            0.0,
+            16000.0,
+            8000.0
+          ],
+          "result": null
+        },
+        {
+          "id": "projected_out",
+          "crs": "EPSG:32650",
+          "extent": [
+            0.0,
+            0.0,
+            100.0,
+            100.0
+          ],
+          "result": null
+        },
+        {
+          "id": "projected_inside",
+          "crs": "EPSG:32650",
+          "extent": [
+            500000.0,
+            4400000.0,
+            510000.0,
+            4410000.0
+          ],
+          "result": null
+        },
+        {
+          "id": "unknown_id",
+          "crs": "EPSG:99999",
+          "extent": [
+            0.0,
+            0.0,
+            100.0,
+            100.0
+          ],
+          "result": null
+        },
+        {
+          "id": "west_out",
+          "crs": "EPSG:4326",
+          "extent": [
+            -181.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              -181.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[-181, 0] / y[0, 0]"
+          }
+        },
+        {
+          "id": "lat_out",
+          "crs": "EPSG:4326",
+          "extent": [
+            0.0,
+            90.5,
+            10.0,
+            91.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              0.0,
+              90.5,
+              10.0,
+              91.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[0, 10] / y[90.5, 91]"
+          }
+        },
+        {
+          "id": "eps_absorbed",
+          "crs": "EPSG:4326",
+          "extent": [
+            -180.0000001,
+            -90.0000001,
+            180.0,
+            90.0
+          ],
+          "result": null
+        },
+        {
+          "id": "beyond_eps",
+          "crs": "EPSG:4326",
+          "extent": [
+            -180.001,
+            -90.0,
+            180.0,
+            90.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              -180.001,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[-180.001, 180] / y[-90, 90]"
+          }
+        },
+        {
+          "id": "boundary_exact",
+          "crs": "EPSG:4326",
+          "extent": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ],
+          "result": null
+        },
+        {
+          "id": "inverted_extent",
+          "crs": "EPSG:4326",
+          "extent": [
+            16000.0,
+            8000.0,
+            0.0,
+            0.0
+          ],
+          "result": null
+        },
+        {
+          "id": "descriptive_crs",
+          "crs": "EPSG:4326 / WGS84",
+          "extent": [
+            0.0,
+            0.0,
+            16000.0,
+            8000.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              0.0,
+              0.0,
+              16000.0,
+              8000.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[0, 16000] / y[0, 8000]"
+          }
+        },
+        {
+          "id": "null_crs",
+          "crs": null,
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            10.0
+          ],
+          "result": null
+        },
+        {
+          "id": "ws_crs",
+          "crs": "   ",
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            10.0
+          ],
+          "result": null
+        }
+      ],
+      "infer_crs_from_extent": [
+        {
+          "id": "null_extent",
+          "extent": null,
+          "suggested_crs": "",
+          "basis": "数据坐标范围不可用——不推断"
+        },
+        {
+          "id": "local_data",
+          "extent": [
+            0.0,
+            0.0,
+            16000.0,
+            8000.0
+          ],
+          "suggested_crs": "",
+          "basis": "数据坐标超出经纬度域（本地/投影坐标）——保持本地"
+        },
+        {
+          "id": "geographic_data",
+          "extent": [
+            100.0,
+            20.0,
+            120.0,
+            40.0
+          ],
+          "suggested_crs": "EPSG:4326",
+          "basis": "数据坐标完全落在经纬度域内（地理坐标）"
+        },
+        {
+          "id": "inverted_extent",
+          "extent": [
+            16000.0,
+            8000.0,
+            0.0,
+            0.0
+          ],
+          "suggested_crs": "",
+          "basis": "数据坐标范围不可用——不推断"
+        },
+        {
+          "id": "boundary_exact",
+          "extent": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ],
+          "suggested_crs": "EPSG:4326",
+          "basis": "数据坐标完全落在经纬度域内（地理坐标）"
+        },
+        {
+          "id": "lat_out",
+          "extent": [
+            0.0,
+            90.5,
+            10.0,
+            91.0
+          ],
+          "suggested_crs": "",
+          "basis": "数据坐标超出经纬度域（本地/投影坐标）——保持本地"
+        },
+        {
+          "id": "small_local_inside_domain",
+          "extent": [
+            0.0,
+            0.0,
+            200.0,
+            100.0
+          ],
+          "suggested_crs": "",
+          "basis": "数据坐标超出经纬度域（本地/投影坐标）——保持本地"
+        }
+      ]
+    }
+  },
+  "pyproj_env": {
+    "pyproj_blocked": false,
+    "geometry_units": {
+      "constants": {
+        "METRES_PER_DEGREE_LAT": 111320.0
+      },
+      "is_geographic_crs": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": false
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": false
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": false
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": true
+        },
+        {
+          "id": "4326_lower",
+          "crs": "epsg:4326",
+          "result": true
+        },
+        {
+          "id": "4326_mixed",
+          "crs": "Epsg:4326",
+          "result": true
+        },
+        {
+          "id": "4326_padded",
+          "crs": "  EPSG:4326  ",
+          "result": true
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS 84",
+          "result": true
+        },
+        {
+          "id": "4326_slash_ns",
+          "crs": "EPSG:4326/WGS84",
+          "result": true
+        },
+        {
+          "id": "4490",
+          "crs": "EPSG:4490",
+          "result": true
+        },
+        {
+          "id": "4214",
+          "crs": "EPSG:4214",
+          "result": true
+        },
+        {
+          "id": "4269",
+          "crs": "EPSG:4269",
+          "result": true
+        },
+        {
+          "id": "4267",
+          "crs": "EPSG:4267",
+          "result": true
+        },
+        {
+          "id": "4610",
+          "crs": "EPSG:4610",
+          "result": true
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": false
+        },
+        {
+          "id": "3857_slash",
+          "crs": "EPSG:3857 / Pseudo-Mercator",
+          "result": false
+        },
+        {
+          "id": "3857_padded",
+          "crs": "  EPSG:3857  ",
+          "result": false
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": false
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": false
+        },
+        {
+          "id": "99999_padded",
+          "crs": "  EPSG:99999  ",
+          "result": false
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": true
+        },
+        {
+          "id": "wgs84_utm",
+          "crs": "WGS 84 / UTM zone 48N",
+          "result": false
+        },
+        {
+          "id": "proj4_utm",
+          "crs": "+proj=utm +zone=48 +datum=WGS84",
+          "result": false
+        }
+      ],
+      "area_unit_label": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": "unknown-unit²"
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": "unknown-unit²"
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": "unknown-unit²"
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_lower",
+          "crs": "epsg:4326",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_mixed",
+          "crs": "Epsg:4326",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_padded",
+          "crs": "  EPSG:4326  ",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS 84",
+          "result": "deg²"
+        },
+        {
+          "id": "4326_slash_ns",
+          "crs": "EPSG:4326/WGS84",
+          "result": "deg²"
+        },
+        {
+          "id": "4490",
+          "crs": "EPSG:4490",
+          "result": "deg²"
+        },
+        {
+          "id": "4214",
+          "crs": "EPSG:4214",
+          "result": "deg²"
+        },
+        {
+          "id": "4269",
+          "crs": "EPSG:4269",
+          "result": "deg²"
+        },
+        {
+          "id": "4267",
+          "crs": "EPSG:4267",
+          "result": "deg²"
+        },
+        {
+          "id": "4610",
+          "crs": "EPSG:4610",
+          "result": "deg²"
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": "EPSG:3857-unit²"
+        },
+        {
+          "id": "3857_slash",
+          "crs": "EPSG:3857 / Pseudo-Mercator",
+          "result": "EPSG:3857 / Pseudo-Mercator-unit²"
+        },
+        {
+          "id": "3857_padded",
+          "crs": "  EPSG:3857  ",
+          "result": "EPSG:3857-unit²"
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": "EPSG:32650-unit²"
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": "EPSG:99999-unit²"
+        },
+        {
+          "id": "99999_padded",
+          "crs": "  EPSG:99999  ",
+          "result": "EPSG:99999-unit²"
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": "deg²"
+        },
+        {
+          "id": "wgs84_utm",
+          "crs": "WGS 84 / UTM zone 48N",
+          "result": "WGS 84 / UTM zone 48N-unit²"
+        },
+        {
+          "id": "proj4_utm",
+          "crs": "+proj=utm +zone=48 +datum=WGS84",
+          "result": "+proj=utm +zone=48 +datum=WGS84-unit²"
+        }
+      ],
+      "ring_area_with_unit": [
+        {
+          "id": "unit_projected",
+          "crs": "EPSG:32650",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              100.0,
+              0.0
+            ],
+            [
+              100.0,
+              100.0
+            ],
+            [
+              0.0,
+              100.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 10000.0,
+          "unit_label": "EPSG:32650-unit²",
+          "warning": null
+        },
+        {
+          "id": "equator_001",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01
+            ],
+            [
+              0.0,
+              0.01
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 1239214.2369801102,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "lat60_001",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              60.0
+            ],
+            [
+              0.01,
+              60.0
+            ],
+            [
+              0.01,
+              60.01
+            ],
+            [
+              0.0,
+              60.01
+            ],
+            [
+              0.0,
+              60.0
+            ]
+          ],
+          "area": 619532.1956233591,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "latneg60_001",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              -60.0
+            ],
+            [
+              0.01,
+              -60.0
+            ],
+            [
+              0.01,
+              -60.01
+            ],
+            [
+              0.0,
+              -60.01
+            ],
+            [
+              0.0,
+              -60.0
+            ]
+          ],
+          "area": 619532.1956233591,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "small_unknown_id",
+          "crs": "EPSG:99999",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "EPSG:99999-unit²",
+          "warning": null
+        },
+        {
+          "id": "small_empty_crs",
+          "crs": "",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "unknown-unit²",
+          "warning": "CRS undeclared: area unit is unknown (not metres)"
+        },
+        {
+          "id": "small_null_crs",
+          "crs": null,
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "unknown-unit²",
+          "warning": "CRS undeclared: area unit is unknown (not metres)"
+        },
+        {
+          "id": "small_ws_crs",
+          "crs": "   ",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "unknown-unit²",
+          "warning": "CRS undeclared: area unit is unknown (not metres)"
+        },
+        {
+          "id": "padded_projected",
+          "crs": "  EPSG:3857  ",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              100.0,
+              0.0
+            ],
+            [
+              100.0,
+              100.0
+            ],
+            [
+              0.0,
+              100.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 10000.0,
+          "unit_label": "EPSG:3857-unit²",
+          "warning": null
+        },
+        {
+          "id": "descriptive_4326",
+          "crs": "EPSG:4326 / WGS 84",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01
+            ],
+            [
+              0.0,
+              0.01
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 1239214.2369801102,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326 / WGS 84' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "empty_ring_geo",
+          "crs": "EPSG:4326",
+          "ring": [],
+          "area": 0.0,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "empty_ring_null_crs",
+          "crs": null,
+          "ring": [],
+          "area": 0.0,
+          "unit_label": "unknown-unit²",
+          "warning": "CRS undeclared: area unit is unknown (not metres)"
+        },
+        {
+          "id": "two_point_geo",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "area": 0.0,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "open_square_geo",
+          "crs": "EPSG:4326",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01
+            ],
+            [
+              0.0,
+              0.01
+            ]
+          ],
+          "area": 1239214.235281422,
+          "unit_label": "≈m² (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: area is a local-scale approximation from the ring's mean latitude; reproject to a projected CRS for exact areas"
+        },
+        {
+          "id": "triangle_projected",
+          "crs": "EPSG:3857",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 0.5,
+          "unit_label": "EPSG:3857-unit²",
+          "warning": null
+        },
+        {
+          "id": "padded_unknown_id",
+          "crs": "  EPSG:99999  ",
+          "ring": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "area": 100.0,
+          "unit_label": "EPSG:99999-unit²",
+          "warning": null
+        }
+      ],
+      "polyline_length_with_unit": [
+        {
+          "id": "proj_2pt",
+          "crs": "EPSG:32650",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              30.0,
+              40.0
+            ]
+          ],
+          "length": 50.0,
+          "unit_label": "EPSG:32650-unit",
+          "warning": null
+        },
+        {
+          "id": "geo_001",
+          "crs": "EPSG:4326",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ]
+          ],
+          "length": 1113.2,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "geo_multiseg",
+          "crs": "EPSG:4326",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01
+            ]
+          ],
+          "length": 2226.3999981161105,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "geo_lat60",
+          "crs": "EPSG:4326",
+          "vertices": [
+            [
+              0.0,
+              60.0
+            ],
+            [
+              0.01,
+              60.0
+            ]
+          ],
+          "length": 556.6000000000001,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "geo_descriptive",
+          "crs": "EPSG:4326 / WGS 84",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0
+            ]
+          ],
+          "length": 1113.2,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326 / WGS 84' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "undeclared_empty",
+          "crs": "",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "length": 5.0,
+          "unit_label": "unknown-unit",
+          "warning": "CRS undeclared: length unit is unknown (not metres)"
+        },
+        {
+          "id": "undeclared_null",
+          "crs": null,
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "length": 5.0,
+          "unit_label": "unknown-unit",
+          "warning": "CRS undeclared: length unit is unknown (not metres)"
+        },
+        {
+          "id": "undeclared_ws",
+          "crs": "   ",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "length": 5.0,
+          "unit_label": "unknown-unit",
+          "warning": "CRS undeclared: length unit is unknown (not metres)"
+        },
+        {
+          "id": "padded_projected",
+          "crs": "  EPSG:32650 ",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              30.0,
+              40.0
+            ]
+          ],
+          "length": 50.0,
+          "unit_label": "EPSG:32650-unit",
+          "warning": null
+        },
+        {
+          "id": "empty_geo",
+          "crs": "EPSG:4326",
+          "vertices": [],
+          "length": 0.0,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "single_point_geo",
+          "crs": "EPSG:4326",
+          "vertices": [
+            [
+              5.0,
+              5.0
+            ]
+          ],
+          "length": 0.0,
+          "unit_label": "≈m (local-scale approx, geographic CRS)",
+          "warning": "CRS 'EPSG:4326' is geographic: length is a local-scale approximation"
+        },
+        {
+          "id": "unknown_id",
+          "crs": "EPSG:99999",
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              4.0
+            ]
+          ],
+          "length": 5.0,
+          "unit_label": "EPSG:99999-unit",
+          "warning": null
+        }
+      ]
+    },
+    "crs_contract": {
+      "constants": {
+        "GEOGRAPHIC_DEGREE_DOMAIN": [
+          -180.0,
+          -90.0,
+          180.0,
+          90.0
+        ],
+        "DOMAIN_EPSILON": 1e-09,
+        "PROJECTED_DOMAIN_SLACK": 0.02
+      },
+      "normalize_crs": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": ""
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": ""
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": ""
+        },
+        {
+          "id": "ws_tab_nl",
+          "crs": "\t epsg:4326 \n",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_lower",
+          "crs": "epsg:4326",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_mixed",
+          "crs": "Epsg:4326",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_padded",
+          "crs": "  EPSG:4326  ",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS 84",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_slash_ns",
+          "crs": "EPSG:4326/WGS84",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_dot",
+          "crs": "EPSG:4326.",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "4326_letter",
+          "crs": "EPSG:4326x",
+          "result": "EPSG:4326x"
+        },
+        {
+          "id": "4326_underscore",
+          "crs": "EPSG:4326_X",
+          "result": "EPSG:4326_X"
+        },
+        {
+          "id": "4326_leading_zeros",
+          "crs": "EPSG:0123",
+          "result": "EPSG:0123"
+        },
+        {
+          "id": "epsg_no_digits",
+          "crs": "EPSG:",
+          "result": "EPSG:"
+        },
+        {
+          "id": "digits_only",
+          "crs": "4326",
+          "result": "4326"
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": "WGS84"
+        },
+        {
+          "id": "prefix_not_at_start",
+          "crs": "xxxEPSG:4326",
+          "result": "xxxEPSG:4326"
+        },
+        {
+          "id": "proj4",
+          "crs": "+proj=utm +zone=48 +datum=WGS84",
+          "result": "+proj=utm +zone=48 +datum=WGS84"
+        },
+        {
+          "id": "local",
+          "crs": "LOCAL",
+          "result": "LOCAL"
+        }
+      ],
+      "crs_is_geographic": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": null
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": null
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": null
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": true
+        },
+        {
+          "id": "4326_lower",
+          "crs": "epsg:4326",
+          "result": true
+        },
+        {
+          "id": "4326_mixed",
+          "crs": "Epsg:4326",
+          "result": true
+        },
+        {
+          "id": "4326_padded",
+          "crs": "  EPSG:4326  ",
+          "result": true
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS 84",
+          "result": true
+        },
+        {
+          "id": "4326_slash_ns",
+          "crs": "EPSG:4326/WGS84",
+          "result": true
+        },
+        {
+          "id": "4490",
+          "crs": "EPSG:4490",
+          "result": true
+        },
+        {
+          "id": "4214",
+          "crs": "EPSG:4214",
+          "result": true
+        },
+        {
+          "id": "4269",
+          "crs": "EPSG:4269",
+          "result": true
+        },
+        {
+          "id": "4267",
+          "crs": "EPSG:4267",
+          "result": true
+        },
+        {
+          "id": "4610",
+          "crs": "EPSG:4610",
+          "result": true
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": false
+        },
+        {
+          "id": "3857_slash",
+          "crs": "EPSG:3857 / Pseudo-Mercator",
+          "result": false
+        },
+        {
+          "id": "3857_padded",
+          "crs": "  EPSG:3857  ",
+          "result": false
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": false
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": null
+        },
+        {
+          "id": "99999_padded",
+          "crs": "  EPSG:99999  ",
+          "result": null
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": true
+        },
+        {
+          "id": "wgs84_utm",
+          "crs": "WGS 84 / UTM zone 48N",
+          "result": false
+        },
+        {
+          "id": "proj4_utm",
+          "crs": "+proj=utm +zone=48 +datum=WGS84",
+          "result": false
+        }
+      ],
+      "resolve_crs": [
+        {
+          "id": "declared_4326",
+          "value": "EPSG:4326",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:4326",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "declared_padded",
+          "value": "  EPSG:4326  ",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:4326",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "declared_descriptive",
+          "value": "EPSG:4326 / WGS84",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:4326",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "declared_unknown_id",
+          "value": "EPSG:99999",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:99999",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "declared_lower_4490",
+          "value": "epsg:4490",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "EPSG:4490",
+          "declared": true,
+          "degraded_reason": "",
+          "ok": true
+        },
+        {
+          "id": "empty_no_fallback",
+          "value": "",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "null_no_fallback",
+          "value": null,
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "ws_no_fallback",
+          "value": "   ",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "fallback_4326",
+          "value": "",
+          "purpose": "测试",
+          "fallback": "EPSG:4326",
+          "crs": "EPSG:4326",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明，按记录在案的默认 EPSG:4326 处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "fallback_padded_descriptive",
+          "value": "",
+          "purpose": "测试",
+          "fallback": " epsg:4326 / WGS 84 ",
+          "crs": "EPSG:4326",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明，按记录在案的默认 EPSG:4326 处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "fallback_null",
+          "value": null,
+          "purpose": "测试",
+          "fallback": null,
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "fallback_also_empty",
+          "value": "",
+          "purpose": "测试",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "测试: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "ws_value_fallback",
+          "value": "   ",
+          "purpose": "服务边界",
+          "fallback": "EPSG:4326",
+          "crs": "EPSG:4326",
+          "declared": false,
+          "degraded_reason": "服务边界: CRS 未声明，按记录在案的默认 EPSG:4326 处理（降级）",
+          "ok": false
+        },
+        {
+          "id": "empty_chinese_purpose",
+          "value": "",
+          "purpose": "图层导入",
+          "fallback": "",
+          "crs": "",
+          "declared": false,
+          "degraded_reason": "图层导入: CRS 未声明且无默认——按未知坐标处理（降级）",
+          "ok": false
+        }
+      ],
+      "panel_publish_crs": [
+        {
+          "id": "declared",
+          "value": "EPSG:4326",
+          "purpose": "图层面板发布",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "empty",
+          "value": "",
+          "purpose": "图层面板发布",
+          "result": ""
+        },
+        {
+          "id": "null",
+          "value": null,
+          "purpose": "图层面板发布",
+          "result": ""
+        },
+        {
+          "id": "descriptive",
+          "value": "EPSG:4326 / WGS 84",
+          "purpose": "图层面板发布",
+          "result": "EPSG:4326"
+        },
+        {
+          "id": "unknown_id",
+          "value": "EPSG:99999",
+          "purpose": "图层面板发布",
+          "result": "EPSG:99999"
+        },
+        {
+          "id": "explicit_purpose",
+          "value": "",
+          "purpose": "首页面板发布",
+          "result": ""
+        }
+      ],
+      "crs_axis_unit_metres": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": null
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": null
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": null
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": false
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": true
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": true
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": null
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": false
+        }
+      ],
+      "scale_denominator_from_pixels": [
+        {
+          "id": "metric_32650",
+          "mupp": 10.0,
+          "ppi": 96.0,
+          "crs": "EPSG:32650",
+          "result": 37795.27559055118
+        },
+        {
+          "id": "degrees_4326",
+          "mupp": 10.0,
+          "ppi": 96.0,
+          "crs": "EPSG:4326",
+          "result": 0.0
+        },
+        {
+          "id": "empty_crs",
+          "mupp": 10.0,
+          "ppi": 96.0,
+          "crs": "",
+          "result": 0.0
+        },
+        {
+          "id": "null_crs",
+          "mupp": 10.0,
+          "ppi": 96.0,
+          "crs": null,
+          "result": 0.0
+        },
+        {
+          "id": "zero_mupp",
+          "mupp": 0.0,
+          "ppi": 96.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "neg_mupp",
+          "mupp": -1.0,
+          "ppi": 96.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "zero_ppi",
+          "mupp": 10.0,
+          "ppi": 0.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "neg_ppi",
+          "mupp": 10.0,
+          "ppi": -5.0,
+          "crs": "EPSG:32650",
+          "result": 0.0
+        },
+        {
+          "id": "fractional",
+          "mupp": 2.5,
+          "ppi": 120.0,
+          "crs": "EPSG:32650",
+          "result": 11811.023622047245
+        }
+      ],
+      "crs_coordinate_domain": [
+        {
+          "id": "null",
+          "crs": null,
+          "result": null
+        },
+        {
+          "id": "empty",
+          "crs": "",
+          "result": null
+        },
+        {
+          "id": "ws_only",
+          "crs": "   ",
+          "result": null
+        },
+        {
+          "id": "4326",
+          "crs": "EPSG:4326",
+          "result": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ]
+        },
+        {
+          "id": "4326_slash",
+          "crs": "EPSG:4326 / WGS84",
+          "result": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ]
+        },
+        {
+          "id": "4490_lower",
+          "crs": "epsg:4490",
+          "result": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ]
+        },
+        {
+          "id": "3857",
+          "crs": "EPSG:3857",
+          "result": [
+            -20839008.676500812,
+            -20850924.748175178,
+            20839008.676500812,
+            20850924.748175178
+          ]
+        },
+        {
+          "id": "32650",
+          "crs": "EPSG:32650",
+          "result": [
+            152662.3008037622,
+            -186580.10364894875,
+            847337.6991962378,
+            9515585.286096387
+          ]
+        },
+        {
+          "id": "99999",
+          "crs": "EPSG:99999",
+          "result": null
+        },
+        {
+          "id": "wgs84",
+          "crs": "WGS84",
+          "result": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ]
+        }
+      ],
+      "coordinate_domain_mismatch": [
+        {
+          "id": "local_under_4326",
+          "crs": "EPSG:4326",
+          "extent": [
+            0.0,
+            0.0,
+            16000.0,
+            8000.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              0.0,
+              0.0,
+              16000.0,
+              8000.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[0, 16000] / y[0, 8000]"
+          }
+        },
+        {
+          "id": "inside_4326",
+          "crs": "EPSG:4326",
+          "extent": [
+            100.0,
+            20.0,
+            120.0,
+            40.0
+          ],
+          "result": null
+        },
+        {
+          "id": "null_extent",
+          "crs": "EPSG:4326",
+          "extent": null,
+          "result": null
+        },
+        {
+          "id": "undeclared_crs",
+          "crs": "",
+          "extent": [
+            0.0,
+            0.0,
+            16000.0,
+            8000.0
+          ],
+          "result": null
+        },
+        {
+          "id": "projected_out",
+          "crs": "EPSG:32650",
+          "extent": [
+            0.0,
+            0.0,
+            100.0,
+            100.0
+          ],
+          "result": {
+            "crs": "EPSG:32650",
+            "extent": [
+              0.0,
+              0.0,
+              100.0,
+              100.0
+            ],
+            "domain": [
+              152662.3008037622,
+              -186580.10364894875,
+              847337.6991962378,
+              9515585.286096387
+            ],
+            "describe": "声明 CRS EPSG:32650 的有效坐标域为 x[152662, 847338] / y[-186580, 9.51559e+06]，数据实际坐标范围为 x[0, 100] / y[0, 100]"
+          }
+        },
+        {
+          "id": "projected_inside",
+          "crs": "EPSG:32650",
+          "extent": [
+            500000.0,
+            4400000.0,
+            510000.0,
+            4410000.0
+          ],
+          "result": null
+        },
+        {
+          "id": "unknown_id",
+          "crs": "EPSG:99999",
+          "extent": [
+            0.0,
+            0.0,
+            100.0,
+            100.0
+          ],
+          "result": null
+        },
+        {
+          "id": "west_out",
+          "crs": "EPSG:4326",
+          "extent": [
+            -181.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              -181.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[-181, 0] / y[0, 0]"
+          }
+        },
+        {
+          "id": "lat_out",
+          "crs": "EPSG:4326",
+          "extent": [
+            0.0,
+            90.5,
+            10.0,
+            91.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              0.0,
+              90.5,
+              10.0,
+              91.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[0, 10] / y[90.5, 91]"
+          }
+        },
+        {
+          "id": "eps_absorbed",
+          "crs": "EPSG:4326",
+          "extent": [
+            -180.0000001,
+            -90.0000001,
+            180.0,
+            90.0
+          ],
+          "result": null
+        },
+        {
+          "id": "beyond_eps",
+          "crs": "EPSG:4326",
+          "extent": [
+            -180.001,
+            -90.0,
+            180.0,
+            90.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              -180.001,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[-180.001, 180] / y[-90, 90]"
+          }
+        },
+        {
+          "id": "boundary_exact",
+          "crs": "EPSG:4326",
+          "extent": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ],
+          "result": null
+        },
+        {
+          "id": "inverted_extent",
+          "crs": "EPSG:4326",
+          "extent": [
+            16000.0,
+            8000.0,
+            0.0,
+            0.0
+          ],
+          "result": null
+        },
+        {
+          "id": "descriptive_crs",
+          "crs": "EPSG:4326 / WGS84",
+          "extent": [
+            0.0,
+            0.0,
+            16000.0,
+            8000.0
+          ],
+          "result": {
+            "crs": "EPSG:4326",
+            "extent": [
+              0.0,
+              0.0,
+              16000.0,
+              8000.0
+            ],
+            "domain": [
+              -180.0,
+              -90.0,
+              180.0,
+              90.0
+            ],
+            "describe": "声明 CRS EPSG:4326 的有效坐标域为 x[-180, 180] / y[-90, 90]，数据实际坐标范围为 x[0, 16000] / y[0, 8000]"
+          }
+        },
+        {
+          "id": "null_crs",
+          "crs": null,
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            10.0
+          ],
+          "result": null
+        },
+        {
+          "id": "ws_crs",
+          "crs": "   ",
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            10.0
+          ],
+          "result": null
+        }
+      ],
+      "infer_crs_from_extent": [
+        {
+          "id": "null_extent",
+          "extent": null,
+          "suggested_crs": "",
+          "basis": "数据坐标范围不可用——不推断"
+        },
+        {
+          "id": "local_data",
+          "extent": [
+            0.0,
+            0.0,
+            16000.0,
+            8000.0
+          ],
+          "suggested_crs": "",
+          "basis": "数据坐标超出经纬度域（本地/投影坐标）——保持本地"
+        },
+        {
+          "id": "geographic_data",
+          "extent": [
+            100.0,
+            20.0,
+            120.0,
+            40.0
+          ],
+          "suggested_crs": "EPSG:4326",
+          "basis": "数据坐标完全落在经纬度域内（地理坐标）"
+        },
+        {
+          "id": "inverted_extent",
+          "extent": [
+            16000.0,
+            8000.0,
+            0.0,
+            0.0
+          ],
+          "suggested_crs": "",
+          "basis": "数据坐标范围不可用——不推断"
+        },
+        {
+          "id": "boundary_exact",
+          "extent": [
+            -180.0,
+            -90.0,
+            180.0,
+            90.0
+          ],
+          "suggested_crs": "EPSG:4326",
+          "basis": "数据坐标完全落在经纬度域内（地理坐标）"
+        },
+        {
+          "id": "lat_out",
+          "extent": [
+            0.0,
+            90.5,
+            10.0,
+            91.0
+          ],
+          "suggested_crs": "",
+          "basis": "数据坐标超出经纬度域（本地/投影坐标）——保持本地"
+        },
+        {
+          "id": "small_local_inside_domain",
+          "extent": [
+            0.0,
+            0.0,
+            200.0,
+            100.0
+          ],
+          "suggested_crs": "",
+          "basis": "数据坐标超出经纬度域（本地/投影坐标）——保持本地"
+        }
+      ]
+    }
+  }
+}

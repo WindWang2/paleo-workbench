@@ -24,3 +24,13 @@ target_link_libraries(pwb_mapping_kernel PUBLIC Pwb::Domain)
 if(BUILD_TESTING)
     add_subdirectory(mapping_kernel_tests)
 endif()
+
+# BEGIN CONV-17 — task 17: geometry_units + crs_contract leaves (beside
+# crs_policy; oracle mapping_kernel.crs_units). Appended only; the target
+# above is untouched when PWB_BUILD_CONV_17 is OFF.
+if(PWB_BUILD_CONV_17)
+    target_sources(pwb_mapping_kernel PRIVATE
+        src/geometry_units.cpp
+        src/crs_contract.cpp)
+endif()
+# END CONV-17
