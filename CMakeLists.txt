@@ -80,6 +80,19 @@ if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)
 endif()
 
+# BEGIN CONV-12
+# geomodel geometric kernels (CONV-12): faithful C++ port of the Python viz
+# formation-volume stack — paleo_workbench/viz/formation_volume.py,
+# horizon_sculpting.py, fault_displacement.py and the pure-geometry halves of
+# viz/geomodel/{builders,measurements,section,qc}. Qt-free, Python-free,
+# numpy-free; frozen against tools/oracle/generate_geomodel_volume_fixtures.py.
+option(PWB_BUILD_CONV_12
+    "Build the geomodel volume/thickness/section kernel ported from the Python viz stack (CONV-12)" OFF)
+if(PWB_BUILD_CONV_12)
+    add_subdirectory(libs/geomodel)
+endif()
+# END CONV-12
+
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
 # it (no substitutes). Fail loudly when the combo is impossible.
