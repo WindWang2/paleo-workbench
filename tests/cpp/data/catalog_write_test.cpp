@@ -85,3 +85,27 @@ PWB_TEST(version_commit_transaction_is_atomic) {
     PWB_CHECK(reloaded.value().find_version(
                   pwb::domain::VersionId(std::string("ver_9"))) != nullptr);
 }
+
+PWB_TEST(name_search_is_case_folded_on_write) {
+    // Python contract: assets.name_search stores normalize_asset_search_
+    // name(name) (NFKC + casefold). The C++ write path folds ASCII case
+    // (bounded parity — see search_fold in repository.cpp); non-ASCII
+    // text stays verbatim (identical for caseless scripts like CJK).
+    auto repository = fresh_store("fold");
+    PWB_CHECK(repository.open_read_write().is_ok());
+    pwb::catalog::DataAsset asset = test_asset("asset_fold");
+    asset.name = "Seismic Attribute GRUNFELD 相带边界";
+    PWB_CHECK(repository.upsert_asset(asset).code ==
+              pwb::domain::ErrorCode::Ok);
+
+    auto db = pwb::catalog::Database::open(
+        fs::temp_directory_path() / "pwb_catalog_write_fold"
+            / "catalog.sqlite",
+        pwb::catalog::SqliteOpenMode::ReadOnly);
+    PWB_CHECK(db.is_ok());
+    auto statement = db.value().prepare(
+        "SELECT name_search FROM assets WHERE id = 'asset_fold'");
+    PWB_CHECK(statement.step());
+    PWB_CHECK(statement.text(0) ==
+              "seismic attribute grunfeld 相带边界");
+}

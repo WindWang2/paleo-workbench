@@ -59,4 +59,11 @@
   头驱动排序、严格规则网格）；`importSegy` 入库 Raw 体版本；端到端对冻结
   oracle 对账（读取器 vs geoviz 逐样本；导入体上跑 rms vs expected_rms_w21）。
   套件 47/47 ×2（integrated 树，含 D/E/seismic_io）。
-- 待办：M4（按需）、M5（Windows 回归需外部环境；入口切换为产品决策）。
+- 2026-09-17（同日）：**M5a/M5b + M4 首片**——`run-integrated-gate.sh`
+  一键门禁（configure+build+ctest×2+MALLOC 审计）；地震菜单“打开体版本…”
+  （D 的浏览入口补全）；`name_search` 写入路径 ASCII 折叠对齐 Python
+  NFKC+casefold 契约（有界实现，非 ASCII 边界在源码注释与测试中声明）。
+  门禁脚本全绿（47/47 ×2 + 14/14）。
+- 待办：M4 其余（GC/dedup、staging leases、models、catalog.json
+  checkpoint 等，按需）、M5 剩余（Windows 回归需外部环境；入口切换为
+  产品决策）。

@@ -150,6 +150,9 @@ private:
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
     void importSegyDialog();
 #endif
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    void openVolumeDialog();
+#endif
     void exportLayoutDialog();
     void armPan();
     void armZoomIn();

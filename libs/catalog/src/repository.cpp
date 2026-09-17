@@ -37,6 +37,27 @@ std::optional<std::string> opt_text(const Statement& statement, int column) {
     return statement.text(column);
 }
 
+// name_search fold, aligned with the Python contract
+// (normalize_asset_search_name: NFKC + casefold). Full Unicode NFKC needs
+// normalization tables this side does not carry yet; the bounded
+// implementation here is ASCII case folding, which covers the dominant
+// search semantics (case-insensitive ASCII names) and leaves non-ASCII
+// text verbatim — identical to Python for scripts without case (CJK) and
+// diverging only for non-ASCII cased letters (e.g. Ü). That boundary is
+// deliberate and documented; a full NFKC port belongs to the B line.
+std::string search_fold(const std::string& name) {
+    std::string folded;
+    folded.reserve(name.size());
+    for (const char c : name) {
+        if (c >= 'A' && c <= 'Z') {
+            folded.push_back(static_cast<char>(c - 'A' + 'a'));
+        } else {
+            folded.push_back(c);
+        }
+    }
+    return folded;
+}
+
 }  // namespace
 
 CatalogRepository::CatalogRepository(std::filesystem::path sqlite_path)
@@ -367,7 +388,7 @@ DataError CatalogRepository::upsert_asset_in_transaction(
         " trashed_at=excluded.trashed_at");
     statement.bind(1, asset.id.str());
     statement.bind(2, asset.name);
-    statement.bind(3, asset.name);  // name_search: NFKC+casefold ≈ identity
+    statement.bind(3, search_fold(asset.name));  // see search_fold()
     statement.bind(4, asset.type);
     statement.bind(5, asset.description);
     if (asset.current_version_id.has_value()) {

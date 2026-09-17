@@ -331,6 +331,10 @@ void MainWindow::buildMenusAndToolbar() {
     seismic_menu->addAction(tr("计算属性…"), this,
                             &MainWindow::runAttributeDialog,
                             QKeySequence(Qt::CTRL | Qt::Key_U));
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    seismic_menu->addAction(tr("打开体版本…"), this,
+                            &MainWindow::openVolumeDialog);
+#endif
 #endif
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
     if (seismic_menu == nullptr) {
@@ -1252,6 +1256,44 @@ void MainWindow::importSegyDialog() {
     statusBar()->showMessage(
         tr("SEG-Y 已导入：%1").arg(QString::fromStdString(version_id)),
         10000);
+}
+#endif
+
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+void MainWindow::openVolumeDialog() {
+    if (project_store_ == nullptr) {
+        QMessageBox::information(this, tr("打开体版本"), tr("请先打开工程。"));
+        return;
+    }
+    const std::vector<std::string> versions = volumeVersionIds();
+    if (versions.empty()) {
+        QMessageBox::information(
+            this, tr("打开体版本"),
+            tr("当前工程没有 PWBVOL1 体版本（导入 SEG-Y 或先计算一个属性）。"));
+        return;
+    }
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("打开体版本"));
+    auto* combo = new QComboBox(&dialog);
+    for (const std::string& id : versions) {
+        combo->addItem(QString::fromStdString(id),
+                       QString::fromStdString(id));
+    }
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    form->addRow(tr("体版本"), combo);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+    if (dialog.exec() != QDialog::Accepted) return;
+    const QString error = openVolumeVersion(
+        combo->currentData().toString().toStdString());
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("打开体版本"), error);
+    }
 }
 #endif
 
