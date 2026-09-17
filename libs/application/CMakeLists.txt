@@ -21,3 +21,14 @@ if(TARGET Pwb::Data AND TARGET Pwb::Science AND TARGET Pwb::Visualization
     target_compile_definitions(pwb_application PUBLIC
         PWB_WITH_DATA_INTEGRATION=1)
 endif()
+
+# BEGIN CONV-01
+# Swarm task 01: Qt-free orchestration over the frozen mapping_kernel
+# (extract -> interpolate -> contour -> polygonize -> GeoJSON features).
+if(PWB_BUILD_CONV_01)
+    target_sources(pwb_application PRIVATE src/map_pipeline_runner.cpp)
+    # PUBLIC link is load-bearing: the app and the map-pipeline test compile
+    # main_window.cpp themselves and need the transitive kernel link.
+    target_link_libraries(pwb_application PUBLIC Pwb::MappingKernel)
+endif()
+# END CONV-01

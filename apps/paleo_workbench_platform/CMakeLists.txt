@@ -40,3 +40,11 @@ if(TARGET Pwb::SeismicIo AND TARGET Pwb::Data)
     target_link_libraries(pwb-platform PRIVATE Pwb::SeismicIo)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_IO=1)
 endif()
+
+# BEGIN CONV-01
+# Swarm task 01: the 地质因子图 action compiles into the app when the slice
+# is built (libs/application carries the runner + kernel link).
+if(PWB_BUILD_CONV_01)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_01=1)
+endif()
+# END CONV-01

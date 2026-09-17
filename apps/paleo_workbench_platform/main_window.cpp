@@ -43,7 +43,23 @@
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/qgis/layout_service.hpp>
+#include <pwb/qgis/layer_adapter.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+
+#ifdef PWB_WITH_CONV_01
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QSpinBox>
+#include <QVBoxLayout>
+
+#include <qgsjsonutils.h>
+#include <qgsproject.h>
+#include <qgsvectordataprovider.h>
+
+#include <pwb/application/map_pipeline_runner.hpp>
+#endif
 
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/seismic_attributes/attributes.hpp>
@@ -64,6 +80,41 @@ QString layerLabelFor(const pwb::application::DomainLayerFacts& facts) {
     }
     return QString::fromStdString(facts.layer_id);
 }
+
+#ifdef PWB_WITH_CONV_01
+// The frozen 8-well porosity fixture of
+// tests/test_geological_mapping_pipeline.py (sample_well_dataset): the well
+// source behind the reserved "builtin.sample_wells" layer id.
+pwb::domain::Json builtin_well_records() {
+    const struct {
+        const char* id;
+        const char* name;
+        double x;
+        double y;
+        double porosity;
+    } wells[] = {
+        {"W1", "井-1", 114.10, 22.50, 18.5},
+        {"W2", "井-2", 114.25, 22.52, 22.3},
+        {"W3", "井-3", 114.38, 22.48, 15.2},
+        {"W4", "井-4", 114.15, 22.65, 24.1},
+        {"W5", "井-5", 114.30, 22.68, 19.8},
+        {"W6", "井-6", 114.42, 22.62, 12.4},
+        {"W7", "井-7", 114.20, 22.80, 26.5},
+        {"W8", "井-8", 114.35, 22.82, 21.0},
+    };
+    pwb::domain::Json records = pwb::domain::Json::array();
+    for (const auto& well : wells) {
+        records.push_back(pwb::domain::Json{
+            {"well_id", well.id},
+            {"name", well.name},
+            {"x", well.x},
+            {"y", well.y},
+            {"孔隙度", well.porosity},
+        });
+    }
+    return records;
+}
+#endif
 }  // namespace
 
 
@@ -279,6 +330,10 @@ void MainWindow::buildMenusAndToolbar() {
          QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)},
         {"map_export", QT_TRANSLATE_NOOP("MainWindow", "导出布局…"),
          QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P)},
+#ifdef PWB_WITH_CONV_01
+        {"factor_workbench", QT_TRANSLATE_NOOP("MainWindow", "地质因子图…"),
+         QKeySequence(Qt::CTRL | Qt::Key_G)},
+#endif
     };
 
     refreshActionStates();  // materializes one QAction per tool id
@@ -345,6 +400,11 @@ void MainWindow::buildMenusAndToolbar() {
 #endif
 #endif
 
+#ifdef PWB_WITH_CONV_01
+    QMenu* geology_menu = menuBar()->addMenu(tr("地质(&G)"));
+    geology_menu->addAction(actions_.action("factor_workbench"));
+#endif
+
     auto* toolbar = addToolBar(tr("地图工具"));
     toolbar->setObjectName(QStringLiteral("map-toolbar"));
     toolbar->addAction(actions_.action("reference_import"));
@@ -386,6 +446,9 @@ void MainWindow::connectActions() {
     wire("save_edits", &MainWindow::saveEdits);
     wire("rollback", &MainWindow::rollBackEdits);
     wire("map_export", &MainWindow::exportLayoutDialog);
+#ifdef PWB_WITH_CONV_01
+    wire("factor_workbench", &MainWindow::geologicalFactorMapDialog);
+#endif
 }
 
 void MainWindow::refreshActionStates() {
@@ -823,6 +886,264 @@ void MainWindow::exportLayoutDialog() {
         statusBar()->showMessage(tr("已导出: %1").arg(path), 8000);
     }
 }
+
+#ifdef PWB_WITH_CONV_01
+namespace {
+// 地质因子图 re-runs regenerate the two product layers in place: drop the
+// previous instance (join-key lookup, not the QGIS layer id) first.
+void removeLayerById(QgsProject* project, const std::string& layer_id) {
+    const auto layers = project->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        if (pwb::qgis::layer_adapter::layer_id_of(it.value()) == layer_id) {
+            project->removeMapLayer(it.key());
+            return;
+        }
+    }
+}
+}  // namespace
+
+QString MainWindow::runGeologicalFactorMap(
+    const QString& layer_id, const std::string& factor_name,
+    const std::string& method, int grid_n,
+    const std::string& target_horizon) {
+    pwb::domain::Json records = pwb::domain::Json::array();
+    std::string crs;
+    if (layer_id == QStringLiteral("builtin.sample_wells")) {
+        records = builtin_well_records();
+        crs = "EPSG:4326";
+    } else {
+        QgsVectorLayer* layer =
+            session_->map().vectorLayerById(layer_id.toStdString());
+        if (layer == nullptr) {
+            return QString::fromStdString("layer not found: "
+                                          + layer_id.toStdString());
+        }
+        if (layer->geometryType() != Qgis::GeometryType::Point) {
+            return QString::fromStdString("井点源必须是点图层："
+                                          + layer_id.toStdString());
+        }
+        const QgsFields fields = layer->fields();
+        int value_index = fields.indexOf(QString::fromStdString(factor_name));
+        if (value_index < 0) value_index = fields.indexOf(QStringLiteral("value"));
+        if (value_index < 0) {
+            return QString::fromStdString("图层缺少因子取值字段（需要 "
+                                          + factor_name
+                                          + " 或 value 字段）："
+                                          + layer_id.toStdString());
+        }
+        const int well_id_index = fields.indexOf(QStringLiteral("well_id"));
+        const int name_index = fields.indexOf(QStringLiteral("name"));
+        const int qc_index = fields.indexOf(QStringLiteral("qc_flag"));
+        QgsFeatureIterator it = layer->getFeatures();
+        QgsFeature feature;
+        while (it.nextFeature(feature)) {
+            if (!feature.hasGeometry()) continue;
+            const QgsPointXY pt = feature.geometry().asPoint();
+            pwb::domain::Json rec = pwb::domain::Json::object();
+            rec["x"] = pt.x();
+            rec["y"] = pt.y();
+            if (well_id_index >= 0) {
+                rec["well_id"] =
+                    feature.attribute(well_id_index).toString().toStdString();
+            }
+            if (name_index >= 0) {
+                rec["name"] =
+                    feature.attribute(name_index).toString().toStdString();
+            }
+            if (qc_index >= 0) {
+                rec["qc_flag"] =
+                    feature.attribute(qc_index).toString().toStdString();
+            }
+            bool numeric = false;
+            const double value = feature.attribute(value_index).toDouble(&numeric);
+            rec[factor_name] = numeric
+                ? pwb::domain::Json(value)
+                : pwb::domain::Json(
+                      feature.attribute(value_index).toString().toStdString());
+            records.push_back(std::move(rec));
+        }
+        crs = layer->crs().authid().toStdString();
+    }
+
+    pwb::application::MapPipelineRequest request;
+    request.factor_name = factor_name;
+    request.target_horizon = target_horizon;
+    request.crs = crs;
+    request.method = method;
+    request.grid_n = grid_n;
+    const pwb::application::MapPipelineOutcome outcome =
+        pwb::application::run_map_pipeline(records, request);
+    if (!outcome.ok) {
+        // The kernel's validate() message verbatim (Python ValueError
+        // wording is part of the contract).
+        return QString::fromStdString(outcome.error);
+    }
+
+    // Idempotent re-run: regenerate the two product layers in place.
+    const QString contour_id = QStringLiteral("factor.contour");
+    const QString facies_id = QStringLiteral("factor.classification");
+    removeLayerById(session_->map().project(), contour_id.toStdString());
+    removeLayerById(session_->map().project(), facies_id.toStdString());
+    facts_.erase(contour_id.toStdString());
+    facts_.erase(facies_id.toStdString());
+
+    const QString crs_param = QString::fromStdString(crs);
+    const QString contour_uri =
+        (crs_param.isEmpty() ? QStringLiteral("LineString?")
+                             : QStringLiteral("LineString?crs=") + crs_param
+                             + QStringLiteral("&"))
+        + QStringLiteral(
+              "field=level:double&field=label_text:string(64)"
+              "&field=is_index_contour:integer&field=length:double"
+              "&field=is_closed:integer&field=factor:string(64)"
+              "&field=unit:string(16)");
+    const QString facies_uri =
+        (crs_param.isEmpty() ? QStringLiteral("Polygon?")
+                             : QStringLiteral("Polygon?crs=") + crs_param
+                             + QStringLiteral("&"))
+        + QStringLiteral(
+              "field=facies_id:integer&field=facies_name:string(64)"
+              "&field=facies:string(64)&field=color:string(16)"
+              "&field=area:double&field=area_unit:string(64)"
+              "&field=area_percent:double&field=mean_value:double"
+              "&field=area_approx_m2:double");
+
+    auto add_product_layer = [&](const QString& layer_id,
+                                 const QString& name, const QString& uri,
+                                 const pwb::domain::Json& features,
+                                 const char* role,
+                                 QgsVectorLayer** out_layer) -> std::string {
+        // Memory provider layer: MapSession::addVectorLayer pins the "ogr"
+        // provider (file-backed payloads), so the in-memory product layers
+        // are constructed directly and registered through the same
+        // join-key adapter + project tree.
+        auto* layer = new QgsVectorLayer(uri, name, QStringLiteral("memory"));
+        if (!layer->isValid()) {
+            const QString detail =
+                layer->error().message(QgsErrorMessage::Text);
+            delete layer;
+            return "memory provider failed for '" + uri.toStdString()
+                + "': " + detail.toStdString();
+        }
+        pwb::qgis::LayerBinding binding{layer_id.toStdString(), "", "",
+                                        "vector"};
+        pwb::qgis::layer_adapter::apply(layer, binding);
+        const QString collection =
+            QString::fromStdString(pwb::domain::Json{
+                {"type", "FeatureCollection"}, {"features", features}}
+                                       .dump());
+        QgsFeatureList parsed = QgsJsonUtils::stringToFeatureList(
+            collection, layer->fields(), nullptr);
+        if (parsed.empty()) {
+            delete layer;
+            return "geojson features parse to nothing";
+        }
+        layer->dataProvider()->addFeatures(parsed);
+        layer->updateExtents();
+        session_->map().project()->addMapLayer(layer);
+        layer->triggerRepaint();
+
+        // Factor outputs are RAW-protected (workspace ROLE_RAW_PROTECTED):
+        // registered with their science role, never edit-granted.
+        pwb::application::DomainLayerFacts facts;
+        facts.layer_id = layer_id.toStdString();
+        facts.role = role;
+        facts.role_label = name.toStdString();
+        facts.artifact_maturity = "raw";
+        facts.write_granted = false;
+        facts_[facts.layer_id] = facts;
+        if (out_layer != nullptr) *out_layer = layer;
+        return "";
+    };
+
+    QgsVectorLayer* facies_layer = nullptr;
+    std::string add_error = add_product_layer(
+        contour_id, QString::fromStdString(factor_name) + tr(" 等值线"),
+        contour_uri, outcome.contour_features, "factor_contour", nullptr);
+    if (add_error.empty()) {
+        add_error = add_product_layer(
+            facies_id, QString::fromStdString(factor_name) + tr(" 相带"),
+            facies_uri, outcome.polygon_features, "factor_classification",
+            &facies_layer);
+    }
+    if (!add_error.empty()) {
+        return QString::fromStdString(add_error);
+    }
+
+    if (facies_layer != nullptr && !facies_layer->extent().isNull()) {
+        canvas_->setExtent(facies_layer->extent());
+    }
+    session_->map().refreshCanvases();
+    refreshActionStates();
+    statusBar()->showMessage(
+        tr("地质因子图已生成：%1（%2 条等值线 / %3 个相带多边形）")
+            .arg(QString::fromStdString(factor_name))
+            .arg(outcome.contour_features.size())
+            .arg(outcome.polygon_features.size()),
+        10000);
+    return QString();
+}
+
+void MainWindow::geologicalFactorMapDialog() {
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("地质因子图"));
+    auto* wells = new QComboBox(&dialog);
+    wells->addItem(tr("内置示例井点（8 井 · 孔隙度）"),
+                   QStringLiteral("builtin.sample_wells"));
+    for (const std::string& id : session_->map().layerIdsTopFirst()) {
+        QgsVectorLayer* layer = session_->map().vectorLayerById(id);
+        if (layer == nullptr
+            || layer->geometryType() != Qgis::GeometryType::Point) {
+            continue;
+        }
+        wells->addItem(layer->name(), QString::fromStdString(id));
+    }
+    auto* factor = new QComboBox(&dialog);
+    for (const char* name :
+         {"砂岩厚度", "地层厚度", "孔隙度", "渗透率", "TOC", "古水深", "砂地比"}) {
+        factor->addItem(QString::fromUtf8(name));
+    }
+    factor->setCurrentIndex(2);   // 孔隙度 (locale-independent default)
+    auto* horizon = new QComboBox(&dialog);
+    for (const char* h : {"T1", "T2", "T3", "E1s", "E2s", "E3s", "K1q"}) {
+        horizon->addItem(QString::fromUtf8(h));
+    }
+    auto* method = new QComboBox(&dialog);
+    method->addItem(tr("反距离加权 (IDW)"), QStringLiteral("idw"));
+    // The C++ kernel is the numpy grid-OLS Ordinary Kriging fallback; the
+    // geoviz WLS engine is a different estimator and is not ported (M6).
+    method->addItem(tr("克里金插值 (numpy 回退估算)"),
+                    QStringLiteral("kriging"));
+    auto* grid_n = new QSpinBox(&dialog);
+    grid_n->setRange(20, 300);
+    grid_n->setSingleStep(10);
+    grid_n->setValue(50);
+
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    auto* form = new QFormLayout;
+    form->addRow(tr("井点图层"), wells);
+    form->addRow(tr("因素"), factor);
+    form->addRow(tr("目的层段"), horizon);
+    form->addRow(tr("插值方法"), method);
+    form->addRow(tr("网格数"), grid_n);
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const QString result = runGeologicalFactorMap(
+        wells->currentData().toString(), factor->currentText().toStdString(),
+        method->currentData().toString().toStdString(), grid_n->value(),
+        horizon->currentText().toStdString());
+    if (!result.isEmpty()) {
+        QMessageBox::warning(this, tr("地质因子图"),
+                             tr("地质编图失败：%1").arg(result));
+    }
+}
+#endif
 
 // ------------------------------------------------------------ reactions ----
 
