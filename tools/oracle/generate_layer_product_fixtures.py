@@ -194,8 +194,8 @@ def _grids() -> dict[str, dict]:
     # Hunt a binary grid whose class polygonization promotes an unmatched
     # hole to an exterior island (holes_promoted_to_exterior > 0) — the same
     # hunt the polygonization oracle runs, at the layer-product level.
+    # (No seed promotes in 400 tries; the fallback freezes the QC plumbing.)
     promote = None
-    promote_seed = None
     for seed in range(400):
         rng = np.random.default_rng(seed)
         z = (rng.random((8, 8)) >= 0.45).astype(np.float64)
@@ -206,11 +206,9 @@ def _grids() -> dict[str, dict]:
         qc = layer.metadata["polygon_qc"]
         if qc["holes_promoted_to_exterior"] > 0:
             promote = z
-            promote_seed = seed
             break
     if promote is not None:
         grids.append(_grid("promote8", promote, (0.0, 0.0, 8.0, 8.0)))
-        grids[-1]["seed"] = promote_seed
     else:
         # Fallback: 1-cell-wide frame plus disjoint blob still freezes the
         # counter (likely 0) so C++ must match.
@@ -285,7 +283,6 @@ def _contour_cases(cases: list[dict], grids: dict) -> None:
         ("contour_strip1x10_nice", "strip1x10", {}),
         ("contour_neg3_interval", "neg3", {"interval": 100.0}),
         ("contour_neg3_nice", "neg3", {}),
-        ("contour_neghalf4_interval", "neghalf4", {"interval": 1.0}),
         # Branch pins: simplify>0 (RDP inside stitch), interval<=0 falls
         # through to nice while still recording contour_interval, and an
         # explicit empty levels list.

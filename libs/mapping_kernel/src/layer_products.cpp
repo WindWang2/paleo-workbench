@@ -52,6 +52,23 @@ std::string strip(const std::string& s) {
     return s.substr(a, b - a);
 }
 
+// geometry_units.is_geographic_crs: strips first, then asks the D5
+// authority (crs_policy); unknown ids (nullopt, no pyproj) and empties are
+// not geographic.
+bool layer_crs_is_geographic(const std::string& crs) {
+    const std::string trimmed = strip(crs);
+    if (trimmed.empty()) return false;
+    return crs_is_geographic(trimmed).value_or(false);
+}
+
+// geometry_units.area_unit_label: "deg²" / "{crs}-unit²" / "unknown-unit²".
+std::string area_unit_label(const std::string& crs) {
+    if (layer_crs_is_geographic(crs)) return "deg²";
+    const std::string trimmed = strip(crs);
+    if (!trimmed.empty()) return trimmed + "-unit²";
+    return "unknown-unit²";
+}
+
 Grid grid_from_factor(const FactorGrid& g) {
     Grid out;
     out.grid_x = g.grid_x;
@@ -202,10 +219,6 @@ double polygon_net_area(const Polygon& poly) {
     return std::max(0.0, area);
 }
 
-}  // namespace
-
-namespace {
-
 struct DoubleLength {
     double hi;
     double lo;
@@ -286,25 +299,11 @@ double python_polyline_length(const Polyline& points) {
 }  // namespace
 
 double float32_mask_mean(const std::vector<float>& values) {
+    // Callers gate on a non-empty class mask (Python's np.mean([]) is NaN
+    // and never reachable in the packing); 0.0 keeps the guard total.
     if (values.empty()) return 0.0;
     const float sum = pairwise_sum_f32(values.data(), values.size());
     return static_cast<double>(sum / static_cast<float>(values.size()));
-}
-
-bool layer_crs_is_geographic(const std::string& crs) {
-    // geometry_units.is_geographic_crs strips first, then asks the D5
-    // authority; unknown ids (nullopt, no pyproj) and empties are not
-    // geographic.
-    const std::string trimmed = strip(crs);
-    if (trimmed.empty()) return false;
-    return crs_is_geographic(trimmed).value_or(false);
-}
-
-std::string area_unit_label(const std::string& crs) {
-    if (layer_crs_is_geographic(crs)) return "deg²";
-    const std::string trimmed = strip(crs);
-    if (!trimmed.empty()) return trimmed + "-unit²";
-    return "unknown-unit²";
 }
 
 ContourLayerProduct generate_contour_layer_product(
@@ -474,7 +473,7 @@ FaciesLayerProduct generate_facies_polygon_layer_product(
         static const char* kPalette[] = {"#b0bec5", "#ffe082", "#d73027",
                                          "#81c784", "#4fc3f7", "#ba68c8"};
         for (std::size_t i = 0; i < names.size(); ++i) {
-            colors.emplace_back(kPalette[i % 6]);
+            colors.emplace_back(kPalette[i % std::size(kPalette)]);
         }
     }
 

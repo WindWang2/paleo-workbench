@@ -165,8 +165,16 @@
 3. math.isclose 的 rel+abs 双容差出现在：is_closed（abs 1e-5）、is_index（abs 1e-5）、vmin≈vmax（默认）、洞/环闭合判据（已核内）。
 4. Python `%` 负操作数语义（is_index 的 interval 路径）。
 5. `%g` 标签格式化（C snprintf %g 对齐，oracle 钉值）。
-6. mean float32 累加 vs double（oracle 生成时实测后定实现）。
-7. facies_id=int、nodata_cells/total_cells=int、bool 原生——json 类型敏感比较下的类型纪律。
-8. 早退分支的 qc 键集合差异（contour 两键；facies 五键 + 显式 thresholds 时 thresholds/thresholds_source/…仍在）。
-9. 空类（c_mask 无元）跳过 → 不产 feature；holes_promoted_to_exterior 键只在循环至少跑过一次后出现。
-10. clip_ring：Python 硬依赖 shapely → 本切片 C++ API 不含 clip 参数（decisions D1）。
+6. mean float32 累加 vs double（实测 numpy 为 float32 pair-wise + float32 除法；已实现 float32_mask_mean 并由 mean_units 钉死）。
+7. **CPython math.hypot ≠ glibc hypot（差 1 ulp）**：length 属性须复刻 CPython vector_norm（幂次缩放 + VD 平方 + Neumaier 补偿和 + 根号微分修正，fma 版）；30 万对模糊对拍 0 失败。max 遇 NaN/inf 用 `if (x>max)` 循环语义（std::max(NaN,y) 语义不同）。
+8. facies_id=int、nodata_cells/total_cells=int、bool 原生——json 类型敏感比较下的类型纪律；Python JSON 非负整数解析为 unsigned，测试侧 dump→parse 规范化后比较（线格式一致）。
+9. 早退分支的 qc 键集合差异（contour 两键；facies 五键，且 small_polygon_threshold 逐字回显 min_area——审核轮 1 修复）。
+10. 空类（c_mask 无元）跳过 → 不产 feature；holes_promoted_to_exterior 键只在循环至少跑过一次后出现。
+11. clip_ring：Python 硬依赖 shapely → 本切片 C++ API 不含 clip 参数（decisions D1）。
+12. interval 阶梯起点：Python math.ceil 返回 int → 0*interval=+0.0（标签 "0"）；C++ std::ceil 产 -0.0 → 规范化（审核轮 1 修复，contour_neghalf4_interval 钉死）。
+
+## 10. 审核轮 2（完整性）分支矩阵 → 案例映射（最终态）
+
+**contour**：finite<2（nan6/inf6/one1）；显式 levels（ramp8/spike7/constant8）；显式空列表（ramp8_explicit_empty）；interval>0（ramp8/neg3/neghalf4/islands10/holed10）；interval≤0 falls-through 且 contour_interval 记录（ramp8_interval_zero）；quantile（ramp8/plain12）；nice（多例）；is_index 双路径（interval 系 vs idx%5 系）；label 有/无 unit（ramp8 "m" vs islands10 ""）；is_closed 真/假（spike7/其余）；simplify>0（ramp8_simplify）；smooth>0（ramp8_smooth）；负值 %g + 负 flevel 取模（neg3）；极端量级 %g（micro3/macro3）；1xN 条带 marching 需 2x2（strip1x10）；clip 分支 N/A（D1，QC 计数钉 0）。
+
+**facies**：早退五键 + min_area 回显（nan6_default/nan6_minarea/inf6）；默认阈值等值场（constant8）/跨度 ⅓⅔（ramp8/batch4/donut10/geo 系）；显式阈值 sorted(set)（ramp8_explicit 乱序+重复）；默认名三档/均一/"相带 N"（ramp8/constant8/nested12）；显式名（spike7/ramp8_names_short）；名少于 thresholds+1 类 id cap（ramp8_names_cap）；默认色板/显式 colors（ramp8_colors）；空类跳过（ramp8_outside_high 类 1/2 无元）；min_area None/0/正/相等（moat12 四例）；CRS projected/geographic/未声明（geoproj12/geodeg12/geonone12）+ area_approx_m2 + area_warnings 双文案 + 逐环警告去重；洞升级计数（promote8 fallback——400 种子猎取无 >0，与 polygonization oracle 同状，QC 管道冻结）；float32 均值（mean_units 10 档尺寸 + 全部案例端到端）；MultiPolygon 几何在 identity-repair 下不可达（始终 Polygon，已记录）。

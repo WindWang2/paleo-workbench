@@ -101,10 +101,4 @@ FaciesLayerProduct generate_facies_polygon_layer_product(
 // accumulator semantics the mean_value property depends on.
 double float32_mask_mean(const std::vector<float>& values);
 
-// geometry_units.area_unit_label: "deg²" / "{crs}-unit²" / "unknown-unit²".
-std::string area_unit_label(const std::string& crs);
-
-// geometry_units.is_geographic_crs: crs_policy predicate, unknown → false.
-bool layer_crs_is_geographic(const std::string& crs);
-
 }  // namespace pwb::mapping
