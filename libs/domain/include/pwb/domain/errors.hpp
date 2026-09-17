@@ -63,23 +63,24 @@ struct DataError {
     bool ok() const noexcept { return code == ErrorCode::Ok; }
 };
 
-// A minimal expected<T, DataError>.
+// A minimal expected<T, DataError>. T needs to be movable, not
+// default-constructible (v3: session handles are not default-constructible).
 template <typename T>
 class Result {
 public:
-    Result(T value) : value_(std::move(value)), error_() {}
+    Result(T value) : value_(std::move(value)) {}
     Result(DataError error) : error_(std::move(error)) {}
 
-    bool is_ok() const noexcept { return !error_.has_value(); }
+    bool is_ok() const noexcept { return value_.has_value(); }
     explicit operator bool() const noexcept { return is_ok(); }
-    T& value() & { return value_; }
-    const T& value() const& { return value_; }
-    T&& value() && { return std::move(value_); }
+    T& value() & { return *value_; }
+    const T& value() const& { return *value_; }
+    T&& value() && { return std::move(*value_); }
     const DataError& error() const { return *error_; }
     DataError& error() { return *error_; }
 
 private:
-    T value_{};
+    std::optional<T> value_;
     std::optional<DataError> error_;
 };
 

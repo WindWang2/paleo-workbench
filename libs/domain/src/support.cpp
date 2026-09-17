@@ -2,6 +2,7 @@
 #include "pwb/domain/json.hpp"
 
 #include <cmath>
+#include <ctime>
 #include <iomanip>
 #include <sstream>
 
@@ -23,7 +24,11 @@ std::string now_iso8601() {
                         .count() %
                     1'000'000;
     std::tm tm{};
+#if defined(_WIN32)
     gmtime_s(&tm, &tt);
+#else
+    gmtime_r(&tt, &tm);
+#endif
     std::ostringstream os;
     os << (tm.tm_year + 1900) << '-' << format_two(tm.tm_mon + 1) << '-'
        << format_two(tm.tm_mday) << 'T' << format_two(tm.tm_hour) << ':'

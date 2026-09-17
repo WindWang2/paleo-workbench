@@ -3,13 +3,13 @@
     {
       "exists": true,
       "id": "res000000000007",
-      "resolved": "C:/Users/wangj.KEVIN/projects/paleo-workbench/tests/cpp/data/fixtures/typical/payloads/well_heads.csv",
+      "resolved": "/home/kevin/projects/paleo_project/.worktrees/cpp-v2-data/tests/cpp/data/fixtures/typical/payloads/well_heads.csv",
       "stored": "payloads/well_heads.csv"
     },
     {
       "exists": true,
       "id": "res000000000008",
-      "resolved": "C:/Users/wangj.KEVIN/projects/paleo-workbench/tests/cpp/data/fixtures/typical/payloads/external/segy/raw.sgy",
+      "resolved": "/home/kevin/projects/paleo_project/.worktrees/cpp-v2-data/tests/cpp/data/fixtures/typical/payloads/external/segy/raw.sgy",
       "stored": "payloads/external/segy/raw.sgy"
     }
   ],

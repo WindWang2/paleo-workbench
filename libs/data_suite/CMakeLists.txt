@@ -35,6 +35,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../catalog
 add_library(pwb_data STATIC
     src/commit_coordinator.cpp
     src/facade.cpp
+    src/run_coordinator.cpp
+    src/session.cpp
 )
 add_library(Pwb::Data ALIAS pwb_data)
 target_compile_features(pwb_data PUBLIC cxx_std_20)
@@ -56,6 +58,16 @@ if(PWB_BUILD_TOOLS)
                      ${CMAKE_CURRENT_BINARY_DIR}/tools/pwb-inspect)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../tools/pwb-migrate
                      ${CMAKE_CURRENT_BINARY_DIR}/tools/pwb-migrate)
+endif()
+
+# A-line consumption example (v3-contracts.md §9): the production-library
+# loop A drives — open, base version, staged edit, run register, publish,
+# close/reopen.
+add_executable(pwb-data-loop examples/data_consumer_example.cpp)
+target_compile_features(pwb-data-loop PRIVATE cxx_std_20)
+target_link_libraries(pwb-data-loop PRIVATE Pwb::Data)
+if(MSVC)
+    target_compile_options(pwb-data-loop PRIVATE /utf-8 /W4 /permissive-)
 endif()
 
 if(BUILD_TESTING)

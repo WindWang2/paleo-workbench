@@ -58,6 +58,20 @@ public:
         const DataVersion& version, const domain::AssetId& asset_id,
         const std::optional<domain::RunId>& run_id);
 
+    // One-transaction publish of a run result: optional NEW asset row +
+    // version row + derived tables + current pointer + run_outputs link +
+    // revision bump (service.py register_result_asset parity: no
+    // zero-version window). All or nothing.
+    domain::DataError publish_result_transaction(
+        const std::optional<DataAsset>& new_asset, const DataVersion& version,
+        const domain::RunId& run_id);
+
+    // One-transaction run terminal flip: status + parameters merged with
+    // extra (extra wins) + revision bump. NotFound when the row is absent.
+    domain::DataError finish_run_transaction(
+        const domain::RunId& run_id, const std::string& status,
+        const domain::Json& extra_parameters);
+
     int current_revision() const;
 
 private:

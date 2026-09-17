@@ -7,6 +7,7 @@
 
 #include "pwb/catalog/models.hpp"
 #include "pwb/catalog/repository.hpp"
+#include "pwb/data/run_contracts.hpp"
 #include "pwb/domain/diagnostics.hpp"
 #include "pwb/domain/errors.hpp"
 #include "pwb/domain/ids.hpp"
@@ -49,6 +50,9 @@ inline constexpr std::string_view to_string(CommitStatus status) {
 }
 
 // Durable phases of one commit operation (journal["phase"] vocabulary).
+// RunCompleted sits between Rebound and Completed for run_publish journals:
+// the run row only turns terminal AFTER payload, catalog rows and project
+// bindings are all durable (v3-contracts.md §6).
 enum class JournalPhase {
     Invalid,
     Written,
@@ -56,6 +60,7 @@ enum class JournalPhase {
     CatalogCommitted,
     ProjectSaved,
     Rebound,
+    RunCompleted,
     Completed,
     CleanedUp,
 };
@@ -68,11 +73,19 @@ inline constexpr std::string_view to_string(JournalPhase phase) {
         case JournalPhase::CatalogCommitted: return "catalog_committed";
         case JournalPhase::ProjectSaved: return "project_saved";
         case JournalPhase::Rebound: return "rebound";
+        case JournalPhase::RunCompleted: return "run_completed";
         case JournalPhase::Completed: return "completed";
         case JournalPhase::CleanedUp: return "cleaned_up";
     }
     return "invalid";
 };
+
+// Journal discriminator (v3). Absent in v1 journals → EditCommit.
+enum class JournalKind { EditCommit, RunPublish };
+
+inline constexpr std::string_view to_string(JournalKind kind) {
+    return kind == JournalKind::RunPublish ? "run_publish" : "edit_commit";
+}
 
 // An already-placed producer file handed to B (never a live QGIS feature).
 struct StagedAssetV1 {
@@ -103,6 +116,59 @@ struct CommitReceiptV1 {
     domain::DiagnosticList diagnostics;
 };
 
+enum class PublishStatus {
+    Published,
+    Duplicate,
+    Conflict,
+    Failed,
+    RolledBack,
+};
+
+inline constexpr std::string_view to_string(PublishStatus status) {
+    switch (status) {
+        case PublishStatus::Published: return "published";
+        case PublishStatus::Duplicate: return "duplicate";
+        case PublishStatus::Conflict: return "conflict";
+        case PublishStatus::Failed: return "failed";
+        case PublishStatus::RolledBack: return "rolled_back";
+    }
+    return "failed";
+}
+
+// Single-result publish of one algorithm run (v3-contracts.md §6). The
+// products vector mirrors the producer's result set: exactly ONE artifact
+// is accepted this round — zero or multiple products are rejected with
+// invalid_argument BEFORE any write, never silently trimmed.
+struct PublishRequestV1 {
+    domain::OperationId operation_id;  // publish idempotency key
+    domain::RunId run_id;  // must exist and be "running"
+    // Existing target asset; when empty a NEW result asset is created from
+    // new_asset_name/new_asset_type (callers never pre-create it).
+    std::optional<domain::AssetId> target_asset_id;
+    std::string new_asset_name;  // required when target_asset_id is empty
+    std::string new_asset_type = "unknown";
+    domain::DataStage stage = domain::DataStage::Derived;
+    std::vector<StagedAssetV1> products;  // size MUST be 1 this round
+    // Descriptive result metadata stored verbatim into version.metadata —
+    // units, approximation flags, display hints. B owns the bytes and the
+    // transaction, never the numeric encoding (that stays with A).
+    domain::Json result_metadata = domain::Json::object();
+    std::optional<domain::LayerId> rebind_layer;  // optional workspace rebind
+};
+
+struct PublishReceiptV1 {
+    domain::OperationId operation_id;
+    domain::RunId run_id;
+    domain::AssetId asset_id;  // created or existing target
+    bool asset_created = false;
+    domain::VersionId new_version_id;
+    int version_number = 0;
+    std::string sha256;  // measured payload hash
+    std::uintmax_t size_bytes = 0;
+    PublishStatus status = PublishStatus::Failed;
+    domain::DiagnosticList diagnostics;
+};
+
 struct RecoveryReportV1 {
     std::vector<std::string> continued;  // operation ids resumed to success
     std::vector<std::string> rolled_back;  // operation ids rolled back
@@ -121,11 +187,16 @@ public:
         std::string operation_id;
         domain::VersionId new_version_id;
         JournalPhase phase = JournalPhase::Invalid;
+        JournalKind kind = JournalKind::EditCommit;
         CommitReceiptV1 receipt;
         std::optional<domain::RunId> resumed_run_id;
         std::optional<domain::LayerId> resumed_rebind_layer;
         std::vector<domain::VersionId> resumed_parents;
         std::string resumed_format;
+        // run_publish fragments needed to resume a publish transaction.
+        bool asset_created = false;
+        domain::Json asset_json = domain::Json::object();  // new-asset row
+        domain::Json result_metadata = domain::Json::object();
     };
 
     // Fault injection for recovery tests: return an error to abort the
@@ -140,9 +211,28 @@ public:
     domain::Result<CommitReceiptV1> commit(const CommitRequestV1& request,
                                            project::ProjectDocument& document);
 
+    // ---- run lifecycle (v3) ------------------------------------------------
+    // Durable "running" registration; idempotent on run_id.
+    domain::Result<RunStateV1> register_run(
+        const RunRegistrationV1& registration);
+    // Explicit algorithm-failure / user-cancel terminal transition. Refused
+    // while an unfinished publish journal holds the run (recover first) and
+    // refused for runs that already published outputs.
+    domain::Result<RunStateV1> finish_run(
+        const domain::RunId& run_id, RunTerminalStatus terminal,
+        domain::Json extra_parameters);
+    // Single-result publish through the same journal machinery. The run
+    // turns "complete" only after payload, catalog rows and bindings are
+    // all durable; replaying the operation id returns the same receipt.
+    domain::Result<PublishReceiptV1> publish_run_result(
+        const PublishRequestV1& request,
+        project::ProjectDocument& document);
+    // Read-only projection of one run row (nullopt when absent).
+    std::optional<RunStateV1> run_state(const domain::RunId& run_id) const;
     // Resume/roll back every unfinished journal. Must run at startup before
     // any new commit. Never guesses silently: unresolvable journals land in
-    // RecoveryReportV1::pending.
+    // RecoveryReportV1::pending and BLOCK conflicting new writes until an
+    // operator resolves them (the journal file is never auto-deleted).
     RecoveryReportV1 recover(project::ProjectDocument& document);
 
     std::vector<JournalRecord> load_journals() const;
@@ -167,6 +257,25 @@ private:
         JournalRecord& record, const CommitRequestV1& caller_request,
         project::ProjectDocument& document);
     domain::Result<CommitReceiptV1> rollback_journal(JournalRecord& record);
+    // Rebind one workspace membership onto (asset, version); shared by the
+    // edit-commit and run-publish paths.
+    void apply_rebind_to(const domain::AssetId& asset_id,
+                         const domain::VersionId& version_id,
+                         const std::optional<domain::LayerId>& layer,
+                         project::ProjectDocument& document);
+    // Rejects a new operation when an unfinished journal holds an
+    // overlapping target (same asset, run or rebind layer). The same
+    // operation id resumes instead — that path is handled by the caller.
+    std::optional<domain::Diagnostic> pending_conflict(
+        const domain::OperationId& own_operation_id,
+        const std::optional<domain::AssetId>& asset_id,
+        const std::optional<domain::RunId>& run_id,
+        const std::optional<domain::LayerId>& rebind_layer) const;
+    // run_publish resume/rollback (implemented in run_coordinator.cpp).
+    domain::Result<PublishReceiptV1> finish_publish_journal(
+        JournalRecord& record, project::ProjectDocument& document);
+    domain::Result<PublishReceiptV1> rollback_publish_journal(
+        JournalRecord& record);
 
     project::ProjectManager& manager_;
     catalog::CatalogRepository& repository_;
