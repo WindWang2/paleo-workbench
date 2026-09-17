@@ -80,6 +80,23 @@ if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)
 endif()
 
+# BEGIN CONV-07
+# In-memory DAG workflow engine (full-conversion plan M7 executor slice):
+# topological order, failure short-circuit, cooperative cancel, per-node
+# stdout logging; node ops wrap the mapping_kernel extract/interpolate
+# kernels, so the kernels must be on.
+option(PWB_BUILD_CONV_07
+    "Build the in-memory DAG workflow engine (libs/workflow_engine)" OFF)
+if(PWB_BUILD_CONV_07)
+    if(NOT PWB_BUILD_MAPPING_KERNEL)
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_07=ON requires PWB_BUILD_MAPPING_KERNEL=ON "
+            "(node ops wrap the mapping kernels)")
+    endif()
+    add_subdirectory(libs/workflow_engine)
+endif()
+# END CONV-07
+
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
 # it (no substitutes). Fail loudly when the combo is impossible.
