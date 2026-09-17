@@ -129,6 +129,12 @@ public:
     // Unique per-widget identity used as SliceSelectionEvent::origin.
     [[nodiscard]] std::string viewer_origin() const;
 
+    // --- internal wiring (public for the canvas child; not for hosts) -----
+    void report_cursor(const class QPointF& image_point);
+    void report_click_selection(const class QPointF& image_point);
+    void report_drag_selection(const class QPointF& from, const class QPointF& to);
+    void handle_result(const SliceResult& result); // queued worker delivery
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

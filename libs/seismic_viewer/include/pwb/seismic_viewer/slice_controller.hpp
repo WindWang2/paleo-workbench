@@ -52,6 +52,7 @@ struct SliceResult {
     std::int64_t rows{0};
     std::int64_t cols{0};
     std::vector<float> values;   // owned plane, canonical row-major (rows*cols)
+    std::vector<std::uint8_t> indexed; // map_slice_to_indexed8 output (worker thread)
     double value_min{0.0};       // stretch actually applied
     double value_max{0.0};
     std::string diagnostic;      // non-empty on failure/degeneracy; hosts show it
@@ -62,6 +63,7 @@ struct ControllerStats {
     std::uint64_t coalesced{0};          // queued requests replaced by a newer one
     std::uint64_t executed{0};           // read_slice attempts (cache misses)
     std::uint64_t cache_hits{0};
+    std::uint64_t cache_misses{0};       // requests that executed a read
     std::uint64_t delivered{0};          // sink calls with fresh results
     std::uint64_t discarded_stale{0};    // computed but superseded/old-epoch
     std::uint64_t read_failures{0};      // read_slice returned 0
