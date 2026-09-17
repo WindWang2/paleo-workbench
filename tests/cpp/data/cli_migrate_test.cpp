@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdio>
+#include <sys/wait.h>
 #include <filesystem>
 #include <string>
 
@@ -14,7 +15,13 @@ namespace fs = std::filesystem;
 std::string g_exe;
 
 int run_capture(const std::string& args, std::string& output) {
+#ifdef _WIN32
+    // cmd /c strips the outermost quote pair, so wrap the whole command
+    // once more when paths contain spaces.
     std::string command = "\"\"" + g_exe + "\" " + args + "\"";
+#else
+    std::string command = "'" + g_exe + "' " + args;
+#endif
     std::array<char, 4096> chunk{};
     output.clear();
 #ifdef _WIN32
@@ -30,7 +37,8 @@ int run_capture(const std::string& args, std::string& output) {
 #ifdef _WIN32
     const int status = _pclose(pipe);
 #else
-    const int status = pclose(pipe);
+    const int raw = pclose(pipe);
+    const int status = WIFEXITED(raw) ? WEXITSTATUS(raw) : 128 + raw;
 #endif
     return status;
 }

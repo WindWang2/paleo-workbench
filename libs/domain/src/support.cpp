@@ -2,6 +2,7 @@
 #include "pwb/domain/json.hpp"
 
 #include <cmath>
+#include <ctime>
 #include <iomanip>
 #include <sstream>
 
@@ -23,9 +24,6 @@ std::string now_iso8601() {
                         .count() %
                     1'000'000;
     std::tm tm{};
-    // MSVC gmtime_s(&tm, &t) vs POSIX gmtime_r(&t, &tm) — different argument
-    // order; both are the thread-safe UTC conversion. (A-line portability
-    // fix, handed back to B for their branch.)
 #if defined(_WIN32)
     gmtime_s(&tm, &tt);
 #else

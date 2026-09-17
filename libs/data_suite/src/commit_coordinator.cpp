@@ -1,6 +1,6 @@
 #include "pwb/data/commit_coordinator.hpp"
 
-#include "pwb/domain/sha256.hpp"
+#include "coordinator_detail.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -19,125 +19,9 @@ using pwb::domain::Result;
 
 namespace fs = std::filesystem;
 
-namespace {
-
-std::optional<std::string> read_file_text(const fs::path& file) {
-    std::ifstream stream(file, std::ios::binary);
-    if (!stream) return std::nullopt;
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-    if (stream.bad()) return std::nullopt;
-    return buffer.str();
-}
-
-bool write_file_bytes(const fs::path& file, std::string_view bytes) {
-    std::ofstream stream(file, std::ios::binary | std::ios::trunc);
-    if (!stream) return false;
-    stream.write(bytes.data(),
-                 static_cast<std::streamsize>(bytes.size()));
-    stream.flush();
-    return static_cast<bool>(stream);
-}
-
-// Streams source → destination while hashing (place_managed_file parity,
-// without the CAS/blob fast path — round 1 scope).
-struct PlacedPayload {
-    fs::path final_path;
-    std::string rel_path;      // project-relative POSIX
-    std::uintmax_t size = 0;
-    std::string sha256;
-};
-
-domain::Result<PlacedPayload> place_payload(const fs::path& source,
-                                            const fs::path& project_path,
-                                            domain::DataStage stage,
-                                            const domain::AssetId& asset_id,
-                                            const domain::VersionId& version_id) {
-    using R = domain::Result<PlacedPayload>;
-    if (!domain::is_safe_storage_segment(asset_id.str()) ||
-        !domain::is_safe_storage_segment(version_id.str())) {
-        return DataError(ErrorCode::UnsafeId,
-                         "asset/version id unsafe as storage segment");
-    }
-    const fs::path artifacts = pwb::project::artifact_dir_for(project_path);
-    const char* stage_dir = stage == domain::DataStage::Raw
-                                ? "raw"
-                                : (stage == domain::DataStage::Derived
-                                       ? "derived"
-                                       : (stage == domain::DataStage::Intermediate
-                                              ? "intermediate"
-                                              : "outputs"));
-    const fs::path target_dir =
-        artifacts / stage_dir / asset_id.str() / version_id.str();
-    std::error_code ec;
-    fs::create_directories(target_dir, ec);
-    if (ec) {
-        return DataError(ErrorCode::IoError,
-                         "cannot create payload dir: " + ec.message());
-    }
-    const fs::path target = target_dir / source.filename();
-    if (fs::exists(target, ec)) {
-        return DataError(ErrorCode::ImmutableVersion,
-                         "managed payload already exists: " +
-                             pwb::project::path_to_u8(target));
-    }
-    const fs::path tmp = target_dir / (".place-" + std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count()));
-    {
-        std::ifstream in(source, std::ios::binary);
-        if (!in) {
-            return DataError(ErrorCode::InvalidArgument,
-                             "staged source unreadable: " +
-                                 pwb::project::path_to_u8(source));
-        }
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            return DataError(ErrorCode::IoError, "cannot create payload tmp");
-        }
-        pwb::domain::Sha256 digest;
-        std::string buffer(1 << 20, '\0');
-        PlacedPayload placed;
-        while (in) {
-            in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-            const std::streamsize got = in.gcount();
-            if (got > 0) {
-                out.write(buffer.data(), got);
-                digest.update(buffer.data(), static_cast<std::size_t>(got));
-                placed.size += static_cast<std::uintmax_t>(got);
-            }
-        }
-        if (in.bad() || !out) {
-            std::error_code remove_ec;
-            fs::remove(tmp, remove_ec);
-            return DataError(ErrorCode::IoError, "payload copy failed");
-        }
-        placed.sha256 = digest.hex_digest();
-        placed.final_path = target;
-        // Windows: an open handle (even read-only) blocks rename — the
-        // streams must close before the atomic tmp → final move.
-        out.close();
-        in.close();
-        fs::rename(tmp, target, ec);
-        if (ec) {
-            std::error_code remove_ec;
-            fs::remove(tmp, remove_ec);
-            return DataError(ErrorCode::IoError, "payload rename failed: " +
-                                                     ec.message());
-        }
-        const fs::path project_dir =
-            pwb::project::project_dir_for(project_path);
-        placed.rel_path = pwb::project::path_to_u8(fs::weakly_canonical(target, ec)
-                              .lexically_relative(
-                                  pwb::project::project_dir_for(project_path)));
-
-        if (ec || placed.rel_path.empty()) {
-            placed.rel_path = pwb::project::path_to_u8(target);
-        }
-        return placed;
-    }
-}
-
-}  // namespace
+using detail::read_file_text;
+using detail::write_file_bytes;
+using detail::place_payload;
 
 CommitCoordinator::CommitCoordinator(
     project::ProjectManager& manager, pwb::catalog::CatalogRepository& repository,
@@ -166,6 +50,9 @@ CommitCoordinator::load_journals() const {
         record.operation_id = parsed.value("operation_id", "");
         record.new_version_id =
             domain::VersionId(parsed.value("new_version_id", ""));
+        if (parsed.value("kind", "edit_commit") == "run_publish") {
+            record.kind = JournalKind::RunPublish;
+        }
         const std::string phase = parsed.value("phase", "invalid");
         for (int probe = static_cast<int>(JournalPhase::Invalid);
              probe <= static_cast<int>(JournalPhase::CleanedUp); ++probe) {
@@ -190,6 +77,8 @@ CommitCoordinator::load_journals() const {
                 record.receipt.status = CommitStatus::Duplicate;
             } else if (status == "rolled_back") {
                 record.receipt.status = CommitStatus::RolledBack;
+            } else if (status == "conflict") {
+                record.receipt.status = CommitStatus::Conflict;
             }
         }
         // Request fragments needed to RESUME an interrupted operation.
@@ -218,6 +107,17 @@ CommitCoordinator::load_journals() const {
         }
         if (parsed.contains("format")) {
             record.resumed_format = parsed.value("format", "");
+        }
+        // run_publish fragments (v3): new-asset row + result metadata are
+        // needed to resume the publish transaction after a crash.
+        record.asset_created = parsed.value("asset_created", false);
+        if (parsed.contains("asset_json") &&
+            parsed["asset_json"].is_object()) {
+            record.asset_json = parsed["asset_json"];
+        }
+        if (parsed.contains("result_metadata") &&
+            parsed["result_metadata"].is_object()) {
+            record.result_metadata = parsed["result_metadata"];
         }
         records.push_back(std::move(record));
     }
@@ -294,6 +194,15 @@ Result<CommitReceiptV1> CommitCoordinator::commit(
     const CommitRequestV1& request, project::ProjectDocument& document) {
     // ---- Idempotency: same operation id → replay the recorded receipt.
     if (auto existing = find_journal(request.operation_id)) {
+        if (existing->kind == JournalKind::RunPublish) {
+            CommitReceiptV1 mismatch;
+            mismatch.operation_id = request.operation_id;
+            mismatch.status = CommitStatus::Failed;
+            mismatch.diagnostics.push_back(Diagnostic::error(
+                "operation_id_kind_mismatch",
+                "operation id belongs to a run_publish journal"));
+            return mismatch;
+        }
         CommitReceiptV1 receipt = existing->receipt;
         if (existing->phase == JournalPhase::Completed ||
             existing->phase == JournalPhase::CleanedUp) {
@@ -303,26 +212,48 @@ Result<CommitReceiptV1> CommitCoordinator::commit(
                     "operation_replayed",
                     "operation id already committed — receipt replayed, no "
                     "second version"));
+                return receipt;
             }
-            return receipt;
-        }
-        if (existing->phase == JournalPhase::Written ||
-            existing->phase == JournalPhase::PayloadStaged ||
-            existing->phase == JournalPhase::CatalogCommitted) {
+            if (receipt.status != CommitStatus::RolledBack) {
+                return receipt;  // conflict/failed outcome — replay as-is
+            }
+            // Rolled back earlier: the operation id is free again — a new
+            // attempt proceeds below (fresh version id, journal rewritten).
+            receipt.diagnostics.push_back(Diagnostic::info(
+                "operation_rolled_back",
+                "previous attempt was rolled back — new attempt proceeds"));
+        } else if (existing->phase == JournalPhase::Written ||
+                   existing->phase == JournalPhase::PayloadStaged ||
+                   existing->phase == JournalPhase::CatalogCommitted ||
+                   existing->phase == JournalPhase::ProjectSaved ||
+                   existing->phase == JournalPhase::Rebound) {
             // Unfinished journal from an earlier crash: resume it now.
             CommitRequestV1 resumed = request;
             return finish_journal(*existing, resumed, document);
         }
-        if (receipt.status == CommitStatus::RolledBack) {
-            receipt.diagnostics.push_back(Diagnostic::info(
-                "operation_rolled_back",
-                "previous attempt was rolled back — new attempt proceeds"));
-        }
+    } else if (auto conflict = pending_conflict(
+                   request.operation_id, request.asset_id, request.run_id,
+                   request.rebind_layer)) {
+        // An unfinished journal holds an overlapping target: recovery must
+        // decide its fate before this project accepts new conflicting
+        // writes (v3-contracts.md §2).
+        CommitReceiptV1 blocked;
+        blocked.operation_id = request.operation_id;
+        blocked.status = CommitStatus::Failed;
+        blocked.diagnostics.push_back(std::move(*conflict));
+        return blocked;
     }
 
     // ---- Validation gate.
     CommitReceiptV1 receipt;
     receipt.operation_id = request.operation_id;
+    if (!domain::is_safe_storage_segment(request.operation_id.str())) {
+        receipt.diagnostics.push_back(Diagnostic::error(
+            "unsafe_operation_id",
+            "operation id is used as the journal file name and must match "
+            "[A-Za-z0-9._-] without a leading dot"));
+        return receipt;
+    }
     if (document.read_only()) {
         receipt.diagnostics.push_back(Diagnostic::error(
             "read_only", "project is read-only (future schema)"));
@@ -509,15 +440,22 @@ Result<CommitReceiptV1> CommitCoordinator::finish_journal_phase4(
 void CommitCoordinator::apply_rebind(const CommitRequestV1& request,
                                      const DataVersion& version,
                                      project::ProjectDocument& document) {
-    if (!request.rebind_layer.has_value()) return;
+    apply_rebind_to(request.asset_id, version.id, request.rebind_layer,
+                    document);
+}
+
+void CommitCoordinator::apply_rebind_to(
+    const domain::AssetId& asset_id, const domain::VersionId& version_id,
+    const std::optional<domain::LayerId>& layer,
+    project::ProjectDocument& document) {
+    if (!layer.has_value()) return;
     workspace::ensure_mapping_workspace(document.root());
     domain::Json& ws = document.root()["mapping_workspace"];
     if (ws.contains("memberships") &&
-        ws["memberships"].contains(request.rebind_layer->str())) {
-        domain::Json& membership =
-            ws["memberships"][request.rebind_layer->str()];
-        membership["source_asset_id"] = request.asset_id.str();
-        membership["source_version_id"] = version.id.str();
+        ws["memberships"].contains(layer->str())) {
+        domain::Json& membership = ws["memberships"][layer->str()];
+        membership["source_asset_id"] = asset_id.str();
+        membership["source_version_id"] = version_id.str();
         membership["binding_kind"] = "catalog_version";
         membership["bound_at"] = now();
     }
@@ -660,6 +598,54 @@ Result<CommitReceiptV1> CommitCoordinator::rollback_journal(
     return receipt;
 }
 
+std::optional<Diagnostic> CommitCoordinator::pending_conflict(
+    const domain::OperationId& own_operation_id,
+    const std::optional<domain::AssetId>& asset_id,
+    const std::optional<domain::RunId>& run_id,
+    const std::optional<domain::LayerId>& rebind_layer) const {
+    for (const auto& record : load_journals()) {
+        if (record.operation_id == own_operation_id.str()) continue;
+        const bool unfinished =
+            record.phase == JournalPhase::Written ||
+            record.phase == JournalPhase::PayloadStaged ||
+            record.phase == JournalPhase::CatalogCommitted ||
+            record.phase == JournalPhase::ProjectSaved ||
+            record.phase == JournalPhase::Rebound ||
+            record.phase == JournalPhase::RunCompleted;
+        if (!unfinished) continue;
+        bool overlap = false;
+        if (asset_id.has_value() &&
+            record.json.value("asset_id", "") == asset_id->str()) {
+            overlap = true;
+        }
+        if (!overlap && run_id.has_value()) {
+            const auto& run_field = record.json["run_id"];
+            if (run_field.is_string() &&
+                run_field.get<std::string>() == run_id->str()) {
+                overlap = true;
+            }
+        }
+        if (!overlap && rebind_layer.has_value()) {
+            const auto& layer_field = record.json["rebind_layer"];
+            if (layer_field.is_string() &&
+                layer_field.get<std::string>() == rebind_layer->str()) {
+                overlap = true;
+            }
+        }
+        if (overlap) {
+            return Diagnostic::error(
+                "recovery_required",
+                "unfinished journal " + record.operation_id +
+                    " (phase " + std::string(to_string(record.phase)) +
+                    ") holds an overlapping asset/run/layer — run "
+                    "WritableSession::recover() first",
+                Json{{"blocking_operation", record.operation_id},
+                     {"phase", std::string(to_string(record.phase))}});
+        }
+    }
+    return std::nullopt;
+}
+
 RecoveryReportV1 CommitCoordinator::recover(
     project::ProjectDocument& document) {
     RecoveryReportV1 report;
@@ -670,6 +656,25 @@ RecoveryReportV1 CommitCoordinator::recover(
                 report.rolled_back.push_back(record.operation_id);
             } else {
                 report.continued.push_back(record.operation_id);
+            }
+            continue;
+        }
+        if (record.kind == JournalKind::RunPublish) {
+            auto outcome = finish_publish_journal(record, document);
+            if (outcome.is_ok() &&
+                (outcome.value().status == PublishStatus::Published ||
+                 outcome.value().status == PublishStatus::RolledBack)) {
+                if (outcome.value().status == PublishStatus::RolledBack) {
+                    report.rolled_back.push_back(record.operation_id);
+                } else {
+                    report.continued.push_back(record.operation_id);
+                }
+            } else {
+                report.pending.push_back(record.operation_id);
+                report.diagnostics.push_back(Diagnostic::warning(
+                    "recovery_pending",
+                    "journal " + record.operation_id +
+                        " could not be auto-resolved — awaiting decision"));
             }
             continue;
         }

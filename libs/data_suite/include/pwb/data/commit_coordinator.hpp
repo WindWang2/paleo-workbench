@@ -229,7 +229,6 @@ public:
         project::ProjectDocument& document);
     // Read-only projection of one run row (nullopt when absent).
     std::optional<RunStateV1> run_state(const domain::RunId& run_id) const;
-
     // Resume/roll back every unfinished journal. Must run at startup before
     // any new commit. Never guesses silently: unresolvable journals land in
     // RecoveryReportV1::pending and BLOCK conflicting new writes until an
@@ -258,6 +257,12 @@ private:
         JournalRecord& record, const CommitRequestV1& caller_request,
         project::ProjectDocument& document);
     domain::Result<CommitReceiptV1> rollback_journal(JournalRecord& record);
+    // Rebind one workspace membership onto (asset, version); shared by the
+    // edit-commit and run-publish paths.
+    void apply_rebind_to(const domain::AssetId& asset_id,
+                         const domain::VersionId& version_id,
+                         const std::optional<domain::LayerId>& layer,
+                         project::ProjectDocument& document);
     // Rejects a new operation when an unfinished journal holds an
     // overlapping target (same asset, run or rebind layer). The same
     // operation id resumes instead — that path is handled by the caller.
@@ -266,6 +271,11 @@ private:
         const std::optional<domain::AssetId>& asset_id,
         const std::optional<domain::RunId>& run_id,
         const std::optional<domain::LayerId>& rebind_layer) const;
+    // run_publish resume/rollback (implemented in run_coordinator.cpp).
+    domain::Result<PublishReceiptV1> finish_publish_journal(
+        JournalRecord& record, project::ProjectDocument& document);
+    domain::Result<PublishReceiptV1> rollback_publish_journal(
+        JournalRecord& record);
 
     project::ProjectManager& manager_;
     catalog::CatalogRepository& repository_;
