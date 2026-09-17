@@ -54,11 +54,20 @@
 
 - **M6 编图计算管线**（mapping/geological_pipeline 3.0k 行起步）：
   contouring（✅ 首片已落地：`libs/mapping_kernel`，
-  168 冻结案例全过）→ interpolator（IDW 等，1.0k）→ polygonization
-  （616 行，需 polygon 环模型）→ pipeline.py 编排（594 行）→
-  factor_layer_products/well_prediction_surface。
+  168 冻结案例全过）→ interpolator（✅ 第二片已落地：IDW + numpy
+  Ordinary Kriging 核，19 冻结案例全过）→ polygonization
+  （✅ 第三片已落地：栅格描边 + 洞归属 + 分类，24 冻结案例，
+  坐标 diff 0；shapely repair / clip 未移植）→ pipeline.py 编排
+  （✅ extract_factors 已落地，22 冻结案例；MapDocument/composer 仍
+  Python）→ factor_layer_products/well_prediction_surface
+  （✅ nearest_neighbor_class_grid 已落地，10 冻结案例，含 inclusive
+  PIP 与 even-odd 边界分歧；factor_layer_products 仍是描述符胶水）。
 - **M7 工作流引擎核**（workflow/ 2.8 万行中引擎部分：定义/执行器/
-  crs_policy/factor_grid_result）。
+  crs_policy/factor_grid_result）。crs_policy 首片已进
+  `libs/mapping_kernel`（无 pyproj；未知 CRS → axes_known 空）；
+  `interpolate_factor` 已写入 distance_policy / annotation 与
+  GridStatistics（finite 格元 float64 mean/std ddof=0）。sample_normalization
+  叶核已进 mapping_kernel。DAG 执行器不是 TaskRuntime。
 - **M8 viz 其余**（井相关：DTW 对比、地层相关、地质体；2 万行分期）。
 - **M9 prediction/interchange/resources/providers**（~1.5 万行，
   纯服务层居多）。
@@ -104,5 +113,39 @@
   银行家舍入）；oracle 生成器
   `tools/oracle/generate_contour_fixtures.py` 冻结 5 网格 ×168 案例
   （含 NaN 空洞/鞍点场/噪声场），C++ 对账全过（坐标 <1e-9）。
-- 待办：M6 其余（interpolator→polygonization→pipeline 编排）、M7-M12
-  按阶梯推进。
+- 2026-09-17：**M6 第二片完成**——`libs/mapping_kernel` 忠实移植
+  interpolator.py 数值核（IDW 全邻域/kNN、numpy-grid-OLS Ordinary
+  Kriging 含球状/指数/高斯变差函数与移动邻域、extent/validate、
+  even-odd 域掩膜）。geoviz WLS 引擎是不同估计器，不在本核。
+  oracle 生成器 `tools/oracle/generate_interpolator_fixtures.py` 冻结
+  19 案例（含精确命中、半径 NaN、kNN、常值场、重合样点、域掩膜）；
+  C++ 对账全过（IDW grid_z ≤1e-6，Kriging ≤1e-4 float32；轴/变差
+  参数 1e-12/1e-9）。测试 `mapping_kernel.interpolator`。门禁 50/50 ×2。
+- 2026-09-17：**M6 第三片完成**——`libs/mapping_kernel` 忠实移植
+  polygonization.py 数值核（shoelace/signed/centroid、轴对齐共线简化、
+  格元边追踪复刻 Python dict 插入序、even-odd 洞投票、最小外环优先、
+  相带分类 ⅓/⅔）。oracle 生成器
+  `tools/oracle/generate_polygonization_fixtures.py` 冻结 24 案例
+  （repair_invalid_geometry 打成 identity，不冻 shapely）。坐标 diff 0。
+  测试 `mapping_kernel.polygonization`。门禁 51/51 ×2。
+  并行 swarm 同时落地：
+  **extract_factors**（22 案例，坐标族 #1150、派生砂地比/厚度）+
+  **crs_policy**（builtin 13+22+4；未知 id 无 pyproj → nullopt，
+  未接线 interpolator）。门禁 53/53 ×2。
+- 2026-09-17：**M6 NN 分类栅格 + M7 crs_policy 接线**——
+  `nearest_neighbor_class_grid`（first-seen 相 id、numpy.argmin 先最小、
+  inclusive 含边 PIP，不复用 interpolator even-odd 掩膜）；oracle
+  `generate_class_grid_fixtures.py` 10 案例（含边上 inclusive=True /
+  even-odd=False）。`interpolate_factor` 按 dataset CRS（C++：
+  InterpolateOptions.crs）调用 `resolve_distance_policy` 并写入
+  FactorGrid。测试 `mapping_kernel.class_grid` + interpolator 策略用例。
+  门禁 54/54 ×2。
+- 2026-09-17：**M7 GridStatistics + sample_normalization**——
+  `grid_statistics` 对齐 `GridStatistics.from_grid`（全 NaN / inf / 空
+  栅格）；`interpolate_factor` 写入 FactorGrid.statistics。
+  `normalize_factor_samples` 四策略 mean/first/error/keep（精确坐标
+  相等、增量均值、worst-flag、well_id 拼接）。oracle 8 + 14 案例。
+  测试 `mapping_kernel.grid_stats` / `mapping_kernel.sample_norm`。
+  门禁 56/56 ×2。
+- 待办：pipeline MapDocument/composer 仍 Python；M7 DAG 定义（非
+  TaskRuntime）；其后 M8-M12。

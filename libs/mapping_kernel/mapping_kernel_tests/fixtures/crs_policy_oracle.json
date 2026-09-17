@@ -1,0 +1,486 @@
+{
+  "constants": {
+    "POLICY_PLANAR": "planar",
+    "POLICY_PLANAR_DEGREES": "planar_degrees",
+    "POLICY_PROJECTED": "projected",
+    "POLICY_UNDECLARED": "undeclared",
+    "DISTANCE_POLICIES": [
+      "planar",
+      "planar_degrees",
+      "projected"
+    ],
+    "KNOWN_GEOGRAPHIC": [
+      "EPSG:3857",
+      "EPSG:4214",
+      "EPSG:4267",
+      "EPSG:4269",
+      "EPSG:4326",
+      "EPSG:4490",
+      "EPSG:4610"
+    ],
+    "PROJECTED_EXCEPTIONS": [
+      "EPSG:3857"
+    ]
+  },
+  "pyproj_available": true,
+  "pyproj_version": "3.7.2",
+  "builtin": {
+    "crs_is_geographic": [
+      {
+        "id": "null",
+        "crs": null,
+        "result": null
+      },
+      {
+        "id": "empty",
+        "crs": "",
+        "result": null
+      },
+      {
+        "id": "4326",
+        "crs": "EPSG:4326",
+        "result": true
+      },
+      {
+        "id": "4269",
+        "crs": "EPSG:4269",
+        "result": true
+      },
+      {
+        "id": "4267",
+        "crs": "EPSG:4267",
+        "result": true
+      },
+      {
+        "id": "4214",
+        "crs": "EPSG:4214",
+        "result": true
+      },
+      {
+        "id": "4610",
+        "crs": "EPSG:4610",
+        "result": true
+      },
+      {
+        "id": "4490",
+        "crs": "EPSG:4490",
+        "result": true
+      },
+      {
+        "id": "3857",
+        "crs": "EPSG:3857",
+        "result": false
+      },
+      {
+        "id": "4326_lower",
+        "crs": "epsg:4326",
+        "result": true
+      },
+      {
+        "id": "4326_padded",
+        "crs": "  EPSG:4326  ",
+        "result": true
+      },
+      {
+        "id": "4326_slash",
+        "crs": "EPSG:4326 / WGS 84",
+        "result": true
+      },
+      {
+        "id": "3857_slash",
+        "crs": "EPSG:3857 / Pseudo-Mercator",
+        "result": false
+      }
+    ],
+    "resolve": [
+      {
+        "id": "undeclared_default",
+        "crs": null,
+        "distance_policy": null,
+        "result": {
+          "policy": "planar",
+          "crs": null,
+          "axes_known": null,
+          "annotation": "distance_policy=planar; CRS undeclared — planar assumption unverified",
+          "warning": null
+        }
+      },
+      {
+        "id": "undeclared_planar",
+        "crs": null,
+        "distance_policy": "planar",
+        "result": {
+          "policy": "planar",
+          "crs": null,
+          "axes_known": null,
+          "annotation": "distance_policy=planar; CRS undeclared — planar assumption unverified",
+          "warning": null
+        }
+      },
+      {
+        "id": "undeclared_planar_degrees",
+        "crs": null,
+        "distance_policy": "planar_degrees",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": null,
+          "axes_known": null,
+          "annotation": "distance_policy=planar_degrees; CRS undeclared — planar assumption unverified",
+          "warning": null
+        }
+      },
+      {
+        "id": "undeclared_projected",
+        "crs": null,
+        "distance_policy": "projected",
+        "result": {
+          "policy": "projected",
+          "crs": null,
+          "axes_known": null,
+          "annotation": "distance_policy=projected; CRS undeclared — planar assumption unverified",
+          "warning": null
+        }
+      },
+      {
+        "id": "empty_default",
+        "crs": "",
+        "distance_policy": null,
+        "result": {
+          "policy": "planar",
+          "crs": "",
+          "axes_known": null,
+          "annotation": "distance_policy=planar; CRS  axis units unverifiable (unknown id or pyproj unavailable) — planar assumption unconfirmed",
+          "warning": "CRS  axis units could not be verified; distance policy applied without confirmation"
+        }
+      },
+      {
+        "id": "empty_planar_degrees",
+        "crs": "",
+        "distance_policy": "planar_degrees",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "",
+          "axes_known": null,
+          "annotation": "distance_policy=planar_degrees; operator explicitly accepted degree-as-planar distances",
+          "warning": "planar_degrees declared for a non-geographic CRS"
+        }
+      },
+      {
+        "id": "empty_projected",
+        "crs": "",
+        "distance_policy": "projected",
+        "result": {
+          "policy": "projected",
+          "crs": "",
+          "axes_known": null,
+          "annotation": "distance_policy=projected; CRS  declared projected by operator",
+          "warning": null
+        }
+      },
+      {
+        "id": "4326_default",
+        "crs": "EPSG:4326",
+        "distance_policy": null,
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4326",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; geographic CRS EPSG:4326 — degree-as-planar assumption APPLIED and recorded",
+          "warning": "CRS EPSG:4326 is geographic (degree axes); interpolation distances treat degrees as planar metres. For large extents reproject to a projected CRS or declare distance_policy='planar_degrees'."
+        }
+      },
+      {
+        "id": "4326_empty_policy",
+        "crs": "EPSG:4326",
+        "distance_policy": "",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4326",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; geographic CRS EPSG:4326 — degree-as-planar assumption APPLIED and recorded",
+          "warning": "CRS EPSG:4326 is geographic (degree axes); interpolation distances treat degrees as planar metres. For large extents reproject to a projected CRS or declare distance_policy='planar_degrees'."
+        }
+      },
+      {
+        "id": "4326_ws_policy",
+        "crs": "EPSG:4326",
+        "distance_policy": "   ",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4326",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; geographic CRS EPSG:4326 — degree-as-planar assumption APPLIED and recorded",
+          "warning": "CRS EPSG:4326 is geographic (degree axes); interpolation distances treat degrees as planar metres. For large extents reproject to a projected CRS or declare distance_policy='planar_degrees'."
+        }
+      },
+      {
+        "id": "4326_explicit_planar",
+        "crs": "EPSG:4326",
+        "distance_policy": "planar",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4326",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; geographic CRS EPSG:4326 — degree-as-planar assumption APPLIED and recorded",
+          "warning": "CRS EPSG:4326 is geographic (degree axes); interpolation distances treat degrees as planar metres. For large extents reproject to a projected CRS or declare distance_policy='planar_degrees'."
+        }
+      },
+      {
+        "id": "4326_planar_degrees",
+        "crs": "EPSG:4326",
+        "distance_policy": "planar_degrees",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4326",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; operator explicitly accepted degree-as-planar distances",
+          "warning": null
+        }
+      },
+      {
+        "id": "4326_projected",
+        "crs": "EPSG:4326",
+        "distance_policy": "projected",
+        "result": {
+          "policy": "projected",
+          "crs": "EPSG:4326",
+          "axes_known": true,
+          "annotation": "distance_policy=projected; CRS EPSG:4326 declared projected by operator",
+          "warning": "projected policy declared but CRS is geographic"
+        }
+      },
+      {
+        "id": "4326_padded_policy",
+        "crs": "EPSG:4326",
+        "distance_policy": "  planar_degrees  ",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4326",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; operator explicitly accepted degree-as-planar distances",
+          "warning": null
+        }
+      },
+      {
+        "id": "4326_padded_crs",
+        "crs": "  EPSG:4326  ",
+        "distance_policy": null,
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "  EPSG:4326  ",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; geographic CRS   EPSG:4326   — degree-as-planar assumption APPLIED and recorded",
+          "warning": "CRS   EPSG:4326   is geographic (degree axes); interpolation distances treat degrees as planar metres. For large extents reproject to a projected CRS or declare distance_policy='planar_degrees'."
+        }
+      },
+      {
+        "id": "4326_slash",
+        "crs": "EPSG:4326 / WGS 84",
+        "distance_policy": null,
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4326 / WGS 84",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; geographic CRS EPSG:4326 / WGS 84 — degree-as-planar assumption APPLIED and recorded",
+          "warning": "CRS EPSG:4326 / WGS 84 is geographic (degree axes); interpolation distances treat degrees as planar metres. For large extents reproject to a projected CRS or declare distance_policy='planar_degrees'."
+        }
+      },
+      {
+        "id": "4490_default",
+        "crs": "EPSG:4490",
+        "distance_policy": null,
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4490",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; geographic CRS EPSG:4490 — degree-as-planar assumption APPLIED and recorded",
+          "warning": "CRS EPSG:4490 is geographic (degree axes); interpolation distances treat degrees as planar metres. For large extents reproject to a projected CRS or declare distance_policy='planar_degrees'."
+        }
+      },
+      {
+        "id": "4490_planar_degrees",
+        "crs": "EPSG:4490",
+        "distance_policy": "planar_degrees",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:4490",
+          "axes_known": true,
+          "annotation": "distance_policy=planar_degrees; operator explicitly accepted degree-as-planar distances",
+          "warning": null
+        }
+      },
+      {
+        "id": "3857_default",
+        "crs": "EPSG:3857",
+        "distance_policy": null,
+        "result": {
+          "policy": "planar",
+          "crs": "EPSG:3857",
+          "axes_known": false,
+          "annotation": "distance_policy=planar; CRS EPSG:3857 projected/verified planar metres",
+          "warning": null
+        }
+      },
+      {
+        "id": "3857_planar",
+        "crs": "EPSG:3857",
+        "distance_policy": "planar",
+        "result": {
+          "policy": "planar",
+          "crs": "EPSG:3857",
+          "axes_known": false,
+          "annotation": "distance_policy=planar; CRS EPSG:3857 projected/verified planar metres",
+          "warning": null
+        }
+      },
+      {
+        "id": "3857_planar_degrees",
+        "crs": "EPSG:3857",
+        "distance_policy": "planar_degrees",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:3857",
+          "axes_known": false,
+          "annotation": "distance_policy=planar_degrees; operator explicitly accepted degree-as-planar distances",
+          "warning": "planar_degrees declared for a non-geographic CRS"
+        }
+      },
+      {
+        "id": "3857_projected",
+        "crs": "EPSG:3857",
+        "distance_policy": "projected",
+        "result": {
+          "policy": "projected",
+          "crs": "EPSG:3857",
+          "axes_known": false,
+          "annotation": "distance_policy=projected; CRS EPSG:3857 declared projected by operator",
+          "warning": null
+        }
+      }
+    ],
+    "errors": [
+      {
+        "id": "err_4326_lightyears",
+        "crs": "EPSG:4326",
+        "distance_policy": "planar_lightyears",
+        "error": "distance_policy must be one of ('planar', 'planar_degrees', 'projected'), got 'planar_lightyears'"
+      },
+      {
+        "id": "err_null_geodesic",
+        "crs": null,
+        "distance_policy": "geodesic",
+        "error": "distance_policy must be one of ('planar', 'planar_degrees', 'projected'), got 'geodesic'"
+      },
+      {
+        "id": "err_4326_PLANAR",
+        "crs": "EPSG:4326",
+        "distance_policy": "PLANAR",
+        "error": "distance_policy must be one of ('planar', 'planar_degrees', 'projected'), got 'PLANAR'"
+      },
+      {
+        "id": "err_4326_not_a_policy",
+        "crs": "EPSG:4326",
+        "distance_policy": "not-a-policy",
+        "error": "distance_policy must be one of ('planar', 'planar_degrees', 'projected'), got 'not-a-policy'"
+      }
+    ]
+  },
+  "pyproj_optional": {
+    "crs_is_geographic": [
+      {
+        "id": "unknown_99999",
+        "crs": "EPSG:99999",
+        "result": null
+      },
+      {
+        "id": "unknown_99999999",
+        "crs": "EPSG:99999999",
+        "result": null
+      },
+      {
+        "id": "utm_32650",
+        "crs": "EPSG:32650",
+        "result": false
+      },
+      {
+        "id": "whitespace_only",
+        "crs": "  ",
+        "result": null
+      }
+    ],
+    "resolve": [
+      {
+        "id": "unknown_99999_default",
+        "crs": "EPSG:99999",
+        "distance_policy": null,
+        "result": {
+          "policy": "planar",
+          "crs": "EPSG:99999",
+          "axes_known": null,
+          "annotation": "distance_policy=planar; CRS EPSG:99999 axis units unverifiable (unknown id or pyproj unavailable) — planar assumption unconfirmed",
+          "warning": "CRS EPSG:99999 axis units could not be verified; distance policy applied without confirmation"
+        }
+      },
+      {
+        "id": "unknown_99999_planar_degrees",
+        "crs": "EPSG:99999",
+        "distance_policy": "planar_degrees",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:99999",
+          "axes_known": null,
+          "annotation": "distance_policy=planar_degrees; operator explicitly accepted degree-as-planar distances",
+          "warning": "planar_degrees declared for a non-geographic CRS"
+        }
+      },
+      {
+        "id": "unknown_99999_projected",
+        "crs": "EPSG:99999",
+        "distance_policy": "projected",
+        "result": {
+          "policy": "projected",
+          "crs": "EPSG:99999",
+          "axes_known": null,
+          "annotation": "distance_policy=projected; CRS EPSG:99999 declared projected by operator",
+          "warning": null
+        }
+      },
+      {
+        "id": "utm_32650_default",
+        "crs": "EPSG:32650",
+        "distance_policy": null,
+        "result": {
+          "policy": "planar",
+          "crs": "EPSG:32650",
+          "axes_known": false,
+          "annotation": "distance_policy=planar; CRS EPSG:32650 projected/verified planar metres",
+          "warning": null
+        }
+      },
+      {
+        "id": "utm_32650_planar_degrees",
+        "crs": "EPSG:32650",
+        "distance_policy": "planar_degrees",
+        "result": {
+          "policy": "planar_degrees",
+          "crs": "EPSG:32650",
+          "axes_known": false,
+          "annotation": "distance_policy=planar_degrees; operator explicitly accepted degree-as-planar distances",
+          "warning": "planar_degrees declared for a non-geographic CRS"
+        }
+      },
+      {
+        "id": "utm_32650_projected",
+        "crs": "EPSG:32650",
+        "distance_policy": "projected",
+        "result": {
+          "policy": "projected",
+          "crs": "EPSG:32650",
+          "axes_known": false,
+          "annotation": "distance_policy=projected; CRS EPSG:32650 declared projected by operator",
+          "warning": null
+        }
+      }
+    ]
+  }
+}

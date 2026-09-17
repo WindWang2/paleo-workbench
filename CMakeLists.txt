@@ -28,7 +28,7 @@ option(PWB_BUILD_SEISMIC_ATTRIBUTES
 option(PWB_BUILD_SEISMIC_IO
     "Build the post-stack SEG-Y reader (libs/seismic_io)" OFF)
 option(PWB_BUILD_MAPPING_KERNEL
-    "Build the contouring kernel ported from the Python mapping pipeline" OFF)
+    "Build the contouring+interpolator kernel ported from the Python mapping pipeline" OFF)
 option(PWB_BUILD_INTEGRATION_TESTS
     "Register tests/cpp/integration (requires platform+data+science)" OFF)
 include(CTest)
