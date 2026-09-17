@@ -92,6 +92,7 @@ QgsRasterLayer* MapSession::addRasterLayer(const std::string& uri,
 }
 
 QgsMapLayer* MapSession::layerById(const std::string& layer_id) const {
+    if (project_ == nullptr) return nullptr;   // closed session
     const auto layers = project_->mapLayers();
     for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
         if (layer_adapter::layer_id_of(it.value()) == layer_id) return it.value();

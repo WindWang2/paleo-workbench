@@ -6,13 +6,14 @@
 #include <cmath>
 #include <memory>
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QFile>
 #include <QTemporaryDir>
 
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
 #include <qgsproject.h>
+#include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 
 #include <pwb/qgis/edit_controller.hpp>
@@ -28,15 +29,14 @@ using pwb::qgis::MapSession;
 namespace {
 
 QgsPointXY vertex_of(QgsVectorLayer* layer, long long fid, int index) {
-    QgsFeature feature;
-    layer->getFeature(fid, feature);
+    QgsFeature feature = layer->getFeature(static_cast<QgsFeatureId>(fid));
     return feature.geometry().vertexAt(index);
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QgsApplication app(argc, argv, true);
     pwb::qgis::QgisRuntime::acquire();
 
     QTemporaryDir temp_dir;
@@ -105,8 +105,7 @@ int main(int argc, char** argv) {
             QStringLiteral("staged"), QStringLiteral("ogr"));
         PWB_CHECK_MSG(staged_layer.isValid(), "staged asset unreadable");
         PWB_CHECK(staged_layer.featureCount() == 3);
-        QgsFeature reloaded;
-        staged_layer.getFeature(1, reloaded);
+        QgsFeature reloaded = staged_layer.getFeature(1);
         PWB_CHECK(reloaded.hasGeometry());
         const QgsPointXY reloaded_vertex = reloaded.geometry().vertexAt(0);
         PWB_CHECK(std::abs(reloaded_vertex.x() - moved.x()) < 1e-9);

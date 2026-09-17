@@ -7,7 +7,9 @@
 //                 export a PNG, exit 0/1 (used by CTest and package smoke;
 //                 failures print diagnostics, never fake success).
 
-#include <QApplication>
+#include <filesystem>
+
+#include <qgsapplication.h>
 #include <QCommandLineParser>
 #include <QColor>
 #include <QDir>
@@ -15,9 +17,14 @@
 #include <QImage>
 #include <QTemporaryDir>
 
+#include <qgsfeature.h>
+#include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaprendererparalleljob.h>
+#include <qgsmapsettings.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
+#include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 
 #include <pwb/qgis/edit_controller.hpp>
@@ -104,14 +111,24 @@ int runSelfCheck() {
         return 1;
     }
 
-    // Render one frame synchronously into an image (real render job).
+    // Render one frame synchronously through the same map-render job engine
+    // the canvas uses. Widget->grab() is not deterministic for an unshown
+    // window under the offscreen platform; the parallel job renders the
+    // canvas's real map settings into a fixed-size image.
     QgsMapCanvas* canvas = window.findChild<QgsMapCanvas*>();
     if (canvas == nullptr) {
         qCritical("canvas not found");
         return 1;
     }
     canvas->resize(800, 600);
-    const QImage frame = canvas->grab().toImage();
+    canvas->setExtent(layer->extent());
+    QgsMapSettings settings = canvas->mapSettings();
+    settings.setOutputSize(QSize(800, 600));
+    settings.setBackgroundColor(Qt::white);
+    QgsMapRendererParallelJob job(settings);
+    job.start();
+    job.waitForFinished();
+    const QImage frame = job.renderedImage();
     if (frame.size() != QSize(800, 600)) {
         qCritical("render frame size mismatch: %dx%d",
                   frame.width(), frame.height());
@@ -139,6 +156,24 @@ int runSelfCheck() {
         qCritical("layout export failed: %s", export_error.c_str());
         return 1;
     }
+#ifdef PWB_WITH_WELL_LOG
+    // Well-log dock embedding: the real WLE-backed host loads the committed
+    // LAS fixture (dev tree; a missing file is reported, a failed parse of
+    // a present fixture is a hard error).
+    const QString las_path = QStringLiteral(PWB_SOURCE_DIR
+                                             "/tests/fixtures/realdata/A1.Las");
+    if (QFile::exists(las_path)) {
+        const QString las_error = window.loadLasIntoDock(las_path);
+        if (!las_error.isEmpty()) {
+            qCritical("well-log dock LAS load failed: %s",
+                      qUtf8Printable(las_error));
+            return 1;
+        }
+    } else {
+        qInfo("self-check: LAS fixture absent (dev tree only), dock check skipped");
+    }
+#endif
+
     qInfo("self-check ok: gpkg=%ls png=%ls bytes=%zu",
           gpkg_uri.toStdWString().c_str(), png.wstring().c_str(),
           static_cast<size_t>(std::filesystem::file_size(png)));
@@ -148,7 +183,7 @@ int runSelfCheck() {
 }  // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QgsApplication app(argc, argv, true);
     QApplication::setApplicationName(QStringLiteral("pwb-platform"));
     QApplication::setOrganizationName(QStringLiteral("paleo-workbench"));
 

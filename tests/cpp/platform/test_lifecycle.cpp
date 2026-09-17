@@ -3,7 +3,7 @@
 // teardown order; a crash anywhere fails the process. The 500-cycle soak +
 // sanitizers are an integration/stability gate and are NOT claimed here.
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QTemporaryDir>
 
 #include <qgslayertreeview.h>
@@ -18,7 +18,7 @@
 #include "test_framework.hpp"
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QgsApplication app(argc, argv, true);
     pwb::qgis::QgisRuntime::acquire();
 
     QTemporaryDir temp_dir;
@@ -45,10 +45,18 @@ int main(int argc, char** argv) {
         pwb::qgis::EditController edit(session);
         PWB_CHECK(edit.start_editing("cycle.layer").empty());
         const QgsPointXY v0 = layer->getFeature(1).geometry().vertexAt(0);
-        PWB_CHECK(edit.move_vertex("cycle.layer", 1, 0, v0.x() + 0.01 * cycle,
-                                   v0.y() + 0.01).empty());
+        // Commit persists into this cycle's GPKG working copy, so alternate
+        // the move direction — a monotone drift walks vertex 0 past the
+        // right edge after ~17 cycles and trips the topology gate.
+        const double dir = (cycle % 2 == 0) ? 1.0 : -1.0;
+        PWB_CHECK(edit.move_vertex("cycle.layer", 1, 0, v0.x() + 0.01 * dir,
+                                   v0.y() + 0.01 * dir).empty());
         pwb::qgis::StagedAsset staged;
-        PWB_CHECK(edit.commit("cycle.layer", staged_dir, &staged, nullptr).empty());
+        const std::string cycle_commit_error =
+            edit.commit("cycle.layer", staged_dir, &staged, nullptr);
+        PWB_CHECK_MSG(cycle_commit_error.empty(),
+                      "cycle " + std::to_string(cycle) + " commit failed: "
+                      + cycle_commit_error);
 
         session.close();   // ordered teardown per the contract
         PWB_CHECK(session.project() == nullptr);

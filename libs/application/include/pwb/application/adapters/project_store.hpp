@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <pwb/qgis/edit_controller.hpp>
+#include <pwb/qgis/layer_adapter.hpp>
 
 namespace pwb::application {
 
@@ -38,12 +39,14 @@ struct LayerBindingV1 {
 // path/hash; original version never overwritten.
 struct CommitRequestV1 {
     std::string operation_id;
-    std::string base_version;
+    std::string base_version;   // "" = resolve (binding, then asset head)
+    std::string asset_id;       // "" = binding's asset (join-key authority)
     pwb::qgis::StagedAsset staged;
 };
 
 struct CommitReceiptV1 {
     bool ok = false;
+    bool duplicate = false;   // B replayed an earlier operation_id
     std::string new_version;
     std::string run_id;
     std::string error;

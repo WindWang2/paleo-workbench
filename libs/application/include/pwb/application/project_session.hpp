@@ -64,6 +64,12 @@ public:
         return mapping_stage_;
     }
 
+    // Current map tool id (policy vocabulary: pan/zoom_in/vertex/...).
+    // Drives the checked derivation; the canvas remains the QGIS authority
+    // for which QgsMapTool is armed — this is the policy-side mirror.
+    void set_current_tool(std::string tool_id) { current_tool_ = std::move(tool_id); }
+    const std::string& current_tool() const { return current_tool_; }
+
     void set_store(std::shared_ptr<IProjectStore> store) { store_ = std::move(store); }
     IProjectStore* store() const { return store_.get(); }
 

@@ -3,37 +3,93 @@
 # Reuse policy (prompt A1 / docs/development/cpp-platform/00-baseline.md):
 #   * The vendored QGIS 4.2.0 install tree produced by the verified bridge
 #     recipe is consumed READ-ONLY via imported targets. Paths default to the
-#     main worktree on this machine and are cache-overridable.
-#   * Manifest mismatch (Qt/MSVC/CRT/version) => rebuild into this worktree
-#     under build/qgis-vendor with <=2 jobs; never write the main repo tree.
-#   * One Qt ABI: Qt 6.8.0 msvc2022_64. No PySide, no conda, no system Qt.
+#     main worktree on the host and are cache-overridable (or injected via
+#     same-named environment variables); no machine-absolute paths are baked
+#     into the repository for Linux.
+#   * Manifest mismatch (Qt/compiler/CRT/version) => rebuild into this
+#     worktree under build/qgis-vendor with <=2 jobs; never write the main
+#     repo tree.
+#   * One Qt ABI per process. On the Windows host: Qt 6.8.0 msvc2022_64. On
+#     Linux: the single system Qt 6 dev prefix the vendored QGIS .so set
+#     actually resolves against (ldd evidence), pinned via PWB_QT_PREFIX.
+#     No PySide, no conda, no second Qt.
 
-set(PWB_QT_PREFIX "C:/deps/Qt/6.8.0/msvc2022_64" CACHE PATH "Qt 6.8 dev prefix (single ABI)")
-set(PALEO_QGIS_SOURCE_DIR "C:/Users/wangj.KEVIN/projects/paleo-workbench/third_party/qgis"
-    CACHE PATH "Vendored QGIS 4.2.0 source snapshot (headers; read-only)")
-set(PALEO_QGIS_SDK_DIR "C:/Users/wangj.KEVIN/projects/paleo-workbench/native/qgis_render_bridge/build/qgis-vendor/output"
-    CACHE PATH "QGIS install tree (lib/bin/plugins/data; read-only)")
-set(PALEO_QGIS_BUILD_DIR "C:/Users/wangj.KEVIN/projects/paleo-workbench/native/qgis_render_bridge/build/qgis-vendor"
-    CACHE PATH "QGIS build tree that carries the generated qgsconfig.h (read-only)")
+# ---- SDK locations: cache var > environment > host default ----
+function(pwb_sdk_path var default)
+    if(NOT DEFINED ${var})
+        if(DEFINED ENV{${var}})
+            set(${var} "$ENV{${var}}" CACHE PATH "${var} (from environment)")
+        else()
+            set(${var} "${default}" CACHE PATH "${var}")
+        endif()
+    endif()
+endfunction()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Xml Svg)
+if(WIN32)
+    pwb_sdk_path(PWB_QT_PREFIX "C:/deps/Qt/6.8.0/msvc2022_64")
+    pwb_sdk_path(PALEO_QGIS_SOURCE_DIR
+        "C:/Users/wangj.KEVIN/projects/paleo-workbench/third_party/qgis")
+    pwb_sdk_path(PALEO_QGIS_SDK_DIR
+        "C:/Users/wangj.KEVIN/projects/paleo-workbench/native/qgis_render_bridge/build/qgis-vendor/output")
+    pwb_sdk_path(PALEO_QGIS_BUILD_DIR
+        "C:/Users/wangj.KEVIN/projects/paleo-workbench/native/qgis_render_bridge/build/qgis-vendor")
+else()
+    # Sibling main checkout of the same bare repo on this host
+    # (<repo>/main); overridable per machine via cache or environment.
+    get_filename_component(PWB_SIBLING_MAIN
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../main" ABSOLUTE)
+    pwb_sdk_path(PWB_QT_PREFIX "/usr")
+    pwb_sdk_path(PALEO_QGIS_SOURCE_DIR "${PWB_SIBLING_MAIN}/third_party/qgis")
+    pwb_sdk_path(PALEO_QGIS_SDK_DIR
+        "${PWB_SIBLING_MAIN}/native/qgis_render_bridge/build/qgis-vendor/output")
+    pwb_sdk_path(PALEO_QGIS_BUILD_DIR
+        "${PWB_SIBLING_MAIN}/native/qgis_render_bridge/build/qgis-vendor")
+endif()
+
+# PWB_QT_PREFIX must actually constrain find_package — not just PATH. When
+# set, it is prepended to CMAKE_PREFIX_PATH and the resolved Qt6 package is
+# verified to live inside it; anything else is a configure error.
+if(PWB_QT_PREFIX)
+    list(PREPEND CMAKE_PREFIX_PATH "${PWB_QT_PREFIX}")
+endif()
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Xml Svg PrintSupport)
+if(PWB_QT_PREFIX)
+    cmake_path(IS_PREFIX PWB_QT_PREFIX "${Qt6_DIR}" _qt_in_prefix)
+    if(NOT _qt_in_prefix)
+        message(FATAL_ERROR
+            "Qt6 resolved outside PWB_QT_PREFIX (${PWB_QT_PREFIX}): ${Qt6_DIR}. "
+            "A second Qt ABI would enter the process — fix the prefix instead "
+            "of weakening the check.")
+    endif()
+endif()
 
 if(NOT EXISTS "${PALEO_QGIS_SOURCE_DIR}/UPSTREAM.md")
     message(FATAL_ERROR "vendored QGIS source snapshot missing: ${PALEO_QGIS_SOURCE_DIR}")
 endif()
 foreach(_lib qgis_core qgis_gui qgis_analysis)
-    if(NOT EXISTS "${PALEO_QGIS_SDK_DIR}/lib/${_lib}.lib")
-        message(FATAL_ERROR "QGIS SDK import library missing: ${PALEO_QGIS_SDK_DIR}/lib/${_lib}.lib (rebuild the vendor SDK per 00-baseline.md)")
+    if(WIN32)
+        if(NOT EXISTS "${PALEO_QGIS_SDK_DIR}/lib/${_lib}.lib")
+            message(FATAL_ERROR "QGIS SDK import library missing: ${PALEO_QGIS_SDK_DIR}/lib/${_lib}.lib (rebuild the vendor SDK per 00-baseline.md)")
+        endif()
+    else()
+        if(NOT EXISTS "${PALEO_QGIS_SDK_DIR}/lib/lib${_lib}.so")
+            message(FATAL_ERROR "QGIS SDK shared library missing: ${PALEO_QGIS_SDK_DIR}/lib/lib${_lib}.so (rebuild the vendor SDK per 00-baseline.md)")
+        endif()
     endif()
 endforeach()
 
-# Import libs + DLLs.
+# Import the QGIS libraries (Windows: import lib + DLL; Linux: .so).
 foreach(_comp Core Gui Analysis)
     string(TOLOWER "${_comp}" _lower)
     add_library(PwbQgis::${_comp} SHARED IMPORTED GLOBAL)
-    set_target_properties(PwbQgis::${_comp} PROPERTIES
-        IMPORTED_IMPLIB   "${PALEO_QGIS_SDK_DIR}/lib/qgis_${_lower}.lib"
-        IMPORTED_LOCATION "${PALEO_QGIS_SDK_DIR}/bin/qgis_${_lower}.dll")
+    if(WIN32)
+        set_target_properties(PwbQgis::${_comp} PROPERTIES
+            IMPORTED_IMPLIB   "${PALEO_QGIS_SDK_DIR}/lib/qgis_${_lower}.lib"
+            IMPORTED_LOCATION "${PALEO_QGIS_SDK_DIR}/bin/qgis_${_lower}.dll")
+    else()
+        set_target_properties(PwbQgis::${_comp} PROPERTIES
+            IMPORTED_LOCATION "${PALEO_QGIS_SDK_DIR}/lib/libqgis_${_lower}.so")
+    endif()
 endforeach()
 
 # QGIS core/gui headers include across their component subdirectories without
@@ -71,11 +127,19 @@ target_include_directories(PwbQgis::Sdk INTERFACE ${PWB_QGIS_ANALYSIS_DIRS})
 target_include_directories(PwbQgis::Sdk INTERFACE
     "${PALEO_QGIS_BUILD_DIR}"
     "${PALEO_QGIS_BUILD_DIR}/src/core"
+    "${PALEO_QGIS_BUILD_DIR}/src/gui"
+    "${PALEO_QGIS_BUILD_DIR}/src/analysis"
 )
 target_link_libraries(PwbQgis::Sdk INTERFACE
     PwbQgis::Core PwbQgis::Gui PwbQgis::Analysis
-    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::Svg)
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::Svg Qt6::PrintSupport)
 
-# Runtime closure location for tests/apps (PATH prepend + prefix path).
-set(PALEO_QGIS_RUNTIME "${PALEO_QGIS_SDK_DIR}/bin" CACHE INTERNAL "QGIS runtime DLL dir")
-set(PWB_QT_RUNTIME "${PWB_QT_PREFIX}/bin" CACHE INTERNAL "Qt runtime DLL dir")
+if(WIN32)
+    # Runtime closure location for tests/apps (PATH prepend + prefix path).
+    set(PALEO_QGIS_RUNTIME "${PALEO_QGIS_SDK_DIR}/bin" CACHE INTERNAL "QGIS runtime DLL dir")
+    set(PWB_QT_RUNTIME "${PWB_QT_PREFIX}/bin" CACHE INTERNAL "Qt runtime DLL dir")
+else()
+    # Linux: shared objects and QGIS provider plugins live under lib/.
+    set(PALEO_QGIS_RUNTIME "${PALEO_QGIS_SDK_DIR}/lib" CACHE INTERNAL "QGIS runtime SO dir")
+    set(PWB_QT_RUNTIME "${PWB_QT_PREFIX}/lib" CACHE INTERNAL "Qt runtime SO dir")
+endif()

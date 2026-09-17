@@ -20,6 +20,7 @@ class QgsProject;
 class QgsVectorLayer;
 class QgsRasterLayer;
 class QgsMapLayer;
+class QWidget;
 
 namespace pwb::qgis {
 
@@ -35,8 +36,8 @@ public:
 
     // Widget factories: the caller gives the Qt parent (MainWindow/dock).
     // The session records the widget for ordered teardown only.
-    QgsMapCanvas* createCanvas(class QWidget* parent);
-    QgsLayerTreeView* createLayerTree(class QWidget* parent);
+    QgsMapCanvas* createCanvas(QWidget* parent);
+    QgsLayerTreeView* createLayerTree(QWidget* parent);
 
     QgsProject* project() const { return project_.get(); }
 

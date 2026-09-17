@@ -28,6 +28,13 @@ target_include_directories(pwb_catalog PUBLIC ${PWB_VENDOR_DIR}/sqlite)
 if(MSVC)
     set_source_files_properties(${PWB_VENDOR_DIR}/sqlite/sqlite3.c
         PROPERTIES COMPILE_OPTIONS "/W0;/utf-8")
+else()
+    # A-line integration fix (handed back to B): the statically vendored
+    # sqlite3 must not preempt the system libsqlite3 loaded by QGIS/GDAL in
+    # the integrated application — hidden visibility keeps both copies
+    # isolated (each binary binds its own).
+    set_source_files_properties(${PWB_VENDOR_DIR}/sqlite/sqlite3.c
+        PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
 endif()
 
 install(TARGETS pwb_catalog EXPORT PwbDataTargets ARCHIVE DESTINATION lib)

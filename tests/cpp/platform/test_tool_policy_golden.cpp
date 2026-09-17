@@ -7,7 +7,7 @@
 
 #include <cstdio>
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -120,7 +120,7 @@ ToolContextSnapshot context_from_json(const QJsonObject& json) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QgsApplication app(argc, argv, true);
 
     const QString golden_path =
         pwb::test_fixtures::test_data_path(QStringLiteral("golden_tool_policy.json"));

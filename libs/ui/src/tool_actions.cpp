@@ -4,6 +4,12 @@
 
 namespace pwb::ui {
 
+ToolActionSet::~ToolActionSet() {
+    for (auto& [id, action] : actions_) {
+        delete action;
+    }
+}
+
 void ToolActionSet::apply(
     const std::map<std::string, pwb::tool_policy::ToolAvailability>&
         availability) {
@@ -17,7 +23,10 @@ void ToolActionSet::apply(
         } else {
             action = it->second;
         }
-        // Pure projection: no gate logic lives here.
+        // Pure projection: no gate logic lives here. setChecked is a no-op
+        // on non-checkable actions, so a checked verdict promotes the
+        // action to checkable first (parity tests read it back).
+        if (verdict.checked) action->setCheckable(true);
         action->setEnabled(verdict.enabled);
         action->setChecked(verdict.checked);
         action->setVisible(verdict.visible);
