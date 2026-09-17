@@ -48,6 +48,9 @@
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/seismic_attributes/attributes.hpp>
 #endif
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <pwb/seismic_io/segy_reader.hpp>
+#endif
 
 #ifdef PWB_WITH_WELL_LOG
 #include <pwb/viz/well_log_host_widget.hpp>
@@ -320,12 +323,22 @@ void MainWindow::buildMenusAndToolbar() {
     view_menu->addSeparator();
     view_menu->addAction(actions_.action("refresh"));
 
+#if defined(PWB_WITH_SEISMIC_IO) || defined(PWB_WITH_SEISMIC_VIEWER)
+    QMenu* seismic_menu = nullptr;
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_SEISMIC_ATTRIBUTES) \
     && defined(PWB_WITH_DATA_INTEGRATION)
-    QMenu* seismic_menu = menuBar()->addMenu(tr("地震(&S)"));
+    seismic_menu = menuBar()->addMenu(tr("地震(&S)"));
     seismic_menu->addAction(tr("计算属性…"), this,
                             &MainWindow::runAttributeDialog,
                             QKeySequence(Qt::CTRL | Qt::Key_U));
+#endif
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+    if (seismic_menu == nullptr) {
+        seismic_menu = menuBar()->addMenu(tr("地震(&S)"));
+    }
+    seismic_menu->addAction(tr("导入 SEG-Y…"), this,
+                            &MainWindow::importSegyDialog);
+#endif
 #endif
 
     auto* toolbar = addToolBar(tr("地图工具"));
@@ -1122,6 +1135,122 @@ void MainWindow::runAttributeDialog() {
         tr("属性已发布：%1（运行 %2）")
             .arg(QString::fromStdString(outcome.version_id))
             .arg(QString::fromStdString(outcome.run_id)),
+        10000);
+}
+#endif
+
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+std::string MainWindow::importSegy(const QString& path, std::string* error) {
+    if (project_store_ == nullptr) {
+        if (error != nullptr) *error = "未打开工程（SEG-Y 导入需要工程目录）";
+        return "";
+    }
+    static std::uint64_t import_counter = 0;
+    const std::string import_id =
+        "segy-import-" + std::to_string(import_counter++);
+
+    auto volume = pwb::seismic_io::read_segy(
+        std::filesystem::path(path.toStdWString()), error);
+    if (!volume.has_value()) return "";
+
+    pwb::application::VolumePayload payload;
+    payload.header.ni = static_cast<std::uint32_t>(volume->ni);
+    payload.header.nc = static_cast<std::uint32_t>(volume->nc);
+    payload.header.ns = static_cast<std::uint32_t>(volume->ns);
+    payload.header.inline_start = volume->iline_start;
+    payload.header.crossline_start = volume->xline_start;
+    payload.header.sample_start = 0.0;
+    payload.header.inline_step = volume->iline_step;
+    payload.header.crossline_step = volume->xline_step;
+    payload.header.sample_step = volume->dt_ms;
+    payload.header.sample_unit = volume->unit;
+    payload.header.value_unit = "amplitude";
+    payload.header.algorithm_id = "import.segy";
+    payload.header.algorithm_version = "1.0.0";
+    payload.header.build_identity = "pwb-platform";
+    payload.header.request_id = import_id;
+    payload.samples = std::move(volume->samples);
+
+    const std::filesystem::path project_dir =
+        project_store_->project_file().parent_path();
+    const std::filesystem::path staged_dir = project_dir / ".pwb-imports";
+    std::error_code ec;
+    std::filesystem::create_directories(staged_dir, ec);
+    const std::filesystem::path staged_path =
+        staged_dir / (import_id + ".pwbvol");
+    const std::string write_error =
+        pwb::application::write_volume_payload(payload, staged_path);
+    if (!write_error.empty()) {
+        if (error != nullptr) *error = write_error;
+        return "";
+    }
+
+    const pwb::domain::RunId run_id{std::string("run_") + import_id};
+    pwb::data::RunRegistrationV1 registration;
+    registration.run_id = run_id;
+    registration.operation = "import.segy";
+    registration.generator = "pwb-platform";
+    registration.parameters = pwb::domain::Json::object();
+    registration.parameters["source_file"] = path.toStdString();
+    auto registered =
+        project_store_->coordinator().register_run(registration);
+    if (!registered.is_ok()) {
+        if (error != nullptr) {
+            *error = "register_run failed: " + registered.error().message;
+        }
+        return "";
+    }
+    pwb::data::PublishRequestV1 publish;
+    publish.operation_id =
+        pwb::domain::OperationId{std::string("pub_") + import_id};
+    publish.run_id = run_id;
+    publish.new_asset_name =
+        "地震数据 " + std::filesystem::path(path.toStdWString())
+                           .stem()
+                           .string();
+    publish.new_asset_type = "seismic_volume";
+    publish.stage = pwb::domain::DataStage::Raw;
+    pwb::data::StagedAssetV1 staged;
+    staged.source_path = staged_path;
+    staged.format = "PWBVOL1";
+    publish.products.push_back(std::move(staged));
+    publish.result_metadata = pwb::domain::Json::object();
+    publish.result_metadata["payload_format"] = "PWBVOL1";
+    publish.result_metadata["source_format"] = "SEG-Y";
+    auto published = project_store_->coordinator().publish_run_result(
+        publish, project_store_->document());
+    if (!published.is_ok()) {
+        if (error != nullptr) {
+            *error = "publish failed: " + published.error().message;
+        }
+        return "";
+    }
+    return published.value().new_version_id.str();
+}
+#endif
+
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+void MainWindow::importSegyDialog() {
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("导入 SEG-Y"), QString(),
+        tr("SEG-Y 数据 (*.sgy *.segy);;所有文件 (*)"));
+    if (path.isEmpty()) return;
+    std::string error;
+    const std::string version_id = importSegy(path, &error);
+    if (version_id.empty()) {
+        QMessageBox::warning(this, tr("导入 SEG-Y"),
+                             QString::fromStdString(error));
+        return;
+    }
+#if defined(PWB_WITH_SEISMIC_VIEWER)
+    const QString view_error = openVolumeVersion(version_id);
+    if (!view_error.isEmpty()) {
+        QMessageBox::warning(this, tr("导入 SEG-Y"), view_error);
+        return;
+    }
+#endif
+    statusBar()->showMessage(
+        tr("SEG-Y 已导入：%1").arg(QString::fromStdString(version_id)),
         10000);
 }
 #endif

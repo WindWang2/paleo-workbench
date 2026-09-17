@@ -35,3 +35,8 @@ if(TARGET Pwb::SeismicAttributes AND TARGET Pwb::Data
     target_compile_definitions(pwb-platform PRIVATE
         PWB_WITH_SEISMIC_ATTRIBUTES=1)
 endif()
+# Real SEG-Y import (M3): reader + B publication path.
+if(TARGET Pwb::SeismicIo AND TARGET Pwb::Data)
+    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicIo)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_IO=1)
+endif()

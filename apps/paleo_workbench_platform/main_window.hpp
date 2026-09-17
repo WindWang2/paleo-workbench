@@ -71,6 +71,13 @@ public:
     // bootstrap boundary asset via B's run lifecycle) and opens it.
     QString newProject(const QString& dir_path, const QString& name);
 #endif
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+    // Imports one post-stack SEG-Y file as a new Raw seismic_volume asset
+    // version (PWBVOL1 payload) through B's run lifecycle; returns the
+    // new version id or "" + *error. The version is immediately usable as
+    // an attribute input and viewable in the seismic dock.
+    std::string importSegy(const QString& path, std::string* error);
+#endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
 
@@ -139,6 +146,9 @@ private:
 #ifdef PWB_WITH_DATA_INTEGRATION
     void openProjectDialog();
     void newProjectDialog();
+#endif
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+    void importSegyDialog();
 #endif
     void exportLayoutDialog();
     void armPan();

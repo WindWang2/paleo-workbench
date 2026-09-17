@@ -25,6 +25,8 @@ option(PWB_BUILD_SEISMIC_VIEWER
     "Build the CPP-D seismic 2D viewer (fails when absent)" OFF)
 option(PWB_BUILD_SEISMIC_ATTRIBUTES
     "Build the CPP-E seismic attribute library (fails when absent)" OFF)
+option(PWB_BUILD_SEISMIC_IO
+    "Build the post-stack SEG-Y reader (libs/seismic_io)" OFF)
 option(PWB_BUILD_INTEGRATION_TESTS
     "Register tests/cpp/integration (requires platform+data+science)" OFF)
 include(CTest)
@@ -65,6 +67,12 @@ if(PWB_BUILD_SEISMIC_ATTRIBUTES)
             "duplicated into the platform.")
     endif()
     add_subdirectory(libs/seismic_attributes)
+endif()
+if(PWB_BUILD_SEISMIC_IO)
+    add_subdirectory(libs/seismic_io)
+    if(BUILD_TESTING)
+        add_subdirectory(libs/seismic_io/seismic_io_tests)
+    endif()
 endif()
 
 # The integrated configuration is all-or-nothing by definition: the app's

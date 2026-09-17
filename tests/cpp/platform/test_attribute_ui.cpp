@@ -33,6 +33,18 @@ using pwb::app::MainWindow;
 
 namespace {
 
+std::vector<float> read_f32(const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    input.seekg(0, std::ios::end);
+    const std::streamsize size = input.tellg();
+    input.seekg(0, std::ios::beg);
+    std::vector<float> data(static_cast<std::size_t>(size / 4));
+    if (!data.empty()) {
+        input.read(reinterpret_cast<char*>(data.data()), size);
+    }
+    return data;
+}
+
 bool copy_tree(const fs::path& from, const fs::path& to) {
     std::error_code ec;
     fs::create_directories(to, ec);
@@ -233,6 +245,88 @@ int main(int argc, char** argv) {
         break;
     }
     PWB_CHECK_MSG(reached_terminal, "attribute run never reached a terminal state");
+
+#if defined(PWB_WITH_SEISMIC_IO)
+    // ---- M3 end-to-end: real SEG-Y import -> attribute -> frozen oracle
+    // -> viewer. The imported volume is sample-identical to the geoviz
+    // oracle input, so rms(window=21) must match the frozen expected file.
+    {
+        std::string import_error;
+        const std::string imported = window.importSegy(
+            QString::fromStdString(
+                (fs::path(PWB_REALDATA_DIR) / "tiny.sgy").string()),
+            &import_error);
+        PWB_CHECK_MSG(!imported.empty(), import_error);
+
+        std::string run_error;
+        const std::string rms_request = window.runAttribute(
+            "seismic.rms_amplitude", {{"window", "21"}}, imported,
+            &run_error);
+        PWB_CHECK_MSG(!rms_request.empty(), run_error);
+        for (int i = 0; i < 2000; ++i) {
+            const auto outcome = window.attributeOutcome(rms_request);
+            if (outcome.status == "queued" || outcome.status == "running"
+                || outcome.status == "publishing") {
+                QThread::msleep(5);
+                continue;
+            }
+            PWB_CHECK_MSG(outcome.status == "succeeded",
+                          "imported rms status=" + outcome.status
+                              + " error=" + outcome.error);
+            // Oracle accounting: read the durable payload and compare
+            // against E's frozen expected_rms_w21.
+            std::string reopen_error;
+            auto reopened = pwb::application::PwbDataStore::open(
+                project_file, &reopen_error);
+            PWB_CHECK_MSG(reopened != nullptr, reopen_error);
+            auto snapshot = reopened->snapshot();
+            PWB_CHECK(snapshot.is_ok());
+            fs::path payload_path;
+            for (const auto& version :
+                 snapshot.value().catalog_versions) {
+                if (version.id.str() == outcome.version_id) {
+                    payload_path = work / version.path;
+                }
+            }
+            PWB_CHECK(!payload_path.empty());
+            pwb::application::VolumePayload payload;
+            PWB_CHECK(pwb::application::read_volume_payload(
+                          payload_path, &payload)
+                          .empty());
+            std::vector<float> expected = read_f32(
+                fs::path(PWB_ATTRIBUTE_FIXTURES) / "tiny_sgy_real"
+                / "expected_rms_w21.f32");
+            PWB_CHECK(payload.samples.size() == expected.size());
+            double max_diff = 0.0;
+            for (std::size_t i = 0; i < expected.size(); ++i) {
+                max_diff = std::max(max_diff,
+                    std::fabs(static_cast<double>(payload.samples[i])
+                              - static_cast<double>(expected[i])));
+            }
+            PWB_CHECK_MSG(max_diff < 1e-5,
+                          "imported rms oracle mismatch, max_abs_diff="
+                              + std::to_string(max_diff));
+            break;
+        }
+
+        // The imported volume itself displays in the slice dock.
+        const QString view_error = window.openVolumeVersion(imported);
+        PWB_CHECK_MSG(view_error.isEmpty(),
+                      view_error.toStdString());
+        QDockWidget* dock = window.findChild<QDockWidget*>("seismic-dock");
+        auto* viewer = static_cast<pwb::seismic_viewer::SeismicSliceWidget*>(
+            dock != nullptr ? dock->widget() : nullptr);
+        PWB_CHECK(viewer != nullptr);
+        for (int spin = 0; spin < 200 && viewer->state()
+                 != pwb::seismic_viewer::ViewerState::ok; ++spin) {
+            QCoreApplication::processEvents();
+            QThread::msleep(5);
+        }
+        PWB_CHECK_MSG(viewer->state()
+                          == pwb::seismic_viewer::ViewerState::ok,
+                      "imported volume did not reach ok state");
+    }
+#endif
 
     window.close();
     pwb::qgis::QgisRuntime::release();

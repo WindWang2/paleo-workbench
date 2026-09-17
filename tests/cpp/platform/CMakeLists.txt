@@ -105,6 +105,14 @@ if(PWB_BUILD_DATA AND PWB_BUILD_SEISMIC_VIEWER
     target_compile_definitions(platform_attribute_ui PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         PWB_WITH_SEISMIC_VIEWER=1 PWB_WITH_SEISMIC_ATTRIBUTES=1)
+    # M3: real SEG-Y import path (reader + B publication) when present.
+    if(PWB_BUILD_SEISMIC_IO)
+        target_link_libraries(platform_attribute_ui PRIVATE Pwb::SeismicIo)
+        target_compile_definitions(platform_attribute_ui PRIVATE
+            PWB_WITH_SEISMIC_IO=1
+            PWB_REALDATA_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/realdata"
+            PWB_ATTRIBUTE_FIXTURES="${CMAKE_SOURCE_DIR}/tests/cpp/seismic_attributes/fixtures")
+    endif()
     add_test(NAME platform.attribute_ui COMMAND platform_attribute_ui)
     set_tests_properties(platform.attribute_ui PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
