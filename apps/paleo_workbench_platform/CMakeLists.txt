@@ -2,6 +2,7 @@ add_executable(pwb-platform
     main.cpp
     main_window.cpp
 )
+set_target_properties(pwb-platform PROPERTIES AUTOMOC ON)
 target_include_directories(pwb-platform PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(pwb-platform PRIVATE cxx_std_20)
 target_link_libraries(pwb-platform PRIVATE Pwb::Application Pwb::Ui)

@@ -3,11 +3,12 @@
 // the result publisher port. Real B/C E2E integration is a separate gate and
 // is NOT claimed by this test.
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QTemporaryDir>
 
 #include <qgsvectorlayer.h>
 
+#include <pwb/application/adapters/result_publisher.hpp>
 #include <pwb/application/project_session.hpp>
 #include <pwb/qgis/map_session.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
@@ -67,7 +68,7 @@ public:
 }  // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QgsApplication app(argc, argv, true);
     pwb::qgis::QgisRuntime::acquire();
 
     QTemporaryDir temp_dir;
@@ -92,6 +93,12 @@ int main(int argc, char** argv) {
         PWB_CHECK(session.active_layer_error().empty());
 
         // Without a store: honest module-only error, staged asset still real.
+        // (An edit session + one change first — commit requires a session.)
+        PWB_CHECK(session.edit().start_editing("adapters.layer").empty());
+        const QgsPointXY first_v0 = layer->getFeature(1).geometry().vertexAt(0);
+        PWB_CHECK(session.edit().move_vertex("adapters.layer", 1, 0,
+                                             first_v0.x() + 0.05,
+                                             first_v0.y() + 0.05).empty());
         std::string module_only_error;
         pwb::qgis::StagedAsset staged =
             session.stage_commit("adapters.layer", staged_dir, &module_only_error);

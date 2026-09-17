@@ -3,14 +3,14 @@
 // providers, provider/CRS verification, one synchronous render, tree order
 // read-back, honest provider-failure diagnostics. Never a fake success.
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QColor>
 #include <QEventLoop>
 #include <QImage>
 #include <QTemporaryDir>
 
 #include <qgsmapcanvas.h>
-#include <qgsmaprenderparalleljob.h>
+#include <qgsmaprendererparalleljob.h>
 #include <qgsmapsettings.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
@@ -25,7 +25,7 @@
 #include "test_framework.hpp"
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QgsApplication app(argc, argv, true);
     pwb::qgis::QgisRuntime::acquire();
 
     QTemporaryDir temp_dir;
@@ -88,13 +88,9 @@ int main(int argc, char** argv) {
         QgsMapSettings settings = canvas->mapSettings();
         settings.setOutputSize(QSize(640, 480));
         settings.setBackgroundColor(Qt::white);
-        QgsMapRendererParallelJob job;
-        job.setMapSettings(settings);
-        QEventLoop loop;
-        QObject::connect(&job, &QgsMapRendererParallelJob::finished, &loop,
-                         &QEventLoop::quit);
+        QgsMapRendererParallelJob job(settings);
         job.start();
-        loop.exec();
+        job.waitForFinished();
         const QImage image = job.renderedImage();
         PWB_CHECK(!image.isNull());
         PWB_CHECK(image.width() == 640 && image.height() == 480);

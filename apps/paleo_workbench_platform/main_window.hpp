@@ -1,11 +1,16 @@
 #pragma once
 
 // MainWindow — direct C++ hosting of QgsMapCanvas + QgsLayerTreeView via
-// ProjectSession (no Shiboken address bridge, no mirror copies). This first
-// round deliberately carries a minimal shell: canvas + tree + toolbar driven
-// by Pwb::ToolPolicy + an editable fixture layer for the smoke path.
+// ProjectSession (no Shiboken address bridge, no mirror copies). The shell
+// wires real operations (open vector/raster, map tools, vertex editing,
+// undo/redo, commit/rollback, layout export, dirty-close) onto actions that
+// are governed by Pwb::ToolPolicy: menu, toolbar and shortcuts share the
+// same QAction objects, so one policy verdict drives every surface.
 
+#include <functional>
+#include <map>
 #include <memory>
+#include <set>
 
 #include <QMainWindow>
 
@@ -14,9 +19,12 @@
 
 class QgsMapCanvas;
 class QgsLayerTreeView;
+class QgsMapTool;
 class QLabel;
 
 namespace pwb::app {
+
+class VertexMoveMapTool;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -30,19 +38,77 @@ public:
 
     pwb::application::ProjectSession* session() const { return session_.get(); }
 
+    // Test/automation entry points for the wired operations (same code the
+    // actions trigger; no parallel logic).
+    QString openVectorLayer(const QString& path);
+    QString openRasterLayer(const QString& path);
+    QString commitActiveLayer(const std::filesystem::path& staged_dir);
+    bool anyDirtyEditSession() const;
+
+    // Dirty-close three-way decision (Save/Discard/Cancel). Production
+    // answers with a QMessageBox; tests inject a scripted responder so the
+    // close semantics stay verifiable offscreen.
+    void setDirtyCloseResponder(std::function<int()> responder) {
+        dirty_close_responder_ = std::move(responder);
+    }
+    // Yes/No confirmation for discarding edits (rollback, stop-with-dirty).
+    void setDiscardConfirmResponder(std::function<int()> responder) {
+        discard_confirm_responder_ = std::move(responder);
+    }
+    // True when the action id has a real handler connected (wiring audit).
+    bool actionWired(const QString& tool_id) const {
+        return wired_action_ids_.count(tool_id.toStdString()) > 0;
+    }
+    enum class DirtyCloseDecision { Proceed, SaveAndClose, DiscardAndClose };
+
 protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
     void buildUi();
-    void buildToolbar();
+    void buildMenusAndToolbar();
+    void connectActions();
     void refreshActionStates();
+
+    // Operation handlers (triggered by the governed actions).
+    void openVectorDialog();
+    void openRasterDialog();
+    void exportLayoutDialog();
+    void armPan();
+    void armZoomIn();
+    void armZoomOut();
+    void zoomFullExtent();
+    void refreshMap();
+    void toggleEditing();
+    void saveEdits();
+    void rollBackEdits();
+    void undoEdition();
+    void redoEdition();
+    void armVertexTool();
+
+    void onActiveLayerChanged();
+    void onCanvasMapToolChanged();
+    void setStatusFromPolicy(
+        const std::map<std::string, pwb::tool_policy::ToolAvailability>& availability);
 
     std::unique_ptr<pwb::application::ProjectSession> session_;
     pwb::ui::ToolActionSet actions_;
     QgsMapCanvas* canvas_ = nullptr;
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;
+
+    // Map tools (canvas-owned via setMapTool; kept for re-arming).
+    QgsMapTool* pan_tool_ = nullptr;
+    QgsMapTool* zoom_in_tool_ = nullptr;
+    QgsMapTool* zoom_out_tool_ = nullptr;
+    VertexMoveMapTool* vertex_tool_ = nullptr;
+
+    // Domain facts per registered layer id (module-only authority: layers
+    // opened by this shell carry write grants here until B bindings exist).
+    std::map<std::string, pwb::application::DomainLayerFacts> facts_;
+    std::function<int()> dirty_close_responder_;
+    std::function<int()> discard_confirm_responder_;
+    std::set<std::string> wired_action_ids_;
 };
 
 }  // namespace pwb::app

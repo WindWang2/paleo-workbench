@@ -6,7 +6,7 @@
 
 #include <cstdio>
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QString>
 
 #include <pwb/tool_policy/tool_availability.hpp>
@@ -61,7 +61,7 @@ void check_invariants(const ToolAvailability& verdict) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QgsApplication app(argc, argv, true);
 
     // -- invariant sweep: every tool keeps the availability invariants -----
     {
@@ -185,11 +185,15 @@ int main(int argc, char** argv) {
                   == "当前编图阶段未知——仅保留基础工具组");
         PWB_CHECK(evaluate_tool("cancel", staged).visible);      // cancel exempt
         PWB_CHECK(evaluate_tool("pan", staged).enabled);
-        // factor group hidden on facies_calibration; whitelist words
+        // factor group hidden on facies_calibration; whitelist words.
+        // Oracle-verified (Python tool_availability, 2026-09-17): the group
+        // visibility gate fires first with the CURRENT stage label; the
+        // whitelist wording is defensive-only for this tool (group visible
+        // only on constraint_factor, which the whitelist contains).
         staged.mapping_stage = "facies_calibration";
         const ToolAvailability fw = evaluate_tool("factor_workbench", staged);
         PWB_CHECK(!fw.enabled);
-        PWB_CHECK(fw.disabled_reason.find("当前阶段不允许该操作（限 ② 约束与单因素）")
+        PWB_CHECK(fw.disabled_reason.find("当前阶段不提供该工具组（① 智能预测）")
                   == 0);
         staged.mapping_stage = "";   // explicit unknown: fail closed too
         PWB_CHECK(!evaluate_tool("add_line", staged).visible);
@@ -245,10 +249,12 @@ int main(int argc, char** argv) {
             const ToolAvailability& verdict = all.at(id);
             if (act->isEnabled() != verdict.enabled) ++parity_failures;
             if (act->isChecked() != verdict.checked) ++parity_failures;
-            const QString tooltip = act->toolTip();
-            if (verdict.disabled_reason.empty()
-                ? !tooltip.isEmpty()
-                : tooltip.toStdString() != verdict.disabled_reason) {
+            // Qt documents QAction::toolTip() to fall back to the action
+            // text when no tooltip is set; an empty reason therefore reads
+            // back as the tool id, anything else must match exactly.
+            const std::string expected_tooltip = verdict.disabled_reason.empty()
+                ? id : verdict.disabled_reason;
+            if (act->toolTip().toStdString() != expected_tooltip) {
                 ++parity_failures;
             }
         }

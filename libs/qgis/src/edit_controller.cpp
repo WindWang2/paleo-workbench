@@ -99,14 +99,18 @@ std::string EditController::start_editing(const std::string& layer_id) {
         }));
     capture.connections.push_back(QObject::connect(
         layer, &QgsVectorLayer::committedAttributeValuesChanges, layer,
-        [this, q_layer_id](const QString&, const QgsChangedAttributesMap& changes) {
+        [this, q_layer_id, layer](const QString&, const QgsChangedAttributesMap& changes) {
             Capture& slot = captures_[q_layer_id.toStdString()];
             for (auto fit = changes.constBegin(); fit != changes.constEnd(); ++fit) {
                 AttributeChangeV1 change;
                 change.host_fid = static_cast<long long>(fit.key());
                 for (auto ait = fit.value().constBegin();
                      ait != fit.value().constEnd(); ++ait) {
-                    change.attrs[ait.key().toStdString()] =
+                    // QgsAttributeMap keys are field indexes; EditDeltaV1
+                    // speaks field NAMES (domain vocabulary).
+                    const int field_index = ait.key();
+                    const QString field_name = layer->fields().field(field_index).name();
+                    change.attrs[field_name.toStdString()] =
                         ait.value().toString().toStdString();
                 }
                 slot.delta.attribute_changes.push_back(std::move(change));
@@ -137,9 +141,8 @@ std::string EditController::move_vertex(const std::string& layer_id,
     QgsVectorLayer* layer = editingLayerOrError(layer_id, &error);
     if (layer == nullptr) return error;
 
-    QgsFeature feature;
-    if (!layer->getFeature(static_cast<QgsFeatureId>(fid), feature)
-        || !feature.hasGeometry()) {
+    QgsFeature feature = layer->getFeature(static_cast<QgsFeatureId>(fid));
+    if (!feature.isValid() || !feature.hasGeometry()) {
         return "feature " + std::to_string(fid) + " has no geometry";
     }
     QgsGeometry geometry = feature.geometry();

@@ -17,7 +17,10 @@ void ToolActionSet::apply(
         } else {
             action = it->second;
         }
-        // Pure projection: no gate logic lives here.
+        // Pure projection: no gate logic lives here. setChecked is a no-op
+        // on non-checkable actions, so a checked verdict promotes the
+        // action to checkable first (parity tests read it back).
+        if (verdict.checked) action->setCheckable(true);
         action->setEnabled(verdict.enabled);
         action->setChecked(verdict.checked);
         action->setVisible(verdict.visible);

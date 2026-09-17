@@ -2,7 +2,7 @@
 // + legend, live tree layer order) exported as PNG/PDF/SVG with honest
 // capability errors (unknown format rejected; empty output rejected).
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QColor>
 #include <QFile>
 #include <QImage>
@@ -18,7 +18,7 @@
 #include "test_framework.hpp"
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QgsApplication app(argc, argv, true);
     pwb::qgis::QgisRuntime::acquire();
 
     QTemporaryDir temp_dir;

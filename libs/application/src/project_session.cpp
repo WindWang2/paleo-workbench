@@ -7,6 +7,7 @@
 #include <qgsvectordataprovider.h>
 
 #include <pwb/qgis/qgis_runtime.hpp>
+#include <pwb/tool_policy/tool_availability.hpp>
 
 namespace pwb::application {
 
@@ -121,13 +122,12 @@ pwb::tool_policy::ToolContextSnapshot ProjectSession::snapshot() const {
             const QgsVectorDataProvider* provider = layer->dataProvider();
             if (provider != nullptr) {
                 ctx.provider_name = provider->name().toStdString();
-                const bool cap_add =
-                    provider->capabilities() & QgsVectorDataProvider::AddFeatures;
-                const bool cap_geom = provider->capabilities()
-                    & QgsVectorDataProvider::ChangeGeometries;
-                const bool cap_attr = provider->capabilities()
-                    & QgsVectorDataProvider::ChangeAttributeValues;
-                ctx.provider_writable = cap_add && cap_geom && cap_attr;
+                const Qgis::VectorProviderCapabilities caps =
+                    provider->capabilities();
+                ctx.provider_writable =
+                    caps.testFlag(Qgis::VectorProviderCapability::AddFeatures)
+                    && caps.testFlag(Qgis::VectorProviderCapability::ChangeGeometries)
+                    && caps.testFlag(Qgis::VectorProviderCapability::ChangeAttributeValues);
             }
             ctx.selection_count = static_cast<int>(layer->selectedFeatureCount());
         } else {
