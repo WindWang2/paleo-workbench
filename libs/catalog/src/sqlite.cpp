@@ -1,5 +1,7 @@
 #include "pwb/catalog/sqlite.hpp"
 
+#include <system_error>
+
 #include <filesystem>
 
 namespace pwb::catalog {
@@ -53,6 +55,31 @@ Result<Database> Database::open(const std::filesystem::path& file,
             break;
     }
     const std::string path = file.generic_string();
+    // Read-only WAL access normally CREATES -shm/-wal coordination files —
+    // a write, at the filesystem level, for a "read-only" open. Under the
+    // single-writer protocol no concurrent writer exists, so a cleanly
+    // closed store is opened immutable (provably zero footprint). When a
+    // -wal file exists it may hold unmerged committed transactions (e.g.
+    // after a crash): fall back to a normal read-only open — correctness
+    // over footprint.
+    if (mode == SqliteOpenMode::ReadOnly) {
+        std::error_code exists_ec;
+        const bool has_wal = std::filesystem::exists(
+            file.parent_path() / (file.filename().string() + "-wal"),
+            exists_ec);
+        if (!has_wal) {
+            const std::string uri = "file:" + path + "?immutable=1";
+            if (sqlite3_open_v2(uri.c_str(), &database.db_, flags,
+                                nullptr) == SQLITE_OK) {
+                sqlite3_busy_timeout(database.db_, 5000);
+                return database;
+            }
+            if (database.db_ != nullptr) {
+                sqlite3_close(database.db_);
+                database.db_ = nullptr;
+            }
+        }
+    }
     const int rc = sqlite3_open_v2(path.c_str(), &database.db_, flags, nullptr);
     if (rc != SQLITE_OK) {
         DataError error = make_error("sqlite open failed", database.db_, rc);
