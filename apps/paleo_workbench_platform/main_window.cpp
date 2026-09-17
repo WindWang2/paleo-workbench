@@ -21,6 +21,7 @@
 #include <qgsvectorlayer.h>
 #include <qgsvertexmarker.h>
 
+#include <pwb/application/adapters/data_store.hpp>
 #include <pwb/qgis/layout_service.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 
@@ -233,6 +234,8 @@ void MainWindow::buildMenusAndToolbar() {
     }
 
     QMenu* file_menu = menuBar()->addMenu(tr("文件(&F)"));
+    file_menu->addAction(tr("打开工程…"), this,
+                         &MainWindow::openProjectDialog, QKeySequence::Open);
     file_menu->addAction(actions_.action("reference_import"));
     file_menu->addAction(actions_.action("layer_new"));
     file_menu->addSeparator();
@@ -379,6 +382,124 @@ void MainWindow::openRasterDialog() {
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("打开栅格底图"), error);
     }
+}
+
+void MainWindow::openProjectDialog() {
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("打开工程"), QString(),
+        tr("Paleo 工程 (*.paleo.json *.paleo);;所有文件 (*)"));
+    if (path.isEmpty()) return;
+    const QString error = openProject(path);
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("打开工程"), error);
+    }
+}
+
+QString MainWindow::openProject(const QString& project_file) {
+    if (session_->store() != nullptr) {
+        return tr("已有工程打开（每窗口一个工程会话）");
+    }
+    std::string open_error;
+    auto store = pwb::application::PwbDataStore::open(
+        std::filesystem::path(project_file.toStdWString()), &open_error);
+    if (store == nullptr) {
+        return QString::fromStdString(open_error);
+    }
+
+    // B's startup contract: resume/roll back unfinished journals BEFORE
+    // any new commit. Pending items stay blocking; surface them honestly.
+    const pwb::data::RecoveryReportV1 recovery = store->recover();
+
+    session_->set_store(store);
+
+    // Materialize every bound GeoJSON layer as an explicit working copy —
+    // the catalog payload file itself is read-only for the shell.
+    auto snapshot = store->snapshot();
+    if (!snapshot.is_ok()) {
+        session_->set_store(nullptr);
+        return QString::fromStdString(snapshot.error().message);
+    }
+    std::map<std::string, const pwb::catalog::DataVersion*> versions;
+    for (const auto& version : snapshot.value().catalog_versions) {
+        versions[version.id.str()] = &version;
+    }
+    const std::filesystem::path project_dir =
+        std::filesystem::path(project_file.toStdWString()).parent_path();
+    const std::filesystem::path working_dir = project_dir / ".pwb-working";
+    int opened = 0;
+    int skipped = 0;
+    std::string first_error;
+    for (const pwb::workspace::LayerBinding& binding :
+         snapshot.value().layer_bindings) {
+        const auto it = versions.find(binding.source_version_id);
+        if (it == versions.end() || it->second == nullptr
+            || it->second->format != "GeoJSON" || it->second->trashed) {
+            continue;
+        }
+        const std::filesystem::path payload =
+            project_dir / it->second->path;
+        std::error_code ec;
+        if (!std::filesystem::exists(payload, ec)) {
+            ++skipped;
+            continue;
+        }
+        std::filesystem::create_directories(working_dir, ec);
+        const std::filesystem::path working =
+            working_dir / (binding.layer_id + ".geojson");
+        std::filesystem::copy_file(
+            payload, working, std::filesystem::copy_options::overwrite_existing,
+            ec);
+        if (ec) {
+            if (first_error.empty()) {
+                first_error = "working copy create failed for "
+                    + binding.layer_id + ": " + ec.message();
+            }
+            ++skipped;
+            continue;
+        }
+        pwb::qgis::LayerBinding qbinding{binding.layer_id,
+                                         binding.source_asset_id,
+                                         binding.source_version_id,
+                                         "vector"};
+        std::string add_error;
+        QgsVectorLayer* layer = session_->map().addVectorLayer(
+            working.string(), binding.layer_id, qbinding, &add_error);
+        if (layer == nullptr) {
+            if (first_error.empty()) first_error = add_error;
+            ++skipped;
+            continue;
+        }
+        pwb::application::DomainLayerFacts facts;
+        facts.layer_id = binding.layer_id;
+        facts.role = binding.role.empty() ? "facies_boundary" : binding.role;
+        facts.role_label = binding.layer_id;
+        facts.artifact_maturity = "draft";
+        // Working-copy grant: the bound catalog version authorizes edits on
+        // the copy; the payload stays immutable.
+        facts.write_granted = true;
+        facts_[facts.layer_id] = facts;
+        if (!session_->active_layer().has_value()) {
+            session_->set_active_layer(facts);
+            canvas_->setExtent(layer->extent());
+        }
+        ++opened;
+    }
+    refreshActionStates();
+    QString summary = tr("工程已打开：%1 个绑定图层（%2 跳过）")
+                          .arg(opened)
+                          .arg(skipped);
+    if (!recovery.pending.empty()) {
+        summary += tr("；%1 个未决恢复项（阻塞冲突写入）")
+                       .arg(recovery.pending.size());
+    }
+    if (!recovery.rolled_back.empty()) {
+        summary += tr("；%1 个日志已回滚").arg(recovery.rolled_back.size());
+    }
+    statusBar()->showMessage(summary, 10000);
+    if (!first_error.empty()) {
+        return QString::fromStdString(first_error);
+    }
+    return QString();
 }
 
 void MainWindow::armPan() {

@@ -65,6 +65,27 @@ set_tests_properties(platform.ui_wiring PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
     TIMEOUT 300)
 
+# Project session test: real MainWindow + real B store (.paleo open /
+# recovery / working copies / save / reopen). Needs B in the build.
+if(PWB_BUILD_DATA)
+    add_executable(platform_project_session test_project_session.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+    set_target_properties(platform_project_session PROPERTIES AUTOMOC ON)
+    target_compile_features(platform_project_session PRIVATE cxx_std_20)
+    target_include_directories(platform_project_session PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+    target_link_libraries(platform_project_session PRIVATE
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data)
+    target_compile_definitions(platform_project_session PRIVATE
+        PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME platform.project_session COMMAND platform_project_session)
+    set_tests_properties(platform.project_session PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+endif()
+
 # App-level smoke: the real executable's self-check (fixtures + render +
 # export in one process, exit code is the verdict).
 add_test(NAME platform.qgis_smoke_app COMMAND pwb-platform --self-check)

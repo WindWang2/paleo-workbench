@@ -18,6 +18,7 @@
 | 11 | WLE dock 嵌入（VisualizationWellLog 守卫；无 Q_OBJECT → dock->widget() cast）；self-check 真 LAS 加载；部署树 + env -i 自检 exit 0；提交 `18ba6409`；纯平台树回归 9/9；四文档+集成验证 | 见 v3-verification / v3-integration-verification | 通过 | 收口 |
 | 12 | B 后续交付（`50075fb0`+`2286b23b`）合入复验：仍 32/34（fixture 绝对路径问题在其修复范围外）；终验一次全量+链接审计（0 Python/PySide，Qt 单源 /usr/lib） | 资源 75 ×3（B 持锁）按协议等待，未绕过 | 收口 | — |
 | 13（main） | 外部评审 P1 修复：发布失败改抛 `CatalogPublishError`+run 终态收敛；EditController stage/finalize 拆分（B 接受后才写源 provider）；operation ID `pwb-edit-<layer>-r<rev>-<sha8>` 唯一化+重试复用+base_version 冻结；`data.oracle_compare` 语义比较去机器绑定；D/E 开关纳入 integrated 树；新增 `integration.attribute_chain` 五线真实链（E 内核→C runtime→A publisher→B catalog→重开读回对账 E 冻结 oracle）。详见 v3-verification §4a | main 工作区 integrated 44/44 ×2（data 19/19、science 4/4、D 5/5、E 4/4、platform 9/9 含新增连续编辑/重试/源未写断言、integration 3/3 含发布失败注入两段+五线链）；MALLOC_CHECK_=3 platform+integration 12/12 | 通过 | 评审后续第 2/3 步剩余（.paleo 工程会话、D/E 主程序装配） |
+| 14（main） | 评审第 2 步：`MainWindow::openProject`（真 store 拒只读→recover() 启动恢复→GeoJSON 绑定图层物化为 `.pwb-working/` 显式工作副本→facts/active 接线；文件菜单“打开工程…”）；新增 `platform.project_session`：prep 绑定→打开→编辑→保存→payload 哈希前后不变+工作副本已改+绑定推进→重开刷新 | integrated 45/45 ×2；MALLOC_CHECK_=3 platform+integration 13/13 | 通过 | D/E 主程序装配（第 3 步剩余）、新建工程 |
 
 ## 结论
 

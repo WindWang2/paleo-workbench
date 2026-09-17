@@ -43,6 +43,13 @@ public:
     // actions trigger; no parallel logic).
     QString openVectorLayer(const QString& path);
     QString openRasterLayer(const QString& path);
+    // Opens a .paleo project session through B: real store (refuses
+    // unreadable/read-only), startup journal recovery, then every bound
+    // GeoJSON layer is materialized as an EXPLICIT WORKING COPY under
+    // <project>/.pwb-working/ — catalog payloads are never edited in
+    // place. Returns "" on success; the store stays attached so save_edits
+    // goes through the real catalog transaction.
+    QString openProject(const QString& project_file);
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
 
@@ -88,6 +95,7 @@ private:
     // Operation handlers (triggered by the governed actions).
     void openVectorDialog();
     void openRasterDialog();
+    void openProjectDialog();
     void exportLayoutDialog();
     void armPan();
     void armZoomIn();
