@@ -146,6 +146,14 @@ def _grids() -> dict[str, dict]:
                     [-300.0, -100.0, 0.0]])
     grids.append(_grid("neg3", neg, (0.0, 0.0, 3.0, 3.0), unit="°C"))
 
+    # vmin/interval in (-1, 0): math.ceil returns an int in Python, so the
+    # ladder start is +0.0 (label "0") — never -0.0 (label "-0").
+    neghalf = np.array([[-0.5, 0.0, 0.5, 1.0],
+                        [0.0, 0.5, 1.0, 1.5],
+                        [0.5, 1.0, 1.5, 2.0],
+                        [1.0, 1.5, 2.0, 2.5]])
+    grids.append(_grid("neghalf4", neghalf, (0.0, 0.0, 4.0, 4.0), unit="m"))
+
     # Micro / macro spans: %g exponent labels on the contour ladder.
     micro = np.array([[1.0e-6, 2.0e-6, 3.0e-6],
                       [2.0e-6, 4.0e-6, 2.0e-6],
@@ -182,6 +190,37 @@ def _grids() -> dict[str, dict]:
     ii, jj = np.indices((8, 8))
     checker = ((ii + jj) % 2).astype(np.float64) * 10.0
     grids.append(_grid("checker8", checker, (0.0, 0.0, 80.0, 80.0)))
+
+    # Hunt a binary grid whose class polygonization promotes an unmatched
+    # hole to an exterior island (holes_promoted_to_exterior > 0) — the same
+    # hunt the polygonization oracle runs, at the layer-product level.
+    promote = None
+    promote_seed = None
+    for seed in range(400):
+        rng = np.random.default_rng(seed)
+        z = (rng.random((8, 8)) >= 0.45).astype(np.float64)
+        if z.min() == z.max():
+            continue
+        res = _factor_result(_grid("tmp", z, (0.0, 0.0, 8.0, 8.0)))
+        layer = generate_facies_polygon_layer(res, thresholds=[0.5])
+        qc = layer.metadata["polygon_qc"]
+        if qc["holes_promoted_to_exterior"] > 0:
+            promote = z
+            promote_seed = seed
+            break
+    if promote is not None:
+        grids.append(_grid("promote8", promote, (0.0, 0.0, 8.0, 8.0)))
+        grids[-1]["seed"] = promote_seed
+    else:
+        # Fallback: 1-cell-wide frame plus disjoint blob still freezes the
+        # counter (likely 0) so C++ must match.
+        z = np.zeros((8, 8), dtype=np.float64)
+        z[0, :] = 1.0
+        z[-1, :] = 1.0
+        z[:, 0] = 1.0
+        z[:, -1] = 1.0
+        z[3:5, 3:5] = 1.0
+        grids.append(_grid("promote8", z, (0.0, 0.0, 8.0, 8.0)))
 
     return {g["name"]: g for g in grids}
 
@@ -246,6 +285,14 @@ def _contour_cases(cases: list[dict], grids: dict) -> None:
         ("contour_strip1x10_nice", "strip1x10", {}),
         ("contour_neg3_interval", "neg3", {"interval": 100.0}),
         ("contour_neg3_nice", "neg3", {}),
+        ("contour_neghalf4_interval", "neghalf4", {"interval": 1.0}),
+        # Branch pins: simplify>0 (RDP inside stitch), interval<=0 falls
+        # through to nice while still recording contour_interval, and an
+        # explicit empty levels list.
+        ("contour_ramp8_simplify", "ramp8", {"levels": [3.0], "simplify": 0.6}),
+        ("contour_ramp8_interval_zero", "ramp8", {"interval": 0.0}),
+        ("contour_ramp8_explicit_empty", "ramp8", {"levels": []}),
+        ("contour_neghalf4_interval", "neghalf4", {"interval": 1.0}),
         ("contour_micro3_nice", "micro3", {}),
         ("contour_macro3_nice", "macro3", {}),
         ("contour_plain12_quantile", "plain12", {"leveling_mode": "quantile"}),
@@ -292,6 +339,13 @@ def _facies_cases(cases: list[dict], grids: dict) -> None:
          {"thresholds": [6.0, 2.0, 6.0]}),  # unsorted + duplicate → sorted(set)
         ("facies_ramp8_names_short", "ramp8",
          {"thresholds": [2.0, 4.0, 6.0], "names": ["甲", "乙", "丙"]}),
+        # Names shorter than thresholds+1: class ids cap at len(names)-1.
+        ("facies_ramp8_names_cap", "ramp8",
+         {"thresholds": [1.0, 4.0, 7.0], "names": ["甲", "乙"]}),
+        # Explicit per-class colors override the default palette.
+        ("facies_ramp8_colors", "ramp8",
+         {"thresholds": [2.0, 6.0],
+          "colors": ["#111111", "#222222", "#333333"]}),
         ("facies_batch4_default", "batch4", {}),
         ("facies_islands10_explicit", "islands10", {"thresholds": [1.0, 6.0]}),
         ("facies_donut10_default", "donut10", {}),
@@ -304,6 +358,8 @@ def _facies_cases(cases: list[dict], grids: dict) -> None:
         ("facies_constant8_explicit", "constant8",
          {"thresholds": [20.0, 30.0], "names": ["Low", "Medium", "High"]}),
         ("facies_nan6_default", "nan6", {}),
+        ("facies_nan6_minarea", "nan6",
+         {"min_area": 5.0}),  # early return still echoes small_polygon_threshold
         ("facies_inf6_default", "inf6", {}),
         ("facies_one1_default", "one1", {}),
         ("facies_strip1x10_explicit", "strip1x10",
@@ -325,6 +381,8 @@ def _facies_cases(cases: list[dict], grids: dict) -> None:
         # Thresholds fully outside [vmin, vmax].
         ("facies_ramp8_outside_low", "ramp8", {"thresholds": [-100.0]}),
         ("facies_ramp8_outside_high", "ramp8", {"thresholds": [100.0]}),
+        # Hole promotion (or its pinned zero fallback) at the layer level.
+        ("facies_promote8_explicit", "promote8", {"thresholds": [0.5]}),
     ]
     for cid, gname, kw in specs:
         g = grids[gname]

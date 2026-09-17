@@ -341,7 +341,11 @@ ContourLayerProduct generate_contour_layer_product(
         out.levels = *options.levels;
     } else if (use_interval) {
         const double interval = *options.interval;
+        // Python math.ceil returns an int, so 0 * interval is +0.0; C++
+        // std::ceil keeps -0.0 for ratios in (-1, 0). Normalize so labels
+        // print "0", not "-0".
         double curr = std::ceil(vmin / interval) * interval;
+        if (curr == 0.0) curr = 0.0;
         while (curr <= vmax) {
             out.levels.push_back(round_to(curr, 6));
             curr += interval;
@@ -424,8 +428,10 @@ FaciesLayerProduct generate_facies_polygon_layer_product(
         if (std::isfinite(z)) ++finite_count;
     }
     if (finite_count == 0 || h < 1 || w < 1) {
-        // Python early return: exactly five QC keys, no thresholds block.
-        qc["small_polygon_threshold"] = Json();
+        // Python early return: exactly five QC keys, no thresholds block;
+        // small_polygon_threshold echoes the caller's min_area verbatim.
+        qc["small_polygon_threshold"] =
+            options.min_area.has_value() ? Json(*options.min_area) : Json();
         qc["small_polygons_dropped"] = 0;
         qc["clipped_to_domain"] = 0;
         qc["empty_after_clip"] = 0;

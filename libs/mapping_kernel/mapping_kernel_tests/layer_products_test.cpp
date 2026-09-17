@@ -212,8 +212,8 @@ int main() {
     }
     run_mean_units(oracle["mean_units"]);
 
-    check(n_contour == 24, "24 contour cases");
-    check(n_facies == 26, "26 facies cases");
+    check(n_contour == 29, "29 contour cases");
+    check(n_facies == 30, "30 facies cases");
 
     // Empty colors would be a ZeroDivisionError in Python — fail closed.
     bool threw = false;
