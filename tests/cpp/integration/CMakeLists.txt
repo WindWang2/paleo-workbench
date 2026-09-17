@@ -39,3 +39,14 @@ endfunction()
 
 pwb_add_integration_test(project_chain test_project_chain.cpp)
 pwb_add_integration_test(algorithm_chain test_algorithm_chain.cpp)
+
+# Five-line chain (E kernel -> C runtime -> A publisher -> B catalog ->
+# durable re-read): only when CPP-E is in this build; the suite must not
+# silently stand in a fake attribute kernel for the real one.
+if(PWB_BUILD_SEISMIC_ATTRIBUTES)
+    pwb_add_integration_test(attribute_chain test_attribute_chain.cpp)
+    target_link_libraries(integration_attribute_chain PRIVATE
+        Pwb::SeismicAttributes)
+    target_compile_definitions(integration_attribute_chain PRIVATE
+        PWB_ATTRIBUTES_FIXTURE_ROOT="${CMAKE_SOURCE_DIR}/tests/cpp/seismic_attributes/fixtures")
+endif()

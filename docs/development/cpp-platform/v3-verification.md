@@ -44,7 +44,7 @@ ctest --test-dir build/cpp-integrated                        # 32/34（§4）
 
 `data.*` 17/19、`science.*` 4/4、`platform.*` 9/9、`integration.*` 2/2。唯二失败为 B 线 oracle fixture 内嵌绝对路径（checkout 相关，已移交 B；本线不重写他线 fixture）。
 
-## 4a. main 增量（评审 P1 修复后，`e732678d` 之后）— integrated 43/43 通过 ×2
+## 4a. main 增量（评审 P1 修复后，`e732678d` 之后）— integrated 44/44 通过 ×2
 
 合并后按外部评审（status-after-pull-e732678d.md）修复三项 P1，并把 D/E 纳入同一 integrated 树：
 
@@ -55,6 +55,7 @@ ctest --test-dir build/cpp-integrated                        # 32/34（§4）
 | P1 operation ID 复用 | ID = `pwb-edit-<layer>-r<base_revision>-<sha256[0:8]>`（layer id 净化为安全段）；同内容重试复用同 ID（B 幂等），内容变化即新 ID；`base_revisions_` 在每次成功 finalize 推进；base_version 冻结为 B 绑定版本 | 同测试新增：连续两轮提交 ID 必不同；同内容重试 ID 必相同 |
 | fixture 绝对路径 | `data.oracle_compare` 改为语义比较（resolved == canonical(fixture dir)/stored + oracle 自洽尾缀校验），不再比对生成机器的绝对路径 | `data.*` 19/19（原 17/19 的两个 oracle 失败清零） |
 | D/E 入 integrated 门禁 | `PWB_BUILD_SEISMIC_VIEWER/ATTRIBUTES=ON` 与 A/B/C 同树构建 | `seismic_viewer.*` 5/5、`seismic_attributes.*` 4/4 同树通过 |
+| 五线真实链 | 新增 `integration.attribute_chain`：真 E 内核（rms_amplitude window=21 / envelope，tiny_sgy_real 冻结 oracle）经 C TaskRuntime → A CatalogResultPublisher → B catalog → 重开读回 PWBVOL1 与 oracle 对账（<1e-5）；E 的显式注册由 host 调用（4/4 入 registry）。E 原套件仅用基线 runtime+收集型 publisher，此测试补上生产链证据 | Passed（含 run 行 complete 仅经 publish 达成、provenance/version/payload 存在性断言） |
 
 实测命令（main 工作区，GCC 16.2.1 / Qt 6.11.2 系统 ABI / vendored QGIS 4.2.0）：
 
@@ -67,8 +68,8 @@ cmake -S . -B build/cpp-integrated -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DPALEO_QGIS_SDK_DIR=$PWD/native/qgis_render_bridge/build/qgis-vendor/output \
   -DPALEO_QGIS_BUILD_DIR=$PWD/native/qgis_render_bridge/build/qgis-vendor
 cmake --build build/cpp-integrated -j 8        # exit 0
-ctest --test-dir build/cpp-integrated -j 4     # 43/43 Passed，两轮
-MALLOC_CHECK_=3 ctest --test-dir build/cpp-integrated -R "platform.|integration."  # 11/11
+ctest --test-dir build/cpp-integrated -j 4     # 44/44 Passed，两轮
+MALLOC_CHECK_=3 ctest --test-dir build/cpp-integrated -R "platform.|integration."  # 12/12
 ```
 
 仍属未完成（如实）：正常 .paleo 工程 UI 会话（set_store 生产调用）、D viewer/E 算法在主程序内的装配、Windows 回归——评审建议的后续顺序第 2/3 步。
