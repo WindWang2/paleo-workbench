@@ -15,6 +15,7 @@
 #include <map>
 #include <string>
 
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <qgsapplication.h>
 #include <qgsvectorlayer.h>
@@ -272,6 +273,95 @@ int main(int argc, char** argv) {
         PWB_CHECK(std::fabs(file_v.x() - v.x()) < 1e-9
                   && std::fabs(file_v.y() - v.y()) < 1e-9);
         PWB_CHECK(layer->editBuffer() == nullptr);   // clean session
+    }
+
+    // ---- new project bootstrap: fresh dir -> empty catalog + one
+    // boundary asset -> open a raw layer -> edit -> save auto-targets the
+    // single asset (rebind) -> reopen materializes the bound layer.
+    {
+        const fs::path fresh_dir =
+            fs::path(temp_dir.path().toStdWString()) / "fresh";
+        const QString gpkg_uri =
+            pwb::test_fixtures::make_gpkg_fixture(temp_dir.path());
+        PWB_CHECK(!gpkg_uri.isEmpty());
+
+        MainWindow window;
+        const QString error = window.newProject(
+            QString::fromStdString(fresh_dir.string()),
+            QStringLiteral("bootstrap-工程"));
+        PWB_CHECK_MSG(error.isEmpty(), error.toStdString());
+        PWB_CHECK(window.session()->store() != nullptr);
+        const fs::path project_file2 = fresh_dir
+            / "bootstrap-工程.paleo.json";
+        PWB_CHECK(fs::exists(project_file2));
+
+        // One live asset seeded by the bootstrap publish.
+        std::string asset_id;
+        {
+            std::string probe_error;
+            auto probe = pwb::application::PwbDataStore::open(
+                project_file2, &probe_error);
+            PWB_CHECK_MSG(probe != nullptr, probe_error);
+            auto snapshot = probe->snapshot();
+            PWB_CHECK(snapshot.is_ok());
+            int live = 0;
+            for (const auto& asset : snapshot.value().catalog_assets) {
+                if (!asset.trashed) {
+                    ++live;
+                    asset_id = asset.id.str();
+                }
+            }
+            PWB_CHECK(live == 1);
+            PWB_CHECK(!asset_id.empty());
+        }
+
+        // Open a raw vector layer, edit, save: with no binding and exactly
+        // one live asset the commit auto-targets it and REBINDS the layer.
+        const QString open_error2 =
+            window.openVectorLayer(gpkg_uri);
+        PWB_CHECK_MSG(open_error2.isEmpty(),
+                      open_error2.toStdString());
+        const std::string raw_layer =
+            QFileInfo(gpkg_uri).completeBaseName().toStdString();
+        PWB_CHECK(window.session()->edit().start_editing(raw_layer).empty());
+        QgsVectorLayer* layer =
+            window.session()->map().vectorLayerById(raw_layer);
+        PWB_CHECK(layer != nullptr);
+        const QgsPointXY v0 = layer->getFeature(1).geometry().vertexAt(0);
+        PWB_CHECK(window.session()->edit()
+                      .move_vertex(raw_layer, 1, 0, v0.x() + 0.3, v0.y())
+                      .empty());
+        const QString save_error = window.commitActiveLayer(
+            fs::path(temp_dir.path().toStdWString()) / "fresh-staged");
+        PWB_CHECK_MSG(save_error.isEmpty(), save_error.toStdString());
+
+        {
+            std::string probe_error;
+            auto probe = pwb::application::PwbDataStore::open(
+                project_file2, &probe_error);
+            PWB_CHECK_MSG(probe != nullptr, probe_error);
+            auto snapshot = probe->snapshot();
+            PWB_CHECK(snapshot.is_ok());
+            const pwb::workspace::LayerBinding* binding =
+                binding_for(snapshot.value(), raw_layer);
+            PWB_CHECK(binding != nullptr);
+            PWB_CHECK(binding->source_asset_id == asset_id);
+        }
+        window.close();
+
+        // Reopen: the auto-bound layer materializes as a working copy.
+        MainWindow reopened;
+        const QString reopen_error2 = reopened.openProject(
+            QString::fromStdString(project_file2.string()));
+        PWB_CHECK_MSG(reopen_error2.isEmpty(),
+                      reopen_error2.toStdString());
+        QgsVectorLayer* bound = reopened.session()->map().vectorLayerById(
+            raw_layer);
+        PWB_CHECK(bound != nullptr);
+        PWB_CHECK(bound->source().contains(QStringLiteral(".pwb-working")));
+        const QgsPointXY bound_v =
+            bound->getFeature(1).geometry().vertexAt(0);
+        PWB_CHECK(std::fabs(bound_v.x() - (v0.x() + 0.3)) < 1e-9);
     }
 
     pwb::qgis::QgisRuntime::release();

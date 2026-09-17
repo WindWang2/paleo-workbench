@@ -66,6 +66,11 @@ public:
     // place. Returns "" on success; the store stays attached so save_edits
     // goes through the real catalog transaction.
     QString openProject(const QString& project_file);
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // Creates a fresh project (B's document factory + empty catalog + one
+    // bootstrap boundary asset via B's run lifecycle) and opens it.
+    QString newProject(const QString& dir_path, const QString& name);
+#endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
 
@@ -131,7 +136,10 @@ private:
     // Operation handlers (triggered by the governed actions).
     void openVectorDialog();
     void openRasterDialog();
+#ifdef PWB_WITH_DATA_INTEGRATION
     void openProjectDialog();
+    void newProjectDialog();
+#endif
     void exportLayoutDialog();
     void armPan();
     void armZoomIn();

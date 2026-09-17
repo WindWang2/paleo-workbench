@@ -451,6 +451,41 @@ const ModelSpec kUserVectorLayerSpec{"UserVectorLayer", &kUserVectorLayer};
 const ModelSpec kMapReferenceLayerSpec{"MapReferenceLayer",
                                        &kMapReferenceLayer};
 
+// Python-parity defaults for the two sections Python materializes on
+// ProjectDocument.new (see kProjectDocument below). Function-local statics
+// avoid static-init-order hazards and a discarded parse degrades to an
+// empty object instead of poisoning the spec.
+Json joint_analysis_default() {
+    static const Json value = [] {
+        Json parsed = Json::parse(
+            std::string(R"({"tree_checks":{},"well_visibility":{},)")
+                + R"("well_identity_asset_id":null,"well_identity_map":{},)"
+                + R"("seismic_color_scale":"blue-white-red",)"
+                + R"("gr_color_scale":"viridis","well_width_px":5,)"
+                + R"("orthogonal_inline_index":null,)"
+                + R"("orthogonal_crossline_index":null,)"
+                + R"("orthogonal_inline_number":null,)"
+                + R"("orthogonal_crossline_number":null,"time_slices":[],)"
+                + R"("active_time_slice_ms":null,"time_slice_opacity":80,)"
+                + R"("vertical_domain":"Time","active_fence_wells":[],)"
+                + R"("active_fence_name":null,"path_hints":{}})",
+            nullptr, false);
+        return parsed.is_discarded() ? Json::object() : parsed;
+    }();
+    return value;
+}
+
+Json geo3d_workspace_default() {
+    static const Json value = [] {
+        Json parsed = Json::parse(
+            std::string(R"({"objects":[],"measurements":[],"display":{},)")
+                + R"("clip":{},"camera":{},"views":[],"selected":""})",
+            nullptr, false);
+        return parsed.is_discarded() ? Json::object() : parsed;
+    }();
+    return value;
+}
+
 // Top-level ProjectDocument. meta is REQUIRED; everything else carries a
 // default. Long-tail business sections (well_tables, contour_drafts, …)
 // stay JsonList envelopes: they round-trip verbatim and are explicitly
@@ -492,8 +527,13 @@ const std::vector<FieldSpec> kProjectDocument{
     {"quality_reports", FieldType::JsonList, Json::array()},
     {"version_sets", FieldType::JsonList, Json::array()},
     {"export_artifacts", FieldType::JsonList, Json::array()},
-    {"joint_analysis", FieldType::JsonValue},
-    {"geo3d_workspace", FieldType::JsonValue},
+    // joint_analysis / geo3d_workspace: Python materializes full defaults
+    // on ProjectDocument.new (fixtures carry them as objects). Without a
+    // default here, create_new() emits null, which parse() rejects — the
+    // defaults below are the frozen Python parity content (minimal
+    // fixture, oracle-regenerated 2026-09-16).
+    {"joint_analysis", FieldType::JsonValue, joint_analysis_default()},
+    {"geo3d_workspace", FieldType::JsonValue, geo3d_workspace_default()},
     {"mapping_workspace", FieldType::JsonMap, Json::object()},
     {"compilation_input_sets", FieldType::JsonList, Json::array()},
     {"integrated_interpretations", FieldType::JsonList, Json::array()},

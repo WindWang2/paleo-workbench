@@ -111,7 +111,10 @@ CommitReceiptV1 PwbDataStore::commit(const CommitRequestV1& request) {
 
     // Target asset: explicit request target first (host authority), then
     // the B binding of the staged layer (the join key). First-time layer
-    // commits have no binding yet — rebind_layer creates it on success.
+    // commits have no binding yet — when the project carries exactly ONE
+    // non-trashed asset, that asset is the deterministic target (fresh
+    // bootstrap projects); with more than one asset an explicit target or
+    // binding is required (never guess among candidates).
     std::string asset_id = request.asset_id;
     if (asset_id.empty()) {
         const pwb::workspace::LayerBinding* binding =
@@ -119,9 +122,19 @@ CommitReceiptV1 PwbDataStore::commit(const CommitRequestV1& request) {
         if (binding != nullptr) asset_id = binding->source_asset_id;
     }
     if (asset_id.empty()) {
+        const pwb::catalog::DataAsset* single = nullptr;
+        int live_assets = 0;
+        for (const auto& asset : snapshot_cache_.catalog_assets) {
+            if (asset.trashed) continue;
+            single = &asset;
+            ++live_assets;
+        }
+        if (live_assets == 1) asset_id = single->id.str();
+    }
+    if (asset_id.empty()) {
         receipt.error = "no asset target for layer '"
             + request.staged.source_layer_id + "' (no explicit asset, no "
-            "catalog binding)";
+              "catalog binding, and the asset choice is ambiguous)";
         return receipt;
     }
     // Optimistic lock: explicit base, else the asset's current head version.

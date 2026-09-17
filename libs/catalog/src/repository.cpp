@@ -329,6 +329,12 @@ Result<CatalogDocument> CatalogRepository::open_read_write() {
     std::filesystem::create_directories(sqlite_path_.parent_path(), ec);
     auto schema_error = db_.ensure_schema();
     if (schema_error.code != ErrorCode::Ok) return schema_error;
+    // A freshly created store has no sync_state rows yet — the status
+    // probe (and therefore every subsequent open) would refuse it. Seed
+    // idempotently so create-then-reopen works (INSERT .. ON CONFLICT DO
+    // NOTHING; the revision row keeps its value on existing stores).
+    auto seeded = bump_revision();
+    if (seeded.code != ErrorCode::Ok) return seeded;
     return load_document_from(db_);
 }
 

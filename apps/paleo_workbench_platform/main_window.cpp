@@ -3,12 +3,16 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QToolBar>
+
+#include <fstream>
 
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <QComboBox>
@@ -283,8 +287,13 @@ void MainWindow::buildMenusAndToolbar() {
     }
 
     QMenu* file_menu = menuBar()->addMenu(tr("文件(&F)"));
+#ifdef PWB_WITH_DATA_INTEGRATION
+    file_menu->addAction(tr("新建工程…"), this,
+                         &MainWindow::newProjectDialog,
+                         QKeySequence::New);
     file_menu->addAction(tr("打开工程…"), this,
                          &MainWindow::openProjectDialog, QKeySequence::Open);
+#endif
     file_menu->addAction(actions_.action("reference_import"));
     file_menu->addAction(actions_.action("layer_new"));
     file_menu->addSeparator();
@@ -442,6 +451,7 @@ void MainWindow::openRasterDialog() {
 }
 
 void MainWindow::openProjectDialog() {
+#ifdef PWB_WITH_DATA_INTEGRATION
     const QString path = QFileDialog::getOpenFileName(
         this, tr("打开工程"), QString(),
         tr("Paleo 工程 (*.paleo.json *.paleo);;所有文件 (*)"));
@@ -450,6 +460,123 @@ void MainWindow::openProjectDialog() {
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("打开工程"), error);
     }
+#endif
+}
+
+#ifdef PWB_WITH_DATA_INTEGRATION
+void MainWindow::newProjectDialog() {
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, tr("新建工程 — 选择目录"));
+    if (dir.isEmpty()) return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(
+        this, tr("新建工程"), tr("工程名称："), QLineEdit::Normal,
+        tr("新工程"), &ok);
+    if (!ok || name.isEmpty()) return;
+    const QString error = newProject(dir, name);
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("新建工程"), error);
+    }
+}
+
+QString MainWindow::newProject(const QString& dir_path,
+                               const QString& name) {
+    if (session_->store() != nullptr) {
+        return tr("已有工程打开（每窗口一个工程会话）");
+    }
+    // File-system-safe project name (also becomes the .paleo.json stem).
+    std::string safe = name.toStdString();
+    for (char& c : safe) {
+        const bool ok_char = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+            || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'
+            || static_cast<unsigned char>(c) >= 0x80;  // keep CJK names
+        if (!ok_char) c = '_';
+    }
+    if (safe.empty() || safe.front() == '.') safe = "project";
+    std::error_code ec;
+    const std::filesystem::path project_dir =
+        std::filesystem::path(dir_path.toStdWString());
+    std::filesystem::create_directories(project_dir, ec);
+    if (ec) {
+        return tr("无法创建目录：%1").arg(QString::fromStdString(ec.message()));
+    }
+    const std::filesystem::path project_file =
+        project_dir / (safe + ".paleo.json");
+
+    // Document via B's own factory (full default materialization, same as
+    // the Python ProjectDocument.new).
+    auto document = pwb::project::ProjectDocument::create_new(
+        name.toStdString(), "");
+    pwb::project::ProjectManager manager(project_file);
+    auto saved = manager.save(document);
+    if (!saved.is_ok()) {
+        return QString::fromStdString("project save failed: "
+                                       + saved.error().message);
+    }
+
+    // Empty catalog: open_read_write creates the schema (sqlite itself
+    // never creates parent directories — make the metadata dir first).
+    const std::filesystem::path catalog_file =
+        pwb::project::catalog_sqlite_for(project_file);
+    std::filesystem::create_directories(catalog_file.parent_path(), ec);
+    if (ec) {
+        return tr("无法创建 catalog 目录：%1").arg(
+            QString::fromStdString(ec.message()));
+    }
+    pwb::catalog::CatalogRepository repository(catalog_file);
+    auto writable = repository.open_read_write();
+    if (!writable.is_ok()) {
+        return QString::fromStdString("catalog init failed: "
+                                       + writable.error().message);
+    }
+
+    // Seed the initial boundary asset with an empty GeoJSON version
+    // through B's own run lifecycle (single-writer transaction; the
+    // catalog rows never get hand-rolled from the platform).
+    std::string open_error;
+    auto store = pwb::application::PwbDataStore::open(project_file,
+                                                      &open_error);
+    if (store == nullptr) {
+        return QString::fromStdString(open_error);
+    }
+    const std::filesystem::path staged_dir = project_dir / ".pwb-bootstrap";
+    std::filesystem::create_directories(staged_dir, ec);
+    const std::filesystem::path staged_geojson =
+        staged_dir / "boundary-v1.geojson";
+    {
+        std::ofstream out(staged_geojson, std::ios::binary);
+        out << "{\"type\":\"FeatureCollection\",\"features\":[]}";
+        if (!out.good()) return tr("引导图层写入失败");
+    }
+    const pwb::domain::RunId run_id{std::string("run_bootstrap-0001")};
+    pwb::data::RunRegistrationV1 registration;
+    registration.run_id = run_id;
+    registration.operation = "bootstrap";
+    registration.generator = "pwb-platform";
+    auto registered = store->coordinator().register_run(registration);
+    if (!registered.is_ok()) {
+        return QString::fromStdString("bootstrap register failed: "
+                                       + registered.error().message);
+    }
+    pwb::data::PublishRequestV1 publish;
+    publish.operation_id =
+        pwb::domain::OperationId{std::string("pub_bootstrap-0001")};
+    publish.run_id = run_id;
+    publish.new_asset_name = "相带边界";
+    publish.new_asset_type = "vector_boundary";
+    publish.stage = pwb::domain::DataStage::Raw;
+    pwb::data::StagedAssetV1 staged;
+    staged.source_path = staged_geojson;
+    staged.format = "GeoJSON";
+    publish.products.push_back(std::move(staged));
+    publish.result_metadata = pwb::domain::Json::object();
+    auto published =
+        store->coordinator().publish_run_result(publish, store->document());
+    if (!published.is_ok()) {
+        return QString::fromStdString("bootstrap publish failed: "
+                                       + published.error().message);
+    }
+    return openProject(QString::fromStdString(project_file.string()));
 }
 
 QString MainWindow::openProject(const QString& project_file) {
@@ -491,8 +618,11 @@ QString MainWindow::openProject(const QString& project_file) {
     for (const pwb::workspace::LayerBinding& binding :
          snapshot.value().layer_bindings) {
         const auto it = versions.find(binding.source_version_id);
-        if (it == versions.end() || it->second == nullptr
-            || it->second->format != "GeoJSON" || it->second->trashed) {
+        // Vector payloads this shell can edit as working copies (staged
+        // export is GeoJSON either way).
+        if (it == versions.end() || it->second == nullptr || it->second->trashed
+            || (it->second->format != "GeoJSON"
+                && it->second->format != "GPKG")) {
             continue;
         }
         const std::filesystem::path payload =
@@ -503,8 +633,8 @@ QString MainWindow::openProject(const QString& project_file) {
             continue;
         }
         std::filesystem::create_directories(working_dir, ec);
-        const std::filesystem::path working =
-            working_dir / (binding.layer_id + ".geojson");
+        const std::filesystem::path working = working_dir
+            / (binding.layer_id + payload.extension().string());
         std::filesystem::copy_file(
             payload, working, std::filesystem::copy_options::overwrite_existing,
             ec);
@@ -560,6 +690,7 @@ QString MainWindow::openProject(const QString& project_file) {
     }
     return QString();
 }
+#endif  // PWB_WITH_DATA_INTEGRATION
 
 void MainWindow::armPan() {
     canvas_->setMapTool(pan_tool_);

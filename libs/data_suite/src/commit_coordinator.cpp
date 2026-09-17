@@ -451,14 +451,26 @@ void CommitCoordinator::apply_rebind_to(
     if (!layer.has_value()) return;
     workspace::ensure_mapping_workspace(document.root());
     domain::Json& ws = document.root()["mapping_workspace"];
-    if (ws.contains("memberships") &&
-        ws["memberships"].contains(layer->str())) {
-        domain::Json& membership = ws["memberships"][layer->str()];
-        membership["source_asset_id"] = asset_id.str();
-        membership["source_version_id"] = version_id.str();
-        membership["binding_kind"] = "catalog_version";
-        membership["bound_at"] = now();
+    if (!ws.contains("memberships") || !ws["memberships"].is_object()) {
+        ws["memberships"] = domain::Json::object();
     }
+    // First-time layer bind: the membership entry does not exist yet —
+    // create it (rebind semantics per v3-contracts §2; the layer was
+    // committed against the asset, so the binding is real, not guessed).
+    if (!ws["memberships"].contains(layer->str())
+        || !ws["memberships"][layer->str()].is_object()) {
+        domain::Json fresh = domain::Json::object();
+        fresh["layer_id"] = layer->str();
+        fresh["role"] = "facies_boundary";
+        fresh["created_stage"] = "facies_calibration";
+        fresh["created_at"] = now();
+        ws["memberships"][layer->str()] = std::move(fresh);
+    }
+    domain::Json& membership = ws["memberships"][layer->str()];
+    membership["source_asset_id"] = asset_id.str();
+    membership["source_version_id"] = version_id.str();
+    membership["binding_kind"] = "catalog_version";
+    membership["bound_at"] = now();
 }
 
 Result<CommitReceiptV1> CommitCoordinator::finish_journal(
