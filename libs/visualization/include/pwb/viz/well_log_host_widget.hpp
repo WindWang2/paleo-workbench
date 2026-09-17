@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 
+#include <QString>
 #include <QWidget>
 
 #include <pwb/viz/selection.hpp>
@@ -38,9 +39,11 @@ public:
 
     // Parses a real LAS file with the engine's LasSourceAdapter, builds one
     // track per curve (linear scale from the curve's finite value range) and
-    // submits document + presentation to the session. Returns false and fills
-    // *error on parse or submission failure.
-    [[nodiscard]] bool load_las(const class QString& path, class QString* error = nullptr);
+    // submits document + presentation to the session. Returns false and
+    // fills *error on parse or submission failure. Repeated loads are full
+    // replacements: each parse produces a new engine document and the view
+    // follows it; a failed reload keeps the previously loaded document.
+    [[nodiscard]] bool load_las(const QString& path, QString* error = nullptr);
 
     void set_selection_callback(SelectionCallback callback);
 
