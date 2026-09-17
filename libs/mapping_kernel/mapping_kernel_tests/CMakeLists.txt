@@ -69,3 +69,22 @@ target_compile_definitions(mapping_kernel.sample_norm PRIVATE
     PWB_SAMPLE_NORM_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample_norm_oracle.json")
 add_test(NAME mapping_kernel.sample_norm COMMAND mapping_kernel.sample_norm)
 set_tests_properties(mapping_kernel.sample_norm PROPERTIES TIMEOUT 30)
+
+# BEGIN CONV-10
+# representative_facies oracle test (conv swarm #10). Requires the CONV-10
+# leaf source in pwb_mapping_kernel (see libs/mapping_kernel/CMakeLists.txt).
+if(PWB_BUILD_CONV_10)
+    add_executable(mapping_kernel.representative_facies
+        representative_facies_test.cpp)
+    target_compile_features(mapping_kernel.representative_facies PRIVATE
+        cxx_std_20)
+    target_link_libraries(mapping_kernel.representative_facies PRIVATE
+        Pwb::MappingKernel Pwb::Domain)
+    target_compile_definitions(mapping_kernel.representative_facies PRIVATE
+        PWB_REPRESENTATIVE_FACIES_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/representative_facies_oracle.json")
+    add_test(NAME mapping_kernel.representative_facies
+        COMMAND mapping_kernel.representative_facies)
+    set_tests_properties(mapping_kernel.representative_facies PROPERTIES
+        TIMEOUT 120)
+endif()
+# END CONV-10
