@@ -39,6 +39,15 @@ public:
 
     const std::filesystem::path& path() const { return sqlite_path_; }
 
+    // Writes the catalog.json manifest (Python ADR 0056 checkpoint/export
+    // contract, schema 1): full table dump + catalog_revision, atomic
+    // (tmp + rename), previous manifest preserved as <name>.bak. models/
+    // model_versions have no domain read model yet — their rows pass
+    // through verbatim so a manifest written by this side never drops
+    // registry content.
+    domain::DataError export_manifest(
+        const std::filesystem::path& manifest_path) const;
+
     // ---- write paths (each is one transaction + revision bump) ----------
     domain::DataError upsert_asset(const DataAsset& asset);
     domain::DataError upsert_version(const DataVersion& version);

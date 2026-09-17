@@ -51,6 +51,12 @@ public:
     pwb::data::RecoveryReportV1 recover() {
         return impl_->coordinator.recover(impl_->document);
     }
+    // Checkpoints metadata/catalog.json (B's ADR 0056 export contract:
+    // atomic, previous revision kept as .bak).
+    pwb::domain::DataError export_manifest() {
+        return impl_->repository.export_manifest(
+            pwb::project::catalog_manifest_for(project_file()));
+    }
     // Fresh zero-write snapshot of the underlying project.
     pwb::domain::Result<pwb::data::ProjectSnapshotV1> snapshot() const {
         return pwb::data::DataFacade(project_file()).open_snapshot();

@@ -593,6 +593,7 @@ QString MainWindow::newProject(const QString& dir_path,
         return QString::fromStdString("bootstrap publish failed: "
                                        + published.error().message);
     }
+    (void)store->export_manifest();
     return openProject(QString::fromStdString(project_file.string()));
 }
 
@@ -1229,6 +1230,7 @@ std::string MainWindow::importSegy(const QString& path, std::string* error) {
         }
         return "";
     }
+    (void)project_store_->export_manifest();
     return published.value().new_version_id.str();
 }
 #endif

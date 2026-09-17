@@ -188,6 +188,11 @@ CommitReceiptV1 PwbDataStore::commit(const CommitRequestV1& request) {
     // new version (close/reopen semantics without a second session).
     auto refreshed = snapshot();
     if (refreshed.is_ok()) snapshot_cache_ = std::move(refreshed).value();
+    // Checkpoint the catalog.json manifest: sqlite stays canonical, the
+    // manifest is the rebuildable export view — a failed export never
+    // fails the committed transaction, the next checkpoint re-syncs it.
+    (void)impl_->repository.export_manifest(
+        pwb::project::catalog_manifest_for(impl_->manager.path()));
     return receipt;
 }
 

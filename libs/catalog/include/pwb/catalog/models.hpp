@@ -104,6 +104,21 @@ struct WorkingCopy {
     std::optional<std::int64_t> source_size_bytes;
 };
 
+// One derivation edge (versions.parent_version_ids normalized into rows).
+struct LineageEdge {
+    std::string parent_version_id;
+    std::string child_version_id;
+};
+
+// One staging lease row (single-writer admission; written by B's gates).
+struct StagingLease {
+    std::string lease_id;
+    std::string target;
+    std::string kind;
+    std::string acquired_at;
+    std::string heartbeat_at;
+};
+
 // The materialized catalog document (all canonical tables).
 struct CatalogDocument {
     int catalog_revision = 0;
@@ -114,6 +129,8 @@ struct CatalogDocument {
     std::vector<std::pair<std::string, std::string>> asset_tags;
     std::vector<std::pair<std::string, std::string>> version_tags;
     std::vector<WorkingCopy> working_copies;
+    std::vector<LineageEdge> lineage;
+    std::vector<StagingLease> staging_leases;
 
     const DataAsset* find_asset(const domain::AssetId& id) const;
     const DataVersion* find_version(const domain::VersionId& id) const;

@@ -108,3 +108,4 @@ pwb_data_test(data_build_hygiene build_hygiene_test.cpp data.build_hygiene
     "$<TARGET_FILE:pwb-inspect>"
     "$<TARGET_FILE:pwb-migrate>"
     "$<TARGET_FILE:pwb-data-loop>")
+pwb_data_test(data_manifest_export manifest_export_test.cpp data.manifest_export)

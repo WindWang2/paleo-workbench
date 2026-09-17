@@ -272,7 +272,7 @@ void compare_fixture(const char* name, const char* project_file) {
     const Json tables =
         load_json_file(dir / "oracle_catalog_dump.json")["tables"];
     std::map<std::string, Json> assets, versions, runs, tags, members,
-        inputs, outputs, ports, copies,atag,vtag;
+        inputs, outputs, ports, copies,atag,vtag,lineage,leases;
     for (const auto& asset : document.value().assets) {
         assets[asset.id.str()] = project_asset(asset);
     }
@@ -320,6 +320,21 @@ void compare_fixture(const char* name, const char* project_file) {
     for (const auto& copy : document.value().working_copies) {
         copies[copy.working_id] = project_copy(copy);
     }
+    // lineage + staging_leases (read models added with the manifest work —
+    // previously reported-not-compared).
+    for (const auto& edge : document.value().lineage) {
+        lineage[edge.parent_version_id + "\x1f" + edge.child_version_id] =
+            Json{{"parent_version_id", edge.parent_version_id},
+                 {"child_version_id", edge.child_version_id}};
+    }
+    for (const auto& lease : document.value().staging_leases) {
+        leases[lease.lease_id] =
+            Json{{"lease_id", lease.lease_id},
+                 {"target", lease.target},
+                 {"kind", lease.kind},
+                 {"acquired_at", lease.acquired_at},
+                 {"heartbeat_at", lease.heartbeat_at}};
+    }
     check_rows(tables, "assets", assets, {"id"});
     check_rows(tables, "versions", versions, {"id"});
     check_rows(tables, "runs", runs, {"id"});
@@ -328,6 +343,9 @@ void compare_fixture(const char* name, const char* project_file) {
     check_rows(tables, "version_tags", vtag, {"version_id", "tag_id"});
     check_rows(tables, "version_members", members, {"version_id", "name"});
     check_rows(tables, "working_copies", copies, {"working_id"});
+    check_rows(tables, "lineage", lineage,
+               {"parent_version_id", "child_version_id"});
+    check_rows(tables, "staging_leases", leases, {"lease_id"});
     // run_inputs/outputs keyed by (run_id, version_id).
     check_rows(tables, "run_inputs", inputs, {"run_id", "version_id"});
     check_rows(tables, "run_outputs", outputs, {"run_id", "version_id"});

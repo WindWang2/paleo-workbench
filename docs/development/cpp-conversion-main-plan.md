@@ -64,6 +64,12 @@
   （D 的浏览入口补全）；`name_search` 写入路径 ASCII 折叠对齐 Python
   NFKC+casefold 契约（有界实现，非 ASCII 边界在源码注释与测试中声明）。
   门禁脚本全绿（47/47 ×2 + 14/14）。
-- 待办：M4 其余（GC/dedup、staging leases、models、catalog.json
-  checkpoint 等，按需）、M5 剩余（Windows 回归需外部环境；入口切换为
+- 2026-09-17（同日）：**M4 第二片**——lineage/staging_leases 读模型入
+  `CatalogDocument`（oracle_compare 从“只报告”升为真比较，typical fixture
+  3+1 行对账通过）；`CatalogRepository::export_manifest` 落 Python ADR 0056
+  的 catalog.json checkpoint 契约（全表 schema 1、原子写、.bak 轮换、
+  models/model_versions 原样透传不丢行），接线到 PwbDataStore::commit 与
+  bootstrap/import 之后；新测试 `data.manifest_export`。门禁 48/48 ×2。
+- 待办：M4 其余（GC/dedup、models 领域读模型——fixtures 现无数据可对账，
+  待有真实使用后补）、M5 剩余（Windows 回归需外部环境；入口切换为
   产品决策）。

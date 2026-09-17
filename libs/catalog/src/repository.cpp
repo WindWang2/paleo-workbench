@@ -2,6 +2,7 @@
 #include "pwb/project/paths.hpp"
 
 #include <algorithm>
+#include <fstream>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -20,6 +21,162 @@ Json parse_json_column(const std::string& text, const char* fallback) {
     Json parsed = Json::parse(text, nullptr, false);
     if (parsed.is_discarded()) return Json::parse(fallback, nullptr, false);
     return parsed;
+}
+
+// Manifest row serializers (Python catalog/store.py schema 1; field names
+// are the pydantic model's 1:1).
+Json manifest_asset(const DataAsset& asset) {
+    Json j = Json::object();
+    j["id"] = asset.id.str();
+    j["name"] = asset.name;
+    j["type"] = asset.type;
+    j["description"] = asset.description;
+    j["current_version_id"] = asset.current_version_id.has_value()
+        ? Json(asset.current_version_id->str())
+        : Json(nullptr);
+    j["legacy_resource_id"] = asset.legacy_resource_id.has_value()
+        ? Json(*asset.legacy_resource_id)
+        : Json(nullptr);
+    j["metadata"] = asset.metadata;
+    j["created_at"] = asset.created_at;
+    j["updated_at"] = asset.updated_at;
+    j["trashed"] = asset.trashed;
+    j["trashed_at"] = asset.trashed_at.has_value() ? Json(*asset.trashed_at)
+                                                   : Json(nullptr);
+    return j;
+}
+
+Json manifest_port(const RunPort& port) {
+    Json j = Json::object();
+    j["role"] = port.role;
+    j["version_id"] = port.version_id.str();
+    j["ordinal"] = port.ordinal;
+    j["required"] = port.required;
+    j["entity_type"] = port.entity_type;
+    j["entity_id"] = port.entity_id;
+    j["note"] = port.note;
+    return j;
+}
+
+Json manifest_run(const DataRun& run) {
+    Json j = Json::object();
+    j["id"] = run.id.str();
+    j["operation"] = run.operation;
+    j["input_version_ids"] = Json::array();
+    for (const auto& id : run.input_version_ids) {
+        j["input_version_ids"].push_back(id.str());
+    }
+    j["output_version_ids"] = Json::array();
+    for (const auto& id : run.output_version_ids) {
+        j["output_version_ids"].push_back(id.str());
+    }
+    j["input_ports"] = Json::array();
+    j["output_ports"] = Json::array();
+    for (const auto& port : run.input_ports) {
+        j["input_ports"].push_back(manifest_port(port));
+    }
+    for (const auto& port : run.output_ports) {
+        j["output_ports"].push_back(manifest_port(port));
+    }
+    j["parameters"] = run.parameters;
+    j["generator"] = run.generator;
+    j["status"] = run.status;
+    j["model_ref"] = run.model_ref.has_value() ? *run.model_ref
+                                               : Json(nullptr);
+    j["created_at"] = run.created_at;
+    return j;
+}
+
+Json manifest_version(const DataVersion& version) {
+    Json j = Json::object();
+    j["id"] = version.id.str();
+    j["asset_id"] = version.asset_id.str();
+    j["version_number"] = version.version_number;
+    j["stage"] = std::string(domain::to_string(version.stage));
+    j["managed"] = version.managed;
+    j["path"] = version.path;
+    j["source_uri"] = version.source_uri.has_value() ? Json(*version.source_uri)
+                                                     : Json(nullptr);
+    j["format"] = version.format;
+    j["size_bytes"] = version.size_bytes.has_value()
+        ? Json(*version.size_bytes)
+        : Json(nullptr);
+    j["sha256"] = version.sha256.has_value() ? Json(*version.sha256)
+                                             : Json(nullptr);
+    j["run_id"] = version.run_id.has_value() ? Json(version.run_id->str())
+                                             : Json(nullptr);
+    j["metadata"] = version.metadata;
+    j["created_at"] = version.created_at;
+    j["trashed"] = version.trashed;
+    j["trashed_at"] = version.trashed_at.has_value()
+        ? Json(*version.trashed_at)
+        : Json(nullptr);
+    j["parent_version_ids"] = Json::array();
+    for (const auto& parent : version.parent_version_ids) {
+        j["parent_version_ids"].push_back(parent.str());
+    }
+    j["members"] = Json::array();
+    for (const auto& member : version.members) {
+        Json m = Json::object();
+        m["name"] = member.name;
+        m["rel_path"] = member.rel_path;
+        m["member_role"] = member.member_role;
+        m["ordinal"] = member.ordinal;
+        m["required"] = member.required;
+        m["sha256"] = member.sha256.has_value() ? Json(*member.sha256)
+                                                : Json(nullptr);
+        m["size_bytes"] = member.size_bytes.has_value()
+            ? Json(*member.size_bytes)
+            : Json(nullptr);
+        j["members"].push_back(std::move(m));
+    }
+    return j;
+}
+
+// Raw passthrough for the registry tables (no domain read model yet): the
+// manifest must never drop rows this side cannot interpret.
+Json passthrough_rows(Database& db, const char* table) {
+    Json rows = Json::array();
+    if (!db.table_exists(table)) return rows;
+    std::vector<std::string> columns;
+    std::vector<std::string> json_columns;
+    {
+        Statement pragma =
+            db.prepare(std::string("PRAGMA table_info(") + table + ")");
+        while (pragma.step()) {
+            const std::string name = pragma.text(1);
+            const std::string type = pragma.text(2);
+            columns.push_back(name);
+            if (type.find("TEXT") != std::string::npos
+                && (name == "metadata" || name == "provenance"
+                    || name == "input_schema" || name == "output_schema")) {
+                json_columns.push_back(name);
+            }
+        }
+    }
+    std::string sql = "SELECT ";
+    for (std::size_t i = 0; i < columns.size(); ++i) {
+        if (i > 0) sql += ", ";
+        sql += columns[i];
+    }
+    sql += std::string(" FROM ") + table + " ORDER BY id";
+    Statement rows_statement = db.prepare(sql);
+    while (rows_statement.step()) {
+        Json row = Json::object();
+        for (std::size_t i = 0; i < columns.size(); ++i) {
+            const bool is_json = std::find(json_columns.begin(),
+                                           json_columns.end(), columns[i])
+                != json_columns.end();
+            if (is_json) {
+                row[columns[i]] = parse_json_column(rows_statement.text(
+                    static_cast<int>(i)), "{}");
+            } else {
+                row[columns[i]] = rows_statement.text(static_cast<int>(i));
+            }
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
 }
 
 std::string json_column(const Json& value, const char* fallback) {
@@ -333,7 +490,117 @@ Result<CatalogDocument> CatalogRepository::load_document_from(
             document.working_copies.push_back(std::move(copy));
         }
     }
+    if (db.table_exists("lineage")) {
+        Statement rows = db.prepare(
+            "SELECT parent_version_id, child_version_id FROM lineage");
+        while (rows.step()) {
+            LineageEdge edge;
+            edge.parent_version_id = rows.text(0);
+            edge.child_version_id = rows.text(1);
+            document.lineage.push_back(std::move(edge));
+        }
+    }
+    if (db.table_exists("staging_leases")) {
+        Statement rows = db.prepare(
+            "SELECT lease_id, target, kind, acquired_at, heartbeat_at "
+            "FROM staging_leases");
+        while (rows.step()) {
+            StagingLease lease;
+            lease.lease_id = rows.text(0);
+            lease.target = rows.text(1);
+            lease.kind = rows.text(2);
+            lease.acquired_at = rows.text(3);
+            lease.heartbeat_at = rows.text(4);
+            document.staging_leases.push_back(std::move(lease));
+        }
+    }
     return document;
+}
+
+DataError CatalogRepository::export_manifest(
+    const std::filesystem::path& manifest_path) const {
+    auto opened = Database::open(sqlite_path_, SqliteOpenMode::ReadOnly);
+    if (!opened.is_ok()) return opened.error();
+    Database db = std::move(opened.value());
+    auto loaded = load_document_from(db);
+    if (!loaded.is_ok()) return loaded.error();
+    CatalogDocument document = std::move(loaded.value());
+
+    Json manifest = Json::object();
+    manifest["schema_version"] = kCatalogSchemaVersion;
+    manifest["catalog_revision"] = document.catalog_revision;
+    manifest["assets"] = Json::array();
+    for (const auto& asset : document.assets) {
+        manifest["assets"].push_back(manifest_asset(asset));
+    }
+    manifest["versions"] = Json::array();
+    for (const auto& version : document.versions) {
+        manifest["versions"].push_back(manifest_version(version));
+    }
+    manifest["runs"] = Json::array();
+    for (const auto& run : document.runs) {
+        manifest["runs"].push_back(manifest_run(run));
+    }
+    manifest["tags"] = Json::array();
+    for (const auto& tag : document.tags) {
+        Json j = Json::object();
+        j["id"] = tag.id;
+        j["name"] = tag.name;
+        j["display_name"] = tag.display_name.has_value()
+            ? Json(*tag.display_name)
+            : Json(nullptr);
+        j["metadata"] = tag.metadata;
+        manifest["tags"].push_back(std::move(j));
+    }
+    manifest["asset_tags"] = Json::object();
+    for (const auto& [asset_id, tag_id] : document.asset_tags) {
+        manifest["asset_tags"][asset_id].push_back(tag_id);
+    }
+    manifest["version_tags"] = Json::object();
+    for (const auto& [version_id, tag_id] : document.version_tags) {
+        manifest["version_tags"][version_id].push_back(tag_id);
+    }
+    manifest["models"] = passthrough_rows(db, "models");
+    manifest["model_versions"] = passthrough_rows(db, "model_versions");
+
+    // Atomic write with the previous revision kept as .bak (store.py save
+    // pattern): existing manifest -> .bak, tmp -> manifest.
+    std::error_code ec;
+    std::filesystem::create_directories(manifest_path.parent_path(), ec);
+    const std::string text = manifest.dump(2);
+    const std::filesystem::path tmp =
+        manifest_path.parent_path()
+        / ("." + manifest_path.filename().generic_string() + ".tmp");
+    const std::filesystem::path bak =
+        manifest_path.parent_path()
+        / (manifest_path.filename().generic_string() + ".bak");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out.good()) {
+            return DataError(ErrorCode::IoError,
+                             "manifest temp file unwritable");
+        }
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        out.flush();
+        if (!out.good()) {
+            std::filesystem::remove(tmp, ec);
+            return DataError(ErrorCode::IoError, "manifest temp write failed");
+        }
+    }
+    if (std::filesystem::exists(manifest_path, ec)) {
+        std::filesystem::rename(manifest_path, bak, ec);
+        if (ec) {
+            std::filesystem::remove(tmp, ec);
+            return DataError(ErrorCode::IoError,
+                             "manifest .bak rotation failed: " + ec.message());
+        }
+    }
+    std::filesystem::rename(tmp, manifest_path, ec);
+    if (ec) {
+        return DataError(ErrorCode::IoError,
+                         "manifest rename failed: " + ec.message());
+    }
+    return DataError(ErrorCode::Ok, "");
 }
 
 Result<CatalogDocument> CatalogRepository::open_read_write() {
