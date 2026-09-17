@@ -49,3 +49,14 @@
 
 ## 进度记录
 - 2026-09-17：计划建立；M1 开工。
+- 2026-09-17（同日）：**M1 完成**——`AlgorithmRunner` + E 四内核注册 + D 切片
+  dock + 计算属性对话框；`platform.attribute_ui`（真 MainWindow：种子体→
+  rms→入库 complete→viewer ok）。
+- 2026-09-17（同日）：**M2 完成**——`newProject`（B 文档工厂+空 catalog+
+  bootstrap 资产）+ GPKG 物化 + 单资产自动定向；流程暴露并修复 B 三个缺陷
+  （create_new 空值不回读 / 新库 sync_state 不种 / 首绑 rebind 空转）。
+- 2026-09-17（同日）：**M3 完成**——`libs/seismic_io` SEG-Y 读取器（IEEE/IBM、
+  头驱动排序、严格规则网格）；`importSegy` 入库 Raw 体版本；端到端对冻结
+  oracle 对账（读取器 vs geoviz 逐样本；导入体上跑 rms vs expected_rms_w21）。
+  套件 47/47 ×2（integrated 树，含 D/E/seismic_io）。
+- 待办：M4（按需）、M5（Windows 回归需外部环境；入口切换为产品决策）。

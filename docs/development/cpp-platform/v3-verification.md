@@ -57,6 +57,9 @@ ctest --test-dir build/cpp-integrated                        # 32/34（§4）
 | D/E 入 integrated 门禁 | `PWB_BUILD_SEISMIC_VIEWER/ATTRIBUTES=ON` 与 A/B/C 同树构建 | `seismic_viewer.*` 5/5、`seismic_attributes.*` 4/4 同树通过 |
 | 五线真实链 | 新增 `integration.attribute_chain`：真 E 内核（rms_amplitude window=21 / envelope，tiny_sgy_real 冻结 oracle）经 C TaskRuntime → A CatalogResultPublisher → B catalog → 重开读回 PWBVOL1 与 oracle 对账（<1e-5）；E 的显式注册由 host 调用（4/4 入 registry）。E 原套件仅用基线 runtime+收集型 publisher，此测试补上生产链证据 | Passed（含 run 行 complete 仅经 publish 达成、provenance/version/payload 存在性断言） |
 | .paleo 工程会话（评审第 2 步） | `MainWindow::openProject`：真 `PwbDataStore::open`（拒只读/损坏）→ `recover()` 启动恢复（pending 如实上报且继续阻塞冲突写）→ 每个 GeoJSON 绑定图层物化为 `<project>/.pwb-working/` 显式工作副本（catalog payload 永不改写）→ 绑定事实注入 facts_/active layer；文件菜单新增“打开工程…”。保存走既有 stage→B→finalize 链。新增 `platform.project_session`（真 MainWindow）：prep 绑定→打开→编辑→commitActiveLayer→payload 哈希不变+工作副本已改+绑定推进→重开工作副本从新 payload 刷新 | Passed（45/45 ×2 含此项；重开副本与文件态一致、干净会话断言） |
+| M1 D/E 装配 | `AlgorithmRunner` + E 四内核注册 + D 切片 dock + “计算属性…”；`platform.attribute_ui` 种子体→rms→complete+版本→viewer ok | Passed |
+| M2 新建工程/首绑 | `newProject`（B 工厂+bootstrap 资产）+ GPKG 物化 + 单活资产自动定向；B 三缺陷修复（schema 默认/新库 sync_state/首绑 rebind）；`platform.project_session` bootstrap 场景 | Passed |
+| M3 SEG-Y 真实数据 | `libs/seismic_io` 读取器（严格网格契约）；`importSegy` 入库；`seismic_io.segy_read`（geoviz oracle 逐样本）+ `platform.attribute_ui` 导入→rms→expected_rms_w21 对账→显示 | Passed（47/47 ×2） |
 
 实测命令（main 工作区，GCC 16.2.1 / Qt 6.11.2 系统 ABI / vendored QGIS 4.2.0）：
 
