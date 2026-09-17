@@ -1,0 +1,7632 @@
+{
+ "kind": "workflow_spec_oracle",
+ "generator": "tools/oracle/generate_workflow_spec_fixtures.py",
+ "python": {
+  "workflow_schema_version": "1.0",
+  "condition_kinds_sorted": [
+   "all_of",
+   "any_of",
+   "node_output_equals",
+   "node_state",
+   "node_succeeded",
+   "not"
+  ],
+  "context_whitelist_sorted": [
+   "active_survey_id",
+   "active_well_id",
+   "current_map_id",
+   "project_path",
+   "selection.active_well_id",
+   "selection.depth_range",
+   "selection.seismic_cursor",
+   "selection.selected_well_ids",
+   "workspace_id"
+  ],
+  "node_id_pattern": "^[a-z][a-z0-9_]*$",
+  "workflow_id_pattern": "^[a-z][a-z0-9_.-]{1,63}$"
+ },
+ "valid_specs": [
+  {
+   "name": "linear3",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "c",
+      "action_id": "c.compute",
+      "parameters": {},
+      "depends_on": [
+       "b"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "c",
+      "action_id": "c.compute",
+      "parameters": {},
+      "depends_on": [
+       "b"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "7db214a3deec53d6ec1cd7baf062defc24b7080b5cbe1634baa5c06f2c31d127"
+  },
+  {
+   "name": "diamond4",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "c",
+      "action_id": "c.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "d",
+      "action_id": "d.compute",
+      "parameters": {},
+      "depends_on": [
+       "b",
+       "c"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "c",
+      "action_id": "c.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "d",
+      "action_id": "d.compute",
+      "parameters": {},
+      "depends_on": [
+       "b",
+       "c"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "1d9e012d26cf3d0d63be9290c2fd09cc1f18ba77011588db01454181b801df4d"
+  },
+  {
+   "name": "parallel_max_concurrency",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.par",
+    "name": "par",
+    "description": "",
+    "max_concurrency": 2,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "c",
+      "action_id": "c.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.par",
+    "name": "par",
+    "description": "",
+    "max_concurrency": 2,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "c",
+      "action_id": "c.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "69478534095489679ae3c9318916ff75017b027d7b64688eb2c3198b849afcc7"
+  },
+  {
+   "name": "recipe_chinese_factor_map",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.factor-map",
+    "name": "单因素图",
+    "description": "factor map chain",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": true,
+      "default": 32,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "validate",
+      "action_id": "factor.validate",
+      "parameters": {
+       "factor": {
+        "$slot": "factor"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": "factor QC"
+     },
+     {
+      "node_id": "interpolate",
+      "action_id": "factor.interpolate",
+      "parameters": {
+       "factor": {
+        "$slot": "factor"
+       },
+       "grid_n": {
+        "$slot": "grid_n"
+       }
+      },
+      "depends_on": [
+       "validate"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "contour",
+      "action_id": "map.contour",
+      "parameters": {},
+      "depends_on": [
+       "interpolate"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.factor-map",
+    "name": "单因素图",
+    "description": "factor map chain",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": true,
+      "default": 32,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "validate",
+      "action_id": "factor.validate",
+      "parameters": {
+       "factor": {
+        "$slot": "factor"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": "factor QC"
+     },
+     {
+      "node_id": "interpolate",
+      "action_id": "factor.interpolate",
+      "parameters": {
+       "factor": {
+        "$slot": "factor"
+       },
+       "grid_n": {
+        "$slot": "grid_n"
+       }
+      },
+      "depends_on": [
+       "validate"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "contour",
+      "action_id": "map.contour",
+      "parameters": {},
+      "depends_on": [
+       "interpolate"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "b7c696d5df7e553ed0650c23a22957569e54b2c2308ba4157f2f7535d7a0a4d6"
+  },
+  {
+   "name": "ref_without_key",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {
+       "up": {
+        "$ref": "a"
+       }
+      },
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {
+       "up": {
+        "$ref": "a"
+       }
+      },
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "5e3de6e94818988fbe590df24fdd530d0e5b894ce19114ab6250de1da52b5425"
+  },
+  {
+   "name": "ref_with_key",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {
+       "version": {
+        "$ref": "a",
+        "key": "version_id"
+       }
+      },
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {
+       "version": {
+        "$ref": "a",
+        "key": "version_id"
+       }
+      },
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "a25195da6ccda0dc2f7b413c499d681a17174556c9de92581b8e264843258806"
+  },
+  {
+   "name": "slot_nested_containers",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "opts": {
+        "factor": {
+         "$slot": "factor"
+        },
+        "tags": [
+         {
+          "$slot": "factor"
+         },
+         "static"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "opts": {
+        "factor": {
+         "$slot": "factor"
+        },
+        "tags": [
+         {
+          "$slot": "factor"
+         },
+         "static"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "2f1f04ddc05add67f75c80abe760dfcc28c035ad34ee1bb81a03b0905729ac05"
+  },
+  {
+   "name": "context_workspace",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "w": {
+        "$context": "workspace_id"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "w": {
+        "$context": "workspace_id"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "1588dae1b10e4edae80bb0f8740688f54f8469f2f55ec0db1088a29c27fc4aa7"
+  },
+  {
+   "name": "context_selection_dotted",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "wells": {
+        "$context": "selection.selected_well_ids"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "wells": {
+        "$context": "selection.selected_well_ids"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "82455ba7ec36bfcb316fa55a99e2713584844c5ce949e26f1b25729ad06d11b1"
+  },
+  {
+   "name": "condition_node_succeeded",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "a"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "a"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "575d4aef32dc0f59b5918eecaa700ff4c5a782f81b54bb738c2ac9cfd8164a3d"
+  },
+  {
+   "name": "condition_node_output_equals",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "node_output_equals",
+       "node": "a",
+       "key": "mode",
+       "value": "full"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "node_output_equals",
+       "node": "a",
+       "key": "mode",
+       "value": "full"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "a6f6ba062ce8761d26d8bcc1e50e579c6f64c51b1c77c210218ce014efa01a88"
+  },
+  {
+   "name": "condition_node_state",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "node_state",
+       "node": "a",
+       "state": "succeeded"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "node_state",
+       "node": "a",
+       "state": "succeeded"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "7a644fe6e5da20703b2faefa594f1ac9fe2de53063e0c1f0931599793f1175c7"
+  },
+  {
+   "name": "condition_all_of",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "all_of",
+       "conditions": [
+        {
+         "kind": "node_succeeded",
+         "node": "a"
+        },
+        {
+         "kind": "node_output_equals",
+         "node": "a",
+         "key": "ok",
+         "value": true
+        }
+       ]
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "all_of",
+       "conditions": [
+        {
+         "kind": "node_succeeded",
+         "node": "a"
+        },
+        {
+         "kind": "node_output_equals",
+         "node": "a",
+         "key": "ok",
+         "value": true
+        }
+       ]
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "c524a03fdde635734fc837151e6c68c385de8cd49e5ac41a431d1148023d6cf4"
+  },
+  {
+   "name": "condition_any_of",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "any_of",
+       "conditions": [
+        {
+         "kind": "node_succeeded",
+         "node": "a"
+        }
+       ]
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "any_of",
+       "conditions": [
+        {
+         "kind": "node_succeeded",
+         "node": "a"
+        }
+       ]
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "67029516e7f2b79a89b839ca36d02806393b0e90a05918984259921a0d46b5b7"
+  },
+  {
+   "name": "condition_not",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "not",
+       "condition": {
+        "kind": "node_succeeded",
+        "node": "a"
+       }
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "not",
+       "condition": {
+        "kind": "node_succeeded",
+        "node": "a"
+       }
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "e5db97352e36e515083bf181908ab5b4cf05eb0fcdeb9537df4468a930704779"
+  },
+  {
+   "name": "condition_deep_nest",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "all_of",
+       "conditions": [
+        {
+         "kind": "any_of",
+         "conditions": [
+          {
+           "kind": "node_succeeded",
+           "node": "a"
+          },
+          {
+           "kind": "not",
+           "condition": {
+            "kind": "node_state",
+            "node": "a",
+            "state": "failed"
+           }
+          }
+         ]
+        }
+       ]
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "all_of",
+       "conditions": [
+        {
+         "kind": "any_of",
+         "conditions": [
+          {
+           "kind": "node_succeeded",
+           "node": "a"
+          },
+          {
+           "kind": "not",
+           "condition": {
+            "kind": "node_state",
+            "node": "a",
+            "state": "failed"
+           }
+          }
+         ]
+        }
+       ]
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "9d0fbcc8149382e5e9034d995c808cb0268783c5cea3cf8bb2bdfa2567727c1d"
+  },
+  {
+   "name": "retry_custom",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 5,
+       "backoff_seconds": 2.5
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 5,
+       "backoff_seconds": 2.5
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "4f52b5cec65baa7c7c8d6653e1b55750e6e7e175b58f22851024d6915f1b57fe"
+  },
+  {
+   "name": "unicode_name_and_desc",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.corr-map-1",
+    "name": "连井对比 & 编图",
+    "description": "层位 T2 → 单因素 → 古地理图",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": "输入检查"
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.corr-map-1",
+    "name": "连井对比 & 编图",
+    "description": "层位 T2 → 单因素 → 古地理图",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": "输入检查"
+     }
+    ]
+   },
+   "spec_hash": "c2d340539cd3d25757870c6da8ceaad8885ff0c113d545bb0fadbf1228e33fa0"
+  },
+  {
+   "name": "workflow_id_max_boundary",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "aa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "name": "boundary",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "aa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "name": "boundary",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "cb4fba44e875eb5caf5835c0a86cfec87e70193c28f4013fd22cb988ba034f3c"
+  },
+  {
+   "name": "workflow_id_trailing_newline",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "ab\n",
+    "name": "newline",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "ab\n",
+    "name": "newline",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "5245424d8915732a617b0483e857e5719c2275c47b8e983a232eabdfb65b8e26"
+  },
+  {
+   "name": "condition_state_and_value_order",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "node_state",
+       "node": "a",
+       "state": "failed",
+       "value": 2.5
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": {
+       "kind": "node_state",
+       "node": "a",
+       "state": "failed",
+       "value": 2.5
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "4025548182c46243b45d78b8482074551d81ffe68e2ebe80a5afc0b0b93cf2ef"
+  },
+  {
+   "name": "empty_depends_and_params",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "cb6e133b63b94287360282c845962d8a2227e25b6ec1a0973e2eaee0ef0b5490"
+  },
+  {
+   "name": "slot_optional_no_default",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "opt",
+      "schema": {
+       "type": "string"
+      },
+      "required": false,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "opt",
+      "schema": {
+       "type": "string"
+      },
+      "required": false,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "3b252d5c58dabd79051059739e8785ce8d18850164a77288ae1b6c5b08bbcda1"
+  },
+  {
+   "name": "slot_default_types",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "s",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "文本",
+      "description": ""
+     },
+     {
+      "name": "i",
+      "schema": {
+       "type": "integer"
+      },
+      "required": true,
+      "default": 7,
+      "description": ""
+     },
+     {
+      "name": "f",
+      "schema": {
+       "type": "number"
+      },
+      "required": true,
+      "default": 0.5,
+      "description": ""
+     },
+     {
+      "name": "b",
+      "schema": {
+       "type": "boolean"
+      },
+      "required": true,
+      "default": false,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "s",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "文本",
+      "description": ""
+     },
+     {
+      "name": "i",
+      "schema": {
+       "type": "integer"
+      },
+      "required": true,
+      "default": 7,
+      "description": ""
+     },
+     {
+      "name": "f",
+      "schema": {
+       "type": "number"
+      },
+      "required": true,
+      "default": 0.5,
+      "description": ""
+     },
+     {
+      "name": "b",
+      "schema": {
+       "type": "boolean"
+      },
+      "required": true,
+      "default": false,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "cfd73a1a86509e9330373fcc8b15579f975f8df2246a9577c777448d72cb6551"
+  },
+  {
+   "name": "raw_dict_defaults",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "workflow_id": "wf.raw",
+    "name": "raw",
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute"
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.raw",
+    "name": "raw",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "97214bbcd7240992f729be1588c273b19556f277a8d8bca400e03cc5d8143a1b"
+  },
+  {
+   "name": "raw_dict_falsy_containers",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "workflow_id": "wf.falsy",
+    "name": "falsy",
+    "schema_version": "",
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": []
+     }
+    ],
+    "slots": [
+     {
+      "name": "opt",
+      "required": 0
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "",
+    "workflow_id": "wf.falsy",
+    "name": "falsy",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "opt",
+      "schema": {
+       "type": "string"
+      },
+      "required": false,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "0cc479d8eea698b6f1407397dafb9a544292ad4d25b28224452ad80feb5f53de"
+  },
+  {
+   "name": "raw_dict_slot_schema_fallback",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "workflow_id": "wf.rawslot",
+    "name": "rawslot",
+    "slots": [
+     {
+      "name": "factor"
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "f": {
+        "$slot": "factor"
+       }
+      }
+     }
+    ]
+   },
+   "reserialized": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.rawslot",
+    "name": "rawslot",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "f": {
+        "$slot": "factor"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "spec_hash": "a1380e19b419834ba9ace0c98904d98b776e4adcba7738c663d14611cc4e2cd9"
+  }
+ ],
+ "invalid_specs": [
+  {
+   "name": "empty_workflow_id",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "workflow_id '' must match ^[a-z][a-z0-9_.-]{1,63}$"
+   ]
+  },
+  {
+   "name": "uppercase_workflow_id",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "WF.X",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "workflow_id 'WF.X' must match ^[a-z][a-z0-9_.-]{1,63}$"
+   ]
+  },
+  {
+   "name": "workflow_id_too_long",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "workflow_id 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' must match ^[a-z][a-z0-9_.-]{1,63}$"
+   ]
+  },
+  {
+   "name": "workflow_id_bad_char",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "bad space",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "workflow_id 'bad space' must match ^[a-z][a-z0-9_.-]{1,63}$"
+   ]
+  },
+  {
+   "name": "workflow_id_single_char",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "a",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "workflow_id 'a' must match ^[a-z][a-z0-9_.-]{1,63}$"
+   ]
+  },
+  {
+   "name": "no_nodes",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": []
+   },
+   "problems": [
+    "workflow needs at least one node"
+   ]
+  },
+  {
+   "name": "max_concurrency_zero",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 0,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "max_concurrency must be >= 1"
+   ]
+  },
+  {
+   "name": "max_concurrency_negative",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": -3,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "max_concurrency must be >= 1"
+   ]
+  },
+  {
+   "name": "node_id_uppercase",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "Node",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node_id 'Node' must match ^[a-z][a-z0-9_]*$"
+   ]
+  },
+  {
+   "name": "node_id_digit_start",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "9node",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node_id '9node' must match ^[a-z][a-z0-9_]*$"
+   ]
+  },
+  {
+   "name": "node_id_empty",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node_id '' must match ^[a-z][a-z0-9_]*$"
+   ]
+  },
+  {
+   "name": "duplicate_node_id",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "a",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "duplicate node id 'a'",
+    "dependency cycle among nodes []"
+   ]
+  },
+  {
+   "name": "duplicate_node_id_skips_action_check",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "a",
+      "action_id": "ghost.action",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "duplicate node id 'a'",
+    "dependency cycle among nodes []"
+   ]
+  },
+  {
+   "name": "duplicate_bad_node_id",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "Bad",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "Bad",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node_id 'Bad' must match ^[a-z][a-z0-9_]*$",
+    "node_id 'Bad' must match ^[a-z][a-z0-9_]*$",
+    "duplicate node id 'Bad'",
+    "dependency cycle among nodes []"
+   ]
+  },
+  {
+   "name": "unknown_action",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "ghost.action",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': unknown action 'ghost.action'"
+   ]
+  },
+  {
+   "name": "meta_workflow_action",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "workflow.run",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': workflow.* actions cannot be nodes of a workflow (meta-workflow recursion is not supported)"
+   ]
+  },
+  {
+   "name": "destructive_action_and_retry_zero",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute",
+    "x.destroy": "destructive"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "x.destroy",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 0,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': DESTRUCTIVE actions cannot appear in workflows",
+    "node 'a': retry.max_attempts must be >= 1"
+   ]
+  },
+  {
+   "name": "retry_max_attempts_zero",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 0,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': retry.max_attempts must be >= 1"
+   ]
+  },
+  {
+   "name": "condition_unknown_kind",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": {
+       "kind": "bogus"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': condition kind 'bogus' is not one of ['all_of', 'any_of', 'node_output_equals', 'node_state', 'node_succeeded', 'not']"
+   ]
+  },
+  {
+   "name": "condition_missing_node",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": {
+       "kind": "node_succeeded"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': condition 'node_succeeded' requires a node reference"
+   ]
+  },
+  {
+   "name": "condition_output_equals_missing_key",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": {
+       "kind": "node_output_equals",
+       "node": "a"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': node_output_equals requires an output key"
+   ]
+  },
+  {
+   "name": "condition_state_missing_state",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": {
+       "kind": "node_state",
+       "node": "a"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': node_state requires a state value"
+   ]
+  },
+  {
+   "name": "condition_all_of_empty",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": {
+       "kind": "all_of"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': all_of requires conditions"
+   ]
+  },
+  {
+   "name": "condition_not_missing_child",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": {
+       "kind": "not"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': 'not' requires a condition"
+   ]
+  },
+  {
+   "name": "condition_nested_errors",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": {
+       "kind": "all_of",
+       "conditions": [
+        {
+         "kind": "not"
+        },
+        {
+         "kind": "bogus"
+        }
+       ]
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': 'not' requires a condition",
+    "node 'a': condition kind 'bogus' is not one of ['all_of', 'any_of', 'node_output_equals', 'node_state', 'node_succeeded', 'not']"
+   ]
+  },
+  {
+   "name": "bad_slot_name",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "9bad",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "slot name '9bad' must match ^[a-z][a-z0-9_]*$"
+   ]
+  },
+  {
+   "name": "slot_name_uppercase",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "Factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "slot name 'Factor' must match ^[a-z][a-z0-9_]*$"
+   ]
+  },
+  {
+   "name": "duplicate_slot_names",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "x",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     },
+     {
+      "name": "x",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "duplicate slot names"
+   ]
+  },
+  {
+   "name": "missing_dependency",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [
+       "ghost"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': dependency 'ghost' does not exist"
+   ]
+  },
+  {
+   "name": "self_dependency",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': self-dependency",
+    "dependency cycle among nodes ['a']"
+   ]
+  },
+  {
+   "name": "condition_references_unknown_node",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "ghost"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': condition references unknown node 'ghost'"
+   ]
+  },
+  {
+   "name": "slot_binding_unknown",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "s": {
+        "$slot": "nope"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': binding $slot 'nope' is not a declared slot"
+   ]
+  },
+  {
+   "name": "slot_binding_non_string",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "s": {
+        "$slot": 3
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': binding $slot 3 is not a declared slot"
+   ]
+  },
+  {
+   "name": "ref_unknown_node",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "up": {
+        "$ref": "ghost"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': binding $ref 'ghost' is not a node in this workflow"
+   ]
+  },
+  {
+   "name": "ref_not_in_depends_on",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {
+       "up": {
+        "$ref": "a"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'b': binding $ref 'a' must be listed in depends_on (data dependencies are explicit)"
+   ]
+  },
+  {
+   "name": "ref_key_non_string",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {
+       "up": {
+        "$ref": "a",
+        "key": 3
+       }
+      },
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'b': $ref key must be a string"
+   ]
+  },
+  {
+   "name": "context_not_whitelisted",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "x": {
+        "$context": "project.meta.secret"
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': binding $context 'project.meta.secret' is not whitelisted ['active_survey_id', 'active_well_id', 'current_map_id', 'project_path', 'selection.active_well_id', 'selection.depth_range', 'selection.seismic_cursor', 'selection.selected_well_ids', 'workspace_id']"
+   ]
+  },
+  {
+   "name": "context_non_string",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "x": {
+        "$context": 1
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': binding $context 1 is not whitelisted ['active_survey_id', 'active_well_id', 'current_map_id', 'project_path', 'selection.active_well_id', 'selection.depth_range', 'selection.seismic_cursor', 'selection.selected_well_ids', 'workspace_id']"
+   ]
+  },
+  {
+   "name": "binding_mixed_keys_slot",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "s": {
+        "$slot": "factor",
+        "extra": 1
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': binding objects must be exactly one of {\"$slot\": name} / {\"$ref\": node} / {\"$context\": key}"
+   ]
+  },
+  {
+   "name": "binding_mixed_keys_ref",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {
+       "up": {
+        "$ref": "a",
+        "extra": 1
+       }
+      },
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'b': binding objects must be exactly one of {\"$slot\": name} / {\"$ref\": node} / {\"$context\": key}"
+   ]
+  },
+  {
+   "name": "binding_mixed_keys_deep",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {
+       "list": [
+        {
+         "ok": 1
+        },
+        {
+         "$ref": "a",
+         "$slot": "x"
+        }
+       ]
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': binding objects must be exactly one of {\"$slot\": name} / {\"$ref\": node} / {\"$context\": key}"
+   ]
+  },
+  {
+   "name": "cycle_two_nodes",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [
+       "b"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "dependency cycle among nodes ['a', 'b']"
+   ]
+  },
+  {
+   "name": "cycle_three_with_downstream_tail",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [
+       "c"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "c",
+      "action_id": "c.compute",
+      "parameters": {},
+      "depends_on": [
+       "b"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "d",
+      "action_id": "d.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "dependency cycle among nodes ['a', 'b', 'c', 'd']"
+   ]
+  },
+  {
+   "name": "duplicate_id_with_cycle",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.oracle",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [
+       "b"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "a",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "b",
+      "action_id": "b.compute",
+      "parameters": {},
+      "depends_on": [
+       "a"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "problems": [
+    "duplicate node id 'a'",
+    "dependency cycle among nodes ['a', 'b']"
+   ]
+  },
+  {
+   "name": "multi_problem_head",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "",
+    "name": "oracle",
+    "description": "",
+    "max_concurrency": 0,
+    "slots": [],
+    "nodes": []
+   },
+   "problems": [
+    "workflow_id '' must match ^[a-z][a-z0-9_.-]{1,63}$",
+    "workflow needs at least one node",
+    "max_concurrency must be >= 1"
+   ]
+  },
+  {
+   "name": "raw_dict_missing_action_key",
+   "registry": {
+    "a.compute": "compute",
+    "b.compute": "compute",
+    "c.compute": "compute",
+    "d.compute": "compute",
+    "factor.interpolate": "compute",
+    "factor.validate": "compute",
+    "map.contour": "compute",
+    "workflow.run": "compute"
+   },
+   "spec": {
+    "workflow_id": "wf.bad",
+    "name": "bad",
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "ghost.action",
+      "depends_on": [
+       "ghost2"
+      ],
+      "retry": {
+       "max_attempts": 0
+      }
+     }
+    ]
+   },
+   "problems": [
+    "node 'a': unknown action 'ghost.action'",
+    "node 'a': dependency 'ghost2' does not exist"
+   ]
+  }
+ ],
+ "condition_trees": [
+  {
+   "name": "valid_node_succeeded",
+   "condition": {
+    "kind": "node_succeeded",
+    "node": "a"
+   },
+   "problems": []
+  },
+  {
+   "name": "valid_output_equals",
+   "condition": {
+    "kind": "node_output_equals",
+    "node": "a",
+    "key": "k",
+    "value": 1
+   },
+   "problems": []
+  },
+  {
+   "name": "valid_node_state",
+   "condition": {
+    "kind": "node_state",
+    "node": "a",
+    "state": "failed"
+   },
+   "problems": []
+  },
+  {
+   "name": "valid_all_of",
+   "condition": {
+    "kind": "all_of",
+    "conditions": [
+     {
+      "kind": "node_succeeded",
+      "node": "a"
+     },
+     {
+      "kind": "node_succeeded",
+      "node": "b"
+     }
+    ]
+   },
+   "problems": []
+  },
+  {
+   "name": "truthy_empty_node",
+   "condition": {
+    "kind": "node_succeeded",
+    "node": ""
+   },
+   "problems": [
+    "condition 'node_succeeded' requires a node reference"
+   ]
+  },
+  {
+   "name": "truthy_empty_key",
+   "condition": {
+    "kind": "node_output_equals",
+    "node": "a",
+    "key": ""
+   },
+   "problems": [
+    "node_output_equals requires an output key"
+   ]
+  },
+  {
+   "name": "truthy_empty_state",
+   "condition": {
+    "kind": "node_state",
+    "node": "a",
+    "state": ""
+   },
+   "problems": [
+    "node_state requires a state value"
+   ]
+  },
+  {
+   "name": "unknown_empty_kind",
+   "condition": {
+    "kind": ""
+   },
+   "problems": [
+    "condition kind '' is not one of ['all_of', 'any_of', 'node_output_equals', 'node_state', 'node_succeeded', 'not']"
+   ]
+  },
+  {
+   "name": "invalid_unknown_kind",
+   "condition": {
+    "kind": "sometimes"
+   },
+   "problems": [
+    "condition kind 'sometimes' is not one of ['all_of', 'any_of', 'node_output_equals', 'node_state', 'node_succeeded', 'not']"
+   ]
+  },
+  {
+   "name": "invalid_missing_node",
+   "condition": {
+    "kind": "node_succeeded"
+   },
+   "problems": [
+    "condition 'node_succeeded' requires a node reference"
+   ]
+  },
+  {
+   "name": "invalid_missing_key",
+   "condition": {
+    "kind": "node_output_equals",
+    "node": "a"
+   },
+   "problems": [
+    "node_output_equals requires an output key"
+   ]
+  },
+  {
+   "name": "invalid_missing_state",
+   "condition": {
+    "kind": "node_state",
+    "node": "a"
+   },
+   "problems": [
+    "node_state requires a state value"
+   ]
+  },
+  {
+   "name": "invalid_all_of_empty",
+   "condition": {
+    "kind": "all_of"
+   },
+   "problems": [
+    "all_of requires conditions"
+   ]
+  },
+  {
+   "name": "invalid_any_of_empty",
+   "condition": {
+    "kind": "any_of"
+   },
+   "problems": [
+    "any_of requires conditions"
+   ]
+  },
+  {
+   "name": "invalid_not_missing_child",
+   "condition": {
+    "kind": "not"
+   },
+   "problems": [
+    "'not' requires a condition"
+   ]
+  },
+  {
+   "name": "nested_errors",
+   "condition": {
+    "kind": "all_of",
+    "conditions": [
+     {
+      "kind": "not"
+     },
+     {
+      "kind": "node_output_equals",
+      "node": "a"
+     },
+     {
+      "kind": "meh"
+     }
+    ]
+   },
+   "problems": [
+    "'not' requires a condition",
+    "node_output_equals requires an output key",
+    "condition kind 'meh' is not one of ['all_of', 'any_of', 'node_output_equals', 'node_state', 'node_succeeded', 'not']"
+   ]
+  },
+  {
+   "name": "nested_deep_valid",
+   "condition": {
+    "kind": "all_of",
+    "conditions": [
+     {
+      "kind": "any_of",
+      "conditions": [
+       {
+        "kind": "node_succeeded",
+        "node": "a"
+       },
+       {
+        "kind": "not",
+        "condition": {
+         "kind": "node_state",
+         "node": "a",
+         "state": "cancelled"
+        }
+       }
+      ]
+     },
+     {
+      "kind": "node_output_equals",
+      "node": "b",
+      "key": "n",
+      "value": 2.5
+     }
+    ]
+   },
+   "problems": []
+  }
+ ],
+ "slot_bindings": [
+  {
+   "name": "required_missing",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {},
+   "materialized": {},
+   "problems": [
+    "required slot 'factor' has no value"
+   ]
+  },
+  {
+   "name": "unknown_slot",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "ghost": 1
+   },
+   "materialized": {
+    "ghost": 1
+   },
+   "problems": [
+    "unknown slot 'ghost' (declared: ['factor'])",
+    "required slot 'factor' has no value"
+   ]
+  },
+  {
+   "name": "string_ok",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "factor": "GR"
+   },
+   "materialized": {
+    "factor": "GR"
+   },
+   "problems": []
+  },
+  {
+   "name": "integer_got_string",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "grid_n": "big"
+   },
+   "materialized": {
+    "grid_n": "big"
+   },
+   "problems": [
+    "slot grid_n: expected integer, got str"
+   ]
+  },
+  {
+   "name": "integer_below_minimum",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "grid_n": 2
+   },
+   "materialized": {
+    "grid_n": 2
+   },
+   "problems": [
+    "slot grid_n: 2 < minimum 4"
+   ]
+  },
+  {
+   "name": "number_above_maximum",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "ratio",
+      "schema": {
+       "type": "number",
+       "maximum": 1.0
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "ratio": 1.5
+   },
+   "materialized": {
+    "ratio": 1.5
+   },
+   "problems": [
+    "slot ratio: 1.5 > maximum 1.0"
+   ]
+  },
+  {
+   "name": "enum_violation",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "method",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "idw",
+        "kriging"
+       ]
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "method": "poly"
+   },
+   "materialized": {
+    "method": "poly"
+   },
+   "problems": [
+    "slot method: 'poly' not in enum ['idw', 'kriging']"
+   ]
+  },
+  {
+   "name": "array_min_items",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "samples",
+      "schema": {
+       "type": "array",
+       "minItems": 2,
+       "items": {
+        "type": "number"
+       }
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "samples": [
+     1.0
+    ]
+   },
+   "materialized": {
+    "samples": [
+     1.0
+    ]
+   },
+   "problems": [
+    "slot samples: 1 items < minItems 2"
+   ]
+  },
+  {
+   "name": "items_type_error",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "samples",
+      "schema": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "samples": [
+     1.0,
+     "oops"
+    ]
+   },
+   "materialized": {
+    "samples": [
+     1.0,
+     "oops"
+    ]
+   },
+   "problems": [
+    "slot samples[1]: expected number, got str"
+   ]
+  },
+  {
+   "name": "additional_properties_false",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "roi",
+      "schema": {
+       "type": "object",
+       "additionalProperties": false
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "roi": {
+     "extra": 1
+    }
+   },
+   "materialized": {
+    "roi": {
+     "extra": 1
+    }
+   },
+   "problems": [
+    "slot roi.extra: not declared and additionalProperties false"
+   ]
+  },
+  {
+   "name": "nested_required_missing",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "roi",
+      "schema": {
+       "type": "object",
+       "required": [
+        "il0"
+       ]
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "roi": {}
+   },
+   "materialized": {
+    "roi": {}
+   },
+   "problems": [
+    "slot roi.il0: required"
+   ]
+  },
+  {
+   "name": "union_string_null_ok",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "v",
+      "schema": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "v": null
+   },
+   "materialized": {
+    "v": null
+   },
+   "problems": []
+  },
+  {
+   "name": "union_rejects_integer",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "v",
+      "schema": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "v": 3
+   },
+   "materialized": {
+    "v": 3
+   },
+   "problems": [
+    "slot v: expected one of ['string', 'null'], got int"
+   ]
+  },
+  {
+   "name": "unknown_schema_type",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "v",
+      "schema": {
+       "type": "float128"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "v": 1.0
+   },
+   "materialized": {
+    "v": 1.0
+   },
+   "problems": [
+    "slot v: unknown type 'float128'"
+   ]
+  },
+  {
+   "name": "unknown_schema_type_non_string",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "v",
+      "schema": {
+       "type": 5
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "v": 1.0
+   },
+   "materialized": {
+    "v": 1.0
+   },
+   "problems": [
+    "slot v: unknown type 5"
+   ]
+  },
+  {
+   "name": "union_all_unknown_types",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "v",
+      "schema": {
+       "type": [
+        "float128"
+       ]
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "v": 1.0
+   },
+   "materialized": {
+    "v": 1.0
+   },
+   "problems": [
+    "slot v: expected one of ['float128'] (no known JSON type in union), got float"
+   ]
+  },
+  {
+   "name": "enum_numeric_bool_pass",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "v",
+      "schema": {
+       "type": "integer",
+       "enum": [
+        1
+       ]
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "v": true
+   },
+   "materialized": {
+    "v": true
+   },
+   "problems": [
+    "slot v: expected integer, got boolean"
+   ]
+  },
+  {
+   "name": "min_items_float",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "samples",
+      "schema": {
+       "type": "array",
+       "minItems": 2.0
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "samples": [
+     1.0
+    ]
+   },
+   "materialized": {
+    "samples": [
+     1.0
+    ]
+   },
+   "problems": [
+    "slot samples: 1 items < minItems 2.0"
+   ]
+  },
+  {
+   "name": "null_property_schema_additional_false",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "roi",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "inner": null
+       },
+       "additionalProperties": false
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "roi": {
+     "inner": {
+      "a": 1
+     }
+    }
+   },
+   "materialized": {
+    "roi": {
+     "inner": {
+      "a": 1
+     }
+    }
+   },
+   "problems": [
+    "slot roi.inner: not declared and additionalProperties false"
+   ]
+  },
+  {
+   "name": "top_level_expected_object",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "roi",
+      "schema": {
+       "type": "object"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "roi": "not-a-dict"
+   },
+   "materialized": {
+    "roi": "not-a-dict"
+   },
+   "problems": [
+    "slot roi: expected object"
+   ]
+  },
+  {
+   "name": "array_max_items",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "samples",
+      "schema": {
+       "type": "array",
+       "maxItems": 1
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "samples": [
+     1.0,
+     2.0
+    ]
+   },
+   "materialized": {
+    "samples": [
+     1.0,
+     2.0
+    ]
+   },
+   "problems": [
+    "slot samples: 2 items > maxItems 1"
+   ]
+  },
+  {
+   "name": "boolean_for_integer",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "n",
+      "schema": {
+       "type": "integer"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "n": true
+   },
+   "materialized": {
+    "n": true
+   },
+   "problems": [
+    "slot n: expected integer, got boolean"
+   ]
+  },
+  {
+   "name": "number_accepts_integer",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "n",
+      "schema": {
+       "type": "number"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "n": 3
+   },
+   "materialized": {
+    "n": 3
+   },
+   "problems": []
+  },
+  {
+   "name": "defaults_materialized_and_overridden",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "factor",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": null,
+      "description": ""
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer"
+      },
+      "required": true,
+      "default": 16,
+      "description": ""
+     },
+     {
+      "name": "opt",
+      "schema": {
+       "type": "string"
+      },
+      "required": false,
+      "default": null,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {
+    "factor": "RT",
+    "grid_n": 64
+   },
+   "materialized": {
+    "factor": "RT",
+    "grid_n": 64
+   },
+   "problems": []
+  },
+  {
+   "name": "default_used_when_absent",
+   "spec": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.slots",
+    "name": "slots",
+    "description": "",
+    "max_concurrency": 1,
+    "slots": [
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer"
+      },
+      "required": true,
+      "default": 16,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "a",
+      "action_id": "a.compute",
+      "parameters": {},
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "slot_values": {},
+   "materialized": {
+    "grid_n": 16
+   },
+   "problems": []
+  }
+ ],
+ "resolve": [
+  {
+   "name": "slot_hit",
+   "value": {
+    "$slot": "factor"
+   },
+   "slot_values": {
+    "factor": "GR"
+   },
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": "GR",
+   "error": null
+  },
+  {
+   "name": "slot_miss",
+   "value": {
+    "$slot": "nope"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": null,
+   "error": "slot 'nope' has no bound value"
+  },
+  {
+   "name": "ref_whole_outputs",
+   "value": {
+    "$ref": "a"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": {
+    "version_ids": [
+     "ver-1"
+    ],
+    "n": 5,
+    "k": null
+   },
+   "error": null
+  },
+  {
+   "name": "ref_key_hit",
+   "value": {
+    "$ref": "a",
+    "key": "n"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": 5,
+   "error": null
+  },
+  {
+   "name": "ref_key_null_value_is_a_value",
+   "value": {
+    "$ref": "a",
+    "key": "k"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": null,
+   "error": null
+  },
+  {
+   "name": "ref_key_missing",
+   "value": {
+    "$ref": "a",
+    "key": "m"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": null,
+   "error": "reference 'a' produced no output key 'm'"
+  },
+  {
+   "name": "ref_unresolved",
+   "value": {
+    "$ref": "ghost"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": null,
+   "error": "reference 'ghost' has no resolved output yet"
+  },
+  {
+   "name": "ref_outputs_not_dict",
+   "value": {
+    "$ref": "scalar_node",
+    "key": "n"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": null,
+   "error": "reference 'scalar_node' produced no output key 'n'"
+  },
+  {
+   "name": "ref_key_non_string",
+   "value": {
+    "$ref": "a",
+    "key": 3
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": null,
+   "error": "reference 'a' produced no output key 3"
+  },
+  {
+   "name": "context_hit",
+   "value": {
+    "$context": "workspace_id"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": "测试工区",
+   "error": null
+  },
+  {
+   "name": "context_dotted_selection",
+   "value": {
+    "$context": "selection.selected_well_ids"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": [
+    "W1",
+    "W2"
+   ],
+   "error": null
+  },
+  {
+   "name": "context_null_attr_is_unavailable",
+   "value": {
+    "$context": "current_map_id"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": null,
+   "error": "context binding 'current_map_id' is not available in this session"
+  },
+  {
+   "name": "context_attr_absent_is_unavailable",
+   "value": {
+    "$context": "active_well_id"
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "W"
+   },
+   "resolved": null,
+   "error": "context binding 'active_well_id' is not available in this session"
+  },
+  {
+   "name": "nested_dict_and_list_recursion",
+   "value": {
+    "outer": {
+     "$slot": "factor"
+    },
+    "list": [
+     {
+      "$ref": "a"
+     },
+     1,
+     null
+    ],
+    "deep": {
+     "k": [
+      {
+       "$ref": "a",
+       "key": "n"
+      }
+     ]
+    }
+   },
+   "slot_values": {
+    "factor": "RT"
+   },
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": {
+    "outer": "RT",
+    "list": [
+     {
+      "version_ids": [
+       "ver-1"
+      ],
+      "n": 5,
+      "k": null
+     },
+     1,
+     null
+    ],
+    "deep": {
+     "k": [
+      5
+     ]
+    }
+   },
+   "error": null
+  },
+  {
+   "name": "scalars_passthrough",
+   "value": {
+    "i": 42,
+    "s": "x",
+    "b": true,
+    "n": null,
+    "f": 1.5
+   },
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": {
+    "i": 42,
+    "s": "x",
+    "b": true,
+    "n": null,
+    "f": 1.5
+   },
+   "error": null
+  },
+  {
+   "name": "top_level_scalar",
+   "value": 7,
+   "slot_values": {},
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": 7,
+   "error": null
+  },
+  {
+   "name": "top_level_list",
+   "value": [
+    {
+     "$slot": "factor"
+    },
+    {
+     "$ref": "a"
+    }
+   ],
+   "slot_values": {
+    "factor": "GR"
+   },
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": [
+    "GR",
+    {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    }
+   ],
+   "error": null
+  },
+  {
+   "name": "bind_parameters_node",
+   "value": {
+    "factor": {
+     "$slot": "factor"
+    },
+    "up": {
+     "$ref": "a",
+     "key": "n"
+    }
+   },
+   "slot_values": {
+    "factor": "GR"
+   },
+   "results": {
+    "a": {
+     "version_ids": [
+      "ver-1"
+     ],
+     "n": 5,
+     "k": null
+    },
+    "scalar_node": "not-a-dict"
+   },
+   "context": {
+    "workspace_id": "测试工区",
+    "project_path": "/tmp/demo.paleo.json",
+    "active_survey_id": "S1",
+    "active_well_id": "W1",
+    "current_map_id": null,
+    "selection.active_well_id": "W1",
+    "selection.selected_well_ids": [
+     "W1",
+     "W2"
+    ],
+    "selection.seismic_cursor": null,
+    "selection.depth_range": [
+     100.0,
+     2000.5
+    ]
+   },
+   "resolved": {
+    "factor": "GR",
+    "up": 5
+   },
+   "error": null
+  }
+ ],
+ "canonical_hash": [
+  {
+   "name": "simple",
+   "value": {
+    "a": 1,
+    "b": [
+     1,
+     2,
+     3
+    ]
+   },
+   "hash": "bfa6ceebf136e4837ec687f2be09f612c645c9ec1f99e3ef5d497b0d5bb99e0a"
+  },
+  {
+   "name": "order_independent_a",
+   "value": {
+    "a": 1,
+    "z": 2,
+    "m": {
+     "y": 1,
+     "x": 2
+    }
+   },
+   "hash": "5cc422d6eb0ae874191938d3f1f0671e0bad1e03fa58eea988960d3b4d3f732d"
+  },
+  {
+   "name": "order_independent_b",
+   "value": {
+    "z": 2,
+    "m": {
+     "x": 2,
+     "y": 1
+    },
+    "a": 1
+   },
+   "hash": "5cc422d6eb0ae874191938d3f1f0671e0bad1e03fa58eea988960d3b4d3f732d"
+  },
+  {
+   "name": "chinese_keys",
+   "value": {
+    "名称": "单因素图",
+    "节点": [
+     {
+      "编号": 1
+     }
+    ]
+   },
+   "hash": "e7ac5fed77cd495d961151d38e6ea9ac1746f57d84295085aa8f38f73284dce8"
+  },
+  {
+   "name": "int_vs_float_int",
+   "value": {
+    "v": 1
+   },
+   "hash": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91"
+  },
+  {
+   "name": "int_vs_float_float",
+   "value": {
+    "v": 1.0
+   },
+   "hash": "f3c8be97307d38261061fa08e74365e54a239cddb1d189f3bea18022adbe2f35"
+  },
+  {
+   "name": "bool_null_string",
+   "value": {
+    "t": true,
+    "n": null,
+    "s": "a\"b'c\n"
+   },
+   "hash": "8e224b0556d1ef743004062514840198c0d0c9aeefd0f7404b0d1bd96b083f96"
+  },
+  {
+   "name": "empty_objects",
+   "value": {
+    "o": {},
+    "l": []
+   },
+   "hash": "111c683c055d4f0a50ce55366e2dfc66644f79266248039a271dd7e25cd5b104"
+  },
+  {
+   "name": "nested_sorting",
+   "value": {
+    "b": {
+     "d": 1,
+     "c": {
+      "f": 2,
+      "e": 1
+     }
+    },
+    "a": 3
+   },
+   "hash": "b9aee2c87b59f203a68e3b1b9535e672068148c494075f4cc13641cfe136aee1"
+  }
+ ],
+ "run_roundtrip": [
+  {
+   "name": "all_enum_states",
+   "run": {
+    "run_id": "states0000000001",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.runrt",
+     "name": "runrt",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      },
+      {
+       "node_id": "b",
+       "action_id": "b.compute",
+       "parameters": {},
+       "depends_on": [
+        "a"
+       ],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    },
+    "state": "interrupted",
+    "slot_values": {},
+    "node_runs": [
+     {
+      "node_id": "a",
+      "state": "pending",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "b",
+      "state": "unavailable",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "c",
+      "state": "running",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "d",
+      "state": "succeeded",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "e",
+      "state": "failed",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "f",
+      "state": "cancelled",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "g",
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     }
+    ],
+    "project_name": null,
+    "project_path": null,
+    "created_at": 1758144000.0,
+    "updated_at": 1758144000.0,
+    "spec_hash": "1a6e57002aa9bd7595fc3bdb479882018ac73eddfb590a7384fb58f4d1f57f0c",
+    "parent_run_id": null
+   },
+   "reserialized": {
+    "run_id": "states0000000001",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.runrt",
+     "name": "runrt",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      },
+      {
+       "node_id": "b",
+       "action_id": "b.compute",
+       "parameters": {},
+       "depends_on": [
+        "a"
+       ],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    },
+    "state": "interrupted",
+    "slot_values": {},
+    "node_runs": [
+     {
+      "node_id": "a",
+      "state": "pending",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "b",
+      "state": "unavailable",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "c",
+      "state": "running",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "d",
+      "state": "succeeded",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "e",
+      "state": "failed",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "f",
+      "state": "cancelled",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "g",
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     }
+    ],
+    "project_name": null,
+    "project_path": null,
+    "created_at": 1758144000.0,
+    "updated_at": 1758144000.0,
+    "spec_hash": "1a6e57002aa9bd7595fc3bdb479882018ac73eddfb590a7384fb58f4d1f57f0c",
+    "parent_run_id": null
+   }
+  },
+  {
+   "name": "full_run_fields",
+   "run": {
+    "run_id": "fullrun00000001",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.runrt",
+     "name": "runrt",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      },
+      {
+       "node_id": "b",
+       "action_id": "b.compute",
+       "parameters": {},
+       "depends_on": [
+        "a"
+       ],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    },
+    "state": "completed",
+    "slot_values": {
+     "factor": "GR"
+    },
+    "node_runs": [
+     {
+      "node_id": "a",
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "GR"
+      },
+      "input_version_ids": [
+       "ver-in-1"
+      ],
+      "cache_identity": "identity-a",
+      "output_version_ids": [
+       "ver-out-1"
+      ],
+      "outputs": {
+       "version_ids": [
+        "ver-out-1"
+       ]
+      },
+      "receipt": {
+       "status": "success",
+       "action_id": "a.compute"
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1758144001.0,
+      "finished_at": 1758144002.0
+     },
+     {
+      "node_id": "b",
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": "条件未满足",
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     }
+    ],
+    "project_name": "工程甲",
+    "project_path": "/tmp/demo.paleo.json",
+    "created_at": 1758144000.0,
+    "updated_at": 1758144060.5,
+    "spec_hash": "1a6e57002aa9bd7595fc3bdb479882018ac73eddfb590a7384fb58f4d1f57f0c",
+    "parent_run_id": "orig0001"
+   },
+   "reserialized": {
+    "run_id": "fullrun00000001",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.runrt",
+     "name": "runrt",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      },
+      {
+       "node_id": "b",
+       "action_id": "b.compute",
+       "parameters": {},
+       "depends_on": [
+        "a"
+       ],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    },
+    "state": "completed",
+    "slot_values": {
+     "factor": "GR"
+    },
+    "node_runs": [
+     {
+      "node_id": "a",
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "GR"
+      },
+      "input_version_ids": [
+       "ver-in-1"
+      ],
+      "cache_identity": "identity-a",
+      "output_version_ids": [
+       "ver-out-1"
+      ],
+      "outputs": {
+       "version_ids": [
+        "ver-out-1"
+       ]
+      },
+      "receipt": {
+       "status": "success",
+       "action_id": "a.compute"
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1758144001.0,
+      "finished_at": 1758144002.0
+     },
+     {
+      "node_id": "b",
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": "条件未满足",
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     }
+    ],
+    "project_name": "工程甲",
+    "project_path": "/tmp/demo.paleo.json",
+    "created_at": 1758144000.0,
+    "updated_at": 1758144060.5,
+    "spec_hash": "1a6e57002aa9bd7595fc3bdb479882018ac73eddfb590a7384fb58f4d1f57f0c",
+    "parent_run_id": "orig0001"
+   }
+  },
+  {
+   "name": "store_drift_setdefault",
+   "run": {
+    "run_id": "fullrun00000001",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.runrt",
+     "name": "runrt",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      },
+      {
+       "node_id": "b",
+       "action_id": "b.compute",
+       "parameters": {},
+       "depends_on": [
+        "a"
+       ],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    },
+    "state": "completed",
+    "slot_values": {
+     "factor": "GR"
+    },
+    "node_runs": [
+     {
+      "node_id": "a",
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "GR"
+      },
+      "input_version_ids": [
+       "ver-in-1"
+      ],
+      "cache_identity": "identity-a",
+      "output_version_ids": [
+       "ver-out-1"
+      ],
+      "outputs": {
+       "version_ids": [
+        "ver-out-1"
+       ]
+      },
+      "receipt": {
+       "status": "success",
+       "action_id": "a.compute"
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1758144001.0,
+      "finished_at": 1758144002.0
+     }
+    ],
+    "project_name": "工程甲",
+    "project_path": "/tmp/demo.paleo.json",
+    "created_at": 1758144000.0,
+    "updated_at": 1758144060.5,
+    "spec_hash": "1a6e57002aa9bd7595fc3bdb479882018ac73eddfb590a7384fb58f4d1f57f0c",
+    "parent_run_id": "orig0001"
+   },
+   "reserialized": {
+    "run_id": "fullrun00000001",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.runrt",
+     "name": "runrt",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      },
+      {
+       "node_id": "b",
+       "action_id": "b.compute",
+       "parameters": {},
+       "depends_on": [
+        "a"
+       ],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    },
+    "state": "completed",
+    "slot_values": {
+     "factor": "GR"
+    },
+    "node_runs": [
+     {
+      "node_id": "a",
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "GR"
+      },
+      "input_version_ids": [
+       "ver-in-1"
+      ],
+      "cache_identity": "identity-a",
+      "output_version_ids": [
+       "ver-out-1"
+      ],
+      "outputs": {
+       "version_ids": [
+        "ver-out-1"
+       ]
+      },
+      "receipt": {
+       "status": "success",
+       "action_id": "a.compute"
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1758144001.0,
+      "finished_at": 1758144002.0
+     },
+     {
+      "node_id": "b",
+      "state": "pending",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     }
+    ],
+    "project_name": "工程甲",
+    "project_path": "/tmp/demo.paleo.json",
+    "created_at": 1758144000.0,
+    "updated_at": 1758144060.5,
+    "spec_hash": "1a6e57002aa9bd7595fc3bdb479882018ac73eddfb590a7384fb58f4d1f57f0c",
+    "parent_run_id": "orig0001"
+   }
+  },
+  {
+   "name": "minimal_defaults",
+   "run": {
+    "run_id": "abc123",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.runrt",
+     "name": "runrt",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      },
+      {
+       "node_id": "b",
+       "action_id": "b.compute",
+       "parameters": {},
+       "depends_on": [
+        "a"
+       ],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    }
+   },
+   "reserialized": {
+    "run_id": "abc123",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.runrt",
+     "name": "runrt",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      },
+      {
+       "node_id": "b",
+       "action_id": "b.compute",
+       "parameters": {},
+       "depends_on": [
+        "a"
+       ],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    },
+    "state": "running",
+    "slot_values": {},
+    "node_runs": [
+     {
+      "node_id": "a",
+      "state": "pending",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     {
+      "node_id": "b",
+      "state": "pending",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     }
+    ],
+    "project_name": null,
+    "project_path": null,
+    "created_at": null,
+    "updated_at": null,
+    "spec_hash": null,
+    "parent_run_id": null
+   }
+  }
+ ],
+ "from_dict_error": [
+  {
+   "name": "missing_node_id",
+   "spec": {
+    "workflow_id": "wf.bad",
+    "name": "bad",
+    "nodes": [
+     {
+      "action_id": "a.compute"
+     }
+    ]
+   },
+   "python_error": "KeyError"
+  },
+  {
+   "name": "null_nodes",
+   "spec": {
+    "workflow_id": "wf.bad",
+    "name": "bad",
+    "nodes": null
+   },
+   "python_error": "TypeError"
+  },
+  {
+   "name": "missing_workflow_id",
+   "spec": {
+    "name": "bad",
+    "nodes": []
+   },
+   "python_error": "KeyError"
+  },
+  {
+   "name": "unknown_run_state",
+   "spec": {
+    "run_id": "x",
+    "workflow": {
+     "schema_version": "1.0",
+     "workflow_id": "wf.oracle",
+     "name": "oracle",
+     "description": "",
+     "max_concurrency": 1,
+     "slots": [],
+     "nodes": [
+      {
+       "node_id": "a",
+       "action_id": "a.compute",
+       "parameters": {},
+       "depends_on": [],
+       "condition": null,
+       "retry": {
+        "max_attempts": 1,
+        "backoff_seconds": 0.0
+       },
+       "description": ""
+      }
+     ]
+    },
+    "state": "bogus"
+   },
+   "python_error": "ValueError"
+  },
+  {
+   "name": "unknown_node_run_state",
+   "spec": {
+    "node_id": "a",
+    "state": "bogus"
+   },
+   "python_error": "ValueError"
+  }
+ ]
+}
