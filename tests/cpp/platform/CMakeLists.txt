@@ -11,13 +11,19 @@ if(EXISTS "${PALEO_QGIS_SDK_DIR}/share/proj")
 else()
     set(PWB_PROJ_DATA "/usr/share/proj")
 endif()
-# GDAL data likewise.
-if(EXISTS "${PALEO_QGIS_SDK_DIR}/data/gdal")
-    set(PWB_GDAL_DATA "${PALEO_QGIS_SDK_DIR}/data/gdal")
-elseif(EXISTS "${PALEO_QGIS_SDK_DIR}/data")
+# GDAL data: only the real GDAL data dir (marker file probe) counts — the
+# vendor output/data on Linux is QGIS resources, not GDAL's csv tree.
+if(EXISTS "${PALEO_QGIS_SDK_DIR}/data/pcs.csv")
     set(PWB_GDAL_DATA "${PALEO_QGIS_SDK_DIR}/data")
-else()
+elseif(EXISTS "/usr/share/gdal/pcs.csv")
     set(PWB_GDAL_DATA "/usr/share/gdal")
+else()
+    set(PWB_GDAL_DATA "")
+endif()
+if(PWB_GDAL_DATA)
+    set(PWB_GDAL_DATA_ENV ";GDAL_DATA=${PWB_GDAL_DATA}")
+else()
+    set(PWB_GDAL_DATA_ENV "")
 endif()
 
 function(pwb_add_platform_test name)
@@ -31,7 +37,7 @@ function(pwb_add_platform_test name)
     add_test(NAME platform.${name} COMMAND platform_${name})
     set_tests_properties(platform.${name} PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA};GDAL_DATA=${PWB_GDAL_DATA}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
         TIMEOUT 300)
 endfunction()
 
@@ -56,7 +62,7 @@ target_link_libraries(platform_ui_wiring PRIVATE
 add_test(NAME platform.ui_wiring COMMAND platform_ui_wiring)
 set_tests_properties(platform.ui_wiring PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA};GDAL_DATA=${PWB_GDAL_DATA}"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
     TIMEOUT 300)
 
 # App-level smoke: the real executable's self-check (fixtures + render +
@@ -64,5 +70,5 @@ set_tests_properties(platform.ui_wiring PROPERTIES
 add_test(NAME platform.qgis_smoke_app COMMAND pwb-platform --self-check)
 set_tests_properties(platform.qgis_smoke_app PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA};GDAL_DATA=${PWB_GDAL_DATA}"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
     TIMEOUT 300)

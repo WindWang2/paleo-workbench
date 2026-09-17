@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include <QAction>
 #include <QString>
@@ -18,6 +19,8 @@ namespace pwb::ui {
 
 class ToolActionSet {
 public:
+    ~ToolActionSet();   // owns (deletes) the QActions it materialized
+
     // Rebuilds/updates one QAction per availability entry. Actions are
     // owned by this object (parented QObject tree); toolbar binding keeps
     // whatever subset the surface wants.

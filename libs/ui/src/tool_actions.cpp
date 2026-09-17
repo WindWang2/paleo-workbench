@@ -4,6 +4,12 @@
 
 namespace pwb::ui {
 
+ToolActionSet::~ToolActionSet() {
+    for (auto& [id, action] : actions_) {
+        delete action;
+    }
+}
+
 void ToolActionSet::apply(
     const std::map<std::string, pwb::tool_policy::ToolAvailability>&
         availability) {

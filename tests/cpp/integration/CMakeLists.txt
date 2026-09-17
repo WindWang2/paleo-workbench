@@ -33,7 +33,7 @@ function(pwb_add_integration_test name)
     add_test(NAME integration.${name} COMMAND integration_${name})
     set_tests_properties(integration.${name} PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA};GDAL_DATA=${PWB_GDAL_DATA}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
         TIMEOUT 600)
 endfunction()
 

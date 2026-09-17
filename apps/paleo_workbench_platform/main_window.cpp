@@ -24,6 +24,10 @@
 #include <pwb/qgis/layout_service.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 
+#ifdef PWB_WITH_WELL_LOG
+#include <pwb/viz/well_log_host_widget.hpp>
+#endif
+
 namespace pwb::app {
 namespace {
 QString layerLabelFor(const pwb::application::DomainLayerFacts& facts) {
@@ -77,6 +81,8 @@ public:
                                  QString::fromStdString(error));
         }
         window_->session()->map().refreshCanvases();
+        // The undo/redo/dirty verdicts changed with the edit buffer.
+        window_->refreshActionStates();
     }
 
 private:
@@ -138,7 +144,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     resize(1280, 800);
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow() {
+    // Ordered teardown must run while every member the signal paths touch
+    // (actions_, status label, canvas) is still alive: member destruction
+    // order would otherwise kill the action set before the session, and
+    // MapSession::close() -> unsetMapTool -> mapToolSet -> refresh would
+    // use the destroyed members (observed as a segfault in the integrated
+    // build). ProjectSession::close()/MapSession::close() are idempotent
+    // when closeEvent already ran.
+    if (session_ != nullptr) session_->close();
+}
 
 void MainWindow::buildUi() {
     canvas_ = session_->map().createCanvas(this);
@@ -153,6 +168,16 @@ void MainWindow::buildUi() {
 
     status_label_ = new QLabel(QStringLiteral("ready"), this);
     statusBar()->addWidget(status_label_);
+
+#ifdef PWB_WITH_WELL_LOG
+    // C's WLE-backed well-log host in a dock (same Qt ABI, one process;
+    // no Python). Same-session ownership: dies with the window.
+    auto* well_log_dock = new QDockWidget(tr("测井"), this);
+    well_log_dock->setObjectName(QStringLiteral("well-log-dock"));
+    auto* well_log_host = new pwb::viz::WellLogHostWidget(well_log_dock);
+    well_log_dock->setWidget(well_log_host);
+    addDockWidget(Qt::RightDockWidgetArea, well_log_dock);
+#endif
 
     // Tools are canvas-parented; MapSession teardown unsets them first.
     pan_tool_ = new QgsMapToolPan(canvas_);
@@ -574,6 +599,22 @@ QString MainWindow::loadFixtures(const QString& vector_uri,
     refreshActionStates();
     return QString();
 }
+
+#ifdef PWB_WITH_WELL_LOG
+QString MainWindow::loadLasIntoDock(const QString& las_path) {
+    // The host widget carries no Q_OBJECT: reach it through its dock
+    // (object-named) instead of findChild on the type.
+    QDockWidget* dock = findChild<QDockWidget*>("well-log-dock");
+    auto* host = static_cast<pwb::viz::WellLogHostWidget*>(
+        dock != nullptr ? dock->widget() : nullptr);
+    if (host == nullptr) return QStringLiteral("unavailable");
+    QString error;
+    if (!host->load_las(las_path, &error)) {
+        return error.isEmpty() ? QStringLiteral("load failed") : error;
+    }
+    return QString();
+}
+#endif
 
 QString MainWindow::commitActiveLayer(const std::filesystem::path& staged_dir) {
     const auto active = session_->active_layer();

@@ -109,28 +109,40 @@ CommitReceiptV1 PwbDataStore::commit(const CommitRequestV1& request) {
     CommitReceiptV1 receipt;
     receipt.ok = false;
 
-    // Target asset + optimistic-lock base come from the B binding of the
-    // staged layer (the join key authority), never guessed.
-    const pwb::workspace::LayerBinding* binding =
-        binding_for(request.staged.source_layer_id);
-    if (binding == nullptr || binding->source_asset_id.empty()) {
-        receipt.error = "no catalog binding for layer '"
-            + request.staged.source_layer_id + "' — refusing to commit into "
-            "an unbound target";
+    // Target asset: explicit request target first (host authority), then
+    // the B binding of the staged layer (the join key). First-time layer
+    // commits have no binding yet — rebind_layer creates it on success.
+    std::string asset_id = request.asset_id;
+    if (asset_id.empty()) {
+        const pwb::workspace::LayerBinding* binding =
+            binding_for(request.staged.source_layer_id);
+        if (binding != nullptr) asset_id = binding->source_asset_id;
+    }
+    if (asset_id.empty()) {
+        receipt.error = "no asset target for layer '"
+            + request.staged.source_layer_id + "' (no explicit asset, no "
+            "catalog binding)";
         return receipt;
     }
+    // Optimistic lock: explicit base, else the asset's current head version.
     std::string base_version = request.base_version;
-    if (base_version.empty()) base_version = binding->source_version_id;
     if (base_version.empty()) {
-        receipt.error = "base version unknown for layer '"
-            + request.staged.source_layer_id + "' (binding carries no "
-            "version and the request supplied none)";
+        for (const auto& asset : snapshot_cache_.catalog_assets) {
+            if (asset.id.str() == asset_id && asset.current_version_id
+                && !asset.current_version_id->empty()) {
+                base_version = asset.current_version_id->str();
+                break;
+            }
+        }
+    }
+    if (base_version.empty()) {
+        receipt.error = "base version unknown for asset '" + asset_id + "'";
         return receipt;
     }
 
     pwb::data::CommitRequestV1 b_request;
     b_request.operation_id = pwb::domain::OperationId(request.operation_id);
-    b_request.asset_id = pwb::domain::AssetId(binding->source_asset_id);
+    b_request.asset_id = pwb::domain::AssetId(asset_id);
     b_request.base_version_id = pwb::domain::VersionId(base_version);
     b_request.stage = pwb::domain::DataStage::Derived;
     b_request.staged.source_path = request.staged.geojson_path;

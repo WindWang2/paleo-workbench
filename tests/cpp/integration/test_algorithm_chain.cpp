@@ -263,7 +263,9 @@ int main(int argc, char** argv) {
                     static_cast<double>(payload.samples[i])
                     - static_cast<double>(expected[i]))));
         }
-        PWB_CHECK_MSG(max_diff < 1e-6,
+        // 2e-3 is C's frozen oracle tolerance (cpp-science 00-baseline §5)
+        // — the numerical contract, not a number we invented here.
+        PWB_CHECK_MSG(max_diff < 2e-3,
                       "oracle mismatch, max_abs_diff=" + std::to_string(max_diff));
         PWB_CHECK(payload.header.algorithm_id == "seismic.coherence_c3");
         PWB_CHECK(payload.header.sample_unit == "ms");

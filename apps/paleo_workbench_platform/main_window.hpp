@@ -12,6 +12,7 @@
 #include <memory>
 #include <set>
 
+#include <QAction>
 #include <QMainWindow>
 
 #include <pwb/application/project_session.hpp>
@@ -59,16 +60,30 @@ public:
     bool actionWired(const QString& tool_id) const {
         return wired_action_ids_.count(tool_id.toStdString()) > 0;
     }
+    // The governed QAction for a tool id (the shared object menus and the
+    // toolbar consume; nullptr when the policy vocabulary lacks the id).
+    QAction* governedAction(const QString& tool_id) const {
+        return actions_.action(tool_id.toStdString());
+    }
+#ifdef PWB_WITH_WELL_LOG
+    // Loads a LAS into the well-log dock (C's WLE-backed widget). Returns
+    // "" on success; "unavailable" when built without the viewer.
+    QString loadLasIntoDock(const QString& las_path);
+#endif
     enum class DirtyCloseDecision { Proceed, SaveAndClose, DiscardAndClose };
+
+    // Re-projects policy verdicts onto the actions; public because map
+    // tools/external edit paths must refresh after mutating edit state.
+    void refreshActionStates();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+
 
 private:
     void buildUi();
     void buildMenusAndToolbar();
     void connectActions();
-    void refreshActionStates();
 
     // Operation handlers (triggered by the governed actions).
     void openVectorDialog();

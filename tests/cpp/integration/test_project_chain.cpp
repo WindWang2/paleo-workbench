@@ -94,19 +94,23 @@ int main(int argc, char** argv) {
     PWB_CHECK(first_snapshot.is_ok());
     PWB_CHECK(!first_snapshot.value().catalog_assets.empty());
 
-    // Find a layer binding that carries asset+version (the edit target).
-    std::string layer_id, asset_id, base_version;
-    for (const auto& binding : first_snapshot.value().layer_bindings) {
-        if (!binding.source_asset_id.empty()
-            && !binding.source_version_id.empty()) {
-            layer_id = binding.layer_id;
-            asset_id = binding.source_asset_id;
-            base_version = binding.source_version_id;
+    // Edit target: a REAL catalog asset (the typical fixture's workspace
+    // bindings reference synthetic ids — first-time commits rebind the
+    // layer to the real asset via rebind_layer). Pick the asset whose head
+    // version carries a payload hash (the immutability check reads it).
+    std::string layer_id = "L_drafted";
+    std::string asset_id, base_version;
+    for (const auto& asset : first_snapshot.value().catalog_assets) {
+        if (!asset.current_version_id) continue;
+        const std::string head = asset.current_version_id->str();
+        if (!version_sha(first_snapshot.value(), head).empty()) {
+            asset_id = asset.id.str();
+            base_version = head;
             break;
         }
     }
-    PWB_CHECK_MSG(!layer_id.empty(),
-                  "fixture carries no catalog-bound layer binding");
+    PWB_CHECK_MSG(!asset_id.empty(),
+                  "fixture carries no asset with a hashed head version");
     const int versions_before = count_versions(first_snapshot.value(), asset_id);
     const std::string base_sha =
         version_sha(first_snapshot.value(), base_version);
@@ -156,6 +160,7 @@ int main(int argc, char** argv) {
         pwb::application::CommitRequestV1 request;
         request.operation_id = "int-edit-0001";
         request.base_version = base_version;
+        request.asset_id = asset_id;
         request.staged = staged;
         const auto receipt = store->commit(request);
         PWB_CHECK_MSG(receipt.ok, "B commit failed: " + receipt.error);
@@ -172,6 +177,7 @@ int main(int argc, char** argv) {
         pwb::application::CommitRequestV1 stale_request;
         stale_request.operation_id = "int-edit-0002";
         stale_request.base_version = base_version;   // superseded now
+        stale_request.asset_id = asset_id;
         // Re-stage from the same edited working copy for a genuinely new op.
         pwb::application::ProjectSession stale_session;
         std::string stale_add_error;

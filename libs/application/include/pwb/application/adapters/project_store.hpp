@@ -39,7 +39,8 @@ struct LayerBindingV1 {
 // path/hash; original version never overwritten.
 struct CommitRequestV1 {
     std::string operation_id;
-    std::string base_version;
+    std::string base_version;   // "" = resolve (binding, then asset head)
+    std::string asset_id;       // "" = binding's asset (join-key authority)
     pwb::qgis::StagedAsset staged;
 };
 

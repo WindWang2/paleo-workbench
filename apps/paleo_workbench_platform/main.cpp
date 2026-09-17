@@ -156,6 +156,24 @@ int runSelfCheck() {
         qCritical("layout export failed: %s", export_error.c_str());
         return 1;
     }
+#ifdef PWB_WITH_WELL_LOG
+    // Well-log dock embedding: the real WLE-backed host loads the committed
+    // LAS fixture (dev tree; a missing file is reported, a failed parse of
+    // a present fixture is a hard error).
+    const QString las_path = QStringLiteral(PWB_SOURCE_DIR
+                                             "/tests/fixtures/realdata/A1.Las");
+    if (QFile::exists(las_path)) {
+        const QString las_error = window.loadLasIntoDock(las_path);
+        if (!las_error.isEmpty()) {
+            qCritical("well-log dock LAS load failed: %s",
+                      qUtf8Printable(las_error));
+            return 1;
+        }
+    } else {
+        qInfo("self-check: LAS fixture absent (dev tree only), dock check skipped");
+    }
+#endif
+
     qInfo("self-check ok: gpkg=%ls png=%ls bytes=%zu",
           gpkg_uri.toStdWString().c_str(), png.wstring().c_str(),
           static_cast<size_t>(std::filesystem::file_size(png)));
