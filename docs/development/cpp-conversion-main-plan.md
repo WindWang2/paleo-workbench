@@ -70,6 +70,11 @@
   的 catalog.json checkpoint 契约（全表 schema 1、原子写、.bak 轮换、
   models/model_versions 原样透传不丢行），接线到 PwbDataStore::commit 与
   bootstrap/import 之后；新测试 `data.manifest_export`。门禁 48/48 ×2。
+- 2026-09-17（同日）：**M5 收口**——`--self-check` 扩展覆盖 M1-M3 全链
+  （新工程→编辑保存→manifest checkpoint→SEG-Y 导入→rms→切片显示；部署树
+  无 fixture 时如实跳过）；入口切换评审文档
+  `cpp-entry-switch-review.md`（结论：建议并行启动器增量曝光，Windows
+  回归+打包+soak 清零后再评默认切换）。门禁 48/48 ×2。
 - 待办：M4 其余（GC/dedup、models 领域读模型——fixtures 现无数据可对账，
-  待有真实使用后补）、M5 剩余（Windows 回归需外部环境；入口切换为
-  产品决策）。
+  待有真实使用后补）；M5 硬阻塞三项（Windows 回归需外部环境、正式安装
+  包、长稳 soak）与入口切换决策本身。

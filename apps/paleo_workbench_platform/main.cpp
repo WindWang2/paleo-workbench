@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QImage>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
@@ -26,6 +27,11 @@
 #include <qgsrasterlayer.h>
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
+
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <QDockWidget>
+#include <pwb/seismic_viewer/seismic_slice_widget.hpp>
+#endif
 
 #include <pwb/qgis/edit_controller.hpp>
 #include <pwb/qgis/layout_service.hpp>
@@ -172,6 +178,131 @@ int runSelfCheck() {
     } else {
         qInfo("self-check: LAS fixture absent (dev tree only), dock check skipped");
     }
+#endif
+
+#if defined(PWB_WITH_DATA_INTEGRATION)
+    // ---- project lifecycle (M2): fresh project -> open layer -> edit ->
+    // save through the real catalog transaction -> manifest checkpoint.
+    {
+        const QString fresh_dir = temp_dir.path()
+            + QStringLiteral("/fresh-project");
+        const QString new_error =
+            window.newProject(fresh_dir, QStringLiteral("selfcheck"));
+        if (!new_error.isEmpty()) {
+            qCritical("newProject failed: %s", qUtf8Printable(new_error));
+            return 1;
+        }
+        if (window.session()->store() == nullptr) {
+            qCritical("newProject attached no store");
+            return 1;
+        }
+        const QString open_error = window.openVectorLayer(gpkg_uri);
+        if (!open_error.isEmpty()) {
+            qCritical("self-check layer open failed: %s",
+                      qUtf8Printable(open_error));
+            return 1;
+        }
+        const std::string layer_id = "fixture";
+        if (window.session()->edit().start_editing(layer_id).empty()) {
+            QgsVectorLayer* fresh_layer =
+                window.session()->map().vectorLayerById(layer_id);
+            const QgsPointXY v0 =
+                fresh_layer->getFeature(1).geometry().vertexAt(0);
+            window.session()->edit().move_vertex(layer_id, 1, 0,
+                                                 v0.x() + 0.2, v0.y());
+            const QString save_error = window.commitActiveLayer(
+                std::filesystem::path(temp_dir.path().toStdWString())
+                / "selfcheck-staged");
+            if (!save_error.isEmpty()) {
+                qCritical("self-check commit failed: %s",
+                          qUtf8Printable(save_error));
+                return 1;
+            }
+        } else {
+            qCritical("self-check edit session failed to start");
+            return 1;
+        }
+        const std::filesystem::path manifest =
+            std::filesystem::path(fresh_dir.toStdWString())
+            / "selfcheck.artifacts" / "metadata" / "catalog.json";
+        if (!std::filesystem::exists(manifest)) {
+            qCritical("catalog.json manifest checkpoint missing");
+            return 1;
+        }
+    }
+
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_SEISMIC_VIEWER) \
+    && defined(PWB_WITH_SEISMIC_ATTRIBUTES)
+    // ---- M3 chain: SEG-Y import -> attribute run -> slice display. The
+    // real fixture only exists in dev trees; deployed packages skip the
+    // check (like the LAS dock check above).
+    const QString sgy_path = QStringLiteral(PWB_SOURCE_DIR
+                                             "/tests/fixtures/realdata/tiny.sgy");
+    if (QFile::exists(sgy_path)) {
+        std::string import_error;
+        const std::string imported =
+            window.importSegy(sgy_path, &import_error);
+        if (imported.empty()) {
+            qCritical("self-check SEG-Y import failed: %s",
+                      import_error.c_str());
+            return 1;
+        }
+        std::string run_error;
+        const std::string request_id = window.runAttribute(
+            "seismic.rms_amplitude", {{"window", "21"}}, imported,
+            &run_error);
+        if (request_id.empty()) {
+            qCritical("self-check attribute submit failed: %s",
+                      run_error.c_str());
+            return 1;
+        }
+        std::string status;
+        for (int i = 0; i < 2000; ++i) {
+            const auto outcome = window.attributeOutcome(request_id);
+            status = outcome.status;
+            if (status != "queued" && status != "running"
+                && status != "publishing") {
+                if (status != "succeeded") {
+                    qCritical("self-check attribute run %s: %s",
+                              status.c_str(), outcome.error.c_str());
+                    return 1;
+                }
+                break;
+            }
+            QThread::msleep(5);
+        }
+        if (status != "succeeded") {
+            qCritical("self-check attribute run never finished");
+            return 1;
+        }
+        const QString view_error = window.openVolumeVersion(imported);
+        if (!view_error.isEmpty()) {
+            qCritical("self-check volume view failed: %s",
+                      qUtf8Printable(view_error));
+            return 1;
+        }
+        QDockWidget* seismic_dock =
+            window.findChild<QDockWidget*>("seismic-dock");
+        auto* slice = static_cast<pwb::seismic_viewer::SeismicSliceWidget*>(
+            seismic_dock != nullptr ? seismic_dock->widget() : nullptr);
+        if (slice == nullptr) {
+            qCritical("seismic dock missing");
+            return 1;
+        }
+        for (int spin = 0; spin < 200
+                 && slice->state() != pwb::seismic_viewer::ViewerState::ok;
+             ++spin) {
+            QCoreApplication::processEvents();
+            QThread::msleep(5);
+        }
+        if (slice->state() != pwb::seismic_viewer::ViewerState::ok) {
+            qCritical("slice viewer did not reach ok state");
+            return 1;
+        }
+    } else {
+        qInfo("self-check: SEG-Y fixture absent (dev tree only), M3 chain skipped");
+    }
+#endif
 #endif
 
     qInfo("self-check ok: gpkg=%ls png=%ls bytes=%zu",
