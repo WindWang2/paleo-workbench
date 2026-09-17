@@ -5,6 +5,8 @@
 // agreement, collects the ToolContextSnapshot from live authorities, and is
 // the single assembly point for the B/C adapters (libs/application/adapters).
 
+#include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -73,8 +75,16 @@ public:
     void set_store(std::shared_ptr<IProjectStore> store) { store_ = std::move(store); }
     IProjectStore* store() const { return store_.get(); }
 
-    // Commit through the B adapter (staged asset protocol). Without a store
-    // (module-only mode) returns an explicit error, never a fake receipt.
+    // Commit through the B adapter (staged asset protocol), ordered so the
+    // user's source provider is written only after the catalog transaction
+    // accepts the round:
+    //   stage (live buffer, provider untouched) -> B commit -> finalize.
+    // A rejected B commit keeps the edit buffer alive for repair + retry;
+    // the retry reuses the same operation id for identical staged content
+    // (B's idempotency) and gets a fresh id when the content changed.
+    // Without a store (module-only mode) the working file is the only
+    // persistence: it is finalized and an explicit error is returned, never
+    // a fake receipt.
     pwb::qgis::StagedAsset stage_commit(const std::string& layer_id,
                                         const std::filesystem::path& staged_dir,
                                         std::string* error);
@@ -86,6 +96,21 @@ public:
     void close();
 
 private:
+    // One staged round that has not been accepted by B yet: the operation
+    // id must stay stable across retries of the SAME content (B replays
+    // receipts by id) and change when the content changes (consecutive
+    // edit rounds must never reuse an id — B would replay the old receipt
+    // and silently drop the new edit).
+    struct PendingOperation {
+        std::string operation_id;
+        std::string sha256;
+        std::uint64_t base_revision = 0;
+    };
+
+    std::string operation_id_for(const std::string& layer_id,
+                                 const pwb::qgis::StagedAsset& staged);
+    std::string frozen_base_version(const std::string& layer_id) const;
+
     std::unique_ptr<pwb::qgis::MapSession> map_;
     std::unique_ptr<pwb::qgis::EditController> edit_;
     std::shared_ptr<IProjectStore> store_;
@@ -94,6 +119,7 @@ private:
     std::string active_layer_error_;
     std::optional<std::string> mapping_stage_;
     std::string current_tool_ = "pan";
+    std::map<std::string, PendingOperation> pending_operations_;
 };
 
 }  // namespace pwb::application

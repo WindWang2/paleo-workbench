@@ -236,8 +236,28 @@ void compare_fixture(const char* name, const char* project_file) {
         if (it == by_id.end()) continue;
         PWB_CHECK(it->second->stored_path ==
                   entry["stored"].get<std::string>());
-        PWB_CHECK(it->second->resolved_path ==
-                  entry["resolved"].get<std::string>());
+        // The oracle was frozen on a different checkout: its "resolved"
+        // absolute path is machine-bound. Compare the resolution
+        // SEMANTICALLY — resolved must equal the fixture's project dir +
+        // the stored relative path (that is what the Python oracle froze)
+        // — and keep the oracle itself honest (its resolved tail must
+        // match its stored path).
+        const std::string oracle_stored = entry["stored"].get<std::string>();
+        const std::string oracle_resolved =
+            entry["resolved"].get<std::string>();
+        const bool oracle_tail_ok =
+            oracle_resolved.size() >= oracle_stored.size()
+            && oracle_resolved.compare(
+                   oracle_resolved.size() - oracle_stored.size(),
+                   std::string::npos, oracle_stored) == 0;
+        PWB_CHECK(oracle_tail_ok);  // oracle resolved/stored disagree: <id>
+        std::error_code canon_ec;
+        const fs::path base =
+            fs::weakly_canonical(fs::absolute(dir), canon_ec);
+        const fs::path expected =
+            fs::weakly_canonical(base / fs::path(oracle_stored), canon_ec);
+        PWB_CHECK(fs::path(it->second->resolved_path).lexically_normal()
+                  == expected.lexically_normal());  // resolved mismatch: <id>
         PWB_CHECK(it->second->exists == entry["exists"].get<bool>());
         ++g_compared_rows;
     }

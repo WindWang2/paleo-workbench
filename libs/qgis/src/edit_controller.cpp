@@ -39,9 +39,8 @@ std::string sha256_of_file(const std::filesystem::path& path) {
 EditController::EditController(MapSession& session) : session_(session) {}
 
 EditController::~EditController() {
-    for (auto& [layer_id, capture] : captures_) {
-        for (const QMetaObject::Connection& connection : capture.connections)
-            QObject::disconnect(connection);
+    while (!captures_.empty()) {
+        disconnectCapture(captures_.begin()->first);
     }
 }
 
@@ -218,14 +217,22 @@ std::vector<std::string> EditController::validate_topology(
     return errors;
 }
 
-std::string EditController::commit(const std::string& layer_id,
-                                   const std::filesystem::path& staged_dir,
-                                   StagedAsset* out_staged, EditDeltaV1* out_delta) {
+void EditController::disconnectCapture(const std::string& layer_id) {
+    const auto it = captures_.find(layer_id);
+    if (it == captures_.end()) return;
+    for (const QMetaObject::Connection& connection : it->second.connections)
+        QObject::disconnect(connection);
+    captures_.erase(it);
+}
+
+std::string EditController::stage(const std::string& layer_id,
+                                  const std::filesystem::path& staged_dir,
+                                  StagedAsset* out_staged) {
     std::string error;
     QgsVectorLayer* layer = editingLayerOrError(layer_id, &error);
     if (layer == nullptr) return error;
 
-    // Topology gate first: illegal geometries block the commit and keep the
+    // Topology gate first: illegal geometries block staging and keep the
     // session (the buffer survives for repair + retry).
     std::vector<std::string> topology_errors = validate_topology(layer_id);
     if (!topology_errors.empty()) {
@@ -237,24 +244,13 @@ std::string EditController::commit(const std::string& layer_id,
         return "拓扑校验失败，阻止提交: " + joined;
     }
 
+    // Staged asset: full-layer GeoJSON written into the staged dir while
+    // the edit buffer is still live — the writer iterates through the
+    // layer's feature source, so pending adds/changes/deletes are included
+    // without touching the user's source provider. Hash + provenance are
+    // recorded; B's CommitRequest consumes this path — we never write
+    // catalog.sqlite from the platform side.
     const std::uint64_t base_revision = base_revisions_[layer_id];
-    if (!layer->commitChanges(true)) {
-        QStringList commit_errors = layer->commitErrors();
-        commit_errors.removeAll(QString());
-        if (commit_errors.isEmpty()) commit_errors << QStringLiteral("commit failed");
-        return commit_errors.join(QStringLiteral("; ")).toStdString();
-    }
-    layer->triggerRepaint();
-
-    Capture& capture = captures_[layer_id];
-    if (out_delta != nullptr) {
-        capture.delta.base_revision = base_revision;
-        *out_delta = capture.delta;
-    }
-
-    // Staged asset: full-layer GeoJSON written into the staged dir; hash +
-    // provenance recorded. B's CommitRequest consumes this path — we never
-    // write catalog.sqlite from the platform side.
     std::error_code ec;
     std::filesystem::create_directories(staged_dir, ec);
     const std::filesystem::path out_path =
@@ -270,9 +266,8 @@ std::string EditController::commit(const std::string& layer_id,
         layer->transformContext(), options, &writer_error, &new_filename,
         &new_layer);
     if (writer_result != QgsVectorFileWriter::NoError) {
-        for (const QMetaObject::Connection& connection : capture.connections)
-            QObject::disconnect(connection);
-        captures_.erase(layer_id);
+        // Buffer intentionally kept: the provider is untouched, the staged
+        // round can be retried after the writer problem is fixed.
         return "staged asset write failed: " + writer_error.toStdString();
     }
     if (out_staged != nullptr) {
@@ -283,10 +278,43 @@ std::string EditController::commit(const std::string& layer_id,
         out_staged->feature_count =
             static_cast<std::uint64_t>(layer->featureCount());
     }
-    for (const QMetaObject::Connection& connection : capture.connections)
-        QObject::disconnect(connection);
-    captures_.erase(layer_id);
     return "";
+}
+
+std::string EditController::finalize(const std::string& layer_id,
+                                     EditDeltaV1* out_delta) {
+    std::string error;
+    QgsVectorLayer* layer = editingLayerOrError(layer_id, &error);
+    if (layer == nullptr) return error;
+
+    if (!layer->commitChanges(true)) {
+        // Buffer kept: the provider rejected the write; the staged round
+        // stays valid and the session survives for repair + retry.
+        QStringList commit_errors = layer->commitErrors();
+        commit_errors.removeAll(QString());
+        if (commit_errors.isEmpty()) commit_errors << QStringLiteral("commit failed");
+        return commit_errors.join(QStringLiteral("; ")).toStdString();
+    }
+    layer->triggerRepaint();
+    // The committed* signals fired during commitChanges have completed the
+    // capture's delta — deliver it now, then close the round.
+    const auto it = captures_.find(layer_id);
+    if (it != captures_.end()) {
+        it->second.delta.base_revision = base_revisions_[layer_id];
+        if (out_delta != nullptr) *out_delta = it->second.delta;
+    }
+    base_revisions_[layer_id] = base_revisions_[layer_id] + 1;
+    disconnectCapture(layer_id);
+    return "";
+}
+
+std::string EditController::commit(const std::string& layer_id,
+                                   const std::filesystem::path& staged_dir,
+                                   StagedAsset* out_staged,
+                                   EditDeltaV1* out_delta) {
+    std::string error = stage(layer_id, staged_dir, out_staged);
+    if (!error.empty()) return error;
+    return finalize(layer_id, out_delta);
 }
 
 std::string EditController::set_snapping(bool enabled, double tolerance_px) {

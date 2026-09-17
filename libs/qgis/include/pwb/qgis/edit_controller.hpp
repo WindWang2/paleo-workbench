@@ -76,9 +76,25 @@ public:
     // geometries; returns the error lines (empty = clean).
     std::vector<std::string> validate_topology(const std::string& layer_id);
 
-    // Commit path: validate -> commitChanges -> staged asset (GeoJSON +
-    // sha256) + captured delta. On validation/commit failure the session is
-    // kept and the reason returned.
+    // Three-step commit protocol (review P1: the user's source provider is
+    // written only AFTER the catalog transaction accepts the round):
+    //   stage()    — topology gate + staged GeoJSON (including the live
+    //                edit buffer's pending changes) + sha256. The provider
+    //                is NOT written; the buffer stays alive for repair +
+    //                retry. out_delta is NOT filled here — the committed
+    //                delta only exists after finalize().
+    //   finalize() — commitChanges into the source provider; on success the
+    //                complete EditDeltaV1 (committed signals included) is
+    //                delivered, the capture closes and the layer's base
+    //                revision advances. On failure the buffer survives and
+    //                the reason returns.
+    //   commit()   — stage + finalize in one call (module-only callers that
+    //                have no catalog transaction in between).
+    std::string stage(const std::string& layer_id,
+                      const std::filesystem::path& staged_dir,
+                      StagedAsset* out_staged);
+    std::string finalize(const std::string& layer_id,
+                         EditDeltaV1* out_delta = nullptr);
     std::string commit(const std::string& layer_id,
                        const std::filesystem::path& staged_dir,
                        StagedAsset* out_staged, EditDeltaV1* out_delta);
@@ -94,7 +110,6 @@ public:
 private:
     QgsVectorLayer* editingLayerOrError(const std::string& layer_id,
                                         std::string* error) const;
-    void captureCommittedDelta(const std::string& layer_id);
     void disconnectCapture(const std::string& layer_id);
 
     MapSession& session_;
@@ -104,6 +119,9 @@ private:
         bool armed = false;
     };
     std::map<std::string, Capture> captures_;
+    // Provider commits completed this session per layer. Advances on every
+    // successful finalize(); drives the staged asset's base_revision and
+    // distinguishes consecutive edit rounds.
     std::map<std::string, std::uint64_t> base_revisions_;
 };
 

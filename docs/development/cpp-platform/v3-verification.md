@@ -44,6 +44,35 @@ ctest --test-dir build/cpp-integrated                        # 32/34（§4）
 
 `data.*` 17/19、`science.*` 4/4、`platform.*` 9/9、`integration.*` 2/2。唯二失败为 B 线 oracle fixture 内嵌绝对路径（checkout 相关，已移交 B；本线不重写他线 fixture）。
 
+## 4a. main 增量（评审 P1 修复后，`e732678d` 之后）— integrated 43/43 通过 ×2
+
+合并后按外部评审（status-after-pull-e732678d.md）修复三项 P1，并把 D/E 纳入同一 integrated 树：
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| P1 发布假成功 | `CatalogResultPublisher` 全部失败路径（outputs≠1/shape 空/register_run/payload 写/publish_run_result/状态异常）改为记录 outcome + 已注册 run 尽力 `finish_run(Failed)`（再失败即显式 recovery-pending）+ 抛 `CatalogPublishError`；C 的 TaskRuntime 契约将抛异常的 publish_success 判为 `publisher.publish_threw` 失败 | `integration.algorithm_chain` 新增两段失败注入：staged_dir 指向普通文件（payload 写失败）→ 任务 failed + run 终态 failed + 无成功版本；双输出内核 → 任务 failed 且 run 行完全不存在 |
+| P1 保存顺序 | `EditController` 拆 `stage()`（活编辑缓冲导出 staged GeoJSON，不写源 provider）/`finalize()`（commitChanges+交付完整 delta+推进 base revision）；`ProjectSession::stage_commit` 重排为 stage → B commit → finalize；B 拒绝时缓冲保留、源文件未动（可修复重试）；B 接受后 finalize 失败则明确“catalog 版本已权威，重载工作副本” | `platform.adapters_substitutes` 新增：B 拒绝后第二个图层读同一 GPKG 文件证实源未写 + 缓冲存活；接受后源已写 |
+| P1 operation ID 复用 | ID = `pwb-edit-<layer>-r<base_revision>-<sha256[0:8]>`（layer id 净化为安全段）；同内容重试复用同 ID（B 幂等），内容变化即新 ID；`base_revisions_` 在每次成功 finalize 推进；base_version 冻结为 B 绑定版本 | 同测试新增：连续两轮提交 ID 必不同；同内容重试 ID 必相同 |
+| fixture 绝对路径 | `data.oracle_compare` 改为语义比较（resolved == canonical(fixture dir)/stored + oracle 自洽尾缀校验），不再比对生成机器的绝对路径 | `data.*` 19/19（原 17/19 的两个 oracle 失败清零） |
+| D/E 入 integrated 门禁 | `PWB_BUILD_SEISMIC_VIEWER/ATTRIBUTES=ON` 与 A/B/C 同树构建 | `seismic_viewer.*` 5/5、`seismic_attributes.*` 4/4 同树通过 |
+
+实测命令（main 工作区，GCC 16.2.1 / Qt 6.11.2 系统 ABI / vendored QGIS 4.2.0）：
+
+```bash
+cmake -S . -B build/cpp-integrated -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DPWB_BUILD_PLATFORM=ON -DPWB_BUILD_DATA=ON -DPWB_BUILD_SCIENCE=ON \
+  -DPWB_BUILD_INTEGRATION_TESTS=ON -DPWB_BUILD_TOOLS=ON \
+  -DPWB_BUILD_SEISMIC_VIEWER=ON -DPWB_BUILD_SEISMIC_ATTRIBUTES=ON \
+  -DPALEO_QGIS_SOURCE_DIR=$PWD/third_party/qgis \
+  -DPALEO_QGIS_SDK_DIR=$PWD/native/qgis_render_bridge/build/qgis-vendor/output \
+  -DPALEO_QGIS_BUILD_DIR=$PWD/native/qgis_render_bridge/build/qgis-vendor
+cmake --build build/cpp-integrated -j 8        # exit 0
+ctest --test-dir build/cpp-integrated -j 4     # 43/43 Passed，两轮
+MALLOC_CHECK_=3 ctest --test-dir build/cpp-integrated -R "platform.|integration."  # 11/11
+```
+
+仍属未完成（如实）：正常 .paleo 工程 UI 会话（set_store 生产调用）、D viewer/E 算法在主程序内的装配、Windows 回归——评审建议的后续顺序第 2/3 步。
+
 ## 5. 关键修复的技术根因（供审计）
 
 1. `QgsApplication::instance()` 为 `qobject_cast`——进程必须以 QgsApplication 为应用对象（全部 8 个入口替换，3 参构造）。
@@ -58,4 +87,4 @@ ctest --test-dir build/cpp-integrated                        # 32/34（§4）
 - 可见 UI 交互记录/截图：headless 环境无显示服务器，**未执行**（以 ui_wiring 动作触发断言替代）。
 - 500-cycle soak / sanitizers / 性能基准：未执行。
 - Windows 构建：无环境，未执行。
-- D/E 集成：未交付，未发生。
+- D/E 主程序装配（viewer 实例、算法注册 UI）：未执行（§4a 仅覆盖同树构建+模块测试；评审后续第 3 步）。

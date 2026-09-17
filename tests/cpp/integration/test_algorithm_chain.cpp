@@ -11,6 +11,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <stop_token>
 #include <thread>
@@ -118,6 +119,45 @@ public:
         pwb::science::ProgressSink,
         std::stop_token) override {
         throw std::runtime_error("kernel exploded (test)");
+    }
+};
+
+// Kernel returning TWO result volumes: violates the single-result publish
+// contract — the publisher must reject before any durable write.
+class MultiOutputAlgorithm final : public pwb::science::IAlgorithm {
+public:
+    const pwb::science::AlgorithmDescriptor& descriptor() const override {
+        static pwb::science::AlgorithmDescriptor descriptor = [] {
+            pwb::science::AlgorithmDescriptor d;
+            d.algorithm_id = "test.multi_output";
+            d.version = "1.0.0";
+            d.display_name = "Multi-output (integration test)";
+            d.family = "test";
+            return d;
+        }();
+        return descriptor;
+    }
+
+    pwb::science::Result<pwb::science::AlgorithmResultV1> run(
+        const pwb::science::AlgorithmRequestV1& request,
+        pwb::science::ProgressSink,
+        std::stop_token) override {
+        pwb::science::AlgorithmResultV1 result;
+        result.request_id = request.request_id;
+        result.provenance.algorithm_id = "test.multi_output";
+        result.provenance.algorithm_version = "1.0.0";
+        result.provenance.build_identity = "integration-build";
+        for (int i = 0; i < 2; ++i) {
+            auto samples = std::make_shared<std::vector<float>>(24, 0.5f);
+            pwb::science::ProducedVolume produced;
+            produced.name = "out" + std::to_string(i);
+            produced.unit = "amplitude";
+            produced.volume.data = samples->data();
+            produced.volume.shape = {2, 3, 4};
+            produced.volume.lifetime = std::move(samples);
+            result.outputs.push_back(std::move(produced));
+        }
+        return result;
     }
 };
 
@@ -350,6 +390,117 @@ int main(int argc, char** argv) {
         PWB_CHECK(handle2.snapshot().status
                   == pwb::workflow::TaskStatus::cancelled);
         next_runtime.shutdown();
+    }
+
+    // ---- publication failure injection (review P1): a real publish that
+    // cannot reach the durable state must FAIL the task (never a false
+    // succeeded/published) and leave no dangling "running" run.
+    {
+        // (a) Staged payload write fails: staged_dir points at a regular
+        //     file, so the PWBVOL1 payload cannot be written. The run was
+        //     already registered "running" — the publisher must terminate
+        //     it Failed and throw; the runtime must report the task failed.
+        const fs::path blocker =
+            fs::path(temp.path().toStdWString()) / "blocker";
+        {
+            std::ofstream touch(blocker, std::ios::binary);
+            PWB_CHECK(touch.good());
+        }
+        pwb::application::CatalogResultPublisher blocked_publisher(
+            store, blocker);
+
+        pwb::science::AlgorithmRequestV1 blocked_request;
+        blocked_request.request_id = "int-blocked-0001";
+        blocked_request.algorithm_id = "seismic.coherence_c3";
+        blocked_request.algorithm_version = descriptor.version;
+        blocked_request.params_json = request.params_json;
+        blocked_request.input_volumes.push_back(
+            {input.data(), {ni, nc, ns}, {0, 0, 0}, nullptr});
+        pwb::application::RequestContext blocked_context;
+        blocked_context.geometry = geometry;
+        blocked_publisher.set_request_context(blocked_request.request_id,
+                                              std::move(blocked_context));
+
+        {
+            pwb::workflow::TaskRuntime runtime;
+            auto handle = runtime.submit(
+                pwb::science::algorithms::make_coherence_c3(
+                    "integration-build"),
+                blocked_request,
+                std::shared_ptr<pwb::application::CatalogResultPublisher>(
+                    &blocked_publisher, [](auto*) {}));
+            handle.wait();
+            const auto snapshot = handle.snapshot();
+            PWB_CHECK_MSG(snapshot.status == pwb::workflow::TaskStatus::failed,
+                          "blocked staged write must fail the task");
+            PWB_CHECK_MSG(snapshot.error_code == "publisher.publish_threw",
+                          "error_code=" + snapshot.error_code);
+            PWB_CHECK(!snapshot.published);
+            runtime.shutdown();
+        }
+
+        const auto blocked_outcome =
+            blocked_publisher.outcome(blocked_request.request_id);
+        PWB_CHECK(!blocked_outcome.success);
+        PWB_CHECK(blocked_outcome.error.find("payload write failed")
+                  != std::string::npos);
+
+        // Durable state: the run exists and is TERMINAL failed — not a
+        // dangling "running" row — and no success version was published.
+        auto reopen2 = pwb::application::PwbDataStore::open(
+            work / "typical.paleo.json", &reopen_error);
+        PWB_CHECK_MSG(reopen2 != nullptr, "reopen2: " + reopen_error);
+        {
+            auto snapshot = reopen2->snapshot();
+            PWB_CHECK(snapshot.is_ok());
+            std::string status;
+            PWB_CHECK_MSG(
+                runs_with_status(snapshot.value(), "run_int-blocked-0001",
+                                 &status)
+                    && status == "failed",
+                "blocked run missing or not failed (status=" + status + ")");
+            int versions_for_run = 0;
+            for (const auto& v : snapshot.value().catalog_versions) {
+                if (v.run_id && v.run_id->str() == "run_int-blocked-0001") {
+                    ++versions_for_run;
+                }
+            }
+            PWB_CHECK(versions_for_run == 0);
+        }
+
+        // (b) Contract violation (2 result volumes): the publisher rejects
+        //     BEFORE any durable write — the task fails and no run row is
+        //     created at all.
+        pwb::application::CatalogResultPublisher& plain_publisher = publisher;
+        {
+            pwb::workflow::TaskRuntime runtime;
+            pwb::science::AlgorithmRequestV1 multi_request;
+            multi_request.request_id = "int-multi-0001";
+            multi_request.algorithm_id = "test.multi_output";
+            multi_request.algorithm_version = "1.0.0";
+            auto handle = runtime.submit(
+                std::make_shared<MultiOutputAlgorithm>(),
+                multi_request,
+                std::shared_ptr<pwb::application::CatalogResultPublisher>(
+                    &plain_publisher, [](auto*) {}));
+            handle.wait();
+            const auto snapshot = handle.snapshot();
+            PWB_CHECK_MSG(snapshot.status == pwb::workflow::TaskStatus::failed,
+                          "multi-output publish must fail the task");
+            PWB_CHECK(snapshot.error_code == "publisher.publish_threw");
+            PWB_CHECK(!snapshot.published);
+            runtime.shutdown();
+        }
+        PWB_CHECK(!publisher.outcome("int-multi-0001").success);
+        {
+            auto snapshot = reopen2->snapshot();
+            PWB_CHECK(snapshot.is_ok());
+            std::string status;
+            PWB_CHECK_MSG(
+                runs_with_status(snapshot.value(), "run_int-multi-0001",
+                                 &status) == 0,
+                "multi-output run must not be registered at all");
+        }
     }
 
     pwb::qgis::QgisRuntime::release();

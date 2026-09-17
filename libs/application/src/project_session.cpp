@@ -40,36 +40,115 @@ void ProjectSession::set_active_layer(const DomainLayerFacts& facts) {
     }
 }
 
+namespace {
+// B uses operation ids as journal file names ([A-Za-z0-9._-], no leading
+// dot). QGIS layer ids carry user layer names — sanitize instead of
+// letting a space or CJK character reject the whole commit.
+std::string safe_segment(const std::string& raw) {
+    std::string out;
+    out.reserve(raw.size());
+    for (const char c : raw) {
+        const bool safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+            || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        out.push_back(safe ? c : '_');
+    }
+    while (!out.empty() && out.front() == '.') out.erase(out.begin());
+    return out.empty() ? std::string("layer") : out;
+}
+}  // namespace
+
+std::string ProjectSession::operation_id_for(
+    const std::string& layer_id, const pwb::qgis::StagedAsset& staged) {
+    const auto it = pending_operations_.find(layer_id);
+    if (it != pending_operations_.end()
+        && it->second.sha256 == staged.sha256
+        && it->second.base_revision == staged.base_revision) {
+        // Same staged round retried — B replays the recorded receipt for
+        // this id (idempotency by design).
+        return it->second.operation_id;
+    }
+    // New round: content hash + base revision make the id unique per edit
+    // round and stable across process restarts.
+    PendingOperation pending;
+    pending.operation_id = "pwb-edit-" + safe_segment(layer_id)
+        + "-r" + std::to_string(staged.base_revision)
+        + "-" + staged.sha256.substr(0, 8);
+    pending.sha256 = staged.sha256;
+    pending.base_revision = staged.base_revision;
+    const std::string id = pending.operation_id;
+    pending_operations_[layer_id] = std::move(pending);
+    return id;
+}
+
+std::string ProjectSession::frozen_base_version(
+    const std::string& layer_id) const {
+    if (store_ == nullptr) return "";
+    // Freeze the bound version the user actually edited against (B's
+    // optimistic lock); "" lets B resolve binding -> asset head.
+    for (const LayerBindingV1& binding : store_->load_bindings()) {
+        if (binding.layer_id == layer_id && !binding.version_id.empty()) {
+            return binding.version_id;
+        }
+    }
+    return "";
+}
+
 pwb::qgis::StagedAsset ProjectSession::stage_commit(
     const std::string& layer_id, const std::filesystem::path& staged_dir,
     std::string* error) {
     pwb::qgis::StagedAsset staged;
-    pwb::qgis::EditDeltaV1 delta;
-    const std::string commit_error =
-        edit_->commit(layer_id, staged_dir, &staged, &delta);
-    if (!commit_error.empty()) {
-        if (error != nullptr) *error = commit_error;
+
+    // 1) Stage from the LIVE edit buffer: the user's source provider is
+    //    not written yet; a failure here keeps the session retryable.
+    const std::string stage_error =
+        edit_->stage(layer_id, staged_dir, &staged);
+    if (!stage_error.empty()) {
+        if (error != nullptr) *error = stage_error;
         return staged;
     }
+
     if (store_ == nullptr) {
-        // Module-only mode: the staged asset exists, but no B store is
-        // attached — report honestly instead of faking a receipt.
-        if (error != nullptr)
-            *error = "no project store attached (module-only mode); staged asset at "
-                + staged.geojson_path.string();
+        // Module-only mode: the working file is the only persistence
+        // available — finalize it, then report honestly instead of faking
+        // a catalog receipt.
+        const std::string finalize_error = edit_->finalize(layer_id);
+        if (error != nullptr) {
+            *error = finalize_error.empty()
+                ? "no project store attached (module-only mode); committed "
+                  "to the working file only, staged asset at "
+                  + staged.geojson_path.string()
+                : finalize_error;
+        }
         return staged;
     }
+
+    // 2) Catalog transaction first (stable operation id per staged round).
     CommitRequestV1 request;
-    request.operation_id = "pwb-edit-" + layer_id + "-"
-        + std::to_string(staged.base_revision);
-    // Base version comes from B's binding; without a store it stays empty
-    // (honest unknown) rather than a fabricated id.
-    request.base_version = std::string();
+    request.operation_id = operation_id_for(layer_id, staged);
+    request.base_version = frozen_base_version(layer_id);
     request.staged = staged;
     const CommitReceiptV1 receipt = store_->commit(request);
-    if (!receipt.ok && error != nullptr) {
-        *error = "store rejected commit: " + receipt.error;
+    if (!receipt.ok) {
+        // Buffer alive, staged file intact: repair + retry (same content
+        // reuses the same operation id).
+        if (error != nullptr) {
+            *error = "store rejected commit: " + receipt.error;
+        }
+        return staged;
     }
+
+    // 3) B accepted — now write the user's source provider and close the
+    //    round. A failure here leaves the catalog version authoritative;
+    //    the working copy can be reloaded from it.
+    pwb::qgis::EditDeltaV1 delta;
+    const std::string finalize_error = edit_->finalize(layer_id, &delta);
+    if (error != nullptr && !finalize_error.empty()) {
+        *error = "catalog version " + receipt.new_version
+            + " committed, but the working file commit failed: "
+            + finalize_error + " — reload the layer from the catalog "
+              "version";
+    }
+    pending_operations_.erase(layer_id);
     return staged;
 }
 

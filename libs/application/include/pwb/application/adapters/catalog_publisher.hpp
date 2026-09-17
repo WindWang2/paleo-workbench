@@ -18,6 +18,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 #include <pwb/application/adapters/data_store.hpp>
@@ -26,6 +27,18 @@
 #include <pwb/viz/seismic_volume.hpp>
 
 namespace pwb::application {
+
+// Publication did NOT reach the durable state. C's TaskRuntime contract
+// turns a throwing publish_success into a failed task (stable code
+// "publisher.publish_threw") instead of a false succeeded/published; for
+// failure/cancel outcomes the algorithm verdict stands and the throw is
+// recorded as a diagnostic. The publisher's Outcome map keeps the same
+// error for tests/UI observability.
+class CatalogPublishError : public std::runtime_error {
+public:
+    explicit CatalogPublishError(const std::string& what)
+        : std::runtime_error(what) {}
+};
 
 struct RequestContext {
     pwb::viz::VolumeGeometryV1 geometry;      // input volume axes
@@ -59,6 +72,13 @@ public:
 
 private:
     pwb::domain::RunId run_id_for(const std::string& request_id) const;
+
+    // Records the outcome, terminates an already-durable "running" run as
+    // Failed (best effort — a failing finish_run leaves the run "running",
+    // which is B's explicit recovery-pending state), then throws
+    // CatalogPublishError so the runtime never reports a false success.
+    [[noreturn]] void fail(const std::string& request_id, Outcome outcome,
+                           bool terminate_run, std::string message);
 
     std::shared_ptr<PwbDataStore> store_;
     std::filesystem::path staged_dir_;

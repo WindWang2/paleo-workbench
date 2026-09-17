@@ -24,6 +24,30 @@ pwb::domain::RunId CatalogResultPublisher::run_id_for(
     return pwb::domain::RunId("run_" + request_id);
 }
 
+void CatalogResultPublisher::fail(const std::string& request_id,
+                                  Outcome outcome, bool terminate_run,
+                                  std::string message) {
+    if (terminate_run) {
+        pwb::domain::Json extra = pwb::domain::Json::object();
+        extra["publication_failed"] = message;
+        auto finished = store_->coordinator().finish_run(
+            run_id_for(request_id), pwb::data::RunTerminalStatus::Failed,
+            std::move(extra));
+        if (!finished.is_ok()) {
+            message += "; finish_run(Failed) also failed ("
+                + finished.error().message
+                + ") — run left 'running' as explicit recovery pending";
+        }
+    }
+    outcome.success = false;
+    outcome.error = message;
+    {
+        const std::scoped_lock lock(mutex_);
+        outcomes_[request_id] = std::move(outcome);
+    }
+    throw CatalogPublishError(std::move(message));
+}
+
 void CatalogResultPublisher::publish_success(
     const pwb::science::AlgorithmResultV1& result) {
     Outcome outcome;
@@ -37,21 +61,19 @@ void CatalogResultPublisher::publish_success(
     }
 
     // Exactly one result volume per task (B enforces it too — reject early
-    // and honestly, before any durable write).
+    // and honestly, before any durable write). Reaching this method without
+    // a durable publish MUST throw: the runtime's contract counts a
+    // returning publish_success as "published".
     if (result.outputs.size() != 1) {
-        outcome.error = "expected exactly 1 result volume, got "
-            + std::to_string(result.outputs.size());
-        const std::scoped_lock lock(mutex_);
-        outcomes_[result.request_id] = std::move(outcome);
-        return;
+        fail(result.request_id, std::move(outcome), false,
+             "expected exactly 1 result volume, got "
+                 + std::to_string(result.outputs.size()));
     }
     const pwb::science::ProducedVolume& produced = result.outputs.front();
     const auto& shape = produced.volume.shape;
     if (shape[0] <= 0 || shape[1] <= 0 || shape[2] <= 0) {
-        outcome.error = "result volume has empty shape";
-        const std::scoped_lock lock(mutex_);
-        outcomes_[result.request_id] = std::move(outcome);
-        return;
+        fail(result.request_id, std::move(outcome), false,
+             "result volume has empty shape");
     }
 
     // 1) Durable "running" registration (idempotent on run id).
@@ -78,10 +100,8 @@ void CatalogResultPublisher::publish_success(
     auto registered =
         store_->coordinator().register_run(registration);
     if (!registered.is_ok()) {
-        outcome.error = "register_run failed: " + registered.error().message;
-        const std::scoped_lock lock(mutex_);
-        outcomes_[result.request_id] = std::move(outcome);
-        return;
+        fail(result.request_id, std::move(outcome), false,
+             "register_run failed: " + registered.error().message);
     }
 
     // 2) Serialize the single result volume (PWBVOL1: shape/axes/units +
@@ -126,10 +146,10 @@ void CatalogResultPublisher::publish_success(
     const std::string write_error =
         write_volume_payload(payload, payload_path);
     if (!write_error.empty()) {
-        outcome.error = "payload write failed: " + write_error;
-        const std::scoped_lock lock(mutex_);
-        outcomes_[result.request_id] = std::move(outcome);
-        return;
+        // The "running" run row is already durable — terminate it before
+        // throwing so nothing dangles (best effort, see fail()).
+        fail(result.request_id, std::move(outcome), true,
+             "payload write failed: " + write_error);
     }
 
     // 3) Single-result publish; the run turns terminal only when durable.
@@ -162,20 +182,15 @@ void CatalogResultPublisher::publish_success(
         store_->coordinator().publish_run_result(publish,
                                                  store_->document());
     if (!published.is_ok()) {
-        outcome.error = "publish_run_result failed: "
-            + published.error().message;
-        const std::scoped_lock lock(mutex_);
-        outcomes_[result.request_id] = std::move(outcome);
-        return;
+        fail(result.request_id, std::move(outcome), true,
+             "publish_run_result failed: " + published.error().message);
     }
     const pwb::data::PublishReceiptV1& receipt = published.value();
     if (receipt.status != pwb::data::PublishStatus::Published
         && receipt.status != pwb::data::PublishStatus::Duplicate) {
-        outcome.error = "publish status="
-            + std::string(pwb::data::to_string(receipt.status));
-        const std::scoped_lock lock(mutex_);
-        outcomes_[result.request_id] = std::move(outcome);
-        return;
+        fail(result.request_id, std::move(outcome), true,
+             "publish status="
+                 + std::string(pwb::data::to_string(receipt.status)));
     }
     outcome.success = true;
     outcome.version_id = receipt.new_version_id.str();
@@ -202,11 +217,11 @@ void CatalogResultPublisher::publish_failure(const Failure& failure) {
     auto registered =
         store_->coordinator().register_run(registration);
     if (!registered.is_ok()) {
-        outcome.error = "register_run(failure path) failed: "
-            + registered.error().message;
-        const std::scoped_lock lock(mutex_);
-        outcomes_[failure.request_id] = std::move(outcome);
-        return;
+        // Nothing durable yet — record + throw (the task's failure verdict
+        // stands; the runtime adds a visibility diagnostic).
+        fail(failure.request_id, std::move(outcome), false,
+             "register_run(failure path) failed: "
+                 + registered.error().message);
     }
     const pwb::data::RunTerminalStatus terminal =
         failure.cancelled ? pwb::data::RunTerminalStatus::Cancelled
@@ -217,10 +232,9 @@ void CatalogResultPublisher::publish_failure(const Failure& failure) {
     auto finished = store_->coordinator().finish_run(
         run_id_for(failure.request_id), terminal, std::move(extra));
     if (!finished.is_ok()) {
-        outcome.error = "finish_run failed: " + finished.error().message;
-        const std::scoped_lock lock(mutex_);
-        outcomes_[failure.request_id] = std::move(outcome);
-        return;
+        fail(failure.request_id, std::move(outcome), false,
+             "finish_run failed: " + finished.error().message
+                 + " — run left 'running' as explicit recovery pending");
     }
     outcome.success = true;   // failure correctly persisted (visibility)
     outcome.error = failure.code + ": " + failure.message;
