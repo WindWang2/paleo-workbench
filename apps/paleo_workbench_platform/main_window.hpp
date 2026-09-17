@@ -7,10 +7,13 @@
 // are governed by Pwb::ToolPolicy: menu, toolbar and shortcuts share the
 // same QAction objects, so one policy verdict drives every surface.
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
+#include <vector>
 
 #include <QAction>
 #include <QMainWindow>
@@ -18,10 +21,23 @@
 #include <pwb/application/project_session.hpp>
 #include <pwb/ui/tool_actions.hpp>
 
+#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <pwb/application/algorithm_runner.hpp>
+#endif
+
 class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsMapTool;
 class QLabel;
+class QDockWidget;
+
+namespace pwb::application {
+class AlgorithmRunner;
+class PwbDataStore;
+}
+namespace pwb::seismic_viewer {
+class SeismicSliceWidget;
+}
 
 namespace pwb::app {
 
@@ -77,6 +93,26 @@ public:
     // "" on success; "unavailable" when built without the viewer.
     QString loadLasIntoDock(const QString& las_path);
 #endif
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    // PWBVOL1 catalog version ids of the open project (attribute inputs /
+    // viewable volumes).
+    std::vector<std::string> volumeVersionIds() const;
+    // Displays one PWBVOL1 catalog version in the seismic dock. Returns ""
+    // on success.
+    QString openVolumeVersion(const std::string& version_id);
+#endif
+#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+    // Submits one attribute run over a PWBVOL1 version into the real B
+    // store (register -> payload -> publish). Returns the request id or ""
+    // + *error.
+    std::string runAttribute(
+        const std::string& algorithm_id,
+        const std::map<std::string, std::string>& params,
+        const std::string& input_version_id, std::string* error);
+    // Polls a runAttribute request ("" status = unknown id).
+    pwb::application::AlgorithmRunner::Outcome attributeOutcome(
+        const std::string& request_id);
+#endif
     enum class DirtyCloseDecision { Proceed, SaveAndClose, DiscardAndClose };
 
     // Re-projects policy verdicts onto the actions; public because map
@@ -113,12 +149,26 @@ private:
     void onCanvasMapToolChanged();
     void setStatusFromPolicy(
         const std::map<std::string, pwb::tool_policy::ToolAvailability>& availability);
+#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+    void runAttributeDialog();
+#endif
 
     std::unique_ptr<pwb::application::ProjectSession> session_;
     pwb::ui::ToolActionSet actions_;
     QgsMapCanvas* canvas_ = nullptr;
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;
+    // The B store opened by openProject (null in module-only mode); the
+    // attribute runner and volume viewer resolve catalog versions here.
+    std::shared_ptr<pwb::application::PwbDataStore> project_store_;
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    QDockWidget* seismic_dock_ = nullptr;
+    pwb::seismic_viewer::SeismicSliceWidget* slice_widget_ = nullptr;
+    std::uint64_t slice_revision_ = 0;
+#endif
+#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+    std::unique_ptr<pwb::application::AlgorithmRunner> attribute_runner_;
+#endif
 
     // Map tools (canvas-owned via setMapTool; kept for re-arming).
     QgsMapTool* pan_tool_ = nullptr;

@@ -86,6 +86,32 @@ if(PWB_BUILD_DATA)
         TIMEOUT 300)
 endif()
 
+# Attribute UI test (M1): real MainWindow with D's slice dock + E's
+# kernels + real B store in one process. Only when all of D/E/B are built;
+# the same guards the app itself uses.
+if(PWB_BUILD_DATA AND PWB_BUILD_SEISMIC_VIEWER
+        AND PWB_BUILD_SEISMIC_ATTRIBUTES)
+    add_executable(platform_attribute_ui test_attribute_ui.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+    set_target_properties(platform_attribute_ui PROPERTIES AUTOMOC ON)
+    target_compile_features(platform_attribute_ui PRIVATE cxx_std_20)
+    target_include_directories(platform_attribute_ui PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+    target_link_libraries(platform_attribute_ui PRIVATE
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data
+        Pwb::SeismicViewer Pwb::SeismicAttributes Pwb::Visualization
+        Pwb::Science Pwb::Workflow)
+    target_compile_definitions(platform_attribute_ui PRIVATE
+        PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        PWB_WITH_SEISMIC_VIEWER=1 PWB_WITH_SEISMIC_ATTRIBUTES=1)
+    add_test(NAME platform.attribute_ui COMMAND platform_attribute_ui)
+    set_tests_properties(platform.attribute_ui PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+endif()
+
 # App-level smoke: the real executable's self-check (fixtures + render +
 # export in one process, exit code is the verdict).
 add_test(NAME platform.qgis_smoke_app COMMAND pwb-platform --self-check)

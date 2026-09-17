@@ -22,3 +22,16 @@ if(TARGET Pwb::VisualizationWellLog)
     target_link_libraries(pwb-platform PRIVATE Pwb::VisualizationWellLog)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_WELL_LOG=1)
 endif()
+
+# D seismic viewer dock + E attribute kernels: the app is the composition
+# root (E's contract: the host registers; no static auto-registration).
+if(TARGET Pwb::SeismicViewer)
+    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicViewer)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_VIEWER=1)
+endif()
+if(TARGET Pwb::SeismicAttributes AND TARGET Pwb::Data
+        AND TARGET Pwb::Science AND TARGET Pwb::Workflow)
+    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicAttributes)
+    target_compile_definitions(pwb-platform PRIVATE
+        PWB_WITH_SEISMIC_ATTRIBUTES=1)
+endif()

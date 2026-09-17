@@ -10,6 +10,22 @@
 #include <QStatusBar>
 #include <QToolBar>
 
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QFormLayout>
+#include <QSpinBox>
+#include <QVBoxLayout>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QTimer>
+#include <QEventLoop>
+
+#include <pwb/application/adapters/volume_payload.hpp>
+#include <pwb/seismic_viewer/seismic_slice_widget.hpp>
+#include <pwb/viz/seismic_volume.hpp>
+#endif
+
 #include <qgsfeatureiterator.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
@@ -24,6 +40,10 @@
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/qgis/layout_service.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+
+#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <pwb/seismic_attributes/attributes.hpp>
+#endif
 
 #ifdef PWB_WITH_WELL_LOG
 #include <pwb/viz/well_log_host_widget.hpp>
@@ -127,6 +147,27 @@ private:
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     session_ = std::make_unique<pwb::application::ProjectSession>();
+#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+    // The app is the composition root: E's contract has the host register
+    // explicitly (no static auto-registration into a shared registry).
+    attribute_runner_ = std::make_unique<pwb::application::AlgorithmRunner>();
+    const std::string rejections[] = {
+        attribute_runner_->register_kernel(
+            pwb::seismic_attributes::make_envelope("pwb-platform")),
+        attribute_runner_->register_kernel(
+            pwb::seismic_attributes::make_instantaneous_phase("pwb-platform")),
+        attribute_runner_->register_kernel(
+            pwb::seismic_attributes::make_instantaneous_frequency(
+                "pwb-platform")),
+        attribute_runner_->register_kernel(
+            pwb::seismic_attributes::make_rms_amplitude("pwb-platform")),
+    };
+    for (const std::string& rejection : rejections) {
+        if (!rejection.empty()) {
+            qWarning("attribute kernel registration: %s", rejection.c_str());
+        }
+    }
+#endif
     dirty_close_responder_ = [this]() {
         return QMessageBox::question(
             this, tr("未提交的修改"),
@@ -178,6 +219,14 @@ void MainWindow::buildUi() {
     auto* well_log_host = new pwb::viz::WellLogHostWidget(well_log_dock);
     well_log_dock->setWidget(well_log_host);
     addDockWidget(Qt::RightDockWidgetArea, well_log_dock);
+#endif
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    // D's slice host in a dock (moc-free widget like the WLE host).
+    seismic_dock_ = new QDockWidget(tr("地震视图"), this);
+    seismic_dock_->setObjectName(QStringLiteral("seismic-dock"));
+    slice_widget_ = new pwb::seismic_viewer::SeismicSliceWidget(seismic_dock_);
+    seismic_dock_->setWidget(slice_widget_);
+    addDockWidget(Qt::RightDockWidgetArea, seismic_dock_);
 #endif
 
     // Tools are canvas-parented; MapSession teardown unsets them first.
@@ -261,6 +310,14 @@ void MainWindow::buildMenusAndToolbar() {
     view_menu->addAction(actions_.action("full_extent"));
     view_menu->addSeparator();
     view_menu->addAction(actions_.action("refresh"));
+
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_SEISMIC_ATTRIBUTES) \
+    && defined(PWB_WITH_DATA_INTEGRATION)
+    QMenu* seismic_menu = menuBar()->addMenu(tr("地震(&S)"));
+    seismic_menu->addAction(tr("计算属性…"), this,
+                            &MainWindow::runAttributeDialog,
+                            QKeySequence(Qt::CTRL | Qt::Key_U));
+#endif
 
     auto* toolbar = addToolBar(tr("地图工具"));
     toolbar->setObjectName(QStringLiteral("map-toolbar"));
@@ -411,12 +468,14 @@ QString MainWindow::openProject(const QString& project_file) {
     const pwb::data::RecoveryReportV1 recovery = store->recover();
 
     session_->set_store(store);
+    project_store_ = store;
 
     // Materialize every bound GeoJSON layer as an explicit working copy —
     // the catalog payload file itself is read-only for the shell.
     auto snapshot = store->snapshot();
     if (!snapshot.is_ok()) {
         session_->set_store(nullptr);
+        project_store_ = nullptr;
         return QString::fromStdString(snapshot.error().message);
     }
     std::map<std::string, const pwb::catalog::DataVersion*> versions;
@@ -744,5 +803,196 @@ QString MainWindow::commitActiveLayer(const std::filesystem::path& staged_dir) {
     session_->stage_commit(active->layer_id, staged_dir, &error);
     return QString::fromStdString(error);
 }
+
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+std::vector<std::string> MainWindow::volumeVersionIds() const {
+    std::vector<std::string> ids;
+    if (project_store_ == nullptr) return ids;
+    auto snapshot = project_store_->snapshot();
+    if (!snapshot.is_ok()) return ids;
+    for (const auto& version : snapshot.value().catalog_versions) {
+        if (version.format == "PWBVOL1" && !version.trashed) {
+            ids.push_back(version.id.str());
+        }
+    }
+    return ids;
+}
+
+QString MainWindow::openVolumeVersion(const std::string& version_id) {
+    if (project_store_ == nullptr) return tr("未打开工程");
+    auto snapshot = project_store_->snapshot();
+    if (!snapshot.is_ok()) {
+        return QString::fromStdString(snapshot.error().message);
+    }
+    const std::filesystem::path project_dir =
+        project_store_->project_file().parent_path();
+    for (const auto& version : snapshot.value().catalog_versions) {
+        if (version.id.str() != version_id || version.format != "PWBVOL1") {
+            continue;
+        }
+        pwb::application::VolumePayload payload;
+        const std::string read_error = pwb::application::read_volume_payload(
+            project_dir / version.path, &payload);
+        if (!read_error.empty()) {
+            return QString::fromStdString(read_error);
+        }
+        pwb::viz::VolumeGeometryV1 geometry;
+        geometry.shape = {static_cast<std::int64_t>(payload.header.ni),
+                          static_cast<std::int64_t>(payload.header.nc),
+                          static_cast<std::int64_t>(payload.header.ns)};
+        geometry.strides = {0, 0, 0};
+        geometry.origin = {payload.header.inline_start,
+                           payload.header.crossline_start,
+                           payload.header.sample_start};
+        geometry.step = {payload.header.inline_step,
+                         payload.header.crossline_step,
+                         payload.header.sample_step};
+        geometry.unit = payload.header.sample_unit;
+        auto volume = std::shared_ptr<pwb::viz::ISeismicVolume>(
+            pwb::viz::make_owning_volume(geometry,
+                                         std::move(payload.samples))
+                .release());
+        slice_widget_->set_volume(
+            volume, pwb::seismic_viewer::VolumeIdentity{version_id, 0},
+            ++slice_revision_);
+        seismic_dock_->show();
+        seismic_dock_->raise();
+        statusBar()->showMessage(
+            tr("体版本已载入：%1").arg(QString::fromStdString(version_id)),
+            8000);
+        return QString();
+    }
+    return tr("catalog 中未找到该体版本：%1").arg(
+        QString::fromStdString(version_id));
+}
+#endif
+
+#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+std::string MainWindow::runAttribute(
+    const std::string& algorithm_id,
+    const std::map<std::string, std::string>& params,
+    const std::string& input_version_id, std::string* error) {
+    if (attribute_runner_ == nullptr) {
+        if (error != nullptr) *error = "attribute runner unavailable";
+        return "";
+    }
+    return attribute_runner_->submit(project_store_, algorithm_id, params,
+                                     input_version_id, error);
+}
+
+pwb::application::AlgorithmRunner::Outcome MainWindow::attributeOutcome(
+    const std::string& request_id) {
+    if (attribute_runner_ == nullptr) return {};
+    return attribute_runner_->outcome(request_id);
+}
+
+void MainWindow::runAttributeDialog() {
+    if (project_store_ == nullptr) {
+        QMessageBox::information(this, tr("计算属性"), tr("请先打开工程。"));
+        return;
+    }
+    const std::vector<std::string> versions = volumeVersionIds();
+    if (versions.empty()) {
+        QMessageBox::information(
+            this, tr("计算属性"),
+            tr("当前工程没有 PWBVOL1 体版本（先导入/计算一个体）。"));
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("计算地震属性"));
+    auto* algorithm = new QComboBox(&dialog);
+    for (const auto& info : attribute_runner_->algorithms()) {
+        algorithm->addItem(QString::fromStdString(info.display_name),
+                           QString::fromStdString(info.algorithm_id));
+    }
+    auto* input = new QComboBox(&dialog);
+    for (const std::string& id : versions) {
+        input->addItem(QString::fromStdString(id),
+                       QString::fromStdString(id));
+    }
+    auto* window = new QSpinBox(&dialog);
+    window->setRange(0, 4096);
+    window->setValue(21);
+    auto* sample_interval = new QDoubleSpinBox(&dialog);
+    sample_interval->setDecimals(6);
+    sample_interval->setMinimum(0.000001);
+    sample_interval->setValue(0.002);
+    sample_interval->setSuffix(tr(" s"));
+
+    auto* form = new QFormLayout;
+    form->addRow(tr("算法"), algorithm);
+    form->addRow(tr("输入体版本"), input);
+    form->addRow(tr("窗口（RMS）"), window);
+    form->addRow(tr("采样间隔（瞬时频率）"), sample_interval);
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const std::string algorithm_id =
+        algorithm->currentData().toString().toStdString();
+    const std::string input_version =
+        input->currentData().toString().toStdString();
+    std::map<std::string, std::string> params;
+    if (algorithm_id == "seismic.rms_amplitude") {
+        params["window"] = std::to_string(window->value());
+    } else if (algorithm_id == "seismic.instantaneous_frequency") {
+        params["sample_interval"] = std::to_string(
+            sample_interval->value());
+    }
+
+    std::string error;
+    const std::string request_id =
+        runAttribute(algorithm_id, params, input_version, &error);
+    if (request_id.empty()) {
+        QMessageBox::warning(this, tr("计算属性"),
+                             QString::fromStdString(error));
+        return;
+    }
+
+    // M1: modal progress for the (small) fixture-scale volumes; large
+    // volumes get a non-modal progress surface later.
+    QTimer timer(&dialog);
+    timer.setInterval(50);
+    QEventLoop loop;
+    QObject::connect(&timer, &QTimer::timeout, &loop, [&]() {
+        const std::string status = attributeOutcome(request_id).status;
+        if (status == "queued" || status == "running"
+            || status == "publishing") {
+            return;
+        }
+        loop.quit();
+    });
+    timer.start();
+    loop.exec();
+    const auto outcome = attributeOutcome(request_id);
+    if (outcome.status != "succeeded") {
+        QMessageBox::warning(
+            this, tr("计算属性"),
+            tr("运行失败：%1\n%2")
+                .arg(QString::fromStdString(outcome.error_code))
+                .arg(QString::fromStdString(outcome.error)));
+        return;
+    }
+#if defined(PWB_WITH_SEISMIC_VIEWER)
+    const QString view_error =
+        openVolumeVersion(outcome.version_id);
+    if (!view_error.isEmpty()) {
+        QMessageBox::warning(this, tr("计算属性"), view_error);
+        return;
+    }
+#endif
+    statusBar()->showMessage(
+        tr("属性已发布：%1（运行 %2）")
+            .arg(QString::fromStdString(outcome.version_id))
+            .arg(QString::fromStdString(outcome.run_id)),
+        10000);
+}
+#endif
 
 }  // namespace pwb::app
