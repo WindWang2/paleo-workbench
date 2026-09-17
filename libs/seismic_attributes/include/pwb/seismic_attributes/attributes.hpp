@@ -22,10 +22,10 @@
 namespace pwb::seismic_attributes {
 
 // Algorithm ids (distinct from C3's "seismic.coherence_c3"):
-//   seismic.attribute.envelope
-//   seismic.attribute.instantaneous_phase
-//   seismic.attribute.instantaneous_frequency
-//   seismic.attribute.rms_amplitude
+//   seismic.envelope
+//   seismic.instantaneous_phase
+//   seismic.instantaneous_frequency
+//   seismic.rms_amplitude
 
 // Factories. Each descriptor declares exactly one volume_f32 input ("volume")
 // and one volume_f32 output; the output shape/strides mirror the input's

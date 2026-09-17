@@ -38,12 +38,18 @@
 
 ## 1. 算法注册契约
 
+> 修正记录（实现集成时发现）：基线 `AlgorithmRegistry` 的 id 校验只接受
+> **单 dot** 的 `<domain>.<name>` 模式（`libs/algorithms/src/registry.cpp`
+> `valid_algorithm_id`），v3-contracts 初稿的 `seismic.attribute.<name>`
+> 双 dot 命名会被拒绝。冻结 id 修正为下表单 dot 形式（域 `seismic`，与
+> C3 的 `seismic.coherence_c3` 无冲突）。
+
 | 算法 id | 输出端口名 | 输出单位 | 参数 |
 |---|---|---|---|
-| `seismic.attribute.envelope` | `envelope` | `""`（振幅） | 无 |
-| `seismic.attribute.instantaneous_phase` | `instantaneous_phase` | `rad` | 无 |
-| `seismic.attribute.instantaneous_frequency` | `instantaneous_frequency` | `Hz` | `sample_interval`（number，秒，>0，默认 1.0） |
-| `seismic.attribute.rms_amplitude` | `rms_amplitude` | `""`（振幅） | `window`（integer，半窗，0..1048576，默认 21） |
+| `seismic.envelope` | `envelope` | `""`（振幅） | 无 |
+| `seismic.instantaneous_phase` | `instantaneous_phase` | `rad` | 无 |
+| `seismic.instantaneous_frequency` | `instantaneous_frequency` | `Hz` | `sample_interval`（number，秒，>0，默认 1.0） |
+| `seismic.rms_amplitude` | `rms_amplitude` | `""`（振幅） | `window`（integer，半窗，0..1048576，默认 21） |
 
 - 四算法各恰好 1 个输入端口 `volume`（volume_f32，required）与 1 个输出端口
   （volume_f32）；输出 shape = 输入 shape，packed C-order，数据为 owned float32
@@ -72,7 +78,7 @@ strided 输入（按 `effective_strides()` 寻址，不为切片复制整卷）�
 | n_t=1 | 支持（analytic=x，env=\|x\|，phase=0 或 π） | 同左 | **显式拒绝**（oracle ValueError；诊断 `input.sample_count.too_small`） | 支持（窗口折叠到单点） |
 | n_t=2 | 支持（h=[1,1]，analytic=x 实数） | 同左 | 支持（两点同为一阶单侧差分） | 支持 |
 | 奇/偶/非 2 幂长度 | 支持任意 N≥1（pocketfft 混合基+Bluestein） | 同左 | N≥2 | 任意 |
-| NaN/Inf | 传播：该 trace 全 NaN（Inf→NaN）；不静默清洗 | 该 trace 全 NaN | unwrap 的 NaN 向后扩散到 trace 尾部（复刻 cumsum 语义） | NaN 在窗口可达范围内传播（symmetric 折叠） |
+| NaN/Inf | 传播：该 trace 全 NaN（Inf→NaN）；不静默清洗 | 该 trace 全 NaN | unwrap 的 NaN 向后扩散到 trace 尾部（复刻 cumsum 语义） | 复刻 `uniform_filter1d` 滑窗和的非有限拓扑（实测冻结）：NaN 进入滑窗和后该 trace **其后全部** 输出 NaN；Inf 在窗内输出 +Inf，离开窗口那一步起（Inf−Inf）其后全部 NaN。有限值路径同构（先减后加滑窗和，float64） |
 | 常数 | env=\|c\|，phase=0（c>0）或 π（c<0），c=0 → 0 | 同左 | unwrap 全常数 → 频率 0 | RMS=\|c\| |
 | 边界 | — | — | 首末点一阶单侧，内部二阶中心 | symmetric（边缘重复）padding |
 | dt/单位 | — | rad | `sample_interval` 秒；输出 cycles/s = Hz（provider 传 ms 时由宿主先行 ÷1000，与 `seismic_view.py:1835` 一致） | — |
@@ -100,18 +106,26 @@ strided 输入（按 `effective_strides()` 寻址，不为切片复制整卷）�
 
 对照对象为固定解释器生成的 fixture（float32 期望值）。比较规则：
 
-- envelope / rms_amplitude：`max_abs` 与 `max_rel`（rel 分母 max(|expected|, 1e-30)）。
+- envelope / rms_amplitude：逐元素双判据 `|a-e| ≤ max(max_abs, max_rel·|e|)`。
 - instantaneous_phase：**circular difference** `|wrap(a-b)|`，wrap 到 [-π,π]；atan2
   分支与 ±π 零符号差异天然消解。
-- instantaneous_frequency：非 NaN 处 max_abs/max_rel；dt 缩放放大已计入。
-- NaN 掩码：C++ 与 oracle 的 NaN 位置必须逐元素一致；finite/NaN 分布单独统计报告。
+- instantaneous_frequency：非 NaN 处双判据；dt 缩放放大已计入。
+- NaN/Inf 掩码：C++ 与 oracle 的非有限位置（含 Inf 符号）必须逐元素一致；
+  finite/NaN 分布单独统计报告。
+- **幅度不确定子集（phase/freq 专用，报告不豁免）**：解析信号在数学上为精确
+  零的样本（impulse 类数据实测存在），其相位在任何实现中都是纯舍入噪声
+  （oracle float32 ~1e-9、double 路径 ~1e-17，角度任意）。判据：oracle 包络
+  `env ≤ 1e-6 · max(该 trace env)` 的样本为"不确定"；phase 在不确定样本上只
+  报告偏差不断言；freq 额外把不确定样本的 ±1 邻域一并转为报告（unwrap 链的
+  2π 偏移差只在链偏移变化处的 gradient 浮现）。不确定子集的数量与最大偏差
+  逐 case 打印，不允许整体跳过。
 
 | 算法 | max_abs | max_rel | 依据 |
 |---|---|---|---|
 | envelope | 1e-5 | 1e-4 | oracle complex64 舍入 ~1.2e-7·A |
 | instantaneous_phase | 1e-4 rad | — | complex64 angle 舍入 ~1.2e-7 rad |
 | instantaneous_frequency | 5e-3 | 1e-2 | float32 unwrap 链 + ÷dt 放大（dt=0.002s 时 ÷2π·500） |
-| rms_amplitude | 1e-6 | 1e-5 | oracle 平方/均值即 float64，两侧同精度 |
+| rms_amplitude | 1e-6 | 1e-5 | oracle 平方/均值即 float64，滑窗和同构 |
 
 fixture manifest 逐 case 记录容差；实测误差逐算法报告 max_abs/max_rel 与
 finite/NaN 掩码统计，不允许"通过"二字带过。
