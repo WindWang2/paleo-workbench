@@ -5,6 +5,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <latch>
+#include <stdexcept>
 #include <stop_token>
 #include <thread>
 
@@ -50,12 +53,16 @@ private:
 };
 
 // Scripted algorithm: succeeds / fails / loops until cancelled, with optional
-// slow phase so cancellation races the worker.
+// slow phase so cancellation races the worker. The `gated` mode blocks inside
+// run() until a latch is released (barrier-precise ordering for publish
+// tests: the test wires handles into publishers while run() is parked).
 class ScriptedAlgorithm final : public IAlgorithm {
 public:
-    enum class Mode { succeed, fail, cancel_cooperative };
+    enum class Mode { succeed, fail, cancel_cooperative, gated };
 
     explicit ScriptedAlgorithm(Mode mode) : mode_(mode) {}
+    explicit ScriptedAlgorithm(std::latch& entered, std::latch& release)
+        : mode_(Mode::gated), entered_(&entered), release_(&release) {}
 
     [[nodiscard]] const AlgorithmDescriptor& descriptor() const override {
         return descriptor_;
@@ -66,6 +73,20 @@ public:
         runs_++;
         if (mode_ == Mode::fail) {
             return AlgorithmError{{Diagnostic{"scripted.failure", "planned failure", "error"}}};
+        }
+        if (mode_ == Mode::gated) {
+            entered_->count_down();
+            release_->wait();
+            if (progress) {
+                progress(ProgressReport{0.5, "gated"});
+            }
+            AlgorithmResultV1 result;
+            result.request_id = request.request_id;
+            result.outputs.push_back(ProducedVolume{"out", VolumeView{}, ""});
+            result.provenance.algorithm_id = descriptor_.algorithm_id;
+            result.provenance.algorithm_version = descriptor_.version;
+            result.provenance.build_identity = "scripted";
+            return result;
         }
         if (progress) {
             progress(ProgressReport{0.5, "half"});
@@ -103,6 +124,8 @@ private:
         return descriptor;
     }();
     Mode mode_;
+    std::latch* entered_{nullptr};
+    std::latch* release_{nullptr};
     std::atomic<int> runs_{0};
 };
 
@@ -261,6 +284,398 @@ TEST(real_coherence_runs_end_to_end_through_the_runtime) {
     PWB_CHECK(publisher->success_count(handle.snapshot().request_id) == 1);
     PWB_CHECK(snapshot.progress.has_value());
     PWB_CHECK(snapshot.progress->fraction == 1.0);
+}
+
+// --- v3 publish/close semantics (v3-contracts.md §1) -----------------------
+//
+// All ordering below is enforced with latches/flags, never fixed sleeps.
+
+namespace {
+
+// Blocks inside publish_success until released; counts publish calls.
+class BarrierPublisher final : public IResultPublisherV1 {
+public:
+    BarrierPublisher(std::latch& entered, std::latch& release)
+        : entered_(&entered), release_(&release) {}
+
+    void publish_success(const AlgorithmResultV1&) override {
+        ++success_calls;
+        entered_->count_down();
+        release_->wait();
+    }
+    void publish_failure(const Failure&) override { ++failure_calls; }
+
+    std::atomic<int> success_calls{0};
+    std::atomic<int> failure_calls{0};
+
+private:
+    std::latch* entered_;
+    std::latch* release_;
+};
+
+// publish_success throws; publish_failure records. For L3 "publish throws".
+class ThrowingSuccessPublisher final : public IResultPublisherV1 {
+public:
+    void publish_success(const AlgorithmResultV1&) override {
+        ++success_calls;
+        throw std::runtime_error("database down");
+    }
+    void publish_failure(const Failure& failure) override {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        failures_.push_back(failure);
+    }
+    [[nodiscard]] const Failure* find_failure(const std::string& request_id) const {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        for (const Failure& failure : failures_) {
+            if (failure.request_id == request_id) {
+                return &failure;
+            }
+        }
+        return nullptr;
+    }
+
+    std::atomic<int> success_calls{0};
+
+private:
+    mutable std::mutex mutex_;
+    std::vector<Failure> failures_;
+};
+
+// publish_failure throws; publish_success must never be called.
+class ThrowingFailurePublisher final : public IResultPublisherV1 {
+public:
+    void publish_success(const AlgorithmResultV1&) override { ++success_calls; }
+    void publish_failure(const Failure&) override {
+        ++failure_calls;
+        throw std::runtime_error("failure sink unavailable");
+    }
+
+    std::atomic<int> success_calls{0};
+    std::atomic<int> failure_calls{0};
+};
+
+bool has_diagnostic(const std::vector<Diagnostic>& diagnostics, const char* code) {
+    for (const Diagnostic& diagnostic : diagnostics) {
+        if (diagnostic.code == code) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+TEST(wait_returns_only_after_publish_completes) {
+    // v3: publish BEFORE terminal. While the publisher is parked inside
+    // publish_success, wait() must not return and the snapshot must expose
+    // the publishing phase.
+    std::latch publish_entered(1);
+    std::latch release_publish(1);
+    auto publisher = std::make_shared<BarrierPublisher>(publish_entered, release_publish);
+
+    TaskRuntime runtime;
+    TaskHandle handle = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::succeed),
+        scripted_request("slowpub-1"), publisher);
+
+    std::atomic<bool> wait_done{false};
+    std::thread waiter([&handle, &wait_done] {
+        handle.wait();
+        wait_done.store(true, std::memory_order_release);
+    });
+
+    publish_entered.wait(); // publisher is inside publish_success, parked
+    PWB_CHECK(!wait_done.load(std::memory_order_acquire));
+    PWB_CHECK(handle.snapshot().status == TaskStatus::publishing);
+    PWB_CHECK(!handle.snapshot().published);
+
+    release_publish.count_down();
+    waiter.join();
+    PWB_CHECK(wait_done.load(std::memory_order_acquire));
+    const TaskSnapshot snapshot = handle.snapshot();
+    PWB_CHECK(snapshot.status == TaskStatus::succeeded);
+    PWB_CHECK(snapshot.published);
+    PWB_CHECK(publisher->success_calls == 1);
+}
+
+TEST(publish_success_throwing_marks_task_failed_and_worker_continues) {
+    TaskRuntime runtime;
+    auto publisher = std::make_shared<ThrowingSuccessPublisher>();
+    TaskHandle handle = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::succeed),
+        scripted_request("throw-1"), publisher);
+    handle.wait();
+    const TaskSnapshot snapshot = handle.snapshot();
+    PWB_CHECK(snapshot.status == TaskStatus::failed); // publish failed => not success
+    PWB_CHECK(snapshot.error_code == "publisher.publish_threw");
+    PWB_CHECK(!snapshot.published);
+    PWB_CHECK(has_diagnostic(snapshot.diagnostics, "publisher.publish_threw"));
+    PWB_CHECK(publisher->success_calls == 1); // exactly one attempt
+    PWB_CHECK(publisher->find_failure("throw-1") == nullptr); // no compensating failure
+
+    // The worker survived: the next task runs and publishes normally.
+    auto next_publisher = std::make_shared<RecordingPublisher>();
+    TaskHandle next = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::succeed),
+        scripted_request("throw-2"), next_publisher);
+    next.wait();
+    PWB_CHECK(next.snapshot().status == TaskStatus::succeeded);
+    PWB_CHECK(next.snapshot().published);
+    PWB_CHECK(next_publisher->success_count("throw-2") == 1);
+}
+
+TEST(failure_publish_throwing_keeps_verdict_and_publishes_once) {
+    TaskRuntime runtime;
+
+    // Algorithm failure + throwing publish_failure: verdict stays "failed"
+    // with the algorithm's own code; the publish exception is only a
+    // diagnostic; exactly one publish attempt; never success.
+    auto throwing = std::make_shared<ThrowingFailurePublisher>();
+    TaskHandle failed_handle = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::fail),
+        scripted_request("fthrow-1"), throwing);
+    failed_handle.wait();
+    const TaskSnapshot failed_snapshot = failed_handle.snapshot();
+    PWB_CHECK(failed_snapshot.status == TaskStatus::failed);
+    PWB_CHECK(failed_snapshot.error_code == "scripted.failure");
+    PWB_CHECK(!failed_snapshot.published);
+    PWB_CHECK(has_diagnostic(failed_snapshot.diagnostics, "publisher.publish_failure_threw"));
+    PWB_CHECK(throwing->failure_calls == 1);
+    PWB_CHECK(throwing->success_calls == 0);
+
+    // Queued cancellation + throwing publish_failure: stays cancelled, no
+    // success result can exist, publish attempted exactly once.
+    auto blocker =
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::cancel_cooperative);
+    TaskHandle blocking_handle = runtime.submit(blocker, scripted_request("fthrow-blk"), nullptr);
+    while (blocker->runs() == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    TaskHandle cancelled_handle = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::succeed),
+        scripted_request("fthrow-2"), throwing);
+    cancelled_handle.cancel(); // still queued behind the blocker
+    blocking_handle.cancel();
+    blocking_handle.wait();
+    cancelled_handle.wait();
+    const TaskSnapshot cancelled_snapshot = cancelled_handle.snapshot();
+    PWB_CHECK(cancelled_snapshot.status == TaskStatus::cancelled);
+    PWB_CHECK(!cancelled_snapshot.published);
+    PWB_CHECK(has_diagnostic(cancelled_snapshot.diagnostics,
+                             "publisher.publish_failure_threw"));
+    PWB_CHECK(throwing->failure_calls == 2); // fthrow-1 + fthrow-2, each once
+    PWB_CHECK(throwing->success_calls == 0);
+}
+
+TEST(snapshot_is_reentrant_from_publish_callback) {
+    // The publisher (worker thread) reads snapshot() and calls cancel()
+    // while publish_success is in flight: no lock is held across publish, so
+    // both must be safe and observe status==publishing.
+    struct Hooks {
+        std::mutex mutex;
+        TaskHandle handle;
+        bool observed_publishing{false};
+        std::string observed_error;
+    };
+    auto hook_ptr = std::make_shared<Hooks>();
+
+    class ReentrantPublisher final : public IResultPublisherV1 {
+    public:
+        explicit ReentrantPublisher(std::shared_ptr<Hooks> hooks) : hooks_(std::move(hooks)) {}
+        void publish_success(const AlgorithmResultV1&) override {
+            const std::lock_guard<std::mutex> lock(hooks_->mutex);
+            const TaskSnapshot snapshot = hooks_->handle.snapshot();
+            hooks_->observed_publishing = snapshot.status == TaskStatus::publishing;
+            hooks_->handle.cancel(); // L3 no-op; must not throw or deadlock
+            ++calls;
+        }
+        void publish_failure(const Failure&) override { ++failures; }
+        std::atomic<int> calls{0};
+        std::atomic<int> failures{0};
+
+    private:
+        std::shared_ptr<Hooks> hooks_;
+    };
+
+    std::latch run_entered(1);
+    std::latch release_run(1);
+    TaskRuntime runtime;
+    auto publisher = std::make_shared<ReentrantPublisher>(hook_ptr);
+    TaskHandle handle =
+        runtime.submit(std::make_shared<ScriptedAlgorithm>(run_entered, release_run),
+                       scripted_request("reent-1"), publisher);
+    run_entered.wait(); // algorithm parked: wire the handle safely
+    {
+        const std::lock_guard<std::mutex> lock(hook_ptr->mutex);
+        hook_ptr->handle = handle;
+    }
+    release_run.count_down();
+    handle.wait();
+
+    PWB_CHECK(publisher->calls == 1);
+    PWB_CHECK(hook_ptr->observed_publishing);
+    PWB_CHECK(handle.snapshot().status == TaskStatus::succeeded);
+    PWB_CHECK(handle.snapshot().published);
+}
+
+TEST(self_wait_from_publisher_is_detected_and_throws) {
+    // A publisher waiting on its own task could only be satisfied by itself;
+    // v3 detects it instead of deadlocking. The publisher catches the
+    // logic_error, so publication still completes and the task succeeds.
+    struct SelfHooks {
+        std::mutex mutex;
+        TaskHandle handle;
+        bool caught_self_wait{false};
+        std::string message;
+    };
+    auto hook_ptr = std::make_shared<SelfHooks>();
+
+    class SelfWaitingPublisher final : public IResultPublisherV1 {
+    public:
+        explicit SelfWaitingPublisher(std::shared_ptr<SelfHooks> hooks)
+            : hooks_(std::move(hooks)) {}
+        void publish_success(const AlgorithmResultV1&) override {
+            const std::lock_guard<std::mutex> lock(hooks_->mutex);
+            try {
+                hooks_->handle.wait(); // prohibited self-wait
+            } catch (const std::logic_error& error) {
+                hooks_->caught_self_wait = true;
+                hooks_->message = error.what();
+            }
+        }
+        void publish_failure(const Failure&) override {}
+
+    private:
+        std::shared_ptr<SelfHooks> hooks_;
+    };
+
+    std::latch run_entered(1);
+    std::latch release_run(1);
+    TaskRuntime runtime;
+    auto publisher = std::make_shared<SelfWaitingPublisher>(hook_ptr);
+    TaskHandle handle =
+        runtime.submit(std::make_shared<ScriptedAlgorithm>(run_entered, release_run),
+                       scripted_request("selfwait-1"), publisher);
+    run_entered.wait();
+    {
+        const std::lock_guard<std::mutex> lock(hook_ptr->mutex);
+        hook_ptr->handle = handle;
+    }
+    release_run.count_down();
+    handle.wait();
+
+    PWB_CHECK(hook_ptr->caught_self_wait);
+    PWB_CHECK(hook_ptr->message.find("self_wait_detected") != std::string::npos);
+    PWB_CHECK(handle.snapshot().status == TaskStatus::succeeded);
+    PWB_CHECK(handle.snapshot().published);
+}
+
+TEST(wait_idle_from_publisher_is_detected_and_throws) {
+    struct IdleHooks {
+        std::mutex mutex;
+        TaskRuntime* runtime{nullptr};
+        bool caught{false};
+    };
+    auto hook_ptr = std::make_shared<IdleHooks>();
+
+    class IdleWaitingPublisher final : public IResultPublisherV1 {
+    public:
+        explicit IdleWaitingPublisher(std::shared_ptr<IdleHooks> hooks)
+            : hooks_(std::move(hooks)) {}
+        void publish_success(const AlgorithmResultV1&) override {
+            const std::lock_guard<std::mutex> lock(hooks_->mutex);
+            try {
+                hooks_->runtime->wait_idle();
+            } catch (const std::logic_error&) {
+                hooks_->caught = true;
+            }
+        }
+        void publish_failure(const Failure&) override {}
+
+    private:
+        std::shared_ptr<IdleHooks> hooks_;
+    };
+
+    std::latch run_entered(1);
+    std::latch release_run(1);
+    TaskRuntime runtime;
+    hook_ptr->runtime = &runtime;
+    TaskHandle handle = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(run_entered, release_run),
+        scripted_request("idlewait-1"),
+        std::make_shared<IdleWaitingPublisher>(hook_ptr));
+    run_entered.wait();
+    release_run.count_down();
+    handle.wait();
+
+    PWB_CHECK(hook_ptr->caught);
+    PWB_CHECK(handle.snapshot().status == TaskStatus::succeeded);
+    runtime.wait_idle(); // from a non-worker thread: fine
+}
+
+TEST(cancel_during_irrevocable_publish_still_succeeds) {
+    // L2/L3: once run() returned, the outcome is irrevocable. A cancel
+    // arriving while publish_success is in flight is a no-op: the task
+    // succeeds, the success is published exactly once, and no cancellation
+    // failure appears (never "DB success + task cancelled").
+    std::latch publish_entered(1);
+    std::latch release_publish(1);
+    auto publisher = std::make_shared<BarrierPublisher>(publish_entered, release_publish);
+
+    TaskRuntime runtime;
+    TaskHandle handle = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::succeed),
+        scripted_request("latecxl-1"), publisher);
+    publish_entered.wait(); // inside publish; computation already finished
+    handle.cancel();
+    release_publish.count_down();
+    handle.wait();
+
+    PWB_CHECK(handle.snapshot().status == TaskStatus::succeeded);
+    PWB_CHECK(handle.snapshot().published);
+    PWB_CHECK(publisher->success_calls == 1);
+    PWB_CHECK(publisher->failure_calls == 0);
+}
+
+TEST(explicit_shutdown_drains_queue_and_rejects_new_submits) {
+    TaskRuntime runtime;
+    auto publisher = std::make_shared<RecordingPublisher>();
+
+    auto blocker =
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::cancel_cooperative);
+    TaskHandle blocking_handle = runtime.submit(blocker, scripted_request("sd-blk"), nullptr);
+    while (blocker->runs() == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    TaskHandle queued_a = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::succeed),
+        scripted_request("sd-1"), publisher);
+    TaskHandle queued_b = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::succeed),
+        scripted_request("sd-2"), publisher);
+
+    blocking_handle.cancel();
+    runtime.shutdown(); // drains: blocker cancelled, sd-1/sd-2 run + publish
+
+    PWB_CHECK(blocking_handle.snapshot().status == TaskStatus::cancelled);
+    PWB_CHECK(queued_a.snapshot().status == TaskStatus::succeeded);
+    PWB_CHECK(queued_a.snapshot().published);
+    PWB_CHECK(queued_b.snapshot().status == TaskStatus::succeeded);
+    PWB_CHECK(queued_b.snapshot().published);
+    PWB_CHECK(publisher->success_count("sd-1") == 1);
+    PWB_CHECK(publisher->success_count("sd-2") == 1);
+
+    // Rejected submits never publish — the request was never accepted.
+    TaskHandle rejected = runtime.submit(
+        std::make_shared<ScriptedAlgorithm>(ScriptedAlgorithm::Mode::succeed),
+        scripted_request("sd-3"), publisher);
+    PWB_CHECK(rejected.snapshot().status == TaskStatus::failed);
+    PWB_CHECK(rejected.snapshot().error_code == "runtime.shutdown");
+    PWB_CHECK(!rejected.snapshot().published);
+    PWB_CHECK(publisher->success_count("sd-3") == 0);
+    PWB_CHECK(publisher->find_failure("sd-3") == nullptr);
+
+    runtime.shutdown(); // idempotent
 }
 
 #include "pwb_test_main.inc"

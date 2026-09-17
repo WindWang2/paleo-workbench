@@ -1,4 +1,4 @@
-#include "well_log_host_widget.hpp"
+#include <pwb/viz/well_log_host_widget.hpp>
 
 #include <QFile>
 #include <QString>
@@ -13,6 +13,7 @@
 #include <welllog/session/session.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -26,9 +27,21 @@ namespace {
 constexpr double kTrackWidthMm = 30.0;
 constexpr double kSurfaceWidthMm = 120.0;
 
-DepthDomainKind to_contract_domain(welllog::DepthDomain domain) {
-    return domain == welllog::DepthDomain::time ? DepthDomainKind::time
-                                                : DepthDomainKind::measured_depth;
+// The engine's DepthDomain has no time member: TIME-indexed logs surface as
+// source_index with a time unit. The v1 contract distinguishes only depth
+// vs time, so depth-family domains collapse to measured_depth and
+// source_index maps by unit.
+DepthDomainKind to_contract_domain(welllog::DepthDomain domain, const std::string& unit) {
+    switch (domain) {
+    case welllog::DepthDomain::measured_depth:
+    case welllog::DepthDomain::true_vertical_depth:
+    case welllog::DepthDomain::true_vertical_depth_subsea:
+        return DepthDomainKind::measured_depth;
+    case welllog::DepthDomain::source_index:
+        return (unit == "ms" || unit == "s" || unit == "us") ? DepthDomainKind::time
+                                                             : DepthDomainKind::measured_depth;
+    }
+    return DepthDomainKind::measured_depth;
 }
 
 const welllog::RgbaColor kCurvePalette[] = {
@@ -208,12 +221,20 @@ bool WellLogHostWidget::load_las(const QString& path, QString* error) {
         ++palette_index;
     }
 
-    state_->document_id = document.id();
-    state_->axis_id = axis.id;
-    state_->revision = document.revision().value;
-    state_->document_id_text_value = document.id().to_string();
-    state_->axis_unit = axis.unit;
-    state_->axis_domain = to_contract_domain(axis.domain);
+    // Host state is captured before the document move and applied only
+    // after BOTH commands were accepted: a rejected reload leaves the
+    // previously loaded document fully intact. The axis unit is
+    // canonicalized to lowercase for SelectionEventV1 (the contract
+    // vocabulary is "m"/"ms"/...; the engine passes the LAS token through
+    // verbatim, e.g. "M").
+    const auto presentation_document_id = document.id();
+    const auto axis_id = axis.id;
+    const auto presentation_revision = document.revision().value;
+    auto presentation_document_text = document.id().to_string();
+    auto axis_unit = axis.unit;
+    std::transform(axis_unit.begin(), axis_unit.end(), axis_unit.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto axis_domain = to_contract_domain(axis.domain, axis.unit);
 
     const auto document_ok =
         state_->session->execute(welllog::SetDocumentCommand{std::move(document)});
@@ -231,6 +252,13 @@ bool WellLogHostWidget::load_las(const QString& path, QString* error) {
         }
         return false;
     }
+
+    state_->document_id = presentation_document_id;
+    state_->axis_id = axis_id;
+    state_->revision = presentation_revision;
+    state_->document_id_text_value = std::move(presentation_document_text);
+    state_->axis_unit = std::move(axis_unit);
+    state_->axis_domain = axis_domain;
     state_->view->set_document_id(state_->document_id);
     state_->has_document = true;
     return true;

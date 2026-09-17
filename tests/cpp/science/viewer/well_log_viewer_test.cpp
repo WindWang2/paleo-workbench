@@ -1,14 +1,20 @@
 // science.viewer.well_log — real well-log-engine Qt adapter test (G5).
 // Requires the actual WLE SDK and a real OpenGL context: no Qt-free fakes.
 // Receives the LAS fixture path as argv[1] from the CMake test registration.
+// Covers: real LAS parse/render, SelectionEventV1 business ids/units,
+// viewport reset, PNG export, Unicode paths, negative loads, and a 20x
+// load/close robustness loop (no hangs, no dangling callbacks).
 
 #include "../pwb_test.hpp"
 
-#include "well_log_host_widget.hpp"
+#include <pwb/viz/well_log_host_widget.hpp>
 
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QImage>
+#include <QTemporaryDir>
 #include <QThread>
 
 #include <welllog/qtwidgets/well_log_view.hpp>
@@ -86,7 +92,7 @@ int main(int argc, char** argv) {
     // not just a blank widget.
     PWB_CHECK(process_until(
         [&host] {
-            const QImage grabbed = host.view()->grab();
+            const QImage grabbed = host.view()->grabFramebuffer();
             return !grabbed.isNull() && distinct_colors(grabbed) > 1;
         },
         15000));
@@ -116,16 +122,97 @@ int main(int argc, char** argv) {
     PWB_CHECK(process_until(
         [&host] { return !host.view()->selection().has_value(); }, 10000));
 
-    // 6. Clean close: explicit destruction order does not crash, and a
-    // fresh host can load again afterwards (repeat open/close robustness).
+    // 5b. PNG export: the rendered view is a real, non-empty image file.
     {
-        WellLogHostWidget second;
-        QString second_error;
-        PWB_CHECK_MSG(second.load_las(las_path, &second_error),
-                      second_error.toStdString().c_str());
-    } // full teardown here
+        const QImage grabbed = host.view()->grabFramebuffer();
+        PWB_CHECK(!grabbed.isNull());
+        PWB_CHECK(grabbed.width() > 0 && grabbed.height() > 0);
+        const QString png_path =
+            QDir::current().filePath("well_log_viewer_test.png");
+        PWB_CHECK(grabbed.save(png_path, "PNG"));
+        PWB_CHECK(QFile(png_path).size() > 0);
+        std::printf("saved render: %s (%dx%d)\n", png_path.toStdString().c_str(),
+                    grabbed.width(), grabbed.height());
+    }
+
+    // 5c. Unicode path: same LAS under a non-ASCII filename still loads.
+    {
+        QTemporaryDir temp;
+        PWB_CHECK(temp.isValid());
+        const QString sub = QStringLiteral("测井-archives");
+        PWB_CHECK(QDir(temp.path()).mkpath(sub));
+        const QString unicode_path = QDir(temp.path()).filePath(
+            sub + QStringLiteral("/Well No.7 — ünicode名.Las"));
+        PWB_CHECK(QFile::copy(las_path, unicode_path));
+        WellLogHostWidget unicode_host;
+        QString unicode_error;
+        PWB_CHECK_MSG(unicode_host.load_las(unicode_path, &unicode_error),
+                      unicode_error.toStdString().c_str());
+        PWB_CHECK(unicode_host.has_document());
+    }
+
+    // 5d. Negative loads: missing file / malformed content must fail with a
+    // non-empty error, never crash, and leave a previously loaded document
+    // intact.
+    {
+        QString error;
+        PWB_CHECK(!host.load_las(QStringLiteral("/nonexistent/ghost.Las"), &error));
+        PWB_CHECK(!error.isEmpty());
+        PWB_CHECK(host.has_document()); // previous document survived
+        error.clear();
+
+        QTemporaryDir temp;
+        QFile garbage(temp.filePath("garbage.Las"));
+        PWB_CHECK(garbage.open(QIODevice::WriteOnly));
+        garbage.write("this is not a LAS file at all\n\x01\x02\x03\n");
+        garbage.close();
+        PWB_CHECK(!host.load_las(garbage.fileName(), &error));
+        PWB_CHECK(!error.isEmpty());
+        PWB_CHECK(host.has_document());
+        PWB_CHECK(!host.document_id_text().isEmpty());
+
+        QFile empty(temp.filePath("empty.Las"));
+        PWB_CHECK(empty.open(QIODevice::WriteOnly));
+        empty.close();
+        error.clear();
+        PWB_CHECK(!host.load_las(empty.fileName(), &error));
+        PWB_CHECK(!error.isEmpty());
+    }
+
+    // 5e. In-place reload on the SAME widget: full replacement — the engine
+    // derives document ids deterministically from the source identity, so
+    // reloading the same file keeps the id; what must hold is that the
+    // reload succeeds and the view still renders.
+    {
+        QString reload_error;
+        PWB_CHECK_MSG(host.load_las(las_path, &reload_error),
+                      reload_error.toStdString().c_str());
+        PWB_CHECK(host.has_document());
+        PWB_CHECK(!host.document_id_text().isEmpty());
+        PWB_CHECK(process_until([&host] {
+            const QImage grabbed = host.view()->grabFramebuffer();
+            return !grabbed.isNull() && distinct_colors(grabbed) > 1;
+        }, 15000));
+    }
+
+    // 6. Close robustness: 20 full load/show/close cycles in FRESH widgets
+    // (each iteration is a complete session + GL context teardown — no hang,
+    // no dangling callback can survive this loop).
+    for (int round = 0; round < 20; ++round) {
+        WellLogHostWidget cycle;
+        cycle.resize(420, 600);
+        QString cycle_error;
+        PWB_CHECK_MSG(cycle.load_las(las_path, &cycle_error),
+                      cycle_error.toStdString().c_str());
+        cycle.show();
+        PWB_CHECK(process_until([&cycle] {
+            return cycle.view()->capability_report().initialization_complete;
+        }, 15000));
+        QApplication::processEvents(QEventLoop::AllEvents, 20);
+    } // full teardown each round
 
     std::printf("science.viewer.well_log: real WLE adapter rendered A1.Las, "
-                "selection/range/close all verified\n");
+                "selection/range/PNG/unicode/negatives + 20x open-close "
+                "verified\n");
     return 0;
 }
