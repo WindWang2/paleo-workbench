@@ -1,0 +1,63 @@
+{
+  "cases": {
+    "dedup_adopt": {
+      "case": "dedup_adopt",
+      "rel_path": "demo.artifacts/blobs/3f/3f2206825ce707c5a3c1a363515f0d18a4db208baf9e57f88fe9ec2bca6cd339",
+      "sha256": "3f2206825ce707c5a3c1a363515f0d18a4db208baf9e57f88fe9ec2bca6cd339",
+      "size_bytes": 630,
+      "source_removed": false
+    },
+    "dedup_move": {
+      "blob_placed": true,
+      "case": "dedup_move",
+      "rel_path": "demo.artifacts/outputs/asset_p3/ver_p3/move_me.bin",
+      "rel_prefix": "demo.artifacts/outputs/asset_p3/ver_p3/",
+      "sha256": "a4d4b414b6abc5444d76019b388a6a9ab1e8a37e56b9d458d92efe941883b07c",
+      "size_bytes": 240,
+      "source_removed": true
+    },
+    "err_exists": {
+      "case": "err_exists",
+      "error": "Managed payload already exists: <ROOT>/demo.artifacts/raw/asset_p5/ver_p5/dup.bin"
+    },
+    "err_mismatch": {
+      "case": "err_mismatch",
+      "error": "Checksum mismatch for <ROOT>/incoming/mm.bin: caller reported 0000000000000000000000000000000000000000000000000000000000000000, actual 359b365773dbfb3e21cc1196062f477ad27f83bc04aa9dcd4178d924127a5f17"
+    },
+    "err_same_size_diff_content": {
+      "case": "err_same_size",
+      "error": "Checksum mismatch for <ROOT>/incoming/twin.bin: caller reported edba4ee61c3d08f634c41aa8d3db97de3a3674021177d37a273c11a60a6f0c7d, actual c43e35854fd330df99dbb057412ddb85b7eccf0256cec6352bc59ff91c9352e4"
+    },
+    "err_unsafe_asset": {
+      "case": "err_unsafe_asset",
+      "error": "Unsafe asset id '../evil': only [A-Za-z0-9._-] allowed"
+    },
+    "err_unsafe_asset_dot": {
+      "case": "err_unsafe_asset_dot",
+      "error": "Unsafe asset id '.hidden': only [A-Za-z0-9._-] allowed"
+    },
+    "err_unsafe_asset_quote": {
+      "case": "err_unsafe_asset_quote",
+      "error": "Unsafe asset id \"ev'il\": only [A-Za-z0-9._-] allowed"
+    },
+    "err_unsafe_version": {
+      "case": "err_unsafe_version",
+      "error": "Unsafe version id 'a/b': only [A-Za-z0-9._-] allowed"
+    },
+    "ok_new": {
+      "case": "ok_new",
+      "rel_path": "demo.artifacts/raw/asset_p1/ver_p1/one.bin",
+      "sha256": "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
+      "size_bytes": 3
+    },
+    "ok_unicode_asset_id": {
+      "case": "ok_unicode_asset_id",
+      "rel_path": "demo.artifacts/raw/asset_资产1/ver_utf8/one.bin",
+      "sha256": "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
+      "size_bytes": 3
+    }
+  },
+  "digest_b": "3f2206825ce707c5a3c1a363515f0d18a4db208baf9e57f88fe9ec2bca6cd339",
+  "digest_sized": "edba4ee61c3d08f634c41aa8d3db97de3a3674021177d37a273c11a60a6f0c7d",
+  "scenario": "place_rules"
+}

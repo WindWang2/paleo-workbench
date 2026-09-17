@@ -1,0 +1,213 @@
+{
+  "cleanup_working_copies": {
+    "remaining_files": [
+      "demo.artifacts/blobs/14/14761b1baaec6ee6dfe54d4c6433e4abecd1a5737d0ae6e9ab66f9621e8b93ab",
+      "demo.artifacts/blobs/d1/d14eccd7caab56bb1b0042546d728172943278dedbb869603a0be39dd3b5d9e6",
+      "demo.artifacts/blobs/d7/d7f2402032b5f0a42a1094877fb71fa37c7dc1b60e2331a5735620c65d4d0df6",
+      "demo.artifacts/intermediate/.blob-notes",
+      "demo.artifacts/outputs/ghost2/leftover2.bin",
+      "demo.artifacts/outputs/junk.tmp",
+      "demo.artifacts/raw/.place-abc123",
+      "demo.artifacts/raw/asset_bec1ecf3cc51/ver_8ec2978f3fe3/well_data.tmp",
+      "demo.artifacts/raw/asset_d9e1e8c709ee/ver_467dea1c223c/a.bin",
+      "demo.artifacts/raw/ghost_asset/ghost_version/leftover.bin",
+      "demo.artifacts/trash/ver_ghost2/payload.bin",
+      "demo.artifacts/working/ver_467dea1c223c/a.bin",
+      "demo.paleo.json",
+      "incoming/a.bin",
+      "incoming/junk.bin",
+      "incoming/well_data.tmp"
+    ],
+    "removed": [
+      {
+        "kind": "working_orphan",
+        "rel": "demo.artifacts/working/ver_ghost/wip.txt"
+      }
+    ]
+  },
+  "meta": {
+    "junk_digest": "d7f2402032b5f0a42a1094877fb71fa37c7dc1b60e2331a5735620c65d4d0df6",
+    "leased_stage_orphan": "demo.artifacts/raw/ghost_asset/ghost_version/leftover.bin",
+    "live_working_rel": "demo.artifacts/working/ver_467dea1c223c/a.bin",
+    "referenced_temp_payload": "demo.artifacts/raw/asset_bec1ecf3cc51/ver_8ec2978f3fe3/well_data.tmp"
+  },
+  "plan_auto": [
+    {
+      "kind": "empty_dir",
+      "rel": "demo.artifacts/derived/empty_a/empty_b",
+      "size": 0
+    },
+    {
+      "kind": "temp_orphan",
+      "rel": "demo.artifacts/intermediate/.blob-notes",
+      "size": 5
+    },
+    {
+      "kind": "temp_orphan",
+      "rel": "demo.artifacts/metadata/.catalog.json.zzz.tmp",
+      "size": 5
+    },
+    {
+      "kind": "temp_orphan",
+      "rel": "demo.artifacts/outputs/junk.tmp",
+      "size": 5
+    },
+    {
+      "kind": "temp_orphan",
+      "rel": "demo.artifacts/raw/.place-abc123",
+      "size": 5
+    }
+  ],
+  "plan_explicit": [
+    {
+      "kind": "blob_orphan",
+      "rel": "demo.artifacts/blobs/d7/d7f2402032b5f0a42a1094877fb71fa37c7dc1b60e2331a5735620c65d4d0df6",
+      "size": 23
+    },
+    {
+      "kind": "empty_dir",
+      "rel": "demo.artifacts/derived/empty_a/empty_b",
+      "size": 0
+    },
+    {
+      "kind": "stage_orphan",
+      "rel": "demo.artifacts/intermediate/.blob-notes",
+      "size": 5
+    },
+    {
+      "kind": "stage_orphan",
+      "rel": "demo.artifacts/outputs/ghost2/leftover2.bin",
+      "size": 7
+    },
+    {
+      "kind": "stage_orphan",
+      "rel": "demo.artifacts/outputs/junk.tmp",
+      "size": 5
+    },
+    {
+      "kind": "stage_orphan",
+      "rel": "demo.artifacts/raw/.place-abc123",
+      "size": 5
+    },
+    {
+      "kind": "temp_orphan",
+      "rel": "demo.artifacts/intermediate/.blob-notes",
+      "size": 5
+    },
+    {
+      "kind": "temp_orphan",
+      "rel": "demo.artifacts/metadata/.catalog.json.zzz.tmp",
+      "size": 5
+    },
+    {
+      "kind": "temp_orphan",
+      "rel": "demo.artifacts/outputs/junk.tmp",
+      "size": 5
+    },
+    {
+      "kind": "temp_orphan",
+      "rel": "demo.artifacts/raw/.place-abc123",
+      "size": 5
+    },
+    {
+      "kind": "trash_orphan",
+      "rel": "demo.artifacts/trash/ver_ghost2/payload.bin",
+      "size": 12
+    },
+    {
+      "kind": "working_orphan",
+      "rel": "demo.artifacts/working/ver_ghost/wip.txt",
+      "size": 9
+    }
+  ],
+  "scenario": "gc_orphans",
+  "sweep_auto": {
+    "remaining_files": [
+      "demo.artifacts/blobs/14/14761b1baaec6ee6dfe54d4c6433e4abecd1a5737d0ae6e9ab66f9621e8b93ab",
+      "demo.artifacts/blobs/d1/d14eccd7caab56bb1b0042546d728172943278dedbb869603a0be39dd3b5d9e6",
+      "demo.artifacts/blobs/d7/d7f2402032b5f0a42a1094877fb71fa37c7dc1b60e2331a5735620c65d4d0df6",
+      "demo.artifacts/outputs/ghost2/leftover2.bin",
+      "demo.artifacts/raw/asset_bec1ecf3cc51/ver_8ec2978f3fe3/well_data.tmp",
+      "demo.artifacts/raw/asset_d9e1e8c709ee/ver_467dea1c223c/a.bin",
+      "demo.artifacts/raw/ghost_asset/ghost_version/leftover.bin",
+      "demo.artifacts/trash/ver_ghost2/payload.bin",
+      "demo.artifacts/working/ver_467dea1c223c/a.bin",
+      "demo.artifacts/working/ver_ghost/wip.txt",
+      "demo.paleo.json",
+      "incoming/a.bin",
+      "incoming/junk.bin",
+      "incoming/well_data.tmp"
+    ],
+    "removed": [
+      {
+        "kind": "empty_dir",
+        "rel": "demo.artifacts/derived/empty_a/empty_b"
+      },
+      {
+        "kind": "temp_orphan",
+        "rel": "demo.artifacts/intermediate/.blob-notes"
+      },
+      {
+        "kind": "temp_orphan",
+        "rel": "demo.artifacts/metadata/.catalog.json.zzz.tmp"
+      },
+      {
+        "kind": "temp_orphan",
+        "rel": "demo.artifacts/outputs/junk.tmp"
+      },
+      {
+        "kind": "temp_orphan",
+        "rel": "demo.artifacts/raw/.place-abc123"
+      }
+    ]
+  },
+  "sweep_explicit": {
+    "remaining_files": [
+      "demo.artifacts/blobs/14/14761b1baaec6ee6dfe54d4c6433e4abecd1a5737d0ae6e9ab66f9621e8b93ab",
+      "demo.artifacts/blobs/d1/d14eccd7caab56bb1b0042546d728172943278dedbb869603a0be39dd3b5d9e6",
+      "demo.artifacts/raw/asset_bec1ecf3cc51/ver_8ec2978f3fe3/well_data.tmp",
+      "demo.artifacts/raw/asset_d9e1e8c709ee/ver_467dea1c223c/a.bin",
+      "demo.artifacts/raw/ghost_asset/ghost_version/leftover.bin",
+      "demo.artifacts/working/ver_467dea1c223c/a.bin",
+      "demo.artifacts/working/ver_ghost/wip.txt",
+      "demo.paleo.json",
+      "incoming/a.bin",
+      "incoming/junk.bin",
+      "incoming/well_data.tmp"
+    ],
+    "removed": [
+      {
+        "kind": "blob_orphan",
+        "rel": "demo.artifacts/blobs/d7/d7f2402032b5f0a42a1094877fb71fa37c7dc1b60e2331a5735620c65d4d0df6"
+      },
+      {
+        "kind": "empty_dir",
+        "rel": "demo.artifacts/derived/empty_a/empty_b"
+      },
+      {
+        "kind": "stage_orphan",
+        "rel": "demo.artifacts/intermediate/.blob-notes"
+      },
+      {
+        "kind": "stage_orphan",
+        "rel": "demo.artifacts/outputs/ghost2/leftover2.bin"
+      },
+      {
+        "kind": "stage_orphan",
+        "rel": "demo.artifacts/outputs/junk.tmp"
+      },
+      {
+        "kind": "stage_orphan",
+        "rel": "demo.artifacts/raw/.place-abc123"
+      },
+      {
+        "kind": "temp_orphan",
+        "rel": "demo.artifacts/metadata/.catalog.json.zzz.tmp"
+      },
+      {
+        "kind": "trash_orphan",
+        "rel": "demo.artifacts/trash/ver_ghost2/payload.bin"
+      }
+    ]
+  }
+}
