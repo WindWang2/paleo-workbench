@@ -14,6 +14,10 @@
 
 #include <fstream>
 
+#ifdef PWB_WITH_CONV_16
+#include "factor_stats_dock.hpp"
+#endif
+
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -217,6 +221,12 @@ void MainWindow::buildUi() {
 
     status_label_ = new QLabel(QStringLiteral("ready"), this);
     statusBar()->addWidget(status_label_);
+
+#ifdef PWB_WITH_CONV_16
+    // conv-16: read-only factor statistics HUD (FactorGrid.statistics).
+    factor_dock_ = new FactorStatsDock(this);
+    addDockWidget(Qt::RightDockWidgetArea, factor_dock_);
+#endif
 
 #ifdef PWB_WITH_WELL_LOG
     // C's WLE-backed well-log host in a dock (same Qt ABI, one process;
@@ -1296,6 +1306,16 @@ void MainWindow::openVolumeDialog() {
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("打开体版本"), error);
     }
+}
+#endif
+
+#ifdef PWB_WITH_CONV_16
+void MainWindow::showFactorStatistics(
+    const QString& factor_name, const pwb::mapping::GridStatistics& stats) {
+    if (factor_dock_ == nullptr) return;
+    factor_dock_->setStatistics(factor_name, stats);
+    factor_dock_->show();
+    factor_dock_->raise();
 }
 #endif
 

@@ -40,3 +40,18 @@ if(TARGET Pwb::SeismicIo AND TARGET Pwb::Data)
     target_link_libraries(pwb-platform PRIVATE Pwb::SeismicIo)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_IO=1)
 endif()
+
+# BEGIN CONV-16
+# conv-16 factor statistics HUD: the dock reads pwb::mapping::GridStatistics
+# (FactorGrid.statistics), so the mapping kernel joins the link closure only
+# when this cluster is enabled. The interpolation flow calls
+# MainWindow::showFactorStatistics once factor results land in the app.
+if(PWB_BUILD_CONV_16)
+    if(NOT TARGET Pwb::MappingKernel)
+        message(FATAL_ERROR "PWB_BUILD_CONV_16=ON requires PWB_BUILD_MAPPING_KERNEL=ON")
+    endif()
+    target_sources(pwb-platform PRIVATE factor_stats_dock.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::MappingKernel)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_16=1)
+endif()
+# END CONV-16

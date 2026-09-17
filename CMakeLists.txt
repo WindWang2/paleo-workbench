@@ -109,3 +109,37 @@ if(PWB_BUILD_PLATFORM)
         endif()
     endif()
 endif()
+
+# BEGIN CONV-16
+# conv-16 UI panel cluster, first slice: the read-only factor statistics HUD
+# (apps/paleo_workbench_platform/factor_stats_dock.*) and its ctest target.
+# The dock is a Qt Widgets HUD over pwb::mapping::GridStatistics — no QGIS —
+# so the test exists in the same PLATFORM=OFF configuration the conversion
+# gates use here (single definition; the app binary wires the dock through
+# its CONV-16 block in apps/paleo_workbench_platform/CMakeLists.txt when the
+# platform is built).
+option(PWB_BUILD_CONV_16 "Build conv-16 factor statistics HUD cluster" OFF)
+if(PWB_BUILD_CONV_16)
+    if(NOT TARGET Pwb::MappingKernel)
+        message(FATAL_ERROR "PWB_BUILD_CONV_16=ON requires PWB_BUILD_MAPPING_KERNEL=ON")
+    endif()
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets)
+    if(BUILD_TESTING AND NOT TARGET platform_factor_hud)
+        add_executable(platform_factor_hud
+            tests/cpp/platform/factor_hud_test.cpp
+            apps/paleo_workbench_platform/factor_stats_dock.cpp)
+        set_target_properties(platform_factor_hud PROPERTIES AUTOMOC ON)
+        target_compile_features(platform_factor_hud PRIVATE cxx_std_20)
+        target_include_directories(platform_factor_hud PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/apps/paleo_workbench_platform)
+        target_link_libraries(platform_factor_hud PRIVATE
+            Qt6::Widgets Pwb::MappingKernel)
+        target_compile_definitions(platform_factor_hud PRIVATE
+            PWB_FACTOR_HUD_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/platform/fixtures/factor_hud/oracle.json")
+        add_test(NAME platform.factor_hud COMMAND platform_factor_hud)
+        set_tests_properties(platform.factor_hud PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            TIMEOUT 120)
+    endif()
+endif()
+# END CONV-16

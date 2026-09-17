@@ -31,6 +31,15 @@ class QgsMapTool;
 class QLabel;
 class QDockWidget;
 
+namespace pwb::mapping {
+struct GridStatistics;
+}
+#ifdef PWB_WITH_CONV_16
+namespace pwb::app {
+class FactorStatsDock;
+}
+#endif
+
 namespace pwb::application {
 class AlgorithmRunner;
 class PwbDataStore;
@@ -42,6 +51,9 @@ class SeismicSliceWidget;
 namespace pwb::app {
 
 class VertexMoveMapTool;
+#ifdef PWB_WITH_CONV_16
+class FactorStatsDock;
+#endif
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -131,6 +143,14 @@ public:
     // tools/external edit paths must refresh after mutating edit state.
     void refreshActionStates();
 
+#ifdef PWB_WITH_CONV_16
+    // conv-16: the read-only factor statistics HUD dock (FactorGrid.
+    // statistics via pwb::mapping::grid_statistics). Entry point for the
+    // interpolation flow once the mapping pipeline hosts results here.
+    void showFactorStatistics(const QString& factor_name,
+                              const pwb::mapping::GridStatistics& stats);
+#endif
+
 protected:
     void closeEvent(QCloseEvent* event) override;
 
@@ -179,6 +199,9 @@ private:
     QgsMapCanvas* canvas_ = nullptr;
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;
+#ifdef PWB_WITH_CONV_16
+    FactorStatsDock* factor_dock_ = nullptr;
+#endif
     // The B store opened by openProject (null in module-only mode); the
     // attribute runner and volume viewer resolve catalog versions here.
     std::shared_ptr<pwb::application::PwbDataStore> project_store_;
