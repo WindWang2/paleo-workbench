@@ -1,0 +1,82 @@
+{
+  "case": "synth_nt2",
+  "dtype": "float32",
+  "files": {
+    "expected_envelope.f32": {
+      "algorithm": "envelope",
+      "elements": 24,
+      "max": 1.5913234949111938,
+      "mean": 1.0018277168273926,
+      "min": 0.15935185551643372,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "7313713199dbbebbbb9fbf7725bb9f23fc9c32517e1dcbb404063473a85598fd"
+    },
+    "expected_freq.f32": {
+      "algorithm": "freq",
+      "elements": 24,
+      "max": 0.0,
+      "mean": 0.0,
+      "min": 0.0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sample_interval": 1.0,
+      "sha256": "2ea9ab9198d1638007400cd2c3bef1cc745b864b76011a0e1bc52180ac6452d4",
+      "unit": "Hz"
+    },
+    "expected_phase.f32": {
+      "algorithm": "phase",
+      "elements": 24,
+      "max": 0.0,
+      "mean": 0.0,
+      "min": 0.0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "6a6ecc4e954c0f53212f9ca14e6c5b578b0dc55f2c9b99dd18f31ec15dbe2e81"
+    },
+    "expected_rms_w1.f32": {
+      "algorithm": "rms",
+      "elements": 24,
+      "max": 1.5592375993728638,
+      "mean": 1.0138195753097534,
+      "min": 0.4065551459789276,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "d0ce2c9152caf7fc31dae9ea9e228c7971b1f9edb61338f40a328cfa80ce7710",
+      "total_window": 3,
+      "window": 1
+    },
+    "input.f32": {
+      "elements": 24,
+      "max": 1.5913234949111938,
+      "mean": 1.0018277168273926,
+      "min": 0.1593518853187561,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "15578b4c193c900de533883a285aebe3e60cb9d4702b893b905575d3699c0778"
+    }
+  },
+  "order": "C (inline, crossline, sample); sample axis = time",
+  "shape": [
+    4,
+    3,
+    2
+  ],
+  "tolerances": {
+    "envelope": {
+      "max_abs": 1e-05,
+      "max_rel": 0.0001
+    },
+    "freq": {
+      "max_abs": 0.005,
+      "max_rel": 0.01
+    },
+    "phase": {
+      "max_abs": 0.0001
+    },
+    "rms": {
+      "max_abs": 1e-06,
+      "max_rel": 1e-05
+    }
+  }
+}

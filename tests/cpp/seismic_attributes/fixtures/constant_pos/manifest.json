@@ -1,0 +1,82 @@
+{
+  "case": "constant_pos",
+  "dtype": "float32",
+  "files": {
+    "expected_envelope.f32": {
+      "algorithm": "envelope",
+      "elements": 200,
+      "max": 2.5,
+      "mean": 2.5,
+      "min": 2.5,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "b07192ae89ca0e98a51f146c4016d245ff0d80de01826858cb3903ff35f78ed3"
+    },
+    "expected_freq.f32": {
+      "algorithm": "freq",
+      "elements": 200,
+      "max": 0.0,
+      "mean": 0.0,
+      "min": 0.0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sample_interval": 0.002,
+      "sha256": "67042dfda5683aead81b6055d19c4dba238341f9dd82f49c0e7cc0c19c5f10d1",
+      "unit": "Hz"
+    },
+    "expected_phase.f32": {
+      "algorithm": "phase",
+      "elements": 200,
+      "max": 0.0,
+      "mean": 0.0,
+      "min": 0.0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "c11d455d83ce7008091890bc06b08dd35a3d1083e626ccb64f5c5779dcf92886"
+    },
+    "expected_rms_w21.f32": {
+      "algorithm": "rms",
+      "elements": 200,
+      "max": 2.5,
+      "mean": 2.5,
+      "min": 2.5,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "b07192ae89ca0e98a51f146c4016d245ff0d80de01826858cb3903ff35f78ed3",
+      "total_window": 43,
+      "window": 21
+    },
+    "input.f32": {
+      "elements": 200,
+      "max": 2.5,
+      "mean": 2.5,
+      "min": 2.5,
+      "n_inf": 0,
+      "n_nan": 0,
+      "sha256": "b07192ae89ca0e98a51f146c4016d245ff0d80de01826858cb3903ff35f78ed3"
+    }
+  },
+  "order": "C (inline, crossline, sample); sample axis = time",
+  "shape": [
+    5,
+    5,
+    8
+  ],
+  "tolerances": {
+    "envelope": {
+      "max_abs": 1e-05,
+      "max_rel": 0.0001
+    },
+    "freq": {
+      "max_abs": 0.005,
+      "max_rel": 0.01
+    },
+    "phase": {
+      "max_abs": 0.0001
+    },
+    "rms": {
+      "max_abs": 1e-06,
+      "max_rel": 1e-05
+    }
+  }
+}
