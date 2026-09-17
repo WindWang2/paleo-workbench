@@ -1,0 +1,7342 @@
+{
+ "meta": {
+  "unicode": "16.0.0",
+  "python": "3.14.6",
+  "generator": "tools/oracle/generate_interchange_fixtures.py"
+ },
+ "adapters": [
+  {
+   "format_id": "las",
+   "display_name": "LAS 测井曲线",
+   "extensions": [
+    "las"
+   ],
+   "import": true,
+   "notes": "导出仅支持 CSV/JSON 摘要（lasio）；不提供 LAS 写入器"
+  },
+  {
+   "format_id": "csv",
+   "display_name": "CSV 表格",
+   "extensions": [
+    "csv"
+   ],
+   "import": true,
+   "notes": "支持 delimiter/encoding 探测与归一化转换导入；导出为归一化 CSV"
+  },
+  {
+   "format_id": "tsv",
+   "display_name": "TSV 表格",
+   "extensions": [
+    "tsv",
+    "txt"
+   ],
+   "import": true,
+   "notes": "支持 delimiter/encoding 探测与归一化转换导入；导出为归一化 CSV"
+  },
+  {
+   "format_id": "xlsx",
+   "display_name": "Excel 工作簿",
+   "extensions": [
+    "xlsx",
+    "xls"
+   ],
+   "import": true,
+   "notes": "按工作簿整体导入（保留原文件）；导出走既有 table_to_xlsx 转换链"
+  },
+  {
+   "format_id": "geojson",
+   "display_name": "GeoJSON 矢量",
+   "extensions": [
+    "geojson",
+    "json"
+   ],
+   "import": true,
+   "notes": "GDAL 缺失时仍完全可用（纯 json 实现）"
+  },
+  {
+   "format_id": "vector_gdal",
+   "display_name": "GIS 矢量（GDAL）",
+   "extensions": [
+    "shp",
+    "gpkg",
+    "kml",
+    "gml",
+    "geojson",
+    "tab",
+    "mif"
+   ],
+   "import": false,
+   "notes": "GDAL (osgeo) 不可用：vendored 构建未安装（ADR 0060）"
+  },
+  {
+   "format_id": "raster",
+   "display_name": "GeoTIFF / GDAL 栅格",
+   "extensions": [
+    "tif",
+    "tiff",
+    "img",
+    "grd"
+   ],
+   "import": true,
+   "notes": "导出为标准化 GeoTIFF（窗口 IO）；检查统计走 decimated overview 读取"
+  },
+  {
+   "format_id": "segy",
+   "display_name": "SEG-Y 地震数据（中小体）",
+   "extensions": [
+    "sgy",
+    "segy"
+   ],
+   "import": true,
+   "notes": "本仓库无 SEG-Y 写出器：导出不可用；派生数据走既有 zarr-v3 转码管线；100GB 级数据不在本适配器范围"
+  },
+  {
+   "format_id": "flac3d_f3grid",
+   "display_name": "FLAC3D 角点网格",
+   "extensions": [
+    "f3grid"
+   ],
+   "import": false,
+   "notes": "结构化六面体网格写出（export_to_flac3d）；无读取器，inspect 为结构扫描"
+  },
+  {
+   "format_id": "abaqus_inp",
+   "display_name": "Abaqus 有限元网格",
+   "extensions": [
+    "inp"
+   ],
+   "import": false,
+   "notes": "结构化六面体网格写出（export_to_abaqus）；无读取器，inspect 为结构扫描"
+  },
+  {
+   "format_id": "dlis",
+   "display_name": "DLIS 测井（不可用）",
+   "extensions": [
+    "dlis",
+    "lis"
+   ],
+   "import": false,
+   "notes": "DLIS/LIS 暂不可用：well-log-engine 的 C++ 适配器未暴露 Python 绑定，且环境无 dlisio 依赖；请先转换 LAS 或等待绑定发布"
+  },
+  {
+   "format_id": "vtk_model",
+   "display_name": "VTK 模型（不可用）",
+   "extensions": [
+    "vtk",
+    "vtu",
+    "vtp"
+   ],
+   "import": false,
+   "notes": "VTK 家族暂不可用：仓库无 VTK 读取器/写出器"
+  },
+  {
+   "format_id": "mesh_exchange",
+   "display_name": "OBJ/STL 网格（不可用）",
+   "extensions": [
+    "obj",
+    "stl"
+   ],
+   "import": false,
+   "notes": "OBJ/STL 暂不可用：仓库无对应读取器/写出器"
+  }
+ ],
+ "safe_path": [
+  {
+   "id": "reject-0",
+   "name": "",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "reject-1",
+   "name": "   ",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "reject-2",
+   "name": "\t\n",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "reject-3",
+   "name": "a\u0000b",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'a\\x00b'"
+  },
+  {
+   "id": "reject-4",
+   "name": "café.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'café.txt'"
+  },
+  {
+   "id": "reject-5",
+   "name": "Å.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'Å.txt'"
+  },
+  {
+   "id": "reject-6",
+   "name": "가.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '가.txt'"
+  },
+  {
+   "id": "reject-7",
+   "name": "/absolute/path.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: '/absolute/path.txt'"
+  },
+  {
+   "id": "reject-8",
+   "name": "/abs",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: '/abs'"
+  },
+  {
+   "id": "reject-9",
+   "name": "//x",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: '//x'"
+  },
+  {
+   "id": "reject-10",
+   "name": "C:\\windows\\path.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: 'C:\\\\windows\\\\path.txt'"
+  },
+  {
+   "id": "reject-11",
+   "name": "C:/windows/path.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: 'C:/windows/path.txt'"
+  },
+  {
+   "id": "reject-12",
+   "name": "c:x.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: 'c:x.txt'"
+  },
+  {
+   "id": "reject-13",
+   "name": "\\\\srv\\share",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: '\\\\\\\\srv\\\\share'"
+  },
+  {
+   "id": "reject-14",
+   "name": "..",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: traversal component in '..'"
+  },
+  {
+   "id": "reject-15",
+   "name": "../evil.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: traversal component in '../evil.txt'"
+  },
+  {
+   "id": "reject-16",
+   "name": "a/../../evil.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: traversal component in 'a/../../evil.txt'"
+  },
+  {
+   "id": "reject-17",
+   "name": "a/../b.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: traversal component in 'a/../b.txt'"
+  },
+  {
+   "id": "reject-18",
+   "name": "a\\..\\evil",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: traversal component in 'a\\\\..\\\\evil'"
+  },
+  {
+   "id": "reject-19",
+   "name": ".",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: no components in '.'"
+  },
+  {
+   "id": "reject-20",
+   "name": "./",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: no components in './'"
+  },
+  {
+   "id": "reject-21",
+   "name": "  /  x",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: blank path component in '  /  x'"
+  },
+  {
+   "id": "reject-22",
+   "name": "a/ /b.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: blank path component in 'a/ /b.txt'"
+  },
+  {
+   "id": "reject-23",
+   "name": "a/b /c.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: trailing dot/space in 'b '"
+  },
+  {
+   "id": "reject-24",
+   "name": "file.txt.",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: trailing dot/space in 'file.txt.'"
+  },
+  {
+   "id": "reject-25",
+   "name": "file.txt. ",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: trailing dot/space in 'file.txt. '"
+  },
+  {
+   "id": "reject-26",
+   "name": "...",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: trailing dot/space in '...'"
+  },
+  {
+   "id": "reject-27",
+   "name": "con.",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: trailing dot/space in 'con.'"
+  },
+  {
+   "id": "reject-28",
+   "name": "CON",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: Windows reserved name 'CON'"
+  },
+  {
+   "id": "reject-29",
+   "name": "con.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: Windows reserved name 'con.txt'"
+  },
+  {
+   "id": "reject-30",
+   "name": "Con",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: Windows reserved name 'Con'"
+  },
+  {
+   "id": "reject-31",
+   "name": "NUL.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: Windows reserved name 'NUL.txt'"
+  },
+  {
+   "id": "reject-32",
+   "name": "COM1",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: Windows reserved name 'COM1'"
+  },
+  {
+   "id": "reject-33",
+   "name": "lpt4.ini",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: Windows reserved name 'lpt4.ini'"
+  },
+  {
+   "id": "reject-34",
+   "name": "bad<name>.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'bad<name>.txt'"
+  },
+  {
+   "id": "reject-35",
+   "name": "bad\"quote.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'bad\"quote.txt'"
+  },
+  {
+   "id": "reject-36",
+   "name": "pipe|file.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'pipe|file.txt'"
+  },
+  {
+   "id": "reject-37",
+   "name": "ctrl\u0001char.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'ctrl\\x01char.txt'"
+  },
+  {
+   "id": "reject-38",
+   "name": "a/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: path component too long in 'a/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'"
+  },
+  {
+   "id": "reject-39",
+   "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: path component too long in 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'"
+  },
+  {
+   "id": "reject-40",
+   "name": "dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: path too long: 'dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir'"
+  },
+  {
+   "id": "reject-41",
+   "name": " ",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "reject-42",
+   "name": "\u001c",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "reject-43",
+   "name": "　",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "reject-44",
+   "name": "ἳ.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ἳ.txt'"
+  },
+  {
+   "id": "reject-45",
+   "name": "ொ.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ொ.txt'"
+  },
+  {
+   "id": "reject-46",
+   "name": "ৌ.txt",
+   "what": "entry",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ৌ.txt'"
+  },
+  {
+   "id": "accept-47",
+   "name": "data/file.bin",
+   "what": "entry",
+   "ok": true,
+   "path": "data/file.bin",
+   "error": null
+  },
+  {
+   "id": "accept-48",
+   "name": "artifacts/raw/a/b/file.las",
+   "what": "entry",
+   "ok": true,
+   "path": "artifacts/raw/a/b/file.las",
+   "error": null
+  },
+  {
+   "id": "accept-49",
+   "name": "数据/测井/W-001.las",
+   "what": "entry",
+   "ok": true,
+   "path": "数据/测井/W-001.las",
+   "error": null
+  },
+  {
+   "id": "accept-50",
+   "name": "café.txt",
+   "what": "entry",
+   "ok": true,
+   "path": "café.txt",
+   "error": null
+  },
+  {
+   "id": "accept-51",
+   "name": "./x.txt",
+   "what": "entry",
+   "ok": true,
+   "path": "x.txt",
+   "error": null
+  },
+  {
+   "id": "accept-52",
+   "name": "a/./b.txt",
+   "what": "entry",
+   "ok": true,
+   "path": "a/b.txt",
+   "error": null
+  },
+  {
+   "id": "accept-53",
+   "name": "a//b.txt",
+   "what": "entry",
+   "ok": true,
+   "path": "a/b.txt",
+   "error": null
+  },
+  {
+   "id": "accept-54",
+   "name": "a/b/",
+   "what": "entry",
+   "ok": true,
+   "path": "a/b",
+   "error": null
+  },
+  {
+   "id": "accept-55",
+   "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "what": "entry",
+   "ok": true,
+   "path": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "error": null
+  },
+  {
+   "id": "accept-56",
+   "name": "ctrl.txt",
+   "what": "entry",
+   "ok": true,
+   "path": "ctrl.txt",
+   "error": null
+  },
+  {
+   "id": "accept-57",
+   "name": "a/bc.txt",
+   "what": "entry",
+   "ok": true,
+   "path": "a/bc.txt",
+   "error": null
+  },
+  {
+   "id": "accept-58",
+   "name": "..x",
+   "what": "entry",
+   "ok": true,
+   "path": "..x",
+   "error": null
+  },
+  {
+   "id": "accept-59",
+   "name": ".hidden",
+   "what": "entry",
+   "ok": true,
+   "path": ".hidden",
+   "error": null
+  },
+  {
+   "id": "accept-60",
+   "name": "console.txt",
+   "what": "entry",
+   "ok": true,
+   "path": "console.txt",
+   "error": null
+  },
+  {
+   "id": "accept-61",
+   "name": "报告 v2.json",
+   "what": "entry",
+   "ok": true,
+   "path": "报告 v2.json",
+   "error": null
+  },
+  {
+   "id": "accept-62",
+   "name": "a b.txt",
+   "what": "entry",
+   "ok": true,
+   "path": "a b.txt",
+   "error": null
+  },
+  {
+   "id": "accept-63",
+   "name": "中文 目录/x.las",
+   "what": "entry",
+   "ok": true,
+   "path": "中文 目录/x.las",
+   "error": null
+  },
+  {
+   "id": "what-prefix",
+   "name": "../x",
+   "what": "manifest entry",
+   "ok": false,
+   "path": null,
+   "error": "manifest entry: traversal component in '../x'"
+  }
+ ],
+ "reserved_helper": [
+  {
+   "id": "reserved-0",
+   "name": "../x",
+   "unsafe": true
+  },
+  {
+   "id": "reserved-1",
+   "name": "CON",
+   "unsafe": true
+  },
+  {
+   "id": "reserved-2",
+   "name": "con.txt",
+   "unsafe": true
+  },
+  {
+   "id": "reserved-3",
+   "name": "data/file.bin",
+   "unsafe": false
+  },
+  {
+   "id": "reserved-4",
+   "name": "café.txt",
+   "unsafe": false
+  },
+  {
+   "id": "reserved-5",
+   "name": "\u0001",
+   "unsafe": true
+  }
+ ],
+ "collision": [
+  {
+   "id": "collision-0",
+   "names": [
+    "Data/file.txt",
+    "data/file.txt"
+   ],
+   "fail_index": 1,
+   "error": "case-insensitive collision: 'data/file.txt'"
+  },
+  {
+   "id": "collision-1",
+   "names": [
+    "a.txt",
+    "a.txt"
+   ],
+   "fail_index": 1,
+   "error": "duplicate entry after normalization: 'a.txt'"
+  },
+  {
+   "id": "collision-2",
+   "names": [
+    "a.txt",
+    "b.txt",
+    "A.TXT"
+   ],
+   "fail_index": 2,
+   "error": "case-insensitive collision: 'A.TXT'"
+  },
+  {
+   "id": "collision-3",
+   "names": [
+    "数据.txt",
+    "数据.txt"
+   ],
+   "fail_index": 1,
+   "error": "duplicate entry after normalization: '数据.txt'"
+  },
+  {
+   "id": "collision-4",
+   "names": [
+    "ok/x.bin",
+    "ok/y.bin"
+   ],
+   "fail_index": null,
+   "error": null
+  },
+  {
+   "id": "collision-5",
+   "names": [
+    "ß.txt",
+    "ss.txt"
+   ],
+   "fail_index": 1,
+   "error": "case-insensitive collision: 'ss.txt'"
+  }
+ ],
+ "sanitize": [
+  {
+   "id": "sanitize-0",
+   "stem": "a/b<c",
+   "fallback": "export",
+   "expected": "a_b_c"
+  },
+  {
+   "id": "sanitize-1",
+   "stem": "CON",
+   "fallback": "export",
+   "expected": "_CON"
+  },
+  {
+   "id": "sanitize-2",
+   "stem": "",
+   "fallback": "export",
+   "expected": "export"
+  },
+  {
+   "id": "sanitize-3",
+   "stem": "  . ",
+   "fallback": "export",
+   "expected": "export"
+  },
+  {
+   "id": "sanitize-4",
+   "stem": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "fallback": "export",
+   "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+   "id": "sanitize-5",
+   "stem": "café",
+   "fallback": "export",
+   "expected": "café"
+  },
+  {
+   "id": "sanitize-6",
+   "stem": "报告：告|图.tif",
+   "fallback": "export",
+   "expected": "报告：告_图.tif"
+  },
+  {
+   "id": "sanitize-7",
+   "stem": "nul.txt",
+   "fallback": "export",
+   "expected": "_nul.txt"
+  },
+  {
+   "id": "sanitize-8",
+   "stem": ".hidden",
+   "fallback": "export",
+   "expected": "hidden"
+  },
+  {
+   "id": "sanitize-9",
+   "stem": ".",
+   "fallback": "myfallback",
+   "expected": "myfallback"
+  },
+  {
+   "id": "sanitize-10",
+   "stem": "报告",
+   "fallback": "导出",
+   "expected": "报告"
+  }
+ ],
+ "unicode": [
+  {
+   "id": "unicode-0",
+   "input": "café.txt",
+   "nfc": "café.txt",
+   "casefold": "café.txt"
+  },
+  {
+   "id": "unicode-1",
+   "input": "café.txt",
+   "nfc": "café.txt",
+   "casefold": "café.txt"
+  },
+  {
+   "id": "unicode-2",
+   "input": "Å.txt",
+   "nfc": "Å.txt",
+   "casefold": "å.txt"
+  },
+  {
+   "id": "unicode-3",
+   "input": "Å.txt",
+   "nfc": "Å.txt",
+   "casefold": "å.txt"
+  },
+  {
+   "id": "unicode-4",
+   "input": "Å.txt",
+   "nfc": "Å.txt",
+   "casefold": "å.txt"
+  },
+  {
+   "id": "unicode-5",
+   "input": "ą́",
+   "nfc": "ą́",
+   "casefold": "ą́"
+  },
+  {
+   "id": "unicode-6",
+   "input": "q̨́",
+   "nfc": "q̨́",
+   "casefold": "q̨́"
+  },
+  {
+   "id": "unicode-7",
+   "input": "Ω",
+   "nfc": "Ω",
+   "casefold": "ω"
+  },
+  {
+   "id": "unicode-8",
+   "input": "ﬁ.txt",
+   "nfc": "ﬁ.txt",
+   "casefold": "fi.txt"
+  },
+  {
+   "id": "unicode-9",
+   "input": "각",
+   "nfc": "각",
+   "casefold": "각"
+  },
+  {
+   "id": "unicode-10",
+   "input": "가",
+   "nfc": "가",
+   "casefold": "가"
+  },
+  {
+   "id": "unicode-11",
+   "input": "각",
+   "nfc": "각",
+   "casefold": "각"
+  },
+  {
+   "id": "unicode-12",
+   "input": "각",
+   "nfc": "각",
+   "casefold": "각"
+  },
+  {
+   "id": "unicode-13",
+   "input": "ཷ",
+   "nfc": "ཷ",
+   "casefold": "ཷ"
+  },
+  {
+   "id": "unicode-14",
+   "input": "ϓ",
+   "nfc": "ϓ",
+   "casefold": "ϓ"
+  },
+  {
+   "id": "unicode-15",
+   "input": "数据/测井.las",
+   "nfc": "数据/测井.las",
+   "casefold": "数据/测井.las"
+  },
+  {
+   "id": "unicode-16",
+   "input": "ß",
+   "nfc": "ß",
+   "casefold": "ss"
+  },
+  {
+   "id": "unicode-17",
+   "input": "İ",
+   "nfc": "İ",
+   "casefold": "i̇"
+  },
+  {
+   "id": "unicode-18",
+   "input": "Σ",
+   "nfc": "Σ",
+   "casefold": "σ"
+  },
+  {
+   "id": "unicode-19",
+   "input": "ͅ",
+   "nfc": "ͅ",
+   "casefold": "ι"
+  },
+  {
+   "id": "unicode-20",
+   "input": "ﬖ",
+   "nfc": "ﬖ",
+   "casefold": "վն"
+  },
+  {
+   "id": "unicode-21",
+   "input": "一乙二.las",
+   "nfc": "一乙二.las",
+   "casefold": "一乙二.las"
+  },
+  {
+   "id": "unicode-22",
+   "input": "à̖̗b",
+   "nfc": "à̖̗b",
+   "casefold": "à̖̗b"
+  },
+  {
+   "id": "unicode-23",
+   "input": "ἳ",
+   "nfc": "ἳ",
+   "casefold": "ἳ"
+  },
+  {
+   "id": "unicode-24",
+   "input": "ἳ͂",
+   "nfc": "ἳ͂",
+   "casefold": "ἳ͂"
+  },
+  {
+   "id": "unicode-25",
+   "input": "ொ",
+   "nfc": "ொ",
+   "casefold": "ொ"
+  },
+  {
+   "id": "unicode-26",
+   "input": "ৌ",
+   "nfc": "ৌ",
+   "casefold": "ৌ"
+  },
+  {
+   "id": "unicode-27",
+   "input": "ą́",
+   "nfc": "ą́",
+   "casefold": "ą́"
+  },
+  {
+   "id": "unicode-28",
+   "input": "ཷ",
+   "nfc": "ཷ",
+   "casefold": "ཷ"
+  },
+  {
+   "id": "unicode-29",
+   "input": "ṩ",
+   "nfc": "ṩ",
+   "casefold": "ṩ"
+  },
+  {
+   "id": "unicode-30",
+   "input": "ᾴ",
+   "nfc": "ᾴ",
+   "casefold": "άι"
+  },
+  {
+   "id": "unicode-31",
+   "input": "ἲ",
+   "nfc": "ἲ",
+   "casefold": "ἲ"
+  }
+ ],
+ "fuzz_nfc": [
+  {
+   "id": "fuzznfc-0",
+   "input": "́ே̨̖a̓",
+   "nfc": "́ே̨̖a̓",
+   "casefold": "́ே̨̖a̓"
+  },
+  {
+   "id": "fuzznfc-1",
+   "input": "ௗ̣̣中",
+   "nfc": "ௗ̣̣中",
+   "casefold": "ௗ̣̣中"
+  },
+  {
+   "id": "fuzznfc-2",
+   "input": "eেq̓̀",
+   "nfc": "eেq̓̀",
+   "casefold": "eেq̓̀"
+  },
+  {
+   "id": "fuzznfc-3",
+   "input": "exax",
+   "nfc": "exax",
+   "casefold": "exax"
+  },
+  {
+   "id": "fuzznfc-4",
+   "input": "்̖̔̇ͅᄀ",
+   "nfc": "்̖̔̇ͅᄀ",
+   "casefold": "்̖̔̇ιᄀ"
+  },
+  {
+   "id": "fuzznfc-5",
+   "input": "ͅqা-̨",
+   "nfc": "ͅqা-̨",
+   "casefold": "ιqা-̨"
+  },
+  {
+   "id": "fuzznfc-6",
+   "input": "ாேυ",
+   "nfc": "ாேυ",
+   "casefold": "ாேυ"
+  },
+  {
+   "id": "fuzznfc-7",
+   "input": "xqυι֮e",
+   "nfc": "xqυι֮e",
+   "casefold": "xqυι֮e"
+  },
+  {
+   "id": "fuzznfc-8",
+   "input": "֮υ̣ᆨ中́",
+   "nfc": "֮υ̣ᆨ中́",
+   "casefold": "֮υ̣ᆨ中́"
+  },
+  {
+   "id": "fuzznfc-9",
+   "input": "aேx̀",
+   "nfc": "aேx̀",
+   "casefold": "aேx̀"
+  },
+  {
+   "id": "fuzznfc-10",
+   "input": "̔া",
+   "nfc": "̔া",
+   "casefold": "̔া"
+  },
+  {
+   "id": "fuzznfc-11",
+   "input": "̀-",
+   "nfc": "̀-",
+   "casefold": "̀-"
+  },
+  {
+   "id": "fuzznfc-12",
+   "input": "̣͂",
+   "nfc": "̣͂",
+   "casefold": "̣͂"
+  },
+  {
+   "id": "fuzznfc-13",
+   "input": "াᆨ",
+   "nfc": "াᆨ",
+   "casefold": "াᆨ"
+  },
+  {
+   "id": "fuzznfc-14",
+   "input": "qιxৗᆨ̓",
+   "nfc": "qιxৗᆨ̓",
+   "casefold": "qιxৗᆨ̓"
+  },
+  {
+   "id": "fuzznfc-15",
+   "input": "֮́가가̓",
+   "nfc": "֮́가가̓",
+   "casefold": "֮́가가̓"
+  },
+  {
+   "id": "fuzznfc-16",
+   "input": "ெ̓েாe",
+   "nfc": "ெ̓েாe",
+   "casefold": "ெ̓েாe"
+  },
+  {
+   "id": "fuzznfc-17",
+   "input": "ே̨",
+   "nfc": "ே̨",
+   "casefold": "ே̨"
+  },
+  {
+   "id": "fuzznfc-18",
+   "input": "̖ேου",
+   "nfc": "̖ேου",
+   "casefold": "̖ேου"
+  },
+  {
+   "id": "fuzznfc-19",
+   "input": "ᅡι̖-֮͂",
+   "nfc": "ᅡι̖-֮͂",
+   "casefold": "ᅡι̖-֮͂"
+  },
+  {
+   "id": "fuzznfc-20",
+   "input": "ᆨெ̓া",
+   "nfc": "ᆨெ̓া",
+   "casefold": "ᆨெ̓া"
+  },
+  {
+   "id": "fuzznfc-21",
+   "input": "̨-αᾳ",
+   "nfc": "̨-αᾳ",
+   "casefold": "̨-ααι"
+  },
+  {
+   "id": "fuzznfc-22",
+   "input": "ᄀ̇ἀெ",
+   "nfc": "ᄀ̇ἀெ",
+   "casefold": "ᄀ̇ἀெ"
+  },
+  {
+   "id": "fuzznfc-23",
+   "input": "̨υᆨ̇",
+   "nfc": "̨υᆨ̇",
+   "casefold": "̨υᆨ̇"
+  },
+  {
+   "id": "fuzznfc-24",
+   "input": "ᄀ̖̓e்",
+   "nfc": "ᄀ̖̓e்",
+   "casefold": "ᄀ̖̓e்"
+  },
+  {
+   "id": "fuzznfc-25",
+   "input": "̀ᅡ",
+   "nfc": "̀ᅡ",
+   "casefold": "̀ᅡ"
+  },
+  {
+   "id": "fuzznfc-26",
+   "input": "xáa̔ᄀ",
+   "nfc": "xáa̔ᄀ",
+   "casefold": "xáa̔ᄀ"
+  },
+  {
+   "id": "fuzznfc-27",
+   "input": "aυυq",
+   "nfc": "aυυq",
+   "casefold": "aυυq"
+  },
+  {
+   "id": "fuzznfc-28",
+   "input": "ę֮x",
+   "nfc": "ę֮x",
+   "casefold": "ę֮x"
+  },
+  {
+   "id": "fuzznfc-29",
+   "input": "ᆨͅ",
+   "nfc": "ᆨͅ",
+   "casefold": "ᆨι"
+  },
+  {
+   "id": "fuzznfc-30",
+   "input": "்̇ᄀெᆨι",
+   "nfc": "்̇ᄀெᆨι",
+   "casefold": "்̇ᄀெᆨι"
+  },
+  {
+   "id": "fuzznfc-31",
+   "input": "aᆨοৗ中ι",
+   "nfc": "aᆨοৗ中ι",
+   "casefold": "aᆨοৗ中ι"
+  },
+  {
+   "id": "fuzznfc-32",
+   "input": "்ę̣α",
+   "nfc": "்ę̣α",
+   "casefold": "்ę̣α"
+  },
+  {
+   "id": "fuzznfc-33",
+   "input": "̇͂q̀̇υ",
+   "nfc": "̇͂q̀̇υ",
+   "casefold": "̇͂q̀̇υ"
+  },
+  {
+   "id": "fuzznfc-34",
+   "input": "াௗᄀ",
+   "nfc": "াௗᄀ",
+   "casefold": "াௗᄀ"
+  },
+  {
+   "id": "fuzznfc-35",
+   "input": "̖̇",
+   "nfc": "̖̇",
+   "casefold": "̖̇"
+  },
+  {
+   "id": "fuzznfc-36",
+   "input": "ৗெᄀ̣ᄀ",
+   "nfc": "ৗெᄀ̣ᄀ",
+   "casefold": "ৗெᄀ̣ᄀ"
+  },
+  {
+   "id": "fuzznfc-37",
+   "input": "͂ᄀx்qο",
+   "nfc": "͂ᄀx்qο",
+   "casefold": "͂ᄀx்qο"
+  },
+  {
+   "id": "fuzznfc-38",
+   "input": "ᅡে",
+   "nfc": "ᅡে",
+   "casefold": "ᅡে"
+  },
+  {
+   "id": "fuzznfc-39",
+   "input": "া가eᆨ",
+   "nfc": "া가eᆨ",
+   "casefold": "া가eᆨ"
+  },
+  {
+   "id": "fuzznfc-40",
+   "input": "ে֮ͅͅ",
+   "nfc": "ে֮ͅͅ",
+   "casefold": "েι֮ι"
+  },
+  {
+   "id": "fuzznfc-41",
+   "input": "ͅৗ́q",
+   "nfc": "ͅৗ́q",
+   "casefold": "ιৗ́q"
+  },
+  {
+   "id": "fuzznfc-42",
+   "input": "̇́οeeͅ",
+   "nfc": "̇́οeeͅ",
+   "casefold": "̇́οeeι"
+  },
+  {
+   "id": "fuzznfc-43",
+   "input": "֮ᆨο",
+   "nfc": "֮ᆨο",
+   "casefold": "֮ᆨο"
+  },
+  {
+   "id": "fuzznfc-44",
+   "input": "ο͂",
+   "nfc": "ο͂",
+   "casefold": "ο͂"
+  },
+  {
+   "id": "fuzznfc-45",
+   "input": "ᄀ̓xெᅡ̀",
+   "nfc": "ᄀ̓xெᅡ̀",
+   "casefold": "ᄀ̓xெᅡ̀"
+  },
+  {
+   "id": "fuzznfc-46",
+   "input": "்̇া̣中",
+   "nfc": "்̇া̣中",
+   "casefold": "்̇া̣中"
+  },
+  {
+   "id": "fuzznfc-47",
+   "input": "eq̨αᅡ",
+   "nfc": "eq̨αᅡ",
+   "casefold": "eq̨αᅡ"
+  },
+  {
+   "id": "fuzznfc-48",
+   "input": "ᄀெৗę͂",
+   "nfc": "ᄀெৗę͂",
+   "casefold": "ᄀெৗę͂"
+  },
+  {
+   "id": "fuzznfc-49",
+   "input": "ᄀ́",
+   "nfc": "ᄀ́",
+   "casefold": "ᄀ́"
+  },
+  {
+   "id": "fuzznfc-50",
+   "input": "-xাா֮x",
+   "nfc": "-xাா֮x",
+   "casefold": "-xাா֮x"
+  },
+  {
+   "id": "fuzznfc-51",
+   "input": "́ெο̇α̨",
+   "nfc": "́ெο̇α̨",
+   "casefold": "́ெο̇α̨"
+  },
+  {
+   "id": "fuzznfc-52",
+   "input": "͂eυে",
+   "nfc": "͂eυে",
+   "casefold": "͂eυে"
+  },
+  {
+   "id": "fuzznfc-53",
+   "input": "ௗ̓া",
+   "nfc": "ௗ̓া",
+   "casefold": "ௗ̓া"
+  },
+  {
+   "id": "fuzznfc-54",
+   "input": "α中்ৗ",
+   "nfc": "α中்ৗ",
+   "casefold": "α中்ৗ"
+  },
+  {
+   "id": "fuzznfc-55",
+   "input": "ὐ̓̀eυ",
+   "nfc": "ὐ̓̀eυ",
+   "casefold": "ὐ̓̀eυ"
+  },
+  {
+   "id": "fuzznfc-56",
+   "input": "ᆨ̨̣̀̇ௗ",
+   "nfc": "ᆨ̨̣̀̇ௗ",
+   "casefold": "ᆨ̨̣̀̇ௗ"
+  },
+  {
+   "id": "fuzznfc-57",
+   "input": "̓ৗ֮ο",
+   "nfc": "̓ৗ֮ο",
+   "casefold": "̓ৗ֮ο"
+  },
+  {
+   "id": "fuzznfc-58",
+   "input": "֮াο",
+   "nfc": "֮াο",
+   "casefold": "֮াο"
+  },
+  {
+   "id": "fuzznfc-59",
+   "input": "中েx",
+   "nfc": "中েx",
+   "casefold": "中েx"
+  },
+  {
+   "id": "fuzznfc-60",
+   "input": "υ가α",
+   "nfc": "υ가α",
+   "casefold": "υ가α"
+  },
+  {
+   "id": "fuzznfc-61",
+   "input": "ா̓ᅡௗe",
+   "nfc": "ா̓ᅡௗe",
+   "casefold": "ா̓ᅡௗe"
+  },
+  {
+   "id": "fuzznfc-62",
+   "input": "ͅ-ιι",
+   "nfc": "ͅ-ιι",
+   "casefold": "ι-ιι"
+  },
+  {
+   "id": "fuzznfc-63",
+   "input": "υοৗ͂ா",
+   "nfc": "υοৗ͂ா",
+   "casefold": "υοৗ͂ா"
+  },
+  {
+   "id": "fuzznfc-64",
+   "input": "υxৗ̣͂",
+   "nfc": "υxৗ̣͂",
+   "casefold": "υxৗ̣͂"
+  },
+  {
+   "id": "fuzznfc-65",
+   "input": "中ȧ֮֮υ",
+   "nfc": "中ȧ֮֮υ",
+   "casefold": "中ȧ֮֮υ"
+  },
+  {
+   "id": "fuzznfc-66",
+   "input": "αaᆨ",
+   "nfc": "αaᆨ",
+   "casefold": "αaᆨ"
+  },
+  {
+   "id": "fuzznfc-67",
+   "input": "ேৗ-ே̀",
+   "nfc": "ேৗ-ே̀",
+   "casefold": "ேৗ-ே̀"
+  },
+  {
+   "id": "fuzznfc-68",
+   "input": "οᅡௗᄀ͂ι",
+   "nfc": "οᅡௗᄀ͂ι",
+   "casefold": "οᅡௗᄀ͂ι"
+  },
+  {
+   "id": "fuzznfc-69",
+   "input": "்̨",
+   "nfc": "்̨",
+   "casefold": "்̨"
+  },
+  {
+   "id": "fuzznfc-70",
+   "input": "ᆨাẹ",
+   "nfc": "ᆨাẹ",
+   "casefold": "ᆨাẹ"
+  },
+  {
+   "id": "fuzznfc-71",
+   "input": "ιே́-",
+   "nfc": "ιே́-",
+   "casefold": "ιே́-"
+  },
+  {
+   "id": "fuzznfc-72",
+   "input": "οাιேq",
+   "nfc": "οাιேq",
+   "casefold": "οাιேq"
+  },
+  {
+   "id": "fuzznfc-73",
+   "input": "াᆨυেι",
+   "nfc": "াᆨυেι",
+   "casefold": "াᆨυেι"
+  },
+  {
+   "id": "fuzznfc-74",
+   "input": "̣̓ᄀ",
+   "nfc": "̣̓ᄀ",
+   "casefold": "̣̓ᄀ"
+  },
+  {
+   "id": "fuzznfc-75",
+   "input": "οா̖ax",
+   "nfc": "οா̖ax",
+   "casefold": "οா̖ax"
+  },
+  {
+   "id": "fuzznfc-76",
+   "input": "ᅡா",
+   "nfc": "ᅡா",
+   "casefold": "ᅡா"
+  },
+  {
+   "id": "fuzznfc-77",
+   "input": "̨α֮",
+   "nfc": "̨α֮",
+   "casefold": "̨α֮"
+  },
+  {
+   "id": "fuzznfc-78",
+   "input": "ে̨ύ中υ",
+   "nfc": "ে̨ύ中υ",
+   "casefold": "ে̨ύ中υ"
+  },
+  {
+   "id": "fuzznfc-79",
+   "input": "각ா",
+   "nfc": "각ா",
+   "casefold": "각ா"
+  },
+  {
+   "id": "fuzznfc-80",
+   "input": "ௗெ",
+   "nfc": "ௗெ",
+   "casefold": "ௗெ"
+  },
+  {
+   "id": "fuzznfc-81",
+   "input": "ᆨᅡ",
+   "nfc": "ᆨᅡ",
+   "casefold": "ᆨᅡ"
+  },
+  {
+   "id": "fuzznfc-82",
+   "input": "α֮a-",
+   "nfc": "α֮a-",
+   "casefold": "α֮a-"
+  },
+  {
+   "id": "fuzznfc-83",
+   "input": "̣̓υௗ",
+   "nfc": "̣̓υௗ",
+   "casefold": "̣̓υௗ"
+  },
+  {
+   "id": "fuzznfc-84",
+   "input": "̇́ாᄀৗ",
+   "nfc": "̇́ாᄀৗ",
+   "casefold": "̇́ாᄀৗ"
+  },
+  {
+   "id": "fuzznfc-86",
+   "input": "்̖",
+   "nfc": "்̖",
+   "casefold": "்̖"
+  },
+  {
+   "id": "fuzznfc-87",
+   "input": "̨ে",
+   "nfc": "̨ে",
+   "casefold": "̨ে"
+  },
+  {
+   "id": "fuzznfc-88",
+   "input": "ௗேাா",
+   "nfc": "ௗேাா",
+   "casefold": "ௗேাா"
+  },
+  {
+   "id": "fuzznfc-89",
+   "input": "̇ο֮",
+   "nfc": "̇ο֮",
+   "casefold": "̇ο֮"
+  },
+  {
+   "id": "fuzznfc-90",
+   "input": "̇́ௗ",
+   "nfc": "̇́ௗ",
+   "casefold": "̇́ௗ"
+  },
+  {
+   "id": "fuzznfc-91",
+   "input": "ιᄀ֮",
+   "nfc": "ιᄀ֮",
+   "casefold": "ιᄀ֮"
+  },
+  {
+   "id": "fuzznfc-92",
+   "input": "ι가aq̓υ",
+   "nfc": "ι가aq̓υ",
+   "casefold": "ι가aq̓υ"
+  },
+  {
+   "id": "fuzznfc-93",
+   "input": "̣̀가ৗ-ᅡ",
+   "nfc": "̣̀가ৗ-ᅡ",
+   "casefold": "̣̀가ৗ-ᅡ"
+  },
+  {
+   "id": "fuzznfc-94",
+   "input": "ῖ",
+   "nfc": "ῖ",
+   "casefold": "ῖ"
+  },
+  {
+   "id": "fuzznfc-95",
+   "input": "ৗͅெ̔ৗ中",
+   "nfc": "ৗͅெ̔ৗ中",
+   "casefold": "ৗιெ̔ৗ中"
+  },
+  {
+   "id": "fuzznfc-96",
+   "input": "ὀαৗ்",
+   "nfc": "ὀαৗ்",
+   "casefold": "ὀαৗ்"
+  },
+  {
+   "id": "fuzznfc-97",
+   "input": "͂েᄀ֮",
+   "nfc": "͂েᄀ֮",
+   "casefold": "͂েᄀ֮"
+  },
+  {
+   "id": "fuzznfc-98",
+   "input": "ேaৗে",
+   "nfc": "ேaৗে",
+   "casefold": "ேaৗে"
+  },
+  {
+   "id": "fuzznfc-99",
+   "input": "̔ெι̖̇υ",
+   "nfc": "̔ெι̖̇υ",
+   "casefold": "̔ெι̖̇υ"
+  },
+  {
+   "id": "fuzznfc-100",
+   "input": "̓ெᅡா가",
+   "nfc": "̓ெᅡா가",
+   "casefold": "̓ெᅡா가"
+  },
+  {
+   "id": "fuzznfc-101",
+   "input": "ο֮ৗ̓ে",
+   "nfc": "ο֮ৗ̓ে",
+   "casefold": "ο֮ৗ̓ে"
+  },
+  {
+   "id": "fuzznfc-102",
+   "input": "̖ாeaα-",
+   "nfc": "̖ாeaα-",
+   "casefold": "̖ாeaα-"
+  },
+  {
+   "id": "fuzznfc-103",
+   "input": "ে͂",
+   "nfc": "ে͂",
+   "casefold": "ে͂"
+  },
+  {
+   "id": "fuzznfc-104",
+   "input": "ৗெͅ",
+   "nfc": "ৗெͅ",
+   "casefold": "ৗெι"
+  },
+  {
+   "id": "fuzznfc-105",
+   "input": "̨ᄀ",
+   "nfc": "̨ᄀ",
+   "casefold": "̨ᄀ"
+  },
+  {
+   "id": "fuzznfc-106",
+   "input": "͂̓",
+   "nfc": "͂̓",
+   "casefold": "͂̓"
+  },
+  {
+   "id": "fuzznfc-107",
+   "input": "ௗা̔ᄀο",
+   "nfc": "ௗা̔ᄀο",
+   "casefold": "ௗা̔ᄀο"
+  },
+  {
+   "id": "fuzznfc-108",
+   "input": "́ᆨே",
+   "nfc": "́ᆨே",
+   "casefold": "́ᆨே"
+  },
+  {
+   "id": "fuzznfc-109",
+   "input": "ৗ͂가中",
+   "nfc": "ৗ͂가中",
+   "casefold": "ৗ͂가中"
+  },
+  {
+   "id": "fuzznfc-110",
+   "input": "͂̀가x̨͂",
+   "nfc": "͂̀가x̨͂",
+   "casefold": "͂̀가x̨͂"
+  },
+  {
+   "id": "fuzznfc-111",
+   "input": "েেᅡெ中̨",
+   "nfc": "েেᅡெ中̨",
+   "casefold": "েেᅡெ中̨"
+  },
+  {
+   "id": "fuzznfc-112",
+   "input": "া்",
+   "nfc": "া்",
+   "casefold": "া்"
+  },
+  {
+   "id": "fuzznfc-113",
+   "input": "̀ύ֮̇́",
+   "nfc": "̀ύ֮̇́",
+   "casefold": "̀ύ֮̇́"
+  },
+  {
+   "id": "fuzznfc-114",
+   "input": "ͅᅡ-̔",
+   "nfc": "ͅᅡ-̔",
+   "casefold": "ιᅡ-̔"
+  },
+  {
+   "id": "fuzznfc-115",
+   "input": "中ெ",
+   "nfc": "中ெ",
+   "casefold": "中ெ"
+  },
+  {
+   "id": "fuzznfc-116",
+   "input": "가όaে",
+   "nfc": "가όaে",
+   "casefold": "가όaে"
+  },
+  {
+   "id": "fuzznfc-117",
+   "input": "̔ᄀqᄀ̣x",
+   "nfc": "̔ᄀqᄀ̣x",
+   "casefold": "̔ᄀqᄀ̣x"
+  },
+  {
+   "id": "fuzznfc-118",
+   "input": "ே̀υাெ",
+   "nfc": "ே̀υাெ",
+   "casefold": "ே̀υাெ"
+  },
+  {
+   "id": "fuzznfc-119",
+   "input": "가ᅡ-ாে",
+   "nfc": "가ᅡ-ாে",
+   "casefold": "가ᅡ-ாে"
+  },
+  {
+   "id": "fuzznfc-120",
+   "input": "中া",
+   "nfc": "中া",
+   "casefold": "中া"
+  },
+  {
+   "id": "fuzznfc-121",
+   "input": "̔ι",
+   "nfc": "̔ι",
+   "casefold": "̔ι"
+  },
+  {
+   "id": "fuzznfc-122",
+   "input": "ᄀ中eͅ",
+   "nfc": "ᄀ中eͅ",
+   "casefold": "ᄀ中eι"
+  },
+  {
+   "id": "fuzznfc-123",
+   "input": "中̀aͅ",
+   "nfc": "中̀aͅ",
+   "casefold": "中̀aι"
+  },
+  {
+   "id": "fuzznfc-124",
+   "input": "aᅡৗx",
+   "nfc": "aᅡৗx",
+   "casefold": "aᅡৗx"
+  },
+  {
+   "id": "fuzznfc-125",
+   "input": "eυ",
+   "nfc": "eυ",
+   "casefold": "eυ"
+  },
+  {
+   "id": "fuzznfc-126",
+   "input": "̓ᆨeυা",
+   "nfc": "̓ᆨeυা",
+   "casefold": "̓ᆨeυা"
+  },
+  {
+   "id": "fuzznfc-127",
+   "input": "்각͂ᅡ",
+   "nfc": "்각͂ᅡ",
+   "casefold": "்각͂ᅡ"
+  },
+  {
+   "id": "fuzznfc-128",
+   "input": "֮াx",
+   "nfc": "֮াx",
+   "casefold": "֮াx"
+  },
+  {
+   "id": "fuzznfc-129",
+   "input": "̖가υாே̣",
+   "nfc": "̖가υாே̣",
+   "casefold": "̖가υாே̣"
+  },
+  {
+   "id": "fuzznfc-130",
+   "input": "ে̀াe̔ι",
+   "nfc": "ে̀াe̔ι",
+   "casefold": "ে̀াe̔ι"
+  },
+  {
+   "id": "fuzznfc-131",
+   "input": "αxে",
+   "nfc": "αxে",
+   "casefold": "αxে"
+  },
+  {
+   "id": "fuzznfc-132",
+   "input": "ᅡe",
+   "nfc": "ᅡe",
+   "casefold": "ᅡe"
+  },
+  {
+   "id": "fuzznfc-133",
+   "input": "ᄀே",
+   "nfc": "ᄀே",
+   "casefold": "ᄀே"
+  },
+  {
+   "id": "fuzznfc-134",
+   "input": "͂ে̣ι",
+   "nfc": "͂ে̣ι",
+   "casefold": "͂ে̣ι"
+  },
+  {
+   "id": "fuzznfc-135",
+   "input": "qι-",
+   "nfc": "qι-",
+   "casefold": "qι-"
+  },
+  {
+   "id": "fuzznfc-136",
+   "input": "ெ가̔",
+   "nfc": "ெ가̔",
+   "casefold": "ெ가̔"
+  },
+  {
+   "id": "fuzznfc-137",
+   "input": "ே்͂ι",
+   "nfc": "ே்͂ι",
+   "casefold": "ே்͂ι"
+  },
+  {
+   "id": "fuzznfc-138",
+   "input": "̔া-ιௗ",
+   "nfc": "̔া-ιௗ",
+   "casefold": "̔া-ιௗ"
+  },
+  {
+   "id": "fuzznfc-139",
+   "input": "ে֮υᆨ",
+   "nfc": "ে֮υᆨ",
+   "casefold": "ে֮υᆨ"
+  },
+  {
+   "id": "fuzznfc-140",
+   "input": "ா̣̀q中ο",
+   "nfc": "ா̣̀q中ο",
+   "casefold": "ா̣̀q中ο"
+  },
+  {
+   "id": "fuzznfc-141",
+   "input": "ே்̓ேৗ",
+   "nfc": "ே்̓ேৗ",
+   "casefold": "ே்̓ேৗ"
+  },
+  {
+   "id": "fuzznfc-142",
+   "input": "েυৗ̨̇ௗ",
+   "nfc": "েυৗ̨̇ௗ",
+   "casefold": "েυৗ̨̇ௗ"
+  },
+  {
+   "id": "fuzznfc-143",
+   "input": "ο中ாா",
+   "nfc": "ο中ாா",
+   "casefold": "ο中ாா"
+  },
+  {
+   "id": "fuzznfc-144",
+   "input": "가ᄀ",
+   "nfc": "가ᄀ",
+   "casefold": "가ᄀ"
+  },
+  {
+   "id": "fuzznfc-145",
+   "input": "άxᄀ-",
+   "nfc": "άxᄀ-",
+   "casefold": "άxᄀ-"
+  },
+  {
+   "id": "fuzznfc-146",
+   "input": "ெᆨா-ᆨͅ",
+   "nfc": "ெᆨா-ᆨͅ",
+   "casefold": "ெᆨா-ᆨι"
+  },
+  {
+   "id": "fuzznfc-147",
+   "input": "가a֮ே",
+   "nfc": "가a֮ே",
+   "casefold": "가a֮ே"
+  },
+  {
+   "id": "fuzznfc-148",
+   "input": "̖ιαা",
+   "nfc": "̖ιαা",
+   "casefold": "̖ιαা"
+  },
+  {
+   "id": "fuzznfc-149",
+   "input": "ᆨὓேে",
+   "nfc": "ᆨὓேে",
+   "casefold": "ᆨὓேে"
+  },
+  {
+   "id": "fuzznfc-150",
+   "input": "ে中가",
+   "nfc": "ে中가",
+   "casefold": "ে中가"
+  },
+  {
+   "id": "fuzznfc-151",
+   "input": "̖ᅡᆨι가",
+   "nfc": "̖ᅡᆨι가",
+   "casefold": "̖ᅡᆨι가"
+  },
+  {
+   "id": "fuzznfc-152",
+   "input": "υᄀে",
+   "nfc": "υᄀে",
+   "casefold": "υᄀে"
+  },
+  {
+   "id": "fuzznfc-153",
+   "input": "ᆨ்֮qι가",
+   "nfc": "ᆨ்֮qι가",
+   "casefold": "ᆨ்֮qι가"
+  },
+  {
+   "id": "fuzznfc-154",
+   "input": "̔ͅাιe",
+   "nfc": "̔ͅাιe",
+   "casefold": "̔ιাιe"
+  },
+  {
+   "id": "fuzznfc-155",
+   "input": "̀ͅ",
+   "nfc": "̀ͅ",
+   "casefold": "̀ι"
+  },
+  {
+   "id": "fuzznfc-156",
+   "input": "가̇͂ெ",
+   "nfc": "가̇͂ெ",
+   "casefold": "가̇͂ெ"
+  },
+  {
+   "id": "fuzznfc-157",
+   "input": "̓-ι",
+   "nfc": "̓-ι",
+   "casefold": "̓-ι"
+  },
+  {
+   "id": "fuzznfc-158",
+   "input": "̇ே",
+   "nfc": "̇ே",
+   "casefold": "̇ே"
+  },
+  {
+   "id": "fuzznfc-159",
+   "input": "xெ்̨",
+   "nfc": "xெ்̨",
+   "casefold": "xெ்̨"
+  },
+  {
+   "id": "fuzznfc-160",
+   "input": "̔ெ̖",
+   "nfc": "̔ெ̖",
+   "casefold": "̔ெ̖"
+  },
+  {
+   "id": "fuzznfc-161",
+   "input": "̣q",
+   "nfc": "̣q",
+   "casefold": "̣q"
+  },
+  {
+   "id": "fuzznfc-162",
+   "input": "̀́ௗ",
+   "nfc": "̀́ௗ",
+   "casefold": "̀́ௗ"
+  },
+  {
+   "id": "fuzznfc-163",
+   "input": "̇ௗȧ",
+   "nfc": "̇ௗȧ",
+   "casefold": "̇ௗȧ"
+  },
+  {
+   "id": "fuzznfc-164",
+   "input": "̨֮qᆨ",
+   "nfc": "̨֮qᆨ",
+   "casefold": "̨֮qᆨ"
+  },
+  {
+   "id": "fuzznfc-165",
+   "input": "̓ᄀ்̣̖̔",
+   "nfc": "̓ᄀ்̣̖̔",
+   "casefold": "̓ᄀ்̣̖̔"
+  },
+  {
+   "id": "fuzznfc-166",
+   "input": "-υxா",
+   "nfc": "-υxா",
+   "casefold": "-υxா"
+  },
+  {
+   "id": "fuzznfc-167",
+   "input": "াᅡ̖̣q",
+   "nfc": "াᅡ̖̣q",
+   "casefold": "াᅡ̖̣q"
+  },
+  {
+   "id": "fuzznfc-168",
+   "input": "̔ι̨ா",
+   "nfc": "̔ι̨ா",
+   "casefold": "̔ι̨ா"
+  },
+  {
+   "id": "fuzznfc-169",
+   "input": "̣α-ᄀᄀ",
+   "nfc": "̣α-ᄀᄀ",
+   "casefold": "̣α-ᄀᄀ"
+  },
+  {
+   "id": "fuzznfc-170",
+   "input": "ᅡ̨xᆨே̓",
+   "nfc": "ᅡ̨xᆨே̓",
+   "casefold": "ᅡ̨xᆨே̓"
+  },
+  {
+   "id": "fuzznfc-171",
+   "input": "̇ெͅq",
+   "nfc": "̇ெͅq",
+   "casefold": "̇ெιq"
+  },
+  {
+   "id": "fuzznfc-172",
+   "input": "்ெaὑ̨",
+   "nfc": "்ெaὑ̨",
+   "casefold": "்ெaὑ̨"
+  },
+  {
+   "id": "fuzznfc-173",
+   "input": "ாৗ͂ᄀ֮",
+   "nfc": "ாৗ͂ᄀ֮",
+   "casefold": "ாৗ͂ᄀ֮"
+  },
+  {
+   "id": "fuzznfc-174",
+   "input": "α̖",
+   "nfc": "α̖",
+   "casefold": "α̖"
+  },
+  {
+   "id": "fuzznfc-175",
+   "input": "̨̇ৗௗ̀q",
+   "nfc": "̨̇ৗௗ̀q",
+   "casefold": "̨̇ৗௗ̀q"
+  },
+  {
+   "id": "fuzznfc-176",
+   "input": "가e̖eெ",
+   "nfc": "가e̖eெ",
+   "casefold": "가e̖eெ"
+  },
+  {
+   "id": "fuzznfc-177",
+   "input": "qοαা்̣",
+   "nfc": "qοαা்̣",
+   "casefold": "qοαা்̣"
+  },
+  {
+   "id": "fuzznfc-178",
+   "input": "ে்ᄀ̀",
+   "nfc": "ে்ᄀ̀",
+   "casefold": "ে்ᄀ̀"
+  },
+  {
+   "id": "fuzznfc-179",
+   "input": "-x中",
+   "nfc": "-x中",
+   "casefold": "-x中"
+  },
+  {
+   "id": "fuzznfc-180",
+   "input": "x̖",
+   "nfc": "x̖",
+   "casefold": "x̖"
+  },
+  {
+   "id": "fuzznfc-181",
+   "input": "가֮",
+   "nfc": "가֮",
+   "casefold": "가֮"
+  },
+  {
+   "id": "fuzznfc-182",
+   "input": "aa̓ι가ே",
+   "nfc": "aa̓ι가ே",
+   "casefold": "aa̓ι가ே"
+  },
+  {
+   "id": "fuzznfc-183",
+   "input": "̀ৗেேαᅡ",
+   "nfc": "̀ৗেேαᅡ",
+   "casefold": "̀ৗেேαᅡ"
+  },
+  {
+   "id": "fuzznfc-184",
+   "input": "்̖qᄀͅௗ",
+   "nfc": "்̖qᄀͅௗ",
+   "casefold": "்̖qᄀιௗ"
+  },
+  {
+   "id": "fuzznfc-185",
+   "input": "中e",
+   "nfc": "中e",
+   "casefold": "中e"
+  },
+  {
+   "id": "fuzznfc-186",
+   "input": "αa֮xௗ̔",
+   "nfc": "αa֮xௗ̔",
+   "casefold": "αa֮xௗ̔"
+  },
+  {
+   "id": "fuzznfc-187",
+   "input": "가்̇-υ",
+   "nfc": "가்̇-υ",
+   "casefold": "가்̇-υ"
+  },
+  {
+   "id": "fuzznfc-188",
+   "input": "οι",
+   "nfc": "οι",
+   "casefold": "οι"
+  },
+  {
+   "id": "fuzznfc-189",
+   "input": "가ᅡ-́",
+   "nfc": "가ᅡ-́",
+   "casefold": "가ᅡ-́"
+  },
+  {
+   "id": "fuzznfc-190",
+   "input": "েe",
+   "nfc": "েe",
+   "casefold": "েe"
+  },
+  {
+   "id": "fuzznfc-191",
+   "input": "েx̓",
+   "nfc": "েx̓",
+   "casefold": "েx̓"
+  },
+  {
+   "id": "fuzznfc-192",
+   "input": "̀ͅο",
+   "nfc": "̀ͅο",
+   "casefold": "ὶο"
+  },
+  {
+   "id": "fuzznfc-193",
+   "input": "́̓가ে中x",
+   "nfc": "́̓가ে中x",
+   "casefold": "́̓가ে中x"
+  },
+  {
+   "id": "fuzznfc-194",
+   "input": "̔υq",
+   "nfc": "̔υq",
+   "casefold": "̔υq"
+  },
+  {
+   "id": "fuzznfc-195",
+   "input": "́ে",
+   "nfc": "́ে",
+   "casefold": "́ে"
+  },
+  {
+   "id": "fuzznfc-196",
+   "input": "̓q",
+   "nfc": "̓q",
+   "casefold": "̓q"
+  },
+  {
+   "id": "fuzznfc-197",
+   "input": "中̨̔ᄀ",
+   "nfc": "中̨̔ᄀ",
+   "casefold": "中̨̔ᄀ"
+  },
+  {
+   "id": "fuzznfc-198",
+   "input": "ௗ̖",
+   "nfc": "ௗ̖",
+   "casefold": "ௗ̖"
+  },
+  {
+   "id": "fuzznfc-199",
+   "input": "υąௗ",
+   "nfc": "υąௗ",
+   "casefold": "υąௗ"
+  },
+  {
+   "id": "fuzznfc-200",
+   "input": "̀ா",
+   "nfc": "̀ா",
+   "casefold": "̀ா"
+  },
+  {
+   "id": "fuzznfc-201",
+   "input": "ο̨̣̖ெ",
+   "nfc": "ο̨̣̖ெ",
+   "casefold": "ο̨̣̖ெ"
+  },
+  {
+   "id": "fuzznfc-202",
+   "input": "́ে͂ாͅ",
+   "nfc": "́ে͂ாͅ",
+   "casefold": "́ে͂ாι"
+  },
+  {
+   "id": "fuzznfc-203",
+   "input": "ே̣̔া̣",
+   "nfc": "ே̣̔া̣",
+   "casefold": "ே̣̔া̣"
+  },
+  {
+   "id": "fuzznfc-204",
+   "input": "்்",
+   "nfc": "்்",
+   "casefold": "்்"
+  },
+  {
+   "id": "fuzznfc-205",
+   "input": "̣̇",
+   "nfc": "̣̇",
+   "casefold": "̣̇"
+  },
+  {
+   "id": "fuzznfc-206",
+   "input": "aᄀ̀ௗ",
+   "nfc": "aᄀ̀ௗ",
+   "casefold": "aᄀ̀ௗ"
+  },
+  {
+   "id": "fuzznfc-207",
+   "input": "ா가ᅡ中",
+   "nfc": "ா가ᅡ中",
+   "casefold": "ா가ᅡ中"
+  },
+  {
+   "id": "fuzznfc-208",
+   "input": "x்",
+   "nfc": "x்",
+   "casefold": "x்"
+  },
+  {
+   "id": "fuzznfc-209",
+   "input": "ᅡ̀x가ẋ",
+   "nfc": "ᅡ̀x가ẋ",
+   "casefold": "ᅡ̀x가ẋ"
+  },
+  {
+   "id": "fuzznfc-210",
+   "input": "ᆨ்ேௗᆨ̔",
+   "nfc": "ᆨ்ேௗᆨ̔",
+   "casefold": "ᆨ்ேௗᆨ̔"
+  },
+  {
+   "id": "fuzznfc-211",
+   "input": "ᅡ்֮̓υ̨",
+   "nfc": "ᅡ்֮̓υ̨",
+   "casefold": "ᅡ்֮̓υ̨"
+  },
+  {
+   "id": "fuzznfc-212",
+   "input": "ெι֮ὶ",
+   "nfc": "ெι֮ὶ",
+   "casefold": "ெι֮ὶ"
+  },
+  {
+   "id": "fuzznfc-213",
+   "input": "ᅡaυeᄀ",
+   "nfc": "ᅡaυeᄀ",
+   "casefold": "ᅡaυeᄀ"
+  },
+  {
+   "id": "fuzznfc-214",
+   "input": "eெqাι",
+   "nfc": "eெqাι",
+   "casefold": "eெqাι"
+  },
+  {
+   "id": "fuzznfc-215",
+   "input": "-̨",
+   "nfc": "-̨",
+   "casefold": "-̨"
+  },
+  {
+   "id": "fuzznfc-216",
+   "input": "ᆨ-",
+   "nfc": "ᆨ-",
+   "casefold": "ᆨ-"
+  },
+  {
+   "id": "fuzznfc-217",
+   "input": "ৗ֮-",
+   "nfc": "ৗ֮-",
+   "casefold": "ৗ֮-"
+  },
+  {
+   "id": "fuzznfc-218",
+   "input": "가েυ中ে",
+   "nfc": "가েυ中ে",
+   "casefold": "가েυ中ে"
+  },
+  {
+   "id": "fuzznfc-219",
+   "input": "া́ͅxৗ",
+   "nfc": "া́ͅxৗ",
+   "casefold": "াίxৗ"
+  },
+  {
+   "id": "fuzznfc-220",
+   "input": "가̨́",
+   "nfc": "가̨́",
+   "casefold": "가̨́"
+  },
+  {
+   "id": "fuzznfc-221",
+   "input": "aௗο",
+   "nfc": "aௗο",
+   "casefold": "aௗο"
+  },
+  {
+   "id": "fuzznfc-222",
+   "input": "ᄀᆨx̖aα",
+   "nfc": "ᄀᆨx̖aα",
+   "casefold": "ᄀᆨx̖aα"
+  },
+  {
+   "id": "fuzznfc-223",
+   "input": "q-",
+   "nfc": "q-",
+   "casefold": "q-"
+  },
+  {
+   "id": "fuzznfc-224",
+   "input": "ᄀυே̔ௗ",
+   "nfc": "ᄀυே̔ௗ",
+   "casefold": "ᄀυே̔ௗ"
+  },
+  {
+   "id": "fuzznfc-225",
+   "input": "̀-া͂xᄀ",
+   "nfc": "̀-া͂xᄀ",
+   "casefold": "̀-া͂xᄀ"
+  },
+  {
+   "id": "fuzznfc-226",
+   "input": "ῖιৗெ",
+   "nfc": "ῖιৗெ",
+   "casefold": "ῖιৗெ"
+  },
+  {
+   "id": "fuzznfc-227",
+   "input": "̣qὑe",
+   "nfc": "̣qὑe",
+   "casefold": "̣qὑe"
+  },
+  {
+   "id": "fuzznfc-228",
+   "input": "ᄀ中가̇",
+   "nfc": "ᄀ中가̇",
+   "casefold": "ᄀ中가̇"
+  },
+  {
+   "id": "fuzznfc-229",
+   "input": "̖͂",
+   "nfc": "̖͂",
+   "casefold": "̖͂"
+  },
+  {
+   "id": "fuzznfc-230",
+   "input": "ὶাᆨᆨ",
+   "nfc": "ὶাᆨᆨ",
+   "casefold": "ὶাᆨᆨ"
+  },
+  {
+   "id": "fuzznfc-231",
+   "input": "ᅡௗàே",
+   "nfc": "ᅡௗàே",
+   "casefold": "ᅡௗàே"
+  },
+  {
+   "id": "fuzznfc-232",
+   "input": "்--̔x́",
+   "nfc": "்--̔x́",
+   "casefold": "்--̔x́"
+  },
+  {
+   "id": "fuzznfc-233",
+   "input": "́ே͂",
+   "nfc": "́ே͂",
+   "casefold": "́ே͂"
+  },
+  {
+   "id": "fuzznfc-234",
+   "input": "া́",
+   "nfc": "া́",
+   "casefold": "া́"
+  },
+  {
+   "id": "fuzznfc-235",
+   "input": "̖-̣ᄀ֮ͅ",
+   "nfc": "̖-̣ᄀ֮ͅ",
+   "casefold": "̖-̣ᄀ֮ι"
+  },
+  {
+   "id": "fuzznfc-236",
+   "input": "υ가ͅে̔া",
+   "nfc": "υ가ͅে̔া",
+   "casefold": "υ가ιে̔া"
+  },
+  {
+   "id": "fuzznfc-237",
+   "input": "̓qே͂েே",
+   "nfc": "̓qே͂েே",
+   "casefold": "̓qே͂েே"
+  },
+  {
+   "id": "fuzznfc-238",
+   "input": "υ中̣x̀",
+   "nfc": "υ中̣x̀",
+   "casefold": "υ中̣x̀"
+  },
+  {
+   "id": "fuzznfc-239",
+   "input": "்͂-",
+   "nfc": "்͂-",
+   "casefold": "்͂-"
+  },
+  {
+   "id": "fuzznfc-240",
+   "input": "̣ᅡ̨̇͂",
+   "nfc": "̣ᅡ̨̇͂",
+   "casefold": "̣ᅡ̨̇͂"
+  },
+  {
+   "id": "fuzznfc-241",
+   "input": "ᅡெe̓েͅ",
+   "nfc": "ᅡெe̓েͅ",
+   "casefold": "ᅡெe̓েι"
+  },
+  {
+   "id": "fuzznfc-242",
+   "input": "ேௗ̔ே",
+   "nfc": "ேௗ̔ே",
+   "casefold": "ேௗ̔ே"
+  },
+  {
+   "id": "fuzznfc-243",
+   "input": "̇েx",
+   "nfc": "̇েx",
+   "casefold": "̇েx"
+  },
+  {
+   "id": "fuzznfc-244",
+   "input": "ė֮",
+   "nfc": "ė֮",
+   "casefold": "ė֮"
+  },
+  {
+   "id": "fuzznfc-245",
+   "input": "ௗেa",
+   "nfc": "ௗেa",
+   "casefold": "ௗেa"
+  },
+  {
+   "id": "fuzznfc-246",
+   "input": "்́͂ͅা",
+   "nfc": "்́͂ͅা",
+   "casefold": "́͂ι்া"
+  },
+  {
+   "id": "fuzznfc-247",
+   "input": "가ιৗ̔",
+   "nfc": "가ιৗ̔",
+   "casefold": "가ιৗ̔"
+  },
+  {
+   "id": "fuzznfc-248",
+   "input": "́͂ͅ-υ",
+   "nfc": "́͂ͅ-υ",
+   "casefold": "́ῖ-υ"
+  },
+  {
+   "id": "fuzznfc-249",
+   "input": "֮ᅡ̓οο",
+   "nfc": "֮ᅡ̓οο",
+   "casefold": "֮ᅡ̓οο"
+  },
+  {
+   "id": "fuzznfc-250",
+   "input": "qা̨ͅ",
+   "nfc": "qা̨ͅ",
+   "casefold": "qা̨ι"
+  },
+  {
+   "id": "fuzznfc-251",
+   "input": "்eᄀa̔",
+   "nfc": "்eᄀa̔",
+   "casefold": "்eᄀa̔"
+  },
+  {
+   "id": "fuzznfc-252",
+   "input": "-ι",
+   "nfc": "-ι",
+   "casefold": "-ι"
+  },
+  {
+   "id": "fuzznfc-253",
+   "input": "αᄀqͅ",
+   "nfc": "αᄀqͅ",
+   "casefold": "αᄀqι"
+  },
+  {
+   "id": "fuzznfc-254",
+   "input": "è",
+   "nfc": "è",
+   "casefold": "è"
+  },
+  {
+   "id": "fuzznfc-255",
+   "input": "ᾁ̖",
+   "nfc": "ᾁ̖",
+   "casefold": "α̖ἱ"
+  },
+  {
+   "id": "fuzznfc-256",
+   "input": "中ᆨ",
+   "nfc": "中ᆨ",
+   "casefold": "中ᆨ"
+  },
+  {
+   "id": "fuzznfc-257",
+   "input": "가́qο",
+   "nfc": "가́qο",
+   "casefold": "가́qο"
+  },
+  {
+   "id": "fuzznfc-258",
+   "input": "̨̣οᅡ",
+   "nfc": "̨̣οᅡ",
+   "casefold": "̨̣οᅡ"
+  },
+  {
+   "id": "fuzznfc-259",
+   "input": "αᄀa",
+   "nfc": "αᄀa",
+   "casefold": "αᄀa"
+  },
+  {
+   "id": "fuzznfc-260",
+   "input": "가ௗ",
+   "nfc": "가ௗ",
+   "casefold": "가ௗ"
+  },
+  {
+   "id": "fuzznfc-261",
+   "input": "가qυা",
+   "nfc": "가qυা",
+   "casefold": "가qυা"
+  },
+  {
+   "id": "fuzznfc-262",
+   "input": "̨֮͂",
+   "nfc": "̨֮͂",
+   "casefold": "̨֮͂"
+  },
+  {
+   "id": "fuzznfc-263",
+   "input": "qৗαᅡ",
+   "nfc": "qৗαᅡ",
+   "casefold": "qৗαᅡ"
+  },
+  {
+   "id": "fuzznfc-264",
+   "input": "ͅἱ̇া",
+   "nfc": "ͅἱ̇া",
+   "casefold": "ιἱ̇া"
+  },
+  {
+   "id": "fuzznfc-265",
+   "input": "்ᄀ̣",
+   "nfc": "்ᄀ̣",
+   "casefold": "்ᄀ̣"
+  },
+  {
+   "id": "fuzznfc-266",
+   "input": "ᅡ̓ͅα",
+   "nfc": "ᅡ̓ͅα",
+   "casefold": "ᅡἰα"
+  },
+  {
+   "id": "fuzznfc-267",
+   "input": "qᄀx́ͅe",
+   "nfc": "qᄀx́ͅe",
+   "casefold": "qᄀx́ιe"
+  },
+  {
+   "id": "fuzznfc-268",
+   "input": "xαᅡ̀",
+   "nfc": "xαᅡ̀",
+   "casefold": "xαᅡ̀"
+  },
+  {
+   "id": "fuzznfc-269",
+   "input": "்ͅ",
+   "nfc": "்ͅ",
+   "casefold": "ι்"
+  },
+  {
+   "id": "fuzznfc-270",
+   "input": "eா가̇",
+   "nfc": "eா가̇",
+   "casefold": "eா가̇"
+  },
+  {
+   "id": "fuzznfc-271",
+   "input": "̔ே中ৗ",
+   "nfc": "̔ே中ৗ",
+   "casefold": "̔ே中ৗ"
+  },
+  {
+   "id": "fuzznfc-272",
+   "input": "ύ̀ͅυெ",
+   "nfc": "ύ̀ͅυெ",
+   "casefold": "υί̀υெ"
+  },
+  {
+   "id": "fuzznfc-273",
+   "input": "中中ιͅ",
+   "nfc": "中中ιͅ",
+   "casefold": "中中ιι"
+  },
+  {
+   "id": "fuzznfc-274",
+   "input": "ᆨq̀",
+   "nfc": "ᆨq̀",
+   "casefold": "ᆨq̀"
+  },
+  {
+   "id": "fuzznfc-275",
+   "input": "̓ா̇ে",
+   "nfc": "̓ா̇ে",
+   "casefold": "̓ா̇ে"
+  },
+  {
+   "id": "fuzznfc-276",
+   "input": "ாeা",
+   "nfc": "ாeা",
+   "casefold": "ாeা"
+  },
+  {
+   "id": "fuzznfc-277",
+   "input": "̣̇x",
+   "nfc": "̣̇x",
+   "casefold": "̣̇x"
+  },
+  {
+   "id": "fuzznfc-278",
+   "input": "οா",
+   "nfc": "οா",
+   "casefold": "οா"
+  },
+  {
+   "id": "fuzznfc-279",
+   "input": "υে",
+   "nfc": "υে",
+   "casefold": "υে"
+  },
+  {
+   "id": "fuzznfc-280",
+   "input": "ιெ்ᄀ",
+   "nfc": "ιெ்ᄀ",
+   "casefold": "ιெ்ᄀ"
+  },
+  {
+   "id": "fuzznfc-281",
+   "input": "x̣eே",
+   "nfc": "x̣eே",
+   "casefold": "x̣eே"
+  },
+  {
+   "id": "fuzznfc-282",
+   "input": "ᆨᅡᆨ中̣",
+   "nfc": "ᆨᅡᆨ中̣",
+   "casefold": "ᆨᅡᆨ中̣"
+  },
+  {
+   "id": "fuzznfc-283",
+   "input": "̇中q",
+   "nfc": "̇中q",
+   "casefold": "̇中q"
+  },
+  {
+   "id": "fuzznfc-284",
+   "input": "-̨̖́ͅ",
+   "nfc": "-̨̖́ͅ",
+   "casefold": "-ί̨̖"
+  },
+  {
+   "id": "fuzznfc-285",
+   "input": "ex中q",
+   "nfc": "ex中q",
+   "casefold": "ex中q"
+  },
+  {
+   "id": "fuzznfc-286",
+   "input": "֮ͅe͂",
+   "nfc": "֮ͅe͂",
+   "casefold": "ι֮e͂"
+  },
+  {
+   "id": "fuzznfc-287",
+   "input": "qো",
+   "nfc": "qো",
+   "casefold": "qো"
+  },
+  {
+   "id": "fuzznfc-288",
+   "input": "̔中ο",
+   "nfc": "̔中ο",
+   "casefold": "̔中ο"
+  },
+  {
+   "id": "fuzznfc-289",
+   "input": "̇̀",
+   "nfc": "̇̀",
+   "casefold": "̇̀"
+  },
+  {
+   "id": "fuzznfc-290",
+   "input": "ே̔ᆨe",
+   "nfc": "ே̔ᆨe",
+   "casefold": "ே̔ᆨe"
+  },
+  {
+   "id": "fuzznfc-291",
+   "input": "̨́ιͅ中",
+   "nfc": "̨́ιͅ中",
+   "casefold": "̨́ιι中"
+  },
+  {
+   "id": "fuzznfc-292",
+   "input": "ᅡυா̇",
+   "nfc": "ᅡυா̇",
+   "casefold": "ᅡυா̇"
+  },
+  {
+   "id": "fuzznfc-293",
+   "input": "͂́ாா",
+   "nfc": "͂́ாா",
+   "casefold": "͂́ாா"
+  },
+  {
+   "id": "fuzznfc-294",
+   "input": "েι̣",
+   "nfc": "েι̣",
+   "casefold": "েι̣"
+  },
+  {
+   "id": "fuzznfc-295",
+   "input": "x֮ா",
+   "nfc": "x֮ா",
+   "casefold": "x֮ா"
+  },
+  {
+   "id": "fuzznfc-296",
+   "input": "̀ᄀᄀė中",
+   "nfc": "̀ᄀᄀė中",
+   "casefold": "̀ᄀᄀė中"
+  },
+  {
+   "id": "fuzznfc-297",
+   "input": "ᆨ̣েᅡ̖e",
+   "nfc": "ᆨ̣েᅡ̖e",
+   "casefold": "ᆨ̣েᅡ̖e"
+  },
+  {
+   "id": "fuzznfc-298",
+   "input": "α̨ே",
+   "nfc": "α̨ே",
+   "casefold": "α̨ே"
+  },
+  {
+   "id": "fuzznfc-299",
+   "input": "ৗ́가ͅaq",
+   "nfc": "ৗ́가ͅaq",
+   "casefold": "ৗ́가ιaq"
+  }
+ ],
+ "within_root": [
+  {
+   "id": "inside-existing",
+   "layout": {
+    "dirs": [
+     "pkg/sub"
+    ],
+    "files": [
+     "pkg/sub/f.txt"
+    ],
+    "symlinks": {}
+   },
+   "root": "pkg",
+   "candidate": "pkg/sub/f.txt",
+   "expect": "inside",
+   "inside_rel": "sub/f.txt",
+   "message_prefix": "",
+   "observed_rel": "sub/f.txt"
+  },
+  {
+   "id": "inside-root-itself",
+   "layout": {
+    "dirs": [
+     "pkg"
+    ],
+    "files": [],
+    "symlinks": {}
+   },
+   "root": "pkg",
+   "candidate": "pkg",
+   "expect": "inside",
+   "inside_rel": ".",
+   "message_prefix": "",
+   "observed_rel": "."
+  },
+  {
+   "id": "inside-not-yet-written",
+   "layout": {
+    "dirs": [
+     "pkg"
+    ],
+    "files": [],
+    "symlinks": {}
+   },
+   "root": "pkg",
+   "candidate": "pkg/new.bin",
+   "expect": "inside",
+   "inside_rel": "new.bin",
+   "message_prefix": "",
+   "observed_rel": "new.bin"
+  },
+  {
+   "id": "escape-sibling",
+   "layout": {
+    "dirs": [
+     "pkg"
+    ],
+    "files": [
+     "outside.txt"
+    ],
+    "symlinks": {}
+   },
+   "root": "pkg",
+   "candidate": "outside.txt",
+   "expect": "escape",
+   "inside_rel": null,
+   "message_prefix": "path escapes package root",
+   "observed_rel": null
+  },
+  {
+   "id": "symlink-file",
+   "layout": {
+    "dirs": [
+     "pkg"
+    ],
+    "files": [
+     "outside.txt"
+    ],
+    "symlinks": {
+     "pkg/link.txt": "../outside.txt"
+    }
+   },
+   "root": "pkg",
+   "candidate": "pkg/link.txt",
+   "expect": "symlink",
+   "inside_rel": null,
+   "message_prefix": "symlink rejected",
+   "observed_rel": null
+  },
+  {
+   "id": "escape-through-dirlink",
+   "layout": {
+    "dirs": [
+     "pkg",
+     "outside"
+    ],
+    "files": [
+     "outside/x.txt"
+    ],
+    "symlinks": {
+     "pkg/dirlink": "../outside"
+    }
+   },
+   "root": "pkg",
+   "candidate": "pkg/dirlink/x.txt",
+   "expect": "escape",
+   "inside_rel": null,
+   "message_prefix": "path escapes package root",
+   "observed_rel": null
+  }
+ ],
+ "manifest": {
+  "filename": "manifest.json",
+  "kind": "paleo-package",
+  "schema_version": 2,
+  "build": [
+   {
+    "id": "manifest-default",
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "",
+      "file": ""
+     },
+     "created_at": "",
+     "application": {
+      "name": "paleo-workbench",
+      "version": ""
+     },
+     "entries": [],
+     "external_dependencies": [],
+     "missing_dependencies": [],
+     "generated_outputs": [],
+     "provenance": {},
+     "options": {},
+     "total_size_bytes": 0,
+     "entry_count": 0
+    },
+    "dumps": "{\n \"kind\": \"paleo-package\",\n \"schema_version\": 2,\n \"project\": {\n  \"name\": \"\",\n  \"file\": \"\"\n },\n \"created_at\": \"\",\n \"application\": {\n  \"name\": \"paleo-workbench\",\n  \"version\": \"\"\n },\n \"entries\": [],\n \"external_dependencies\": [],\n \"missing_dependencies\": [],\n \"generated_outputs\": [],\n \"provenance\": {},\n \"options\": {},\n \"total_size_bytes\": 0,\n \"entry_count\": 0\n}"
+   },
+   {
+    "id": "manifest-full",
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "dumps": "{\n \"kind\": \"paleo-package\",\n \"schema_version\": 2,\n \"project\": {\n  \"name\": \"demo\",\n  \"file\": \"demo.paleo.json\"\n },\n \"created_at\": \"2026-09-17T08:00:00+00:00\",\n \"application\": {\n  \"name\": \"paleo-workbench\",\n  \"version\": \"0.2.17a0\"\n },\n \"entries\": [\n  {\n   \"path\": \"demo.paleo.json\",\n   \"sha256\": \"abababababababababababababababababababababababababababababababab\",\n   \"size_bytes\": 123,\n   \"kind\": \"project\"\n  },\n  {\n   \"path\": \"数据/测井/w.las\",\n   \"sha256\": \"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\n   \"size_bytes\": 9,\n   \"kind\": \"artifact\"\n  }\n ],\n \"external_dependencies\": [\n  {\n   \"version_id\": \"v1\",\n   \"asset\": \"ext\",\n   \"path\": \"/outside/x.las\",\n   \"size_bytes\": 5,\n   \"policy\": \"keep\"\n  }\n ],\n \"missing_dependencies\": [\n  {\n   \"version_id\": \"v9\",\n   \"asset\": \"gone\",\n   \"path\": \"/gone/x.las\",\n   \"reason\": \"managed payload 不存在\"\n  }\n ],\n \"generated_outputs\": [\n  \"v-out-1\",\n  \"v-out-2\"\n ],\n \"provenance\": {\n  \"runs\": [\n   {\n    \"id\": \"r1\",\n    \"operation\": \"interchange.import\",\n    \"status\": \"completed\"\n   }\n  ],\n  \"run_count\": 1,\n  \"备注\": \"oracle\"\n },\n \"options\": {\n  \"external_policy\": \"keep\",\n  \"include_outputs_only\": false,\n  \"include_formats\": null\n },\n \"total_size_bytes\": 132,\n \"entry_count\": 2\n}"
+   }
+  ],
+  "from_dict": [
+   {
+    "id": "roundtrip-full",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    }
+   },
+   {
+    "id": "defaults-empty",
+    "input": {},
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 0,
+     "project": {
+      "name": "",
+      "file": ""
+     },
+     "created_at": "",
+     "application": {
+      "name": "paleo-workbench",
+      "version": ""
+     },
+     "entries": [],
+     "external_dependencies": [],
+     "missing_dependencies": [],
+     "generated_outputs": [],
+     "provenance": {},
+     "options": {},
+     "total_size_bytes": 0,
+     "entry_count": 0
+    }
+   },
+   {
+    "id": "coerce-size-str",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": "5",
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 5,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 1
+    }
+   },
+   {
+    "id": "coerce-size-float",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 2.9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 2,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 1
+    }
+   },
+   {
+    "id": "coerce-size-bool",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": true,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 1,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 1
+    }
+   },
+   {
+    "id": "coerce-size-bad",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": "abc",
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "invalid literal for int() with base 10: 'abc'",
+    "dict": null
+   },
+   {
+    "id": "coerce-size-null",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": null,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "int() argument must be a string, a bytes-like object or a real number, not 'NoneType'",
+    "dict": null
+   },
+   {
+    "id": "coerce-kind-null",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": null
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "None"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 1
+    }
+   },
+   {
+    "id": "coerce-path-int",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": 12345,
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "12345",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 1
+    }
+   },
+   {
+    "id": "coerce-total-str",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": "7",
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 7,
+     "entry_count": 2
+    }
+   },
+   {
+    "id": "coerce-created-int",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": 99,
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null,
+    "dict": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "99",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    }
+   },
+   {
+    "id": "schema-true",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": true,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "schema_version 必须是整数，得到 True",
+    "dict": null
+   },
+   {
+    "id": "schema-false",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": false,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "schema_version 必须是整数，得到 False",
+    "dict": null
+   },
+   {
+    "id": "schema-str",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": "2",
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "schema_version 必须是整数，得到 '2'",
+    "dict": null
+   },
+   {
+    "id": "schema-float",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2.5,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "schema_version 必须是整数，得到 2.5",
+    "dict": null
+   },
+   {
+    "id": "schema-null",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": null,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "schema_version 必须是整数，得到 None",
+    "dict": null
+   }
+  ],
+  "validate": [
+   {
+    "id": "validate-ok",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": true,
+    "error": null
+   },
+   {
+    "id": "validate-traversal",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "../evil.txt",
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "size_bytes": 1,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "manifest entry: traversal component in '../evil.txt'"
+   },
+   {
+    "id": "validate-absolute",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "/etc/passwd",
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "size_bytes": 1,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "manifest entry: absolute path not allowed: '/etc/passwd'"
+   },
+   {
+    "id": "validate-dup-nfc",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "a/b.txt",
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "size_bytes": 1,
+       "kind": "artifact"
+      },
+      {
+       "path": "a/b.txt",
+       "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+       "size_bytes": 2,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "duplicate entry after normalization: 'a/b.txt'"
+   },
+   {
+    "id": "validate-casefold",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "A/B.txt",
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+       "size_bytes": 1,
+       "kind": "artifact"
+      },
+      {
+       "path": "a/b.txt",
+       "sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+       "size_bytes": 2,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2
+    },
+    "ok": false,
+    "error": "case-insensitive collision: 'a/b.txt'"
+   },
+   {
+    "id": "validate-project-file",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2,
+     "project_file": "../paleo.json"
+    },
+    "ok": true,
+    "error": null
+   },
+   {
+    "id": "validate-empty-project-file-ok",
+    "input": {
+     "kind": "paleo-package",
+     "schema_version": 2,
+     "project": {
+      "name": "demo",
+      "file": "demo.paleo.json"
+     },
+     "created_at": "2026-09-17T08:00:00+00:00",
+     "application": {
+      "name": "paleo-workbench",
+      "version": "0.2.17a0"
+     },
+     "entries": [
+      {
+       "path": "demo.paleo.json",
+       "sha256": "abababababababababababababababababababababababababababababababab",
+       "size_bytes": 123,
+       "kind": "project"
+      },
+      {
+       "path": "数据/测井/w.las",
+       "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "size_bytes": 9,
+       "kind": "artifact"
+      }
+     ],
+     "external_dependencies": [
+      {
+       "version_id": "v1",
+       "asset": "ext",
+       "path": "/outside/x.las",
+       "size_bytes": 5,
+       "policy": "keep"
+      }
+     ],
+     "missing_dependencies": [
+      {
+       "version_id": "v9",
+       "asset": "gone",
+       "path": "/gone/x.las",
+       "reason": "managed payload 不存在"
+      }
+     ],
+     "generated_outputs": [
+      "v-out-1",
+      "v-out-2"
+     ],
+     "provenance": {
+      "runs": [
+       {
+        "id": "r1",
+        "operation": "interchange.import",
+        "status": "completed"
+       }
+      ],
+      "run_count": 1,
+      "备注": "oracle"
+     },
+     "options": {
+      "external_policy": "keep",
+      "include_outputs_only": false,
+      "include_formats": null
+     },
+     "total_size_bytes": 132,
+     "entry_count": 2,
+     "project_file": ""
+    },
+    "ok": true,
+    "error": null
+   }
+  ],
+  "entry_paths": [
+   {
+    "id": "entry-paths-full",
+    "paths": [
+     "demo.paleo.json",
+     "数据/测井/w.las"
+    ]
+   }
+  ],
+  "write_read_roundtrip": {
+   "dict": {
+    "kind": "paleo-package",
+    "schema_version": 2,
+    "project": {
+     "name": "demo",
+     "file": "demo.paleo.json"
+    },
+    "created_at": "2026-09-17T08:00:00+00:00",
+    "application": {
+     "name": "paleo-workbench",
+     "version": "0.2.17a0"
+    },
+    "entries": [
+     {
+      "path": "demo.paleo.json",
+      "sha256": "abababababababababababababababababababababababababababababababab",
+      "size_bytes": 123,
+      "kind": "project"
+     },
+     {
+      "path": "数据/测井/w.las",
+      "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "size_bytes": 9,
+      "kind": "artifact"
+     }
+    ],
+    "external_dependencies": [
+     {
+      "version_id": "v1",
+      "asset": "ext",
+      "path": "/outside/x.las",
+      "size_bytes": 5,
+      "policy": "keep"
+     }
+    ],
+    "missing_dependencies": [
+     {
+      "version_id": "v9",
+      "asset": "gone",
+      "path": "/gone/x.las",
+      "reason": "managed payload 不存在"
+     }
+    ],
+    "generated_outputs": [
+     "v-out-1",
+     "v-out-2"
+    ],
+    "provenance": {
+     "runs": [
+      {
+       "id": "r1",
+       "operation": "interchange.import",
+       "status": "completed"
+      }
+     ],
+     "run_count": 1,
+     "备注": "oracle"
+    },
+    "options": {
+     "external_policy": "keep",
+     "include_outputs_only": false,
+     "include_formats": null
+    },
+    "total_size_bytes": 132,
+    "entry_count": 2
+   },
+   "dumps": "{\n \"kind\": \"paleo-package\",\n \"schema_version\": 2,\n \"project\": {\n  \"name\": \"demo\",\n  \"file\": \"demo.paleo.json\"\n },\n \"created_at\": \"2026-09-17T08:00:00+00:00\",\n \"application\": {\n  \"name\": \"paleo-workbench\",\n  \"version\": \"0.2.17a0\"\n },\n \"entries\": [\n  {\n   \"path\": \"demo.paleo.json\",\n   \"sha256\": \"abababababababababababababababababababababababababababababababab\",\n   \"size_bytes\": 123,\n   \"kind\": \"project\"\n  },\n  {\n   \"path\": \"数据/测井/w.las\",\n   \"sha256\": \"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\n   \"size_bytes\": 9,\n   \"kind\": \"artifact\"\n  }\n ],\n \"external_dependencies\": [\n  {\n   \"version_id\": \"v1\",\n   \"asset\": \"ext\",\n   \"path\": \"/outside/x.las\",\n   \"size_bytes\": 5,\n   \"policy\": \"keep\"\n  }\n ],\n \"missing_dependencies\": [\n  {\n   \"version_id\": \"v9\",\n   \"asset\": \"gone\",\n   \"path\": \"/gone/x.las\",\n   \"reason\": \"managed payload 不存在\"\n  }\n ],\n \"generated_outputs\": [\n  \"v-out-1\",\n  \"v-out-2\"\n ],\n \"provenance\": {\n  \"runs\": [\n   {\n    \"id\": \"r1\",\n    \"operation\": \"interchange.import\",\n    \"status\": \"completed\"\n   }\n  ],\n  \"run_count\": 1,\n  \"备注\": \"oracle\"\n },\n \"options\": {\n  \"external_policy\": \"keep\",\n  \"include_outputs_only\": false,\n  \"include_formats\": null\n },\n \"total_size_bytes\": 132,\n \"entry_count\": 2\n}"
+  }
+ },
+ "preflight": {
+  "cases": [
+   {
+    "id": "missing-file",
+    "fs": {
+     "kind": "missing",
+     "suffix": "las",
+     "content_b64": ""
+    },
+    "file_name": "nope.las",
+    "registry": "default",
+    "stub": [],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "",
+      "confidence": "low",
+      "evidence": "missing-file"
+     },
+     "adapter_id": null,
+     "inspection": null,
+     "issues": [
+      {
+       "severity": "error",
+       "code": "missing-file",
+       "message": "文件不存在"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 0,
+     "ok": false
+    }
+   },
+   {
+    "id": "directory",
+    "fs": {
+     "kind": "dir",
+     "suffix": "",
+     "content_b64": ""
+    },
+    "file_name": "sample_dir",
+    "registry": "default",
+    "stub": [],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "",
+      "confidence": "low",
+      "evidence": "directory"
+     },
+     "adapter_id": null,
+     "inspection": null,
+     "issues": [
+      {
+       "severity": "error",
+       "code": "directory",
+       "message": "目录导入请使用批量服务"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 0,
+     "ok": false
+    }
+   },
+   {
+    "id": "format-unknown",
+    "fs": {
+     "kind": "file",
+     "suffix": "bin",
+     "content_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/wABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj9AQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp+goaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2+v8DBwsPExcbHyMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5ufo6err7O3u7/Dx8vP09fb3+Pn6+/z9/v8AAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1+f4CBgoOEhYaHiImKi4yNjo+QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr/AwcLDxMXGx8jJysvMzc7P0NHS09TV1tfY2drb3N3e3+Dh4uPk5ebn6Onq6+zt7u/w8fLz9PX29/j5+vv8/f7/AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="
+    },
+    "file_name": "mystery.bin",
+    "registry": "default",
+    "stub": [],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "",
+      "confidence": "low",
+      "evidence": "no-match"
+     },
+     "adapter_id": null,
+     "inspection": null,
+     "issues": [
+      {
+       "severity": "error",
+       "code": "format-unknown",
+       "message": "无法识别格式（无内容特征且扩展名未注册）"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 0,
+     "ok": false
+    }
+   },
+   {
+    "id": "las-managed-ok",
+    "fs": {
+     "kind": "file",
+     "suffix": "las",
+     "content_b64": "flZFUlNJT04gSU5GT1JNQVRJT04KVkVSUy4gMi4wIDogQ1dMUyBMT0cgQVNDSUkgU1RBTkRBUkQKV1JBUC4gTk8gOiBPTkUgTElORSBQRVIgREVQVEggU1RFUAp+V0VMTCBJTkZPUk1BVElPTgpTVFJULk0gMTAwLjAKU1RPUC5NIDEwOS41ClNURVAuTSAwLjUKTlVMTC4gLTk5OS4yNQpXRUxMLiBXLTAwMQp+Q1VSVkUgSU5GT1JNQVRJT04KREVQVC5NIDogZGVwdGgKR1IuR0FQSSA6IGdhbW1hCn5BCg=="
+    },
+    "file_name": "w.las",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "las",
+      "display_name": "LAS 测井曲线",
+      "extensions": [
+       "las"
+      ],
+      "import": true,
+      "notes": "",
+      "inspect": {
+       "ok": true,
+       "size_bytes": 4321,
+       "metadata": {
+        "well_name": "W-001"
+       },
+       "warnings": [],
+       "errors": []
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "las",
+      "confidence": "high",
+      "evidence": "las-version-section"
+     },
+     "adapter_id": "las",
+     "inspection": {
+      "format_id": "las",
+      "ok": true,
+      "size_bytes": 4321,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {
+       "well_name": "W-001"
+      },
+      "warnings": [],
+      "errors": []
+     },
+     "issues": [],
+     "recommendation": "managed_copy",
+     "estimated_disk_bytes": 4321,
+     "ok": true
+    }
+   },
+   {
+    "id": "las-inspect-warning",
+    "fs": {
+     "kind": "file",
+     "suffix": "las",
+     "content_b64": "flZFUlNJT04gSU5GT1JNQVRJT04KVkVSUy4gMi4wIDogQ1dMUyBMT0cgQVNDSUkgU1RBTkRBUkQKV1JBUC4gTk8gOiBPTkUgTElORSBQRVIgREVQVEggU1RFUAp+V0VMTCBJTkZPUk1BVElPTgpTVFJULk0gMTAwLjAKU1RPUC5NIDEwOS41ClNURVAuTSAwLjUKTlVMTC4gLTk5OS4yNQpXRUxMLiBXLTAwMQp+Q1VSVkUgSU5GT1JNQVRJT04KREVQVC5NIDogZGVwdGgKR1IuR0FQSSA6IGdhbW1hCn5BCg=="
+    },
+    "file_name": "w2.las",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "las",
+      "extensions": [
+       "las"
+      ],
+      "import": true,
+      "inspect": {
+       "ok": true,
+       "size_bytes": 100,
+       "warnings": [
+        "重复曲线助记名: GR"
+       ],
+       "errors": []
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "las",
+      "confidence": "high",
+      "evidence": "las-version-section"
+     },
+     "adapter_id": "las",
+     "inspection": {
+      "format_id": "las",
+      "ok": true,
+      "size_bytes": 100,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [
+       "重复曲线助记名: GR"
+      ],
+      "errors": []
+     },
+     "issues": [
+      {
+       "severity": "warning",
+       "code": "inspect-warning",
+       "message": "重复曲线助记名: GR"
+      }
+     ],
+     "recommendation": "managed_copy",
+     "estimated_disk_bytes": 100,
+     "ok": true
+    }
+   },
+   {
+    "id": "las-inspect-error",
+    "fs": {
+     "kind": "file",
+     "suffix": "las",
+     "content_b64": "flZFUlNJT04gSU5GT1JNQVRJT04KVkVSUy4gMi4wIDogQ1dMUyBMT0cgQVNDSUkgU1RBTkRBUkQKV1JBUC4gTk8gOiBPTkUgTElORSBQRVIgREVQVEggU1RFUAp+V0VMTCBJTkZPUk1BVElPTgpTVFJULk0gMTAwLjAKU1RPUC5NIDEwOS41ClNURVAuTSAwLjUKTlVMTC4gLTk5OS4yNQpXRUxMLiBXLTAwMQp+Q1VSVkUgSU5GT1JNQVRJT04KREVQVC5NIDogZGVwdGgKR1IuR0FQSSA6IGdhbW1hCn5BCg=="
+    },
+    "file_name": "w3.las",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "las",
+      "extensions": [
+       "las"
+      ],
+      "import": true,
+      "inspect": {
+       "ok": false,
+       "size_bytes": 0,
+       "warnings": [
+        "编码可疑"
+       ],
+       "errors": [
+        "LAS 头解析失败: boom"
+       ]
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "las",
+      "confidence": "high",
+      "evidence": "las-version-section"
+     },
+     "adapter_id": "las",
+     "inspection": {
+      "format_id": "las",
+      "ok": false,
+      "size_bytes": 0,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [
+       "编码可疑"
+      ],
+      "errors": [
+       "LAS 头解析失败: boom"
+      ]
+     },
+     "issues": [
+      {
+       "severity": "error",
+       "code": "inspect-error",
+       "message": "LAS 头解析失败: boom"
+      },
+      {
+       "severity": "warning",
+       "code": "inspect-warning",
+       "message": "编码可疑"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 0,
+     "ok": false
+    }
+   },
+   {
+    "id": "import-unavailable-notes",
+    "fs": {
+     "kind": "file",
+     "suffix": "tif",
+     "content_b64": "SUkqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    "file_name": "r.tif",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "raster",
+      "extensions": [
+       "tif",
+       "tiff",
+       "img",
+       "grd"
+      ],
+      "import": false,
+      "notes": "GDAL/rasterio 不可用",
+      "inspect": {
+       "ok": true,
+       "size_bytes": 777,
+       "warnings": [],
+       "errors": []
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "geotiff",
+      "confidence": "high",
+      "evidence": "tiff-magic"
+     },
+     "adapter_id": "raster",
+     "inspection": {
+      "format_id": "raster",
+      "ok": true,
+      "size_bytes": 777,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [],
+      "errors": []
+     },
+     "issues": [
+      {
+       "severity": "error",
+       "code": "import-unavailable",
+       "message": "GDAL/rasterio 不可用"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 777,
+     "ok": false
+    }
+   },
+   {
+    "id": "import-unavailable-default-note",
+    "fs": {
+     "kind": "file",
+     "suffix": "tiff",
+     "content_b64": "SUkqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    "file_name": "r.tiff",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "raster",
+      "extensions": [
+       "tif",
+       "tiff"
+      ],
+      "import": false,
+      "notes": "",
+      "inspect": {
+       "ok": true,
+       "size_bytes": 55
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "geotiff",
+      "confidence": "high",
+      "evidence": "tiff-magic"
+     },
+     "adapter_id": "raster",
+     "inspection": {
+      "format_id": "raster",
+      "ok": true,
+      "size_bytes": 55,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [],
+      "errors": []
+     },
+     "issues": [
+      {
+       "severity": "error",
+       "code": "import-unavailable",
+       "message": "raster 不支持导入"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 55,
+     "ok": false
+    }
+   },
+   {
+    "id": "extension-content-mismatch",
+    "fs": {
+     "kind": "file",
+     "suffix": "tif",
+     "content_b64": "SUkqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    "file_name": "surprise.tif",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "fake_tiff_host",
+      "extensions": [
+       "tif"
+      ],
+      "import": true,
+      "inspect": {
+       "ok": true,
+       "size_bytes": 1
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "geotiff",
+      "confidence": "high",
+      "evidence": "tiff-magic"
+     },
+     "adapter_id": null,
+     "inspection": null,
+     "issues": [
+      {
+       "severity": "error",
+       "code": "extension-content-mismatch",
+       "message": "扩展名 .tif 指向 fake_tiff_host，但内容嗅探为 geotiff（tiff-magic）"
+      },
+      {
+       "severity": "error",
+       "code": "format-unknown",
+       "message": "无法识别格式（无内容特征且扩展名未注册）"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 0,
+     "ok": false
+    }
+   },
+   {
+    "id": "sniff-advisory",
+    "fs": {
+     "kind": "file",
+     "suffix": "csv",
+     "content_b64": "UEsDBBQAAAAAAAAAIQCsKpPYAgAAAAIAAAAIAAAAbm90ZS50eHRoaVBLAQIUAxQAAAAAAAAAIQCsKpPYAgAAAAIAAAAIAAAAAAAAAAAAAACAAQAAAABub3RlLnR4dFBLBQYAAAAAAQABADYAAAAoAAAAAAA="
+    },
+    "file_name": "notes.csv",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "csv",
+      "extensions": [
+       "csv"
+      ],
+      "import": true,
+      "inspect": {
+       "ok": true,
+       "size_bytes": 77,
+       "warnings": [],
+       "errors": []
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "zip",
+      "confidence": "medium",
+      "evidence": "zip-generic"
+     },
+     "adapter_id": "csv",
+     "inspection": {
+      "format_id": "csv",
+      "ok": true,
+      "size_bytes": 77,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [],
+      "errors": []
+     },
+     "issues": [
+      {
+       "severity": "warning",
+       "code": "sniff-advisory",
+       "message": "内容嗅探提示 zip（zip-generic，置信度 medium）；按扩展名按 csv 解析"
+      }
+     ],
+     "recommendation": "managed_copy",
+     "estimated_disk_bytes": 77,
+     "ok": true
+    }
+   },
+   {
+    "id": "extension-mismatch",
+    "fs": {
+     "kind": "file",
+     "suffix": "tif",
+     "content_b64": "flZFUlNJT04gSU5GT1JNQVRJT04KVkVSUy4gMi4wIDogQ1dMUyBMT0cgQVNDSUkgU1RBTkRBUkQKV1JBUC4gTk8gOiBPTkUgTElORSBQRVIgREVQVEggU1RFUAp+V0VMTCBJTkZPUk1BVElPTgpTVFJULk0gMTAwLjAKU1RPUC5NIDEwOS41ClNURVAuTSAwLjUKTlVMTC4gLTk5OS4yNQpXRUxMLiBXLTAwMQp+Q1VSVkUgSU5GT1JNQVRJT04KREVQVC5NIDogZGVwdGgKR1IuR0FQSSA6IGdhbW1hCn5BCg=="
+    },
+    "file_name": "w.tif",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "las",
+      "extensions": [
+       "las"
+      ],
+      "import": true,
+      "inspect": {
+       "ok": true,
+       "size_bytes": 64
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "las",
+      "confidence": "high",
+      "evidence": "las-version-section"
+     },
+     "adapter_id": "las",
+     "inspection": {
+      "format_id": "las",
+      "ok": true,
+      "size_bytes": 64,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [],
+      "errors": []
+     },
+     "issues": [
+      {
+       "severity": "warning",
+       "code": "extension-mismatch",
+       "message": "内容识别为 las，但扩展名为 .tif"
+      }
+     ],
+     "recommendation": "managed_copy",
+     "estimated_disk_bytes": 64,
+     "ok": true
+    }
+   },
+   {
+    "id": "alias-gpkg",
+    "fs": {
+     "kind": "file",
+     "suffix": "gpkg",
+     "content_b64": "U1FMaXRlIGZvcm1hdCAzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHUEtHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    "file_name": "layers.gpkg",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "vector_gdal",
+      "extensions": [
+       "shp",
+       "gpkg",
+       "kml",
+       "gml",
+       "geojson",
+       "tab",
+       "mif"
+      ],
+      "import": false,
+      "notes": "GDAL (osgeo) 不可用：vendored 构建未安装",
+      "inspect": {
+       "ok": true,
+       "size_bytes": 4096
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "gpkg",
+      "confidence": "high",
+      "evidence": "sqlite-gpkg-app-id"
+     },
+     "adapter_id": "vector_gdal",
+     "inspection": {
+      "format_id": "vector_gdal",
+      "ok": true,
+      "size_bytes": 4096,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [],
+      "errors": []
+     },
+     "issues": [
+      {
+       "severity": "error",
+       "code": "import-unavailable",
+       "message": "GDAL (osgeo) 不可用：vendored 构建未安装"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 4096,
+     "ok": false
+    }
+   },
+   {
+    "id": "alias-shp-inspect-error",
+    "fs": {
+     "kind": "file",
+     "suffix": "shp",
+     "content_b64": "AAAnCgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    },
+    "file_name": "pts.shp",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "vector_gdal",
+      "extensions": [
+       "shp",
+       "gpkg"
+      ],
+      "import": true,
+      "inspect": {
+       "ok": false,
+       "size_bytes": 0,
+       "warnings": [],
+       "errors": [
+        "Shapefile sidecar 不完整"
+       ]
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "shapefile",
+      "confidence": "high",
+      "evidence": "shapefile-magic"
+     },
+     "adapter_id": "vector_gdal",
+     "inspection": {
+      "format_id": "vector_gdal",
+      "ok": false,
+      "size_bytes": 0,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [],
+      "errors": [
+       "Shapefile sidecar 不完整"
+      ]
+     },
+     "issues": [
+      {
+       "severity": "error",
+       "code": "inspect-error",
+       "message": "Shapefile sidecar 不完整"
+      }
+     ],
+     "recommendation": "unavailable",
+     "estimated_disk_bytes": 0,
+     "ok": false
+    }
+   },
+   {
+    "id": "plain-text-unregistered-ext",
+    "fs": {
+     "kind": "file",
+     "suffix": "txt",
+     "content_b64": "cGxhaW4gbm90ZXMKc2Vjb25kIGxpbmUKbm90aGluZyBzcGVjaWFsCg=="
+    },
+    "file_name": "notes.txt",
+    "registry": "stub",
+    "stub": [
+     {
+      "format_id": "tsv",
+      "extensions": [
+       "tsv",
+       "txt"
+      ],
+      "import": true,
+      "inspect": {
+       "ok": true,
+       "size_bytes": 42
+      }
+     }
+    ],
+    "report": {
+     "path": "<PATH>",
+     "sniff": {
+      "format_id": "",
+      "confidence": "low",
+      "evidence": "no-match"
+     },
+     "adapter_id": "tsv",
+     "inspection": {
+      "format_id": "tsv",
+      "ok": true,
+      "size_bytes": 42,
+      "crs": null,
+      "units": {},
+      "object_type": "",
+      "bounds": null,
+      "metadata": {},
+      "warnings": [],
+      "errors": []
+     },
+     "issues": [],
+     "recommendation": "managed_copy",
+     "estimated_disk_bytes": 42,
+     "ok": true
+    }
+   }
+  ],
+  "plans": [
+   {
+    "id": "plan-ok-managed",
+    "case": "las-managed-ok",
+    "managed": null,
+    "asset_name": "W-1",
+    "options": {},
+    "ok": true,
+    "plan": {
+     "format_id": "las",
+     "source_path": "<PATH>",
+     "action": "managed_copy",
+     "asset_name": "W-1",
+     "warnings": [],
+     "estimated_bytes": 4321,
+     "transform": null,
+     "metadata": {
+      "well_name": "W-001"
+     },
+     "options": {}
+    },
+    "error": null
+   },
+   {
+    "id": "plan-ok-default-name",
+    "case": "las-managed-ok",
+    "managed": null,
+    "asset_name": null,
+    "options": {},
+    "ok": true,
+    "plan": {
+     "format_id": "las",
+     "source_path": "<PATH>",
+     "action": "managed_copy",
+     "asset_name": "w.las",
+     "warnings": [],
+     "estimated_bytes": 4321,
+     "transform": null,
+     "metadata": {
+      "well_name": "W-001"
+     },
+     "options": {}
+    },
+    "error": null
+   },
+   {
+    "id": "plan-link-external",
+    "case": "las-managed-ok",
+    "managed": false,
+    "asset_name": "W-1",
+    "options": {},
+    "ok": true,
+    "plan": {
+     "format_id": "las",
+     "source_path": "<PATH>",
+     "action": "link_external",
+     "asset_name": "W-1",
+     "warnings": [],
+     "estimated_bytes": 4321,
+     "transform": null,
+     "metadata": {
+      "well_name": "W-001"
+     },
+     "options": {}
+    },
+    "error": null
+   },
+   {
+    "id": "plan-unsupported",
+    "case": "las-inspect-error",
+    "managed": null,
+    "asset_name": "W",
+    "options": {},
+    "ok": false,
+    "plan": null,
+    "error": "LAS 头解析失败: boom"
+   },
+   {
+    "id": "plan-fail-unknown",
+    "case": "format-unknown",
+    "managed": null,
+    "asset_name": null,
+    "options": {},
+    "ok": false,
+    "plan": null,
+    "error": "无法识别格式（无内容特征且扩展名未注册）"
+   },
+   {
+    "id": "plan-fail-mismatch",
+    "case": "extension-content-mismatch",
+    "managed": null,
+    "asset_name": null,
+    "options": {},
+    "ok": false,
+    "plan": null,
+    "error": "扩展名 .tif 指向 fake_tiff_host，但内容嗅探为 geotiff（tiff-magic）；无法识别格式（无内容特征且扩展名未注册）"
+   },
+   {
+    "id": "plan-with-options",
+    "case": "las-managed-ok",
+    "managed": null,
+    "asset_name": "W-2",
+    "options": {
+     "normalize": true
+    },
+    "ok": true,
+    "plan": {
+     "format_id": "las",
+     "source_path": "<PATH>",
+     "action": "managed_copy",
+     "asset_name": "W-2",
+     "warnings": [],
+     "estimated_bytes": 4321,
+     "transform": null,
+     "metadata": {
+      "well_name": "W-001"
+     },
+     "options": {
+      "normalize": true
+     }
+    },
+    "error": null
+   },
+   {
+    "id": "plan-empty-asset-name",
+    "case": "las-managed-ok",
+    "managed": null,
+    "asset_name": "",
+    "options": {},
+    "ok": true,
+    "plan": {
+     "format_id": "las",
+     "source_path": "<PATH>",
+     "action": "managed_copy",
+     "asset_name": "w.las",
+     "warnings": [],
+     "estimated_bytes": 4321,
+     "transform": null,
+     "metadata": {
+      "well_name": "W-001"
+     },
+     "options": {}
+    },
+    "error": null
+   }
+  ]
+ },
+ "registry": [
+  {
+   "id": "duplicate",
+   "error": "duplicate adapter format_id: demo"
+  },
+  {
+   "id": "replace",
+   "get_demo": true,
+   "ext_lookup": "demo"
+  },
+  {
+   "id": "blank",
+   "error": "adapter must define format_id"
+  }
+ ],
+ "fuzz": [
+  {
+   "id": "fuzz-0",
+   "name": "? ́ com1a*가",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '?\\u2003́ com1\\x7fa*가'"
+  },
+  {
+   "id": "fuzz-1",
+   "name": "中nulcon\u0000 \u0000ﬁ\u001c",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '中nulcon\\x00\\u2003\\x00ﬁ\\x1c'"
+  },
+  {
+   "id": "fuzz-2",
+   "name": "ᅡb가ொৌ.*lpt4|ébÅொ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ᅡb가ொৌ.*lpt4|ébÅொ'"
+  },
+  {
+   "id": "fuzz-3",
+   "name": "",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "fuzz-4",
+   "name": " con< 文 \u0001",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\xa0con<\\xa0文 \\x01'"
+  },
+  {
+   "id": "fuzz-5",
+   "name": "ᆨİ\"",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'ᆨİ\"'"
+  },
+  {
+   "id": "fuzz-7",
+   "name": "Ω\u0000Ånuĺ",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'Ω\\x7f\\x00Ånuĺ'"
+  },
+  {
+   "id": "fuzz-8",
+   "name": ":lpt4Å.:..\tbcom1\t:",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path ':lpt4Å.:..\\tbcom1\\t:'"
+  },
+  {
+   "id": "fuzz-9",
+   "name": "\u0000Σﬁ? \tá",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\x00Σﬁ?\\u2028\\tá'"
+  },
+  {
+   "id": "fuzz-10",
+   "name": "|\\<ᄀ.|Ω",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '|\\\\<ᄀ.|Ω'"
+  },
+  {
+   "id": "fuzz-11",
+   "name": "/>\u0000\u001c:txtᄀcom1Σlpt4con",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '/>\\x00\\x1c:txtᄀcom1Σlpt4con'"
+  },
+  {
+   "id": "fuzz-13",
+   "name": "lpt4..ÅᅡΣ*ᄀ\t",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'lpt4..ÅᅡΣ*ᄀ\\t'"
+  },
+  {
+   "id": "fuzz-14",
+   "name": "?İİ* ᄀ é*com1가Å",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '?İİ*\\u2003ᄀ\\u2028é*com1가Å'"
+  },
+  {
+   "id": "fuzz-17",
+   "name": " lpt4 ",
+   "ok": true,
+   "path": " lpt4 ",
+   "error": null
+  },
+  {
+   "id": "fuzz-18",
+   "name": " ́\\:",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in ':'"
+  },
+  {
+   "id": "fuzz-19",
+   "name": "ß..ἱ lpt4Ωொ　 ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ß..ἱ lpt4Ωொ\\u3000\\xa0'"
+  },
+  {
+   "id": "fuzz-20",
+   "name": "\u001d\t",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "fuzz-21",
+   "name": "ৌ　ÅnulΣé*ᄀÅ ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ৌ\\u3000ÅnulΣé*ᄀÅ\\u2028'"
+  },
+  {
+   "id": "fuzz-22",
+   "name": "txt0123456789Ω\u001d//\"ᆨᆨ\u0001",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'txt\\x7f0123456789Ω\\x1d//\"ᆨᆨ\\x01'"
+  },
+  {
+   "id": "fuzz-23",
+   "name": "/*ৌé́:Σlpt4 \u0001İnul",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '/*ৌé́\\x7f:Σlpt4\\u2028\\x01İnul'"
+  },
+  {
+   "id": "fuzz-24",
+   "name": " *b文..|",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in ' *b文..|'"
+  },
+  {
+   "id": "fuzz-25",
+   "name": "ßcom1Åa?a<ᆨ文nul a",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ßcom1Åa?a<ᆨ文nul\\u2003a'"
+  },
+  {
+   "id": "fuzz-26",
+   "name": ":nul:\u001d .éb\tÅ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path ':nul:\\x1d\\u2028.éb\\x7f\\tÅ'"
+  },
+  {
+   "id": "fuzz-27",
+   "name": "0123456789",
+   "ok": true,
+   "path": "0123456789",
+   "error": null
+  },
+  {
+   "id": "fuzz-28",
+   "name": "\"com1\u0001文lpt4conᆨ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\"com1\\x01文lpt4conᆨ'"
+  },
+  {
+   "id": "fuzz-29",
+   "name": "ொἱΣ\u001d",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ொἱΣ\\x1d'"
+  },
+  {
+   "id": "fuzz-30",
+   "name": "..conaΣἱ\\ᅡnultxt",
+   "ok": true,
+   "path": "..conaΣἱ/ᅡnultxt",
+   "error": null
+  },
+  {
+   "id": "fuzz-31",
+   "name": "..İ文bcom1\u0000",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '..İ文bcom1\\x00\\x7f'"
+  },
+  {
+   "id": "fuzz-32",
+   "name": "txt",
+   "ok": true,
+   "path": "txt",
+   "error": null
+  },
+  {
+   "id": "fuzz-33",
+   "name": "\u0001>　.| \u0001com1:>ᄀ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\x01>\\u3000.|\\u2028\\x01com1:>ᄀ'"
+  },
+  {
+   "id": "fuzz-34",
+   "name": "ᆨ/\u0001con ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\x01con\\xa0'"
+  },
+  {
+   "id": "fuzz-35",
+   "name": "ἱﬁᅡ0123456789",
+   "ok": true,
+   "path": "ἱﬁᅡ0123456789",
+   "error": null
+  },
+  {
+   "id": "fuzz-36",
+   "name": "ᆨconnul\u0000",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'ᆨconnul\\x00'"
+  },
+  {
+   "id": "fuzz-37",
+   "name": "nul>ᆨ ৌÅ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'nul>ᆨ\\xa0ৌÅ'"
+  },
+  {
+   "id": "fuzz-38",
+   "name": "文.\\:ß가́ᄀİbΣÅ가\"",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '文.\\\\:ß가́ᄀİbΣÅ가\"'"
+  },
+  {
+   "id": "fuzz-39",
+   "name": "\t \"가\"ᅡ?ৌ\u001d0123456789ொ.",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\t\\u2028\"가\"ᅡ?ৌ\\x1d0123456789ொ.'"
+  },
+  {
+   "id": "fuzz-40",
+   "name": "\u0001?ἱ\\com1bb\"",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\x01?ἱ'"
+  },
+  {
+   "id": "fuzz-41",
+   "name": "\tΣ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\tΣ'"
+  },
+  {
+   "id": "fuzz-42",
+   "name": "\\/\\>nulconᆨnul",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: '\\\\/\\\\>nulconᆨnul'"
+  },
+  {
+   "id": "fuzz-43",
+   "name": "*Åéconß| İ文\u0001ᄀ\u0000 con",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '*Åéconß|\\u2003İ文\\x01ᄀ\\x00\\xa0con'"
+  },
+  {
+   "id": "fuzz-44",
+   "name": "lpt4ﬁÅb.ொconொ/ ßlpt4",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'lpt4ﬁÅb.ொcon\\x7fொ/\\xa0ßlpt4'"
+  },
+  {
+   "id": "fuzz-45",
+   "name": "éᅡbtxt>",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'éᅡb\\x7ftxt>'"
+  },
+  {
+   "id": "fuzz-46",
+   "name": "/ᆨ?ொtxtΩ\u001dÅᄀÅ\tÅ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '/ᆨ?ொtxtΩ\\x1dÅᄀÅ\\tÅ'"
+  },
+  {
+   "id": "fuzz-47",
+   "name": "?é\\ৌ　\u0001/가",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '?é\\\\ৌ\\u3000\\x01/\\x7f가'"
+  },
+  {
+   "id": "fuzz-48",
+   "name": "b:",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: 'b:'"
+  },
+  {
+   "id": "fuzz-49",
+   "name": "\"中ொ*ᄀ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\"中ொ*ᄀ'"
+  },
+  {
+   "id": "fuzz-50",
+   "name": "/ﬁ文ᅡ",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: '/ﬁ文ᅡ'"
+  },
+  {
+   "id": "fuzz-51",
+   "name": ":**|b0123456789:nul",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in ':**|b0123456789:nul'"
+  },
+  {
+   "id": "fuzz-52",
+   "name": "|com1\u0000\u0001 中",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '|com1\\x00\\x7f\\x01\\xa0中'"
+  },
+  {
+   "id": "fuzz-53",
+   "name": "́　 *ᅡ \t　lpt4\\",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '́\\u3000\\u2003*ᅡ\\xa0\\t\\u3000lpt4'"
+  },
+  {
+   "id": "fuzz-54",
+   "name": "\ttxt",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\ttxt'"
+  },
+  {
+   "id": "fuzz-55",
+   "name": "ᄀ\\>ﬁ 가  Å\"ἱ\u001c:",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ᄀ\\\\>ﬁ\\u2003가\\xa0\\xa0Å\"ἱ\\x1c:'"
+  },
+  {
+   "id": "fuzz-56",
+   "name": "İ\u001c/　ﬁÅ  　*ß 中b",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'İ\\x1c/\\u3000ﬁÅ\\u2003\\u2028\\u3000*ß\\u2028中b'"
+  },
+  {
+   "id": "fuzz-57",
+   "name": " 　\u001d0123456789\"Ω..\u001dtxt ..",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path ' \\u3000\\x1d0123456789\"Ω..\\x1dtxt\\u2003..'"
+  },
+  {
+   "id": "fuzz-58",
+   "name": ":\\ᅡlpt4>Å",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path ':\\\\ᅡlpt4>Å'"
+  },
+  {
+   "id": "fuzz-59",
+   "name": "\u001c:Åᅡ>txt\u0000",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\x1c:Åᅡ>txt\\x00'"
+  },
+  {
+   "id": "fuzz-60",
+   "name": "con\u001d ﬁொa\u001c\u0001\t　ொ\tொ ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'con\\x1d\\u2003ﬁொa\\x1c\\x01\\t\\u3000ொ\\tொ\\u2003'"
+  },
+  {
+   "id": "fuzz-61",
+   "name": "ৌ0123456789: \u0000/aΣǺᅡ0123456789\u001c",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'ৌ0123456789:\\u2028\\x00/aΣǺᅡ0123456789\\x1c'"
+  },
+  {
+   "id": "fuzz-62",
+   "name": "\u001d́| 0123456789\\ß中",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\x1d́|\\u20280123456789'"
+  },
+  {
+   "id": "fuzz-63",
+   "name": ">...文é",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '>...文\\x7fé'"
+  },
+  {
+   "id": "fuzz-64",
+   "name": "ᄀtxtcom1b\u0000́..",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'ᄀtxtcom1b\\x00́..'"
+  },
+  {
+   "id": "fuzz-65",
+   "name": "?ΩΣ\\",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '?ΩΣ\\\\'"
+  },
+  {
+   "id": "fuzz-66",
+   "name": "..nuĺ.Σᄀ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '..nuĺ.Σᄀ'"
+  },
+  {
+   "id": "fuzz-67",
+   "name": "com1:가..ৌ\"\u0000",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'com1:가..ৌ\"\\x00'"
+  },
+  {
+   "id": "fuzz-68",
+   "name": "*0123456789lpt4ᆨᅡ \\Å ἱaconÅ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '*0123456789lpt4ᆨᅡ\\u2028\\\\Å ἱaconÅ'"
+  },
+  {
+   "id": "fuzz-69",
+   "name": " .ß Åொ\u0001ἱ/",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\u2028.ß\\xa0Åொ\\x01ἱ\\x7f/'"
+  },
+  {
+   "id": "fuzz-70",
+   "name": "lpt4connul가",
+   "ok": true,
+   "path": "lpt4connul가",
+   "error": null
+  },
+  {
+   "id": "fuzz-71",
+   "name": ":?ﬁ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in ':?ﬁ'"
+  },
+  {
+   "id": "fuzz-72",
+   "name": "<",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '<'"
+  },
+  {
+   "id": "fuzz-73",
+   "name": "ΣÅ|中é..Σ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ΣÅ|中é..Σ'"
+  },
+  {
+   "id": "fuzz-74",
+   "name": "文/\u001dcon\ta",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\x1dcon\\ta'"
+  },
+  {
+   "id": "fuzz-75",
+   "name": "́ con *\u0000:nul",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '́\\xa0con\\xa0*\\x00:nul'"
+  },
+  {
+   "id": "fuzz-76",
+   "name": "\u001d 中ß\u001c\u0001nul?Åἱᆨᅡ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\x1d\\u2028中ß\\x1c\\x01nul?Åἱᆨᅡ'"
+  },
+  {
+   "id": "fuzz-77",
+   "name": "com1",
+   "ok": false,
+   "path": null,
+   "error": "entry: Windows reserved name 'com1'"
+  },
+  {
+   "id": "fuzz-78",
+   "name": "|\u001c Ω.\u001c文ἱ b",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '|\\x1c\\xa0Ω.\\x1c文ἱ b'"
+  },
+  {
+   "id": "fuzz-79",
+   "name": "　 가 ́　中́ ",
+   "ok": true,
+   "path": "　 가 ́　中́ ",
+   "error": null
+  },
+  {
+   "id": "fuzz-80",
+   "name": "ᄀÅ\u0001\u001c\u001d\\　",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ᄀÅ\\x7f\\x01\\x1c\\x1d\\\\\\u3000'"
+  },
+  {
+   "id": "fuzz-81",
+   "name": "\t>\u0001?中\".. ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\t>\\x01?中\"..\\u2003'"
+  },
+  {
+   "id": "fuzz-82",
+   "name": "\ttxt..İ　a",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\ttxt..İ\\u3000a'"
+  },
+  {
+   "id": "fuzz-83",
+   "name": ". *ৌἱ\u001c:con|",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '.\\u2003*ৌἱ\\x1c:con|'"
+  },
+  {
+   "id": "fuzz-84",
+   "name": "\u0000İcom1ᅡΩlpt4ß..",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\x00İcom1ᅡΩlpt4ß..'"
+  },
+  {
+   "id": "fuzz-85",
+   "name": "..>txtnul　ொᅡ\"é",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '..>txtnul\\u3000ொᅡ\"é'"
+  },
+  {
+   "id": "fuzz-86",
+   "name": "conᅡ",
+   "ok": true,
+   "path": "conᅡ",
+   "error": null
+  },
+  {
+   "id": "fuzz-87",
+   "name": " 　ﬁÅ0123456789　\\　 ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\u2028\\u3000ﬁÅ0123456789\\u3000\\\\\\u3000\\xa0'"
+  },
+  {
+   "id": "fuzz-88",
+   "name": "/ᅡ",
+   "ok": false,
+   "path": null,
+   "error": "entry: absolute path not allowed: '/ᅡ'"
+  },
+  {
+   "id": "fuzz-89",
+   "name": "文\tcon>각\t中lpt4́",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '文\\tcon>각\\t中lpt4́'"
+  },
+  {
+   "id": "fuzz-90",
+   "name": "aᅡ가lpt4lpt4 < ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'aᅡ가lpt4lpt4\\xa0<\\u2028'"
+  },
+  {
+   "id": "fuzz-91",
+   "name": ".. \u0001:",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '.. \\x01:'"
+  },
+  {
+   "id": "fuzz-92",
+   "name": "*\u001déßÅৌ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '*\\x1déßÅৌ'"
+  },
+  {
+   "id": "fuzz-93",
+   "name": "İﬁ\\\tৌcom1ᅡ*",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'İﬁ\\\\\\tৌcom1ᅡ*'"
+  },
+  {
+   "id": "fuzz-94",
+   "name": "  Åba",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\xa0 Åba'"
+  },
+  {
+   "id": "fuzz-95",
+   "name": "　",
+   "ok": false,
+   "path": null,
+   "error": "entry: empty path"
+  },
+  {
+   "id": "fuzz-96",
+   "name": "b가>\"ᅡé\"/",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'b가>\"ᅡé\"'"
+  },
+  {
+   "id": "fuzz-97",
+   "name": "ொᆨ..",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ொᆨ..'"
+  },
+  {
+   "id": "fuzz-98",
+   "name": ">*Å中ᄀ<ᆨ\\",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '>*Å中ᄀ<ᆨ\\\\'"
+  },
+  {
+   "id": "fuzz-99",
+   "name": "?Σἱ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '?Σἱ'"
+  },
+  {
+   "id": "fuzz-100",
+   "name": " com1com1́Åொ  ᅡ\u001d",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\xa0com1com1́Åொ\\xa0\\u2003ᅡ\\x1d'"
+  },
+  {
+   "id": "fuzz-101",
+   "name": "İொ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'İொ'"
+  },
+  {
+   "id": "fuzz-102",
+   "name": "com1nul> |İ0123456789",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'com1nul>\\xa0|İ0123456789'"
+  },
+  {
+   "id": "fuzz-103",
+   "name": "0123456789Å>0123456789\u001cৌ가",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '0123456789Å>\\x7f0123456789\\x1cৌ가'"
+  },
+  {
+   "id": "fuzz-104",
+   "name": "ßé  0123456789",
+   "ok": true,
+   "path": "ßé  0123456789",
+   "error": null
+  },
+  {
+   "id": "fuzz-105",
+   "name": "b　ᄀ文0123456789|",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\x7fb\\u3000ᄀ文0123456789|'"
+  },
+  {
+   "id": "fuzz-106",
+   "name": "?",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '?'"
+  },
+  {
+   "id": "fuzz-107",
+   "name": "ொ\u0001\tொ?中\"　 ß",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ொ\\x01\\tொ?中\"\\u3000\\u2003ß'"
+  },
+  {
+   "id": "fuzz-108",
+   "name": "Ω<\u001dொ:ﬁéᅡ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'Ω<\\x1dொ:ﬁéᅡ'"
+  },
+  {
+   "id": "fuzz-109",
+   "name": "\u001c\\ৌ ?a0123456789",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\x1c\\\\ৌ\\xa0?a0123456789'"
+  },
+  {
+   "id": "fuzz-110",
+   "name": "com1<ᆨ.　",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'com1<ᆨ.\\u3000'"
+  },
+  {
+   "id": "fuzz-111",
+   "name": " ொᆨ\u0000 Åᅡlpt4",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\xa0ொᆨ\\x00\\u2028Åᅡlpt4'"
+  },
+  {
+   "id": "fuzz-112",
+   "name": "́|:  ᄀéᅡİß nulΩÅ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '́|:\\u2003\\u2003ᄀéᅡİß\\u2003nulΩÅ'"
+  },
+  {
+   "id": "fuzz-113",
+   "name": "가aﬁconᄀ|<..中ᆨﬁ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '가aﬁconᄀ|<..中ᆨﬁ'"
+  },
+  {
+   "id": "fuzz-114",
+   "name": "com1 b \"文ﬁ|",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'com1\\u2003b\\u2028\"文ﬁ|'"
+  },
+  {
+   "id": "fuzz-116",
+   "name": "éa　",
+   "ok": true,
+   "path": "éa　",
+   "error": null
+  },
+  {
+   "id": "fuzz-117",
+   "name": "ßᅡÅbbொ:Σ*Σ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ßᅡÅbbொ:Σ*Σ'"
+  },
+  {
+   "id": "fuzz-118",
+   "name": "b: ᄀᆨ文İொΣ >ொ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'b:\\u2028ᄀᆨ文İொΣ\\u2028>ொ'"
+  },
+  {
+   "id": "fuzz-119",
+   "name": "<\tᄀÅΩ ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '<\\tᄀÅΩ '"
+  },
+  {
+   "id": "fuzz-120",
+   "name": ":Å\u001dcom1　́\u0000",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in ':Å\\x1dcom1\\u3000́\\x00'"
+  },
+  {
+   "id": "fuzz-121",
+   "name": "lpt4가|ᄀb<..</Å가.",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'lpt4가|ᄀb<..</Å가.'"
+  },
+  {
+   "id": "fuzz-122",
+   "name": " b\\ᆨ́Å",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\xa0b\\\\ᆨ́Å'"
+  },
+  {
+   "id": "fuzz-123",
+   "name": "가com1",
+   "ok": true,
+   "path": "가com1",
+   "error": null
+  },
+  {
+   "id": "fuzz-124",
+   "name": "..?ἱ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '..?ἱ'"
+  },
+  {
+   "id": "fuzz-127",
+   "name": "Ωénulİ<中 ́ >文\u001c..",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'Ω\\x7fénulİ<中\\u2028́\\u2003>文\\x1c..'"
+  },
+  {
+   "id": "fuzz-128",
+   "name": "<0123456789ἱᄀΩ..",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '<0123456789ἱᄀΩ..'"
+  },
+  {
+   "id": "fuzz-129",
+   "name": "\t　가\t:",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\t\\u3000가\\t:'"
+  },
+  {
+   "id": "fuzz-130",
+   "name": "0123456789Åtxt|\u0000lpt4.",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '0123456789Åtxt|\\x00lpt4.'"
+  },
+  {
+   "id": "fuzz-131",
+   "name": "ﬁ\\İৌcom1́文\u001c*́ᅡ　com1",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ﬁ\\\\İৌcom1́文\\x1c*́ᅡ\\u3000com1'"
+  },
+  {
+   "id": "fuzz-132",
+   "name": "0123456789가ἱ :ἱᅡ\u0001中가\\",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '0123456789가ἱ\\u2028:ἱᅡ\\x7f\\x01中가'"
+  },
+  {
+   "id": "fuzz-133",
+   "name": "ÅÅ..İᆨΣ/",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ÅÅ..İᆨΣ/'"
+  },
+  {
+   "id": "fuzz-134",
+   "name": "lpt4?\u001cÅᆨΩΩé",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'lpt4?\\x1cÅᆨΩΩé'"
+  },
+  {
+   "id": "fuzz-135",
+   "name": "ÅΩΣ\" 文İ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ÅΩΣ\"\\u2028文İ'"
+  },
+  {
+   "id": "fuzz-136",
+   "name": "a\t\u001ć 中 ..ἱ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'a\\t\\x1ć\\u2003中 ..ἱ'"
+  },
+  {
+   "id": "fuzz-137",
+   "name": "ᄀ",
+   "ok": true,
+   "path": "ᄀ",
+   "error": null
+  },
+  {
+   "id": "fuzz-138",
+   "name": "txtΣ:<txt|txt́com1가\u001c",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'txtΣ:<txt|txt́com1가\\x1c\\x7f'"
+  },
+  {
+   "id": "fuzz-139",
+   "name": "com1 가com1ﬁnulİÅ ß",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'com1\\u2003가com1ﬁnulİÅ ß'"
+  },
+  {
+   "id": "fuzz-140",
+   "name": "..İ*:ᆨlpt4가",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '..İ*:ᆨlpt4가'"
+  },
+  {
+   "id": "fuzz-141",
+   "name": "Σ\t文con...İß<",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in 'Σ\\t文con...İß<'"
+  },
+  {
+   "id": "fuzz-142",
+   "name": "\" ᄀ..b\u001db|\"éொ\u001c",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\"\\u2003ᄀ..b\\x1db|\"éொ\\x1c'"
+  },
+  {
+   "id": "fuzz-143",
+   "name": "\u0001>ৌἱé*",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\x01>ৌἱé\\x7f*'"
+  },
+  {
+   "id": "fuzz-144",
+   "name": "..b\u0001́文Åé文",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '..b\\x01́文Åé文'"
+  },
+  {
+   "id": "fuzz-145",
+   "name": "nul*<éἱ\u001d /0123456789\u0000 .\u0001",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'nul\\x7f*<éἱ\\x1d /0123456789\\x00\\xa0.\\x01'"
+  },
+  {
+   "id": "fuzz-147",
+   "name": "中 　\u0001中a\u0001 文conconcom1\t",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '中 \\u3000\\x01中a\\x01\\u2003文\\x7fconconcom1\\t'"
+  },
+  {
+   "id": "fuzz-149",
+   "name": " con*ᆨ\u0000 ৌ",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\xa0con*ᆨ\\x00 ৌ'"
+  },
+  {
+   "id": "fuzz-150",
+   "name": "<文\t Ω:ொÅÅÅᄀß \u0000",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '<文\\t\\u2028Ω:ொÅÅÅᄀß \\x00'"
+  },
+  {
+   "id": "fuzz-152",
+   "name": "0123456789<..Å",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '0123456789<..\\x7fÅ'"
+  },
+  {
+   "id": "fuzz-153",
+   "name": "\u0000com1/Ω\u001cnulᆨ",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\x00com1/Ω\\x1cnulᆨ'"
+  },
+  {
+   "id": "fuzz-154",
+   "name": "Ωßlpt4　Å",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'Ωßlpt4\\x7f\\u3000Å'"
+  },
+  {
+   "id": "fuzz-155",
+   "name": "Σ́*éৌ\u0001é\" ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'Σ́*éৌ\\x01é\"\\u2003'"
+  },
+  {
+   "id": "fuzz-156",
+   "name": ". com1文éconcom1conৌlpt4a: ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '.\\u2003com1文éconcom1conৌlpt4a:\\u2003'"
+  },
+  {
+   "id": "fuzz-157",
+   "name": "<Å0123456789Åᅡ>ᆨnul\t ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\x7f<Å0123456789Åᅡ>ᆨnul\\t\\u2028'"
+  },
+  {
+   "id": "fuzz-158",
+   "name": "a/ com1\u0001ᅡ中 ொ|",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'a/ com1\\x01\\x7fᅡ中\\xa0ொ|'"
+  },
+  {
+   "id": "fuzz-159",
+   "name": "nul.　İİb\u001d bélpt4.\\",
+   "ok": false,
+   "path": null,
+   "error": "entry: trailing dot/space in 'nul.\\u3000İİb\\x1d bélpt4.'"
+  },
+  {
+   "id": "fuzz-160",
+   "name": "\u001c /ᄀொ\u0000文\t",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\x1c\\u2028/ᄀொ\\x00文\\t'"
+  },
+  {
+   "id": "fuzz-161",
+   "name": "\u001cৌ文ொ　",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\x1cৌ文ொ\\u3000'"
+  },
+  {
+   "id": "fuzz-162",
+   "name": "ᆨἱ|\u0000ΩÅ ﬁ ",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'ᆨἱ|\\x00ΩÅ\\u2028ﬁ\\u2028'"
+  },
+  {
+   "id": "fuzz-164",
+   "name": " :İ\t\u001dtxtொ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path ' :İ\\t\\x1dtxtொ'"
+  },
+  {
+   "id": "fuzz-167",
+   "name": "..İ",
+   "ok": true,
+   "path": "..İ",
+   "error": null
+  },
+  {
+   "id": "fuzz-168",
+   "name": " ́lpt4\u001c |nul　ᅡ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\xa0́lpt4\\x1c\\u2028|nul\\u3000ᅡ'"
+  },
+  {
+   "id": "fuzz-169",
+   "name": "́/ßlpt4文",
+   "ok": true,
+   "path": "́/ßlpt4文",
+   "error": null
+  },
+  {
+   "id": "fuzz-170",
+   "name": " .ᆨcom1\"中.ﬁb0123456789 /",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in ' .ᆨcom1\"中.ﬁb0123456789\\xa0'"
+  },
+  {
+   "id": "fuzz-171",
+   "name": "lpt4a\tÅtxt中<Å\u001cİ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'lpt4a\\tÅtxt中<Å\\x1cİ'"
+  },
+  {
+   "id": "fuzz-172",
+   "name": " \u0001Ω::",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\u2003\\x01Ω::'"
+  },
+  {
+   "id": "fuzz-173",
+   "name": "..",
+   "ok": false,
+   "path": null,
+   "error": "entry: traversal component in '..'"
+  },
+  {
+   "id": "fuzz-174",
+   "name": "İßΩ?..",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'İßΩ?..'"
+  },
+  {
+   "id": "fuzz-175",
+   "name": "ொ\u001cb<가",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ொ\\x1cb<가'"
+  },
+  {
+   "id": "fuzz-176",
+   "name": " Åcom1* \"\"|\\lpt4",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\u2003Åcom1*\\u2028\"\"|\\\\lpt4'"
+  },
+  {
+   "id": "fuzz-177",
+   "name": "*İ",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '*İ'"
+  },
+  {
+   "id": "fuzz-178",
+   "name": "ﬁÅ\u0000<:",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'ﬁÅ\\x00<:'"
+  },
+  {
+   "id": "fuzz-179",
+   "name": ".|?가\u001c.*.́ﬁ<",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '.|?가\\x1c.*.́ﬁ\\x7f<'"
+  },
+  {
+   "id": "fuzz-180",
+   "name": "ᆨ\\中 é:a中:|",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '中 é:a\\x7f中:|'"
+  },
+  {
+   "id": "fuzz-181",
+   "name": "com1ÅΣ 　0123456789txt\\\u0000 éΣ?",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'com1ÅΣ\\xa0\\u30000123456789txt\\\\\\x00 \\x7féΣ?'"
+  },
+  {
+   "id": "fuzz-182",
+   "name": "가>ἱÅ\"ß́nul　",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '가>ἱÅ\"ß́nul\\u3000'"
+  },
+  {
+   "id": "fuzz-183",
+   "name": "　com1\u0000<ᄀ \u0000b文文",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\u3000com1\\x00<ᄀ\\u2028\\x00b文文'"
+  },
+  {
+   "id": "fuzz-184",
+   "name": "\u0000",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in '\\x00'"
+  },
+  {
+   "id": "fuzz-185",
+   "name": "文\u001ca",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '文\\x1ca'"
+  },
+  {
+   "id": "fuzz-186",
+   "name": "|中\u001dÅÅ ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '|中\\x1dÅÅ\\xa0'"
+  },
+  {
+   "id": "fuzz-187",
+   "name": "İßﬁ |Å文 ß|Å0123456789İÅ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'İßﬁ\\u2003|Å文\\xa0ß|Å0123456789İÅ'"
+  },
+  {
+   "id": "fuzz-188",
+   "name": "conΣnul",
+   "ok": true,
+   "path": "conΣnul",
+   "error": null
+  },
+  {
+   "id": "fuzz-189",
+   "name": "文́中ৌΣ<com1\u001d　ß\t",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '文́中ৌΣ<com1\\x1d\\u3000ß\\t'"
+  },
+  {
+   "id": "fuzz-190",
+   "name": "lpt4文*:Åé..lpt4",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'lpt4文*:\\x7fÅé..lpt4'"
+  },
+  {
+   "id": "fuzz-191",
+   "name": "\t　..　|İßa:　bconᆨß",
+   "ok": false,
+   "path": null,
+   "error": "entry: reserved character in '\\t\\u3000..\\u3000|İßa:\\u3000bconᆨß'"
+  },
+  {
+   "id": "fuzz-193",
+   "name": "ৌ.txtᄀ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'ৌ.txtᄀ'"
+  },
+  {
+   "id": "fuzz-194",
+   "name": "lpt4...Ω|ΣΩ?ᅡ\t",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'lpt4...Ω\\x7f|ΣΩ?ᅡ\\t'"
+  },
+  {
+   "id": "fuzz-195",
+   "name": "Ω\u001cßİ가ἱ:ﬁ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'Ω\\x1cßİ가ἱ:ﬁ'"
+  },
+  {
+   "id": "fuzz-196",
+   "name": "Åᄀ\"\u001ccom1",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'Åᄀ\"\\x1ccom1'"
+  },
+  {
+   "id": "fuzz-197",
+   "name": "Åcom1",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path 'Åcom1'"
+  },
+  {
+   "id": "fuzz-198",
+   "name": "ᅡ\u001cİ?\u0000txta",
+   "ok": false,
+   "path": null,
+   "error": "entry: NUL byte in 'ᅡ\\x1c\\x7fİ\\x7f?\\x00txta'"
+  },
+  {
+   "id": "fuzz-199",
+   "name": "\\lpt4ᆨΣÅ",
+   "ok": false,
+   "path": null,
+   "error": "entry: non-NFC path '\\\\lpt4ᆨΣÅ'"
+  }
+ ]
+}

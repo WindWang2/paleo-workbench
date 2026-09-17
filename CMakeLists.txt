@@ -80,6 +80,14 @@ if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)
 endif()
 
+# BEGIN CONV-14
+option(PWB_BUILD_CONV_14
+    "Build the interchange path-safety/manifest/preflight kernel (conv-14)" OFF)
+if(PWB_BUILD_CONV_14)
+    add_subdirectory(libs/interchange)
+endif()
+# END CONV-14
+
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
 # it (no substitutes). Fail loudly when the combo is impossible.
