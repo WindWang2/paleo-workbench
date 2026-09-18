@@ -51,6 +51,7 @@ class SeismicSliceWidget;
 namespace pwb::app {
 
 class VertexMoveMapTool;
+class AppContext;
 #ifdef PWB_WITH_CONV_16
 class FactorStatsDock;
 #endif
@@ -58,14 +59,23 @@ class FactorStatsDock;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
+    // Product composition: bootstrap creates the AppContext (service
+    // layer: session, attribute runner, project store handle) and hands
+    // it in; the window is a pure shell consumer.
+    explicit MainWindow(AppContext& context, QWidget* parent = nullptr);
+    // Convenience for small hosts/tests: embeds a private AppContext.
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+    AppContext& context() const { return context_; }
 
     // Loads a vector fixture + raster fixture, sets an active layer and
     // returns "" (or the diagnostic). Used by the app smoke entry and tests.
     QString loadFixtures(const QString& vector_uri, const QString& raster_uri);
 
-    pwb::application::ProjectSession* session() const { return session_.get(); }
+    // The map/edit session owned by the context (out-of-line: AppContext is
+    // forward-declared here).
+    pwb::application::ProjectSession* session() const;
 
     // Test/automation entry points for the wired operations (same code the
     // actions trigger; no parallel logic).
@@ -168,6 +178,7 @@ protected:
 
 
 private:
+    void init_shell();
     void buildUi();
     void buildMenusAndToolbar();
     void connectActions();
@@ -209,7 +220,15 @@ private:
     void geologicalFactorMapDialog();
 #endif
 
-    std::unique_ptr<pwb::application::ProjectSession> session_;
+    // The composition root's service layer. When the window embeds its own
+    // context (tests/small hosts), owned_context_ must be declared BEFORE
+    // the reference so member-init order builds it first; it is then
+    // destroyed after the UI members but still before the Qt widget
+    // children tear down (canvas dies in the QObject base destructor) —
+    // session close must run while the canvas is still alive, which the
+    // destructor body guarantees explicitly.
+    std::unique_ptr<AppContext> owned_context_;
+    AppContext& context_;
     pwb::ui::ToolActionSet actions_;
     QgsMapCanvas* canvas_ = nullptr;
     QgsLayerTreeView* tree_ = nullptr;
@@ -217,16 +236,10 @@ private:
 #ifdef PWB_WITH_CONV_16
     FactorStatsDock* factor_dock_ = nullptr;
 #endif
-    // The B store opened by openProject (null in module-only mode); the
-    // attribute runner and volume viewer resolve catalog versions here.
-    std::shared_ptr<pwb::application::PwbDataStore> project_store_;
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     QDockWidget* seismic_dock_ = nullptr;
     pwb::seismic_viewer::SeismicSliceWidget* slice_widget_ = nullptr;
     std::uint64_t slice_revision_ = 0;
-#endif
-#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-    std::unique_ptr<pwb::application::AlgorithmRunner> attribute_runner_;
 #endif
 
     // Map tools (canvas-owned via setMapTool; kept for re-arming).

@@ -10,7 +10,20 @@
 namespace pwb::qgis {
 namespace {
 std::atomic<bool> g_initialized{false};
-const std::string g_prefix = PALEO_QGIS_PREFIX_PATH;
+
+// The deploy seam (native-product closure): the compile-time vendor SDK
+// path is the dev-tree default; a deployed tree carries its own QGIS
+// prefix (resources/plugins layout) and points the process at it via
+// PWB_QGIS_PREFIX. Unset → baked path, exactly the previous behavior.
+const std::string& prefix_path() {
+    static const std::string resolved = [] {
+        if (const char* env = std::getenv("PWB_QGIS_PREFIX")) {
+            if (env[0] != '\0') return std::string(env);
+        }
+        return std::string(PALEO_QGIS_PREFIX_PATH);
+    }();
+    return resolved;
+}
 }  // namespace
 
 void QgisRuntime::acquire() {
@@ -24,7 +37,7 @@ void QgisRuntime::acquire() {
         throw std::logic_error(
             "QgisRuntime::acquire requires an existing QCoreApplication");
     }
-    QgsApplication::setPrefixPath(QString::fromStdString(g_prefix), true);
+    QgsApplication::setPrefixPath(QString::fromStdString(prefix_path()), true);
     QgsApplication::init();
     QgsApplication::initQgis();
 }
@@ -37,7 +50,7 @@ void QgisRuntime::release() {
 
 bool QgisRuntime::initialized() { return g_initialized.load(); }
 
-const std::string& QgisRuntime::prefix_path() { return g_prefix; }
+const std::string& QgisRuntime::prefix_path() { return prefix_path(); }
 
 // Generated qgsversion.h of the vendored build tree ("dev" for local
 // builds); the authoritative version provenance is UPSTREAM.md (4.2.0).

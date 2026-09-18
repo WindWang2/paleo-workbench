@@ -1,11 +1,30 @@
+# Composition-root layout (native-product closure):
+#   main.cpp        — thin entry: -> Bootstrap::run
+#   bootstrap.cpp   — lifecycle: log chain, QgsApplication/QgisRuntime,
+#                     mode dispatch (--self-check/--capabilities/
+#                     --diagnostics/interactive), exception gate
+#   app_context.cpp — service layer: session + attribute runner + store
+#   diagnostics.cpp — product log/error chain + environment probes
+#   self_check.cpp  — the self-check battery
+#   main_window.cpp — the UI shell (consumes AppContext)
 add_executable(pwb-platform
     main.cpp
+    bootstrap.cpp
+    app_context.cpp
+    diagnostics.cpp
+    self_check.cpp
     main_window.cpp
 )
 set_target_properties(pwb-platform PROPERTIES AUTOMOC ON)
-target_include_directories(pwb-platform PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(pwb-platform PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(pwb-platform PRIVATE cxx_std_20)
 target_link_libraries(pwb-platform PRIVATE Pwb::Application Pwb::Ui)
+
+# Compile-time capability table (generated for every platform build by
+# cmake/PwbNativeProduct.cmake; printed by `pwb-platform --capabilities`).
+pwb_native_product_generate_capabilities()
+target_include_directories(pwb-platform PRIVATE ${PWB_GENERATED_INCLUDE_DIR})
 
 # Runtime closure: QGIS vendor bin + Qt bin (single ABI, no PATH guessing at
 # dev time; the deployed package carries its own layout instead).
@@ -23,7 +42,7 @@ if(TARGET Pwb::VisualizationWellLog)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_WELL_LOG=1)
 endif()
 
-# D seismic viewer dock + E attribute kernels: the app is the composition
+# D seismic viewer dock + E attribute kernels: the context is the composition
 # root (E's contract: the host registers; no static auto-registration).
 if(TARGET Pwb::SeismicViewer)
     target_link_libraries(pwb-platform PRIVATE Pwb::SeismicViewer)
@@ -48,6 +67,15 @@ if(PWB_BUILD_CONV_01)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_01=1)
 endif()
 # END CONV-01
+# BEGIN native-product closure
+# Minimal DAG workflow engine (CONV-07) in the product link closure: the
+# self-check battery drives a 4-node diamond through it, proving the
+# workflow capability is alive in the product binary.
+if(PWB_BUILD_CONV_07)
+    target_link_libraries(pwb-platform PRIVATE Pwb::WorkflowEngine)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_WORKFLOW_ENGINE=1)
+endif()
+# END native-product closure
 # BEGIN CONV-16
 # conv-16 factor statistics HUD: the dock reads pwb::mapping::GridStatistics
 # (FactorGrid.statistics), so the mapping kernel joins the link closure only

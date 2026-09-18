@@ -37,6 +37,21 @@ option(PWB_BUILD_INTEGRATION_TESTS
     "Register tests/cpp/integration (requires platform+data+science)" OFF)
 include(CTest)
 
+# BEGIN native-product closure
+# The product-level integrated configuration: one switch pulling the stable
+# C++ product closure (see cmake/PwbNativeProduct.cmake for the capability
+# vocabulary, the fail-closed validation and the generated capability
+# table behind `pwb-platform --capabilities`). The module is included
+# unconditionally — the capability header is generated for every platform
+# build — while the imply/summary pair only runs for the product switch.
+include(cmake/PwbNativeProduct.cmake)
+option(PWB_BUILD_NATIVE_PRODUCT
+    "Build the native C++ product closure (platform+data+science+seismic+mapping; fail-closed)" OFF)
+if(PWB_BUILD_NATIVE_PRODUCT)
+    pwb_native_product_imply()
+endif()
+# END native-product closure
+
 # BEGIN CONV-18
 # Task 18 — FactorGridResult JSON envelope codec (workflow/factor_grid_result.py
 # serialization surface). The codec lives in libs/mapping_kernel next to the
@@ -423,9 +438,19 @@ if(PWB_BUILD_CONV_16)
         target_compile_definitions(platform_factor_hud PRIVATE
             PWB_FACTOR_HUD_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/platform/fixtures/factor_hud/oracle.json")
         add_test(NAME platform.factor_hud COMMAND platform_factor_hud)
-        set_tests_properties(platform.factor_hud PROPERTIES
+        set_tests_properties(platform_factor_hud PROPERTIES
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             TIMEOUT 120)
     endif()
 endif()
 # END CONV-16
+
+# BEGIN native-product closure (epilogue)
+# Runs after every add_subdirectory block: validates the hard closure
+# fail-closed, generates pwb/app/product_capabilities.hpp and prints the
+# capability/link-closure summary. Defined in cmake/PwbNativeProduct.cmake.
+if(PWB_BUILD_NATIVE_PRODUCT)
+    pwb_native_product_summary()
+endif()
+# END native-product closure (epilogue)
+

@@ -39,12 +39,35 @@
         "PWB_BUILD_DATA": "OFF",
         "PWB_BUILD_SCIENCE": "OFF"
       }
+    },
+    {
+      "name": "linux-native-product",
+      "displayName": "Paleo Workbench native C++ product closure (Linux, Release)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/native-product",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PWB_BUILD_NATIVE_PRODUCT": "ON"
+      }
+    },
+    {
+      "name": "windows-msvc-native-product",
+      "displayName": "Paleo Workbench native C++ product closure (Windows MSVC, Release)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/native-product",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PWB_BUILD_NATIVE_PRODUCT": "ON",
+        "CMAKE_PREFIX_PATH": "C:/deps/Qt/6.8.0/msvc2022_64"
+      }
     }
   ],
   "buildPresets": [
     {"name": "windows-msvc-debug", "configurePreset": "windows-msvc-debug"},
     {"name": "windows-msvc-release", "configurePreset": "windows-msvc-release"},
-    {"name": "linux-gcc-release", "configurePreset": "linux-gcc-release"}
+    {"name": "linux-gcc-release", "configurePreset": "linux-gcc-release"},
+    {"name": "linux-native-product", "configurePreset": "linux-native-product"},
+    {"name": "windows-msvc-native-product", "configurePreset": "windows-msvc-native-product"}
   ],
   "testPresets": [
     {
@@ -55,6 +78,11 @@
     {
       "name": "windows-msvc-release",
       "configurePreset": "windows-msvc-release",
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "linux-native-product",
+      "configurePreset": "linux-native-product",
       "output": {"outputOnFailure": true}
     }
   ]
