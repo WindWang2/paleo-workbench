@@ -90,6 +90,25 @@ if(PWB_BUILD_CONV_25)
     add_subdirectory(libs/workflow_graph)
 endif()
 # END CONV-25
+# BEGIN CONV-26 — workflow runtime closure (M7 tail): freshness /
+# current-context, recompute planning + executor, constraint version
+# lifecycle, provenance graph, node adapter bridge + resource model, and
+# the WorkflowRuntimeService composing them — in libs/workflow_runtime,
+# frozen against the Python oracle. Implies the workflow cores it builds
+# on: CONV-25 (graph), CONV-07 (engine + mapping ops), CONV-08
+# (canonical_json encoder) — the implied switches land BEFORE the data /
+# engine / factor_host subdirectory blocks below; the subdirectory itself
+# is added after those blocks.
+option(PWB_BUILD_CONV_26
+    "Build the CONV-26 workflow runtime closure (libs/workflow_runtime; implies PWB_BUILD_DATA + CONV-07/08/25)" OFF)
+if(PWB_BUILD_CONV_26)
+    set(PWB_BUILD_DATA ON)
+    set(PWB_BUILD_MAPPING_KERNEL ON)
+    set(PWB_BUILD_CONV_07 ON)
+    set(PWB_BUILD_CONV_08 ON)
+    set(PWB_BUILD_CONV_25 ON)
+endif()
+# END CONV-26
 
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
@@ -235,6 +254,11 @@ endif()
 # CONV-24 subdirectory — placed after CONV-08 so Pwb::FactorHost exists.
 if(PWB_BUILD_CONV_24)
     add_subdirectory(libs/factor_fusion)
+endif()
+# CONV-26 subdirectory — after the CONV-07/08/25 blocks so the engine,
+# factor_host and graph targets exist.
+if(PWB_BUILD_CONV_26)
+    add_subdirectory(libs/workflow_runtime)
 endif()
 # BEGIN CONV-09
 # M8 first slice: DTW well-log matcher kernel (viz/dtw_log_matcher.py port),
