@@ -155,3 +155,55 @@ when built). CI may add a job that builds the extension and requires
 
 Until the extension exists, `HAS_CPP` is `False` and all tests run on the
 Python path.
+
+## mapping_kernel facade (`pwb_mapping_kernel`, CONV-20)
+
+The geological mapping numeric cores (`interpolate_factor`,
+`extract_factors`, `nearest_neighbor_class_grid`) are ported to the Qt-free
+C++ kernel `libs/mapping_kernel` (frozen against the Python oracles). The
+optional pybind11 module `pwb_mapping_kernel` (source:
+`libs/mapping_bind/`, CMake option `PWB_BUILD_CONV_20`) exposes them to
+Python through the thin facade
+`paleo_workbench/mapping/geological_pipeline/native_bind.py`:
+
+| Facade function | C++ symbol |
+|-----------------|------------|
+| `native_bind.interpolate_factor(dataset, options)` | `pwb::mapping::interpolate_factor` |
+| `native_bind.extract_factors(records, factor_name, ...)` | `pwb::mapping::extract_factors` |
+| `native_bind.nearest_neighbor_class_grid(points, ...)` | `pwb::mapping::nearest_neighbor_class_grid` |
+
+Same boundary rules as `map_edit_core`: `HAS_CPP` is True only when
+`import pwb_mapping_kernel` succeeds; the facade returns the same Python
+types (`FactorGridResult` / `GeologicalFactorDataset` /
+`(grid_z, grid_x, grid_y, names)`); the pure-Python implementations remain
+the fallback and the production pipeline modules are untouched.
+
+Estimator honesty: kriging dispatches to C++ only when the pure-Python path
+would run the same estimator (geoviz engine absent, or a moving
+neighbourhood requested). With the geoviz WLS engine importable and no
+neighbourhood knobs, kriging stays on Python.
+
+Build (CMake, in-tree; the kernel and vendored pybind11 headers live in the
+repo):
+
+```bash
+cmake -S . -B build/conv-20 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DPWB_BUILD_PLATFORM=OFF -DPWB_BUILD_DATA=ON -DPWB_BUILD_SCIENCE=OFF \
+  -DPWB_BUILD_MAPPING_KERNEL=ON -DPWB_BUILD_CONV_20=ON -DBUILD_TESTING=ON
+cmake --build build/conv-20 -j 2 --target mapping_bind_module
+ctest --test-dir build/conv-20 -R 'mapping_bind.smoke' --output-on-failure
+
+# Make the module importable in the current interpreter (per ADR 0067 the
+# .so is built per host and never committed):
+cp build/conv-20/libs/mapping_bind/pwb_mapping_kernel.*.so \
+   "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+python -c "from paleo_workbench.mapping.geological_pipeline import HAS_CPP; assert HAS_CPP is True"
+```
+
+Parity: `libs/mapping_bind/mapping_bind_tests/smoke.py` (ctest
+`mapping_bind.smoke`) replays the frozen oracle
+`libs/mapping_bind/mapping_bind_tests/fixtures/bind_oracle.json` (generated
+from the real Python implementations by
+`libs/mapping_bind/oracle/generate_fixtures.py`), and
+`tests/test_mapping_kernel_bind.py` (skipped when the module is missing)
+compares facade vs pure Python live.

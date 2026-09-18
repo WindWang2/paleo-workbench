@@ -80,6 +80,25 @@ if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)
 endif()
 
+# BEGIN CONV-20
+# Optional pybind11 facade (branch feat/cpp-conv-20-pybind-facade): exposes
+# the Qt-free mapping_kernel cores to Python as module `pwb_mapping_kernel`,
+# consumed by the thin try/except facade
+# paleo_workbench/mapping/geological_pipeline/native_bind.py. OFF by default;
+# never part of the integrated gate. Requires the kernel and Pwb::Domain
+# (the extract core links Json).
+option(PWB_BUILD_CONV_20
+    "Build the optional pybind11 mapping_kernel facade (libs/mapping_bind)" OFF)
+if(PWB_BUILD_CONV_20)
+    if(NOT PWB_BUILD_MAPPING_KERNEL)
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_20=ON requires PWB_BUILD_MAPPING_KERNEL=ON "
+            "(the facade wraps the mapping_kernel cores)")
+    endif()
+    add_subdirectory(libs/mapping_bind)
+endif()
+# END CONV-20
+
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
 # it (no substitutes). Fail loudly when the combo is impossible.
