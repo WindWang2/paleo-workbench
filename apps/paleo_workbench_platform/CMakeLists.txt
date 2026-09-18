@@ -5,7 +5,10 @@ add_executable(pwb-platform
 set_target_properties(pwb-platform PROPERTIES AUTOMOC ON)
 target_include_directories(pwb-platform PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(pwb-platform PRIVATE cxx_std_20)
-target_link_libraries(pwb-platform PRIVATE Pwb::Application Pwb::Ui)
+# CONV-PS platform services: theme QSS, settings persistence,
+# diagnostics probe, session policy, resource lookup.
+target_link_libraries(pwb-platform PRIVATE Pwb::Application Pwb::Ui
+    Pwb::PlatformServices)
 
 # Runtime closure: QGIS vendor bin + Qt bin (single ABI, no PATH guessing at
 # dev time; the deployed package carries its own layout instead).

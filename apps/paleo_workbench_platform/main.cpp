@@ -18,6 +18,8 @@
 #include <QTemporaryDir>
 #include <QThread>
 
+#include <cstdio>
+
 #include <qgsfeature.h>
 #include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
@@ -36,6 +38,11 @@
 #include <pwb/qgis/edit_controller.hpp>
 #include <pwb/qgis/layout_service.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+
+#include <pwb/platform_services/diagnostics_report.hpp>
+#include <pwb/platform_services/qt_session_policy.hpp>
+#include <pwb/platform_services/settings_service.hpp>
+#include <pwb/platform_services/theme_service.hpp>
 
 #include "main_window.hpp"
 
@@ -314,6 +321,11 @@ int runSelfCheck() {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Session policy must run before the application object exists
+    // (qt_platform.py contract): EGL pin, xcb clear, fractional-scale guard.
+    pwb::platform_services::configure_qt_platform_for_session();
+    pwb::platform_services::apply_wayland_fractional_scale_guard();
+
     QgsApplication app(argc, argv, true);
     QApplication::setApplicationName(QStringLiteral("pwb-platform"));
     QApplication::setOrganizationName(QStringLiteral("paleo-workbench"));
@@ -323,11 +335,31 @@ int main(int argc, char** argv) {
         QStringLiteral("Paleo Workbench C++ platform"));
     parser.addOption({QStringLiteral("self-check"),
                       QStringLiteral("headless smoke: fixtures + render + export")});
+    parser.addOption({QStringLiteral("version"),
+                      QStringLiteral("print the application version line")});
+    parser.addOption({QStringLiteral("diagnostics"),
+                      QStringLiteral("print the platform diagnostics report")});
     parser.process(app);
+
+    // --version / --diagnostics answer before any QGIS init (cheap, no GUI).
+    if (parser.isSet(QStringLiteral("version"))) {
+        std::printf("%s\n",
+                    pwb::platform_services::version_line().c_str());
+        return 0;
+    }
+
+    // The unified settings identity predates the native shell: migrate the
+    // legacy (WorkstationV3 / paleo-workbench) stores on every startup —
+    // idempotent, cheap (ui/layout_persistence.py contract). Theme, window
+    // layout and recent lists are owned by MainWindow on the same store.
+    pwb::platform_services::migrate_legacy_settings();
 
     pwb::qgis::QgisRuntime::acquire();
     int exit_code = 0;
-    if (parser.isSet(QStringLiteral("self-check"))) {
+    if (parser.isSet(QStringLiteral("diagnostics"))) {
+        std::printf("%s",
+                    pwb::platform_services::environment_report_text().c_str());
+    } else if (parser.isSet(QStringLiteral("self-check"))) {
         exit_code = runSelfCheck();
     } else {
         pwb::app::MainWindow window;

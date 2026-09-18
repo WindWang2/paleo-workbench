@@ -30,6 +30,12 @@ class QgsLayerTreeView;
 class QgsMapTool;
 class QLabel;
 class QDockWidget;
+class QMenu;
+class QSettings;
+
+namespace pwb::platform_services {
+class ThemeService;
+}
 
 namespace pwb::mapping {
 struct GridStatistics;
@@ -58,7 +64,12 @@ class FactorStatsDock;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    // services_settings: test seam — the QSettings backend for the platform
+    // services (window layout/theme store). Null binds the production
+    // (PaleoWorkbench, Workstation) store, mirroring the Python
+    // LayoutPersistence optional-settings pattern.
+    explicit MainWindow(QWidget* parent = nullptr,
+                        QSettings* services_settings = nullptr);
     ~MainWindow() override;
 
     // Loads a vector fixture + raster fixture, sets an active layer and
@@ -172,6 +183,16 @@ private:
     void buildMenusAndToolbar();
     void connectActions();
 
+    // CONV-PS platform services: settings/theme/recent/diagnostics wiring
+    // (设置 menu + 帮助 menu + File/recent-projects MRU + close-time layout
+    // save on the unified (PaleoWorkbench, Workstation) QSettings store).
+    void buildPlatformMenus();
+    void refreshRecentProjects();
+    void openRecentProject(const QString& project_file);
+    void showAboutDialog();
+    void showDiagnosticsDialog();
+    void syncThemeMenuChecks();
+
     // Operation handlers (triggered by the governed actions).
     void openVectorDialog();
     void openRasterDialog();
@@ -241,6 +262,14 @@ private:
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;
     std::set<std::string> wired_action_ids_;
+
+    // Platform services state (null until the constructor built them).
+    QSettings* services_settings_ = nullptr;  // never owned here
+    std::unique_ptr<QSettings> owned_services_settings_;  // owns when self-created
+    std::unique_ptr<pwb::platform_services::ThemeService> theme_service_;
+    QMenu* recent_projects_menu_ = nullptr;
+    QAction* theme_actions_[3] = {nullptr, nullptr, nullptr};
+    QAction* density_action_ = nullptr;
 };
 
 }  // namespace pwb::app
