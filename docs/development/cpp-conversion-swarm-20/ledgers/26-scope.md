@@ -16,9 +16,12 @@ Library: `libs/workflow_runtime` (`Pwb::WorkflowRuntime`, gate `PWB_BUILD_CONV_2
 3. **Constraint versioning 运行时**（C）— `workflow/constraint_versions.py` 全量：
    content hash（canonical sha256）、commit（经 repository seam，不再直连 SQLite service）、
    pins（for_task/pinned/staleness/late binding）、compare、resolve_constraint_ref。
-4. **Workflow Runtime Service**（D）— `pwb::workflow_runtime::WorkflowRuntimeService`：
-   create/validate/plan/execute/cancel/resume/retry/inspect/explain_stale/list_outputs/
-   provenance_trace 稳定 API，供 C++ application 直接消费。
+4. **Workflow Runtime Service**（D）— `pwb::workflow_runtime::WorkflowRuntimeService`
+   稳定 API，供 C++ application 直接消费。动词到方法面的映射：create＝WorkflowSpec
+   构造（无服务端工厂）、validate/execute/plan/execute_plan/explain_stale/
+   list_outputs/provenance_trace/snapshot/build_context 为具名方法；cancel 经
+   workflow_engine CancelToken 参数传入（协作式）；resume/retry 是
+   re-plan + REUSE_EXISTING seam（成功步骤留在 store 中被复用，失败步骤重算）。
 5. **Task adapter bridge**（E）— NodeAdapter registry：把已有 C++ op（workflow_engine 的
    map.extract_factors / map.interpolate_idw / test.noop + runtime 内置 op）以带
    resource hint / cancel / progress / 错误映射的适配器接入；不复制算法。
