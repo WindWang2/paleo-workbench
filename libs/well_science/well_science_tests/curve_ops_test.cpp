@@ -546,6 +546,67 @@ void run_audit_regression() {
     expect_throw("report-length", "equal length", [&] {
         (void)missing_interval_report({1.0}, {1.0, 2.0});
     });
+
+    // np.where parity (issue #1354): a scalar condition returns the
+    // selected operand wholesale — an array stays elementwise, it is
+    // not flattened to its first element.
+    ++g_cases;
+    g_case = "where-scalar-cond-picks-array";
+    {
+        const auto got = evaluate_curve_expression(
+            "where(2 < 3, GR, RT)",
+            {{"GR", {1.0, 2.0, 3.0}}, {"RT", {7.0, 8.0, 9.0}}});
+        if (!(got.size() == 3 && got[0] == 1.0 && got[1] == 2.0
+              && got[2] == 3.0))
+            fail("scalar-cond where must return the selected array");
+    }
+    ++g_cases;
+    g_case = "where-scalar-cond-fills-scalar";
+    {
+        const auto got = evaluate_curve_expression(
+            "where(1, 5, GR)", {{"GR", {1.0, 2.0, 3.0}}});
+        if (!(got.size() == 3 && got[0] == 5.0 && got[2] == 5.0))
+            fail("scalar-cond where with a scalar pick must fill");
+    }
+    // A mismatched array operand raises numpy's broadcast error instead
+    // of indexing out of bounds.
+    expect_throw("where-broadcast-mismatch", "broadcast", [&] {
+        (void)evaluate_curve_expression(
+            "where(GR > 0, GR, RT)",
+            {{"GR", {1.0, 2.0, 3.0}}, {"RT", {4.0, 5.0}}});
+    });
+
+    // float("1e999") -> inf / float("1e-999") -> 0 in Python: literal
+    // range is not a syntax error (issue #1357).
+    ++g_cases;
+    g_case = "number-literal-overflow-inf";
+    {
+        const auto got = evaluate_curve_expression(
+            "GR * 1e999", {{"GR", {2.0}}});
+        if (!(got.size() == 1 && std::isinf(got[0]) && got[0] > 0.0))
+            fail("1e999 literal must evaluate to +inf");
+    }
+    ++g_cases;
+    g_case = "number-literal-underflow-zero";
+    {
+        const auto got = evaluate_curve_expression(
+            "1e-999 + GR", {{"GR", {1.0}}});
+        if (!(got.size() == 1 && got[0] == 1.0))
+            fail("1e-999 literal must evaluate to 0");
+    }
+
+    // despike fill follows np.nanmedian (issue #1355): ±inf keeps its
+    // median slot — nanmedian([-inf,1,3])=1 -> filled [1,1,3] ->
+    // baseline all 1 -> only index 1 spikes -> arr[1]=1.0.  A finite-
+    // median fill (2.0) would leave arr[1]=2.0 instead.
+    ++g_cases;
+    g_case = "despike-nanmedian-keeps-inf";
+    {
+        const auto got = despike(
+            {1.0, -std::numeric_limits<double>::infinity(), 3.0}, 3.0, 3);
+        if (!(got.size() == 3 && got[1] == 1.0))
+            fail("despike fill must follow np.nanmedian (inf in pool)");
+    }
 }
 
 }  // namespace
