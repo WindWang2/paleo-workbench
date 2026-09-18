@@ -5,84 +5,17 @@
 
 #include <pwb/interchange/path_safety.hpp>
 
+#include "py_compat.hpp"
+
 #include <cstdio>
 #include <stdexcept>
 
 namespace pwb::interchange {
 
 namespace {
-
-// Python repr() of a raw JSON scalar, for the schema_version error message.
-std::string repr_scalar(const Json& value) {
-    if (value.is_boolean()) {
-        return value.get<bool>() ? "True" : "False";
-    }
-    if (value.is_null()) {
-        return "None";
-    }
-    if (value.is_string()) {
-        return python_repr(value.get<std::string>());
-    }
-    if (value.is_number_float()) {
-        // %g matches Python repr for the frozen 2.5-class values only
-        // (6 significant digits); exotic floats are out of oracle scope.
-        const double number = value.get<double>();
-        char buffer[32];
-        std::snprintf(buffer, sizeof(buffer), "%g", number);
-        return buffer;
-    }
-    return value.dump();
-}
-
-// Python str() coercion of a raw JSON scalar (from_dict stores strings).
-std::string py_str(const Json& value) {
-    if (value.is_null()) {
-        return "None";
-    }
-    if (value.is_boolean()) {
-        return value.get<bool>() ? "True" : "False";
-    }
-    if (value.is_string()) {
-        return value.get<std::string>();
-    }
-    return repr_scalar(value);
-}
-
-// Python int() coercion of a raw JSON scalar; raises ValueError/TypeError
-// with the Python message on un-coercible input.
-long long py_llong(const Json& value) {
-    if (value.is_boolean()) {
-        return value.get<bool>() ? 1 : 0;
-    }
-    if (value.is_number_integer()) {
-        return value.get<long long>();
-    }
-    if (value.is_number_float()) {
-        return static_cast<long long>(value.get<double>());
-    }
-    if (value.is_string()) {
-        const std::string raw = value.get<std::string>();
-        std::size_t begin = raw.find_first_not_of(" \t\n\r\v\f");
-        const bool negative = begin != std::string::npos
-            && (raw[begin] == '+' || raw[begin] == '-');
-        const std::size_t digits_begin = begin + (negative ? 1 : 0);
-        if (begin == std::string::npos
-            || raw.find_first_not_of("0123456789", digits_begin)
-                != std::string::npos
-            || digits_begin >= raw.size()) {
-            throw std::invalid_argument(
-                "invalid literal for int() with base 10: " + python_repr(raw));
-        }
-        long long parsed = std::stoll(raw.substr(digits_begin));
-        return negative ? -parsed : parsed;
-    }
-    // Frozen scope: only JSON null reaches this line in the oracle; Python
-    // would name the actual type here.
-    throw std::invalid_argument(
-        "int() argument must be a string, a bytes-like object or a real "
-        "number, not 'NoneType'");
-}
-
+using detail::py_llong;
+using detail::py_str;
+using detail::repr_scalar;
 }  // namespace
 
 Json PackageEntry::to_dict() const {
@@ -162,29 +95,51 @@ PackageManifest PackageManifest::from_dict(const Json& data) {
         application.contains("name") ? py_str(application.at("name")) : "paleo-workbench";
     manifest.application_version =
         application.contains("version") ? py_str(application.at("version")) : "";
-    if (data.contains("entries") && data.at("entries").is_array()) {
-        for (const auto& item : data.at("entries")) {
+    // Python is fail-closed here: list(5) / dict(5) / int(None) raise
+    // TypeError/ValueError, which the verifiers surface as corrupt-manifest.
+    // Silently skipping malformed fields could flip a verify verdict.
+    if (data.contains("entries")) {
+        const Json& entries = data.at("entries");
+        if (!entries.is_array()) {
+            throw std::invalid_argument("'int' object is not iterable");
+        }
+        for (const auto& item : entries) {
             manifest.entries.push_back(PackageEntry::from_dict(item));
         }
     }
-    if (data.contains("external_dependencies")
-        && data.at("external_dependencies").is_array()) {
+    if (data.contains("external_dependencies")) {
+        if (!data.at("external_dependencies").is_array()) {
+            throw std::invalid_argument("'int' object is not iterable");
+        }
         manifest.external_dependencies = data.at("external_dependencies");
     }
-    if (data.contains("missing_dependencies")
-        && data.at("missing_dependencies").is_array()) {
+    if (data.contains("missing_dependencies")) {
+        if (!data.at("missing_dependencies").is_array()) {
+            throw std::invalid_argument("'int' object is not iterable");
+        }
         manifest.missing_dependencies = data.at("missing_dependencies");
     }
-    if (data.contains("generated_outputs")
-        && data.at("generated_outputs").is_array()) {
+    if (data.contains("generated_outputs")) {
+        if (!data.at("generated_outputs").is_array()) {
+            throw std::invalid_argument("'int' object is not iterable");
+        }
         for (const auto& item : data.at("generated_outputs")) {
             manifest.generated_outputs.push_back(py_str(item));
         }
     }
-    if (data.contains("provenance") && data.at("provenance").is_object()) {
+    if (data.contains("provenance")) {
+        if (!data.at("provenance").is_object()) {
+            throw std::invalid_argument("'" +
+                std::string(data.at("provenance").is_null() ? "NoneType" : "int") +
+                "' object is not iterable");
+        }
         manifest.provenance = data.at("provenance");
     }
-    if (data.contains("options") && data.at("options").is_object()) {
+    if (data.contains("options")) {
+        if (!data.at("options").is_object()) {
+            throw std::invalid_argument("argument must be a dict, not " +
+                std::string(data.at("options").is_null() ? "NoneType" : "int"));
+        }
         manifest.options = data.at("options");
     }
     if (data.contains("total_size_bytes")
@@ -258,8 +213,8 @@ PackageManifest read_manifest(const std::filesystem::path& package_root) {
     Json data;
     try {
         data = Json::parse(payload);
-    } catch (const Json::parse_error& exc) {
-        throw std::runtime_error(std::string("manifest 解析失败: ") + exc.what());
+    } catch (const Json::parse_error&) {
+        throw;  // raw parser error; verifier.py adds the single prefix
     }
     PackageManifest manifest = PackageManifest::from_dict(data);
     manifest.validate_paths();
