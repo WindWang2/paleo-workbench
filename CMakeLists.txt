@@ -166,6 +166,16 @@ if(PWB_BUILD_CONV_08)
     add_subdirectory(libs/factor_host)
 endif()
 # END CONV-08
+# BEGIN CONV-09
+# M8 first slice: DTW well-log matcher kernel (viz/dtw_log_matcher.py port),
+# Qt-free, frozen against the Python oracle. Tests need Pwb::Domain
+# (configure with -DPWB_BUILD_DATA=ON).
+option(PWB_BUILD_CONV_09
+    "Build the CONV-09 well_science DTW kernel (M8 first slice)" OFF)
+if(PWB_BUILD_CONV_09)
+    add_subdirectory(libs/well_science)
+endif()
+# END CONV-09
 
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
