@@ -36,6 +36,14 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+// Native prediction runtime: a grid descriptor / band mapping violates the
+// model package contract. Mirrors input_contract.py's InputContractError
+// (a ValueError subclass) for callers that switch on the class.
+class InputContractError : public ValueError {
+public:
+    using ValueError::ValueError;
+};
+
 // Built-in TypeError paths (e.g. iterating a non-iterable schema value).
 class TypeError : public std::runtime_error {
 public:

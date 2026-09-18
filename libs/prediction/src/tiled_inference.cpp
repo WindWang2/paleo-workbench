@@ -83,6 +83,34 @@ std::uint16_t detail::float_to_half_bits(float value) {
     return static_cast<std::uint16_t>(sign | m);
 }
 
+float detail::half_bits_to_float(std::uint16_t bits) {
+    const std::uint32_t sign =
+        static_cast<std::uint32_t>(bits & 0x8000u) << 16;
+    std::uint32_t exponent = (bits >> 10) & 0x1fu;
+    std::uint32_t mantissa = bits & 0x3ffu;
+    std::uint32_t out = 0;
+    if (exponent == 0) {
+        if (mantissa == 0) {
+            out = sign;
+        } else {  // subnormal half -> normal float
+            exponent = 113;  // 127 - 15 + 1
+            while ((mantissa & 0x400u) == 0u) {
+                mantissa <<= 1;
+                --exponent;
+            }
+            mantissa &= 0x3ffu;
+            out = sign | (exponent << 23) | (mantissa << 13);
+        }
+    } else if (exponent == 31) {  // inf / NaN (payload preserved)
+        out = sign | 0x7f800000u | (mantissa << 13);
+    } else {
+        out = sign | ((exponent - 15u + 127u) << 23) | (mantissa << 13);
+    }
+    float value = 0.0f;
+    std::memcpy(&value, &out, sizeof value);
+    return value;
+}
+
 namespace {
 
 namespace fs = std::filesystem;

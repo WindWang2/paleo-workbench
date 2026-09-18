@@ -304,6 +304,27 @@ if(PWB_BUILD_CONV_21)
     set(PWB_BUILD_CONV_19 ON)
 endif()
 # END CONV-21
+# BEGIN PREDICTION-RUNTIME — native prediction runtime closure (M9): the
+# production ONNX Runtime session (dynamic loading), the model package /
+# input-contract runtime, the tiled pipeline with bounded outputs +
+# deterministic summary, the task service and the workflow/catalog seams.
+# Implies CONV-21 (contracts) so a standalone
+# -DPWB_BUILD_PREDICTION_RUNTIME=ON configure really builds the closure.
+# The ONNX Runtime library itself stays a runtime discovery: set
+# -DPWB_ONNXRUNTIME_LIBRARY=<path> to bake a hint for tests/production.
+# Declared BEFORE the CONV-13 block that adds the subdirectory.
+option(PWB_BUILD_PREDICTION_RUNTIME
+    "Build the native prediction runtime (implies CONV-21; ONNX Runtime loaded at run time)" OFF)
+if(PWB_BUILD_PREDICTION_RUNTIME)
+    # The CONV-21 implication block already ran by the time this option is
+    # declared, so set the whole chain here (normal variables win over the
+    # cache-only option() defaults).
+    set(PWB_BUILD_CONV_21 ON)
+    set(PWB_BUILD_CONV_13 ON)
+    set(PWB_BUILD_CONV_14 ON)
+    set(PWB_BUILD_CONV_19 ON)
+endif()
+# END PREDICTION-RUNTIME
 # BEGIN CONV-13 — prediction tiled inference geometry (M9 first slice).
 # Qt-free core: tile/halo/center-crop-fusion contract from
 # paleo_workbench/prediction/tiled_onnx.py, frozen against the Python
