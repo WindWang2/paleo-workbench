@@ -1,0 +1,4504 @@
+{
+ "meta": {
+  "task": "CONV-11 well curve ops",
+  "python": "3.14.6",
+  "numpy": "2.5.3"
+ },
+ "moving_average": [
+  {
+   "name": "pytest:test_moving_average_is_nan_aware",
+   "values": [
+    1,
+    2,
+    3,
+    null,
+    5,
+    6
+   ],
+   "window": 3,
+   "expected": [
+    1.5,
+    2.0,
+    2.5,
+    null,
+    5.5,
+    5.5
+   ]
+  },
+  {
+   "name": "window5_default_smooth",
+   "values": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "window": 5,
+   "expected": [
+    2.0,
+    2.5,
+    3.0,
+    4.0,
+    5.0,
+    5.5,
+    6.0
+   ]
+  },
+  {
+   "name": "even_window4",
+   "values": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   "window": 4,
+   "expected": [
+    0.5,
+    1.0,
+    1.5,
+    2.5,
+    3.5,
+    4.5,
+    5.5,
+    6.5,
+    7.5,
+    8.0
+   ]
+  },
+  {
+   "name": "pytest:test_moving_average_window_wider_than_curve",
+   "values": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   "window": 101,
+   "expected": [
+    2.0,
+    2.5,
+    3.0,
+    3.5,
+    4.0,
+    4.5,
+    5.0,
+    5.5,
+    6.0,
+    6.5
+   ]
+  },
+  {
+   "name": "window1_identity",
+   "values": [
+    1,
+    null,
+    3
+   ],
+   "window": 1,
+   "expected": [
+    1.0,
+    null,
+    3.0
+   ]
+  },
+  {
+   "name": "window0_clamped_to_1",
+   "values": [
+    1,
+    2,
+    3
+   ],
+   "window": 0,
+   "expected": [
+    1.0,
+    2.0,
+    3.0
+   ]
+  },
+  {
+   "name": "negative_window_clamped",
+   "values": [
+    1,
+    2,
+    3
+   ],
+   "window": -5,
+   "expected": [
+    1.0,
+    2.0,
+    3.0
+   ]
+  },
+  {
+   "name": "empty",
+   "values": [],
+   "window": 3,
+   "expected": []
+  },
+  {
+   "name": "all_nan",
+   "values": [
+    null,
+    null,
+    null
+   ],
+   "window": 3,
+   "expected": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "name": "inf_rides_as_nonfinite",
+   "values": [
+    1,
+    2,
+    "Infinity",
+    4,
+    5
+   ],
+   "window": 3,
+   "expected": [
+    1.5,
+    1.5,
+    null,
+    4.5,
+    4.5
+   ]
+  },
+  {
+   "name": "single_sample",
+   "values": [
+    7
+   ],
+   "window": 5,
+   "expected": [
+    7.0
+   ]
+  }
+ ],
+ "median_filter": [
+  {
+   "name": "pytest:test_median_filter_preserves_nan_positions",
+   "values": [
+    10,
+    10,
+    10,
+    500,
+    10,
+    null,
+    10
+   ],
+   "window": 3,
+   "expected": [
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    null,
+    10.0
+   ]
+  },
+  {
+   "name": "window5_spike",
+   "values": [
+    1,
+    1,
+    9,
+    1,
+    1,
+    1,
+    1
+   ],
+   "window": 5,
+   "expected": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "even_window_becomes_5",
+   "values": [
+    1,
+    2,
+    3,
+    900,
+    5
+   ],
+   "window": 4,
+   "expected": [
+    2.0,
+    2.0,
+    3.0,
+    5.0,
+    5.0
+   ]
+  },
+  {
+   "name": "window1_identity",
+   "values": [
+    3,
+    1,
+    2
+   ],
+   "window": 1,
+   "expected": [
+    3.0,
+    1.0,
+    2.0
+   ]
+  },
+  {
+   "name": "negative_window",
+   "values": [
+    3,
+    1,
+    2
+   ],
+   "window": -7,
+   "expected": [
+    3.0,
+    1.0,
+    2.0
+   ]
+  },
+  {
+   "name": "empty",
+   "values": [],
+   "window": 3,
+   "expected": []
+  },
+  {
+   "name": "all_nan",
+   "values": [
+    null,
+    null
+   ],
+   "window": 3,
+   "expected": [
+    null,
+    null
+   ]
+  },
+  {
+   "name": "nan_gap_neighbors_medians",
+   "values": [
+    1,
+    2,
+    null,
+    4,
+    900
+   ],
+   "window": 3,
+   "expected": [
+    1.0,
+    2.0,
+    null,
+    4.0,
+    900.0
+   ]
+  },
+  {
+   "name": "single_sample",
+   "values": [
+    42
+   ],
+   "window": 5,
+   "expected": [
+    42.0
+   ]
+  }
+ ],
+ "normalize_curve": [
+  {
+   "name": "pytest:test_normalize_zscore_z",
+   "values": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    null
+   ],
+   "method": "zscore",
+   "expected": [
+    -1.3416407864998738,
+    -0.4472135954999579,
+    0.4472135954999579,
+    1.3416407864998738,
+    null
+   ]
+  },
+  {
+   "name": "pytest:test_normalize_zscore_m",
+   "values": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    null
+   ],
+   "method": "minmax",
+   "expected": [
+    0.0,
+    0.3333333333333333,
+    0.6666666666666666,
+    1.0,
+    null
+   ]
+  },
+  {
+   "name": "constant_zscore_zeros",
+   "values": [
+    5,
+    5,
+    5,
+    null
+   ],
+   "method": "zscore",
+   "expected": [
+    0.0,
+    0.0,
+    0.0,
+    null
+   ]
+  },
+  {
+   "name": "constant_minmax_half",
+   "values": [
+    5,
+    5,
+    5,
+    null
+   ],
+   "method": "minmax",
+   "expected": [
+    0.5,
+    0.5,
+    0.5,
+    null
+   ]
+  },
+  {
+   "name": "single_finite_zscore",
+   "values": [
+    null,
+    7
+   ],
+   "method": "zscore",
+   "expected": [
+    null,
+    0.0
+   ]
+  },
+  {
+   "name": "single_finite_minmax",
+   "values": [
+    null,
+    7
+   ],
+   "method": "minmax",
+   "expected": [
+    null,
+    0.5
+   ]
+  },
+  {
+   "name": "all_nan",
+   "values": [
+    null,
+    null
+   ],
+   "method": "zscore",
+   "expected": [
+    null,
+    null
+   ]
+  },
+  {
+   "name": "empty",
+   "values": [],
+   "method": "zscore",
+   "expected": []
+  },
+  {
+   "name": "with_inf_excluded_from_stats",
+   "values": [
+    1,
+    2,
+    "Infinity",
+    4
+   ],
+   "method": "minmax",
+   "expected": [
+    0.0,
+    0.3333333333333333,
+    null,
+    1.0
+   ]
+  },
+  {
+   "name": "pytest:unknown_method",
+   "values": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    null
+   ],
+   "method": "magic",
+   "raises": true,
+   "message": "unknown normalization method 'magic' (zscore|minmax)",
+   "match_mode": "exact"
+  }
+ ],
+ "clip_outliers": [
+  {
+   "name": "pytest:percentile5",
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0,
+    24.0,
+    25.0,
+    26.0,
+    27.0,
+    28.0,
+    29.0,
+    30.0,
+    31.0,
+    32.0,
+    33.0,
+    34.0,
+    35.0,
+    36.0,
+    37.0,
+    38.0,
+    39.0,
+    40.0,
+    41.0,
+    42.0,
+    43.0,
+    44.0,
+    45.0,
+    46.0,
+    47.0,
+    48.0,
+    49.0,
+    1000000.0,
+    51.0,
+    52.0,
+    53.0,
+    54.0,
+    55.0,
+    56.0,
+    57.0,
+    58.0,
+    59.0,
+    60.0,
+    61.0,
+    62.0,
+    63.0,
+    64.0,
+    65.0,
+    66.0,
+    67.0,
+    68.0,
+    69.0,
+    70.0,
+    71.0,
+    72.0,
+    73.0,
+    74.0,
+    75.0,
+    76.0,
+    77.0,
+    78.0,
+    79.0,
+    80.0,
+    81.0,
+    82.0,
+    83.0,
+    84.0,
+    85.0,
+    86.0,
+    87.0,
+    88.0,
+    89.0,
+    90.0,
+    91.0,
+    92.0,
+    93.0,
+    94.0,
+    95.0,
+    96.0,
+    97.0,
+    98.0,
+    99.0
+   ],
+   "percentile": 5.0,
+   "expected": [
+    4.95,
+    4.95,
+    4.95,
+    4.95,
+    4.95,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0,
+    24.0,
+    25.0,
+    26.0,
+    27.0,
+    28.0,
+    29.0,
+    30.0,
+    31.0,
+    32.0,
+    33.0,
+    34.0,
+    35.0,
+    36.0,
+    37.0,
+    38.0,
+    39.0,
+    40.0,
+    41.0,
+    42.0,
+    43.0,
+    44.0,
+    45.0,
+    46.0,
+    47.0,
+    48.0,
+    49.0,
+    95.05,
+    51.0,
+    52.0,
+    53.0,
+    54.0,
+    55.0,
+    56.0,
+    57.0,
+    58.0,
+    59.0,
+    60.0,
+    61.0,
+    62.0,
+    63.0,
+    64.0,
+    65.0,
+    66.0,
+    67.0,
+    68.0,
+    69.0,
+    70.0,
+    71.0,
+    72.0,
+    73.0,
+    74.0,
+    75.0,
+    76.0,
+    77.0,
+    78.0,
+    79.0,
+    80.0,
+    81.0,
+    82.0,
+    83.0,
+    84.0,
+    85.0,
+    86.0,
+    87.0,
+    88.0,
+    89.0,
+    90.0,
+    91.0,
+    92.0,
+    93.0,
+    94.0,
+    95.0,
+    95.05,
+    95.05,
+    95.05,
+    95.05
+   ]
+  },
+  {
+   "name": "pytest:bounds",
+   "values": [
+    -5,
+    0,
+    5
+   ],
+   "lower": 0.0,
+   "upper": 1.0,
+   "expected": [
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "lower_only",
+   "values": [
+    -5,
+    0,
+    5
+   ],
+   "lower": 0.0,
+   "expected": [
+    0.0,
+    0.0,
+    5.0
+   ]
+  },
+  {
+   "name": "upper_only",
+   "values": [
+    -5,
+    0,
+    5
+   ],
+   "upper": 0.0,
+   "expected": [
+    -5.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "nan_survives",
+   "values": [
+    -5,
+    null,
+    5
+   ],
+   "lower": 0.0,
+   "upper": 3.0,
+   "expected": [
+    0.0,
+    null,
+    3.0
+   ]
+  },
+  {
+   "name": "percentile_with_nan",
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0,
+    24.0,
+    25.0,
+    26.0,
+    27.0,
+    28.0,
+    29.0,
+    null
+   ],
+   "percentile": 10.0,
+   "expected": [
+    2.9000000000000004,
+    2.9000000000000004,
+    2.9000000000000004,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0,
+    24.0,
+    25.0,
+    26.0,
+    26.1,
+    26.1,
+    26.1,
+    null
+   ]
+  },
+  {
+   "name": "all_nan_returns_unchanged",
+   "values": [
+    null,
+    null
+   ],
+   "lower": null,
+   "upper": null,
+   "expected": [
+    null,
+    null
+   ]
+  },
+  {
+   "name": "small_array_percentile",
+   "values": [
+    1.0
+   ],
+   "percentile": 25.0,
+   "expected": [
+    1.0
+   ]
+  },
+  {
+   "name": "percentile_extremes",
+   "values": [
+    3,
+    1,
+    4,
+    1,
+    5,
+    9,
+    2,
+    6
+   ],
+   "percentile": 49.999,
+   "expected": [
+    3.4999300000000004,
+    3.4999300000000004,
+    3.5000699999999996,
+    3.4999300000000004,
+    3.5000699999999996,
+    3.5000699999999996,
+    3.4999300000000004,
+    3.5000699999999996
+   ]
+  },
+  {
+   "name": "pytest:no_bounds",
+   "values": [
+    1.0
+   ],
+   "raises": true,
+   "message": "clip_outliers needs lower/upper bounds or a percentile",
+   "match_mode": "exact"
+  },
+  {
+   "name": "percentile_zero",
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0,
+    24.0,
+    25.0,
+    26.0,
+    27.0,
+    28.0,
+    29.0,
+    30.0,
+    31.0,
+    32.0,
+    33.0,
+    34.0,
+    35.0,
+    36.0,
+    37.0,
+    38.0,
+    39.0,
+    40.0,
+    41.0,
+    42.0,
+    43.0,
+    44.0,
+    45.0,
+    46.0,
+    47.0,
+    48.0,
+    49.0,
+    1000000.0,
+    51.0,
+    52.0,
+    53.0,
+    54.0,
+    55.0,
+    56.0,
+    57.0,
+    58.0,
+    59.0,
+    60.0,
+    61.0,
+    62.0,
+    63.0,
+    64.0,
+    65.0,
+    66.0,
+    67.0,
+    68.0,
+    69.0,
+    70.0,
+    71.0,
+    72.0,
+    73.0,
+    74.0,
+    75.0,
+    76.0,
+    77.0,
+    78.0,
+    79.0,
+    80.0,
+    81.0,
+    82.0,
+    83.0,
+    84.0,
+    85.0,
+    86.0,
+    87.0,
+    88.0,
+    89.0,
+    90.0,
+    91.0,
+    92.0,
+    93.0,
+    94.0,
+    95.0,
+    96.0,
+    97.0,
+    98.0,
+    99.0
+   ],
+   "percentile": 0.0,
+   "raises": true,
+   "message": "percentile must be in (0, 50), got 0.0",
+   "match_mode": "exact"
+  },
+  {
+   "name": "percentile_fifty",
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0,
+    24.0,
+    25.0,
+    26.0,
+    27.0,
+    28.0,
+    29.0,
+    30.0,
+    31.0,
+    32.0,
+    33.0,
+    34.0,
+    35.0,
+    36.0,
+    37.0,
+    38.0,
+    39.0,
+    40.0,
+    41.0,
+    42.0,
+    43.0,
+    44.0,
+    45.0,
+    46.0,
+    47.0,
+    48.0,
+    49.0,
+    1000000.0,
+    51.0,
+    52.0,
+    53.0,
+    54.0,
+    55.0,
+    56.0,
+    57.0,
+    58.0,
+    59.0,
+    60.0,
+    61.0,
+    62.0,
+    63.0,
+    64.0,
+    65.0,
+    66.0,
+    67.0,
+    68.0,
+    69.0,
+    70.0,
+    71.0,
+    72.0,
+    73.0,
+    74.0,
+    75.0,
+    76.0,
+    77.0,
+    78.0,
+    79.0,
+    80.0,
+    81.0,
+    82.0,
+    83.0,
+    84.0,
+    85.0,
+    86.0,
+    87.0,
+    88.0,
+    89.0,
+    90.0,
+    91.0,
+    92.0,
+    93.0,
+    94.0,
+    95.0,
+    96.0,
+    97.0,
+    98.0,
+    99.0
+   ],
+   "percentile": 50.0,
+   "raises": true,
+   "message": "percentile must be in (0, 50), got 50.0",
+   "match_mode": "exact"
+  },
+  {
+   "name": "percentile_negative",
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0,
+    24.0,
+    25.0,
+    26.0,
+    27.0,
+    28.0,
+    29.0,
+    30.0,
+    31.0,
+    32.0,
+    33.0,
+    34.0,
+    35.0,
+    36.0,
+    37.0,
+    38.0,
+    39.0,
+    40.0,
+    41.0,
+    42.0,
+    43.0,
+    44.0,
+    45.0,
+    46.0,
+    47.0,
+    48.0,
+    49.0,
+    1000000.0,
+    51.0,
+    52.0,
+    53.0,
+    54.0,
+    55.0,
+    56.0,
+    57.0,
+    58.0,
+    59.0,
+    60.0,
+    61.0,
+    62.0,
+    63.0,
+    64.0,
+    65.0,
+    66.0,
+    67.0,
+    68.0,
+    69.0,
+    70.0,
+    71.0,
+    72.0,
+    73.0,
+    74.0,
+    75.0,
+    76.0,
+    77.0,
+    78.0,
+    79.0,
+    80.0,
+    81.0,
+    82.0,
+    83.0,
+    84.0,
+    85.0,
+    86.0,
+    87.0,
+    88.0,
+    89.0,
+    90.0,
+    91.0,
+    92.0,
+    93.0,
+    94.0,
+    95.0,
+    96.0,
+    97.0,
+    98.0,
+    99.0
+   ],
+   "percentile": -5.0,
+   "raises": true,
+   "message": "percentile must be in (0, 50), got -5.0",
+   "match_mode": "exact"
+  },
+  {
+   "name": "percentile_over_fifty",
+   "values": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0,
+    24.0,
+    25.0,
+    26.0,
+    27.0,
+    28.0,
+    29.0,
+    30.0,
+    31.0,
+    32.0,
+    33.0,
+    34.0,
+    35.0,
+    36.0,
+    37.0,
+    38.0,
+    39.0,
+    40.0,
+    41.0,
+    42.0,
+    43.0,
+    44.0,
+    45.0,
+    46.0,
+    47.0,
+    48.0,
+    49.0,
+    1000000.0,
+    51.0,
+    52.0,
+    53.0,
+    54.0,
+    55.0,
+    56.0,
+    57.0,
+    58.0,
+    59.0,
+    60.0,
+    61.0,
+    62.0,
+    63.0,
+    64.0,
+    65.0,
+    66.0,
+    67.0,
+    68.0,
+    69.0,
+    70.0,
+    71.0,
+    72.0,
+    73.0,
+    74.0,
+    75.0,
+    76.0,
+    77.0,
+    78.0,
+    79.0,
+    80.0,
+    81.0,
+    82.0,
+    83.0,
+    84.0,
+    85.0,
+    86.0,
+    87.0,
+    88.0,
+    89.0,
+    90.0,
+    91.0,
+    92.0,
+    93.0,
+    94.0,
+    95.0,
+    96.0,
+    97.0,
+    98.0,
+    99.0
+   ],
+   "percentile": 50.5,
+   "raises": true,
+   "message": "percentile must be in (0, 50), got 50.5",
+   "match_mode": "exact"
+  }
+ ],
+ "normalize_unit_name": [
+  {
+   "name": "token:'m'",
+   "token": "m",
+   "expected": "m"
+  },
+  {
+   "name": "token:'M'",
+   "token": "M",
+   "expected": "m"
+  },
+  {
+   "name": "token:'meter'",
+   "token": "meter",
+   "expected": "m"
+  },
+  {
+   "name": "token:'METER'",
+   "token": "METER",
+   "expected": "m"
+  },
+  {
+   "name": "token:'meters'",
+   "token": "meters",
+   "expected": "m"
+  },
+  {
+   "name": "token:'metre'",
+   "token": "metre",
+   "expected": "m"
+  },
+  {
+   "name": "token:'METRES'",
+   "token": "METRES",
+   "expected": "m"
+  },
+  {
+   "name": "token:'ft'",
+   "token": "ft",
+   "expected": "ft"
+  },
+  {
+   "name": "token:'FT'",
+   "token": "FT",
+   "expected": "ft"
+  },
+  {
+   "name": "token:'feet'",
+   "token": "feet",
+   "expected": "ft"
+  },
+  {
+   "name": "token:'FOOT'",
+   "token": "FOOT",
+   "expected": "ft"
+  },
+  {
+   "name": "token:'f'",
+   "token": "f",
+   "expected": "ft"
+  },
+  {
+   "name": "token:'F'",
+   "token": "F",
+   "expected": "ft"
+  },
+  {
+   "name": "token:'g/cc'",
+   "token": "g/cc",
+   "expected": "g/cc"
+  },
+  {
+   "name": "token:'G/CC'",
+   "token": "G/CC",
+   "expected": "g/cc"
+  },
+  {
+   "name": "token:'g/cm3'",
+   "token": "g/cm3",
+   "expected": "g/cc"
+  },
+  {
+   "name": "token:'g/cm³'",
+   "token": "g/cm³",
+   "expected": "g/cc"
+  },
+  {
+   "name": "token:'gm/cc'",
+   "token": "gm/cc",
+   "expected": "g/cc"
+  },
+  {
+   "name": "token:'kg/m3'",
+   "token": "kg/m3",
+   "expected": "kg/m3"
+  },
+  {
+   "name": "token:'KG/M3'",
+   "token": "KG/M3",
+   "expected": "kg/m3"
+  },
+  {
+   "name": "token:'kg/m³'",
+   "token": "kg/m³",
+   "expected": "kg/m3"
+  },
+  {
+   "name": "token:'us/m'",
+   "token": "us/m",
+   "expected": "us/m"
+  },
+  {
+   "name": "token:'µs/m'",
+   "token": "µs/m",
+   "expected": "us/m"
+  },
+  {
+   "name": "token:'US/FT'",
+   "token": "US/FT",
+   "expected": "us/ft"
+  },
+  {
+   "name": "token:'µs/ft'",
+   "token": "µs/ft",
+   "expected": "us/ft"
+  },
+  {
+   "name": "token:'mm'",
+   "token": "mm",
+   "expected": "mm"
+  },
+  {
+   "name": "token:'MM'",
+   "token": "MM",
+   "expected": "mm"
+  },
+  {
+   "name": "token:'in'",
+   "token": "in",
+   "expected": "in"
+  },
+  {
+   "name": "token:'inch'",
+   "token": "inch",
+   "expected": "in"
+  },
+  {
+   "name": "token:'INCHES'",
+   "token": "INCHES",
+   "expected": "in"
+  },
+  {
+   "name": "token:'mv'",
+   "token": "mv",
+   "expected": "mv"
+  },
+  {
+   "name": "token:'MV'",
+   "token": "MV",
+   "expected": "mv"
+  },
+  {
+   "name": "token:'millivolt'",
+   "token": "millivolt",
+   "expected": "mv"
+  },
+  {
+   "name": "token:'v'",
+   "token": "v",
+   "expected": "v"
+  },
+  {
+   "name": "token:'VOLT'",
+   "token": "VOLT",
+   "expected": "v"
+  },
+  {
+   "name": "token:'ohmm'",
+   "token": "ohmm",
+   "expected": "ohmm"
+  },
+  {
+   "name": "token:'ohm.m'",
+   "token": "ohm.m",
+   "expected": "ohmm"
+  },
+  {
+   "name": "token:'ohmm.m'",
+   "token": "ohmm.m",
+   "expected": "ohmm"
+  },
+  {
+   "name": "token:'ohm-m'",
+   "token": "ohm-m",
+   "expected": "ohmm"
+  },
+  {
+   "name": "token:'%'",
+   "token": "%",
+   "expected": "percent"
+  },
+  {
+   "name": "token:'pct'",
+   "token": "pct",
+   "expected": "percent"
+  },
+  {
+   "name": "token:'v/v'",
+   "token": "v/v",
+   "expected": "v/v"
+  },
+  {
+   "name": "token:'api'",
+   "token": "api",
+   "expected": "api"
+  },
+  {
+   "name": "token:'API'",
+   "token": "API",
+   "expected": "api"
+  },
+  {
+   "name": "token:'  m  '",
+   "token": "  m  ",
+   "expected": "m"
+  },
+  {
+   "name": "token:'FURLONGS'",
+   "token": "FURLONGS",
+   "expected": null
+  },
+  {
+   "name": "token:'blorts'",
+   "token": "blorts",
+   "expected": null
+  },
+  {
+   "name": "token:''",
+   "token": "",
+   "expected": null
+  },
+  {
+   "name": "token:None",
+   "token": null,
+   "expected": null
+  }
+ ],
+ "conversion_factor": [
+  {
+   "name": "m->ft",
+   "from": "m",
+   "to": "ft",
+   "expected": 3.280839895013123
+  },
+  {
+   "name": "ft->m",
+   "from": "ft",
+   "to": "m",
+   "expected": 0.3048
+  },
+  {
+   "name": "g/cc->kg/m3",
+   "from": "g/cc",
+   "to": "kg/m3",
+   "expected": 1000.0
+  },
+  {
+   "name": "kg/m3->g/cc",
+   "from": "kg/m3",
+   "to": "g/cc",
+   "expected": 0.001
+  },
+  {
+   "name": "us/m->us/ft",
+   "from": "us/m",
+   "to": "us/ft",
+   "expected": 0.3048
+  },
+  {
+   "name": "us/ft->us/m",
+   "from": "us/ft",
+   "to": "us/m",
+   "expected": 3.280839895013123
+  },
+  {
+   "name": "mm->in",
+   "from": "mm",
+   "to": "in",
+   "expected": 0.03937007874015748
+  },
+  {
+   "name": "in->mm",
+   "from": "in",
+   "to": "mm",
+   "expected": 25.4
+  },
+  {
+   "name": "mv->v",
+   "from": "mv",
+   "to": "v",
+   "expected": 0.001
+  },
+  {
+   "name": "v->mv",
+   "from": "v",
+   "to": "mv",
+   "expected": 1000.0
+  },
+  {
+   "name": "%->v/v",
+   "from": "%",
+   "to": "v/v",
+   "expected": 0.01
+  },
+  {
+   "name": "pct->v/v",
+   "from": "pct",
+   "to": "v/v",
+   "expected": 0.01
+  },
+  {
+   "name": "m->m",
+   "from": "m",
+   "to": "m",
+   "expected": 1.0
+  },
+  {
+   "name": "METER->m",
+   "from": "METER",
+   "to": "m",
+   "expected": 1.0
+  },
+  {
+   "name": "g/cm3->g/cc",
+   "from": "g/cm3",
+   "to": "g/cc",
+   "expected": 1.0
+  },
+  {
+   "name": "f->ft",
+   "from": "f",
+   "to": "ft",
+   "expected": 1.0
+  },
+  {
+   "name": "%->pct",
+   "from": "%",
+   "to": "pct",
+   "expected": 1.0
+  },
+  {
+   "name": "ohm-m->ohm.m",
+   "from": "ohm-m",
+   "to": "ohm.m",
+   "expected": 1.0
+  },
+  {
+   "name": "m->M",
+   "from": "m",
+   "to": "M",
+   "expected": 1.0
+  },
+  {
+   "name": "us/m->us/m",
+   "from": "us/m",
+   "to": "us/m",
+   "expected": 1.0
+  },
+  {
+   "name": "no-pair:api->m",
+   "from": "api",
+   "to": "m",
+   "raises": true,
+   "message": "no whitelisted conversion 'api' -> 'm'; supported pairs: [('ft', 'm'), ('g/cc', 'kg/m3'), ('in', 'mm'), ('kg/m3', 'g/cc'), ('m', 'ft'), ('mm', 'in'), ('mv', 'v'), ('percent', 'v/v'), ('us/ft', 'us/m'), ('us/m', 'us/ft'), ('v', 'mv'), ('v/v', 'percent')]",
+   "match_mode": "exact"
+  },
+  {
+   "name": "no-pair:m->g/cc",
+   "from": "m",
+   "to": "g/cc",
+   "raises": true,
+   "message": "no whitelisted conversion 'm' -> 'g/cc'; supported pairs: [('ft', 'm'), ('g/cc', 'kg/m3'), ('in', 'mm'), ('kg/m3', 'g/cc'), ('m', 'ft'), ('mm', 'in'), ('mv', 'v'), ('percent', 'v/v'), ('us/ft', 'us/m'), ('us/m', 'us/ft'), ('v', 'mv'), ('v/v', 'percent')]",
+   "match_mode": "exact"
+  },
+  {
+   "name": "no-pair:mm->mv",
+   "from": "mm",
+   "to": "mv",
+   "raises": true,
+   "message": "no whitelisted conversion 'mm' -> 'mv'; supported pairs: [('ft', 'm'), ('g/cc', 'kg/m3'), ('in', 'mm'), ('kg/m3', 'g/cc'), ('m', 'ft'), ('mm', 'in'), ('mv', 'v'), ('percent', 'v/v'), ('us/ft', 'us/m'), ('us/m', 'us/ft'), ('v', 'mv'), ('v/v', 'percent')]",
+   "match_mode": "exact"
+  },
+  {
+   "name": "no-pair:percent->api",
+   "from": "percent",
+   "to": "api",
+   "raises": true,
+   "message": "unrecognized unit ('percent' -> 'api'); supported: ['%', 'api', 'f', 'feet', 'foot', 'ft', 'g/cc', 'g/cm3', 'g/cm³', 'gm/cc', 'in', 'inch', 'inches', 'kg/m3', 'kg/m³', 'm', 'meter', 'meters', 'metre', 'metres', 'millivolt', 'mm', 'mv', 'ohm-m', 'ohm.m', 'ohmm', 'ohmm.m', 'pct', 'us/ft', 'us/m', 'v', 'v/v', 'volt', 'µs/ft', 'µs/m']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "no-pair:g/cc->us/m",
+   "from": "g/cc",
+   "to": "us/m",
+   "raises": true,
+   "message": "no whitelisted conversion 'g/cc' -> 'us/m'; supported pairs: [('ft', 'm'), ('g/cc', 'kg/m3'), ('in', 'mm'), ('kg/m3', 'g/cc'), ('m', 'ft'), ('mm', 'in'), ('mv', 'v'), ('percent', 'v/v'), ('us/ft', 'us/m'), ('us/m', 'us/ft'), ('v', 'mv'), ('v/v', 'percent')]",
+   "match_mode": "exact"
+  },
+  {
+   "name": "unknown-unit:blorts->m",
+   "from": "blorts",
+   "to": "m",
+   "raises": true,
+   "message": "unrecognized unit ('blorts' -> 'm'); supported: ['%', 'api', 'f', 'feet', 'foot', 'ft', 'g/cc', 'g/cm3', 'g/cm³', 'gm/cc', 'in', 'inch', 'inches', 'kg/m3', 'kg/m³', 'm', 'meter', 'meters', 'metre', 'metres', 'millivolt', 'mm', 'mv', 'ohm-m', 'ohm.m', 'ohmm', 'ohmm.m', 'pct', 'us/ft', 'us/m', 'v', 'v/v', 'volt', 'µs/ft', 'µs/m']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "unknown-unit:m->blorts",
+   "from": "m",
+   "to": "blorts",
+   "raises": true,
+   "message": "unrecognized unit ('m' -> 'blorts'); supported: ['%', 'api', 'f', 'feet', 'foot', 'ft', 'g/cc', 'g/cm3', 'g/cm³', 'gm/cc', 'in', 'inch', 'inches', 'kg/m3', 'kg/m³', 'm', 'meter', 'meters', 'metre', 'metres', 'millivolt', 'mm', 'mv', 'ohm-m', 'ohm.m', 'ohmm', 'ohmm.m', 'pct', 'us/ft', 'us/m', 'v', 'v/v', 'volt', 'µs/ft', 'µs/m']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "unknown-unit:None->m",
+   "from": null,
+   "to": "m",
+   "raises": true,
+   "message": "unrecognized unit (None -> 'm'); supported: ['%', 'api', 'f', 'feet', 'foot', 'ft', 'g/cc', 'g/cm3', 'g/cm³', 'gm/cc', 'in', 'inch', 'inches', 'kg/m3', 'kg/m³', 'm', 'meter', 'meters', 'metre', 'metres', 'millivolt', 'mm', 'mv', 'ohm-m', 'ohm.m', 'ohmm', 'ohmm.m', 'pct', 'us/ft', 'us/m', 'v', 'v/v', 'volt', 'µs/ft', 'µs/m']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "unknown-unit:api->None",
+   "from": "api",
+   "to": null,
+   "raises": true,
+   "message": "unrecognized unit ('api' -> None); supported: ['%', 'api', 'f', 'feet', 'foot', 'ft', 'g/cc', 'g/cm3', 'g/cm³', 'gm/cc', 'in', 'inch', 'inches', 'kg/m3', 'kg/m³', 'm', 'meter', 'meters', 'metre', 'metres', 'millivolt', 'mm', 'mv', 'ohm-m', 'ohm.m', 'ohmm', 'ohmm.m', 'pct', 'us/ft', 'us/m', 'v', 'v/v', 'volt', 'µs/ft', 'µs/m']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "unknown-unit:percent->v/v",
+   "from": "percent",
+   "to": "v/v",
+   "raises": true,
+   "message": "unrecognized unit ('percent' -> 'v/v'); supported: ['%', 'api', 'f', 'feet', 'foot', 'ft', 'g/cc', 'g/cm3', 'g/cm³', 'gm/cc', 'in', 'inch', 'inches', 'kg/m3', 'kg/m³', 'm', 'meter', 'meters', 'metre', 'metres', 'millivolt', 'mm', 'mv', 'ohm-m', 'ohm.m', 'ohmm', 'ohmm.m', 'pct', 'us/ft', 'us/m', 'v', 'v/v', 'volt', 'µs/ft', 'µs/m']",
+   "match_mode": "exact"
+  }
+ ],
+ "convert_values": [
+  {
+   "name": "pytest:m_to_ft",
+   "values": [
+    1000.0
+   ],
+   "from": "m",
+   "to": "ft",
+   "expected": [
+    3280.839895013123
+   ]
+  },
+  {
+   "name": "pytest:g/cc_to_kg/m3",
+   "values": [
+    2.0
+   ],
+   "from": "g/cm3",
+   "to": "kg/m3",
+   "expected": [
+    2000.0
+   ]
+  },
+  {
+   "name": "pytest:us/m_to_us/ft",
+   "values": [
+    100.0
+   ],
+   "from": "us/m",
+   "to": "us/ft",
+   "expected": [
+    30.48
+   ]
+  },
+  {
+   "name": "with_nan_and_inf",
+   "values": [
+    1.0,
+    null,
+    "Infinity",
+    -2.5
+   ],
+   "from": "mv",
+   "to": "v",
+   "expected": [
+    0.001,
+    null,
+    "Infinity",
+    -0.0025
+   ]
+  },
+  {
+   "name": "identity_passthrough",
+   "values": [
+    1.5,
+    null
+   ],
+   "from": "M",
+   "to": "meter",
+   "expected": [
+    1.5,
+    null
+   ]
+  },
+  {
+   "name": "empty",
+   "values": [],
+   "from": "m",
+   "to": "ft",
+   "expected": []
+  },
+  {
+   "name": "bad_pair_even_empty",
+   "values": [],
+   "from": "api",
+   "to": "m",
+   "raises": true,
+   "message": "no whitelisted conversion 'api' -> 'm'; supported pairs: [('ft', 'm'), ('g/cc', 'kg/m3'), ('in', 'mm'), ('kg/m3', 'g/cc'), ('m', 'ft'), ('mm', 'in'), ('mv', 'v'), ('percent', 'v/v'), ('us/ft', 'us/m'), ('us/m', 'us/ft'), ('v', 'mv'), ('v/v', 'percent')]",
+   "match_mode": "exact"
+  }
+ ],
+ "resample_axis": [
+  {
+   "name": "pytest:regular",
+   "depth": [
+    1000.0,
+    1000.5,
+    1001.0,
+    1001.5
+   ],
+   "step": 1.0,
+   "expected": [
+    1000.0,
+    1001.0
+   ]
+  },
+  {
+   "name": "exact_fit_guard",
+   "depth": [
+    0.0,
+    0.3,
+    0.6,
+    0.9
+   ],
+   "step": 0.3,
+   "expected": [
+    0.0,
+    0.3,
+    0.6,
+    0.8999999999999999
+   ]
+  },
+  {
+   "name": "trailing_partial_dropped",
+   "depth": [
+    0.0,
+    1.0,
+    2.0,
+    2.5
+   ],
+   "step": 1.0,
+   "expected": [
+    0.0,
+    1.0,
+    2.0
+   ]
+  },
+  {
+   "name": "single_span",
+   "depth": [
+    5.0,
+    7.0
+   ],
+   "step": 3.0,
+   "expected": [
+    5.0
+   ]
+  },
+  {
+   "name": "tiny_step",
+   "depth": [
+    10.0,
+    10.05
+   ],
+   "step": 0.01,
+   "expected": [
+    10.0,
+    10.01,
+    10.02,
+    10.03,
+    10.04,
+    10.05
+   ]
+  },
+  {
+   "name": "short_axis_passthrough",
+   "depth": [
+    3.0
+   ],
+   "step": 1.0,
+   "expected": [
+    3.0
+   ]
+  },
+  {
+   "name": "empty_passthrough",
+   "depth": [],
+   "step": 1.0,
+   "expected": []
+  },
+  {
+   "name": "pytest:zero_step",
+   "depth": [
+    1000.0,
+    1000.5,
+    1001.0,
+    1001.5
+   ],
+   "step": 0.0,
+   "raises": true,
+   "message": "resample step must be positive, got 0.0",
+   "match_mode": "exact"
+  },
+  {
+   "name": "negative_step",
+   "depth": [
+    1000.0,
+    1001.0
+   ],
+   "step": -0.5,
+   "raises": true,
+   "message": "resample step must be positive, got -0.5",
+   "match_mode": "exact"
+  },
+  {
+   "name": "nan_step",
+   "depth": [
+    1000.0,
+    1001.0
+   ],
+   "step": null,
+   "raises": true,
+   "message": "resample step must be positive, got nan",
+   "match_mode": "exact"
+  },
+  {
+   "name": "pytest:descending",
+   "depth": [
+    2000.0,
+    1990.0,
+    1980.0
+   ],
+   "step": 1.0,
+   "raises": true,
+   "message": "resample needs a non-descending depth axis (got 2000.0 → 1980.0); reverse the axis explicitly first",
+   "match_mode": "exact"
+  }
+ ],
+ "interp_nan_aware": [
+  {
+   "name": "pytest:bridges_interior_nan",
+   "new_x": [
+    0.5,
+    1.5,
+    2.5
+   ],
+   "x": [
+    0.0,
+    1.0,
+    2.0,
+    3.0
+   ],
+   "y": [
+    0.0,
+    null,
+    2.0,
+    3.0
+   ],
+   "expected": [
+    0.5,
+    1.5,
+    2.5
+   ]
+  },
+  {
+   "name": "pytest:outside_hull_nan",
+   "new_x": [
+    -1.0,
+    4.0
+   ],
+   "x": [
+    0.0,
+    1.0,
+    2.0,
+    3.0
+   ],
+   "y": [
+    0.0,
+    null,
+    2.0,
+    3.0
+   ],
+   "expected": [
+    null,
+    null
+   ]
+  },
+  {
+   "name": "unsorted_x_sorted_internally",
+   "new_x": [
+    1.5,
+    0.5
+   ],
+   "x": [
+    3.0,
+    1.0,
+    2.0
+   ],
+   "y": [
+    30.0,
+    10.0,
+    20.0
+   ],
+   "expected": [
+    15.0,
+    null
+   ]
+  },
+  {
+   "name": "duplicate_depth_keeps_first",
+   "new_x": [
+    1.5
+   ],
+   "x": [
+    1.0,
+    1.0,
+    2.0
+   ],
+   "y": [
+    10.0,
+    99.0,
+    20.0
+   ],
+   "expected": [
+    15.0
+   ]
+  },
+  {
+   "name": "endpoint_clamp",
+   "new_x": [
+    0.0,
+    3.0
+   ],
+   "x": [
+    0.0,
+    1.0,
+    2.0,
+    3.0
+   ],
+   "y": [
+    0.0,
+    null,
+    2.0,
+    3.0
+   ],
+   "expected": [
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "name": "nan_query",
+   "new_x": [
+    null
+   ],
+   "x": [
+    0.0,
+    1.0,
+    2.0,
+    3.0
+   ],
+   "y": [
+    0.0,
+    null,
+    2.0,
+    3.0
+   ],
+   "expected": [
+    null
+   ]
+  },
+  {
+   "name": "all_nan_y",
+   "new_x": [
+    0.5
+   ],
+   "x": [
+    0.0,
+    1.0
+   ],
+   "y": [
+    null,
+    null
+   ],
+   "expected": [
+    null
+   ]
+  },
+  {
+   "name": "nan_x_dropped",
+   "new_x": [
+    1.5
+   ],
+   "x": [
+    0.0,
+    null,
+    2.0
+   ],
+   "y": [
+    0.0,
+    5.0,
+    2.0
+   ],
+   "expected": [
+    1.5
+   ]
+  },
+  {
+   "name": "single_finite_sample",
+   "new_x": [
+    0.0,
+    5.0,
+    10.0
+   ],
+   "x": [
+    7.0
+   ],
+   "y": [
+    42.0
+   ],
+   "expected": [
+    null,
+    null,
+    null
+   ]
+  }
+ ],
+ "interp_gap_preserving": [
+  {
+   "name": "pytest:interior_gap_not_bridged",
+   "new_x": [
+    0.0,
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    2.25,
+    2.5,
+    2.75,
+    3.0,
+    3.25,
+    3.5,
+    3.75,
+    4.0
+   ],
+   "x": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
+   ],
+   "y": [
+    1.0,
+    2.0,
+    null,
+    null,
+    5.0
+   ],
+   "expected": [
+    1.0,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    5.0
+   ]
+  },
+  {
+   "name": "pytest:outside_hull_stays_nan",
+   "new_x": [
+    0.0,
+    1.5,
+    3.5
+   ],
+   "x": [
+    1.0,
+    2.0,
+    3.0
+   ],
+   "y": [
+    10.0,
+    20.0,
+    30.0
+   ],
+   "expected": [
+    null,
+    15.0,
+    null
+   ]
+  },
+  {
+   "name": "pytest:two_runs",
+   "new_x": [
+    0.5,
+    2.5,
+    4.5
+   ],
+   "x": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0
+   ],
+   "y": [
+    0.0,
+    1.0,
+    null,
+    3.0,
+    4.0,
+    5.0
+   ],
+   "expected": [
+    0.5,
+    null,
+    4.5
+   ]
+  },
+  {
+   "name": "pytest:all_nan",
+   "new_x": [
+    0.0,
+    1.0
+   ],
+   "x": [
+    0.0,
+    1.0
+   ],
+   "y": [
+    null,
+    null
+   ],
+   "expected": [
+    null,
+    null
+   ]
+  },
+  {
+   "name": "duplicate_depth_in_run_keeps_first",
+   "new_x": [
+    0.5,
+    1.0
+   ],
+   "x": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "y": [
+    10.0,
+    99.0,
+    20.0
+   ],
+   "expected": [
+    15.0,
+    20.0
+   ]
+  },
+  {
+   "name": "single_sample_run_exact_hit",
+   "new_x": [
+    2.0,
+    2.5
+   ],
+   "x": [
+    0.0,
+    1.0,
+    2.0,
+    3.0
+   ],
+   "y": [
+    0.0,
+    null,
+    7.0,
+    1.0
+   ],
+   "expected": [
+    7.0,
+    4.0
+   ]
+  },
+  {
+   "name": "leading_trailing_nan",
+   "new_x": [
+    0.5,
+    1.5,
+    2.5,
+    3.5
+   ],
+   "x": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
+   ],
+   "y": [
+    null,
+    1.0,
+    2.0,
+    3.0,
+    null
+   ],
+   "expected": [
+    null,
+    1.5,
+    2.5,
+    null
+   ]
+  },
+  {
+   "name": "nan_query_nan_result",
+   "new_x": [
+    null,
+    1.5
+   ],
+   "x": [
+    1.0,
+    2.0
+   ],
+   "y": [
+    1.0,
+    2.0
+   ],
+   "expected": [
+    null,
+    1.5
+   ]
+  },
+  {
+   "name": "no_finite_x_at_all",
+   "new_x": [
+    0.5
+   ],
+   "x": [
+    null,
+    null
+   ],
+   "y": [
+    1.0,
+    2.0
+   ],
+   "expected": [
+    null
+   ]
+  },
+  {
+   "name": "nan_depth_in_x_rides",
+   "new_x": [
+    1.5
+   ],
+   "x": [
+    0.0,
+    null,
+    3.0
+   ],
+   "y": [
+    0.0,
+    9.0,
+    3.0
+   ],
+   "expected": [
+    null
+   ]
+  },
+  {
+   "name": "descending_finite_x",
+   "new_x": [
+    0.5
+   ],
+   "x": [
+    3.0,
+    2.0,
+    1.0
+   ],
+   "y": [
+    3.0,
+    2.0,
+    1.0
+   ],
+   "raises": true,
+   "message": "interp_gap_preserving needs a non-descending depth axis; reverse the axis explicitly first",
+   "match_mode": "exact"
+  },
+  {
+   "name": "descending_with_nan_x",
+   "new_x": [
+    0.5
+   ],
+   "x": [
+    3.0,
+    null,
+    1.0
+   ],
+   "y": [
+    3.0,
+    2.0,
+    1.0
+   ],
+   "raises": true,
+   "message": "interp_gap_preserving needs a non-descending depth axis; reverse the axis explicitly first",
+   "match_mode": "exact"
+  }
+ ],
+ "missing_interval_report": [
+  {
+   "name": "pytest:basic",
+   "depth": [
+    1000.0,
+    1000.5,
+    1001.0,
+    1001.5,
+    1002.0,
+    1002.5,
+    1003.0,
+    1003.5,
+    1004.0,
+    1004.5,
+    1005.0,
+    1005.5,
+    1006.0,
+    1006.5,
+    1007.0,
+    1007.5,
+    1008.0,
+    1008.5,
+    1009.0,
+    1009.5
+   ],
+   "values": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    null,
+    null,
+    null,
+    null,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "expect_fraction": 0.2,
+   "expect_largest": 1.5,
+   "total_samples": 20,
+   "missing_samples": 4,
+   "intervals": [
+    [
+     1002.0,
+     1003.5
+    ]
+   ]
+  },
+  {
+   "name": "pytest:report_fields",
+   "depth": [
+    1000.0,
+    1000.5,
+    1001.0,
+    1001.5,
+    1002.0,
+    1002.5,
+    1003.0,
+    1003.5,
+    1004.0,
+    1004.5,
+    1005.0,
+    1005.5,
+    1006.0,
+    1006.5,
+    1007.0,
+    1007.5,
+    1008.0,
+    1008.5,
+    1009.0,
+    1009.5
+   ],
+   "values": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    null,
+    null,
+    null,
+    null,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "expect_fraction": 0.2,
+   "expect_largest": 1.5,
+   "total_samples": 20,
+   "missing_samples": 4,
+   "intervals": [
+    [
+     1002.0,
+     1003.5
+    ]
+   ]
+  },
+  {
+   "name": "edge_missing_not_a_gap",
+   "depth": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
+   ],
+   "values": [
+    null,
+    1.0,
+    2.0,
+    3.0,
+    null
+   ],
+   "expect_fraction": 0.4,
+   "expect_largest": 0.0,
+   "total_samples": 5,
+   "missing_samples": 2,
+   "intervals": []
+  },
+  {
+   "name": "one_full_hole",
+   "depth": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
+   ],
+   "values": [
+    1.0,
+    null,
+    null,
+    null,
+    5.0
+   ],
+   "expect_fraction": 0.6,
+   "expect_largest": 2.0,
+   "total_samples": 5,
+   "missing_samples": 3,
+   "intervals": [
+    [
+     1.0,
+     3.0
+    ]
+   ]
+  },
+  {
+   "name": "all_finite",
+   "depth": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
+   ],
+   "values": [
+    1,
+    2,
+    3,
+    4,
+    5
+   ],
+   "expect_fraction": 0.0,
+   "expect_largest": 0.0,
+   "total_samples": 5,
+   "missing_samples": 0,
+   "intervals": []
+  },
+  {
+   "name": "all_nan_no_intervals",
+   "depth": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0
+   ],
+   "values": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "expect_fraction": 1.0,
+   "expect_largest": 0.0,
+   "total_samples": 5,
+   "missing_samples": 5,
+   "intervals": []
+  },
+  {
+   "name": "nan_depth_inside_hole",
+   "depth": [
+    0.0,
+    null,
+    null,
+    null,
+    4.0
+   ],
+   "values": [
+    1.0,
+    null,
+    null,
+    null,
+    5.0
+   ],
+   "expect_fraction": 0.6,
+   "total_samples": 5,
+   "missing_samples": 3,
+   "intervals": [
+    [
+     null,
+     null
+    ]
+   ],
+   "expect_largest": null
+  },
+  {
+   "name": "two_holes",
+   "depth": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   "values": [
+    1,
+    null,
+    null,
+    4,
+    5,
+    6,
+    null,
+    null,
+    9,
+    10
+   ],
+   "expect_fraction": 0.4,
+   "expect_largest": 1.0,
+   "total_samples": 10,
+   "missing_samples": 4,
+   "intervals": [
+    [
+     1.0,
+     2.0
+    ],
+    [
+     6.0,
+     7.0
+    ]
+   ]
+  },
+  {
+   "name": "short_curves_no_intervals",
+   "depth": [
+    0.0,
+    1.0
+   ],
+   "values": [
+    1.0,
+    null
+   ],
+   "expect_fraction": 0.5,
+   "expect_largest": 0.0,
+   "total_samples": 2,
+   "missing_samples": 1,
+   "intervals": []
+  },
+  {
+   "name": "empty",
+   "depth": [],
+   "values": [],
+   "expect_fraction": 0.0,
+   "expect_largest": 0.0,
+   "total_samples": 0,
+   "missing_samples": 0,
+   "intervals": []
+  }
+ ],
+ "evaluate_curve_expression": [
+  {
+   "name": "pytest:arithmetic_and_functions",
+   "expr": "GR / max(RT, 2.0) + 1",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    6.0,
+    13.5
+   ]
+  },
+  {
+   "name": "pytest:where_and_clip",
+   "expr": "where(GR > 100, 100, GR)",
+   "variables": {
+    "GR": [
+     5.0,
+     200.0
+    ]
+   },
+   "expected": [
+    5.0,
+    100.0
+   ]
+  },
+  {
+   "name": "powers",
+   "expr": "GR ** 2 + RT ** -1",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    101.0,
+    2500.25
+   ]
+  },
+  {
+   "name": "power_right_assoc",
+   "expr": "2 ** 3 ** 2",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    512.0,
+    512.0
+   ]
+  },
+  {
+   "name": "unary_minus_binds_looser_than_pow",
+   "expr": "-2 ** 2",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    -4.0,
+    -4.0
+   ]
+  },
+  {
+   "name": "unary_on_exponent",
+   "expr": "2 ** -2",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    0.25,
+    0.25
+   ]
+  },
+  {
+   "name": "modulo_python_sign",
+   "expr": "GR % 3 - RT % -2",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    2.0,
+    2.0
+   ]
+  },
+  {
+   "name": "floordiv_python_floor",
+   "expr": "GR // 3 + -7 // 2",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    -1.0,
+    12.0
+   ]
+  },
+  {
+   "name": "chain_compare",
+   "expr": "1 < GR < 40",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chain_compare_three",
+   "expr": "0 <= GR <= 10 <= RT + 10",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "bool_and_or_nan_truthy",
+   "expr": "(G4 > 5) and (R4 < 100) or (HOLE != 1)",
+   "variables": {
+    "G4": [
+     10.0,
+     50.0,
+     1.0,
+     60.0
+    ],
+    "R4": [
+     1.0,
+     4.0,
+     2.0,
+     8.0
+    ],
+    "HOLE": [
+     1.0,
+     null,
+     3.0,
+     4.0
+    ]
+   },
+   "expected": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "bool_scalar_operand",
+   "expr": "GR and 2",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nan_compare_false",
+   "expr": "HOLE > 2",
+   "variables": {
+    "HOLE": [
+     1.0,
+     null,
+     3.0,
+     4.0
+    ]
+   },
+   "expected": [
+    0.0,
+    0.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nan_bool_truthy",
+   "expr": "HOLE and 1",
+   "variables": {
+    "HOLE": [
+     1.0,
+     null,
+     3.0,
+     4.0
+    ]
+   },
+   "expected": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "min_nan_propagates",
+   "expr": "min(GR, RT)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     null
+    ]
+   },
+   "expected": [
+    1.0,
+    null
+   ]
+  },
+  {
+   "name": "max_nan_propagates",
+   "expr": "max(GR, RT)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     null
+    ]
+   },
+   "expected": [
+    10.0,
+    null
+   ]
+  },
+  {
+   "name": "abs_min_max_funcs",
+   "expr": "abs(min(GR, 0)) - max(RT, 2)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    -2.0,
+    -4.0
+   ]
+  },
+  {
+   "name": "log_family",
+   "expr": "log(GR) + log10(GR) + log2(RT)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    3.302585092994046,
+    7.610993009764165
+   ]
+  },
+  {
+   "name": "log_negative_nan",
+   "expr": "log(-GR)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    null,
+    null
+   ]
+  },
+  {
+   "name": "log_zero_minus_inf",
+   "expr": "log(GR - GR)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    "-Infinity",
+    "-Infinity"
+   ]
+  },
+  {
+   "name": "exp_sqrt",
+   "expr": "exp(RT / 10) + sqrt(GR)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    4.267448578244027,
+    8.562892509506746
+   ]
+  },
+  {
+   "name": "trig",
+   "expr": "sin(GR) + cos(GR) + tan(RT)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    0.1743150846890802,
+    1.860412457137762
+   ]
+  },
+  {
+   "name": "clip_nan_passthrough",
+   "expr": "clip(HOLE, 2, 3)",
+   "variables": {
+    "HOLE": [
+     1.0,
+     null,
+     3.0,
+     4.0
+    ]
+   },
+   "expected": [
+    2.0,
+    null,
+    3.0,
+    3.0
+   ]
+  },
+  {
+   "name": "where_with_nan_condition",
+   "expr": "where(HOLE > 2, 1, 0)",
+   "variables": {
+    "HOLE": [
+     1.0,
+     null,
+     3.0,
+     4.0
+    ]
+   },
+   "expected": [
+    0.0,
+    0.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "scalar_folding",
+   "expr": "1 + 2",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    3.0,
+    3.0
+   ]
+  },
+  {
+   "name": "scalar_broadcast_from_vars",
+   "expr": "GR * 0 + 3",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    3.0,
+    3.0
+   ]
+  },
+  {
+   "name": "division_by_zero_inf",
+   "expr": "GR / (RT - RT)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    "Infinity",
+    "Infinity"
+   ]
+  },
+  {
+   "name": "compare_result_as_value",
+   "expr": "(GR > 20) * 10",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    0.0,
+    10.0
+   ]
+  },
+  {
+   "name": "nested_calls",
+   "expr": "where(clip(GR, 0, 20) > 10, sqrt(GR), 0)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    0.0,
+    7.0710678118654755
+   ]
+  },
+  {
+   "name": "nan_rides_through_arithmetic",
+   "expr": "HOLE * 2 + 1",
+   "variables": {
+    "HOLE": [
+     1.0,
+     null,
+     3.0,
+     4.0
+    ]
+   },
+   "expected": [
+    3.0,
+    null,
+    7.0,
+    9.0
+   ]
+  },
+  {
+   "name": "pytest:unknown_name",
+   "expr": "DT + 1",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "unknown curve name 'DT'; available: ['GR']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "unknown_name_sorted_available",
+   "expr": "DT + 1",
+   "variables": {
+    "ZZ": [
+     1.0
+    ],
+    "AA": [
+     2.0
+    ],
+    "MM": [
+     3.0
+    ]
+   },
+   "raises": true,
+   "message": "unknown curve name 'DT'; available: ['AA', 'MM', 'ZZ']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "pytest:attribute_access",
+   "expr": "GR.__class__",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "expression element Attribute is not allowed",
+   "match_mode": "prefix"
+  },
+  {
+   "name": "pytest:subscript",
+   "expr": "GR[0]",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "expression element Subscript is not allowed",
+   "match_mode": "prefix"
+  },
+  {
+   "name": "pytest:disallowed_function",
+   "expr": "open('x')",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "function 'open' not allowed; supported: ['abs', 'clip', 'cos', 'exp', 'log', 'log10', 'log2', 'max', 'min', 'sin', 'sqrt', 'tan', 'where']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "pytest:keywords",
+   "expr": "clip(GR, a_min=0)",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "keyword arguments are not allowed",
+   "match_mode": "exact"
+  },
+  {
+   "name": "pytest:no_variables",
+   "expr": "1.5",
+   "variables": {},
+   "raises": true,
+   "message": "expression needs at least one curve variable",
+   "match_mode": "exact"
+  },
+  {
+   "name": "empty_expression",
+   "expr": "",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "empty expression",
+   "match_mode": "exact"
+  },
+  {
+   "name": "whitespace_expression",
+   "expr": "   ",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "empty expression",
+   "match_mode": "exact"
+  },
+  {
+   "name": "string_constant",
+   "expr": "'a' + GR",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "constant 'a' not allowed (numbers only)",
+   "match_mode": "exact"
+  },
+  {
+   "name": "bool_constant",
+   "expr": "GR and True",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "constant True not allowed (numbers only)",
+   "match_mode": "exact"
+  },
+  {
+   "name": "disallowed_bitand",
+   "expr": "GR & RT",
+   "variables": {
+    "GR": [
+     1.0
+    ],
+    "RT": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "expression element BinOp is not allowed",
+   "match_mode": "prefix"
+  },
+  {
+   "name": "disallowed_not",
+   "expr": "not GR",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "expression element UnaryOp is not allowed",
+   "match_mode": "prefix"
+  },
+  {
+   "name": "list_node",
+   "expr": "[1, 2]",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "expression element List is not allowed",
+   "match_mode": "prefix"
+  },
+  {
+   "name": "min_three_args",
+   "expr": "min(GR, RT, 1)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "raises": true,
+   "message": "non-broadcastable output operand with shape () doesn't match the broadcast shape (2,)",
+   "match_mode": "exact"
+  },
+  {
+   "name": "sample_aligned_mismatch",
+   "expr": "BB * BB",
+   "variables": {
+    "AA": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "BB": [
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0,
+     6.0
+    ]
+   },
+   "raises": true,
+   "message": "expression did not produce a sample-aligned result",
+   "match_mode": "exact"
+  },
+  {
+   "name": "broadcast_error_text",
+   "expr": "AA + BB",
+   "variables": {
+    "AA": [
+     1.0,
+     2.0,
+     3.0,
+     4.0
+    ],
+    "BB": [
+     1.0,
+     2.0
+    ]
+   },
+   "raises": true,
+   "message": "operands could not be broadcast together with shapes (4,) (2,) ",
+   "match_mode": "exact"
+  },
+  {
+   "name": "syntax_error",
+   "expr": "GR +* 2",
+   "variables": {
+    "GR": [
+     1.0
+    ]
+   },
+   "raises": true,
+   "message": "invalid expression:",
+   "match_mode": "prefix"
+  }
+ ],
+ "classify_depth_unit": [
+  {
+   "name": "token:'M'",
+   "token": "M",
+   "unit": "m",
+   "declared": true,
+   "raw": "M",
+   "known": true
+  },
+  {
+   "name": "token:'m'",
+   "token": "m",
+   "unit": "m",
+   "declared": true,
+   "raw": "m",
+   "known": true
+  },
+  {
+   "name": "token:'METER'",
+   "token": "METER",
+   "unit": "m",
+   "declared": true,
+   "raw": "METER",
+   "known": true
+  },
+  {
+   "name": "token:'Meters'",
+   "token": "Meters",
+   "unit": "m",
+   "declared": true,
+   "raw": "Meters",
+   "known": true
+  },
+  {
+   "name": "token:'MTR'",
+   "token": "MTR",
+   "unit": "m",
+   "declared": true,
+   "raw": "MTR",
+   "known": true
+  },
+  {
+   "name": "token:'MTRS'",
+   "token": "MTRS",
+   "unit": "m",
+   "declared": true,
+   "raw": "MTRS",
+   "known": true
+  },
+  {
+   "name": "token:'metre'",
+   "token": "metre",
+   "unit": "m",
+   "declared": true,
+   "raw": "metre",
+   "known": true
+  },
+  {
+   "name": "token:'METRES'",
+   "token": "METRES",
+   "unit": "m",
+   "declared": true,
+   "raw": "METRES",
+   "known": true
+  },
+  {
+   "name": "token:' m '",
+   "token": " m ",
+   "unit": "m",
+   "declared": true,
+   "raw": "m",
+   "known": true
+  },
+  {
+   "name": "token:'FT'",
+   "token": "FT",
+   "unit": "ft",
+   "declared": true,
+   "raw": "FT",
+   "known": true
+  },
+  {
+   "name": "token:'ft'",
+   "token": "ft",
+   "unit": "ft",
+   "declared": true,
+   "raw": "ft",
+   "known": true
+  },
+  {
+   "name": "token:'F'",
+   "token": "F",
+   "unit": "ft",
+   "declared": true,
+   "raw": "F",
+   "known": true
+  },
+  {
+   "name": "token:'FEET'",
+   "token": "FEET",
+   "unit": "ft",
+   "declared": true,
+   "raw": "FEET",
+   "known": true
+  },
+  {
+   "name": "token:'Foot'",
+   "token": "Foot",
+   "unit": "ft",
+   "declared": true,
+   "raw": "Foot",
+   "known": true
+  },
+  {
+   "name": "token:'  FT'",
+   "token": "  FT",
+   "unit": "ft",
+   "declared": true,
+   "raw": "FT",
+   "known": true
+  },
+  {
+   "name": "token:'FURLONGS'",
+   "token": "FURLONGS",
+   "unit": null,
+   "declared": true,
+   "raw": "FURLONGS",
+   "known": false
+  },
+  {
+   "name": "token:'g/cc'",
+   "token": "g/cc",
+   "unit": null,
+   "declared": true,
+   "raw": "g/cc",
+   "known": false
+  },
+  {
+   "name": "token:''",
+   "token": "",
+   "unit": null,
+   "declared": false,
+   "raw": "",
+   "known": false
+  },
+  {
+   "name": "token:'  '",
+   "token": "  ",
+   "unit": null,
+   "declared": false,
+   "raw": "",
+   "known": false
+  },
+  {
+   "name": "token:'us/ft'",
+   "token": "us/ft",
+   "unit": null,
+   "declared": true,
+   "raw": "us/ft",
+   "known": false
+  },
+  {
+   "name": "token:None",
+   "token": null,
+   "unit": null,
+   "declared": false,
+   "raw": "",
+   "known": false
+  }
+ ],
+ "require_depth_unit": [
+  {
+   "name": "ok:'m':depth_shift",
+   "token_kind": "string",
+   "token": "m",
+   "operation": "depth_shift",
+   "expected": "m"
+  },
+  {
+   "name": "ok:'ft':depth_shift",
+   "token_kind": "string",
+   "token": "ft",
+   "operation": "depth_shift",
+   "expected": "ft"
+  },
+  {
+   "name": "ok:'MTR':x",
+   "token_kind": "string",
+   "token": "MTR",
+   "operation": "x",
+   "expected": "m"
+  },
+  {
+   "name": "ok:DepthUnitInfo(unit='ft', declared=True, raw='FT'):resample_display",
+   "token_kind": "info",
+   "token": "FT",
+   "operation": "resample_display",
+   "expected": "ft"
+  },
+  {
+   "name": "raise:None:depth_shift",
+   "token_kind": "none",
+   "operation": "depth_shift",
+   "raises": true,
+   "message": "operation 'depth_shift' depends on the depth unit, which is not declared by the file; refusing instead of assuming meters",
+   "match_mode": "exact"
+  },
+  {
+   "name": "raise:DepthUnitInfo(unit=None, declared=True, raw='FURLONGS'):resample_display",
+   "token_kind": "info",
+   "token": "FURLONGS",
+   "operation": "resample_display",
+   "raises": true,
+   "message": "operation 'resample_display' depends on the depth unit, which is declared as 'FURLONGS' but unrecognized; refusing instead of assuming meters",
+   "match_mode": "exact"
+  },
+  {
+   "name": "raise:'g/cc':unit_gate",
+   "token_kind": "string",
+   "token": "g/cc",
+   "operation": "unit_gate",
+   "raises": true,
+   "message": "operation 'unit_gate' depends on the depth unit, which is declared as 'g/cc' but unrecognized; refusing instead of assuming meters",
+   "match_mode": "exact"
+  },
+  {
+   "name": "raise:'':depth_shift",
+   "token_kind": "string",
+   "token": "",
+   "operation": "depth_shift",
+   "raises": true,
+   "message": "operation 'depth_shift' depends on the depth unit, which is not declared by the file; refusing instead of assuming meters",
+   "match_mode": "exact"
+  }
+ ],
+ "depth_unit_of": [
+  {
+   "name": "bare_document",
+   "envelope": "__ABSENT__",
+   "unit": null,
+   "declared": false,
+   "raw": "",
+   "known": false
+  },
+  {
+   "name": "wrapper_ft",
+   "envelope": "ft",
+   "unit": "ft",
+   "declared": true,
+   "raw": "ft",
+   "known": true
+  },
+  {
+   "name": "wrapper_none",
+   "envelope": null,
+   "unit": null,
+   "declared": false,
+   "raw": "",
+   "known": false
+  },
+  {
+   "name": "envelope_empty",
+   "envelope": "",
+   "unit": null,
+   "declared": false,
+   "raw": "",
+   "known": false
+  },
+  {
+   "name": "envelope_furlongs",
+   "envelope": "FURLONGS",
+   "unit": null,
+   "declared": true,
+   "raw": "FURLONGS",
+   "known": false
+  }
+ ],
+ "null_policy": [
+  {
+   "name": "declared_mask",
+   "policy": {
+    "source": "declared",
+    "sentinel": -999.25
+   },
+   "values": [
+    -999.25,
+    -999.2500005,
+    -999.250002,
+    0.0,
+    null,
+    42.0
+   ],
+   "expected_mask": [
+    1,
+    1,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "declared_plus_inferred_mask",
+   "policy": {
+    "source": "declared",
+    "sentinel": -999.0,
+    "inferred_sentinels": [
+     -9999.0,
+     -99999.0
+    ]
+   },
+   "values": [
+    -999.0,
+    -9999.0,
+    -99998.9999995,
+    -999.25,
+    null,
+    1.0
+   ],
+   "expected_mask": [
+    1,
+    1,
+    1,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "none_policy_never_matches",
+   "policy": {
+    "source": "none"
+   },
+   "values": [
+    -999.25,
+    0.0
+   ],
+   "expected_mask": [
+    0,
+    0
+   ]
+  },
+  {
+   "name": "nan_never_matches_sentinel",
+   "policy": {
+    "source": "declared",
+    "sentinel": -999.25
+   },
+   "values": [
+    null,
+    -999.25
+   ],
+   "expected_mask": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "as_dict:declared",
+   "policy": {
+    "source": "declared",
+    "sentinel": -999.25
+   },
+   "expected": {
+    "source": "declared",
+    "sentinel": -999.25
+   },
+   "declared_flag": true
+  },
+  {
+   "name": "as_dict:inferred",
+   "policy": {
+    "source": "inferred",
+    "sentinel": -999.25,
+    "inferred_sentinels": [
+     -999.0
+    ]
+   },
+   "expected": {
+    "source": "inferred",
+    "sentinel": -999.25,
+    "inferred_sentinels": [
+     -999.0
+    ]
+   },
+   "declared_flag": false
+  },
+  {
+   "name": "as_dict:derived_injected",
+   "policy": {
+    "source": "derived_injected",
+    "sentinel": -999.25
+   },
+   "expected": {
+    "source": "derived_injected",
+    "sentinel": -999.25
+   },
+   "declared_flag": false
+  },
+  {
+   "name": "as_dict:none_empty",
+   "policy": {
+    "source": "none"
+   },
+   "expected": {
+    "source": "none"
+   },
+   "declared_flag": false
+  }
+ ],
+ "null_policy_from_declared": [
+  {
+   "name": "none",
+   "kind": "none",
+   "raw": null,
+   "source": "none",
+   "sentinel": null
+  },
+  {
+   "name": "empty_string",
+   "kind": "empty",
+   "raw": "",
+   "source": "none",
+   "sentinel": null
+  },
+  {
+   "name": "valid_number",
+   "kind": "number",
+   "raw": "-999.25",
+   "source": "declared",
+   "sentinel": -999.25
+  },
+  {
+   "name": "valid_string",
+   "kind": "string",
+   "raw": "-9999.0",
+   "source": "declared",
+   "sentinel": -9999.0
+  },
+  {
+   "name": "text",
+   "kind": "string",
+   "raw": "abc",
+   "source": "none",
+   "sentinel": null
+  },
+  {
+   "name": "garbage",
+   "kind": "string",
+   "raw": "1e",
+   "source": "none",
+   "sentinel": null
+  }
+ ],
+ "depth_shift": [
+  {
+   "name": "pytest:meters_default",
+   "depths": [
+    1000.0,
+    1000.5
+   ],
+   "delta_m": -1.5,
+   "axis_unit": "m",
+   "expected": [
+    998.5,
+    999.0
+   ]
+  },
+  {
+   "name": "pytest:foot_axis",
+   "depths": [
+    3000.0,
+    3001.0
+   ],
+   "delta_m": 3.048,
+   "axis_unit": "ft",
+   "expected": [
+    3010.0,
+    3011.0
+   ]
+  },
+  {
+   "name": "pytest:moves_axis",
+   "depths": [
+    1000.0,
+    1000.5,
+    1001.0
+   ],
+   "delta_m": -1.5,
+   "axis_unit": "m",
+   "expected": [
+    998.5,
+    999.0,
+    999.5
+   ]
+  },
+  {
+   "name": "nan_rides",
+   "depths": [
+    1000.0,
+    null
+   ],
+   "delta_m": 2.0,
+   "axis_unit": "m",
+   "expected": [
+    1002.0,
+    null
+   ]
+  },
+  {
+   "name": "ft_token_f",
+   "depths": [
+    1000.0
+   ],
+   "delta_m": 0.3048,
+   "axis_unit": "F",
+   "expected": [
+    1001.0
+   ]
+  },
+  {
+   "name": "info_object",
+   "depths": [
+    500.0
+   ],
+   "delta_m": 1.0,
+   "axis_unit": "METER",
+   "expected": [
+    501.0
+   ]
+  },
+  {
+   "name": "pytest:unknown_unit",
+   "depths": [
+    1000.0,
+    1000.5
+   ],
+   "delta_m": 1.0,
+   "axis_unit": null,
+   "raises": true,
+   "message": "operation 'depth_shift' depends on the depth unit, which is not declared by the file; refusing instead of assuming meters",
+   "match_mode": "exact"
+  },
+  {
+   "name": "declared_unknown",
+   "depths": [
+    1000.0
+   ],
+   "delta_m": 1.0,
+   "axis_unit": "FURLONGS",
+   "raises": true,
+   "message": "operation 'depth_shift' depends on the depth unit, which is declared as 'FURLONGS' but unrecognized; refusing instead of assuming meters",
+   "match_mode": "exact"
+  }
+ ],
+ "despike": [
+  {
+   "name": "pytest:sentinel_spike",
+   "values": [
+    60.0,
+    61.0,
+    999.25,
+    60.5,
+    59.5,
+    60.0
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    60.0,
+    61.0,
+    61.0,
+    60.5,
+    59.5,
+    60.0
+   ]
+  },
+  {
+   "name": "quiet_curve_floor",
+   "values": [
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.4,
+    10.0
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0
+   ]
+  },
+  {
+   "name": "nan_neighbors",
+   "values": [
+    1.0,
+    2.0,
+    null,
+    4.0,
+    900.0,
+    1.0,
+    1.5
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    1.0,
+    2.0,
+    null,
+    4.0,
+    4.0,
+    1.0,
+    1.5
+   ]
+  },
+  {
+   "name": "all_nan",
+   "values": [
+    null,
+    null,
+    null
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "name": "empty",
+   "values": [],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": []
+  },
+  {
+   "name": "single_sample",
+   "values": [
+    5.0
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    5.0
+   ]
+  },
+  {
+   "name": "two_finite_ptp_floor",
+   "values": [
+    0.0,
+    100.0
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    0.0,
+    100.0
+   ]
+  },
+  {
+   "name": "wide_window5",
+   "values": [
+    5.0,
+    5.0,
+    5.0,
+    5.0,
+    999.0,
+    5.0,
+    5.0,
+    5.0,
+    5.0
+   ],
+   "threshold_sigma": 3.0,
+   "window": 5,
+   "expected": [
+    5.0,
+    5.0,
+    5.0,
+    5.0,
+    5.0,
+    5.0,
+    5.0,
+    5.0,
+    5.0
+   ]
+  },
+  {
+   "name": "even_window_oddified",
+   "values": [
+    5.0,
+    5.0,
+    5.0,
+    999.0,
+    5.0
+   ],
+   "threshold_sigma": 3.0,
+   "window": 4,
+   "expected": [
+    5.0,
+    5.0,
+    5.0,
+    5.0,
+    5.0
+   ]
+  },
+  {
+   "name": "no_spike_untouched",
+   "values": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0
+   ]
+  },
+  {
+   "name": "negative_spike",
+   "values": [
+    60.0,
+    61.0,
+    -500.0,
+    60.5,
+    59.5,
+    60.0
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    60.0,
+    61.0,
+    60.5,
+    60.5,
+    59.5,
+    60.0
+   ]
+  },
+  {
+   "name": "rng_field",
+   "values": [
+    50.61401887208298,
+    51.679426786144404,
+    50.785899080558536,
+    52.22047175831803,
+    51.2253631619929,
+    53.95787599083629,
+    48.54409747468405,
+    51.98941393705161,
+    48.55486495480944,
+    50.522263756498354,
+    48.82038791919522,
+    48.39823066829588,
+    47.807531938496645,
+    51.37217337522762,
+    48.91337455609672,
+    52.00242687773913,
+    48.74220715333033,
+    51.19781122372209,
+    50.21763314772168,
+    51.01657943333908,
+    50.783838052868404,
+    48.52264595651501,
+    51.66377534915656,
+    52.14172596566338,
+    47.72965206935579,
+    48.490553443697024,
+    48.74436377284627,
+    51.59503800754596,
+    50.58097450473668,
+    48.563361799136196,
+    51.95417943399509,
+    52.11718612862196,
+    45.644821274357696,
+    50.017908075745865,
+    54.438669322793146,
+    51.6210862087971,
+    51.288824233153605,
+    50.66114768540379,
+    52.82646657214993,
+    52.756187863474196,
+    47.247918326639976,
+    48.52255597527636,
+    47.06027752898494,
+    50.73278386572874,
+    50.174516891904496,
+    47.92043573848974,
+    48.024293885420484,
+    50.062255728063896,
+    48.33403594768715,
+    49.33409793434596,
+    51.825842147201236,
+    47.80986963958483,
+    51.11786651651463,
+    51.320217767244436,
+    48.322957827200185,
+    50.03530109127236,
+    51.31854859418093,
+    50.252728765551204,
+    52.787928403389984,
+    48.198711733591225,
+    49.4181960426506,
+    48.783520009994575,
+    50.108750278481665,
+    50.571833396673505
+   ],
+   "threshold_sigma": 3.0,
+   "window": 3,
+   "expected": [
+    50.61401887208298,
+    51.679426786144404,
+    50.785899080558536,
+    52.22047175831803,
+    51.2253631619929,
+    53.95787599083629,
+    48.54409747468405,
+    51.98941393705161,
+    48.55486495480944,
+    50.522263756498354,
+    48.82038791919522,
+    48.39823066829588,
+    47.807531938496645,
+    51.37217337522762,
+    48.91337455609672,
+    52.00242687773913,
+    48.74220715333033,
+    51.19781122372209,
+    50.21763314772168,
+    51.01657943333908,
+    50.783838052868404,
+    48.52264595651501,
+    51.66377534915656,
+    52.14172596566338,
+    47.72965206935579,
+    48.490553443697024,
+    48.74436377284627,
+    51.59503800754596,
+    50.58097450473668,
+    48.563361799136196,
+    51.95417943399509,
+    52.11718612862196,
+    50.017908075745865,
+    50.017908075745865,
+    54.438669322793146,
+    51.6210862087971,
+    51.288824233153605,
+    50.66114768540379,
+    52.82646657214993,
+    52.756187863474196,
+    47.247918326639976,
+    48.52255597527636,
+    47.06027752898494,
+    50.73278386572874,
+    50.174516891904496,
+    47.92043573848974,
+    48.024293885420484,
+    50.062255728063896,
+    48.33403594768715,
+    49.33409793434596,
+    51.825842147201236,
+    47.80986963958483,
+    51.11786651651463,
+    51.320217767244436,
+    48.322957827200185,
+    50.03530109127236,
+    51.31854859418093,
+    50.252728765551204,
+    52.787928403389984,
+    48.198711733591225,
+    49.4181960426506,
+    48.783520009994575,
+    50.108750278481665,
+    50.571833396673505
+   ]
+  }
+ ],
+ "baseline_shift": [
+  {
+   "name": "pytest:adds_offset",
+   "values": [
+    60.0,
+    61.0
+   ],
+   "delta": 5.0,
+   "expected": [
+    65.0,
+    66.0
+   ]
+  },
+  {
+   "name": "nan_rides",
+   "values": [
+    1.0,
+    null
+   ],
+   "delta": 2.5,
+   "expected": [
+    3.5,
+    null
+   ]
+  },
+  {
+   "name": "empty",
+   "values": [],
+   "delta": 1.0,
+   "expected": []
+  }
+ ],
+ "operation_registry": {
+  "operations": {
+   "depth_shift": {
+    "required_params": [
+     "delta_m"
+    ],
+    "scope": "depth_axis"
+   },
+   "despike": {
+    "required_params": [],
+    "scope": "curve"
+   },
+   "baseline_shift": {
+    "required_params": [
+     "delta"
+    ],
+    "scope": "curve"
+   },
+   "smooth": {
+    "required_params": [
+     "window"
+    ],
+    "scope": "curve"
+   },
+   "median_filter": {
+    "required_params": [
+     "window"
+    ],
+    "scope": "curve"
+   },
+   "normalize": {
+    "required_params": [],
+    "scope": "curve"
+   },
+   "clip_outliers": {
+    "required_params": [],
+    "scope": "curve"
+   },
+   "unit_conversion": {
+    "required_params": [
+     "from_unit",
+     "to_unit"
+    ],
+    "scope": "curve"
+   },
+   "resample": {
+    "required_params": [
+     "step"
+    ],
+    "scope": "file"
+   },
+   "depth_unit_normalize": {
+    "required_params": [
+     "target_unit"
+    ],
+    "scope": "file"
+   },
+   "derive_curve": {
+    "required_params": [
+     "expression",
+     "result_mnemonic"
+    ],
+    "scope": "derive"
+   }
+  },
+  "generator_id": "curve-interpretation-v2"
+ }
+}

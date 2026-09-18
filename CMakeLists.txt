@@ -176,6 +176,20 @@ if(PWB_BUILD_CONV_09)
     add_subdirectory(libs/well_science)
 endif()
 # END CONV-09
+# BEGIN CONV-11
+# Well-curve interpretation kernels (curve_operations/well_science port,
+# swarm task 11). Independent of every other CONV-* block.
+option(PWB_BUILD_CONV_11
+    "Build the well-curve ops kernel port (libs/well_science, swarm CONV-11)" OFF)
+if(PWB_BUILD_CONV_11)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/well_science/CMakeLists.txt")
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_11=ON but libs/well_science is not "
+            "delivered on this branch")
+    endif()
+    add_subdirectory(libs/well_science)
+endif()
+# END CONV-11
 
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
