@@ -5,6 +5,8 @@
 
 #include <pwb/science_service/registry.hpp>
 
+#include <pwb/factor_fusion/factor_grid.hpp>
+
 #include <pwb/domain/json.hpp>
 #include <pwb/workflow/task_runtime.hpp>
 
@@ -519,7 +521,7 @@ public:
                 for (const auto& cell : row) {
                     grid.grid_z.push_back(
                         cell.is_number()
-                            ? pwb::factor_fusion::FactorGrid::to_grid_cell(
+                            ? pwb::factor_fusion::to_grid_cell(
                                   cell.get<double>())
                             : std::numeric_limits<float>::quiet_NaN());
                 }
@@ -530,7 +532,7 @@ public:
                     for (const auto& cell : row) {
                         grid.variance_grid.push_back(
                             cell.is_number()
-                                ? pwb::factor_fusion::FactorGrid::to_grid_cell(
+                                ? pwb::factor_fusion::to_grid_cell(
                                       cell.get<double>())
                                 : std::numeric_limits<float>::quiet_NaN());
                     }
@@ -563,7 +565,7 @@ public:
         }
         if (grid.grid_z.size() > limits_.max_grid_cells) {
             return detail::make_error(
-                detail::limit_code("grid_cells"),
+                limit_code("grid_cells"),
                 "grid exceeds cell limit " + std::to_string(limits_.max_grid_cells));
         }
         if (detail::stage_guard(stop, progress, 0.2, "validate")) {
@@ -1146,58 +1148,58 @@ private:
 
 }  // namespace
 
-std::shared_ptr<science::IAlgorithm> make_factor_interpolation_adapter(
+std::unique_ptr<science::IAlgorithm> make_factor_interpolation_adapter(
     std::shared_ptr<IPayloadSource> source, std::string build_identity,
     ResourceLimits limits) {
-    return std::make_shared<FactorInterpolationAdapter>(
+    return std::make_unique<FactorInterpolationAdapter>(
         std::move(source), std::move(build_identity), limits);
 }
 
-std::shared_ptr<science::IAlgorithm> make_factor_layer_products_adapter(
+std::unique_ptr<science::IAlgorithm> make_factor_layer_products_adapter(
     std::string build_identity, ResourceLimits limits) {
-    return std::make_shared<FactorLayerProductsAdapter>(
+    return std::make_unique<FactorLayerProductsAdapter>(
         std::move(build_identity), limits);
 }
 
-std::shared_ptr<science::IAlgorithm> make_facies_surface_adapter(
+std::unique_ptr<science::IAlgorithm> make_facies_surface_adapter(
     std::string build_identity, ResourceLimits limits) {
-    return std::make_shared<FaciesSurfaceAdapter>(std::move(build_identity),
+    return std::make_unique<FaciesSurfaceAdapter>(std::move(build_identity),
                                                   limits);
 }
 
-std::shared_ptr<science::IAlgorithm> make_curve_operation_adapter(
+std::unique_ptr<science::IAlgorithm> make_curve_operation_adapter(
     std::string build_identity, ResourceLimits limits) {
-    return std::make_shared<CurveOperationAdapter>(std::move(build_identity),
+    return std::make_unique<CurveOperationAdapter>(std::move(build_identity),
                                                    limits);
 }
 
-std::shared_ptr<science::IAlgorithm> make_log_match_adapter(
+std::unique_ptr<science::IAlgorithm> make_log_match_adapter(
     std::string build_identity, ResourceLimits limits) {
-    return std::make_shared<LogMatchAdapter>(std::move(build_identity),
+    return std::make_unique<LogMatchAdapter>(std::move(build_identity),
                                              limits);
 }
 
-std::shared_ptr<science::IAlgorithm> make_factor_fusion_adapter(
+std::unique_ptr<science::IAlgorithm> make_factor_fusion_adapter(
     std::string build_identity, ResourceLimits limits) {
-    return std::make_shared<FactorFusionAdapter>(std::move(build_identity),
+    return std::make_unique<FactorFusionAdapter>(std::move(build_identity),
                                                  limits);
 }
 
-std::shared_ptr<science::IAlgorithm> make_geomodel_build_adapter(
+std::unique_ptr<science::IAlgorithm> make_geomodel_build_adapter(
     std::string build_identity, ResourceLimits limits) {
-    return std::make_shared<GeomodelBuildAdapter>(std::move(build_identity),
+    return std::make_unique<GeomodelBuildAdapter>(std::move(build_identity),
                                                   limits);
 }
 
-std::shared_ptr<science::IAlgorithm> make_geomodel_section_adapter(
+std::unique_ptr<science::IAlgorithm> make_geomodel_section_adapter(
     std::string build_identity, ResourceLimits limits) {
-    return std::make_shared<GeomodelSectionAdapter>(std::move(build_identity),
+    return std::make_unique<GeomodelSectionAdapter>(std::move(build_identity),
                                                     limits);
 }
 
-std::shared_ptr<science::IAlgorithm> make_geomodel_export_adapter(
+std::unique_ptr<science::IAlgorithm> make_geomodel_export_adapter(
     std::string build_identity, ResourceLimits limits) {
-    return std::make_shared<GeomodelExportAdapter>(std::move(build_identity),
+    return std::make_unique<GeomodelExportAdapter>(std::move(build_identity),
                                                    limits);
 }
 
@@ -1205,7 +1207,7 @@ std::vector<std::string> register_science_services(
     science::AlgorithmRegistry& registry,
     std::shared_ptr<IPayloadSource> source, const std::string& build_identity,
     const ResourceLimits& limits) {
-    std::vector<std::shared_ptr<science::IAlgorithm>> adapters;
+    std::vector<std::unique_ptr<science::IAlgorithm>> adapters;
     adapters.push_back(make_factor_interpolation_adapter(
         std::move(source), build_identity, limits));
     adapters.push_back(

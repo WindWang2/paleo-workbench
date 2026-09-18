@@ -89,6 +89,14 @@ FactorInterpolationService::FactorInterpolationService(std::string build_identit
 science::Result<FactorInterpolationResult> FactorInterpolationService::run(
     const FactorInterpolationRequest& request, science::ProgressSink progress,
     std::stop_token stop) {
+    // Dataset CRS governs the interpolation stage (D5 distance policy): a
+    // caller who left interpolate.crs unset still expects the declared
+    // dataset CRS to reach the kernel — otherwise the grid annotates
+    // "undeclared" even though the dataset declared one.
+    pwb::mapping::InterpolateOptions interpolate = request.interpolate;
+    if (interpolate.crs.empty() && !request.crs.empty()) {
+        interpolate.crs = request.crs;
+    }
     // ---- stage 0: resource guards (fail closed before allocating) ----------
     if (request.well_records.size() > limits_.max_input_records) {
         return detail::make_error(
@@ -278,7 +286,7 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
         auto grid_result =
             detail::catch_kernel<FactorGrid>("factor.interpolate", [&] {
                 return pwb::mapping::interpolate_factor(points,
-                                                        request.interpolate);
+                                                        interpolate);
             });
         if (grid_result.is_error()) {
             return grid_result.error();
@@ -333,10 +341,10 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
     // Unit validation (factor_units whitelist) — Python collects problems as
     // task quality warnings, not failures; mirror that as warnings here.
     {
-        std::vector<double> values;
+        std::vector<float> values;
         values.reserve(points.size());
         for (const auto& p : points) {
-            values.push_back(p.value);
+            values.push_back(static_cast<float>(p.value));
         }
         for (const std::string& problem : pwb::factor_fusion::
                  validate_factor_unit_against_values(

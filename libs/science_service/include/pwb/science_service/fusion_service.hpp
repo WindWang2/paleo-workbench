@@ -17,7 +17,10 @@
 
 #include <pwb/factor_fusion/fusion.hpp>
 #include <pwb/mapping/interpolator.hpp>
+#include <pwb/science/algorithm.hpp>
 #include <pwb/science/outcome.hpp>
+
+#include <stop_token>
 
 #include <map>
 #include <optional>

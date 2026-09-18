@@ -31,7 +31,10 @@
 #include <pwb/mapping/extract.hpp>
 #include <pwb/mapping/interpolator.hpp>
 #include <pwb/mapping/layer_products.hpp>
+#include <pwb/science/algorithm.hpp>
 #include <pwb/science/outcome.hpp>
+
+#include <stop_token>
 
 #include <memory>
 #include <optional>

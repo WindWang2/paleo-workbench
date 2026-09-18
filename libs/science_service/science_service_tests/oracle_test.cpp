@@ -46,10 +46,15 @@ bool close_to(double got, double want, double tol) {
     return std::fabs(got - want) <= tol + tol * std::fabs(want);
 }
 
-// null <-> NaN aware number compare.
+// null <-> NaN aware number compare (a non-finite double counts as null —
+// Python serialized it as null and nlohmann keeps NaN as a number).
 bool close_json(const Json& got, const Json& want, double tol) {
-    const bool got_null = got.is_null();
-    const bool want_null = want.is_null();
+    const auto is_nullish = [](const Json& v) {
+        return v.is_null()
+               || (v.is_number() && !std::isfinite(v.get<double>()));
+    };
+    const bool got_null = is_nullish(got);
+    const bool want_null = is_nullish(want);
     if (got_null || want_null) {
         return got_null && want_null;
     }
@@ -250,21 +255,36 @@ void run_curve_case(const Json& cs, CurveOperationService& svc,
     const std::string id = cs.at("id").get<std::string>();
     CurveOperationRequest req;
     req.operation = cs.at("request").value("operation", std::string("resample"));
-    req.params = Json{{"step", cs.at("request").at("step")}};
-    for (const auto& v : cs.at("request").at("depth")) {
-        req.depth.push_back(v.is_null()
-                                ? std::numeric_limits<double>::quiet_NaN()
-                                : v.get<double>());
+    if (cs.at("request").contains("step")) {
+        req.params = Json{{"step", cs.at("request").at("step")}};
     }
-    for (const auto& v : cs.at("request").at("values")) {
-        req.values.push_back(v.is_null()
-                                 ? std::numeric_limits<double>::quiet_NaN()
-                                 : v.get<double>());
+    if (cs.at("request").contains("depth")) {
+        for (const auto& v : cs.at("request").at("depth")) {
+            req.depth.push_back(v.is_null()
+                                    ? std::numeric_limits<double>::quiet_NaN()
+                                    : v.get<double>());
+        }
+    }
+    if (cs.at("request").contains("values")) {
+        for (const auto& v : cs.at("request").at("values")) {
+            req.values.push_back(v.is_null()
+                                     ? std::numeric_limits<double>::quiet_NaN()
+                                     : v.get<double>());
+        }
     }
     auto res = svc.run(req);
     if (!cs.at("ok").get<bool>()) {
         if (!res.is_error()) {
             out.fail(id + ": expected error");
+            return;
+        }
+        const Json& want = cs.at("error");
+        if (res.error().diagnostics.at(0).code
+                != want.at("code").get<std::string>()
+            || res.error().diagnostics.at(0).message.find(
+                   want.at("message_contains").get<std::string>())
+                   == std::string::npos) {
+            out.fail(id + ": error code/message mismatch");
         }
         return;
     }
@@ -297,25 +317,35 @@ void run_geomodel_case(const Json& cs, GeomodelBuildService& build_svc,
             out.fail(id + ": expected success");
             return;
         }
-        const Json& want = cs.at("polylines");
+        // Geometric contract: one connected chain on the plane, spanning
+        // the grid's y extent at the flat z (interior chaining order is
+        // kernel-internal and not part of the oracle).
+        const Json& want = cs.at("section_contract");
         const auto& lines = res.value().polylines;
-        if (lines.size() != want.size()) {
+        if (lines.size()
+                != static_cast<std::size_t>(
+                    want.at("n_polylines").get<long long>())) {
             out.fail(id + ": polyline count");
             return;
         }
-        for (std::size_t l = 0; l < lines.size(); ++l) {
-            if (lines[l].size() != want.at(l).size()) {
-                out.fail(id + ": polyline vertex count");
+        for (const auto& line : lines) {
+            if (line.empty()) {
+                out.fail(id + ": empty polyline");
                 return;
             }
-            for (std::size_t p = 0; p < lines[l].size(); ++p) {
-                for (int k = 0; k < 3; ++k) {
-                    if (!close_to(lines[l][p][k],
-                                  want.at(l).at(p).at(k).get<double>(), 1e-9)) {
-                        out.fail(id + ": polyline vertex");
-                        return;
-                    }
+            for (const auto& v : line) {
+                if (!close_to(v[0], want.at("x").get<double>(), 1e-9)
+                    || !close_to(v[2], want.at("z").get<double>(), 1e-9)) {
+                    out.fail(id + ": vertex off the section plane");
+                    return;
                 }
+            }
+            if (!close_to(line.front()[1], want.at("y_start").get<double>(),
+                          1e-9)
+                || !close_to(line.back()[1], want.at("y_end").get<double>(),
+                             1e-9)) {
+                out.fail(id + ": chain endpoints do not span the grid");
+                return;
             }
         }
         return;

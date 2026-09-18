@@ -3,6 +3,7 @@
 // pwb::science_service — internal support shared by the service sources.
 // Not installed, not part of the public API.
 
+#include <pwb/science/algorithm.hpp>
 #include <pwb/science/outcome.hpp>
 #include <pwb/science/types.hpp>
 
@@ -28,7 +29,7 @@ namespace pwb::science_service::detail {
                         .count() % 1000;
     std::tm tm_buf{};
     gmtime_r(&secs, &tm_buf);
-    char buf[32];
+    char buf[64];
     std::snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
                   tm_buf.tm_year + 1900, tm_buf.tm_mon + 1, tm_buf.tm_mday,
                   tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec,

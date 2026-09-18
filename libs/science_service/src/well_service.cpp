@@ -14,11 +14,10 @@
 namespace pwb::science_service {
 
 using pwb::domain::Json;
-using pwb::well_science::CurveOpError;
 
 namespace {
 
-[[nodiscard]] bool get_number(const Json& params, const std::string& key,
+bool get_number(const Json& params, const std::string& key,
                               double& out) {
     if (!params.is_object() || !params.contains(key)) {
         return false;
@@ -31,7 +30,7 @@ namespace {
     return true;
 }
 
-[[nodiscard]] bool get_int(const Json& params, const std::string& key,
+bool get_int(const Json& params, const std::string& key,
                            long long& out) {
     double v = 0.0;
     if (!get_number(params, key, v)) {
@@ -66,7 +65,7 @@ science::Result<CurveOperationResult> CurveOperationService::run(
     std::stop_token stop) {
     if (request.values.size() > limits_.max_curve_samples) {
         return detail::make_error(
-            detail::limit_code("curve_samples"),
+            limit_code("curve_samples"),
             "curve length " + std::to_string(request.values.size())
                 + " exceeds limit " + std::to_string(limits_.max_curve_samples));
     }
@@ -114,14 +113,23 @@ science::Result<CurveOperationResult> CurveOperationService::run(
             "unknown curve operation '" + request.operation
                 + "'; registered: " + known);
     }
-    // Required-parameter check (the table's required_params list).
+    // Required-parameter check (the table's required_params list). A param
+    // counts as supplied when it is in the params object OR carried by the
+    // typed request fields (unit_conversion reads from_unit/to_unit fields).
     for (const auto& required : info_it->required_params) {
-        if (!request.params.is_object()
-            || !request.params.contains(std::string(required))) {
+        const std::string name(required);
+        const bool in_params =
+            request.params.is_object() && request.params.contains(name);
+        bool in_typed = false;
+        if (name == "from_unit") in_typed = request.from_unit.has_value();
+        else if (name == "to_unit") in_typed = request.to_unit.has_value();
+        else if (name == "axis_unit") in_typed = request.axis_unit.has_value();
+        else in_typed = false;
+        if (!in_params && !in_typed) {
             return detail::make_error(
                 "well.missing_param",
                 "operation '" + request.operation + "' requires parameter '"
-                    + std::string(required) + "'");
+                    + name + "'");
         }
     }
 
@@ -133,7 +141,7 @@ science::Result<CurveOperationResult> CurveOperationService::run(
     // Dispatch returns an int so catch_kernel's Result<T> has an object type
     // (std::variant<void> is not instantiable).
     auto dispatch = [&]() -> int {
-        if (op == "moving_average") {
+        if (op == "smooth") {
             int window = 5;
             long long w = 0;
             if (get_int(request.params, "window", w)) window = static_cast<int>(w);
@@ -154,7 +162,7 @@ science::Result<CurveOperationResult> CurveOperationService::run(
             if (get_number(request.params, "percentile", v)) percentile = v;
             out_values =
                 pwb::well_science::clip_outliers(request.values, lower, upper, percentile);
-        } else if (op == "convert_units") {
+        } else if (op == "unit_conversion") {
             out_values = pwb::well_science::convert_values(
                 request.values, request.from_unit, request.to_unit);
             report["factor"] =
@@ -167,34 +175,6 @@ science::Result<CurveOperationResult> CurveOperationService::run(
                 out_depth, request.depth, request.values);
             report["step"] = step;
             report["n_output"] = static_cast<std::uint64_t>(out_depth.size());
-        } else if (op == "interp_display") {
-            double step = 0.0;
-            get_number(request.params, "step", step);
-            out_depth = pwb::well_science::resample_axis(request.depth, step);
-            out_values = pwb::well_science::interp_nan_aware(
-                out_depth, request.depth, request.values);
-            report["step"] = step;
-            report["deprecated_semantics"] = true;
-        } else if (op == "interp_scientific") {
-            double step = 0.0;
-            get_number(request.params, "step", step);
-            out_depth = pwb::well_science::resample_axis(request.depth, step);
-            out_values = pwb::well_science::interp_gap_preserving(
-                out_depth, request.depth, request.values);
-            report["step"] = step;
-        } else if (op == "missing_intervals") {
-            const auto missing = pwb::well_science::missing_interval_report(
-                request.depth, request.values);
-            out_values = request.values;
-            Json intervals = Json::array();
-            for (const auto& [lo, hi] : missing.intervals) {
-                intervals.push_back(Json{lo, hi});
-            }
-            report["intervals"] = std::move(intervals);
-            report["total_samples"] = missing.total_samples;
-            report["missing_samples"] = missing.missing_samples;
-            report["missing_fraction"] = missing.missing_fraction();
-            report["largest_gap"] = missing.largest_gap();
         } else if (op == "depth_shift") {
             double delta_m = 0.0;
             get_number(request.params, "delta_m", delta_m);
@@ -218,12 +198,17 @@ science::Result<CurveOperationResult> CurveOperationService::run(
             get_number(request.params, "delta", delta);
             out_values = pwb::well_science::baseline_shift(request.values, delta);
         } else {
-            // Unreachable: the table check above filtered unknown names.
-            throw std::runtime_error("undispatched operation '" + op + "'");
+            // Registered in the table but not yet dispatched by this
+            // service (depth_unit_normalize / derive_curve): refuse
+            // honestly instead of half-running.
+            throw std::runtime_error(
+                "operation '" + op
+                + "' is registered but not dispatched by the science "
+                  "service yet");
         }
         return 0;
     };
-    auto outcome = detail::catch_kernel<void>("well.curve_operation", dispatch);
+    auto outcome = detail::catch_kernel<int>("well.curve_operation", dispatch);
     if (outcome.is_error()) {
         return outcome.error();
     }
@@ -288,7 +273,7 @@ science::Result<LogMatchResult> LogMatchService::run(
     if (request.reference.size() > limits_.max_curve_samples
         || request.target.size() > limits_.max_curve_samples) {
         return detail::make_error(
-            detail::limit_code("curve_samples"),
+            limit_code("curve_samples"),
             "curve length exceeds limit "
                 + std::to_string(limits_.max_curve_samples));
     }

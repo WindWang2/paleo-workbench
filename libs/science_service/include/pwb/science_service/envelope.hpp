@@ -60,9 +60,11 @@ struct ScienceEnvelope {
     // Round-trip; throws std::invalid_argument on a foreign shape.
     [[nodiscard]] static ScienceEnvelope from_json(const Json& data);
 
-    // Compute and set `fingerprint` from the current payload (factor_host
-    // canonical encoding). Returns the fingerprint.
-    [[nodiscard]] std::string compute_fingerprint() const;
+    // Compute and store `fingerprint` from the current payload (factor_host
+    // canonical encoding). Mutating.
+    void compute_fingerprint();
+    // Pure verifier: the sha256 the payload hashes to, without storing.
+    [[nodiscard]] std::string fingerprint_of_payload() const;
 };
 
 // Serialize with Python-compatible formatting

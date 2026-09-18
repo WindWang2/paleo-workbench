@@ -26,7 +26,10 @@
 #include <pwb/geomodel/domain_contract.hpp>
 #include <pwb/geomodel/fault_displacement.hpp>
 #include <pwb/geomodel/section.hpp>
+#include <pwb/science/algorithm.hpp>
 #include <pwb/science/outcome.hpp>
+
+#include <stop_token>
 
 #include <array>
 #include <optional>
@@ -76,6 +79,10 @@ public:
         const GeomodelBuildRequest& request,
         science::ProgressSink progress = nullptr,
         std::stop_token stop = {});
+
+private:
+    std::string build_identity_;
+    ResourceLimits limits_;
 };
 
 // ---------------------------------------------------------------------------
@@ -106,6 +113,10 @@ public:
         const GeomodelSectionRequest& request,
         science::ProgressSink progress = nullptr,
         std::stop_token stop = {});
+
+private:
+    std::string build_identity_;
+    ResourceLimits limits_;
 };
 
 // ---------------------------------------------------------------------------
@@ -132,6 +143,10 @@ public:
         const FaultDisplacementRequest& request,
         science::ProgressSink progress = nullptr,
         std::stop_token stop = {});
+
+private:
+    std::string build_identity_;
+    ResourceLimits limits_;
 };
 
 // ---------------------------------------------------------------------------
@@ -167,6 +182,10 @@ public:
         const GeomodelExportRequest& request,
         science::ProgressSink progress = nullptr,
         std::stop_token stop = {});
+
+private:
+    std::string build_identity_;
+    ResourceLimits limits_;
 };
 
 // Parse the horizon grid DTO shared by build/section (throws

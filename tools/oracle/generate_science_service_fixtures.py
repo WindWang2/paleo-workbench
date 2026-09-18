@@ -177,7 +177,8 @@ def _factor_case(cid: str, records: list[dict], *, policy: str = "mean",
     except ValueError as exc:
         return {
             "id": cid, "kind": "factor", "request": request, "ok": False,
-            "error": {"code": "factor.normalize", "message": str(exc)},
+            "error": {"code": "factor.normalize",
+                      "message": f"ValueError: {exc}"},
         }
     ds = _dataset_from_points(points)
     if not ds.valid_points:
@@ -354,8 +355,20 @@ def main() -> None:
         # --- factor pipeline ------------------------------------------------
         _factor_case("idw_basic", RECORDS_4, with_contours=True),
         _factor_case("idw_grid_small", RECORDS_4, grid_n=6),
+        # kNN + radius combination. Sample geometry is deliberately
+        # ASYMMETRIC: the C++ kernel's frozen kNN parity contract covers
+        # unique-distance neighbour sets; equidistant ties break differently
+        # in scipy's cKDTree than in the brute-force port (documented in
+        # mapping_kernel interpolator.hpp).
         _factor_case(
-            "idw_knn", RECORDS_4, max_neighbors=2, search_radius=8.0),
+            "idw_knn",
+            [
+                {"well_id": "w1", "x": 0.0, "y": 0.0, "value": 10.0},
+                {"well_id": "w2", "x": 9.4, "y": 1.1, "value": 20.0},
+                {"well_id": "w3", "x": 0.7, "y": 8.2, "value": 30.0},
+                {"well_id": "w4", "x": 10.0, "y": 9.6, "value": 40.0},
+            ],
+            max_neighbors=2, search_radius=8.0),
         _factor_case("kriging_spherical", RECORDS_4, method="kriging"),
         _factor_case("duplicates_mean", RECORDS_4 + [TWIN]),
         _factor_case("duplicates_error", RECORDS_4 + [TWIN], policy="error"),
@@ -408,12 +421,20 @@ def main() -> None:
         _geomodel_case(
             "geomodel_crossed", _horizon(3, 3, 30.0), _horizon(3, 3, 20.0)),
         {
+            # Flat heightfield, generic in-cell x-plane. The frozen contract
+            # is geometric (one connected chain spanning y=0..y=2, every
+            # vertex on the plane at z=10) — interior chaining order is
+            # kernel-internal. A plane exactly ON a node column (x=1.0) is
+            # deliberately not frozen: on-plane chaining is unspecified.
             "id": "geomodel_section", "kind": "geomodel_section",
             "request": {"source": _horizon(3, 3, 10.0),
-                        "plane": {"axis": "x", "value": 1.0}},
+                        "plane": {"axis": "x", "value": 0.4}},
             "ok": True,
-            "polylines": [[[1.0, 0.0, 10.0], [1.0, 1.0, 10.0],
-                           [1.0, 2.0, 10.0]]],
+            "section_contract": {
+                "n_polylines": 1,
+                "x": 0.4, "z": 10.0,
+                "y_start": 0.0, "y_end": 2.0,
+            },
             "source": "analytic",
         },
     ]

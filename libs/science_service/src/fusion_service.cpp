@@ -21,7 +21,7 @@ float cell_value(const Json& v) {
     if (v.is_null() || !v.is_number()) {
         return std::numeric_limits<float>::quiet_NaN();
     }
-    return FactorGrid::to_grid_cell(v.get<double>());
+    return pwb::factor_fusion::to_grid_cell(v.get<double>());
 }
 
 }  // namespace
@@ -96,7 +96,7 @@ science::Result<FactorFusionResult> FactorFusionService::run(
     for (const auto& [name, grid] : request.parsed_grids) {
         if (grid.grid_z.size() > limits_.max_grid_cells) {
             return detail::make_error(
-                detail::limit_code("grid_cells"),
+                limit_code("grid_cells"),
                 "fusion input grid '" + name + "' has "
                     + std::to_string(grid.grid_z.size()) + " cells (limit "
                     + std::to_string(limits_.max_grid_cells) + ")");
@@ -106,8 +106,19 @@ science::Result<FactorFusionResult> FactorFusionService::run(
         return science::TaskCancelled{"validate"};
     }
 
-    // Convert legacy dicts; parsed grids win by name.
-    std::map<std::string, FactorGrid> grids = request.parsed_grids;
+    // Convert legacy dicts; parsed grids win by name. The parsed payload
+    // grids are mapping-kernel carriers — convert to fusion carriers.
+    std::map<std::string, FactorGrid> grids;
+    for (const auto& [name, parsed] : request.parsed_grids) {
+        FactorGrid converted;
+        converted.grid_z = parsed.grid_z;
+        converted.height = static_cast<int>(parsed.grid_y.size());
+        converted.width = static_cast<int>(parsed.grid_x.size());
+        converted.grid_x = parsed.grid_x;
+        converted.grid_y = parsed.grid_y;
+        converted.factor_name = name;
+        grids.emplace(name, std::move(converted));
+    }
     if (request.grids.is_object()) {
         for (auto it = request.grids.begin(); it != request.grids.end(); ++it) {
             if (grids.contains(it.key())) {
@@ -122,7 +133,7 @@ science::Result<FactorFusionResult> FactorFusionService::run(
             }
             if (converted.value().grid_z.size() > limits_.max_grid_cells) {
                 return detail::make_error(
-                    detail::limit_code("grid_cells"),
+                    limit_code("grid_cells"),
                     "fusion input grid '" + it.key() + "' exceeds cell limit "
                         + std::to_string(limits_.max_grid_cells));
             }

@@ -198,7 +198,7 @@ pwb::geomodel::DomainObject domain_object_from_request(const Json& object) {
             boundary = default_boundary(top);
         }
         const std::string object_id =
-            object.value("object_id", std::string("vol:service"));
+            object.value("object_id", std::string("volume:service"));
         auto shell = pwb::geomodel::build_volume_shell(top, base, boundary,
                                                        object_id);
         pwb::geomodel::DomainObject obj;
@@ -249,7 +249,7 @@ science::Result<GeomodelBuildResult> GeomodelBuildService::run(
         static_cast<std::size_t>(top.rows) * top.cols;
     if (lattice > limits_.max_geomodel_vertices) {
         return detail::make_error(
-            detail::limit_code("geomodel_vertices"),
+            limit_code("geomodel_vertices"),
             "horizon lattice of " + std::to_string(lattice)
                 + " nodes exceeds limit "
                 + std::to_string(limits_.max_geomodel_vertices));
@@ -493,13 +493,15 @@ science::Result<ScienceEnvelope> FaultDisplacementService::run(
             }
             const auto line =
                 ring_from_json(request.spec.at("fault_line"), "fault_line");
-            pwb::geomodel::FaultSpec spec;
-            spec.fault_line_x.reserve(line.size());
-            spec.fault_line_y.reserve(line.size());
-            for (const auto& [x, y] : line) {
-                spec.fault_line_x.push_back(x);
-                spec.fault_line_y.push_back(y);
+            if (line.empty()) {
+                throw std::invalid_argument(
+                    "spec fault_line must carry at least one [x, y] anchor");
             }
+            pwb::geomodel::FaultSpec spec;
+            // The kernel takes a single anchor point; the production
+            // adapter reduces the trace to its first vertex.
+            spec.fault_line_x = line.front()[0];
+            spec.fault_line_y = line.front()[1];
             spec.throw_z = request.spec.value("throw_z", 0.0);
             spec.throw_x = request.spec.value("throw_x", 0.0);
             spec.dip_deg = request.spec.value("dip_deg", 60.0);

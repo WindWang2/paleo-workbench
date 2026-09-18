@@ -14,7 +14,10 @@
 // NaN discipline, duplicate/unsorted depth handling and unit whitelists are
 // the kernels' frozen contracts — this layer never relaxes them.
 
+#include <pwb/science/algorithm.hpp>
 #include <pwb/science/outcome.hpp>
+
+#include <stop_token>
 #include <pwb/well_science/dtw.hpp>
 
 #include <cstdint>

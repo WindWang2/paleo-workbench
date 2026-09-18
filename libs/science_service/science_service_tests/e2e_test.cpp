@@ -6,6 +6,8 @@
 //   envelope files verifiable by a workflow adapter (node_request mapper).
 // Plus the failure and cancelled publication paths (publish-before-terminal).
 
+#include <unistd.h>
+
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -20,6 +22,7 @@
 #include <pwb/workflow/task_runtime.hpp>
 
 using namespace pwb::science_service;
+namespace science = pwb::science;
 using pwb::domain::Json;
 
 namespace {
@@ -69,6 +72,8 @@ int main() {
     // --- assemble the service closure --------------------------------------
     auto source = std::make_shared<InMemoryPayloadSource>();
     source->put_table("dver_wells_1", catalog_like_dto());
+    // An empty table version: a legitimate payload that yields no samples.
+    source->put_table("dver_empty_1", Json::array());
 
     science::AlgorithmRegistry registry;
     const auto ids = register_science_services(registry, source, "e2e-build");
@@ -77,8 +82,8 @@ int main() {
     // Host-owned adapter instance (the AlgorithmRunner pattern: the host
     // keeps shared ownership for TaskRuntime submission; the registry above
     // mirrors the descriptors for discovery/validation).
-    auto factor_algorithm =
-        make_factor_interpolation_adapter(source, "e2e-build");
+    std::shared_ptr<pwb::science::IAlgorithm> factor_algorithm(
+        make_factor_interpolation_adapter(source, "e2e-build"));
     check(factor_algorithm->descriptor().algorithm_id
               == "mapping.factor_interpolate",
           "e2e: factor adapter id");
@@ -135,7 +140,7 @@ int main() {
 
     // Round-trip through the envelope codec: fingerprint verifies.
     ScienceEnvelope parsed = ScienceEnvelope::from_json(envelope);
-    check(parsed.recompute_fingerprint() == parsed.fingerprint,
+    check(parsed.fingerprint_of_payload() == parsed.fingerprint,
           "e2e: persisted fingerprint verifies");
 
     const Json result_dump = read_json_file(ok_dir / "result.json");
@@ -149,9 +154,12 @@ int main() {
           "e2e: input ref carried into provenance");
 
     // --- failure path: unknown factor -> publish_failure + failure.json ----
-    const Json bad_params = Json{{"factor_name", "nonexistent_factor_xyz"}};
+    science::VersionRef empty_ref;
+    empty_ref.asset_id = "ast_empty";
+    empty_ref.version_id = "dver_empty_1";
+    const Json bad_params = Json{{"factor_name", "gr"}};
     auto bad_request =
-        node_request("mapping.factor_interpolate", bad_params, {input_ref},
+        node_request("mapping.factor_interpolate", bad_params, {empty_ref},
                      "req_e2e_fail");
     auto bad_handle = runtime.submit(factor_algorithm, bad_request, publisher);
     bad_handle.wait();
@@ -162,7 +170,8 @@ int main() {
     check(std::filesystem::exists(tmp / "req_e2e_fail" / "failure.json"),
           "e2e: failure.json persisted");
     const Json failure = read_json_file(tmp / "req_e2e_fail" / "failure.json");
-    check(failure.at("code") == "factor.no_samples",
+    check(!failure.is_null(), "e2e: failure.json parses");
+    check(!failure.is_null() && failure.at("code") == "factor.no_samples",
           "e2e: failure code stable");
     check(!std::filesystem::exists(tmp / "req_e2e_fail" / "envelope.json"),
           "e2e: no envelope on failure");
@@ -180,6 +189,7 @@ int main() {
           "e2e: task cancelled");
     const Json cancel_failure =
         read_json_file(tmp / "req_e2e_cancel" / "failure.json");
+    check(!cancel_failure.is_null(), "e2e: cancelled failure.json parses");
     check(!cancel_failure.is_null()
               && cancel_failure.at("cancelled") == true,
           "e2e: cancelled published as failure");

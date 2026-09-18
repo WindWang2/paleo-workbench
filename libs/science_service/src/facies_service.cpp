@@ -78,12 +78,12 @@ science::Result<FaciesSurfaceResult> FaciesSurfaceService::run(
     if (request.grid_n < 2 || request.grid_n > limits_.max_grid_n
         || static_cast<std::size_t>(cells) > limits_.max_grid_cells) {
         return detail::make_error(
-            detail::limit_code("grid_n"),
+            limit_code("grid_n"),
             "grid_n " + std::to_string(request.grid_n) + " outside limits");
     }
     if (request.well_points.size() > limits_.max_input_records) {
         return detail::make_error(
-            detail::limit_code("input_records"),
+            limit_code("input_records"),
             "well_points size exceeds limit "
                 + std::to_string(limits_.max_input_records));
     }

@@ -48,9 +48,12 @@ std::optional<std::array<double, 4>> extent_from_json(const Json& data) {
 
 }  // namespace
 
-std::string ScienceEnvelope::compute_fingerprint() const {
+void ScienceEnvelope::compute_fingerprint() {
     fingerprint = pwb::factor_host::stable_sha256(payload);
-    return fingerprint;
+}
+
+std::string ScienceEnvelope::fingerprint_of_payload() const {
+    return pwb::factor_host::stable_sha256(payload);
 }
 
 Json ScienceEnvelope::to_json() const {
@@ -81,14 +84,15 @@ ScienceEnvelope ScienceEnvelope::from_json(const Json& data) {
     }
     env.schema_version = data.at("schema_version").get<int>();
     env.result_type = data.at("result_type").get<std::string>();
-    env.units = data.value("units", std::string());
-    if (data.at("units").is_null()) {
-        env.units = "";
-    }
-    env.crs = data.value("crs", std::string());
-    if (data.at("crs").is_null()) {
-        env.crs = "";
-    }
+    // value(key, default) does NOT fall back when the key exists as null
+    // (undeclared units/crs serialize as null) — read explicitly.
+    const auto string_or_empty = [&data](const char* key) {
+        return data.contains(key) && data.at(key).is_string()
+                   ? data.at(key).get<std::string>()
+                   : std::string();
+    };
+    env.units = string_or_empty("units");
+    env.crs = string_or_empty("crs");
     env.extent = extent_from_json(data.contains("extent")
                                       ? data.at("extent")
                                       : Json(nullptr));

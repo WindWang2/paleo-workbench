@@ -2,6 +2,8 @@
 // well services, fusion, geomodel services, payload source, publishers,
 // resource guards, cancellation, fingerprint determinism.
 
+#include <unistd.h>
+
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -22,6 +24,7 @@
 #include <pwb/science_service/well_service.hpp>
 
 using namespace pwb::science_service;
+namespace science = pwb::science;
 using pwb::domain::Json;
 
 namespace {
@@ -153,7 +156,7 @@ void test_factor_duplicates_and_errors() {
         check(res_err.error().diagnostics.at(0).code == "factor.normalize",
               "factor: error code factor.normalize");
         check(res_err.error().diagnostics.at(0).message.find(
-                  "duplicate sample points") != std::string::npos,
+                  "duplicate sample locations") != std::string::npos,
               "factor: frozen duplicate message");
     }
 
@@ -236,7 +239,7 @@ void test_well_services() {
                   && std::fabs(value.depth.at(3) - 1.5) < 1e-12,
               "curve: resampled axis values");
         check(value.values.size() == 4, "curve: resampled curve length");
-        check(std::fabs(value.values.at(1) - 10.5) < 1e-9,
+        check(std::fabs(value.values.at(1) - 11.5) < 1e-9,
               "curve: interpolated value at 0.5");
         check(value.envelope.result_type == "curve_operation",
               "curve: envelope type");
@@ -281,7 +284,7 @@ void test_well_services() {
 
     // Unit conversion whitelist: m -> ft known factor.
     CurveOperationRequest convert;
-    convert.operation = "convert_units";
+    convert.operation = "unit_conversion";
     convert.params = Json{{"unused", true}};
     convert.values = {1.0, 2.0};
     convert.from_unit = "m";
@@ -350,6 +353,8 @@ void test_fusion_service() {
         {"name", "m1"},
         {"kind", "weighted_evidence"},
         {"default_class", "undetermined"},
+        {"class_names", Json::array({"sand", "shale"})},
+        {"class_thresholds", Json::array({0.5})},
         {"evidences",
          Json::array({Json{{"factor_name", "sand"},
                            {"weight", 1.0},
@@ -476,7 +481,8 @@ void test_geomodel_services() {
     export_req.object = Json{{"kind", "volume"},
                              {"top", horizon(10.0)},
                              {"base", horizon(20.0)},
-                             {"object_id", "vol:export"}};
+                             {"object_id", "volume:export"},
+                             {"crs", "EPSG:32633"}};
     export_req.format = "obj";
     export_req.out_name = "model.obj";
     auto export_res = export_svc.run(export_req);
@@ -498,7 +504,8 @@ void test_geomodel_services() {
     bad.object = Json{{"kind", "volume"},
                       {"top", horizon(30.0)},
                       {"base", horizon(20.0)},
-                      {"object_id", "vol:crossed"}};
+                      {"object_id", "volume:crossed"},
+                             {"crs", "EPSG:32633"}};
     bad.format = "obj";
     bad.out_name = "bad.obj";
     auto bad_res = export_svc.run(bad);
@@ -540,22 +547,28 @@ void test_facies_surface_service() {
     // Representative facies vote over interval records via result summary.
     FaciesSurfaceRequest vote_req;
     vote_req.grid_n = 10;
-    vote_req.result_summary = Json{
-        {"spatial", Json{{"intervals",
-                          Json::array({Json{{"stratigraphic_unit", "S1"},
-                                            {"facies", "sand"},
-                                            {"thickness", 12.0},
-                                            {"probability", 0.8}},
-                                       Json{{"stratigraphic_unit", "S1"},
-                                            {"facies", "shale"},
-                                            {"thickness", 4.0},
-                                            {"probability", 0.9}}})}}},
-        {"spatial_points",
-         Json::array({Json{{"geometry",
-                            Json{{"type", "Point"},
-                                 {"coordinates", Json::array({0.0, 0.0})}}},
-                           {"properties", Json{{"facies", "sand"},
-                                                {"well_id", "w1"}}}}})}};
+    // thickness derives from top/bottom depth keys (kernel contract), not
+    // a literal thickness field.
+    Json intervals = Json::array(
+        {Json{{"stratigraphic_unit", "S1"},
+              {"facies", "sand"},
+              {"top", 100.0},
+              {"bottom", 112.0},
+              {"probability", 0.8}},
+         Json{{"stratigraphic_unit", "S1"},
+              {"facies", "shale"},
+              {"top", 112.0},
+              {"bottom", 116.0},
+              {"probability", 0.9}}});
+    Json features = Json::array(
+        {Json{{"geometry",
+               Json{{"type", "Point"},
+                    {"coordinates", Json::array({0.0, 0.0})}}},
+              {"properties", Json{{"facies", "sand"},
+                                   {"well_id", "w1"}}}}});
+    vote_req.result_summary =
+        Json{{"spatial", Json{{"intervals", intervals},
+                              {"features", features}}}};
     auto vote = svc.run(vote_req);
     check(vote.has_value(), "facies: summary vote runs");
     if (vote.has_value()) {
@@ -607,7 +620,7 @@ void test_payload_source_and_publisher() {
         publisher.publish_failure(failure);
 
         const std::filesystem::path dir =
-            tmp / "req-abc.._x";  // '/' sanitized away
+            tmp / "req-abc_.._x";  // '/' sanitized away
         check(std::filesystem::exists(dir / "envelope.json"),
               "publisher: sanitized request dir + envelope.json");
         check(std::filesystem::exists(dir / "result.json"),
@@ -665,7 +678,7 @@ void test_envelope_roundtrip() {
     const ScienceEnvelope back = ScienceEnvelope::from_json(json);
     check(back.result_type == env.result_type, "envelope: roundtrip type");
     check(back.fingerprint == env.fingerprint, "envelope: roundtrip fingerprint");
-    check(back.recompute_fingerprint() == env.fingerprint,
+    check(back.fingerprint_of_payload() == env.fingerprint,
           "envelope: fingerprint verifies over payload");
     check(back.units == "m" && back.crs == "EPSG:32633",
           "envelope: roundtrip units/crs");

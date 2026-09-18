@@ -40,33 +40,33 @@ namespace pwb::science_service {
 
 // --- adapter factories (one IAlgorithm per service) ------------------------
 
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_factor_interpolation_adapter(std::shared_ptr<IPayloadSource> source,
                                   std::string build_identity = "local",
                                   ResourceLimits limits = ResourceLimits::defaults());
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_factor_layer_products_adapter(
     std::string build_identity = "local",
     ResourceLimits limits = ResourceLimits::defaults());
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_facies_surface_adapter(std::string build_identity = "local",
                             ResourceLimits limits = ResourceLimits::defaults());
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_curve_operation_adapter(std::string build_identity = "local",
                              ResourceLimits limits = ResourceLimits::defaults());
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_log_match_adapter(std::string build_identity = "local",
                        ResourceLimits limits = ResourceLimits::defaults());
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_factor_fusion_adapter(std::string build_identity = "local",
                            ResourceLimits limits = ResourceLimits::defaults());
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_geomodel_build_adapter(std::string build_identity = "local",
                             ResourceLimits limits = ResourceLimits::defaults());
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_geomodel_section_adapter(std::string build_identity = "local",
                               ResourceLimits limits = ResourceLimits::defaults());
-[[nodiscard]] std::shared_ptr<science::IAlgorithm>
+[[nodiscard]] std::unique_ptr<science::IAlgorithm>
 make_geomodel_export_adapter(std::string build_identity = "local",
                              ResourceLimits limits = ResourceLimits::defaults());
 

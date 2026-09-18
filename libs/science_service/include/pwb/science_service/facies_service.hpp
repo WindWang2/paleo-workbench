@@ -10,7 +10,10 @@
 // prediction result summary dict.
 
 #include <pwb/mapping/representative_facies.hpp>
+#include <pwb/science/algorithm.hpp>
 #include <pwb/science/outcome.hpp>
+
+#include <stop_token>
 
 #include <array>
 #include <optional>
@@ -62,6 +65,10 @@ public:
         const FaciesSurfaceRequest& request,
         science::ProgressSink progress = nullptr,
         std::stop_token stop = {});
+
+private:
+    std::string build_identity_;
+    ResourceLimits limits_;
 };
 
 }  // namespace pwb::science_service
