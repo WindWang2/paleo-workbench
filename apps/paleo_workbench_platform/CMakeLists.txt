@@ -62,3 +62,14 @@ if(PWB_BUILD_CONV_16)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_16=1)
 endif()
 # END CONV-16
+
+# BEGIN CONV-PROVIDERS
+# Native capability-provider runtime: the composition root consumes
+# pwb::providers::ProviderService (registry + capability query + guarded
+# run) exactly like the AlgorithmRunner seam. Linked only when
+# PWB_BUILD_PROVIDERS is on, so the app stays buildable without the SDK.
+if(TARGET Pwb::Providers)
+    target_link_libraries(pwb-platform PRIVATE Pwb::Providers)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_PROVIDERS=1)
+endif()
+# END CONV-PROVIDERS

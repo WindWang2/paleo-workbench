@@ -13,6 +13,7 @@ add_library(pwb_providers STATIC
     src/refs.cpp
     src/registry.cpp
     src/schema.cpp
+    src/service.cpp
     src/builtin.cpp
     src/builtin_factor_stats.cpp
     src/builtin_map_thumbnail.cpp
