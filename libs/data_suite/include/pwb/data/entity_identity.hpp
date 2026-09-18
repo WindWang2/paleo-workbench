@@ -61,6 +61,13 @@ public:
         const std::string& name) const;
     std::size_t size() const { return order_.size(); }
 
+    // The index maps hold pointers into the deque; a copied registry would
+    // keep pointing at the ORIGINAL's storage. Move-only.
+    WellRegistry(const WellRegistry&) = delete;
+    WellRegistry& operator=(const WellRegistry&) = delete;
+    WellRegistry(WellRegistry&&) = default;
+    WellRegistry& operator=(WellRegistry&&) = default;
+
 private:
     // Stable storage — the index maps hold raw pointers, and a deque keeps
     // element addresses across push_back (a vector would invalidate them).
@@ -88,6 +95,11 @@ public:
     const SurveyRecord* by_id(const std::string& survey_id) const;
     // by_key is first-wins (Python SurveyRegistry has no ambiguity guard).
     const SurveyRecord* by_key(const std::string& key) const;
+
+    SurveyRegistry(const SurveyRegistry&) = delete;
+    SurveyRegistry& operator=(const SurveyRegistry&) = delete;
+    SurveyRegistry(SurveyRegistry&&) = default;
+    SurveyRegistry& operator=(SurveyRegistry&&) = default;
 
 private:
     std::deque<SurveyRecord> surveys_;  // pointer-stable storage (see above)

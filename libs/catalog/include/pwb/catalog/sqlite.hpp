@@ -37,6 +37,10 @@ public:
     bool is_open() const { return db_ != nullptr; }
     sqlite3* handle() { return db_; }
 
+    // Releases the handle early (callers use it before deleting the
+    // underlying file, e.g. save-as source relocation).
+    void close();
+
     // Executes one or more statements with no parameters (DDL etc.).
     domain::DataError execute(std::string_view sql);
 

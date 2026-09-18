@@ -39,6 +39,10 @@ public:
 
     const std::filesystem::path& path() const { return sqlite_path_; }
 
+    // Releases the writable sqlite handle early (save-as deletes the old
+    // artifacts tree after relocation; the handle must not outlive it).
+    void close() { db_.close(); }
+
     // Writes the catalog.json manifest (Python ADR 0056 checkpoint/export
     // contract, schema 1): full table dump + catalog_revision, atomic
     // (tmp + rename), previous manifest preserved as <name>.bak. models/

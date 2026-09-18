@@ -11,6 +11,8 @@
 // on item order, so the part-wise order is contract.
 #include "pwb/data/ingest_plan.hpp"
 
+#include "path_text_util.hpp"
+
 #include "pwb/catalog/models.hpp"
 #include "pwb/domain/sha256.hpp"
 #include "pwb/ingest/classifier.hpp"
@@ -30,17 +32,8 @@ namespace {
 
 using domain::Json;
 
-std::string lower_ascii(std::string text) {
-    for (char& c : text) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    }
-    return text;
-}
-
-// Path.suffix.lower() — extension WITH dot, "" when none.
-std::string path_suffix(const fs::path& path) {
-    return lower_ascii(path.extension().string());
-}
+using util::lower_ascii;
+using util::path_suffix;
 
 // Path.stem — filename minus the last extension.
 std::string path_stem(const fs::path& path) { return path.stem().string(); }
@@ -88,11 +81,20 @@ std::vector<fs::path> sorted_tree_entries(const fs::path& root) {
     return sorted;
 }
 
-// Content bytes for classify_import_path sniffing (Python's bounded XML
-// extractors read the file themselves; fixture-sized buffers suffice).
+// Content bytes for classify_import_path sniffing, capped: the bounded
+// XML extractors never need more than a prefix this large, and the plan
+// phase must not buffer a multi-GB candidate wholesale.
+constexpr std::uintmax_t kSniffCapBytes = 16ull * 1024 * 1024;
 std::string read_sniff_bytes(const fs::path& path) {
+    std::error_code ec;
+    const std::uintmax_t size = fs::file_size(path, ec);
     std::ifstream stream(path, std::ios::binary);
     std::ostringstream buffer;
+    if (!ec && size > kSniffCapBytes) {
+        std::string prefix(static_cast<std::size_t>(kSniffCapBytes), '\0');
+        stream.read(prefix.data(), kSniffCapBytes);
+        return prefix;
+    }
     buffer << stream.rdbuf();
     return buffer.str();
 }
@@ -103,18 +105,7 @@ std::string directory_hint(const fs::path& path) {
     return parent;
 }
 
-// resolve().as_posix() parity: symlink-aware where the path exists, lexical
-// normalization otherwise; "" when even lexicalization fails.
-std::string resolved_posix(const fs::path& path) {
-    std::error_code ec;
-    fs::path canonical = fs::weakly_canonical(path, ec);
-    if (ec || canonical.empty()) {
-        canonical = fs::absolute(path, ec);
-        if (ec) return "";
-        canonical = canonical.lexically_normal();
-    }
-    return canonical.generic_string();
-}
+using util::resolved_posix;
 
 // ---- identity proposals (_propose_identities) ----------------------------
 

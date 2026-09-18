@@ -24,6 +24,13 @@ Database::~Database() {
     if (db_ != nullptr) sqlite3_close_v2(db_);
 }
 
+void Database::close() {
+    if (db_ != nullptr) {
+        sqlite3_close_v2(db_);
+        db_ = nullptr;
+    }
+}
+
 Database::Database(Database&& other) noexcept
     : db_(other.db_), last_error_(other.last_error_) {
     other.db_ = nullptr;

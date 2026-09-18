@@ -12,11 +12,13 @@ MembershipChange set_layer_binding(MappingWorkspaceState& state,
     MembershipChange change;
     auto it = state.memberships.find(binding.layer_id);
     if (it == state.memberships.end()) {
-        if (binding.created_at.empty()) {
-            binding.created_at = domain::now_iso8601();
-        }
-        if (binding.bound_at.empty()) {
-            binding.bound_at = binding.created_at;
+        // Honest timestamps: an unknown creation time stays "" (Python
+        // keeps `existing.created_at or ""`); only bound_at records when
+        // THIS pin happened.
+        if (!binding.bound_at.empty() && !binding.source_version_id.empty()) {
+            // caller-supplied bound_at kept verbatim
+        } else if (!binding.source_version_id.empty()) {
+            binding.bound_at = domain::now_iso8601();
         }
         const std::string layer_id = binding.layer_id;
         state.memberships[layer_id] = std::move(binding);
@@ -31,9 +33,7 @@ MembershipChange set_layer_binding(MappingWorkspaceState& state,
         it->second.source_version_id != binding.source_version_id ||
         it->second.source_asset_id != binding.source_asset_id ||
         it->second.binding_kind != binding.binding_kind) {
-        binding.created_at = it->second.created_at.empty()
-                                 ? domain::now_iso8601()
-                                 : it->second.created_at;
+        binding.created_at = it->second.created_at;  // verbatim (may be "")
         binding.bound_at = domain::now_iso8601();
         it->second = std::move(binding);
         change.changed = true;
@@ -45,6 +45,15 @@ MembershipChange remove_layer_binding(MappingWorkspaceState& state,
                                       const std::string& layer_id) {
     MembershipChange change;
     change.changed = state.memberships.erase(layer_id) > 0;
+    if (!change.changed) return change;
+    // Python drop_membership also purges the per-stage view-state
+    // overrides so orphaned visibility/opacity entries cannot accumulate.
+    for (auto& [stage, view] : state.stage_states) {
+        (void)stage;
+        view.layer_visibility.erase(layer_id);
+        view.layer_opacity.erase(layer_id);
+        if (view.active_layer_id == layer_id) view.active_layer_id.reset();
+    }
     return change;
 }
 
@@ -61,7 +70,16 @@ MembershipChange rebind_to_version(MappingWorkspaceState& state,
     binding.layer_id = layer_id;
     binding.source_asset_id = asset_id;
     binding.source_version_id = version_id;
-    binding.binding_kind = binding_kind;
+    // Write-time coercion (Python register_layer parity): a pinned record
+    // without an explicit kind is STORED as catalog_version so readers on
+    // either side of the language line see the same kind — the V13
+    // read-side rule remains as the legacy-document compensation.
+    if (binding_kind.empty()) {
+        binding.binding_kind =
+            version_id.empty() ? std::string() : "catalog_version";
+    } else {
+        binding.binding_kind = binding_kind;
+    }
     return set_layer_binding(state, std::move(binding));
 }
 
@@ -81,6 +99,7 @@ StaleRepairReport repair_stale_bindings(
                                : std::string();
         if (!current.empty()) {
             binding.source_version_id = current;
+            binding.binding_kind = "catalog_version";
             binding.bound_at = domain::now_iso8601();
             ++report.repaired_to_current;
         } else {

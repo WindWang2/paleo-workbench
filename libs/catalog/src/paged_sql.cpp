@@ -8,6 +8,7 @@
 #include "pwb/catalog/paged_sql.hpp"
 
 #include "pwb/catalog/models.hpp"
+#include "row_mapping.hpp"
 
 #include <algorithm>
 #include <map>
@@ -31,15 +32,6 @@ std::string like_escape_literal(const std::string& text) {
         escaped.push_back(c);
     }
     return escaped;
-}
-
-// repository.cpp parity: a TEXT metadata column that fails to parse falls
-// back to the model default instead of poisoning the page.
-Json parse_json_column(const std::string& text, const char* fallback) {
-    if (text.empty()) return Json::parse(fallback, nullptr, false);
-    Json parsed = Json::parse(text, nullptr, false);
-    if (parsed.is_discarded()) return Json::parse(fallback, nullptr, false);
-    return parsed;
 }
 
 struct SqlFragment {
@@ -159,46 +151,6 @@ SqlFragment paged_predicates(const EntityPageQuery& query) {
     return sql;
 }
 
-DataAsset asset_from_row(Statement& rows) {
-    // Column order mirrors the load_document SELECT so the mapping stays
-    // reviewable against repository.cpp.
-    DataAsset asset;
-    asset.id = domain::AssetId(rows.text(0));
-    asset.name = rows.text(1);
-    asset.type = rows.text(2);
-    asset.description = rows.text(3);
-    if (!rows.is_null(4)) asset.current_version_id = domain::VersionId(rows.text(4));
-    if (!rows.is_null(5)) asset.legacy_resource_id = rows.text(5);
-    asset.metadata = parse_json_column(rows.text(6), "{}");
-    asset.created_at = rows.text(7);
-    asset.updated_at = rows.text(8);
-    asset.trashed = rows.int64(9) != 0;
-    if (!rows.is_null(10)) asset.trashed_at = rows.text(10);
-    return asset;
-}
-
-DataVersion version_from_row(Statement& rows) {
-    DataVersion version;
-    version.id = domain::VersionId(rows.text(0));
-    version.asset_id = domain::AssetId(rows.text(1));
-    version.version_number = static_cast<int>(rows.int64(2));
-    if (auto stage = domain::data_stage_from_string(rows.text(3))) {
-        version.stage = *stage;
-    }
-    version.managed = rows.int64(4) != 0;
-    version.path = rows.text(5);
-    if (!rows.is_null(6)) version.source_uri = rows.text(6);
-    version.format = rows.text(7);
-    if (!rows.is_null(8)) version.size_bytes = rows.int64(8);
-    if (!rows.is_null(9)) version.sha256 = rows.text(9);
-    if (!rows.is_null(10)) version.run_id = domain::RunId(rows.text(10));
-    version.metadata = parse_json_column(rows.text(11), "{}");
-    version.created_at = rows.text(12);
-    version.trashed = rows.int64(13) != 0;
-    if (!rows.is_null(14)) version.trashed_at = rows.text(14);
-    return version;
-}
-
 }  // namespace
 
 std::vector<Json> search_assets_page_sql(Database& db,
@@ -243,7 +195,7 @@ std::vector<Json> search_assets_page_sql(Database& db,
     page.bind(int(next + 1), std::max<std::int64_t>(0, query.offset));
 
     std::vector<DataAsset> assets;
-    while (page.step()) assets.push_back(asset_from_row(page));
+    while (page.step()) assets.push_back(rows::asset_from_row(page));
     if (assets.empty()) return {};
 
     // Step 2: batch-fetch the page's current versions by primary key.
@@ -265,14 +217,15 @@ std::vector<Json> search_assets_page_sql(Database& db,
         Statement rows = db.prepare(
             "SELECT id, asset_id, version_number, stage, managed, path,"
             " source_uri, format, size_bytes, sha256, run_id, metadata,"
-            " created_at, trashed, trashed_at FROM versions WHERE id IN (" +
+            " created_at, trashed, trashed_at, parent_ids FROM versions"
+            " WHERE id IN (" +
             placeholders + ")");
         if (!rows.is_valid()) continue;
         for (std::size_t i = start; i < end; ++i) {
             rows.bind(int(i - start + 1), version_ids[i]);
         }
         while (rows.step()) {
-            DataVersion version = version_from_row(rows);
+            DataVersion version = rows::version_from_row(rows);
             versions_by_id[version.id.str()] = std::move(version);
         }
     }

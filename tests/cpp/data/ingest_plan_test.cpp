@@ -146,9 +146,10 @@ struct Scratch {
         fs::remove_all(root, ec);
     }
 
-    // Same harness step the generator runs: point the seeded managed-RAW
-    // identity (source_uri) at this replay root so duplicate matching is
-    // location-independent.
+    // Same harness step the generator runs: the fixture stores the seeded
+    // managed-RAW identity as a FIXED RELATIVE marker (checkout-path-
+    // independent); rewrite it to this replay's incoming root so duplicate
+    // matching is location-independent.
     void relocate_seed_identity() {
         auto opened = pwb::catalog::Database::open(
             root / "demo.artifacts" / "metadata" / "catalog.sqlite",
@@ -158,8 +159,8 @@ struct Scratch {
         pwb::catalog::Statement update = db.prepare(
             "UPDATE versions SET source_uri = replace(source_uri, ?, ?)");
         PWB_CHECK(update.is_valid());
-        update.bind(1, fixture_dir().string() + "/tree");
-        update.bind(2, root.string());
+        update.bind(1, "__PWB_INGEST_ROOT__");
+        update.bind(2, (root / "incoming").generic_string());
         update.step_done();
     }
 };

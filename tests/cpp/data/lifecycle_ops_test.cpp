@@ -271,6 +271,12 @@ PWB_TEST(workspace_mutations_rebind_repair_and_roundtrip) {
     fp.source_version_id = "ver_00000000000c";
     fp.binding_kind = "content_fingerprint";
     pwb::workspace::set_layer_binding(state, fp);
+    // Per-stage view overrides for the layer that will be removed — they
+    // must be purged with the membership (Python drop_membership).
+    state.stage_states["facies_calibration"]
+        .layer_visibility["layer_grid"] = false;
+    state.stage_states["facies_calibration"].layer_opacity["layer_grid"] = 0.4;
+    state.stage_states["facies_calibration"].active_layer_id = "layer_grid";
 
     // stale repair: pinned version of layer 1 is gone, asset moved on;
     // layer 2's version survives; both memberships persist.
@@ -303,6 +309,12 @@ PWB_TEST(workspace_mutations_rebind_repair_and_roundtrip) {
     auto removed = pwb::workspace::remove_layer_binding(state,
                                                         "layer_grid");
     PWB_CHECK(removed.changed);
+    PWB_CHECK(state.stage_states["facies_calibration"]
+                  .layer_visibility.count("layer_grid") == 0);
+    PWB_CHECK(state.stage_states["facies_calibration"]
+                  .layer_opacity.count("layer_grid") == 0);
+    PWB_CHECK(!state.stage_states["facies_calibration"]
+                   .active_layer_id.has_value());
     pwb::workspace::write_mapping_workspace(root, state);
     auto reloaded = pwb::workspace::MappingWorkspaceState::from_json(
         root["mapping_workspace"], diagnostics);

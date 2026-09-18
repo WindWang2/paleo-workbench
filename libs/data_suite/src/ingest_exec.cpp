@@ -1,6 +1,8 @@
 // execute_ingest_plan (conv-26) — see ingest_exec.hpp.
 #include "pwb/data/ingest_exec.hpp"
 
+#include "path_text_util.hpp"
+
 #include "pwb/catalog/dedup.hpp"
 #include "pwb/catalog/repository.hpp"
 #include "pwb/domain/diagnostics.hpp"
@@ -19,28 +21,13 @@ namespace {
 
 using domain::Json;
 namespace fs = std::filesystem;
-
-std::string lower_ascii(std::string text) {
-    for (char& c : text) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    }
-    return text;
-}
+using util::lower_ascii;
 
 std::string path_suffix_of(const fs::path& path) {
-    return lower_ascii(path.extension().string());
+    return util::path_suffix(path);
 }
 
-std::string resolved_posix(const fs::path& path) {
-    std::error_code ec;
-    fs::path canonical = fs::weakly_canonical(path, ec);
-    if (ec || canonical.empty()) {
-        canonical = fs::absolute(path, ec);
-        if (ec) return "";
-        canonical = canonical.lexically_normal();
-    }
-    return canonical.generic_string();
-}
+using util::resolved_posix;
 
 // The fresh version directory a failed transaction rolls back (shared CAS
 // blobs are never touched — only GC removes those).
@@ -467,7 +454,9 @@ IngestExecuteReport execute_ingest_plan(const IngestPlan& plan,
                     false);
                 report.bound_links += upsert.created ? 1 : 0;
             }
-            // Pass A: scoped resolve; create the missing wells.
+            // Pass A: scoped resolve; create the missing wells. Every
+            // processed well is _stamp'ed (updated_at always, created_at
+            // filled when empty) like bind_well_extracts.
             for (const WellEntry& entry : entries) {
                 if (entry.has_well_id) continue;
                 const std::string name =
@@ -477,14 +466,18 @@ IngestExecuteReport execute_ingest_plan(const IngestPlan& plan,
                 const ResolutionOutcome outcome =
                     resolve_well(root, &registry, name);
                 if (outcome.matched) {
-                    if (!scope.empty()) {
-                        for (auto& node : wells) {
-                            if (node.value("id", std::string()) ==
-                                outcome.well_id) {
+                    for (auto& node : wells) {
+                        if (node.value("id", std::string()) ==
+                            outcome.well_id) {
+                            if (!scope.empty()) {
                                 node["spatial_scope"] = scope;
-                                node["updated_at"] = stamp;
-                                break;
                             }
+                            if (node.value("created_at", std::string())
+                                    .empty()) {
+                                node["created_at"] = stamp;
+                            }
+                            node["updated_at"] = stamp;
+                            break;
                         }
                     }
                 } else if (!outcome.ambiguous) {
@@ -500,7 +493,17 @@ IngestExecuteReport execute_ingest_plan(const IngestPlan& plan,
                     ++report.created_entities;
                 }
             }
-            // Pass B: unscoped resolution → link (or honest issue).
+            // Pass B: unscoped resolution → link (or honest issue). One
+            // registry for the whole group — rebuilt once after pass A so
+            // the wells it created are visible (never per entry; V6 §6).
+            WellRegistry full_registry;
+            for (const auto& node : wells) {
+                WellRecord record;
+                record.id = node.value("id", std::string());
+                record.name = node.value("name", std::string());
+                record.uwi = node.value("uwi", std::string());
+                full_registry.add(std::move(record));
+            }
             for (const WellEntry& entry : entries) {
                 if (entry.has_well_id) continue;
                 const std::string name =
@@ -510,7 +513,7 @@ IngestExecuteReport execute_ingest_plan(const IngestPlan& plan,
                 const std::string role =
                     entry.item->role.empty() ? "well_log" : entry.item->role;
                 const ResolutionOutcome outcome =
-                    resolve_well(root, nullptr, name);
+                    resolve_well(root, &full_registry, name);
                 if (outcome.matched && !outcome.well_id.empty()) {
                     const auto upsert = upsert_entity_asset_link(
                         root, "well", outcome.well_id, entry.asset_id, role,

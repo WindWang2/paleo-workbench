@@ -1,4 +1,6 @@
 #include "pwb/catalog/repository.hpp"
+
+#include "row_mapping.hpp"
 #include "pwb/project/paths.hpp"
 
 #include <algorithm>
@@ -309,22 +311,7 @@ Result<CatalogDocument> CatalogRepository::load_document_from(
                        "created_at, updated_at, trashed, trashed_at "
                        "FROM assets");
         while (rows.step()) {
-            DataAsset asset;
-            asset.id = domain::AssetId(rows.text(0));
-            asset.name = rows.text(1);
-            asset.type = rows.text(2);
-            asset.description = rows.text(3);
-            if (!rows.is_null(4)) {
-                asset.current_version_id =
-                    domain::VersionId(rows.text(4));
-            }
-            asset.legacy_resource_id = opt_text(rows, 5);
-            asset.metadata = parse_json_column(rows.text(6), "{}");
-            asset.created_at = rows.text(7);
-            asset.updated_at = rows.text(8);
-            asset.trashed = rows.int64(9) != 0;
-            asset.trashed_at = opt_text(rows, 10);
-            document.assets.push_back(std::move(asset));
+            document.assets.push_back(rows::asset_from_row(rows));
         }
     }
     std::unordered_map<std::string, std::vector<VersionMember>> members;
@@ -351,33 +338,7 @@ Result<CatalogDocument> CatalogRepository::load_document_from(
                        " run_id, metadata, created_at, trashed, trashed_at,"
                        " parent_ids FROM versions");
         while (rows.step()) {
-            DataVersion version;
-            version.id = domain::VersionId(rows.text(0));
-            version.asset_id = domain::AssetId(rows.text(1));
-            version.version_number = static_cast<int>(rows.int64(2));
-            if (auto stage = domain::data_stage_from_string(rows.text(3))) {
-                version.stage = *stage;
-            }
-            version.managed = rows.int64(4) != 0;
-            version.path = rows.text(5);
-            version.source_uri = opt_text(rows, 6);
-            version.format = rows.text(7);
-            version.size_bytes = opt_int(rows, 8);
-            version.sha256 = opt_text(rows, 9);
-            if (!rows.is_null(10)) version.run_id = domain::RunId(rows.text(10));
-            version.metadata = parse_json_column(rows.text(11), "{}");
-            version.created_at = rows.text(12);
-            version.trashed = rows.int64(13) != 0;
-            version.trashed_at = opt_text(rows, 14);
-            Json parents = parse_json_column(rows.text(15), "[]");
-            if (parents.is_array()) {
-                for (const auto& parent : parents) {
-                    if (parent.is_string()) {
-                        version.parent_version_ids.emplace_back(
-                            parent.get<std::string>());
-                    }
-                }
-            }
+            DataVersion version = rows::version_from_row(rows);
             auto it = members.find(version.id.str());
             if (it != members.end()) version.members = it->second;
             document.versions.push_back(std::move(version));
@@ -1079,8 +1040,9 @@ int CatalogRepository::rebase_artifact_paths() {
         if (slash == std::string::npos || slash == 0) return false;
         const std::string head = posix.substr(0, slash);
         const std::string suffix = ".artifacts";
-        if (head.size() <= suffix.size() ||
-            head.substr(head.size() - suffix.size()) != suffix ||
+        if (head.size() < suffix.size() ||
+            head.compare(head.size() - suffix.size(), suffix.size(),
+                         suffix) != 0 ||
             head == current) {
             return false;
         }
@@ -1121,20 +1083,25 @@ int CatalogRepository::rebase_artifact_paths() {
     }
     if (db_.table_exists("model_versions")) {
         // Registry rows pass through verbatim on this side; the URI prefix
-        // rewrite is mechanical and stays schema-stable.
+        // rewrite is mechanical and stays schema-stable. Collect first,
+        // update after — never modify a table mid-scan.
         Statement scan =
             db_.prepare("SELECT id, artifact_uri FROM model_versions");
+        std::vector<std::pair<std::string, std::string>> rewrites;
         while (scan.step()) {
             if (scan.is_null(1)) continue;
             std::string rewritten;
             if (rewrite(scan.text(1), &rewritten)) {
-                Statement update = db_.prepare(
-                    "UPDATE model_versions SET artifact_uri = ? WHERE id = ?");
-                update.bind(1, rewritten);
-                update.bind(2, scan.text(0));
-                update.step_done();
-                ++changed;
+                rewrites.emplace_back(scan.text(0), rewritten);
             }
+        }
+        for (const auto& [id, uri] : rewrites) {
+            Statement update = db_.prepare(
+                "UPDATE model_versions SET artifact_uri = ? WHERE id = ?");
+            update.bind(1, uri);
+            update.bind(2, id);
+            update.step_done();
+            ++changed;
         }
     }
     if (changed > 0) bump_revision();

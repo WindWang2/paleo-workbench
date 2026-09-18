@@ -7,6 +7,7 @@
 
 #include <cctype>
 #include <deque>
+#include <set>
 
 namespace pwb::data {
 
@@ -21,11 +22,9 @@ bool is_ascii_space(char c) {
 // explicit Unicode separators Python's regex lists (– — · （ ） 【 】).
 bool is_separator_byte_run(const std::string& text, std::size_t i,
                            std::size_t* length) {
-    const unsigned char c = static_cast<unsigned char>(text[i]);
-    if (is_ascii_space(text[i]) ||
-        (text[i] >= 0 && std::isspace(static_cast<unsigned char>(text[i]))) ||
-        text[i] == '_' || text[i] == '-' || text[i] == ',' || text[i] == '.' ||
-        text[i] == '(' || text[i] == ')' || text[i] == '[' || text[i] == ']') {
+    if (is_ascii_space(text[i]) || text[i] == '_' || text[i] == '-' ||
+        text[i] == ',' || text[i] == '.' || text[i] == '(' ||
+        text[i] == ')' || text[i] == '[' || text[i] == ']') {
         *length = 1;
         return true;
     }
@@ -220,9 +219,11 @@ ResolutionOutcome resolve_well(const domain::Json& project_root,
             const WellRecord* well = candidates.front();
             outcome.strategy = "canonical_name";
             if (!uwi.empty()) {
+                // Python compares normalized strings as-is — a degenerate
+                // alias normalizing to "" still matches a uwi that does.
                 const std::string uwi_key = normalize_well_name(uwi);
                 for (const std::string& alias : well->aliases) {
-                    if (normalize_well_name(alias) == uwi_key && !uwi_key.empty()) {
+                    if (normalize_well_name(alias) == uwi_key) {
                         outcome.strategy = "alias";
                         break;
                     }
@@ -387,6 +388,7 @@ std::vector<std::string> asset_ids_for_entity(
     const domain::Json& project_root, std::string_view entity_type,
     std::string_view entity_id, std::string_view role) {
     std::vector<std::string> ids;
+    std::set<std::string> seen;  // Python dedupes across roles/multi-links
     auto links = project_root.find("entity_asset_links");
     if (links == project_root.end() || !links->is_array()) return ids;
     for (const auto& link : *links) {
@@ -397,7 +399,9 @@ std::vector<std::string> asset_ids_for_entity(
                 link.value("role", std::string()) != role) {
                 continue;
             }
-            ids.push_back(link.value("asset_id", std::string()));
+            const std::string asset_id =
+                link.value("asset_id", std::string());
+            if (seen.insert(asset_id).second) ids.push_back(asset_id);
         }
     }
     return ids;

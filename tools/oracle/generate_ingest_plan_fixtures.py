@@ -163,13 +163,31 @@ def main() -> int:
     )
 
     # Pre-seed one duplicate: the same source path + content as a planned
-    # file, imported through the real service (managed RAW identity).
+    # file, imported through the real service (managed RAW identity). The
+    # committed store carries a FIXED RELATIVE marker as source_uri so the
+    # fixture is checkout-path-independent; every harness (this script's
+    # exec copy AND the C++ replay) rewrites the marker to its own root
+    # before planning.
     service = DataCatalogService.open(tree / "demo.paleo.json", sweep_temp=False)
     try:
         duplicate_source = tree / "incoming" / "W-02" / "curves.las"
         service.import_raw(duplicate_source, name="curves.las")
     finally:
         service.close()
+    _relocate_source_uris(
+        tree / "demo.artifacts" / "metadata" / "catalog.sqlite",
+        (tree / "incoming").resolve(),
+        Path("__PWB_INGEST_ROOT__"),
+    )
+    # The manifest checkpoints carry the same absolute source_uri; make the
+    # whole committed tree checkout-path-independent.
+    for manifest in (tree / "demo.artifacts" / "metadata").glob("catalog.json*"):
+        text = manifest.read_text(encoding="utf-8")
+        marker_text = text.replace(
+            str((tree / "incoming").resolve()), "__PWB_INGEST_ROOT__"
+        )
+        if marker_text != text:
+            manifest.write_text(marker_text, encoding="utf-8")
     _checkpoint(tree / "demo.artifacts" / "metadata" / "catalog.sqlite")
 
     # The committed fixture stays at the PRE-execute state: run the whole
@@ -225,8 +243,8 @@ def run_flow(tree: Path, scenario: Path) -> None:
     root = tree.resolve()
     _relocate_source_uris(
         tree / "demo.artifacts" / "metadata" / "catalog.sqlite",
-        (scenario / "tree").resolve(),
-        root,
+        Path("__PWB_INGEST_ROOT__"),
+        root / "incoming",
     )
     manager = ProjectManager(tree / "demo.paleo.json")
     project = manager.load()

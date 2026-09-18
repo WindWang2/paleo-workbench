@@ -54,7 +54,8 @@ add_library(pwb_data STATIC
 add_library(Pwb::Data ALIAS pwb_data)
 target_compile_features(pwb_data PUBLIC cxx_std_20)
 target_link_libraries(pwb_data
-    PUBLIC Pwb::Domain Pwb::Project Pwb::Workspace Pwb::Catalog Pwb::Ingest)
+    PUBLIC Pwb::Domain Pwb::Project Pwb::Workspace Pwb::Catalog
+    PRIVATE Pwb::Ingest)  # implementation detail (classifier tables)
 target_include_directories(pwb_data
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
            $<INSTALL_INTERFACE:include>)

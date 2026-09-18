@@ -54,13 +54,15 @@ bool StagedArtifactRelocation::commit() {
 
 bool StagedArtifactRelocation::rollback() {
     bool ok = true;
+    std::error_code ec;
     if (moved_root_) {
-        std::error_code ec;
-        if (fs::exists(target_, ec) && !fs::exists(source_, ec)) {
+        if (fs::exists(target_, ec) && !ec && !fs::exists(source_, ec) &&
+            !ec) {
             fs::rename(target_, source_, ec);
             if (ec) ok = false;
         }
-    } else if ((copied_root_ || preserved_source_) && fs::exists(target_)) {
+    } else if ((copied_root_ || preserved_source_) && fs::exists(target_, ec) &&
+               !ec) {
         if (!safe_rmtree(target_)) ok = false;
     }
     for (auto it = moved_children_.rbegin(); it != moved_children_.rend();
@@ -95,40 +97,51 @@ domain::Result<StagedArtifactRelocation> StagedArtifactRelocation::stage(
             fs::copy(source, target, fs::copy_options::recursive, copy_ec);
         }
         if (copy_ec) {
-            fs::path target_check = target;
-            if (fs::exists(target_check, ec) &&
-                !safe_rmtree(target_check)) {
-                // cleanup failed — surface alongside the original error
+            std::string message = "staged relocation copy failed: " +
+                                  copy_ec.message();
+            if (fs::exists(target, ec) && !safe_rmtree(target)) {
+                message += " (cleanup also failed; target debris remains)";
             }
-            return domain::DataError(domain::ErrorCode::IoError,
-                                     "staged relocation copy failed: " +
-                                         copy_ec.message());
+            return domain::DataError(domain::ErrorCode::IoError, message);
         }
         staged.preserved_source_ = true;
         return domain::Result<StagedArtifactRelocation>(std::move(staged));
     }
     // Existing target root: merge only the direct children it lacks;
     // conflicting children are left untouched (both sides hold data that
-    // must not be overwritten).
-    for (const auto& child : fs::directory_iterator(source, ec)) {
-        fs::path destination = target / child.path().filename();
-        std::error_code exists_ec;
-        if (fs::exists(destination, exists_ec) || exists_ec) continue;
-        std::error_code rename_ec;
-        fs::rename(child.path(), destination, rename_ec);
-        if (rename_ec) {
+    // must not be overwritten). Iteration uses the error_code protocol
+    // throughout — an I/O hiccup mid-scan must roll back, not throw.
+    {
+        std::error_code iter_ec;
+        fs::directory_iterator it(source, iter_ec);
+        if (iter_ec) {
             staged.rollback();
             return domain::DataError(domain::ErrorCode::IoError,
-                                     "staged relocation merge failed: " +
-                                         rename_ec.message());
+                                     "staged relocation scan failed: " +
+                                         iter_ec.message());
         }
-        staged.moved_children_.emplace_back(child.path(), destination);
-    }
-    if (ec) {
-        staged.rollback();
-        return domain::DataError(domain::ErrorCode::IoError,
-                                 "staged relocation scan failed: " +
-                                     ec.message());
+        while (it != fs::directory_iterator()) {
+            const fs::path child = it->path();
+            it.increment(iter_ec);
+            if (iter_ec) {
+                staged.rollback();
+                return domain::DataError(domain::ErrorCode::IoError,
+                                         "staged relocation scan failed: " +
+                                             iter_ec.message());
+            }
+            fs::path destination = target / child.filename();
+            std::error_code exists_ec;
+            if (fs::exists(destination, exists_ec) || exists_ec) continue;
+            std::error_code rename_ec;
+            fs::rename(child, destination, rename_ec);
+            if (rename_ec) {
+                staged.rollback();
+                return domain::DataError(domain::ErrorCode::IoError,
+                                         "staged relocation merge failed: " +
+                                             rename_ec.message());
+            }
+            staged.moved_children_.emplace_back(child, destination);
+        }
     }
     return domain::Result<StagedArtifactRelocation>(std::move(staged));
 }
@@ -170,9 +183,9 @@ std::optional<std::string> rebase_owned_artifact_path(
     const std::string prefix = old_name + "/";
     const std::string artifacts_suffix = ".artifacts";
     if (posix.rfind(prefix, 0) == 0 &&
-        old_name.size() > artifacts_suffix.size() &&
-        old_name.substr(old_name.size() - artifacts_suffix.size()) ==
-            artifacts_suffix) {
+        old_name.size() >= artifacts_suffix.size() &&
+        old_name.compare(old_name.size() - artifacts_suffix.size(),
+                         artifacts_suffix.size(), artifacts_suffix) == 0) {
         return new_name + "/" + posix.substr(prefix.size());
     }
     return std::nullopt;
@@ -182,11 +195,20 @@ int rebase_project_artifact_paths(domain::Json& document_root,
                                   const fs::path& old_project_path,
                                   const fs::path& new_project_path) {
     std::error_code ec;
-    const fs::path old_root = fs::weakly_canonical(
-        artifact_dir_for(old_project_path), ec);
-    const fs::path new_root = artifact_dir_for(new_project_path);
-    const fs::path old_dir = fs::weakly_canonical(
-        old_project_path.parent_path(), ec);
+    auto canonical_or_lexical = [](const fs::path& path) {
+        std::error_code canonical_ec;
+        fs::path canonical = fs::weakly_canonical(path, canonical_ec);
+        if (canonical_ec || canonical.empty()) {
+            return path.lexically_normal();
+        }
+        return canonical;
+    };
+    const fs::path old_root =
+        canonical_or_lexical(artifact_dir_for(old_project_path));
+    const fs::path new_root =
+        canonical_or_lexical(artifact_dir_for(new_project_path));
+    const fs::path old_dir =
+        canonical_or_lexical(old_project_path.parent_path());
     int rebased = 0;
     auto rebase_section = [&](const char* key, const char* field) {
         auto section = document_root.find(key);
