@@ -29,6 +29,10 @@ option(PWB_BUILD_SEISMIC_IO
     "Build the post-stack SEG-Y reader (libs/seismic_io)" OFF)
 option(PWB_BUILD_MAPPING_KERNEL
     "Build the contouring+interpolator kernel ported from the Python mapping pipeline" OFF)
+# BEGIN CONV-08
+option(PWB_BUILD_CONV_08
+    "Build the factor interpolation task host (fingerprint / evaluation / plan structs, libs/factor_host)" OFF)
+# END CONV-08
 option(PWB_BUILD_INTEGRATION_TESTS
     "Register tests/cpp/integration (requires platform+data+science)" OFF)
 include(CTest)
@@ -157,6 +161,11 @@ if(PWB_BUILD_CONV_07)
     add_subdirectory(libs/workflow_engine)
 endif()
 # END CONV-07
+# BEGIN CONV-08
+if(PWB_BUILD_CONV_08)
+    add_subdirectory(libs/factor_host)
+endif()
+# END CONV-08
 
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
