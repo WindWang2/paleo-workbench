@@ -1,0 +1,9535 @@
+{
+ "meta": {
+  "generator": "tools/oracle/generate_workflow_graph_fixtures.py",
+  "source": "paleo_workbench/workflow/dependency_graph.py + workflow/interpretation/evidence.py",
+  "cases": 131
+ },
+ "cases": [
+  {
+   "id": "graph_basic",
+   "fn": "graph_rebuild",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ]
+   },
+   "expect": {
+    "result": {
+     "producing_run": {
+      "v3": "r2",
+      "v2": "r1",
+      "v4": "r2"
+     },
+     "consumers": {
+      "v1": [
+       "r1"
+      ],
+      "v2": [
+       "r2"
+      ],
+      "v3": [
+       "r3"
+      ]
+     },
+     "run_inputs": {
+      "r1": [
+       "v1"
+      ],
+      "r2": [
+       "v2"
+      ],
+      "r3": [
+       "v3"
+      ]
+     },
+     "run_outputs": {
+      "r1": [
+       "v2"
+      ],
+      "r2": [
+       "v3",
+       "v4"
+      ],
+      "r3": []
+     },
+     "version_asset": {
+      "v1": "a1",
+      "v2": "a1",
+      "v3": "a2",
+      "v4": "a2"
+     },
+     "asset_versions": {
+      "a1": [
+       "v1",
+       "v2"
+      ],
+      "a2": [
+       "v3",
+       "v4"
+      ]
+     },
+     "domain_task_runs": {
+      "task-x": [
+       "r1",
+       "r3"
+      ],
+      "task-y": [
+       "r2"
+      ]
+     },
+     "edges": [
+      [
+       "v1",
+       "r1",
+       "v2",
+       "idw"
+      ],
+      [
+       "v2",
+       "r2",
+       "v3",
+       "factor_fusion"
+      ],
+      [
+       "v2",
+       "r2",
+       "v4",
+       "factor_fusion"
+      ]
+     ],
+     "cycle_nodes": [],
+     "has_cycle": false
+    }
+   }
+  },
+  {
+   "id": "graph_empty",
+   "fn": "graph_rebuild",
+   "input": {
+    "versions": [],
+    "runs": []
+   },
+   "expect": {
+    "result": {
+     "producing_run": {},
+     "consumers": {},
+     "run_inputs": {},
+     "run_outputs": {},
+     "version_asset": {},
+     "asset_versions": {},
+     "domain_task_runs": {},
+     "edges": [],
+     "cycle_nodes": [],
+     "has_cycle": false
+    }
+   }
+  },
+  {
+   "id": "graph_orphan_runs",
+   "fn": "graph_rebuild",
+   "input": {
+    "versions": [],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "ghost"
+      ],
+      "output_version_ids": [
+       "ghost2"
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "result": {
+     "producing_run": {
+      "ghost2": "r1"
+     },
+     "consumers": {
+      "ghost": [
+       "r1"
+      ]
+     },
+     "run_inputs": {
+      "r1": [
+       "ghost"
+      ]
+     },
+     "run_outputs": {
+      "r1": [
+       "ghost2"
+      ]
+     },
+     "version_asset": {},
+     "asset_versions": {},
+     "domain_task_runs": {},
+     "edges": [
+      [
+       "ghost",
+       "r1",
+       "ghost2",
+       "op"
+      ]
+     ],
+     "cycle_nodes": [],
+     "has_cycle": false
+    }
+   }
+  },
+  {
+   "id": "graph_self_loop",
+   "fn": "graph_rebuild",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v1"
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "result": {
+     "producing_run": {
+      "v1": "r1"
+     },
+     "consumers": {
+      "v1": [
+       "r1"
+      ]
+     },
+     "run_inputs": {
+      "r1": [
+       "v1"
+      ]
+     },
+     "run_outputs": {
+      "r1": [
+       "v1"
+      ]
+     },
+     "version_asset": {
+      "v1": "a1"
+     },
+     "asset_versions": {
+      "a1": [
+       "v1"
+      ]
+     },
+     "domain_task_runs": {},
+     "edges": [
+      [
+       "v1",
+       "r1",
+       "v1",
+       "op"
+      ]
+     ],
+     "cycle_nodes": [
+      "v1"
+     ],
+     "has_cycle": true
+    }
+   }
+  },
+  {
+   "id": "graph_two_cycle",
+   "fn": "graph_rebuild",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ]
+     },
+     {
+      "run_id": "r2",
+      "operation": "op",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v1"
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "result": {
+     "producing_run": {
+      "v2": "r1",
+      "v1": "r2"
+     },
+     "consumers": {
+      "v1": [
+       "r1"
+      ],
+      "v2": [
+       "r2"
+      ]
+     },
+     "run_inputs": {
+      "r1": [
+       "v1"
+      ],
+      "r2": [
+       "v2"
+      ]
+     },
+     "run_outputs": {
+      "r1": [
+       "v2"
+      ],
+      "r2": [
+       "v1"
+      ]
+     },
+     "version_asset": {
+      "v1": "a1",
+      "v2": "a1"
+     },
+     "asset_versions": {
+      "a1": [
+       "v1",
+       "v2"
+      ]
+     },
+     "domain_task_runs": {},
+     "edges": [
+      [
+       "v1",
+       "r1",
+       "v2",
+       "op"
+      ],
+      [
+       "v2",
+       "r2",
+       "v1",
+       "op"
+      ]
+     ],
+     "cycle_nodes": [
+      "v1",
+      "v2"
+     ],
+     "has_cycle": true
+    }
+   }
+  },
+  {
+   "id": "graph_mixed_cycle",
+   "fn": "graph_rebuild",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ]
+     },
+     {
+      "run_id": "r2",
+      "operation": "op",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3"
+      ]
+     },
+     {
+      "run_id": "r3",
+      "operation": "op",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [
+       "v2"
+      ]
+     },
+     {
+      "run_id": "r4",
+      "operation": "op",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [
+       "v4"
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "result": {
+     "producing_run": {
+      "v2": "r1",
+      "v3": "r2",
+      "v4": "r4"
+     },
+     "consumers": {
+      "v1": [
+       "r1"
+      ],
+      "v2": [
+       "r2"
+      ],
+      "v3": [
+       "r3",
+       "r4"
+      ]
+     },
+     "run_inputs": {
+      "r1": [
+       "v1"
+      ],
+      "r2": [
+       "v2"
+      ],
+      "r3": [
+       "v3"
+      ],
+      "r4": [
+       "v3"
+      ]
+     },
+     "run_outputs": {
+      "r1": [
+       "v2"
+      ],
+      "r2": [
+       "v3"
+      ],
+      "r3": [
+       "v2"
+      ],
+      "r4": [
+       "v4"
+      ]
+     },
+     "version_asset": {
+      "v1": "a",
+      "v2": "a",
+      "v3": "a",
+      "v4": "a"
+     },
+     "asset_versions": {
+      "a": [
+       "v1",
+       "v2",
+       "v3",
+       "v4"
+      ]
+     },
+     "domain_task_runs": {},
+     "edges": [
+      [
+       "v1",
+       "r1",
+       "v2",
+       "op"
+      ],
+      [
+       "v2",
+       "r2",
+       "v3",
+       "op"
+      ],
+      [
+       "v3",
+       "r3",
+       "v2",
+       "op"
+      ],
+      [
+       "v3",
+       "r4",
+       "v4",
+       "op"
+      ]
+     ],
+     "cycle_nodes": [
+      "v2",
+      "v3"
+     ],
+     "has_cycle": true
+    }
+   }
+  },
+  {
+   "id": "graph_dup_edges",
+   "fn": "graph_rebuild",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v1",
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2",
+       "v2"
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "result": {
+     "producing_run": {
+      "v3": "r2",
+      "v2": "r1"
+     },
+     "consumers": {
+      "v1": [
+       "r1",
+       "r1"
+      ]
+     },
+     "run_inputs": {
+      "r1": [
+       "v1",
+       "v1"
+      ]
+     },
+     "run_outputs": {
+      "r1": [
+       "v2",
+       "v2"
+      ]
+     },
+     "version_asset": {
+      "v1": "a1",
+      "v2": "a1",
+      "v3": "a2",
+      "v4": "a2"
+     },
+     "asset_versions": {
+      "a1": [
+       "v1",
+       "v2"
+      ],
+      "a2": [
+       "v3",
+       "v4"
+      ]
+     },
+     "domain_task_runs": {},
+     "edges": [
+      [
+       "v1",
+       "r1",
+       "v2",
+       "op"
+      ],
+      [
+       "v1",
+       "r1",
+       "v2",
+       "op"
+      ],
+      [
+       "v1",
+       "r1",
+       "v2",
+       "op"
+      ],
+      [
+       "v1",
+       "r1",
+       "v2",
+       "op"
+      ]
+     ],
+     "cycle_nodes": [],
+     "has_cycle": false
+    }
+   }
+  },
+  {
+   "id": "graph_producing_first",
+   "fn": "graph_rebuild",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1",
+      "producing_run_id": "declared"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [],
+      "output_version_ids": [
+       "v1"
+      ]
+     },
+     {
+      "run_id": "r2",
+      "operation": "op",
+      "input_version_ids": [],
+      "output_version_ids": [
+       "v1"
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "result": {
+     "producing_run": {
+      "v1": "declared"
+     },
+     "consumers": {},
+     "run_inputs": {
+      "r1": [],
+      "r2": []
+     },
+     "run_outputs": {
+      "r1": [
+       "v1"
+      ],
+      "r2": [
+       "v1"
+      ]
+     },
+     "version_asset": {
+      "v1": "a1"
+     },
+     "asset_versions": {
+      "a1": [
+       "v1"
+      ]
+     },
+     "domain_task_runs": {},
+     "edges": [],
+     "cycle_nodes": [],
+     "has_cycle": false
+    }
+   }
+  },
+  {
+   "id": "ddr_v2",
+   "fn": "direct_downstream",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_id": "v2"
+   },
+   "expect": {
+    "result": [
+     "r2"
+    ]
+   }
+  },
+  {
+   "id": "ddr_none",
+   "fn": "direct_downstream",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_id": "v9"
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "ddr_v1",
+   "fn": "direct_downstream",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_id": "v1"
+   },
+   "expect": {
+    "result": [
+     "r1"
+    ]
+   }
+  },
+  {
+   "id": "tdr_v1",
+   "fn": "transitive_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_ids": [
+     "v1"
+    ],
+    "max_nodes": 100000
+   },
+   "expect": {
+    "result": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   }
+  },
+  {
+   "id": "tdr_multi",
+   "fn": "transitive_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_ids": [
+     "v2",
+     "v3"
+    ],
+    "max_nodes": 100000
+   },
+   "expect": {
+    "result": [
+     "r2",
+     "r3"
+    ]
+   }
+  },
+  {
+   "id": "tdr_empty",
+   "fn": "transitive_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_ids": [],
+    "max_nodes": 100000
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "tdr_blank",
+   "fn": "transitive_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_ids": [
+     "",
+     null
+    ],
+    "max_nodes": 100000
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "tdr_cycle",
+   "fn": "transitive_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ]
+     },
+     {
+      "run_id": "r2",
+      "operation": "op",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v1"
+      ]
+     }
+    ],
+    "version_ids": [
+     "v1"
+    ],
+    "max_nodes": 100000
+   },
+   "expect": {
+    "result": [
+     "r1",
+     "r2"
+    ]
+   }
+  },
+  {
+   "id": "tdr_capped",
+   "fn": "transitive_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_ids": [
+     "v1"
+    ],
+    "max_nodes": 2
+   },
+   "expect": {
+    "result": [
+     "r1",
+     "r2"
+    ]
+   }
+  },
+  {
+   "id": "tdr_orphan",
+   "fn": "transitive_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "ghost"
+      ],
+      "output_version_ids": [
+       "o"
+      ]
+     }
+    ],
+    "version_ids": [
+     "ghost"
+    ],
+    "max_nodes": 100000
+   },
+   "expect": {
+    "result": [
+     "r1"
+    ]
+   }
+  },
+  {
+   "id": "tdv_v1",
+   "fn": "transitive_versions",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_ids": [
+     "v1"
+    ]
+   },
+   "expect": {
+    "result": [
+     "v2",
+     "v3",
+     "v4"
+    ]
+   }
+  },
+  {
+   "id": "tdv_none",
+   "fn": "transitive_versions",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_ids": [
+     "ghost"
+    ]
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "latest_x",
+   "fn": "latest_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "task_id": "task-x"
+   },
+   "expect": {
+    "result": "r3"
+   }
+  },
+  {
+   "id": "latest_y",
+   "fn": "latest_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "task_id": "task-y"
+   },
+   "expect": {
+    "result": "r2"
+   }
+  },
+  {
+   "id": "latest_none",
+   "fn": "latest_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "task_id": "task-z"
+   },
+   "expect": {
+    "result": null
+   }
+  },
+  {
+   "id": "asset_v1",
+   "fn": "asset_id_for",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_id": "v1"
+   },
+   "expect": {
+    "result": "a1"
+   }
+  },
+  {
+   "id": "asset_ghost",
+   "fn": "asset_id_for",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "r2",
+      "operation": "factor_fusion",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "status": "complete",
+      "domain_task_id": "task-y",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "r3",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [],
+      "status": "running",
+      "domain_task_id": "task-x",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "version_id": "v9"
+   },
+   "expect": {
+    "result": null
+   }
+  },
+  {
+   "id": "reuse_latest_wins",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ],
+     "require_outputs": false
+    }
+   },
+   "expect": {
+    "result": "newer"
+   }
+  },
+  {
+   "id": "reuse_outputs_req",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ]
+    }
+   },
+   "expect": {
+    "result": "newer"
+   }
+  },
+  {
+   "id": "reuse_gv_match",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ],
+     "generator_version": "g1"
+    }
+   },
+   "expect": {
+    "result": "old"
+   }
+  },
+  {
+   "id": "reuse_gv_none",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ],
+     "generator_version": "g2"
+    }
+   },
+   "expect": {
+    "result": "newer"
+   }
+  },
+  {
+   "id": "reuse_hash",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ],
+     "input_snapshot_hash": "h1"
+    }
+   },
+   "expect": {
+    "result": "newer"
+   }
+  },
+  {
+   "id": "reuse_hash_miss",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ],
+     "input_snapshot_hash": "hX"
+    }
+   },
+   "expect": {
+    "result": null
+   }
+  },
+  {
+   "id": "reuse_params_subset",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ],
+     "parameters": {
+      "power": 2
+     }
+    }
+   },
+   "expect": {
+    "result": "newer"
+   }
+  },
+  {
+   "id": "reuse_params_miss",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ],
+     "parameters": {
+      "power": 3
+     }
+    }
+   },
+   "expect": {
+    "result": null
+   }
+  },
+  {
+   "id": "reuse_params_extra",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1"
+     ],
+     "parameters": {
+      "power": 2,
+      "extra": "x"
+     },
+     "generator_version": "g2"
+    }
+   },
+   "expect": {
+    "result": "newer"
+   }
+  },
+  {
+   "id": "reuse_wrong_op",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "kriging",
+     "input_version_ids": [
+      "v1"
+     ]
+    }
+   },
+   "expect": {
+    "result": null
+   }
+  },
+  {
+   "id": "reuse_wrong_inputs",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v2"
+     ]
+    }
+   },
+   "expect": {
+    "result": null
+   }
+  },
+  {
+   "id": "reuse_input_order",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "idw",
+     "input_version_ids": [
+      "v1",
+      "v2"
+     ]
+    }
+   },
+   "expect": {
+    "result": null
+   }
+  },
+  {
+   "id": "reuse_none",
+   "fn": "find_reuse_run",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "old",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "radius": 500
+      },
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "mid",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [],
+      "status": "complete",
+      "generator_version": "g1",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2
+      },
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "new",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v9"
+      ],
+      "status": "failed",
+      "generator_version": "g1",
+      "started_at": "2026-01-01T03:00:00"
+     },
+     {
+      "run_id": "newer",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v8"
+      ],
+      "status": "completed",
+      "generator_version": "g2",
+      "input_snapshot_hash": "h1",
+      "parameters": {
+       "power": 2,
+       "extra": "x"
+      },
+      "started_at": "2026-01-01T04:00:00"
+     }
+    ],
+    "query": {
+     "operation": "noop",
+     "input_version_ids": []
+    }
+   },
+   "expect": {
+    "result": null
+   }
+  },
+  {
+   "id": "topo_chain",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "ra",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "domain_task_id": "t-a",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "rb",
+      "operation": "fuse",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3"
+      ],
+      "domain_task_id": "t-b",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "rc",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [
+       "v4"
+      ],
+      "domain_task_id": "t-c",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "run_ids": [
+     "rc",
+     "ra",
+     "rb"
+    ],
+    "task_consumers": null
+   },
+   "expect": {
+    "result": [
+     "ra",
+     "rb",
+     "rc"
+    ]
+   }
+  },
+  {
+   "id": "topo_single",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "ra",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "domain_task_id": "t-a",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "rb",
+      "operation": "fuse",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3"
+      ],
+      "domain_task_id": "t-b",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "rc",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [
+       "v4"
+      ],
+      "domain_task_id": "t-c",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "run_ids": [
+     "rb"
+    ],
+    "task_consumers": null
+   },
+   "expect": {
+    "result": [
+     "rb"
+    ]
+   }
+  },
+  {
+   "id": "topo_unknown",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "ra",
+      "operation": "idw",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "domain_task_id": "t-a",
+      "started_at": "2026-01-01T01:00:00"
+     },
+     {
+      "run_id": "rb",
+      "operation": "fuse",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3"
+      ],
+      "domain_task_id": "t-b",
+      "started_at": "2026-01-01T02:00:00"
+     },
+     {
+      "run_id": "rc",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v3"
+      ],
+      "output_version_ids": [
+       "v4"
+      ],
+      "domain_task_id": "t-c",
+      "started_at": "2026-01-01T03:00:00"
+     }
+    ],
+    "run_ids": [
+     "ghost"
+    ],
+    "task_consumers": null
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "topo_diamond",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v0"
+      ],
+      "output_version_ids": [
+       "v1",
+       "v2"
+      ]
+     },
+     {
+      "run_id": "r2",
+      "operation": "op",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v3"
+      ]
+     },
+     {
+      "run_id": "r3",
+      "operation": "op",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v4"
+      ]
+     },
+     {
+      "run_id": "r4",
+      "operation": "op",
+      "input_version_ids": [
+       "v3",
+       "v4"
+      ],
+      "output_version_ids": [
+       "v5"
+      ]
+     }
+    ],
+    "run_ids": [
+     "r4",
+     "r3",
+     "r2",
+     "r1"
+    ],
+    "task_consumers": null
+   },
+   "expect": {
+    "result": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ]
+   }
+  },
+  {
+   "id": "topo_subset_cycle",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ]
+     },
+     {
+      "run_id": "r2",
+      "operation": "op",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v1"
+      ]
+     },
+     {
+      "run_id": "r3",
+      "operation": "op",
+      "input_version_ids": [
+       "v9"
+      ],
+      "output_version_ids": [
+       "v8"
+      ]
+     }
+    ],
+    "run_ids": [
+     "r1",
+     "r2"
+    ],
+    "task_consumers": null
+   },
+   "expect": {
+    "raise": {
+     "python_class": "DependencyGraphError",
+     "message": "cycle detected in recompute subset; cannot topologically order plan"
+    }
+   }
+  },
+  {
+   "id": "topo_cycle_outside",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ]
+     },
+     {
+      "run_id": "r2",
+      "operation": "op",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v1"
+      ]
+     },
+     {
+      "run_id": "r3",
+      "operation": "op",
+      "input_version_ids": [
+       "v9"
+      ],
+      "output_version_ids": [
+       "v8"
+      ]
+     }
+    ],
+    "run_ids": [
+     "r3"
+    ],
+    "task_consumers": null
+   },
+   "expect": {
+    "result": [
+     "r3"
+    ]
+   }
+  },
+  {
+   "id": "topo_synth",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "pred",
+      "operation": "predict",
+      "input_version_ids": [],
+      "output_version_ids": [],
+      "domain_task_id": "t-pred",
+      "started_at": "2026-01-02T00:00:00"
+     },
+     {
+      "run_id": "pred_old",
+      "operation": "predict",
+      "input_version_ids": [],
+      "output_version_ids": [],
+      "domain_task_id": "t-pred",
+      "started_at": "2026-01-01T00:00:00"
+     },
+     {
+      "run_id": "mc",
+      "operation": "map_compile",
+      "input_version_ids": [],
+      "output_version_ids": [
+       "vm"
+      ],
+      "domain_task_id": "t-map",
+      "parameters": {
+       "linked_prediction_task_id": "t-pred",
+       "source_task_ids": [
+        "t-factor"
+       ]
+      },
+      "started_at": "2026-01-03T00:00:00"
+     },
+     {
+      "run_id": "fac",
+      "operation": "idw",
+      "input_version_ids": [],
+      "output_version_ids": [],
+      "domain_task_id": "t-factor",
+      "started_at": "2026-01-01T12:00:00"
+     }
+    ],
+    "run_ids": [
+     "mc",
+     "pred",
+     "fac",
+     "pred_old"
+    ],
+    "task_consumers": null
+   },
+   "expect": {
+    "result": [
+     "fac",
+     "pred",
+     "pred_old",
+     "mc"
+    ]
+   }
+  },
+  {
+   "id": "topo_synth_tc",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "pred",
+      "operation": "predict",
+      "input_version_ids": [],
+      "output_version_ids": [],
+      "domain_task_id": "t-pred",
+      "started_at": "2026-01-02T00:00:00"
+     },
+     {
+      "run_id": "pred_old",
+      "operation": "predict",
+      "input_version_ids": [],
+      "output_version_ids": [],
+      "domain_task_id": "t-pred",
+      "started_at": "2026-01-01T00:00:00"
+     },
+     {
+      "run_id": "mc",
+      "operation": "map_compile",
+      "input_version_ids": [],
+      "output_version_ids": [
+       "vm"
+      ],
+      "domain_task_id": "t-map",
+      "parameters": {
+       "linked_prediction_task_id": "t-pred",
+       "source_task_ids": [
+        "t-factor"
+       ]
+      },
+      "started_at": "2026-01-03T00:00:00"
+     },
+     {
+      "run_id": "fac",
+      "operation": "idw",
+      "input_version_ids": [],
+      "output_version_ids": [],
+      "domain_task_id": "t-factor",
+      "started_at": "2026-01-01T12:00:00"
+     }
+    ],
+    "run_ids": [
+     "mc",
+     "fac"
+    ],
+    "task_consumers": {
+     "t-map": [
+      "t-factor",
+      "t-pred"
+     ]
+    }
+   },
+   "expect": {
+    "result": [
+     "fac",
+     "mc"
+    ]
+   }
+  },
+  {
+   "id": "topo_synth_reach_guard",
+   "fn": "topological_runs",
+   "input": {
+    "versions": [
+     {
+      "version_id": "v1",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v2",
+      "asset_id": "a1"
+     },
+     {
+      "version_id": "v3",
+      "asset_id": "a2",
+      "producing_run_id": "r2"
+     },
+     {
+      "version_id": "v4",
+      "asset_id": "a2"
+     }
+    ],
+    "runs": [
+     {
+      "run_id": "r1",
+      "operation": "op",
+      "input_version_ids": [
+       "v1"
+      ],
+      "output_version_ids": [
+       "v2"
+      ],
+      "domain_task_id": "t-a"
+     },
+     {
+      "run_id": "r2",
+      "operation": "map_compile",
+      "input_version_ids": [
+       "v2"
+      ],
+      "output_version_ids": [
+       "v3"
+      ],
+      "domain_task_id": "t-b",
+      "parameters": {
+       "linked_prediction_task_id": "t-a"
+      }
+     }
+    ],
+    "run_ids": [
+     "r1",
+     "r2"
+    ],
+    "task_consumers": null
+   },
+   "expect": {
+    "result": [
+     "r1",
+     "r2"
+    ]
+   }
+  },
+  {
+   "id": "fmt_draft",
+   "fn": "format_selector",
+   "input": {
+    "kind": "phase1_draft",
+    "ref_id": "layer-9"
+   },
+   "expect": {
+    "result": "draft:layer-9"
+   }
+  },
+  {
+   "id": "fmt_factor",
+   "fn": "format_selector",
+   "input": {
+    "kind": "factor",
+    "ref_id": "task-1"
+   },
+   "expect": {
+    "result": "factor:task-1"
+   }
+  },
+  {
+   "id": "fmt_factor_ver",
+   "fn": "format_selector",
+   "input": {
+    "kind": "factor",
+    "ref_id": "task-1",
+    "version_id": "ver_abc"
+   },
+   "expect": {
+    "result": "factor:task-1:ver_abc"
+   }
+  },
+  {
+   "id": "fmt_pred",
+   "fn": "format_selector",
+   "input": {
+    "kind": "prediction",
+    "ref_id": "p1"
+   },
+   "expect": {
+    "result": "prediction:p1"
+   }
+  },
+  {
+   "id": "fmt_pred_ver",
+   "fn": "format_selector",
+   "input": {
+    "kind": "prediction",
+    "ref_id": "p1",
+    "version_id": "v9"
+   },
+   "expect": {
+    "result": "prediction:p1:v9"
+   }
+  },
+  {
+   "id": "fmt_cg_float",
+   "fn": "format_selector",
+   "input": {
+    "kind": "constraint_group",
+    "ref_id": "g",
+    "floating": true
+   },
+   "expect": {
+    "result": "constraints:current"
+   }
+  },
+  {
+   "id": "fmt_cg_bare",
+   "fn": "format_selector",
+   "input": {
+    "kind": "constraint_group",
+    "ref_id": "",
+    "version_id": ""
+   },
+   "expect": {
+    "result": "constraints:current"
+   }
+  },
+  {
+   "id": "fmt_cg_named",
+   "fn": "format_selector",
+   "input": {
+    "kind": "constraint_group",
+    "ref_id": "断层组"
+   },
+   "expect": {
+    "result": "constraints:断层组"
+   }
+  },
+  {
+   "id": "fmt_cg_named_ver",
+   "fn": "format_selector",
+   "input": {
+    "kind": "constraint_group",
+    "ref_id": "断层组",
+    "version_id": "ver_1"
+   },
+   "expect": {
+    "result": "constraints:断层组:ver_1"
+   }
+  },
+  {
+   "id": "fmt_cg_current",
+   "fn": "format_selector",
+   "input": {
+    "kind": "constraint_group",
+    "ref_id": "current"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "constraint group named 'current' collides with the floating constraints:current reference — pin an explicit version"
+    }
+   }
+  },
+  {
+   "id": "fmt_cg_current_ver",
+   "fn": "format_selector",
+   "input": {
+    "kind": "constraint_group",
+    "ref_id": "current",
+    "version_id": "ver_1"
+   },
+   "expect": {
+    "result": "constraints:current:ver_1"
+   }
+  },
+  {
+   "id": "fmt_ver",
+   "fn": "format_selector",
+   "input": {
+    "kind": "catalog_version",
+    "ref_id": "ver_x"
+   },
+   "expect": {
+    "result": "version:ver_x"
+   }
+  },
+  {
+   "id": "fmt_ver_ver",
+   "fn": "format_selector",
+   "input": {
+    "kind": "catalog_version",
+    "ref_id": "",
+    "version_id": "ver_y"
+   },
+   "expect": {
+    "result": "version:ver_y"
+   }
+  },
+  {
+   "id": "fmt_kind_str",
+   "fn": "format_selector",
+   "input": {
+    "kind": "factor",
+    "ref_id": 123,
+    "version_id": null
+   },
+   "expect": {
+    "result": "factor:123"
+   }
+  },
+  {
+   "id": "parse_draft",
+   "fn": "parse_selector",
+   "input": {
+    "value": "draft:layer-9"
+   },
+   "expect": {
+    "result": {
+     "kind": "phase1_draft",
+     "ref_id": "layer-9",
+     "version_id": "",
+     "floating": false,
+     "raw": "draft:layer-9"
+    }
+   }
+  },
+  {
+   "id": "parse_draft_colons",
+   "fn": "parse_selector",
+   "input": {
+    "value": "draft:layer:with:colons"
+   },
+   "expect": {
+    "result": {
+     "kind": "phase1_draft",
+     "ref_id": "layer:with:colons",
+     "version_id": "",
+     "floating": false,
+     "raw": "draft:layer:with:colons"
+    }
+   }
+  },
+  {
+   "id": "parse_draft_empty",
+   "fn": "parse_selector",
+   "input": {
+    "value": "draft:"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "draft selector missing layer id: 'draft:'"
+    }
+   }
+  },
+  {
+   "id": "parse_factor",
+   "fn": "parse_selector",
+   "input": {
+    "value": "factor:task-1"
+   },
+   "expect": {
+    "result": {
+     "kind": "factor",
+     "ref_id": "task-1",
+     "version_id": "",
+     "floating": false,
+     "raw": "factor:task-1"
+    }
+   }
+  },
+  {
+   "id": "parse_factor_ver",
+   "fn": "parse_selector",
+   "input": {
+    "value": "factor:task-1:ver_abc"
+   },
+   "expect": {
+    "result": {
+     "kind": "factor",
+     "ref_id": "task-1",
+     "version_id": "ver_abc",
+     "floating": false,
+     "raw": "factor:task-1:ver_abc"
+    }
+   }
+  },
+  {
+   "id": "parse_factor_trail",
+   "fn": "parse_selector",
+   "input": {
+    "value": "factor:task-1:"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "malformed evidence selector: 'factor:task-1:'"
+    }
+   }
+  },
+  {
+   "id": "parse_factor_extra",
+   "fn": "parse_selector",
+   "input": {
+    "value": "factor:a:b:c"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "malformed evidence selector: 'factor:a:b:c'"
+    }
+   }
+  },
+  {
+   "id": "parse_factor_empty",
+   "fn": "parse_selector",
+   "input": {
+    "value": "factor:"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "malformed evidence selector: 'factor:'"
+    }
+   }
+  },
+  {
+   "id": "parse_pred",
+   "fn": "parse_selector",
+   "input": {
+    "value": "prediction:p1"
+   },
+   "expect": {
+    "result": {
+     "kind": "prediction",
+     "ref_id": "p1",
+     "version_id": "",
+     "floating": false,
+     "raw": "prediction:p1"
+    }
+   }
+  },
+  {
+   "id": "parse_pred_ver",
+   "fn": "parse_selector",
+   "input": {
+    "value": "prediction:p1:v9"
+   },
+   "expect": {
+    "result": {
+     "kind": "prediction",
+     "ref_id": "p1",
+     "version_id": "v9",
+     "floating": false,
+     "raw": "prediction:p1:v9"
+    }
+   }
+  },
+  {
+   "id": "parse_cg_current",
+   "fn": "parse_selector",
+   "input": {
+    "value": "constraints:current"
+   },
+   "expect": {
+    "result": {
+     "kind": "constraint_group",
+     "ref_id": "",
+     "version_id": "",
+     "floating": true,
+     "raw": "constraints:current"
+    }
+   }
+  },
+  {
+   "id": "parse_cg_named",
+   "fn": "parse_selector",
+   "input": {
+    "value": "constraints:断层组"
+   },
+   "expect": {
+    "result": {
+     "kind": "constraint_group",
+     "ref_id": "断层组",
+     "version_id": "",
+     "floating": false,
+     "raw": "constraints:断层组"
+    }
+   }
+  },
+  {
+   "id": "parse_cg_ver",
+   "fn": "parse_selector",
+   "input": {
+    "value": "constraints:g1:ver_2"
+   },
+   "expect": {
+    "result": {
+     "kind": "constraint_group",
+     "ref_id": "g1",
+     "version_id": "ver_2",
+     "floating": false,
+     "raw": "constraints:g1:ver_2"
+    }
+   }
+  },
+  {
+   "id": "parse_cg_empty",
+   "fn": "parse_selector",
+   "input": {
+    "value": "constraints:"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "malformed evidence selector: 'constraints:'"
+    }
+   }
+  },
+  {
+   "id": "parse_ver",
+   "fn": "parse_selector",
+   "input": {
+    "value": "version:ver_abc"
+   },
+   "expect": {
+    "result": {
+     "kind": "catalog_version",
+     "ref_id": "ver_abc",
+     "version_id": "ver_abc",
+     "floating": false,
+     "raw": "version:ver_abc"
+    }
+   }
+  },
+  {
+   "id": "parse_ver_empty",
+   "fn": "parse_selector",
+   "input": {
+    "value": "version:"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "version selector missing version id: 'version:'"
+    }
+   }
+  },
+  {
+   "id": "parse_bare_ver",
+   "fn": "parse_selector",
+   "input": {
+    "value": "ver_0123456789"
+   },
+   "expect": {
+    "result": {
+     "kind": "catalog_version",
+     "ref_id": "ver_0123456789",
+     "version_id": "",
+     "floating": false,
+     "raw": "version:ver_0123456789"
+    }
+   }
+  },
+  {
+   "id": "parse_bare_dver",
+   "fn": "parse_selector",
+   "input": {
+    "value": "dver_x"
+   },
+   "expect": {
+    "result": {
+     "kind": "catalog_version",
+     "ref_id": "dver_x",
+     "version_id": "",
+     "floating": false,
+     "raw": "version:dver_x"
+    }
+   }
+  },
+  {
+   "id": "parse_bare_uuid",
+   "fn": "parse_selector",
+   "input": {
+    "value": "01234567-89ab-cdef-0123-456789abcdef"
+   },
+   "expect": {
+    "result": {
+     "kind": "catalog_version",
+     "ref_id": "01234567-89ab-cdef-0123-456789abcdef",
+     "version_id": "",
+     "floating": false,
+     "raw": "version:01234567-89ab-cdef-0123-456789abcdef"
+    }
+   }
+  },
+  {
+   "id": "parse_bare_sha",
+   "fn": "parse_selector",
+   "input": {
+    "value": "sha:01234567-89ab-cdef-0123-456789abcdef"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "unrecognized evidence selector: 'sha:01234567-89ab-cdef-0123-456789abcdef'"
+    }
+   }
+  },
+  {
+   "id": "parse_bare_short_dash",
+   "fn": "parse_selector",
+   "input": {
+    "value": "ab-cd"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "unrecognized evidence selector: 'ab-cd'"
+    }
+   }
+  },
+  {
+   "id": "parse_ws",
+   "fn": "parse_selector",
+   "input": {
+    "value": "  factor:task-1  "
+   },
+   "expect": {
+    "result": {
+     "kind": "factor",
+     "ref_id": "task-1",
+     "version_id": "",
+     "floating": false,
+     "raw": "factor:task-1"
+    }
+   }
+  },
+  {
+   "id": "parse_empty",
+   "fn": "parse_selector",
+   "input": {
+    "value": ""
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "empty evidence selector"
+    }
+   }
+  },
+  {
+   "id": "parse_none",
+   "fn": "parse_selector",
+   "input": {
+    "value": null
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "empty evidence selector"
+    }
+   }
+  },
+  {
+   "id": "parse_int",
+   "fn": "parse_selector",
+   "input": {
+    "value": 42
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "unrecognized evidence selector: '42'"
+    }
+   }
+  },
+  {
+   "id": "parse_unknown",
+   "fn": "parse_selector",
+   "input": {
+    "value": "mystery:thing"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "unrecognized evidence selector: 'mystery:thing'"
+    }
+   }
+  },
+  {
+   "id": "parse_case",
+   "fn": "parse_selector",
+   "input": {
+    "value": "Factor:task-1"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "unrecognized evidence selector: 'Factor:task-1'"
+    }
+   }
+  },
+  {
+   "id": "res_draft_ok",
+   "fn": "resolve",
+   "input": {
+    "value": "draft:layer-9",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": {
+     "membership": {
+      "layer-9": {
+       "source_version_id": "ver_raw"
+      }
+     }
+    },
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "draft:layer-9",
+     "kind": "phase1_draft",
+     "ref_id": "layer-9",
+     "version_id": "",
+     "status": "resolved",
+     "pinned_version_id": "ver_raw",
+     "asset_id": "a-raw",
+     "display": "沉积相草稿",
+     "detail": "草稿（几何为内容指纹身份，输入 RAW 版本已钉住）",
+     "quality": {
+      "identity": "content_fingerprint"
+     }
+    }
+   }
+  },
+  {
+   "id": "res_draft_no_ws",
+   "fn": "resolve",
+   "input": {
+    "value": "draft:layer-9",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "draft:layer-9",
+     "kind": "phase1_draft",
+     "ref_id": "layer-9",
+     "version_id": "",
+     "status": "missing",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "沉积相草稿",
+     "detail": "草稿图层无工作区成员资格：layer-9",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_draft_no_member",
+   "fn": "resolve",
+   "input": {
+    "value": "draft:layer-2",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": {
+     "membership": {}
+    },
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "draft:layer-2",
+     "kind": "phase1_draft",
+     "ref_id": "layer-2",
+     "version_id": "",
+     "status": "missing",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "别的",
+     "detail": "草稿图层无工作区成员资格：layer-2",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_draft_unpinned",
+   "fn": "resolve",
+   "input": {
+    "value": "draft:layer-9",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": {
+     "membership": {
+      "layer-9": {
+       "source_version_id": ""
+      }
+     }
+    },
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "draft:layer-9",
+     "kind": "phase1_draft",
+     "ref_id": "layer-9",
+     "version_id": "",
+     "status": "unpinned",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "沉积相草稿",
+     "detail": "草稿未钉住 RAW 源版本（旧工程或未走 checkout）",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_draft_no_catalog",
+   "fn": "resolve",
+   "input": {
+    "value": "draft:layer-9",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": {
+     "membership": {
+      "layer-9": {
+       "source_version_id": "ver_raw"
+      }
+     }
+    },
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "draft:layer-9",
+     "kind": "phase1_draft",
+     "ref_id": "layer-9",
+     "version_id": "",
+     "status": "unknown",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "沉积相草稿",
+     "detail": "无目录服务，无法验证钉住的 RAW 版本",
+     "quality": {
+      "identity": "content_fingerprint"
+     }
+    }
+   }
+  },
+  {
+   "id": "res_draft_ver_missing",
+   "fn": "resolve",
+   "input": {
+    "value": "draft:layer-9",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": {
+     "membership": {
+      "layer-9": {
+       "source_version_id": "ver_zzz"
+      }
+     }
+    },
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "draft:layer-9",
+     "kind": "phase1_draft",
+     "ref_id": "layer-9",
+     "version_id": "",
+     "status": "missing",
+     "pinned_version_id": "ver_zzz",
+     "asset_id": "",
+     "display": "沉积相草稿",
+     "detail": "钉住的 RAW 版本不可解析：ver_zzz",
+     "quality": {
+      "identity": "content_fingerprint"
+     }
+    }
+   }
+  },
+  {
+   "id": "res_draft_catalog_raise",
+   "fn": "resolve",
+   "input": {
+    "value": "draft:layer-9",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "raise": true
+    },
+    "workspace": {
+     "membership": {
+      "layer-9": {
+       "source_version_id": "ver_raw"
+      }
+     }
+    },
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "draft:layer-9",
+     "kind": "phase1_draft",
+     "ref_id": "layer-9",
+     "version_id": "",
+     "status": "missing",
+     "pinned_version_id": "ver_raw",
+     "asset_id": "",
+     "display": "沉积相草稿",
+     "detail": "钉住的 RAW 版本不可解析：ver_raw",
+     "quality": {
+      "identity": "content_fingerprint"
+     }
+    }
+   }
+  },
+  {
+   "id": "res_factor_ok",
+   "fn": "resolve",
+   "input": {
+    "value": "factor:task-1",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "factor:task-1",
+     "kind": "factor",
+     "ref_id": "task-1",
+     "version_id": "",
+     "status": "resolved",
+     "pinned_version_id": "ver_cur",
+     "asset_id": "a-1",
+     "display": "砂地比图",
+     "detail": "",
+     "quality": {
+      "r2": 0.91,
+      "n_points": 120,
+      "mock_data": true
+     }
+    }
+   }
+  },
+  {
+   "id": "res_factor_pin_ok",
+   "fn": "resolve",
+   "input": {
+    "value": "factor:task-1:ver_cur",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "factor:task-1:ver_cur",
+     "kind": "factor",
+     "ref_id": "task-1",
+     "version_id": "ver_cur",
+     "status": "resolved",
+     "pinned_version_id": "ver_cur",
+     "asset_id": "a-1",
+     "display": "砂地比图",
+     "detail": "",
+     "quality": {
+      "r2": 0.91,
+      "n_points": 120,
+      "mock_data": true
+     }
+    }
+   }
+  },
+  {
+   "id": "res_factor_stale",
+   "fn": "resolve",
+   "input": {
+    "value": "factor:task-1:ver_old",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_old": {
+       "asset_id": "a-o",
+       "name": "旧版"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "factor:task-1:ver_old",
+     "kind": "factor",
+     "ref_id": "task-1",
+     "version_id": "ver_old",
+     "status": "stale",
+     "pinned_version_id": "ver_old",
+     "asset_id": "a-o",
+     "display": "砂地比图",
+     "detail": "钉住 ver_old，任务当前结果版本为 ver_cur",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_factor_missing_task",
+   "fn": "resolve",
+   "input": {
+    "value": "factor:ghost",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "factor:ghost",
+     "kind": "factor",
+     "ref_id": "ghost",
+     "version_id": "",
+     "status": "missing",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "ghost",
+     "detail": "单因素任务不存在：ghost",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_factor_unpinned",
+   "fn": "resolve",
+   "input": {
+    "value": "factor:task-2",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "factor:task-2",
+     "kind": "factor",
+     "ref_id": "task-2",
+     "version_id": "",
+     "status": "unpinned",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "task-2",
+     "detail": "插值结果尚未登记版本（保存后登记）",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_factor_no_catalog",
+   "fn": "resolve",
+   "input": {
+    "value": "factor:task-1",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "factor:task-1",
+     "kind": "factor",
+     "ref_id": "task-1",
+     "version_id": "",
+     "status": "unknown",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "砂地比图",
+     "detail": "无目录服务，无法验证版本",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_factor_ver_missing",
+   "fn": "resolve",
+   "input": {
+    "value": "factor:task-1:ver_zzz",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "factor:task-1:ver_zzz",
+     "kind": "factor",
+     "ref_id": "task-1",
+     "version_id": "ver_zzz",
+     "status": "missing",
+     "pinned_version_id": "ver_zzz",
+     "asset_id": "",
+     "display": "砂地比图",
+     "detail": "钉住版本不可解析：ver_zzz",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_factor_quality",
+   "fn": "resolve",
+   "input": {
+    "value": "factor:task-3",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "factor:task-3",
+     "kind": "factor",
+     "ref_id": "task-3",
+     "version_id": "",
+     "status": "resolved",
+     "pinned_version_id": "ver_p3",
+     "asset_id": "a-2",
+     "display": "孔隙度图",
+     "detail": "",
+     "quality": {
+      "variance_min": 0.1,
+      "variance_max": 0.9,
+      "mock_data": true
+     }
+    }
+   }
+  },
+  {
+   "id": "res_pred_ok_unpinned",
+   "fn": "resolve",
+   "input": {
+    "value": "prediction:p1",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "prediction:p1",
+     "kind": "prediction",
+     "ref_id": "p1",
+     "version_id": "",
+     "status": "unpinned",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "河道预测",
+     "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+     "quality": {
+      "mock_data": true,
+      "classes": [
+       "a",
+       "b"
+      ],
+      "mean_confidence": 0.7
+     }
+    }
+   }
+  },
+  {
+   "id": "res_pred_unfinished",
+   "fn": "resolve",
+   "input": {
+    "value": "prediction:p2",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "prediction:p2",
+     "kind": "prediction",
+     "ref_id": "p2",
+     "version_id": "",
+     "status": "missing",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "p2",
+     "detail": "预测任务未完成（status=failed）",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_pred_missing_task",
+   "fn": "resolve",
+   "input": {
+    "value": "prediction:ghost",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "prediction:ghost",
+     "kind": "prediction",
+     "ref_id": "ghost",
+     "version_id": "",
+     "status": "missing",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "ghost",
+     "detail": "预测任务不存在：ghost",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_pred_ver_missing",
+   "fn": "resolve",
+   "input": {
+    "value": "prediction:p1:ver_zzz",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "prediction:p1:ver_zzz",
+     "kind": "prediction",
+     "ref_id": "p1",
+     "version_id": "ver_zzz",
+     "status": "missing",
+     "pinned_version_id": "ver_zzz",
+     "asset_id": "",
+     "display": "河道预测",
+     "detail": "钉住版本不可解析：ver_zzz",
+     "quality": {
+      "mock_data": true,
+      "classes": [
+       "a",
+       "b"
+      ],
+      "mean_confidence": 0.7
+     }
+    }
+   }
+  },
+  {
+   "id": "res_pred_ver_ok",
+   "fn": "resolve",
+   "input": {
+    "value": "prediction:p1:ver_cur",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "prediction:p1:ver_cur",
+     "kind": "prediction",
+     "ref_id": "p1",
+     "version_id": "ver_cur",
+     "status": "resolved",
+     "pinned_version_id": "ver_cur",
+     "asset_id": "a-1",
+     "display": "河道预测",
+     "detail": "",
+     "quality": {
+      "mock_data": true,
+      "classes": [
+       "a",
+       "b"
+      ],
+      "mean_confidence": 0.7
+     }
+    }
+   }
+  },
+  {
+   "id": "res_pred_done",
+   "fn": "resolve",
+   "input": {
+    "value": "prediction:p3",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "prediction:p3",
+     "kind": "prediction",
+     "ref_id": "p3",
+     "version_id": "",
+     "status": "unpinned",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "湖盆预测",
+     "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+     "quality": {
+      "classes": []
+     }
+    }
+   }
+  },
+  {
+   "id": "res_pred_no_cat_ver",
+   "fn": "resolve",
+   "input": {
+    "value": "prediction:p1:ver_x",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "prediction:p1:ver_x",
+     "kind": "prediction",
+     "ref_id": "p1",
+     "version_id": "ver_x",
+     "status": "missing",
+     "pinned_version_id": "ver_x",
+     "asset_id": "",
+     "display": "河道预测",
+     "detail": "钉住版本不可解析：ver_x",
+     "quality": {
+      "mock_data": true,
+      "classes": [
+       "a",
+       "b"
+      ],
+      "mean_confidence": 0.7
+     }
+    }
+   }
+  },
+  {
+   "id": "res_cg_float_clean",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:current",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "clean",
+     "detail": "matches latest commit"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:current",
+     "kind": "constraint_group",
+     "ref_id": "",
+     "version_id": "",
+     "status": "floating",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "地质约束（当前内容）",
+     "detail": "matches latest commit",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_float_stale",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:current",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "stale",
+     "detail": "content differs from latest"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:current",
+     "kind": "constraint_group",
+     "ref_id": "",
+     "version_id": "",
+     "status": "stale",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "地质约束（当前内容）",
+     "detail": "content differs from latest",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_float_superseded",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:current",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "superseded",
+     "detail": "constraint group has a newer commit abc…"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:current",
+     "kind": "constraint_group",
+     "ref_id": "",
+     "version_id": "",
+     "status": "stale",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "地质约束（当前内容）",
+     "detail": "constraint group has a newer commit abc…",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_float_unknown",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:current",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "unknown",
+     "detail": "never committed"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:current",
+     "kind": "constraint_group",
+     "ref_id": "",
+     "version_id": "",
+     "status": "unknown",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "地质约束（当前内容）",
+     "detail": "never committed",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_float_weird",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:current",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "unexpected-word",
+     "detail": "unmapped"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:current",
+     "kind": "constraint_group",
+     "ref_id": "",
+     "version_id": "",
+     "status": "unknown",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "地质约束（当前内容）",
+     "detail": "unmapped",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_float_raise",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:current",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "raise": "backend dead"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:current",
+     "kind": "constraint_group",
+     "ref_id": "",
+     "version_id": "",
+     "status": "unknown",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "地质约束（当前内容）",
+     "detail": "约束解析失败：backend dead",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_named_missing",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:g1:ver_2",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "missing",
+     "detail": "no such group"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:g1:ver_2",
+     "kind": "constraint_group",
+     "ref_id": "g1",
+     "version_id": "ver_2",
+     "status": "missing",
+     "pinned_version_id": "ver_2",
+     "asset_id": "",
+     "display": "g1",
+     "detail": "no such group",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_named_clean",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:g1:ver_2",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "clean",
+     "detail": "matches latest commit"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:g1:ver_2",
+     "kind": "constraint_group",
+     "ref_id": "g1",
+     "version_id": "ver_2",
+     "status": "resolved",
+     "pinned_version_id": "ver_2",
+     "asset_id": "",
+     "display": "g1",
+     "detail": "matches latest commit",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_named_stale",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:g1:ver_2",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "stale",
+     "detail": "content differs from latest"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:g1:ver_2",
+     "kind": "constraint_group",
+     "ref_id": "g1",
+     "version_id": "ver_2",
+     "status": "stale",
+     "pinned_version_id": "ver_2",
+     "asset_id": "",
+     "display": "g1",
+     "detail": "content differs from latest",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_named_unknown",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:g1:ver_2",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "status": "unknown",
+     "detail": "never committed"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:g1:ver_2",
+     "kind": "constraint_group",
+     "ref_id": "g1",
+     "version_id": "ver_2",
+     "status": "unknown",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "g1",
+     "detail": "never committed",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_cg_named_raise",
+   "fn": "resolve",
+   "input": {
+    "value": "constraints:g1:ver_2",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": {
+     "raise": "io error"
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "constraints:g1:ver_2",
+     "kind": "constraint_group",
+     "ref_id": "g1",
+     "version_id": "ver_2",
+     "status": "unknown",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "g1",
+     "detail": "约束解析失败：io error",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_ver_ok",
+   "fn": "resolve",
+   "input": {
+    "value": "version:ver_x",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "version:ver_x",
+     "kind": "catalog_version",
+     "ref_id": "ver_x",
+     "version_id": "ver_x",
+     "status": "resolved",
+     "pinned_version_id": "ver_x",
+     "asset_id": "a-9",
+     "display": "",
+     "detail": "外部版",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_ver_no_catalog",
+   "fn": "resolve",
+   "input": {
+    "value": "version:ver_x",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": null,
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "version:ver_x",
+     "kind": "catalog_version",
+     "ref_id": "ver_x",
+     "version_id": "ver_x",
+     "status": "unknown",
+     "pinned_version_id": "",
+     "asset_id": "",
+     "display": "",
+     "detail": "无目录服务，无法验证版本",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_ver_missing",
+   "fn": "resolve",
+   "input": {
+    "value": "version:ver_zzz",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "version:ver_zzz",
+     "kind": "catalog_version",
+     "ref_id": "ver_zzz",
+     "version_id": "ver_zzz",
+     "status": "missing",
+     "pinned_version_id": "ver_zzz",
+     "asset_id": "",
+     "display": "",
+     "detail": "版本不可解析：ver_zzz",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_bare_ver",
+   "fn": "resolve",
+   "input": {
+    "value": "ver_x",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": {
+     "selector": "version:ver_x",
+     "kind": "catalog_version",
+     "ref_id": "ver_x",
+     "version_id": "",
+     "status": "resolved",
+     "pinned_version_id": "ver_x",
+     "asset_id": "a-9",
+     "display": "",
+     "detail": "外部版",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "res_raise_parse",
+   "fn": "resolve",
+   "input": {
+    "value": "mystery:thing",
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "unrecognized evidence selector: 'mystery:thing'"
+    }
+   }
+  },
+  {
+   "id": "res_selector_obj",
+   "fn": "resolve_selector_obj",
+   "input": {
+    "kind": "catalog_version",
+    "ref_id": "ver_x",
+    "version_id": "ver_x",
+    "floating": false,
+    "catalog": {
+     "resolve": {
+      "ver_cur": {
+       "asset_id": "a-1",
+       "name": "砂地比成果"
+      },
+      "ver_p3": {
+       "asset_id": "a-2",
+       "name": "孔图"
+      },
+      "ver_x": {
+       "asset_id": "a-9",
+       "name": "外部版"
+      },
+      "ver_raw": {
+       "asset_id": "a-raw",
+       "name": "RAW"
+      }
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "selector": "version:ver_x",
+     "kind": "catalog_version",
+     "ref_id": "ver_x",
+     "version_id": "ver_x",
+     "status": "resolved",
+     "pinned_version_id": "ver_x",
+     "asset_id": "a-9",
+     "display": "",
+     "detail": "外部版",
+     "quality": {}
+    }
+   }
+  },
+  {
+   "id": "avail_none",
+   "fn": "available_evidence",
+   "input": {
+    "document": null,
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "avail_empty_ws",
+   "fn": "available_evidence",
+   "input": {
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "workspace": {
+     "membership": {},
+     "roles": {}
+    },
+    "verdict": {
+     "raise": "backend dead"
+    }
+   },
+   "expect": {
+    "result": [
+     {
+      "selector": "factor:task-1:ver_cur",
+      "kind": "factor",
+      "ref_id": "task-1",
+      "version_id": "ver_cur",
+      "status": "unknown",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "砂地比图",
+      "detail": "无目录服务，无法验证版本",
+      "quality": {}
+     },
+     {
+      "selector": "factor:task-3:ver_p3",
+      "kind": "factor",
+      "ref_id": "task-3",
+      "version_id": "ver_p3",
+      "status": "unknown",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "孔隙度图",
+      "detail": "无目录服务，无法验证版本",
+      "quality": {}
+     },
+     {
+      "selector": "prediction:p1",
+      "kind": "prediction",
+      "ref_id": "p1",
+      "version_id": "",
+      "status": "unpinned",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "河道预测",
+      "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+      "quality": {
+       "mock_data": true,
+       "classes": [
+        "a",
+        "b"
+       ],
+       "mean_confidence": 0.7
+      }
+     },
+     {
+      "selector": "prediction:p3",
+      "kind": "prediction",
+      "ref_id": "p3",
+      "version_id": "",
+      "status": "unpinned",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "湖盆预测",
+      "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+      "quality": {
+       "classes": []
+      }
+     },
+     {
+      "selector": "constraints:current",
+      "kind": "constraint_group",
+      "ref_id": "",
+      "version_id": "",
+      "status": "unknown",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "地质约束（当前内容）",
+      "detail": "约束解析失败：backend dead",
+      "quality": {}
+     }
+    ]
+   }
+  },
+  {
+   "id": "avail_full",
+   "fn": "available_evidence",
+   "input": {
+    "document": {
+     "user_vector_layers": [
+      {
+       "id": "layer-9",
+       "name": "沉积相草稿"
+      },
+      {
+       "id": "layer-2",
+       "name": "别的"
+      }
+     ],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "cg1",
+       "name": "断层"
+      }
+     ]
+    },
+    "workspace": {
+     "membership": {
+      "layer-9": {
+       "source_version_id": "ver_raw"
+      }
+     },
+     "roles": {
+      "initial_facies_draft": [
+       "layer-9"
+      ]
+     }
+    },
+    "verdict": {
+     "status": "clean",
+     "detail": "live constraint content"
+    }
+   },
+   "expect": {
+    "result": [
+     {
+      "selector": "draft:layer-9",
+      "kind": "phase1_draft",
+      "ref_id": "layer-9",
+      "version_id": "",
+      "status": "unknown",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "沉积相草稿",
+      "detail": "无目录服务，无法验证钉住的 RAW 版本",
+      "quality": {
+       "identity": "content_fingerprint"
+      }
+     },
+     {
+      "selector": "factor:task-1:ver_cur",
+      "kind": "factor",
+      "ref_id": "task-1",
+      "version_id": "ver_cur",
+      "status": "unknown",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "砂地比图",
+      "detail": "无目录服务，无法验证版本",
+      "quality": {}
+     },
+     {
+      "selector": "factor:task-3:ver_p3",
+      "kind": "factor",
+      "ref_id": "task-3",
+      "version_id": "ver_p3",
+      "status": "unknown",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "孔隙度图",
+      "detail": "无目录服务，无法验证版本",
+      "quality": {}
+     },
+     {
+      "selector": "prediction:p1",
+      "kind": "prediction",
+      "ref_id": "p1",
+      "version_id": "",
+      "status": "unpinned",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "河道预测",
+      "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+      "quality": {
+       "mock_data": true,
+       "classes": [
+        "a",
+        "b"
+       ],
+       "mean_confidence": 0.7
+      }
+     },
+     {
+      "selector": "prediction:p3",
+      "kind": "prediction",
+      "ref_id": "p3",
+      "version_id": "",
+      "status": "unpinned",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "湖盆预测",
+      "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+      "quality": {
+       "classes": []
+      }
+     },
+     {
+      "selector": "constraints:current",
+      "kind": "constraint_group",
+      "ref_id": "",
+      "version_id": "",
+      "status": "floating",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "地质约束（当前内容）",
+      "detail": "live constraint content",
+      "quality": {}
+     }
+    ]
+   }
+  },
+  {
+   "id": "avail_no_constraints",
+   "fn": "available_evidence",
+   "input": {
+    "document": {
+     "user_vector_layers": [],
+     "factor_map_tasks": [
+      {
+       "id": "task-1",
+       "name": "砂地比图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_cur",
+       "quality_metrics": {
+        "r2": 0.91,
+        "n_points": 120,
+        "other": "x"
+       },
+       "source_kind": "mock"
+      },
+      {
+       "id": "task-2",
+       "name": "",
+       "status": "running",
+       "grid_artifact_version_id": "",
+       "quality_metrics": {},
+       "source_kind": "real"
+      },
+      {
+       "id": "task-3",
+       "name": "孔隙度图",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_p3",
+       "quality_metrics": {
+        "variance_min": 0.1,
+        "variance_max": 0.9
+       },
+       "source_kind": "mixed"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "p1",
+       "name": "河道预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {
+        "classes": [
+         "a",
+         "b"
+        ],
+        "mean_confidence": 0.7
+       }
+      },
+      {
+       "id": "p2",
+       "name": "",
+       "status": "failed",
+       "adapter_kind": "onnx",
+       "probability_summary": {}
+      },
+      {
+       "id": "p3",
+       "name": "湖盆预测",
+       "status": "done",
+       "adapter_kind": "real",
+       "probability_summary": {
+        "classes": []
+       }
+      }
+     ],
+     "constraint_layers": []
+    },
+    "workspace": null,
+    "verdict": null
+   },
+   "expect": {
+    "result": [
+     {
+      "selector": "factor:task-1:ver_cur",
+      "kind": "factor",
+      "ref_id": "task-1",
+      "version_id": "ver_cur",
+      "status": "unknown",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "砂地比图",
+      "detail": "无目录服务，无法验证版本",
+      "quality": {}
+     },
+     {
+      "selector": "factor:task-3:ver_p3",
+      "kind": "factor",
+      "ref_id": "task-3",
+      "version_id": "ver_p3",
+      "status": "unknown",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "孔隙度图",
+      "detail": "无目录服务，无法验证版本",
+      "quality": {}
+     },
+     {
+      "selector": "prediction:p1",
+      "kind": "prediction",
+      "ref_id": "p1",
+      "version_id": "",
+      "status": "unpinned",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "河道预测",
+      "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+      "quality": {
+       "mock_data": true,
+       "classes": [
+        "a",
+        "b"
+       ],
+       "mean_confidence": 0.7
+      }
+     },
+     {
+      "selector": "prediction:p3",
+      "kind": "prediction",
+      "ref_id": "p3",
+      "version_id": "",
+      "status": "unpinned",
+      "pinned_version_id": "",
+      "asset_id": "",
+      "display": "湖盆预测",
+      "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+      "quality": {
+       "classes": []
+      }
+     }
+    ]
+   }
+  }
+ ]
+}
