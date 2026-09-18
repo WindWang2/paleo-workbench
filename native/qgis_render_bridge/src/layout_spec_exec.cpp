@@ -1,5 +1,5 @@
 // layout_spec_exec — implementation (moved verbatim from
-// QgisMapStack::layoutExport, CONV-27 D-02, plus two documented
+// QgisMapStack::layoutExport, CONV-29 D-02, plus two documented
 // extensions: spec["force_vector"] forces vector PDF/SVG output and the
 // report carries PNG dimensions).
 
@@ -386,7 +386,7 @@ std::string execute_layout_spec(const ExecContext& context,
     // D10: GeoPDF is available in the vendored QGIS and opt-in per export.
     settings.writeGeoPdf =
         spec.value(QStringLiteral("geo_pdf")).toBool(false);
-    // CONV-27: vector preservation opt-in (no rasterised fallback layers).
+    // CONV-29: vector preservation opt-in (no rasterised fallback layers).
     settings.forceVectorOutput = force_vector;
     result = exporter.exportToPdf(QString::fromStdString(output_path),
                                   settings);

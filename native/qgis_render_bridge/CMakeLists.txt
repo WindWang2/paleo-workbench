@@ -115,6 +115,10 @@ if(PALEO_WITH_QGIS_RENDERER)
     # gui/analysis headers live in component subdirectories (maptools,
     # symbology, ...) and include each other unqualified — mirror the full
     # source-header search path, like the PwbQgisSdk platform target does.
+    if(NOT PWB_BRIDGE_DEPS_PREFIX)
+        set(PWB_BRIDGE_DEPS_PREFIX "/home/kevin/pwb-sdks/root/usr" CACHE PATH
+            "Deps prefix holding the geos/gdal headers the vendored QGIS headers pull in unqualified")
+    endif()
     foreach(_bridge_component gui analysis)
         file(GLOB_RECURSE _bridge_${_bridge_component}_headers CONFIGURE_DEPENDS
             "${PALEO_QGIS_SOURCE_DIR}/src/${_bridge_component}/*.h"
@@ -130,7 +134,10 @@ if(PALEO_WITH_QGIS_RENDERER)
         "${PALEO_QGIS_SOURCE_DIR}/external/spatialindex/include"
         "${PALEO_QGIS_BUILD_DIR}/src/gui"
         "${PALEO_QGIS_BUILD_DIR}/src/analysis"
-        "/home/kevin/pwb-sdks/root/usr/include")
+        "${PALEO_QGIS_BUILD_DIR}/src/ui"   # uic-generated ui_*.h (dock widgets)
+        "${PWB_BRIDGE_DEPS_PREFIX}/include"
+        "${PWB_BRIDGE_DEPS_PREFIX}/include/qt6"  # Qsci etc. alongside Qt6
+    )
     file(GLOB _bridge_qwt_dir "${PALEO_QGIS_SOURCE_DIR}/external/qwt-*")
     if(_bridge_qwt_dir)
         list(GET _bridge_qwt_dir 0 _bridge_qwt_first)

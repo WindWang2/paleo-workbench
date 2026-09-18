@@ -4,7 +4,7 @@
 
 #include "map_stack_service.hpp"
 
-#include "layout_spec_exec.hpp"  // CONV-27: shared spec executor (single authority)
+#include "layout_spec_exec.hpp"  // CONV-29: shared spec executor (single authority)
 
 #include <algorithm>
 #include <chrono>
@@ -6584,7 +6584,7 @@ std::map<std::string, std::string> QgisMapStack::execLayerProperties(
 // M7: QgsLayout composition export (M6 component graph → native layout)
 // --------------------------------------------------------------------------- //
 
-// CONV-27 D-02: the spec → QgsLayout → export body moved verbatim into
+// CONV-29 D-02: the spec → QgsLayout → export body moved verbatim into
 // layout_spec_exec.cpp — the single executor shared with the C++ product
 // chain. This wrapper only feeds the bridge mirror context.
 std::string QgisMapStack::layoutExport(const std::string& spec_json,
