@@ -260,7 +260,8 @@ const AlgorithmRegistry& shared_registry() {
     static const bool registered = [] {
         const auto report =
             pwb::seismic_attributes::register_seismic_attributes(registry, "test-build");
-        return report.registered_ids.size() == 4 && report.rejection.empty();
+        // S line: the registration covers all ten production kernels.
+        return report.registered_ids.size() == 10 && report.rejection.empty();
     }();
     PWB_CHECK(registered);
     return registry;

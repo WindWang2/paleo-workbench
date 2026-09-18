@@ -1,0 +1,109 @@
+{
+ "case": "sl_impulse",
+ "dtype": "float32",
+ "files": {
+  "expected_curvature_mean.f32": {
+   "elements": 720,
+   "kernel": "curvature_mean",
+   "max": 18221574.0,
+   "mean": 1364087.25,
+   "min": -7288629.5,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "kind": "mean",
+    "win_il": 3,
+    "win_t": 3,
+    "win_xl": 3
+   },
+   "sha256": "e8487ecbbcd7b2ffd28fcfa370703259c5ad61481d6954827e56f8f543cd2daa"
+  },
+  "expected_dip_azimuth.f32": {
+   "elements": 720,
+   "kernel": "dip_azimuth",
+   "max": 4.71238899230957,
+   "mean": 0.01745329238474369,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "58815f9679cc5cfd53a66a6cef443a607c3b124d665950af3e0a89c60595b0f5"
+  },
+  "expected_dip_il.f32": {
+   "elements": 720,
+   "kernel": "dip_il",
+   "max": 1.5707963705062866,
+   "mean": 0.0,
+   "min": -1.5707963705062866,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "3e2d4b4a733f01d2cf0a349c1de92701f5644e01d3382d435ab0262670b92f84"
+  },
+  "expected_dip_xl.f32": {
+   "elements": 720,
+   "kernel": "dip_xl",
+   "max": 1.5707963705062866,
+   "mean": 0.0,
+   "min": -1.5707963705062866,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "85d626f5ad49a672df3c215877221ff0a811280239827d1145370cabcb14ca56"
+  },
+  "expected_relative_impedance.f32": {
+   "elements": 720,
+   "kernel": "relative_impedance",
+   "max": 1.0,
+   "mean": 0.01666666753590107,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {},
+   "sha256": "110d2168342bc201dad4609da4be73bb7a1a1e7af9687fb67b6741517f832506"
+  },
+  "expected_sweetness.f32": {
+   "elements": 720,
+   "kernel": "sweetness",
+   "max": 632.9795532226562,
+   "mean": 2.9103455543518066,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "sample_interval": 1.0
+   },
+   "sha256": "694e7aeda3c9449331763005968e994385aa8300d471ce5a0b359fcecccf07e7"
+  },
+  "input.f32": {
+   "elements": 720,
+   "max": 1.0,
+   "mean": 0.0013888889225199819,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "role": "input",
+   "sha256": "bc7361b4c7b2d609c0645716dac36c42a43df19c3324d36e434300de1a4d2033"
+  }
+ },
+ "meta": {
+  "note": "single spike: gradient/unwrap boundaries around a delta"
+ },
+ "shape": [
+  6,
+  5,
+  24
+ ]
+}

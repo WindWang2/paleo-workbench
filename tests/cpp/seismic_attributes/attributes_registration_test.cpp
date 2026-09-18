@@ -55,17 +55,23 @@ bool has_error_code(const Result<pwb::science::AlgorithmResultV1>& result,
 
 } // namespace
 
-TEST(register_four_explicit) {
+TEST(register_ten_explicit) {
     AlgorithmRegistry registry;
     const auto report =
         pwb::seismic_attributes::register_seismic_attributes(registry, "build-abc123");
-    PWB_CHECK(report.registered_ids.size() == 4);
+    PWB_CHECK(report.registered_ids.size() == 10);
     PWB_CHECK(report.rejection.empty());
     const std::vector<std::string> expected = {
         "seismic.envelope",
         "seismic.instantaneous_phase",
         "seismic.instantaneous_frequency",
         "seismic.rms_amplitude",
+        "seismic.sweetness",
+        "seismic.relative_impedance",
+        "seismic.dip_il",
+        "seismic.dip_xl",
+        "seismic.dip_azimuth",
+        "seismic.curvature_mean",
     };
     PWB_CHECK(report.registered_ids == expected);
     for (const std::string& id : expected) {
@@ -78,7 +84,7 @@ TEST(duplicate_registration_rejected) {
     AlgorithmRegistry registry;
     const auto first =
         pwb::seismic_attributes::register_seismic_attributes(registry, "build-1");
-    PWB_CHECK(first.registered_ids.size() == 4);
+    PWB_CHECK(first.registered_ids.size() == 10);
     // Second registration: envelope is a duplicate -> explicit rejection,
     // later entries are not registered.
     const auto second =
@@ -86,21 +92,21 @@ TEST(duplicate_registration_rejected) {
     PWB_CHECK(second.registered_ids.empty());
     PWB_CHECK(!second.rejection.empty());
     PWB_CHECK(second.rejection.find("duplicate") != std::string::npos);
-    // Registry state unchanged: still exactly the four from the first call.
+    // Registry state unchanged: still exactly the ten from the first call.
     std::size_t attribute_count = 0;
     for (const std::string& id : registry.algorithm_ids()) {
         if (id.rfind("seismic.", 0) == 0) {
             ++attribute_count;
         }
     }
-    PWB_CHECK(attribute_count == 4);
+    PWB_CHECK(attribute_count == 10);
 }
 
 TEST(descriptors_match_contract) {
     AlgorithmRegistry registry;
     const auto report =
         pwb::seismic_attributes::register_seismic_attributes(registry, "build-desc");
-    PWB_CHECK(report.registered_ids.size() == 4);
+    PWB_CHECK(report.registered_ids.size() == 10);
     struct Expected {
         const char* id;
         const char* output;
@@ -112,6 +118,12 @@ TEST(descriptors_match_contract) {
         {"seismic.instantaneous_phase", "instantaneous_phase", "rad", 0},
         {"seismic.instantaneous_frequency", "instantaneous_frequency", "Hz", 1},
         {"seismic.rms_amplitude", "rms_amplitude", "", 1},
+        {"seismic.sweetness", "sweetness", "", 1},
+        {"seismic.relative_impedance", "relative_impedance", "", 0},
+        {"seismic.dip_il", "dip_il", "rad", 3},
+        {"seismic.dip_xl", "dip_xl", "rad", 3},
+        {"seismic.dip_azimuth", "dip_azimuth", "rad", 3},
+        {"seismic.curvature_mean", "curvature_mean", "", 3},
     };
     for (const Expected& row : table) {
         const auto& descriptor = registry.find(row.id)->descriptor();
@@ -143,7 +155,7 @@ TEST(request_validation_rejections) {
     AlgorithmRegistry registry;
     const auto report =
         pwb::seismic_attributes::register_seismic_attributes(registry, "build-req");
-    PWB_CHECK(report.registered_ids.size() == 4);
+    PWB_CHECK(report.registered_ids.size() == 10);
     auto input = make_input({2, 2, 4}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16});
 
     // Missing volume.
@@ -230,7 +242,7 @@ TEST(coherence_c3_coexistence) {
                   "build-c3")) == "");
     const auto report =
         pwb::seismic_attributes::register_seismic_attributes(registry, "build-e");
-    PWB_CHECK(report.registered_ids.size() == 4);
+    PWB_CHECK(report.registered_ids.size() == 10);
     PWB_CHECK(report.rejection.empty());
 
     // Small C3 sanity run (2x2x8) — the attribute registrations must not

@@ -24,6 +24,10 @@
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/application/algorithm_runner.hpp>
 #endif
+#if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <pwb/seismic_io/volume_descriptor.hpp>
+#include <pwb/seismic_service/volume_service.hpp>
+#endif
 
 class QgsMapCanvas;
 class QgsLayerTreeView;
@@ -89,6 +93,13 @@ public:
     // new version id or "" + *error. The version is immediately usable as
     // an attribute input and viewable in the seismic dock.
     std::string importSegy(const QString& path, std::string* error);
+#endif
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_SEISMIC_SERVICE) \
+    && defined(PWB_WITH_DATA_INTEGRATION)
+    // Cancelable variant: same staging + publication, but the SEG-Y read
+    // polls `cancel` between traces (used by the threaded import dialog).
+    std::string importSegy(const QString& path, std::string* error,
+                           pwb::seismic_io::CancelFlag cancel);
 #endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
@@ -227,6 +238,13 @@ private:
 #endif
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     std::unique_ptr<pwb::application::AlgorithmRunner> attribute_runner_;
+#endif
+#if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
+    // Native tiled volume service: catalog PWBVOL1 versions open through
+    // the tile cache (never a full-volume copy). Budget honours
+    // PWB_SEISMIC_TILE_CACHE_BYTES.
+    std::unique_ptr<pwb::seismic_service::SeismicVolumeService>
+        seismic_volume_service_;
 #endif
 
     // Map tools (canvas-owned via setMapTool; kept for re-arming).

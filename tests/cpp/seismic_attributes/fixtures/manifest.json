@@ -1,55 +1,90 @@
 {
-  "cases": [
-    "constant_neg",
-    "constant_pos",
-    "impulse",
-    "nan_inf",
-    "sine_30hz",
-    "synth_mixed",
-    "synth_nt1",
-    "synth_nt2",
-    "synth_odd",
-    "synth_prime31",
-    "tiny_sgy_real",
-    "zeros"
-  ],
-  "comparison_rules": {
-    "envelope": "max_abs + max_rel over all elements; NaN masks must match elementwise",
-    "freq": "max_abs + max_rel over finite elements; NaN masks must match",
-    "phase": "circular difference wrapped to [-pi, pi]; NaN masks must match",
-    "rms": "max_abs + max_rel over all elements; NaN masks must match elementwise"
+ "cases": [
+  "sl_constant",
+  "sl_impulse",
+  "sl_nan_inf",
+  "sl_plane",
+  "sl_short_axes",
+  "sl_synth_32",
+  "sl_tiny_sgy_real",
+  "sl_zeros"
+ ],
+ "comparison_rules": {
+  "curvature_mean": "max_abs + max_rel over finite elements; NaN masks must match elementwise",
+  "dip_azimuth": "max_abs + max_rel over finite elements; NaN masks must match elementwise",
+  "dip_il": "max_abs + max_rel over finite elements; NaN masks must match elementwise",
+  "dip_xl": "max_abs + max_rel over finite elements; NaN masks must match elementwise",
+  "relative_impedance": "max_abs + max_rel over finite elements; NaN masks must match elementwise",
+  "sweetness": "max_abs + max_rel over finite elements; NaN masks must match elementwise"
+ },
+ "interpreter": {
+  "executable": "/home/kevin/project/worktrees/cpp-seismic-native-stack/.venv-oracle/bin/python",
+  "numpy": "2.5.3",
+  "python": "3.14.6",
+  "scipy": "1.18.1"
+ },
+ "kernels": {
+  "curvature_mean": {
+   "kind": "mean",
+   "win_il": 3,
+   "win_t": 3,
+   "win_xl": 3
   },
-  "interpreter": {
-    "executable": "/opt/miniconda3/bin/python3.13",
-    "numpy": "2.4.6",
-    "python": "3.13.14",
-    "scipy": "1.17.1"
+  "dip_azimuth": {
+   "dt": 1.0,
+   "dx_il": 1.0,
+   "dx_xl": 1.0
   },
-  "oracle": {
-    "functions": [
-      "compute_envelope",
-      "compute_instantaneous_phase",
-      "compute_instantaneous_frequency",
-      "compute_rms_amplitude"
-    ],
-    "gitlink": "geo-viz-engine@08851951f3bbc0beb90886adf52e1928f4383c16",
-    "module": "geoviz_seismic.attributes"
+  "dip_il": {
+   "dt": 1.0,
+   "dx_il": 1.0,
+   "dx_xl": 1.0
   },
-  "tolerances": {
-    "envelope": {
-      "max_abs": 1e-05,
-      "max_rel": 0.0001
-    },
-    "freq": {
-      "max_abs": 0.005,
-      "max_rel": 0.01
-    },
-    "phase": {
-      "max_abs": 0.0001
-    },
-    "rms": {
-      "max_abs": 1e-06,
-      "max_rel": 1e-05
-    }
+  "dip_xl": {
+   "dt": 1.0,
+   "dx_il": 1.0,
+   "dx_xl": 1.0
+  },
+  "relative_impedance": {},
+  "sweetness": {
+   "sample_interval": 1.0
   }
+ },
+ "oracle": {
+  "functions": [
+   "compute_sweetness",
+   "compute_relative_impedance",
+   "compute_dip",
+   "compute_azimuth",
+   "compute_curvature"
+  ],
+  "gitlink": "geo-viz-engine@08851951f3bbc0beb90886adf52e1928f4383c16",
+  "module": "geoviz_seismic.attributes"
+ },
+ "tolerances": {
+  "curvature_mean": {
+   "max_abs": 0.0001,
+   "max_rel": 0.01
+  },
+  "dip_azimuth": {
+   "max_abs": 1e-05,
+   "max_rel": 0.001
+  },
+  "dip_il": {
+   "max_abs": 1e-05,
+   "max_rel": 0.001
+  },
+  "dip_xl": {
+   "max_abs": 1e-05,
+   "max_rel": 0.001
+  },
+  "relative_impedance": {
+   "max_abs": 1e-06,
+   "max_rel": 1e-05
+  },
+  "sweetness": {
+   "max_abs": 1e-05,
+   "max_rel": 0.01
+  }
+ }
 }

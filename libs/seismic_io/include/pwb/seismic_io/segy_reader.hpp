@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include <pwb/seismic_io/volume_descriptor.hpp>
+
 namespace pwb::seismic_io {
 
 struct SegyVolume {
@@ -44,5 +46,12 @@ struct SegyVolume {
 // reason on any structural/semantic violation (never a guessed volume).
 std::optional<SegyVolume> read_segy(const std::filesystem::path& file,
                                     std::string* error);
+
+// Same read with cooperative cancellation: `cancel` is polled between
+// traces; on cancellation returns nullopt with *error == "cancelled" and
+// the partial volume is discarded.
+std::optional<SegyVolume> read_segy(const std::filesystem::path& file,
+                                    std::string* error,
+                                    const CancelFlag& cancel);
 
 }  // namespace pwb::seismic_io

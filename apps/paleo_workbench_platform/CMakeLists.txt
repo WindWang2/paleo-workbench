@@ -40,6 +40,12 @@ if(TARGET Pwb::SeismicIo AND TARGET Pwb::Data)
     target_link_libraries(pwb-platform PRIVATE Pwb::SeismicIo)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_IO=1)
 endif()
+# S line: native tiled volume service — open catalog volumes without a
+# full-volume copy (SeismicVolumeService over the tile cache).
+if(TARGET Pwb::SeismicService AND TARGET Pwb::Data)
+    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicService)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_SERVICE=1)
+endif()
 
 # BEGIN CONV-01
 # Swarm task 01: the 地质因子图 action compiles into the app when the slice

@@ -1,6 +1,7 @@
-# pwb::seismic_attributes — four single-trace seismic attributes (envelope,
-# instantaneous phase, instantaneous frequency, windowed RMS) on the frozen
-# pwb::science SDK. Qt-free, Python-free, QGIS-free.
+# pwb::seismic_attributes — ten production seismic attribute kernels (the
+# four single-trace E-line kernels plus the S-line volume-structural family:
+# sweetness, relative_impedance, dip_il, dip_xl, dip_azimuth, curvature_mean)
+# on the frozen pwb::science SDK. Qt-free, Python-free, QGIS-free.
 #
 # Standalone entry (E-line):
 #   cmake -S libs/seismic_attributes -B build/cpp-seismic-attributes -G Ninja
@@ -37,6 +38,7 @@ endif()
 
 add_library(pwb_seismic_attributes STATIC
     src/attributes.cpp
+    src/volume_attributes.cpp
 )
 add_library(Pwb::SeismicAttributes ALIAS pwb_seismic_attributes)
 set_target_properties(pwb_seismic_attributes PROPERTIES

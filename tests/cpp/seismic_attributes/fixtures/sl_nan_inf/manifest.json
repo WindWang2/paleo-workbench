@@ -1,0 +1,109 @@
+{
+ "case": "sl_nan_inf",
+ "dtype": "float32",
+ "files": {
+  "expected_curvature_mean.f32": {
+   "elements": 1536,
+   "kernel": "curvature_mean",
+   "max": null,
+   "mean": null,
+   "min": null,
+   "n_inf": 0,
+   "n_nan": 1536,
+   "params": {
+    "kind": "mean",
+    "win_il": 3,
+    "win_t": 3,
+    "win_xl": 3
+   },
+   "sha256": "8feaf055709cccb523fd7a769498f08e0bc62281b25a1bcec2135269ae3e7445"
+  },
+  "expected_dip_azimuth.f32": {
+   "elements": 1536,
+   "kernel": "dip_azimuth",
+   "max": 6.2793192863464355,
+   "mean": 3.1610851287841797,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 389,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "c1086b8631724e11bc1d1000b43e3004f778850437e1745bd32bf6a890cc0cbb"
+  },
+  "expected_dip_il.f32": {
+   "elements": 1536,
+   "kernel": "dip_il",
+   "max": 1.5707963705062866,
+   "mean": 0.012266788631677628,
+   "min": -1.5707963705062866,
+   "n_inf": 0,
+   "n_nan": 387,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "1ffa977ff8e3af6bc7825e38436753b0a0b0906263ba320fa0b9d73f8992dd40"
+  },
+  "expected_dip_xl.f32": {
+   "elements": 1536,
+   "kernel": "dip_xl",
+   "max": 1.5707963705062866,
+   "mean": 0.0238738264888525,
+   "min": -1.5707963705062866,
+   "n_inf": 0,
+   "n_nan": 196,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "56914dc6b0802469a4d52132eb6eb951c501a32f1f06a6269675db0af6c85bc9"
+  },
+  "expected_relative_impedance.f32": {
+   "elements": 1536,
+   "kernel": "relative_impedance",
+   "max": 5.720457553863525,
+   "mean": 0.059521351009607315,
+   "min": -6.565092086791992,
+   "n_inf": 33,
+   "n_nan": 219,
+   "params": {},
+   "sha256": "dd5e4ce057ff766060414f7d0e06b0bc57942ec75ca9cbed29ae67df6a62b574"
+  },
+  "expected_sweetness.f32": {
+   "elements": 1536,
+   "kernel": "sweetness",
+   "max": 78.12098693847656,
+   "mean": 2.397305727005005,
+   "min": 0.14257250726222992,
+   "n_inf": 0,
+   "n_nan": 288,
+   "params": {
+    "sample_interval": 1.0
+   },
+   "sha256": "07d2f796341f9b7269397a309f68a3696eb0f6cb1678fec168edce7b9003505c"
+  },
+  "input.f32": {
+   "elements": 1536,
+   "max": 0.9983698725700378,
+   "mean": -0.0011284943902865052,
+   "min": -0.998293936252594,
+   "n_inf": 2,
+   "n_nan": 193,
+   "role": "input",
+   "sha256": "9181a8aeb5428ad3771b220528e42cd66586eb5ff7b035f1ab66875781516525"
+  }
+ },
+ "meta": {
+  "note": "NaN/Inf poisoning: full inline, mid, start, end"
+ },
+ "shape": [
+  8,
+  6,
+  32
+ ]
+}

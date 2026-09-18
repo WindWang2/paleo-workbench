@@ -1,0 +1,109 @@
+{
+ "case": "sl_short_axes",
+ "dtype": "float32",
+ "files": {
+  "expected_curvature_mean.f32": {
+   "elements": 24,
+   "kernel": "curvature_mean",
+   "max": 0.7553948163986206,
+   "mean": 0.45315781235694885,
+   "min": 0.03420817852020264,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "kind": "mean",
+    "win_il": 3,
+    "win_t": 3,
+    "win_xl": 3
+   },
+   "sha256": "454481cb9faba6111a9b4d98dc07ab62012e802cf358b43b5755b587e9a3d77e"
+  },
+  "expected_dip_azimuth.f32": {
+   "elements": 24,
+   "kernel": "dip_azimuth",
+   "max": 5.5897536277771,
+   "mean": 3.379178762435913,
+   "min": 0.52126544713974,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "26c02a8e3ca55e10927e6a50028d4f787128b9e801f91787c6ad0b8f26ec5f13"
+  },
+  "expected_dip_il.f32": {
+   "elements": 24,
+   "kernel": "dip_il",
+   "max": 1.5684025287628174,
+   "mean": 0.05551479384303093,
+   "min": -1.4721853733062744,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "034c78c43e0bc32af8fe64d12535af7a7fee55d7a2488e3f7468c35dc70e2abf"
+  },
+  "expected_dip_xl.f32": {
+   "elements": 24,
+   "kernel": "dip_xl",
+   "max": 1.5643372535705566,
+   "mean": -0.2131977081298828,
+   "min": -1.540621280670166,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "c872fc044eb99227db5e8b8200d68c356613ab7fccab156a584ee29aa9c113f3"
+  },
+  "expected_relative_impedance.f32": {
+   "elements": 24,
+   "kernel": "relative_impedance",
+   "max": 0.6381765604019165,
+   "mean": -0.6910844445228577,
+   "min": -2.707174777984619,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {},
+   "sha256": "c3e8260c845a1751d5314b5f5fcd649dd772a71dfb1ffbab67837e1a3db63d8b"
+  },
+  "expected_sweetness.f32": {
+   "elements": 24,
+   "kernel": "sweetness",
+   "max": 14.58767318725586,
+   "mean": 2.82981014251709,
+   "min": 0.36628684401512146,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "sample_interval": 1.0
+   },
+   "sha256": "3c7cb8b8b62888b91e38515ec525ac68d83632fda53184566ab0ccf84cce9f90"
+  },
+  "input.f32": {
+   "elements": 24,
+   "max": 0.926384687423706,
+   "mean": -0.19778601825237274,
+   "min": -0.9897267818450928,
+   "n_inf": 0,
+   "n_nan": 0,
+   "role": "input",
+   "sha256": "3e6982edbfb58dcb1d65e44ef24a397cabdb9a3a40591ddcdd08b2264f2477d1"
+  }
+ },
+ "meta": {
+  "note": "minimal axes (>=2): np.gradient edges + smoothing window (7) wider than every axis -> reflect fold"
+ },
+ "shape": [
+  2,
+  3,
+  4
+ ]
+}

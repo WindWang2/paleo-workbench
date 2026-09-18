@@ -1,0 +1,623 @@
+{
+ "cases": {
+  "io_oracle.pwbvol": {
+   "files": {
+    "io_oracle.pwbvol.corner.f32": {
+     "elements": 12,
+     "max": 1.8724619150161743,
+     "min": -1.4466294050216675,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "ba9f69b726d75ffc0c56aa3253f5693f60583928d6ab875b4316d94118d17d90",
+     "shape": [
+      2,
+      2,
+      3
+     ],
+     "window": "corner"
+    },
+    "io_oracle.pwbvol.end.f32": {
+     "elements": 8,
+     "max": 1.5848544836044312,
+     "min": -0.49212318658828735,
+     "n_inf": 0,
+     "n_nan": 1,
+     "sha256": "1433b79faabd189344d0ff601145de8e8dd909550d99e8ccef82b0d553da659c",
+     "shape": [
+      1,
+      2,
+      4
+     ],
+     "window": "end"
+    },
+    "io_oracle.pwbvol.full.f32": {
+     "elements": 105,
+     "max": 1.953026294708252,
+     "min": -1.9874556064605713,
+     "n_inf": 0,
+     "n_nan": 1,
+     "sha256": "5f5a386867498ebf3116ad705783f8fac5ef4769d972059ceccbcbc776588097",
+     "shape": [
+      3,
+      5,
+      7
+     ],
+     "window": "full"
+    },
+    "io_oracle.pwbvol.middle.f32": {
+     "elements": 12,
+     "max": 1.7814069986343384,
+     "min": -1.8431472778320312,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "001f1d765b066fe25a34c94850bc9a313ec7e47ad2c6f5ca5e0e73d2ff6a7e7e",
+     "shape": [
+      2,
+      2,
+      3
+     ],
+     "window": "middle"
+    },
+    "io_oracle.pwbvol.single_trace.f32": {
+     "elements": 7,
+     "max": 1.884344220161438,
+     "min": -1.9323848485946655,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "179e198b9ed4fb7dd4ecf560f39a129aacc71fac8f5f82d14b17e5bda473a683",
+     "shape": [
+      1,
+      1,
+      7
+     ],
+     "window": "single_trace"
+    }
+   },
+   "meta": {
+    "domain": "depth",
+    "iline_start": 10.0,
+    "iline_step": 5.0,
+    "note": "depth-domain payload",
+    "sample_start": 1500.0,
+    "sample_step": 2.5,
+    "shape": [
+     3,
+     5,
+     7
+    ],
+    "storage": "pwbvol1",
+    "unit": "m",
+    "xline_start": 20.0,
+    "xline_step": 5.0
+   },
+   "windows": {
+    "corner": {
+     "extent": [
+      2,
+      2,
+      3
+     ],
+     "name": "corner",
+     "origin": [
+      0,
+      0,
+      0
+     ]
+    },
+    "end": {
+     "extent": [
+      1,
+      2,
+      4
+     ],
+     "name": "end",
+     "origin": null
+    },
+    "middle": {
+     "extent": [
+      2,
+      2,
+      3
+     ],
+     "name": "middle",
+     "origin": [
+      1,
+      1,
+      2
+     ]
+    },
+    "single_trace": {
+     "extent": [
+      1,
+      1,
+      null
+     ],
+     "name": "single_trace",
+     "origin": [
+      2,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  "io_oracle.sgy": {
+   "files": {
+    "io_oracle.sgy.corner.f32": {
+     "elements": 12,
+     "max": 0.953382670879364,
+     "min": -0.9366368651390076,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "e6da77a3398cda21da3d0274fec8168f4f99ae73138a4829573ba645c44aa5c1",
+     "shape": [
+      2,
+      2,
+      3
+     ],
+     "window": "corner"
+    },
+    "io_oracle.sgy.end.f32": {
+     "elements": 8,
+     "max": 0.7266671061515808,
+     "min": -0.7585482001304626,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "2a1e537b5fb572bb304f1a75e4111ded366940a3c165dac7d216793545268bab",
+     "shape": [
+      1,
+      2,
+      4
+     ],
+     "window": "end"
+    },
+    "io_oracle.sgy.full.f32": {
+     "elements": 240,
+     "max": 0.9814026355743408,
+     "min": -0.9835856556892395,
+     "n_inf": 1,
+     "n_nan": 2,
+     "sha256": "7f9b23825078cf904846370d9867ab98340cd7d45800e773d618a95c7c94d531",
+     "shape": [
+      6,
+      4,
+      10
+     ],
+     "window": "full"
+    },
+    "io_oracle.sgy.middle.f32": {
+     "elements": 12,
+     "max": 0.8704583048820496,
+     "min": -0.8551350831985474,
+     "n_inf": 0,
+     "n_nan": 1,
+     "sha256": "3996cdf4c9639fef58070d14673d2d1b265fff9e00daee0d81f97ecf563ba5bc",
+     "shape": [
+      2,
+      2,
+      3
+     ],
+     "window": "middle"
+    },
+    "io_oracle.sgy.single_trace.f32": {
+     "elements": 10,
+     "max": 0.8502961993217468,
+     "min": -0.47554460167884827,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "ca10cdf1f848c17161977dd011de8bb3219c2c1a1c9f8793f1f454534a29e861",
+     "shape": [
+      1,
+      1,
+      10
+     ],
+     "window": "single_trace"
+    }
+   },
+   "meta": {
+    "domain": "time",
+    "dt_ms": 2.0,
+    "format": 5,
+    "iline_start": 1.0,
+    "iline_step": 1.0,
+    "note": "unsorted grid, NaN/Inf",
+    "segyio_crosscheck": "pass",
+    "shape": [
+     6,
+     4,
+     10
+    ],
+    "unit": "ms",
+    "xline_start": 1.0,
+    "xline_step": 1.0
+   },
+   "windows": {
+    "corner": {
+     "extent": [
+      2,
+      2,
+      3
+     ],
+     "name": "corner",
+     "origin": [
+      0,
+      0,
+      0
+     ]
+    },
+    "end": {
+     "extent": [
+      1,
+      2,
+      4
+     ],
+     "name": "end",
+     "origin": null
+    },
+    "middle": {
+     "extent": [
+      2,
+      2,
+      3
+     ],
+     "name": "middle",
+     "origin": [
+      1,
+      1,
+      2
+     ]
+    },
+    "single_trace": {
+     "extent": [
+      1,
+      1,
+      null
+     ],
+     "name": "single_trace",
+     "origin": [
+      2,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  "io_oracle_bins.sgy": {
+   "files": {
+    "io_oracle_bins.sgy.corner.f32": {
+     "elements": 12,
+     "max": 0.9910829067230225,
+     "min": -0.7350418567657471,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "a576a9e91f0988f5b7eb6942cada84e06bba5940e07bdac02eb37174f7c1fb5e",
+     "shape": [
+      2,
+      2,
+      3
+     ],
+     "window": "corner"
+    },
+    "io_oracle_bins.sgy.end.f32": {
+     "elements": 8,
+     "max": 0.8487669825553894,
+     "min": -0.932573676109314,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "8a074ce420f14900216a5cb61363595e93f4068cecee5a63622094780f9588fd",
+     "shape": [
+      1,
+      2,
+      4
+     ],
+     "window": "end"
+    },
+    "io_oracle_bins.sgy.full.f32": {
+     "elements": 96,
+     "max": 0.9910829067230225,
+     "min": -0.9474153518676758,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "783bd08fd0063f783219bcbd007d55b6ce78634461973da3a397f783a2cc6849",
+     "shape": [
+      4,
+      4,
+      6
+     ],
+     "window": "full"
+    },
+    "io_oracle_bins.sgy.middle.f32": {
+     "elements": 12,
+     "max": 0.8520436882972717,
+     "min": -0.8940515518188477,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "0b2ac0fa082dabfbfba334645f25a5969443566a9a0fe789ce42b45d42843fd1",
+     "shape": [
+      2,
+      2,
+      3
+     ],
+     "window": "middle"
+    },
+    "io_oracle_bins.sgy.single_trace.f32": {
+     "elements": 6,
+     "max": 0.634029746055603,
+     "min": -0.444975882768631,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "b77350b19e540011c965203cf578002c353b57dd632b608822e50b341a3eed40",
+     "shape": [
+      1,
+      1,
+      6
+     ],
+     "window": "single_trace"
+    }
+   },
+   "meta": {
+    "bin_grid": {
+     "il_azimuth_deg": 20.0,
+     "il_spacing_m": 25.0,
+     "x_origin": 500000.0,
+     "xl_spacing_m": 50.0,
+     "y_origin": 3000000.0
+    },
+    "domain": "time",
+    "dt_ms": 1.0,
+    "format": 5,
+    "iline_start": 100.0,
+    "iline_step": 2.0,
+    "note": "bin-grid calibration; CDP corner inference",
+    "probes": [
+     {
+      "il_frac": 0.0,
+      "nearest_il": 0,
+      "nearest_xl": 0,
+      "x": 500000.0,
+      "x_roundtrip": 500000.0,
+      "xl_frac": 0.0,
+      "y": 3000000.0,
+      "y_roundtrip": 3000000.0
+     },
+     {
+      "il_frac": 1.9999999999961813,
+      "nearest_il": 2,
+      "nearest_xl": 0,
+      "x": 499982.89899283374,
+      "x_roundtrip": 499982.89899283374,
+      "xl_frac": -2.0442314507818082e-13,
+      "y": 3000046.984631039,
+      "y_roundtrip": 3000046.984631039
+     },
+     {
+      "il_frac": 3.808509063674137e-12,
+      "nearest_il": 0,
+      "nearest_xl": 3,
+      "x": 500140.9538931179,
+      "x_roundtrip": 500140.9538931179,
+      "xl_frac": 3.0000000000009366,
+      "y": 3000051.303021499,
+      "y_roundtrip": 3000051.303021499
+     }
+    ],
+    "shape": [
+     4,
+     4,
+     6
+    ],
+    "unit": "ms",
+    "xline_start": 200.0,
+    "xline_step": 3.0
+   },
+   "windows": {
+    "corner": {
+     "extent": [
+      2,
+      2,
+      3
+     ],
+     "name": "corner",
+     "origin": [
+      0,
+      0,
+      0
+     ]
+    },
+    "end": {
+     "extent": [
+      1,
+      2,
+      4
+     ],
+     "name": "end",
+     "origin": null
+    },
+    "middle": {
+     "extent": [
+      2,
+      2,
+      3
+     ],
+     "name": "middle",
+     "origin": [
+      1,
+      1,
+      2
+     ]
+    },
+    "single_trace": {
+     "extent": [
+      1,
+      1,
+      null
+     ],
+     "name": "single_trace",
+     "origin": [
+      2,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  "io_oracle_ibm.sgy": {
+   "files": {
+    "io_oracle_ibm.sgy.corner.f32": {
+     "elements": 12,
+     "max": 96.27928161621094,
+     "min": -97.70126342773438,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "875be5647d6d5d60cab58eae3f826ef820add8a94eb246941c548e55cb1ee603",
+     "shape": [
+      2,
+      2,
+      3
+     ],
+     "window": "corner"
+    },
+    "io_oracle_ibm.sgy.end.f32": {
+     "elements": 8,
+     "max": 66.8681640625,
+     "min": -82.57035827636719,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "bf0e8f6714504fb9cc29315374f5b32ae42f3c46a592488dd3ab2e6307daf41c",
+     "shape": [
+      1,
+      2,
+      4
+     ],
+     "window": "end"
+    },
+    "io_oracle_ibm.sgy.full.f32": {
+     "elements": 96,
+     "max": 98.28860473632812,
+     "min": -99.96638488769531,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "ac5fda62b9f3d29dada148f2046ff8956836feb0f28b9b91f23dc0660733f1ad",
+     "shape": [
+      4,
+      3,
+      8
+     ],
+     "window": "full"
+    },
+    "io_oracle_ibm.sgy.middle.f32": {
+     "elements": 12,
+     "max": 77.37627410888672,
+     "min": -99.96638488769531,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "9f692b6d676a89bfa61fe0795dde75f281886972da8447f48a525ac298d0ab38",
+     "shape": [
+      2,
+      2,
+      3
+     ],
+     "window": "middle"
+    },
+    "io_oracle_ibm.sgy.single_trace.f32": {
+     "elements": 8,
+     "max": 72.8199691772461,
+     "min": -99.96638488769531,
+     "n_inf": 0,
+     "n_nan": 0,
+     "sha256": "b39d5c914a40b8f194c74cfb7331641a78d148c777866c09096125b0f0774ba0",
+     "shape": [
+      1,
+      1,
+      8
+     ],
+     "window": "single_trace"
+    }
+   },
+   "meta": {
+    "domain": "time",
+    "dt_ms": 4.0,
+    "format": 1,
+    "iline_start": 1.0,
+    "iline_step": 2.0,
+    "note": "IBM floats; non-unit line steps",
+    "shape": [
+     4,
+     3,
+     8
+    ],
+    "unit": "ms",
+    "xline_start": 10.0,
+    "xline_step": 3.0
+   },
+   "windows": {
+    "corner": {
+     "extent": [
+      2,
+      2,
+      3
+     ],
+     "name": "corner",
+     "origin": [
+      0,
+      0,
+      0
+     ]
+    },
+    "end": {
+     "extent": [
+      1,
+      2,
+      4
+     ],
+     "name": "end",
+     "origin": null
+    },
+    "middle": {
+     "extent": [
+      2,
+      2,
+      3
+     ],
+     "name": "middle",
+     "origin": [
+      1,
+      1,
+      2
+     ]
+    },
+    "single_trace": {
+     "extent": [
+      1,
+      1,
+      null
+     ],
+     "name": "single_trace",
+     "origin": [
+      2,
+      1,
+      0
+     ]
+    }
+   }
+  }
+ },
+ "comparison": "window dumps: exact f32 equality except NaN positions must match bitwise; max_abs bound 1e-6 for IBM-decoded values",
+ "interpreter": {
+  "executable": "/home/kevin/project/worktrees/cpp-seismic-native-stack/.venv-oracle/bin/python",
+  "numpy": "2.5.3",
+  "python": "3.14.6"
+ },
+ "oracle": {
+  "bin_grid": "geoviz_seismic.models.BinGridGeometry@08851951",
+  "files": [
+   "io_oracle.sgy",
+   "io_oracle_ibm.sgy",
+   "io_oracle_bins.sgy",
+   "io_oracle.pwbvol"
+  ]
+ },
+ "tolerances": {
+  "max_abs": 1e-06
+ }
+}

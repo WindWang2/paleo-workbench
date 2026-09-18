@@ -10,6 +10,13 @@ namespace pwb::seismic_io {
 
 std::optional<SegyVolume> read_segy(const std::filesystem::path& file,
                                     std::string* error) {
+    const CancelFlag no_cancel;
+    return read_segy(file, error, no_cancel);
+}
+
+std::optional<SegyVolume> read_segy(const std::filesystem::path& file,
+                                    std::string* error,
+                                    const CancelFlag& cancel) {
     // Composition of the frozen pipeline: header-only inspection (grid
     // discovery, validation, dt, bin grid) followed by one full-extent
     // window gather. Error strings and their precedence are the historical
@@ -36,8 +43,7 @@ std::optional<SegyVolume> read_segy(const std::filesystem::path& file,
     volume.unit = descriptor.sample_unit;
     volume.samples.resize(static_cast<std::size_t>(descriptor.elements()));
 
-    const CancelFlag no_cancel;
-    if (read_segy_window(*layout, full, volume.samples, no_cancel, error)
+    if (read_segy_window(*layout, full, volume.samples, cancel, error)
         != volume.samples.size()) {
         return std::nullopt;
     }
