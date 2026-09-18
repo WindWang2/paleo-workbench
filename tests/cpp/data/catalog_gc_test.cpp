@@ -45,6 +45,19 @@ Json load_json(const fs::path& file) {
     return Json::parse(buffer.str(), nullptr, false);
 }
 
+// Git tracks files, not directories: empty fixture directories (the GC
+// empty_dir subjects) do not survive a fresh clone. The frozen oracle lists
+// them; recreate before any plan runs (decisions D16).
+void materialize_empty_dirs(const fs::path& root, const char* name) {
+    const Json oracle = load_json(scenario_dir(name) / "oracle.json");
+    if (!oracle.contains("fabricated_empty_dirs")) return;
+    for (const auto& rel : oracle["fabricated_empty_dirs"]) {
+        std::error_code ec;
+        fs::create_directories(root / pwb::project::path_from_u8(
+                                       rel.get<std::string>()), ec);
+    }
+}
+
 struct Scratch {
     fs::path root;
     fs::path project;
@@ -62,6 +75,7 @@ struct Scratch {
                      | fs::copy_options::overwrite_existing,
                  ec);
         scratch.project = scratch.root / "demo.paleo.json";
+        materialize_empty_dirs(scratch.root, name);
         return scratch;
     }
 

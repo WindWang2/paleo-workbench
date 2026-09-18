@@ -61,17 +61,17 @@
   "v2_path_before": "demo.artifacts/blobs/e0/e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
   "versions": [
     {
-      "asset_id": "asset_7c088f02f44d",
-      "id": "ver_d67d13a93479",
+      "asset_id": "asset_3c68c09b1fb3",
+      "id": "ver_903aa52014b8",
       "path": "demo.artifacts/blobs/e0/e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
       "sha256": "e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
       "size_bytes": 800,
       "trashed": false
     },
     {
-      "asset_id": "asset_584e3aaf4e1a",
-      "id": "ver_f51fca088c04",
-      "path": "demo.artifacts/raw/asset_584e3aaf4e1a/ver_f51fca088c04/one.bin",
+      "asset_id": "asset_ba234b4c4f35",
+      "id": "ver_f087e97ed20f",
+      "path": "demo.artifacts/raw/asset_ba234b4c4f35/ver_f087e97ed20f/one.bin",
       "sha256": "e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
       "size_bytes": 800,
       "trashed": false

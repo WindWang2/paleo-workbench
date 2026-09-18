@@ -140,3 +140,11 @@ Python `is_safe_entity_id` 用 `str.isalnum()`（Unicode 感知），非 ASCII �
 - P3-8 `make_read_only` 只移除写位（保留 exec/setuid，storage.py `mode & ~S_IW*`）。
 - P3-9 blob temp 提交失败改为放置失败（io_error，storage.py `_commit_blob_temp`
   re-raise 语义）；temp 命名改 O_EXCL 预留（POSIX；Windows 依赖单写者协议）。
+
+## D16 空目录 fixture 的物化（合并后核验发现的 fresh-checkout 失效修复）
+
+Git 不跟踪空目录：gc_orphans 场景的 
+（empty_dir 类的唯一被测对象）在生成工作区里真实存在，测试因此通过；但任何
+fresh clone/checkout（包括合并进 main 后的树）都没有该目录，plan_gc 的
+empty_dir 用例必失败。修复：oracle 冻结 `fabricated_empty_dirs` 清单，
+C++ 测试在拷贝场景树后、跑任何 plan 前物化这些目录（D8 的补充条款）。

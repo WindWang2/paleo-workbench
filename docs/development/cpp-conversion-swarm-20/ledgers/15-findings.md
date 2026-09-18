@@ -263,3 +263,63 @@ blob 路径再加 `<artifacts 名>/blobs`；版本号 commit 时分配）、`tra
   oracle_compare/readback 已建立「Python 生成 → C++ 对账」的范式。
 - 缺口：无 gc/dedup/paged 任何实现；name_search 写侧为 ASCII 折叠（有测试）；
   无 blob 写路径。本切片全部补齐行为层，oracle 由真实 Python 服务冻结。
+
+---
+
+## 追补（R10 合并后核验轮）：§5 清单剩余文件全文阅读笔记
+
+### catalog-scale-v5/explain-100k.txt（51 行，全文）
+
+EXPLAIN QUERY PLAN 审计（100k 资产）：默认页/深偏移/keyset/文本过滤全部
+`SCAN a USING INDEX idx_assets_live_name_id`（无 TEMP B-TREE）；type 走
+`idx_assets_type_name_id`；stage 子查询经 `idx_versions_stage` + BLOOM FILTER；
+tag-and 出现 TEMP B-TREE（EXISTS 谓词代价，已知）；lineage 双向均有索引覆盖。
+墙钟：page0 4.31ms / 深偏移 7.45ms / count 3.01ms / order modified 4.09ms /
+stage·size 序 ~130ms（已知代价）。对本切片的约束：C++ 分页的排序键/覆盖序与该
+索引布局一一对应；NULLs-first 与 NULLs 处理已由冻结 oracle 钉死。
+
+### tests/cpp/data/*.cpp（其余 13 文件，全文；此前已读 5.5 个）
+
+- **catalog_read_test.cpp**（79）：typical store Canonical/≥5 地板；计数对 manifest
+  （2 asset/5 ver/1 run）；find_asset/next_version_number；audit 只求终止+良构；
+  缺库 → NotFound。本切片复用同一加载路径。
+- **domain_ids_test.cpp**（93）：强类型显式构造、可 hash、mint 12hex 可播种；
+  `is_safe_storage_segment` ASCII 词表（含 snowman 拒绝）——dedup.cpp 的
+  Unicode 包络（D14）是有意超集，静态词表测试不受影响。
+- **build_hygiene_test.cpp**（91）：ldd/dumpbin 禁链清单
+  python/pyside/shiboken/pybind/qgis/qt6/qt5/conda，fail-closed。新 TU 无新链接。
+- **diagnostics_test.cpp**（67）：corrupt_json/corrupt_db/future/missing → 诊断不崩。
+- **project_paths_test.cpp**（87）：relativize/resolve/escape/UTF-8 桥/只读零写入。
+- **project_roundtrip_test.cpp**（98）：固定时钟下 save 幂等（字节级两遍相等）；
+  future schema 拒写。
+- **project_recovery_test.cpp**（86）：.bak 恢复决策表；双损坏诚实失败。
+- **workspace_codec_test.cpp**（140）：stage/role/binding 回落、maturity 词表外丢弃
+  +诊断、三态/opacity null 剔除、extra 键保留、catalog_bindings 过滤
+  （effective_binding_kind）。与本切片无行为交集。
+- **cli_inspect_test.cpp**（98）/ **cli_migrate_test.cpp**（108）：退出码契约
+  0/2/3/4（+migrate 1）；migrate 拒绝 output-dir==input。
+- **consumer_loop_test.cpp**（117）：生产回路两轮（编辑+run+发布），行计数
+  9 ver/4 asset/5 run；recover 无 pending。
+- **oracle_compare_test.cpp**（417）：Python dump ↔ C++ 投影语义比较；已比较表
+  含 lineage/staging_leases（M4 manifest 工作后补强）；无读模型的表如实上报
+  不比较（models/model_versions/sync_state）；resolve 按语义（机器绑定路径归一）。
+- **commit_coordinator_test.cpp**（184）：happy/duplicate 回放/stale base 冲突；
+  receipt 携带实测 sha/size。
+- **commit_recovery_test.cpp**（155）：四 journal 相位故障注入 → written 回滚、
+  payload 起续传、catalog/project 起续传；staged 源永不被改。
+- **oracle_readback_test.cpp**（217）：C++ 写 → 固定 Python 只读重开验证行级真相；
+  读写前后树 digest 不变；fixture 原目录不动。
+- **crash_recovery_test.cpp**（256）：子进程 `std::_Exit(86)` 真死后新进程恢复
+  （catalog_committed 续传；payload_staged 续传成 complete）。
+- **run_lifecycle_test.cpp**（546，剩余 346 行已补读）：port ⊆ inputs 拒绝；
+  publish 建新资产/lineage/run_outputs 直连 SQL 断言；重放同回执；零/多产物
+  写入前拒绝；终态不可改写（同终态回放幂等）；已有输出禁 finish；hash/unsafe id/
+  缺名拒绝且零 journal；追加到既有资产无新资产行。
+- **run_recovery_test.cpp**（428）：run_publish 相位矩阵（written 回滚保证据+同 id
+  重试成功；payload_staged/catalog…/run_completed 续传+Duplicate）；pending
+  journal 阻塞冲突写入（recovery_required 诊断）且不清除；edit 与 publish 的
+  asset 重叠闸门。
+
+对本切片的增量约束（已满足）：无新增禁链依赖；journal/恢复路径未触碰；
+`oracle_compare` 的 staging_leases 行投影与本切片 GC 的租消费同源
+（CatalogDocument.staging_leases）。
