@@ -243,6 +243,12 @@ def scenario_gc_orphans() -> None:
         "sweep_auto": sweep_auto,
         "sweep_explicit": sweep_explicit,
         "cleanup_working_copies": cleanup,
+        # Git tracks files, not directories: an empty fixture directory does
+        # not survive a fresh clone. The consumer materializes these after
+        # copying the tree (decisions D16).
+        "fabricated_empty_dirs": [
+            "demo.artifacts/derived/empty_a/empty_b",
+        ],
         "meta": {
             "junk_digest": junk_digest,
             "referenced_temp_payload": _rel(root, vtmp.path),

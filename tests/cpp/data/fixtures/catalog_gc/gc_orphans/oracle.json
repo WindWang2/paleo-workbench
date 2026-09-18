@@ -8,11 +8,11 @@
       "demo.artifacts/outputs/ghost2/leftover2.bin",
       "demo.artifacts/outputs/junk.tmp",
       "demo.artifacts/raw/.place-abc123",
-      "demo.artifacts/raw/asset_bec1ecf3cc51/ver_8ec2978f3fe3/well_data.tmp",
-      "demo.artifacts/raw/asset_d9e1e8c709ee/ver_467dea1c223c/a.bin",
+      "demo.artifacts/raw/asset_9f4dc353b170/ver_4ef17a957a6d/a.bin",
+      "demo.artifacts/raw/asset_b4c4ee387d50/ver_e895f8af665f/well_data.tmp",
       "demo.artifacts/raw/ghost_asset/ghost_version/leftover.bin",
       "demo.artifacts/trash/ver_ghost2/payload.bin",
-      "demo.artifacts/working/ver_467dea1c223c/a.bin",
+      "demo.artifacts/working/ver_4ef17a957a6d/a.bin",
       "demo.paleo.json",
       "incoming/a.bin",
       "incoming/junk.bin",
@@ -25,11 +25,14 @@
       }
     ]
   },
+  "fabricated_empty_dirs": [
+    "demo.artifacts/derived/empty_a/empty_b"
+  ],
   "meta": {
     "junk_digest": "d7f2402032b5f0a42a1094877fb71fa37c7dc1b60e2331a5735620c65d4d0df6",
     "leased_stage_orphan": "demo.artifacts/raw/ghost_asset/ghost_version/leftover.bin",
-    "live_working_rel": "demo.artifacts/working/ver_467dea1c223c/a.bin",
-    "referenced_temp_payload": "demo.artifacts/raw/asset_bec1ecf3cc51/ver_8ec2978f3fe3/well_data.tmp"
+    "live_working_rel": "demo.artifacts/working/ver_4ef17a957a6d/a.bin",
+    "referenced_temp_payload": "demo.artifacts/raw/asset_b4c4ee387d50/ver_e895f8af665f/well_data.tmp"
   },
   "plan_auto": [
     {
@@ -127,11 +130,11 @@
       "demo.artifacts/blobs/d1/d14eccd7caab56bb1b0042546d728172943278dedbb869603a0be39dd3b5d9e6",
       "demo.artifacts/blobs/d7/d7f2402032b5f0a42a1094877fb71fa37c7dc1b60e2331a5735620c65d4d0df6",
       "demo.artifacts/outputs/ghost2/leftover2.bin",
-      "demo.artifacts/raw/asset_bec1ecf3cc51/ver_8ec2978f3fe3/well_data.tmp",
-      "demo.artifacts/raw/asset_d9e1e8c709ee/ver_467dea1c223c/a.bin",
+      "demo.artifacts/raw/asset_9f4dc353b170/ver_4ef17a957a6d/a.bin",
+      "demo.artifacts/raw/asset_b4c4ee387d50/ver_e895f8af665f/well_data.tmp",
       "demo.artifacts/raw/ghost_asset/ghost_version/leftover.bin",
       "demo.artifacts/trash/ver_ghost2/payload.bin",
-      "demo.artifacts/working/ver_467dea1c223c/a.bin",
+      "demo.artifacts/working/ver_4ef17a957a6d/a.bin",
       "demo.artifacts/working/ver_ghost/wip.txt",
       "demo.paleo.json",
       "incoming/a.bin",
@@ -165,10 +168,10 @@
     "remaining_files": [
       "demo.artifacts/blobs/14/14761b1baaec6ee6dfe54d4c6433e4abecd1a5737d0ae6e9ab66f9621e8b93ab",
       "demo.artifacts/blobs/d1/d14eccd7caab56bb1b0042546d728172943278dedbb869603a0be39dd3b5d9e6",
-      "demo.artifacts/raw/asset_bec1ecf3cc51/ver_8ec2978f3fe3/well_data.tmp",
-      "demo.artifacts/raw/asset_d9e1e8c709ee/ver_467dea1c223c/a.bin",
+      "demo.artifacts/raw/asset_9f4dc353b170/ver_4ef17a957a6d/a.bin",
+      "demo.artifacts/raw/asset_b4c4ee387d50/ver_e895f8af665f/well_data.tmp",
       "demo.artifacts/raw/ghost_asset/ghost_version/leftover.bin",
-      "demo.artifacts/working/ver_467dea1c223c/a.bin",
+      "demo.artifacts/working/ver_4ef17a957a6d/a.bin",
       "demo.artifacts/working/ver_ghost/wip.txt",
       "demo.paleo.json",
       "incoming/a.bin",
