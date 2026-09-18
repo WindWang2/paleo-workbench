@@ -1,0 +1,5629 @@
+{
+  "generator": "tools/oracle/generate_layout_export_fixtures.py",
+  "note": "Frozen from the real Python product code; regenerate only with the oracle venv. svg_path values are neutralised to <NORTH_ARROW_SVG> on both sides.",
+  "spec_cases": [
+    {
+      "id": "native_full",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_title",
+              "element_type": "title",
+              "x_mm": 60.0,
+              "y_mm": 3.0,
+              "width_mm": 180.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "古地理图",
+                "font_size": 14,
+                "align": "center"
+              }
+            },
+            {
+              "id": "el_subtitle",
+              "element_type": "subtitle",
+              "x_mm": 60.0,
+              "y_mm": 11.0,
+              "width_mm": 180.0,
+              "height_mm": 6.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "早三叠世",
+                "font_size": 10
+              }
+            },
+            {
+              "id": "el_legend",
+              "element_type": "legend",
+              "x_mm": 195.0,
+              "y_mm": 12.0,
+              "width_mm": 90.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "items": []
+              }
+            },
+            {
+              "id": "el_scale",
+              "element_type": "scale_bar",
+              "x_mm": 30.0,
+              "y_mm": 168.0,
+              "width_mm": 40.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "units": "km",
+                "length_km": 50
+              }
+            },
+            {
+              "id": "el_arrow",
+              "element_type": "north_arrow",
+              "x_mm": 250.0,
+              "y_mm": 168.0,
+              "width_mm": 12.0,
+              "height_mm": 18.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "label": "N"
+              }
+            },
+            {
+              "id": "el_neat",
+              "element_type": "neatline",
+              "x_mm": 2.0,
+              "y_mm": 2.0,
+              "width_mm": 293.0,
+              "height_mm": 206.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "line_width_mm": 0.6
+              }
+            },
+            {
+              "id": "el_note",
+              "element_type": "text",
+              "x_mm": 100.0,
+              "y_mm": 180.0,
+              "width_mm": 120.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "备注: 合成用例",
+                "color": "#333333"
+              }
+            },
+            {
+              "id": "el_ann",
+              "element_type": "annotation",
+              "x_mm": 150.0,
+              "y_mm": 100.0,
+              "width_mm": 40.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "①",
+                "leader": true
+              }
+            },
+            {
+              "id": "el_src",
+              "element_type": "datasource",
+              "x_mm": 8.0,
+              "y_mm": 190.0,
+              "width_mm": 150.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "数据来源",
+                "text": "1:20万地质图"
+              }
+            },
+            {
+              "id": "el_cred",
+              "element_type": "time_credits",
+              "x_mm": 8.0,
+              "y_mm": 196.0,
+              "width_mm": 150.0,
+              "height_mm": 6.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "2026-09"
+              }
+            },
+            {
+              "id": "el_strat",
+              "element_type": "strat_labels",
+              "x_mm": 160.0,
+              "y_mm": 190.0,
+              "width_mm": 60.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "T1y"
+              }
+            },
+            {
+              "id": "el_meta",
+              "element_type": "metadata",
+              "x_mm": 160.0,
+              "y_mm": 196.0,
+              "width_mm": 80.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "fields": {
+                  "作者": "李白",
+                  "scale": 2,
+                  "ratio": 1.5,
+                  "verified": true,
+                  "note": null
+                },
+                "font_size": 6
+              }
+            },
+            {
+              "id": "el_img",
+              "element_type": "image",
+              "x_mm": 200.0,
+              "y_mm": 80.0,
+              "width_mm": 40.0,
+              "height_mm": 30.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "image_path": "/assets/logo.svg",
+                "fit": "contain"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "古地理图",
+              "font_size": 14.0,
+              "bold": true,
+              "color": "#000000",
+              "halign": "center",
+              "x": 60.0,
+              "y": 3.0,
+              "w": 180.0,
+              "h": 8.0
+            },
+            {
+              "type": "label",
+              "text": "早三叠世",
+              "font_size": 10.0,
+              "bold": true,
+              "color": "#000000",
+              "halign": "left",
+              "x": 60.0,
+              "y": 11.0,
+              "w": 180.0,
+              "h": 6.0
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "图例",
+              "x": 195.0,
+              "y": 12.0,
+              "w": 90.0,
+              "h": 60.0
+            },
+            {
+              "type": "scalebar",
+              "map_item": "map",
+              "segments": 4,
+              "unit_label": "km",
+              "x": 30.0,
+              "y": 168.0,
+              "w": 40.0,
+              "h": 8.0
+            },
+            {
+              "type": "north_arrow",
+              "map_item": "map",
+              "svg_path": "<NORTH_ARROW_SVG>",
+              "x": 250.0,
+              "y": 168.0,
+              "w": 12.0,
+              "h": 18.0
+            },
+            {
+              "type": "shape",
+              "frame": true,
+              "fill": "#00000000",
+              "x": 2.0,
+              "y": 2.0,
+              "w": 293.0,
+              "h": 206.0
+            },
+            {
+              "type": "label",
+              "text": "备注: 合成用例",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#333333",
+              "halign": "left",
+              "x": 100.0,
+              "y": 180.0,
+              "w": 120.0,
+              "h": 10.0
+            },
+            {
+              "type": "label",
+              "text": "①",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 150.0,
+              "y": 100.0,
+              "w": 40.0,
+              "h": 8.0
+            },
+            {
+              "type": "label",
+              "text": "1:20万地质图",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 8.0,
+              "y": 190.0,
+              "w": 150.0,
+              "h": 8.0
+            },
+            {
+              "type": "label",
+              "text": "2026-09",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 8.0,
+              "y": 196.0,
+              "w": 150.0,
+              "h": 6.0
+            },
+            {
+              "type": "label",
+              "text": "T1y",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 160.0,
+              "y": 190.0,
+              "w": 60.0,
+              "h": 8.0
+            },
+            {
+              "type": "label",
+              "text": "作者: 李白\nscale: 2\nratio: 1.5\nverified: True\nnote: None",
+              "font_size": 6.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 160.0,
+              "y": 196.0,
+              "w": 80.0,
+              "h": 10.0
+            },
+            {
+              "type": "picture",
+              "path": "/assets/logo.svg",
+              "x": 200.0,
+              "y": 80.0,
+              "w": 40.0,
+              "h": 30.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "empty_composition",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_empty",
+          "title": "e",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": []
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "invisible_skipped",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_hidden_title",
+              "element_type": "title",
+              "x_mm": 10.0,
+              "y_mm": 2.0,
+              "width_mm": 60.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": false,
+              "locked": false,
+              "properties": {
+                "text": "hidden"
+              }
+            },
+            {
+              "id": "el_seen",
+              "element_type": "text",
+              "x_mm": 10.0,
+              "y_mm": 170.0,
+              "width_mm": 60.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "seen"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "seen",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 10.0,
+              "y": 170.0,
+              "w": 60.0,
+              "h": 8.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "zorder_stable_ties",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_z",
+          "title": "z",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_c",
+              "element_type": "title",
+              "x_mm": 0.0,
+              "y_mm": 0.0,
+              "width_mm": 50.0,
+              "height_mm": 6.0,
+              "z_index": -3,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "C"
+              }
+            },
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_b",
+              "element_type": "title",
+              "x_mm": 0.0,
+              "y_mm": 0.0,
+              "width_mm": 50.0,
+              "height_mm": 6.0,
+              "z_index": 5,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "B"
+              }
+            },
+            {
+              "id": "el_a",
+              "element_type": "title",
+              "x_mm": 0.0,
+              "y_mm": 0.0,
+              "width_mm": 50.0,
+              "height_mm": 6.0,
+              "z_index": 5,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "A"
+              }
+            },
+            {
+              "id": "el_d",
+              "element_type": "title",
+              "x_mm": 0.0,
+              "y_mm": 0.0,
+              "width_mm": 50.0,
+              "height_mm": 6.0,
+              "z_index": 1000000000,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "D"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "label",
+              "text": "C",
+              "font_size": 10.0,
+              "bold": true,
+              "color": "#000000",
+              "halign": "left",
+              "x": 0.0,
+              "y": 0.0,
+              "w": 50.0,
+              "h": 6.0
+            },
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "B",
+              "font_size": 10.0,
+              "bold": true,
+              "color": "#000000",
+              "halign": "left",
+              "x": 0.0,
+              "y": 0.0,
+              "w": 50.0,
+              "h": 6.0
+            },
+            {
+              "type": "label",
+              "text": "A",
+              "font_size": 10.0,
+              "bold": true,
+              "color": "#000000",
+              "halign": "left",
+              "x": 0.0,
+              "y": 0.0,
+              "w": 50.0,
+              "h": 6.0
+            },
+            {
+              "type": "label",
+              "text": "D",
+              "font_size": 10.0,
+              "bold": true,
+              "color": "#000000",
+              "halign": "left",
+              "x": 0.0,
+              "y": 0.0,
+              "w": 50.0,
+              "h": 6.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "unicode_colorbar",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "units": "％",
+                "min": 0.0,
+                "max": 1.0
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "砂地比 (％)",
+              "x": 205.0,
+              "y": 30.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "grid1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "colorbar_scalar_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "min": 0.0,
+                "max": 1.0,
+                "units": "%"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "砂地比 (%)",
+              "x": 205.0,
+              "y": 30.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "grid1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "colorbar_units_empty",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "min": 0.0,
+                "max": 1.0,
+                "units": ""
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "砂地比",
+              "x": 205.0,
+              "y": 30.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "grid1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "colorbar_units_spaces",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "min": 0.0,
+                "max": 1.0,
+                "units": "   "
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "砂地比",
+              "x": 205.0,
+              "y": 30.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "grid1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "colorbar_units_missing",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "min": 0.0,
+                "max": 1.0
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "砂地比",
+              "x": 205.0,
+              "y": 30.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "grid1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "colorbar_default_title",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "图例",
+              "x": 205.0,
+              "y": 30.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "grid1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "colorbar_unproven",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "min": 0.0,
+                "max": 1.0,
+                "units": "%"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "v1",
+            "layer_type": "vector"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": "composition has elements with no native layout counterpart: colorbar",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "colorbar_no_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "min": 0.0,
+                "max": 1.0,
+                "units": "%"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": "composition has elements with no native layout counterpart: colorbar",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "colorbar_plain_array_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "min": 0.0,
+                "max": 1.0,
+                "units": "%"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "g",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "砂地比 (%)",
+              "x": 205.0,
+              "y": 30.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "g"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "facies_polygon_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_fl",
+              "element_type": "facies_legend",
+              "x_mm": 205.0,
+              "y_mm": 95.0,
+              "width_mm": 78.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "沉积相图例"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "fac1",
+            "layer_type": "polygon"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "沉积相图例",
+              "x": 205.0,
+              "y": 95.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "fac1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "facies_legend mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "facies_categorized_vector_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_fl",
+              "element_type": "facies_legend",
+              "x_mm": 205.0,
+              "y_mm": 95.0,
+              "width_mm": 78.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "沉积相图例"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "v1",
+            "layer_type": "vector",
+            "style": {
+              "renderer": "categorized",
+              "field": "facies"
+            }
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "沉积相图例",
+              "x": 205.0,
+              "y": 95.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "v1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "facies_legend mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "facies_uncategorized_vector_unproven",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_fl",
+              "element_type": "facies_legend",
+              "x_mm": 205.0,
+              "y_mm": 95.0,
+              "width_mm": 78.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "沉积相图例"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "v1",
+            "layer_type": "vector",
+            "style": {
+              "renderer": "single"
+            }
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": "composition has elements with no native layout counterpart: facies_legend",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "facies_facies_kind_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_fl",
+              "element_type": "facies_legend",
+              "x_mm": 205.0,
+              "y_mm": 95.0,
+              "width_mm": 78.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "沉积相图例"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "f2",
+            "layer_type": "facies"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "沉积相图例",
+              "x": 205.0,
+              "y": 95.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "f2"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "facies_legend mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "well_point_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_wl",
+              "element_type": "well_legend",
+              "x_mm": 205.0,
+              "y_mm": 160.0,
+              "width_mm": 70.0,
+              "height_mm": 40.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "测井图例",
+                "items": []
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "w1",
+            "layer_type": "well_point"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "测井图例",
+              "x": 205.0,
+              "y": 160.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "w1"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "well_legend mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "well_kind_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_wl",
+              "element_type": "well_legend",
+              "x_mm": 205.0,
+              "y_mm": 160.0,
+              "width_mm": 70.0,
+              "height_mm": 40.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "测井图例",
+                "items": []
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": [
+          {
+            "id": "w2",
+            "layer_type": "well"
+          }
+        ]
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "测井图例",
+              "x": 205.0,
+              "y": 160.0,
+              "resize_to_contents": false,
+              "filter_layers": [
+                "w2"
+              ]
+            }
+          ]
+        },
+        "warnings": [
+          "well_legend mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ]
+      }
+    },
+    {
+      "id": "well_unproven",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_wl",
+              "element_type": "well_legend",
+              "x_mm": 205.0,
+              "y_mm": 160.0,
+              "width_mm": 70.0,
+              "height_mm": 40.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "测井图例",
+                "items": []
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": "composition has elements with no native layout counterpart: well_legend",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "plain_legend_keeps_box",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_legend",
+              "element_type": "legend",
+              "x_mm": 195.0,
+              "y_mm": 12.0,
+              "width_mm": 90.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "legend",
+              "map_item": "map",
+              "title": "图例",
+              "x": 195.0,
+              "y": 12.0,
+              "w": 90.0,
+              "h": 60.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "hybrid_single",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_chart",
+              "element_type": "stat_chart",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 75.0,
+              "height_mm": 55.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": "composition has elements with no native layout counterpart: stat_chart",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "hybrid_multi_sorted",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_ts",
+              "element_type": "timescale",
+              "x_mm": 15.0,
+              "y_mm": 175.0,
+              "width_mm": 180.0,
+              "height_mm": 12.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_chart",
+              "element_type": "stat_chart",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 75.0,
+              "height_mm": 55.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_inset",
+              "element_type": "inset_map",
+              "x_mm": 200.0,
+              "y_mm": 150.0,
+              "width_mm": 80.0,
+              "height_mm": 40.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_prof",
+              "element_type": "profile",
+              "x_mm": 10.0,
+              "y_mm": 160.0,
+              "width_mm": 120.0,
+              "height_mm": 30.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_fault",
+              "element_type": "fault_symbols",
+              "x_mm": 10.0,
+              "y_mm": 20.0,
+              "width_mm": 40.0,
+              "height_mm": 30.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_lith",
+              "element_type": "lithology_legend",
+              "x_mm": 240.0,
+              "y_mm": 20.0,
+              "width_mm": 40.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": "composition has elements with no native layout counterpart: fault_symbols, inset_map, lithology_legend, profile, stat_chart, timescale",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "carried_text_label",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_future",
+              "element_type": "future_widget",
+              "x_mm": 10.0,
+              "y_mm": 160.0,
+              "width_mm": 60.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "carried"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "carried",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 10.0,
+              "y": 160.0,
+              "w": 60.0,
+              "h": 10.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "metadata_fields",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_meta",
+              "element_type": "metadata",
+              "x_mm": 160.0,
+              "y_mm": 196.0,
+              "width_mm": 80.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "fields": {
+                  "作者": "李白",
+                  "scale": 2,
+                  "ratio": 1.5,
+                  "verified": true,
+                  "note": null
+                }
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "作者: 李白\nscale: 2\nratio: 1.5\nverified: True\nnote: None",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 160.0,
+              "y": 196.0,
+              "w": 80.0,
+              "h": 10.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "metadata_no_fields",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_meta",
+              "element_type": "metadata",
+              "x_mm": 160.0,
+              "y_mm": 196.0,
+              "width_mm": 80.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "fallback text",
+                "fields": "not-a-mapping"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "fallback text",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 160.0,
+              "y": 196.0,
+              "w": 80.0,
+              "h": 10.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "metadata_empty_fields",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_meta",
+              "element_type": "metadata",
+              "x_mm": 160.0,
+              "y_mm": 196.0,
+              "width_mm": 80.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "fields": {}
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 160.0,
+              "y": 196.0,
+              "w": 80.0,
+              "h": 10.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "grid_converts_to_map_units",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_grid",
+              "element_type": "grid",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "spacing_mm": 12
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true,
+              "grid": {
+                "enabled": true,
+                "interval_x": 0.6666666666666666,
+                "interval_y": 0.6666666666666666,
+                "annotation": true
+              }
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "grid_default_spacing",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_grid",
+              "element_type": "grid",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true,
+              "grid": {
+                "enabled": true,
+                "interval_x": 0.5555555555555556,
+                "interval_y": 0.5555555555555556,
+                "annotation": true
+              }
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "grid_zero_spacing_uses_default",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_grid",
+              "element_type": "grid",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "spacing_mm": 0
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true,
+              "grid": {
+                "enabled": true,
+                "interval_x": 0.5555555555555556,
+                "interval_y": 0.5555555555555556,
+                "annotation": true
+              }
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "grid_without_main_map_warns",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_nomap",
+          "title": "n",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_grid",
+              "element_type": "grid",
+              "x_mm": 0.0,
+              "y_mm": 0.0,
+              "width_mm": 10.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": []
+        },
+        "warnings": [
+          "grid element el_grid has no main map to attach to; dropped"
+        ]
+      }
+    },
+    {
+      "id": "grid_last_wins",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_g1",
+              "element_type": "grid",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "spacing_mm": 5
+              }
+            },
+            {
+              "id": "el_g2",
+              "element_type": "grid",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "spacing_mm": 20
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true,
+              "grid": {
+                "enabled": true,
+                "interval_x": 1.1111111111111112,
+                "interval_y": 1.1111111111111112,
+                "annotation": true
+              }
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "grid_float_spacing",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_grid",
+              "element_type": "grid",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "spacing_mm": 2.5
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          100.0,
+          0.0,
+          110.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                100.0,
+                0.0,
+                110.0,
+                9.0
+              ],
+              "frame": true,
+              "grid": {
+                "enabled": true,
+                "interval_x": 0.1388888888888889,
+                "interval_y": 0.1388888888888889,
+                "annotation": true
+              }
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "zero_width_coerced_by_parse",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_bad",
+              "element_type": "title",
+              "x_mm": 10.0,
+              "y_mm": 10.0,
+              "width_mm": 1.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "x"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "x",
+              "font_size": 10.0,
+              "bold": true,
+              "color": "#000000",
+              "halign": "left",
+              "x": 10.0,
+              "y": 10.0,
+              "w": 1.0,
+              "h": 8.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "negative_height_element",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_bad",
+              "element_type": "text",
+              "x_mm": 10.0,
+              "y_mm": 10.0,
+              "width_mm": 50.0,
+              "height_mm": -1.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": "element el_bad (text) has non-positive extent; fix the composition before export",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "image_missing_path",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_img",
+              "element_type": "image",
+              "x_mm": 10.0,
+              "y_mm": 10.0,
+              "width_mm": 40.0,
+              "height_mm": 30.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": "image element 'el_img' has no image_path; embedded image data needs the composer renderer",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "image_embedded_data",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_img",
+              "element_type": "image",
+              "x_mm": 10.0,
+              "y_mm": 10.0,
+              "width_mm": 40.0,
+              "height_mm": 30.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "image_data_png_b64": "aGk="
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": "image element 'el_img' has no image_path; embedded image data needs the composer renderer",
+        "spec": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "crs_null",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": null,
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "boundary_coords",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_t",
+              "element_type": "text",
+              "x_mm": 0.0,
+              "y_mm": 0.0,
+              "width_mm": 0.5,
+              "height_mm": 0.5,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "corner"
+              }
+            },
+            {
+              "id": "el_t2",
+              "element_type": "text",
+              "x_mm": -12.5,
+              "y_mm": -3.25,
+              "width_mm": 10.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "outside"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          -15.0,
+          -5.0,
+          15.0,
+          12.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                -15.0,
+                -5.0,
+                15.0,
+                12.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "label",
+              "text": "corner",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": 0.0,
+              "y": 0.0,
+              "w": 0.5,
+              "h": 0.5
+            },
+            {
+              "type": "label",
+              "text": "outside",
+              "font_size": 10.0,
+              "bold": false,
+              "color": "#000000",
+              "halign": "left",
+              "x": -12.5,
+              "y": -3.25,
+              "w": 10.0,
+              "h": 10.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "scalebar_units_missing",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_scale",
+              "element_type": "scale_bar",
+              "x_mm": 30.0,
+              "y_mm": 168.0,
+              "width_mm": 40.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "scalebar",
+              "map_item": "map",
+              "segments": 4,
+              "unit_label": "",
+              "x": 30.0,
+              "y": 168.0,
+              "w": 40.0,
+              "h": 8.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "scalebar_unicode_units",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_scale",
+              "element_type": "scale_bar",
+              "x_mm": 30.0,
+              "y_mm": 168.0,
+              "width_mm": 40.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "units": "米"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true
+            },
+            {
+              "type": "scalebar",
+              "map_item": "map",
+              "segments": 4,
+              "unit_label": "米",
+              "x": 30.0,
+              "y": 168.0,
+              "w": 40.0,
+              "h": 8.0
+            }
+          ]
+        },
+        "warnings": []
+      }
+    }
+  ],
+  "hybrid_cases": [
+    {
+      "id": "hybrid_types_no_mirror",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_ts",
+              "element_type": "timescale",
+              "x_mm": 15.0,
+              "y_mm": 175.0,
+              "width_mm": 180.0,
+              "height_mm": 12.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_ts2",
+              "element_type": "timescale",
+              "x_mm": 15.0,
+              "y_mm": 188.0,
+              "width_mm": 180.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_chart",
+              "element_type": "stat_chart",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 75.0,
+              "height_mm": 55.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "mirror_layers": null
+      },
+      "cpp_expected": [
+        "stat_chart",
+        "timescale"
+      ]
+    },
+    {
+      "id": "hybrid_types_all_proven",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_ts",
+              "element_type": "timescale",
+              "x_mm": 15.0,
+              "y_mm": 175.0,
+              "width_mm": 180.0,
+              "height_mm": 12.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_ts2",
+              "element_type": "timescale",
+              "x_mm": 15.0,
+              "y_mm": 188.0,
+              "width_mm": 180.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_chart",
+              "element_type": "stat_chart",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 75.0,
+              "height_mm": 55.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          },
+          {
+            "id": "w1",
+            "layer_type": "well_point"
+          },
+          {
+            "id": "f1",
+            "layer_type": "polygon"
+          }
+        ]
+      },
+      "cpp_expected": [
+        "stat_chart",
+        "timescale"
+      ]
+    },
+    {
+      "id": "hybrid_types_empty",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_none",
+          "title": "none",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [],
+          "metadata": {}
+        },
+        "mirror_layers": null
+      },
+      "cpp_expected": []
+    }
+  ],
+  "report_cases": [
+    {
+      "id": "report_native_ok",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "units": "%"
+              }
+            },
+            {
+              "id": "el_title",
+              "element_type": "title",
+              "x_mm": 60.0,
+              "y_mm": 3.0,
+              "width_mm": 180.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "t"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "fmt": "pdf",
+        "dpi": 300.0,
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "geo_pdf": false,
+        "executor": "ok",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "python_report": {
+        "engine": "qgis_layout",
+        "path": "<REPORT_PATH>",
+        "format": "pdf",
+        "dpi": 300.0,
+        "ok": true,
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ],
+        "unmapped_elements": [],
+        "items": 3,
+        "hybrid_items": []
+      },
+      "recorded_geo_pdf": false
+    },
+    {
+      "id": "report_geo_pdf_flag",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "units": "%"
+              }
+            },
+            {
+              "id": "el_title",
+              "element_type": "title",
+              "x_mm": 60.0,
+              "y_mm": 3.0,
+              "width_mm": 180.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "t"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "fmt": "pdf",
+        "dpi": 300.0,
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "geo_pdf": true,
+        "executor": "ok",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "python_report": {
+        "engine": "qgis_layout",
+        "path": "<REPORT_PATH>",
+        "format": "pdf",
+        "dpi": 300.0,
+        "ok": true,
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ],
+        "unmapped_elements": [],
+        "items": 3,
+        "hybrid_items": []
+      },
+      "recorded_geo_pdf": true
+    },
+    {
+      "id": "report_svg_format",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "砂地比",
+                "units": "%"
+              }
+            },
+            {
+              "id": "el_title",
+              "element_type": "title",
+              "x_mm": 60.0,
+              "y_mm": 3.0,
+              "width_mm": 180.0,
+              "height_mm": 8.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "t"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "fmt": "svg",
+        "dpi": 96.0,
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "geo_pdf": false,
+        "executor": "ok",
+        "mirror_layers": [
+          {
+            "id": "grid1",
+            "layer_type": "scalar_grid"
+          }
+        ]
+      },
+      "python_report": {
+        "engine": "qgis_layout",
+        "path": "<REPORT_PATH>",
+        "format": "svg",
+        "dpi": 96.0,
+        "ok": true,
+        "warnings": [
+          "colorbar mapped to the native legend bound to the main map with a filter_layers include list (bridge >= 0.4.0); an older bridge ignores the filter and lists every layer of the linked map"
+        ],
+        "unmapped_elements": [],
+        "items": 3,
+        "hybrid_items": []
+      },
+      "recorded_geo_pdf": false
+    },
+    {
+      "id": "report_hybrid_no_stack",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_ts",
+              "element_type": "timescale",
+              "x_mm": 15.0,
+              "y_mm": 175.0,
+              "width_mm": 180.0,
+              "height_mm": 12.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_ts2",
+              "element_type": "timescale",
+              "x_mm": 15.0,
+              "y_mm": 188.0,
+              "width_mm": 180.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_chart",
+              "element_type": "stat_chart",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 75.0,
+              "height_mm": 55.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            }
+          ],
+          "metadata": {}
+        },
+        "fmt": "pdf",
+        "dpi": 300.0,
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "geo_pdf": false,
+        "executor": "none",
+        "mirror_layers": null
+      },
+      "python_report": {
+        "engine": "composer_fallback",
+        "path": "<REPORT_PATH>",
+        "format": "pdf",
+        "dpi": 300.0,
+        "ok": true,
+        "warnings": [
+          "composer fallback forced by unmapped elements: stat_chart×1, timescale×2",
+          "no QGIS map stack available"
+        ],
+        "unmapped_elements": [
+          "el_ts",
+          "el_ts2",
+          "el_chart"
+        ],
+        "items": 0,
+        "hybrid_items": [
+          "stat_chart",
+          "timescale"
+        ]
+      },
+      "cpp_policy": {
+        "engine": "none",
+        "ok": false,
+        "failure_contains": "fail-closed",
+        "note": "D-03: no composer SVG fallback in the native chain"
+      }
+    },
+    {
+      "id": "report_unproven_colorbar_with_stack",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_cb",
+              "element_type": "colorbar",
+              "x_mm": 205.0,
+              "y_mm": 30.0,
+              "width_mm": 12.0,
+              "height_mm": 60.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "title": "cb",
+                "units": "%"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "fmt": "pdf",
+        "dpi": 300.0,
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "geo_pdf": false,
+        "executor": "ok",
+        "mirror_layers": []
+      },
+      "python_report": {
+        "engine": "composer_fallback",
+        "path": "<REPORT_PATH>",
+        "format": "pdf",
+        "dpi": 300.0,
+        "ok": true,
+        "warnings": [
+          "composer fallback forced by unmapped elements: colorbar×1",
+          "colorbar element(s) have no matching layer in the mirror description (mirror_layers); a legend-backed element goes native only when its layer is provably mirrored",
+          "composition has elements with no native layout counterpart: colorbar"
+        ],
+        "unmapped_elements": [
+          "el_cb"
+        ],
+        "items": 0,
+        "hybrid_items": [
+          "colorbar"
+        ]
+      },
+      "cpp_policy": {
+        "engine": "none",
+        "ok": false,
+        "failure_contains": "no native layout counterpart",
+        "note": "D-03: fail-closed instead of the composer fallback page"
+      }
+    },
+    {
+      "id": "report_runtime_failure",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_sub",
+              "element_type": "subtitle",
+              "x_mm": 60.0,
+              "y_mm": 8.0,
+              "width_mm": 120.0,
+              "height_mm": 6.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "T1"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "fmt": "pdf",
+        "dpi": 300.0,
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "geo_pdf": false,
+        "executor": "fail",
+        "mirror_layers": null
+      },
+      "python_report": {
+        "engine": "composer_fallback",
+        "path": "<REPORT_PATH>",
+        "format": "pdf",
+        "dpi": 300.0,
+        "ok": true,
+        "warnings": [
+          "qgis layout export failed: boom"
+        ],
+        "unmapped_elements": [],
+        "items": 0,
+        "hybrid_items": []
+      },
+      "cpp_policy": {
+        "engine": "qgis_layout",
+        "ok": false,
+        "failure_contains": "boom",
+        "note": "D-03: executor failure is the report, no fallback engine"
+      }
+    },
+    {
+      "id": "report_no_extent",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_sub",
+              "element_type": "subtitle",
+              "x_mm": 60.0,
+              "y_mm": 8.0,
+              "width_mm": 120.0,
+              "height_mm": 6.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "T1"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "fmt": "pdf",
+        "dpi": 300.0,
+        "map_extent": null,
+        "crs": "EPSG:4326",
+        "geo_pdf": false,
+        "executor": "ok",
+        "mirror_layers": null
+      },
+      "python_report": {
+        "engine": "composer_fallback",
+        "path": "<REPORT_PATH>",
+        "format": "pdf",
+        "dpi": 300.0,
+        "ok": true,
+        "warnings": [
+          "no map extent provided"
+        ],
+        "unmapped_elements": [],
+        "items": 0,
+        "hybrid_items": []
+      },
+      "cpp_policy": {
+        "engine": "none",
+        "ok": false,
+        "failure_contains": "no map extent provided",
+        "note": "D-03: fail-closed instead of the composer fallback page"
+      }
+    },
+    {
+      "id": "report_no_stack",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_sub",
+              "element_type": "subtitle",
+              "x_mm": 60.0,
+              "y_mm": 8.0,
+              "width_mm": 120.0,
+              "height_mm": 6.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "text": "T1"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "fmt": "pdf",
+        "dpi": 300.0,
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "geo_pdf": false,
+        "executor": "none",
+        "mirror_layers": null
+      },
+      "python_report": {
+        "engine": "composer_fallback",
+        "path": "<REPORT_PATH>",
+        "format": "pdf",
+        "dpi": 300.0,
+        "ok": true,
+        "warnings": [
+          "no QGIS map stack available"
+        ],
+        "unmapped_elements": [],
+        "items": 0,
+        "hybrid_items": []
+      },
+      "cpp_policy": {
+        "engine": "none",
+        "ok": false,
+        "failure_contains": "no native layout executor available",
+        "note": "D-03: fail-closed instead of the composer fallback page"
+      }
+    }
+  ],
+  "budget_cases": [
+    {
+      "id": "budget_a0_600_over",
+      "expectation_source": "python-product",
+      "input": {
+        "width_mm": 841.0,
+        "height_mm": 1189.0,
+        "dpi": 600.0
+      },
+      "cpp_expected": {
+        "error": "export of 841.0x1189.0 mm at 600 dpi needs ~5.58e+08 px (budget 200000000); reduce dpi to ~215 or smaller"
+      }
+    },
+    {
+      "id": "budget_a4_300_ok",
+      "expectation_source": "python-product",
+      "input": {
+        "width_mm": 297.0,
+        "height_mm": 210.0,
+        "dpi": 300.0
+      },
+      "cpp_expected": {
+        "error": null
+      }
+    },
+    {
+      "id": "budget_a1_300_over",
+      "expectation_source": "python-product",
+      "input": {
+        "width_mm": 594.0,
+        "height_mm": 841.0,
+        "dpi": 300.0
+      },
+      "cpp_expected": {
+        "error": null
+      }
+    },
+    {
+      "id": "budget_fractional_dpi",
+      "expectation_source": "python-product",
+      "input": {
+        "width_mm": 841.0,
+        "height_mm": 1189.0,
+        "dpi": 599.5
+      },
+      "cpp_expected": {
+        "error": "export of 841.0x1189.0 mm at 599.5 dpi needs ~5.57e+08 px (budget 200000000); reduce dpi to ~215 or smaller"
+      }
+    }
+  ],
+  "parity_cases": [
+    {
+      "id": "parity_equal",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        },
+        "export_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        }
+      },
+      "cpp_expected": {
+        "equal": true,
+        "aspects": {
+          "extent": {
+            "equal": true
+          },
+          "crs": {
+            "equal": true
+          },
+          "layer_order": {
+            "equal": true
+          },
+          "visibility": {
+            "equal": true
+          },
+          "grid": {
+            "equal": true
+          },
+          "legend": {
+            "equal": true
+          }
+        },
+        "diff_count": 0,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    },
+    {
+      "id": "parity_extent_diff",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        },
+        "export_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.5,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        }
+      },
+      "cpp_expected": {
+        "equal": false,
+        "aspects": {
+          "extent": {
+            "equal": false
+          },
+          "crs": {
+            "equal": true
+          },
+          "layer_order": {
+            "equal": true
+          },
+          "visibility": {
+            "equal": true
+          },
+          "grid": {
+            "equal": true
+          },
+          "legend": {
+            "equal": true
+          }
+        },
+        "diff_count": 1,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    },
+    {
+      "id": "parity_order_diff",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        },
+        "export_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "b",
+              "visible": true
+            },
+            {
+              "id": "a",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        }
+      },
+      "cpp_expected": {
+        "equal": false,
+        "aspects": {
+          "extent": {
+            "equal": true
+          },
+          "crs": {
+            "equal": true
+          },
+          "layer_order": {
+            "equal": false
+          },
+          "visibility": {
+            "equal": true
+          },
+          "grid": {
+            "equal": true
+          },
+          "legend": {
+            "equal": true
+          }
+        },
+        "diff_count": 1,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    },
+    {
+      "id": "parity_visibility_diff",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        },
+        "export_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": false
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        }
+      },
+      "cpp_expected": {
+        "equal": false,
+        "aspects": {
+          "extent": {
+            "equal": true
+          },
+          "crs": {
+            "equal": true
+          },
+          "layer_order": {
+            "equal": false
+          },
+          "visibility": {
+            "equal": false
+          },
+          "grid": {
+            "equal": true
+          },
+          "legend": {
+            "equal": true
+          }
+        },
+        "diff_count": 2,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    },
+    {
+      "id": "parity_crs_diff",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        },
+        "export_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4490",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        }
+      },
+      "cpp_expected": {
+        "equal": false,
+        "aspects": {
+          "extent": {
+            "equal": true
+          },
+          "crs": {
+            "equal": false
+          },
+          "layer_order": {
+            "equal": true
+          },
+          "visibility": {
+            "equal": true
+          },
+          "grid": {
+            "equal": true
+          },
+          "legend": {
+            "equal": true
+          }
+        },
+        "diff_count": 1,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    },
+    {
+      "id": "parity_grid_diff",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        },
+        "export_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 1.0,
+            "interval_y": 1.0
+          },
+          "legend": true
+        }
+      },
+      "cpp_expected": {
+        "equal": false,
+        "aspects": {
+          "extent": {
+            "equal": true
+          },
+          "crs": {
+            "equal": true
+          },
+          "layer_order": {
+            "equal": true
+          },
+          "visibility": {
+            "equal": true
+          },
+          "grid": {
+            "equal": false
+          },
+          "legend": {
+            "equal": true
+          }
+        },
+        "diff_count": 1,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    },
+    {
+      "id": "parity_legend_diff",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        },
+        "export_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": false
+        }
+      },
+      "cpp_expected": {
+        "equal": false,
+        "aspects": {
+          "extent": {
+            "equal": true
+          },
+          "crs": {
+            "equal": true
+          },
+          "layer_order": {
+            "equal": true
+          },
+          "visibility": {
+            "equal": true
+          },
+          "grid": {
+            "equal": true
+          },
+          "legend": {
+            "equal": false
+          }
+        },
+        "diff_count": 1,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    },
+    {
+      "id": "parity_tolerance_equal",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        },
+        "export_state": {
+          "extent": [
+            1e-12,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        }
+      },
+      "cpp_expected": {
+        "equal": true,
+        "aspects": {
+          "extent": {
+            "equal": true
+          },
+          "crs": {
+            "equal": true
+          },
+          "layer_order": {
+            "equal": true
+          },
+          "visibility": {
+            "equal": true
+          },
+          "grid": {
+            "equal": true
+          },
+          "legend": {
+            "equal": true
+          }
+        },
+        "diff_count": 0,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    },
+    {
+      "id": "parity_malformed_extent",
+      "expectation_source": "cpp-contract",
+      "input": {
+        "canvas_state": {
+          "crs": "EPSG:4326",
+          "layers": [],
+          "legend": false
+        },
+        "export_state": {
+          "extent": [
+            0.0,
+            0.0,
+            10.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "layers": [
+            {
+              "id": "a",
+              "visible": true
+            },
+            {
+              "id": "b",
+              "visible": true
+            }
+          ],
+          "grid": {
+            "enabled": true,
+            "interval_x": 0.5,
+            "interval_y": 0.5
+          },
+          "legend": true
+        }
+      },
+      "cpp_expected": {
+        "equal": false,
+        "aspects": {
+          "extent": {
+            "equal": false
+          },
+          "crs": {
+            "equal": true
+          },
+          "layer_order": {
+            "equal": false
+          },
+          "visibility": {
+            "equal": true
+          },
+          "grid": {
+            "equal": false
+          },
+          "legend": {
+            "equal": false
+          }
+        },
+        "diff_count": 4,
+        "style_source": "shared_qgis_project_layers",
+        "by_construction": [
+          "style",
+          "annotations"
+        ]
+      }
+    }
+  ],
+  "self_check": {
+    "note": "The replay must REJECT this corrupted expectation (comparator negative self-check).",
+    "spec_case_id": "native_full",
+    "corrupt": {
+      "path": [
+        "items",
+        0,
+        "x"
+      ],
+      "value": 999.0
+    }
+  }
+}
