@@ -24,3 +24,11 @@ target_link_libraries(pwb_mapping_kernel PUBLIC Pwb::Domain)
 if(BUILD_TESTING)
     add_subdirectory(mapping_kernel_tests)
 endif()
+
+# BEGIN CONV-05
+# constrained-IDW (Haiyou) surface kernel, frozen against the Python oracle
+# (tools/oracle/generate_constrained_idw_fixtures.py).
+if(PWB_BUILD_CONV_05)
+    target_sources(pwb_mapping_kernel PRIVATE src/constrained_idw.cpp)
+endif()
+# END CONV-05

@@ -76,6 +76,16 @@ if(PWB_BUILD_SEISMIC_IO)
         add_subdirectory(libs/seismic_io/seismic_io_tests)
     endif()
 endif()
+# BEGIN CONV-05
+# constrained-IDW (Haiyou) kernel port with frozen Python oracle; implies the
+# mapping_kernel library it extends.
+option(PWB_BUILD_CONV_05
+    "CONV-05: constrained-IDW kernel + oracle test (extends mapping_kernel)" OFF)
+if(PWB_BUILD_CONV_05)
+    set(PWB_BUILD_MAPPING_KERNEL ON)
+endif()
+# END CONV-05
+
 if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)
 endif()
