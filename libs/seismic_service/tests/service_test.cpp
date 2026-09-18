@@ -180,6 +180,52 @@ int main() {
                         full, {6, 4, 10}, "crossline plane 1");
             check_plane(*opened.volume, pwb::viz::VolumeAxis::sample, 7,
                         full, {6, 4, 10}, "sample plane 7");
+            // Exhaustive: every plane of every axis must match the frozen
+            // full-volume dump element-for-element (NaN positions included).
+            const pwb::viz::VolumeAxis axes[3] = {
+                pwb::viz::VolumeAxis::inline_, pwb::viz::VolumeAxis::crossline,
+                pwb::viz::VolumeAxis::sample};
+            const std::int64_t shape[3] = {6, 4, 10};
+            std::size_t planes_ok = 0;
+            for (int axis_i = 0; axis_i < 3; ++axis_i) {
+                const std::size_t fixed = (std::size_t)axis_i;
+                const std::size_t ra = fixed == 0 ? 1 : 0;
+                const std::size_t ca = fixed == 2 ? 1 : 2;
+                const std::int64_t r_count = shape[ra];
+                const std::int64_t c_count = shape[ca];
+                std::vector<float> plane(
+                    static_cast<std::size_t>(r_count * c_count));
+                for (std::int64_t idx = 0; idx < shape[fixed]; ++idx) {
+                    if (opened.volume->read_slice(axes[axis_i], idx, plane)
+                        != plane.size()) {
+                        check(false, "exhaustive: read_slice size");
+                        break;
+                    }
+                    bool exact = true;
+                    for (std::int64_t r = 0; r < r_count && exact; ++r) {
+                        for (std::int64_t c = 0; c < c_count && exact; ++c) {
+                            std::int64_t cell[3] = {0, 0, 0};
+                            cell[fixed] = idx;
+                            cell[ra] = r;
+                            cell[ca] = c;
+                            const float want = full[static_cast<std::size_t>(
+                                (cell[0] * 4 + cell[1]) * 10 + cell[2])];
+                            const float got =
+                                plane[static_cast<std::size_t>(r * c_count
+                                                               + c)];
+                            const bool both_nan =
+                                std::isnan(want) && std::isnan(got);
+                            exact = both_nan || want == got;
+                        }
+                    }
+                    if (exact) {
+                        ++planes_ok;
+                    } else {
+                        check(false, "exhaustive plane mismatch");
+                    }
+                }
+            }
+            check(planes_ok == 6 + 4 + 10, "exhaustive planes exact");
             // chunk_plan reflects the tile grid.
             const auto plan = opened.volume->chunk_plan();
             check(!plan.empty(), "chunk_plan non-empty");

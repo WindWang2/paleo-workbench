@@ -22,6 +22,18 @@ using pwb::viz::VolumeOwnership;
 
 namespace {
 
+// Tile shape with non-positive extents normalised to 1 (same defensive rule
+// as TileCache::tile_of/tile_origin — a zero extent would be division by
+// zero in the tile index math).
+std::array<std::int64_t, 3> normalised_tile_shape(
+    const std::array<std::int64_t, 3>& tile_shape) {
+    std::array<std::int64_t, 3> shape{1, 1, 1};
+    for (std::size_t a = 0; a < 3; ++a) {
+        shape[a] = tile_shape[a] > 0 ? tile_shape[a] : 1;
+    }
+    return shape;
+}
+
 // The two free axes of a plane, in the canonical output row/column order:
 //   inline plane   -> rows = crossline, cols = sample
 //   crossline plane-> rows = inline,    cols = sample
@@ -85,7 +97,8 @@ public:
             return 0;
         }
 
-        const std::array<std::int64_t, 3> tile_shape = cache_->config().tile_shape;
+        const std::array<std::int64_t, 3> tile_shape =
+            normalised_tile_shape(cache_->config().tile_shape);
         // Per-call flag: a cancelled plane read never poisons later reads.
         const CancelFlag cancel;
         // True 3-D tile grid: the fixed axis addresses its own tile too, so
@@ -143,7 +156,8 @@ public:
     }
 
     [[nodiscard]] std::vector<ChunkInfo> chunk_plan() const override {
-        const std::array<std::int64_t, 3> tile_shape = cache_->config().tile_shape;
+        const std::array<std::int64_t, 3> tile_shape =
+            normalised_tile_shape(cache_->config().tile_shape);
         std::vector<ChunkInfo> plan;
         std::array<std::int64_t, 3> counts{1, 1, 1};
         for (std::size_t a = 0; a < 3; ++a) {

@@ -295,9 +295,14 @@ std::optional<SegyLayout> inspect_segy(const std::filesystem::path& file,
                                             unique_ilines.end(), key.first);
         const auto xl_it = std::lower_bound(unique_xlines.begin(),
                                             unique_xlines.end(), key.second);
-        SegyTracePos& pos = layout.traces[static_cast<std::size_t>(
-            std::distance(unique_ilines.begin(), il_it) * nc
-            + std::distance(unique_xlines.begin(), xl_it))];
+        const std::int64_t il_index =
+            std::distance(unique_ilines.begin(), il_it);
+        const std::int64_t xl_index =
+            std::distance(unique_xlines.begin(), xl_it);
+        SegyTracePos& pos =
+            layout.traces[static_cast<std::size_t>(il_index * nc + xl_index)];
+        pos.inline_index = il_index;
+        pos.crossline_index = xl_index;
         pos.byte_offset = kHeaderTotal
             + static_cast<std::uint64_t>(trace_index)
                   * static_cast<std::uint64_t>(trace_bytes);

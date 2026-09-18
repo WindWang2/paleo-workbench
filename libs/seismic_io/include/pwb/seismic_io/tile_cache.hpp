@@ -18,9 +18,9 @@
 //     budget is returned to the caller but NOT cached — a single oversized
 //     request can never evict everything nor grow the cache unbounded.
 //   * All methods are thread-safe (one mutex; cache misses run the loader
-//     OUTSIDE the lock, exactly one loader call per key per miss — a second
-//     racer waits and re-looks-up, so duplicate loads are possible under
-//     contention but never duplicate loader calls for the same winner).
+//     OUTSIDE the lock — a racing caller for the same key may load twice;
+//     both results are correct, the winner's buffer is served, and the
+//     ledger counts the lookup once).
 //   * Stats: hits / misses / evictions / bytes / peak / entries; peak is a
 //     high-water mark of bytes actually held.
 //

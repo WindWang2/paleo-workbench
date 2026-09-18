@@ -257,13 +257,15 @@ Result<AlgorithmResultV1> run_dip_family(const AlgorithmRequestV1& request,
         static_cast<std::size_t>(ni * nc * ns));
     if (kind == VolumeKind::dip_azimuth) {
         // compute_azimuth: atan2(dip_xl, dip_il), wrapped to [0, 2*pi).
+        // Evaluated in float like the oracle's f32 np.arctan2 (a double
+        // intermediate differs by <= 1 ulp f32, absorbed by the frozen
+        // tolerance).
         for (std::size_t i = 0; i < output_storage->size(); ++i) {
-            double az = std::atan2(static_cast<double>(dip_xl[i]),
-                                   static_cast<double>(dip_il[i]));
-            if (az < 0.0) {
-                az += kTwoPi;
+            float az = std::atan2(dip_xl[i], dip_il[i]);
+            if (az < 0.0f) {
+                az += static_cast<float>(kTwoPi);
             }
-            (*output_storage)[i] = static_cast<float>(az);
+            (*output_storage)[i] = az;
         }
     } else {
         const std::vector<float>& selected =

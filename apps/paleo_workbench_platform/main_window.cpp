@@ -1460,6 +1460,10 @@ void MainWindow::runAttributeDialog() {
     spacing->setMinimum(0.001);
     spacing->setValue(1.0);
     spacing->setSuffix(tr(" m"));
+    auto* curvature_window = new QSpinBox(&dialog);
+    curvature_window->setRange(0, 4096);
+    curvature_window->setValue(3);  // production KERNELS default
+    curvature_window->setPrefix(tr("半窗 "));
 
     auto* form = new QFormLayout;
     form->addRow(tr("算法"), algorithm);
@@ -1468,6 +1472,7 @@ void MainWindow::runAttributeDialog() {
     form->addRow(tr("采样间隔（瞬时频率 / 倾角 dt / 甜度）"),
                  sample_interval);
     form->addRow(tr("道间距（倾角 dx）"), spacing);
+    form->addRow(tr("平滑半窗（曲率）"), curvature_window);
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -1494,9 +1499,9 @@ void MainWindow::runAttributeDialog() {
         params["dx_il"] = std::to_string(spacing->value());
         params["dx_xl"] = std::to_string(spacing->value());
     } else if (algorithm_id == "seismic.curvature_mean") {
-        params["win_il"] = std::to_string(window->value());
-        params["win_xl"] = std::to_string(window->value());
-        params["win_t"] = std::to_string(window->value());
+        params["win_il"] = std::to_string(curvature_window->value());
+        params["win_xl"] = std::to_string(curvature_window->value());
+        params["win_t"] = std::to_string(curvature_window->value());
     }
 
     std::string error;
@@ -1550,6 +1555,15 @@ void MainWindow::runAttributeDialog() {
 
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
 namespace {
+// ONE process-level import id sequence for every entry point (public API
+// and dialog): staged file names, run ids and operation ids share the
+// namespace, so two independent counters could silently reuse the same
+// staged path and overwrite a published version's payload.
+std::string next_segy_import_id() {
+    static std::uint64_t counter = 0;
+    return "segy-import-" + std::to_string(counter++);
+}
+
 // Stages the imported volume into the project and publishes it through B's
 // run lifecycle (register -> payload -> publish -> manifest). Called on the
 // GUI thread only (the catalog store has no documented cross-thread lease).
@@ -1644,9 +1658,7 @@ std::string MainWindow::importSegy(const QString& path, std::string* error,
         if (error != nullptr) *error = "未打开工程（SEG-Y 导入需要工程目录）";
         return "";
     }
-    static std::uint64_t import_counter = 0;
-    const std::string import_id =
-        "segy-import-" + std::to_string(import_counter++);
+    const std::string import_id = next_segy_import_id();
 
     auto volume = pwb::seismic_io::read_segy(
         std::filesystem::path(path.toStdWString()), error, cancel);
@@ -1667,7 +1679,6 @@ void MainWindow::importSegyDialog() {
                              tr("未打开工程（SEG-Y 导入需要工程目录）。"));
         return;
     }
-    static std::uint64_t dialog_import_counter = 0;
 
 #if defined(PWB_WITH_SEISMIC_SERVICE)
     // Threaded import: the heavy SEG-Y read runs on a worker thread with a
@@ -1695,12 +1706,15 @@ void MainWindow::importSegyDialog() {
     worker.join();
     progress.reset();
     if (!volume.has_value()) {
-        QMessageBox::warning(this, tr("导入 SEG-Y"),
-                             QString::fromStdString(read_error));
+        // Cancellation is a normal cooperative outcome, not an error: the
+        // user pressed the button, so return silently.
+        if (read_error != "cancelled") {
+            QMessageBox::warning(this, tr("导入 SEG-Y"),
+                                 QString::fromStdString(read_error));
+        }
         return;
     }
-    const std::string import_id = "segy-import-" + std::to_string(
-        dialog_import_counter++);
+    const std::string import_id = next_segy_import_id();
     std::string publish_error;
     const std::string version_id = publish_segy_import(
         *project_store_, path, import_id, std::move(volume.value()),

@@ -9,6 +9,12 @@
 // O(cache budget), not O(volume) — this is the native replacement of the
 // Python chunked-store viewer path (geoviz_seismic.chunked over zarr).
 //
+// Failure surface note (ISeismicVolume::read_slice): a mid-assembly reader
+// or cancellation failure also returns 0 (the contract's "no plane"
+// verdict) — the output span is then partially scattered and MUST be
+// discarded by the caller. Clean rejections (bad axis index, span size)
+// still write nothing.
+//
 // Threading: matches the SliceController contract — read_slice()/geometry()
 // are called on exactly one worker thread; the tile cache itself is
 // thread-safe, so concurrent volumes (one controller each) share nothing.

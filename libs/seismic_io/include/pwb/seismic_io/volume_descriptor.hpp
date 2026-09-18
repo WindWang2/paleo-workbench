@@ -90,6 +90,9 @@ struct BinGridGeometry {
     }
 
     // World (x, y) -> nearest integer (inline, crossline) index pair.
+    // Halves round away from zero (std::llround); the Python oracle's
+    // round() rounds halves to even — they differ only when a coordinate
+    // lands exactly on a half-grid position.
     [[nodiscard]] std::pair<std::int64_t, std::int64_t> nearest_il_xl(
         double x, double y) const {
         const auto [il_frac, xl_frac] = xy_to_il_xl(x, y);

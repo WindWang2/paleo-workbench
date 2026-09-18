@@ -18,7 +18,7 @@
 | N4 | `pwb::viz::ISeismicVolume` 的 tiled 后端（SEG-Y/PWBVOL1），真 chunk_plan，接现有 SliceController/SeismicSliceWidget | `libs/seismic_service` |
 | N5 | BinGridGeometry（方位角从北顺时针）+ 与工程空间上下文的稳定 seam（CRS 字符串 + x/y↔IL/XL，不猜 CRS） | `libs/seismic_service` |
 | N6 | 6 个 production attribute kernels：sweetness / relative_impedance / dip_il / dip_xl / dip_azimuth / curvature_mean（语义 = geoviz_seismic.attributes，严禁新增算法） | `libs/seismic_attributes` |
-| N7 | 平台产品接线：打开体版本改 tiled（免整卷拷贝）、SEG-Y 导入线程化+可取消、属性对话框补新核参数、选点物理坐标 x/y 显示 | `apps/paleo_workbench_platform` |
+| N7 | 平台产品接线：打开体版本改 tiled（免整卷拷贝）、SEG-Y 导入线程化+可取消、属性对话框补新核参数、bin-grid 标定状态显示（x/y 换算 API 由 service 提供，选点 x/y 显示留待 viewer 事件接线，见 v3-migration.md） | `apps/paleo_workbench_platform` |
 | N8 | Python oracle（固定解释器）：IO 窗口/边界、6 kernel 数学、BinGrid 转换，含 negative self-check | `tests/cpp/seismic_*` oracle |
 | N9 | synthetic 32³/64³ smoke（SEG-Y → tiled open → slice → attribute → publish） | `tests/cpp` |
 
@@ -69,15 +69,20 @@
 ## 2. Attribute 契约（冻结自 geoviz_seismic/attributes.py @08851951）
 
 全部：输入 volume_f32、输出 volume_f32、shape 不变、逐体（非逐道轴参数）。
-内部 f64 计算、f32 输出（沿用 E 线 SDK 约定）； sweetness/dip_azimuth 的
-组合路径先取上游 f32 输出再组合（复现 Python 的 astype(f32) 链）。
+精度链按 oracle 逐面对齐：sweetness 的 Hilbert/unwrap/gradient 内部 f64
+（scipy hilbert 实测对 f32 输入返回 complex64，再乘 f64 h 升 complex128；
+C++ 全 f64，cast f32 前 ~1e-7 相对差，由冻结容差吸收，非位级一致）；
+dip/curvature/relative_impedance 则完整复刻 numpy f32 链（NEP 50 弱标量）
+——这正是 parity 要求，不做 f64 内部提升。dip_azimuth 在 f32 dip 输出上
+以 f32 atan2 + f32 wrap 评估（与 oracle 的 f32 np.arctan2 对齐，
+<=1 ulp f32 差由容差吸收）。
 
 | id（单 dot） | Python 源 | 参数（默认） | 语义要点 |
 |---|---|---|---|
 | seismic.sweetness | compute_sweetness | sample_interval=1.0 | env/√freq_safe，|freq|<1e-6→1e-6，取 |freq|；env、freq 为 f32 输出 |
 | seismic.relative_impedance | compute_relative_impedance | — | 沿 sample 轴顺序 cumsum（f32 累加，NaN 永久污染） |
 | seismic.dip_il / seismic.dip_xl | compute_dip | dt=1.0, dx_il=1.0, dx_xl=1.0 | atan(grad/grad_t_safe)，|grad_t|<1e-10→1e-10；np.gradient 边界=单侧差分 |
-| seismic.dip_azimuth | compute_azimuth | — | atan2(dip_xl, dip_il)（f32 输入），<0 + 2π → [0,2π) |
+| seismic.dip_azimuth | compute_azimuth | dt=1.0, dx_il=1.0, dx_xl=1.0（透传给内部 compute_dip；atan2 对两侧 dip 的等比缩放不不变，故参数非透明） | atan2(dip_xl, dip_il)（f32 输入），<0 + 2π → [0,2π)（f32 粒度上极角恰为 2π 的样本仍可能出现，oracle 同） |
 | seismic.curvature_mean | compute_curvature(kind="mean") | win_il=3, win_xl=3, win_t=3 | slope=grad(单位间距)/grad_t_safe → 3D uniform_filter(size=2w+1, reflect) → 二阶 gradient → (d2_il+d2_xl)/2 |
 
 - uniform_filter(reflect) 的 C++ 实现 = E 线 RMS 同构滑窗和 ÷ n（对称反射），
@@ -88,7 +93,7 @@
 ## 3. Service / 空间 seam 契约
 
 - `SeismicVolumeService`（Qt-free）：`open_segy(path)`、`open_pwbvol(path)`
-  → `OpenedVolume { shared_ptr<ISeismicVolume>, VolumeDescriptor, optional<BinGridGeometry> }`；
+  → `OpenedVolume { volume, descriptor（bin_grid 在 descriptor 内）, cache }`；
   cache 字节预算来自构造参数，缺省读 env `PWB_SEISMIC_TILE_CACHE_BYTES`
   （非法/缺失 → 64 MiB）。
 - `BinGridGeometry`：xy↔(il_frac,xl_frac) 公式逐符号对齐 models.py
@@ -105,7 +110,10 @@
 - 容差：先测后冻（同 E 线协议）：C++ vs oracle 逐 case 最大误差 × 10 余量，
   并附 negative self-check（扰动 oracle ≥1e-3 相对量必须判 FAIL）。
 - IO oracle：tiny.sgy 冻结体 + 合成 format 1/5、NaN 样本、乱序网格、
-  tile≠整卷窗口、取消中途、PWBVOL1 深度域；全部与 numpy 逐样本对照。
+  tile≠整卷窗口、PWBVOL1 深度域、bin-grid 探针（期望 = oracle
+  _infer_bin_grid 对写入字节的推断结果）；取消覆盖为预取消标志拒绝
+  （读循环内逐 trace 检查的实现由代码审查核对，无中途取消用例）；
+  全部与 numpy 逐样本对照。
 
 ## 5. 与既有一致性
 

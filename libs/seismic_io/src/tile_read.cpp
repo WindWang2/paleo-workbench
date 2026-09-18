@@ -183,19 +183,58 @@ std::optional<PwbvolLayout> inspect_pwbvol(const std::filesystem::path& file,
         if (error != nullptr) *error = "header JSON invalid";
         return std::nullopt;
     }
-    if (!header.contains("version") || header["version"].get<int>() != 1) {
+    if (!header.contains("version") || !header["version"].is_number()
+        || header["version"].get<int>() != 1) {
         if (error != nullptr) *error = "unsupported payload version";
         return std::nullopt;
     }
+    const auto is_string = [](const pwb::domain::Json& value) {
+        return value.is_string();
+    };
     if (!header.contains("shape") || !header["shape"].is_array()
         || header["shape"].size() != 3
+        || !header["shape"][0].is_number()
+        || !header["shape"][1].is_number()
+        || !header["shape"][2].is_number()
         || !header.contains("axes") || !header["axes"].is_array()
         || header["axes"].size() != 3
+        || !is_string(header["axes"][0]) || !is_string(header["axes"][1])
+        || !is_string(header["axes"][2])
         || header["axes"][0].get<std::string>() != "inline"
         || header["axes"][1].get<std::string>() != "crossline"
         || header["axes"][2].get<std::string>() != "sample"
         || !header.contains("layout")
+        || !header["layout"].is_string()
         || header["layout"].get<std::string>() != "c-order-f32") {
+        if (error != nullptr) *error = "unsupported payload layout";
+        return std::nullopt;
+    }
+
+    // Every field access below is guarded: a malformed header must yield
+    // nullopt + a diagnostic, never an exception (the inspector is the
+    // fail-closed boundary in front of GUI slots).
+    const auto is_number_array = [&header](const char* key) {
+        if (!header.contains(key) || !header[key].is_array()
+            || header[key].size() != 3) {
+            return false;
+        }
+        for (const auto& value : header[key]) {
+            if (!value.is_number()) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!is_number_array("axis_starts") || !is_number_array("axis_steps")) {
+        if (error != nullptr) *error = "unsupported payload layout";
+        return std::nullopt;
+    }
+    if (header.contains("axis_units")
+        && (!header["axis_units"].is_array()
+            || header["axis_units"].size() != 3
+            || !header["axis_units"][0].is_string()
+            || !header["axis_units"][1].is_string()
+            || !header["axis_units"][2].is_string())) {
         if (error != nullptr) *error = "unsupported payload layout";
         return std::nullopt;
     }
@@ -217,8 +256,7 @@ std::optional<PwbvolLayout> inspect_pwbvol(const std::filesystem::path& file,
     descriptor.iline_step = header["axis_steps"][0].get<double>();
     descriptor.xline_step = header["axis_steps"][1].get<double>();
     descriptor.sample_step = header["axis_steps"][2].get<double>();
-    if (header.contains("axis_units") && header["axis_units"].is_array()
-        && header["axis_units"].size() == 3) {
+    if (header.contains("axis_units")) {
         descriptor.sample_unit = header["axis_units"][2].get<std::string>();
     }
     descriptor.sample_domain = domain_from_unit(descriptor.sample_unit);
