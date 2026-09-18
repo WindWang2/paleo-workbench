@@ -217,6 +217,13 @@ if(PWB_BUILD_CONV_13)
     add_subdirectory(libs/prediction)
 endif()
 # END CONV-13
+# BEGIN CONV-14
+option(PWB_BUILD_CONV_14
+    "Build the interchange path-safety/manifest/preflight kernel (conv-14)" OFF)
+if(PWB_BUILD_CONV_14)
+    add_subdirectory(libs/interchange)
+endif()
+# END CONV-14
 
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
