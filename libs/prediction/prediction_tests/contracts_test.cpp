@@ -143,9 +143,11 @@ Json run_case(const Json& c, const std::string& fx) {
 
 int main() {
     const std::string fixture_path = PWB_CONTRACTS_FIXTURE;
+    // generic_string() (forward slashes): the oracle froze POSIX-style paths
+    // and the C++ resolver emits weakly_canonical(...).generic_string().
     const std::string fx =
         (fs::path(fixture_path).parent_path() / "prediction_contract_files")
-            .string();
+            .generic_string();
 
     std::ifstream in(fixture_path);
     if (!in) {

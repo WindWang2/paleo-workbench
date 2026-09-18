@@ -106,11 +106,23 @@ namespace {
 
 // Node under construction; finalized into an XmlNode when its end tag is
 // seen (tails are never read by the ported consumers and are dropped).
+//
+// The special members are spelled out because MSVC 19.38 reports the
+// implicitly-deleted copy constructor as available
+// (is_copy_constructible_v<BuildNode> == true), which makes
+// std::vector<OpenElement> select the copy path in move_if_noexcept and
+// hard-error on the unique_ptr member inside its own instantiation.
 struct BuildNode {
     std::string tag;
     std::vector<std::pair<std::string, std::string>> attrib;
     std::string text;
     std::vector<std::unique_ptr<XmlNode>> children;
+
+    BuildNode() = default;
+    BuildNode(const BuildNode&) = delete;
+    BuildNode& operator=(const BuildNode&) = delete;
+    BuildNode(BuildNode&&) = default;
+    BuildNode& operator=(BuildNode&&) = default;
 };
 
 }  // namespace

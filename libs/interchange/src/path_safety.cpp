@@ -272,12 +272,16 @@ std::filesystem::path ensure_within_root(const std::filesystem::path& root,
     if (resolved != resolved_root) {
         // "root in resolved.parents": the resolved path must be strictly
         // inside the root (covers ".." survivors and symlinked dirs alike).
-        const auto root_text = resolved_root.string();
-        const auto resolved_text = resolved.string();
-        const bool inside = resolved_text.size() > root_text.size()
-            && resolved_text.compare(0, root_text.size(), root_text) == 0
-            && (root_text == "/"
-                || resolved_text[root_text.size()] == '/');
+        // lexically_relative is component-based, so it is separator- and
+        // platform-correct (the previous text-prefix check only recognized
+        // '/' and rejected every nested path on Windows).
+        const std::filesystem::path relative =
+            resolved.lexically_relative(resolved_root);
+        const std::string relative_text = relative.generic_string();
+        const bool inside = !relative_text.empty()
+            && relative_text != "."
+            && relative_text.rfind("../", 0) != 0
+            && relative_text != "..";
         if (!inside) {
             throw UnsafePathError("path escapes package root: "
                                   + candidate.string());
