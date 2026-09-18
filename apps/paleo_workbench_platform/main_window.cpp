@@ -73,6 +73,8 @@
 #endif
 
 #ifdef PWB_WITH_WELL_LOG
+#include "well_log_track_panel.hpp"
+#include <pwb/viz/well_log_events.hpp>
 #include <pwb/viz/well_log_host_widget.hpp>
 #endif
 
@@ -287,6 +289,31 @@ void MainWindow::buildUi() {
     auto* well_log_host = new pwb::viz::WellLogHostWidget(well_log_dock);
     well_log_dock->setWidget(well_log_host);
     addDockWidget(Qt::RightDockWidgetArea, well_log_dock);
+
+    // Native track settings (this branch): layout/template/export panel
+    // bound to the host; interpretation events surface in the status bar.
+    auto* track_panel_dock = new QDockWidget(tr("测井轨道"), this);
+    track_panel_dock->setObjectName(QStringLiteral("well-log-track-panel"));
+    auto* track_panel = new WellLogTrackPanel(track_panel_dock);
+    track_panel_dock->setWidget(track_panel);
+    addDockWidget(Qt::RightDockWidgetArea, track_panel_dock);
+    track_panel->bind(well_log_host);
+    well_log_host->set_interpretation_callback(
+        [this](const pwb::viz::WellLogInterpretationEvent& event) {
+            const QString label = QString::fromStdString(event.label);
+            if (event.kind ==
+                pwb::viz::WellLogInterpretationEvent::Kind::marker_hit) {
+                status_label_->setText(tr("地层顶部: %1 @ %2")
+                                           .arg(label)
+                                           .arg(event.top));
+            } else {
+                status_label_->setText(tr("相带证据: %1 [%2, %3] %4")
+                                           .arg(label)
+                                           .arg(event.top)
+                                           .arg(event.bottom)
+                                           .arg(QString::fromStdString(event.unit)));
+            }
+        });
 #endif
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     // D's slice host in a dock (moc-free widget like the WLE host).

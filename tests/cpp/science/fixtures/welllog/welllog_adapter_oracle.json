@@ -1,0 +1,1302 @@
+{
+ "schema": "pwb.welllog.adapter_oracle/1",
+ "generator": "tests/cpp/science/fixtures/welllog/generate_oracle.py",
+ "source_of_truth": "paleo_workbench/viz/welllog_engine_adapter.py",
+ "cases": [
+  {
+   "name": "basic_production",
+   "input": {
+    "well_name": "W1",
+    "top_depth": 1000.0,
+    "bottom_depth": 1100.5,
+    "depth_unit": "m",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth": [
+       1000.0,
+       1001.0,
+       1002.0,
+       1003.0
+      ],
+      "values": [
+       42.0,
+       "NaN",
+       55.5,
+       61.0
+      ],
+      "display_range": [
+       0.0,
+       150.0
+      ],
+      "color": ""
+     },
+     {
+      "mnemonic": "RT",
+      "unit": "ohmm",
+      "depth": [
+       1000.0,
+       1000.5,
+       1001.0
+      ],
+      "values": [
+       2.0,
+       0.5,
+       20.0
+      ],
+      "display_range": null,
+      "color": ""
+     },
+     {
+      "mnemonic": "AC",
+      "unit": "us/ft",
+      "depth": [
+       1000.0,
+       1002.0
+      ],
+      "values": [
+       70.0,
+       88.0
+      ],
+      "display_range": null,
+      "color": ""
+     }
+    ],
+    "lithology": [],
+    "facies": [],
+    "markers": [
+     {
+      "depth": 1010.0,
+      "label": "长2",
+      "semantic": "formation_top",
+      "id": ""
+     },
+     {
+      "depth": 1080.0,
+      "label": "长1",
+      "semantic": "formation_top",
+      "id": ""
+     }
+    ],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W1",
+    "top_depth": 1000.0,
+    "bottom_depth": 1100.5,
+    "document_id": "256c6619-adb8-5400-be40-993d14e2c12b",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 4,
+      "depth_first": 1000.0,
+      "depth_last": 1003.0,
+      "value_first": 42.0,
+      "value_last": 61.0,
+      "null_indices": [
+       1
+      ],
+      "curve_id": "40cdefb2-d973-52cd-9ff8-40931d531dad",
+      "axis_id": "f226d8a6-ef24-52d4-8afc-825b324876c8"
+     },
+     {
+      "mnemonic": "RT",
+      "unit": "ohmm",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 3,
+      "depth_first": 1000.0,
+      "depth_last": 1001.0,
+      "value_first": 2.0,
+      "value_last": 20.0,
+      "null_indices": [],
+      "curve_id": "1776f209-70d2-5151-a214-4ab4a84190ef",
+      "axis_id": "ef181f6d-a6a5-586a-aaee-4b82017b21d8"
+     },
+     {
+      "mnemonic": "AC",
+      "unit": "us/ft",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 1000.0,
+      "depth_last": 1002.0,
+      "value_first": 70.0,
+      "value_last": 88.0,
+      "null_indices": [],
+      "curve_id": "8d23376f-5582-555a-92ae-b13a95aea797",
+      "axis_id": "647261da-b4f8-593e-ad03-35deaf272025"
+     }
+    ],
+    "lithology_bounds": [],
+    "facies_bounds": [],
+    "markers": [
+     {
+      "depth": 1010.0,
+      "label": "长2",
+      "semantic": "formation_top"
+     },
+     {
+      "depth": 1080.0,
+      "label": "长1",
+      "semantic": "formation_top"
+     }
+    ],
+    "diagnostics": []
+   },
+   "submit": {
+    "top": 1000.0,
+    "bottom": 1100.5,
+    "tracks": [
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 150.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "40cdefb2-d973-52cd-9ff8-40931d531dad",
+        "color": "#15803d"
+       }
+      ]
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 1e-10,
+      "scale_max": 100.0,
+      "scale_mode": "log",
+      "layers": [
+       {
+        "curve_id": "1776f209-70d2-5151-a214-4ab4a84190ef",
+        "color": "#b91c1c"
+       }
+      ]
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "8d23376f-5582-555a-92ae-b13a95aea797",
+        "color": "#1d4ed8"
+       }
+      ]
+     }
+    ],
+    "diagnostics": []
+   }
+  },
+  {
+   "name": "unknown_depth_unit",
+   "input": {
+    "well_name": "W2",
+    "top_depth": 10.0,
+    "bottom_depth": 20.0,
+    "depth_unit": "furlongs",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth": [
+       10.0,
+       11.0
+      ],
+      "values": [
+       1.0,
+       2.0
+      ],
+      "display_range": null,
+      "color": ""
+     }
+    ],
+    "lithology": [],
+    "facies": [],
+    "markers": [],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W2",
+    "top_depth": 10.0,
+    "bottom_depth": 20.0,
+    "document_id": "2d6954e4-f930-554e-a353-470aa326eccc",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth_unit": "m",
+      "depth_unit_declared": false,
+      "length": 2,
+      "depth_first": 10.0,
+      "depth_last": 11.0,
+      "value_first": 1.0,
+      "value_last": 2.0,
+      "null_indices": [],
+      "curve_id": "f08c186b-09cd-5edd-a4b0-a44df653ff4c",
+      "axis_id": "3f825d4b-13d1-524a-aa91-b79d3109a0a9"
+     }
+    ],
+    "lithology_bounds": [],
+    "facies_bounds": [],
+    "markers": [],
+    "diagnostics": [
+     "depth-unit:unknown — engine label defaults to m for rendering only"
+    ]
+   },
+   "submit": {
+    "top": 10.0,
+    "bottom": 20.0,
+    "tracks": [
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "f08c186b-09cd-5edd-a4b0-a44df653ff4c",
+        "color": "#15803d"
+       }
+      ]
+     }
+    ],
+    "diagnostics": [
+     "depth-unit:unknown — engine label defaults to m for rendering only"
+    ]
+   }
+  },
+  {
+   "name": "empty_well",
+   "input": {
+    "well_name": "W3",
+    "top_depth": 0.0,
+    "bottom_depth": 0.0,
+    "depth_unit": null,
+    "curves": [],
+    "lithology": [],
+    "facies": [],
+    "markers": [],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W3",
+    "top_depth": 0.0,
+    "bottom_depth": 0.0,
+    "document_id": null,
+    "curves": [],
+    "lithology_bounds": [],
+    "facies_bounds": [],
+    "markers": [],
+    "diagnostics": [
+     "no_curves"
+    ]
+   },
+   "submit": null
+  },
+  {
+   "name": "all_nan_values",
+   "input": {
+    "well_name": "W4",
+    "top_depth": 0.0,
+    "bottom_depth": 10.0,
+    "depth_unit": "ft",
+    "curves": [
+     {
+      "mnemonic": "SON",
+      "unit": "us/ft",
+      "depth": [
+       0.0,
+       1.0,
+       2.0
+      ],
+      "values": [
+       "NaN",
+       "NaN",
+       "NaN"
+      ],
+      "display_range": null,
+      "color": ""
+     }
+    ],
+    "lithology": [],
+    "facies": [],
+    "markers": [],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W4",
+    "top_depth": 0.0,
+    "bottom_depth": 10.0,
+    "document_id": null,
+    "curves": [],
+    "lithology_bounds": [],
+    "facies_bounds": [],
+    "markers": [],
+    "diagnostics": [
+     "curve_empty:SON",
+     "all_curves_empty"
+    ]
+   },
+   "submit": null
+  },
+  {
+   "name": "depth_gaps",
+   "input": {
+    "well_name": "W5",
+    "top_depth": 100.0,
+    "bottom_depth": 200.0,
+    "depth_unit": "m",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth": [
+       100.0,
+       "NaN",
+       102.0,
+       103.0,
+       "Infinity",
+       105.0
+      ],
+      "values": [
+       10.0,
+       20.0,
+       "NaN",
+       30.0,
+       40.0,
+       50.0
+      ],
+      "display_range": null,
+      "color": ""
+     }
+    ],
+    "lithology": [],
+    "facies": [],
+    "markers": [],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W5",
+    "top_depth": 100.0,
+    "bottom_depth": 200.0,
+    "document_id": "66dbfe17-f01b-589a-86ef-ffe772cd1c65",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 4,
+      "depth_first": 100.0,
+      "depth_last": 105.0,
+      "value_first": 10.0,
+      "value_last": 50.0,
+      "null_indices": [
+       1,
+       2,
+       4
+      ],
+      "curve_id": "7f5cb407-bbd5-50b6-8df7-9c0bdd5eded1",
+      "axis_id": "28a26f30-21b8-549c-bcae-90aae4e1c5f6"
+     }
+    ],
+    "lithology_bounds": [],
+    "facies_bounds": [],
+    "markers": [],
+    "diagnostics": []
+   },
+   "submit": {
+    "top": 100.0,
+    "bottom": 200.0,
+    "tracks": [
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "7f5cb407-bbd5-50b6-8df7-9c0bdd5eded1",
+        "color": "#15803d"
+       }
+      ]
+     }
+    ],
+    "diagnostics": []
+   }
+  },
+  {
+   "name": "duplicate_depth",
+   "input": {
+    "well_name": "W6",
+    "top_depth": 5.0,
+    "bottom_depth": 5.0,
+    "depth_unit": null,
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth": [
+       5.0,
+       5.0,
+       6.0
+      ],
+      "values": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "display_range": null,
+      "color": ""
+     }
+    ],
+    "lithology": [],
+    "facies": [],
+    "markers": [],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W6",
+    "top_depth": 5.0,
+    "bottom_depth": 5.0,
+    "document_id": "41a1fe3d-bf45-52df-8f51-7b2f88eb6ae4",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth_unit": "m",
+      "depth_unit_declared": false,
+      "length": 3,
+      "depth_first": 5.0,
+      "depth_last": 6.0,
+      "value_first": 1.0,
+      "value_last": 3.0,
+      "null_indices": [],
+      "curve_id": "c9fbaaf1-7f13-5e8c-a560-d5b7b3e7e424",
+      "axis_id": "029be964-6d05-52b2-b72d-67dad23be4f3"
+     }
+    ],
+    "lithology_bounds": [],
+    "facies_bounds": [],
+    "markers": [],
+    "diagnostics": [
+     "depth-unit:unknown — engine label defaults to m for rendering only"
+    ]
+   },
+   "submit": {
+    "top": 5.0,
+    "bottom": 6.0,
+    "tracks": [
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "c9fbaaf1-7f13-5e8c-a560-d5b7b3e7e424",
+        "color": "#15803d"
+       }
+      ]
+     }
+    ],
+    "diagnostics": [
+     "depth-unit:unknown — engine label defaults to m for rendering only"
+    ]
+   }
+  },
+  {
+   "name": "descending_depth",
+   "input": {
+    "well_name": "W7",
+    "top_depth": 0.0,
+    "bottom_depth": 0.0,
+    "depth_unit": null,
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth": [
+       300.0,
+       200.0,
+       100.0
+      ],
+      "values": [
+       3.0,
+       2.0,
+       1.0
+      ],
+      "display_range": null,
+      "color": ""
+     }
+    ],
+    "lithology": [],
+    "facies": [],
+    "markers": [],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W7",
+    "top_depth": 0.0,
+    "bottom_depth": 0.0,
+    "document_id": "aef4cb09-0479-5602-a955-22e164421962",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth_unit": "m",
+      "depth_unit_declared": false,
+      "length": 3,
+      "depth_first": 300.0,
+      "depth_last": 100.0,
+      "value_first": 3.0,
+      "value_last": 1.0,
+      "null_indices": [],
+      "curve_id": "e4771acc-de7d-53a3-a60b-a120fc5c6c2e",
+      "axis_id": "306db881-97b4-59e8-a9ce-c983bcd088d7"
+     }
+    ],
+    "lithology_bounds": [],
+    "facies_bounds": [],
+    "markers": [],
+    "diagnostics": [
+     "depth-unit:unknown — engine label defaults to m for rendering only"
+    ]
+   },
+   "submit": {
+    "top": 100.0,
+    "bottom": 300.0,
+    "tracks": [
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "e4771acc-de7d-53a3-a60b-a120fc5c6c2e",
+        "color": "#15803d"
+       }
+      ]
+     }
+    ],
+    "diagnostics": [
+     "depth-unit:unknown — engine label defaults to m for rendering only"
+    ]
+   }
+  },
+  {
+   "name": "log_scale_fallback",
+   "input": {
+    "well_name": "W8",
+    "top_depth": 0.0,
+    "bottom_depth": 10.0,
+    "depth_unit": "m",
+    "curves": [
+     {
+      "mnemonic": "RT",
+      "unit": "ohmm",
+      "depth": [
+       0.0,
+       1.0
+      ],
+      "values": [
+       -2.0,
+       -1.0
+      ],
+      "display_range": null,
+      "color": ""
+     },
+     {
+      "mnemonic": "RXO",
+      "unit": "ohmm",
+      "depth": [
+       0.0,
+       1.0
+      ],
+      "values": [
+       5.0,
+       7.0
+      ],
+      "display_range": [
+       0.0,
+       0.0
+      ],
+      "color": ""
+     },
+     {
+      "mnemonic": "DEN",
+      "unit": "g/cm3",
+      "depth": [
+       0.0,
+       1.0
+      ],
+      "values": [
+       2.0,
+       2.4
+      ],
+      "display_range": [
+       2.0,
+       "NaN"
+      ],
+      "color": ""
+     }
+    ],
+    "lithology": [],
+    "facies": [],
+    "markers": [],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W8",
+    "top_depth": 0.0,
+    "bottom_depth": 10.0,
+    "document_id": "825b3bef-e3f3-5ecc-a0c4-cdb4d111e4c2",
+    "curves": [
+     {
+      "mnemonic": "RT",
+      "unit": "ohmm",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 0.0,
+      "depth_last": 1.0,
+      "value_first": -2.0,
+      "value_last": -1.0,
+      "null_indices": [],
+      "curve_id": "95f49776-0543-5d1a-86bd-5ec606c02abd",
+      "axis_id": "b9a6b1a0-0c2d-5a87-8c5d-dce4839d595c"
+     },
+     {
+      "mnemonic": "RXO",
+      "unit": "ohmm",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 0.0,
+      "depth_last": 1.0,
+      "value_first": 5.0,
+      "value_last": 7.0,
+      "null_indices": [],
+      "curve_id": "fd9aefb2-81fd-5b07-b479-4b94010b1c32",
+      "axis_id": "5ed39584-3fdc-5dfc-b27a-2a5ec04f9f7f"
+     },
+     {
+      "mnemonic": "DEN",
+      "unit": "g/cm3",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 0.0,
+      "depth_last": 1.0,
+      "value_first": 2.0,
+      "value_last": 2.4,
+      "null_indices": [],
+      "curve_id": "f95c51d2-308d-5ca5-ba53-fe67f772c25c",
+      "axis_id": "163ca5d0-f38a-585b-a765-1b746db18d2d"
+     }
+    ],
+    "lithology_bounds": [],
+    "facies_bounds": [],
+    "markers": [],
+    "diagnostics": []
+   },
+   "submit": {
+    "top": 0.0,
+    "bottom": 10.0,
+    "tracks": [
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "95f49776-0543-5d1a-86bd-5ec606c02abd",
+        "color": "#b91c1c"
+       }
+      ]
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 1e-10,
+      "scale_max": 1.0,
+      "scale_mode": "log",
+      "layers": [
+       {
+        "curve_id": "fd9aefb2-81fd-5b07-b479-4b94010b1c32",
+        "color": "#ea580c"
+       }
+      ]
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "f95c51d2-308d-5ca5-ba53-fe67f772c25c",
+        "color": "#63b3ed"
+       }
+      ]
+     }
+    ],
+    "diagnostics": [
+     "log_scale_fallback:RT"
+    ]
+   }
+  },
+  {
+   "name": "invalid_interval_marker",
+   "input": {
+    "well_name": "W9",
+    "top_depth": 0.0,
+    "bottom_depth": 100.0,
+    "depth_unit": "m",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth": [
+       0.0,
+       100.0
+      ],
+      "values": [
+       1.0,
+       2.0
+      ],
+      "display_range": null,
+      "color": ""
+     }
+    ],
+    "lithology": [
+     {
+      "top": 0.0,
+      "bottom": 50.0,
+      "label": "泥岩"
+     },
+     {
+      "top": 60.0,
+      "bottom": 40.0,
+      "label": "砂岩"
+     },
+     {
+      "top": 70.0,
+      "bottom": "NaN",
+      "label": "灰岩"
+     }
+    ],
+    "facies": [
+     {
+      "top": 0.0,
+      "bottom": 30.0,
+      "label": "浅湖"
+     }
+    ],
+    "markers": [
+     {
+      "depth": 10.0,
+      "label": "K1",
+      "semantic": "formation_top",
+      "id": ""
+     },
+     {
+      "depth": "NaN",
+      "label": "bad",
+      "semantic": "formation_top",
+      "id": ""
+     },
+     {
+      "depth": 20.0,
+      "label": "K2",
+      "semantic": "fault",
+      "id": ""
+     },
+     {
+      "depth": 30.0,
+      "label": "K3",
+      "semantic": "formation_top",
+      "id": "biz-marker-7"
+     }
+    ],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "W9",
+    "top_depth": 0.0,
+    "bottom_depth": 100.0,
+    "document_id": "2670a5fa-c2af-5cb8-b004-774feb095552",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 0.0,
+      "depth_last": 100.0,
+      "value_first": 1.0,
+      "value_last": 2.0,
+      "null_indices": [],
+      "curve_id": "5fe4b403-c4f4-5a31-8e4b-91ee2f9e8abb",
+      "axis_id": "bd7fe74d-5888-5b63-8fc3-e6db0b8c8d62"
+     }
+    ],
+    "lithology_bounds": [
+     [
+      0.0,
+      50.0,
+      "泥岩"
+     ]
+    ],
+    "facies_bounds": [
+     [
+      0.0,
+      30.0,
+      "浅湖"
+     ]
+    ],
+    "markers": [
+     {
+      "depth": 10.0,
+      "label": "K1",
+      "semantic": "formation_top"
+     },
+     {
+      "depth": 20.0,
+      "label": "K2",
+      "semantic": "fault"
+     },
+     {
+      "depth": 30.0,
+      "label": "K3",
+      "semantic": "formation_top"
+     }
+    ],
+    "diagnostics": [
+     "interval_invalid:lithology:1",
+     "interval_invalid:lithology:2",
+     "marker_invalid:1"
+    ]
+   },
+   "submit": {
+    "top": 0.0,
+    "bottom": 100.0,
+    "tracks": [
+     {
+      "width_mm": 24.0,
+      "layers": [],
+      "interval_semantic": "lithology"
+     },
+     {
+      "width_mm": 24.0,
+      "layers": [],
+      "interval_semantic": "facies"
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "5fe4b403-c4f4-5a31-8e4b-91ee2f9e8abb",
+        "color": "#15803d"
+       }
+      ]
+     }
+    ],
+    "diagnostics": [
+     "interval_invalid:lithology:1",
+     "interval_invalid:lithology:2",
+     "marker_invalid:1"
+    ]
+   }
+  },
+  {
+   "name": "unicode_and_colors",
+   "input": {
+    "well_name": "井A-1",
+    "top_depth": 1000.0,
+    "bottom_depth": 1002.0,
+    "depth_unit": "m",
+    "curves": [
+     {
+      "mnemonic": "其他",
+      "unit": "unit",
+      "depth": [
+       1000.0,
+       1001.0
+      ],
+      "values": [
+       1.0,
+       2.0
+      ],
+      "display_range": null,
+      "color": ""
+     },
+     {
+      "mnemonic": "预测概率",
+      "unit": "",
+      "depth": [
+       1000.0,
+       1001.0
+      ],
+      "values": [
+       0.1,
+       0.9
+      ],
+      "display_range": null,
+      "color": ""
+     },
+     {
+      "mnemonic": "gr2",
+      "unit": "API",
+      "depth": [
+       1000.0,
+       1001.0
+      ],
+      "values": [
+       10.0,
+       20.0
+      ],
+      "display_range": null,
+      "color": ""
+     },
+     {
+      "mnemonic": "SP",
+      "unit": "mV",
+      "depth": [
+       1000.0,
+       1001.0
+      ],
+      "values": [
+       -20.0,
+       -10.0
+      ],
+      "display_range": null,
+      "color": "#123456"
+     }
+    ],
+    "lithology": [
+     {
+      "top": 1000.0,
+      "bottom": 1002.0,
+      "label": "泥岩夹砂岩"
+     }
+    ],
+    "facies": [
+     {
+      "top": 1000.0,
+      "bottom": 1001.5,
+      "label": "三角洲前缘"
+     },
+     {
+      "top": 1001.5,
+      "bottom": 1002.0,
+      "label": "未知相带"
+     }
+    ],
+    "markers": [],
+    "facies_groups": null
+   },
+   "expected": {
+    "well_name": "井A-1",
+    "top_depth": 1000.0,
+    "bottom_depth": 1002.0,
+    "document_id": "3b72bdd8-f403-5dfd-8559-44ad2d65ce4c",
+    "curves": [
+     {
+      "mnemonic": "其他",
+      "unit": "unit",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 1000.0,
+      "depth_last": 1001.0,
+      "value_first": 1.0,
+      "value_last": 2.0,
+      "null_indices": [],
+      "curve_id": "d4783974-0bcd-54c2-9368-ecf88ab5db76",
+      "axis_id": "c1d9ed53-6d4f-572c-94a9-76f25b1fba8f"
+     },
+     {
+      "mnemonic": "预测概率",
+      "unit": "unit",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 1000.0,
+      "depth_last": 1001.0,
+      "value_first": 0.1,
+      "value_last": 0.9,
+      "null_indices": [],
+      "curve_id": "21d50f4a-395f-5737-bd1e-647c07d118b2",
+      "axis_id": "b80ba487-7d91-59bd-8503-0bd3ad727a1a"
+     },
+     {
+      "mnemonic": "gr2",
+      "unit": "API",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 1000.0,
+      "depth_last": 1001.0,
+      "value_first": 10.0,
+      "value_last": 20.0,
+      "null_indices": [],
+      "curve_id": "89f96ee1-eed2-57b5-87a6-dfe46021dee0",
+      "axis_id": "94730839-5430-5d64-bf78-ee3be572ee57"
+     },
+     {
+      "mnemonic": "SP",
+      "unit": "mV",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 1000.0,
+      "depth_last": 1001.0,
+      "value_first": -20.0,
+      "value_last": -10.0,
+      "null_indices": [],
+      "curve_id": "0d90a516-ee29-5a65-973a-7a5f77ca62dc",
+      "axis_id": "dc0a8289-5863-5dc8-8a7b-de362eeafead"
+     }
+    ],
+    "lithology_bounds": [
+     [
+      1000.0,
+      1002.0,
+      "泥岩夹砂岩"
+     ]
+    ],
+    "facies_bounds": [
+     [
+      1000.0,
+      1001.5,
+      "三角洲前缘"
+     ],
+     [
+      1001.5,
+      1002.0,
+      "未知相带"
+     ]
+    ],
+    "markers": [],
+    "diagnostics": []
+   },
+   "submit": {
+    "top": 1000.0,
+    "bottom": 1002.0,
+    "tracks": [
+     {
+      "width_mm": 24.0,
+      "layers": [],
+      "interval_semantic": "lithology"
+     },
+     {
+      "width_mm": 24.0,
+      "layers": [],
+      "interval_semantic": "facies"
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "d4783974-0bcd-54c2-9368-ecf88ab5db76",
+        "color": "#63b3ed"
+       }
+      ]
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "21d50f4a-395f-5737-bd1e-647c07d118b2",
+        "color": "#63b3ed"
+       }
+      ]
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "89f96ee1-eed2-57b5-87a6-dfe46021dee0",
+        "color": "#63b3ed"
+       }
+      ]
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "0d90a516-ee29-5a65-973a-7a5f77ca62dc",
+        "color": "#123456"
+       }
+      ]
+     }
+    ],
+    "diagnostics": []
+   }
+  },
+  {
+   "name": "grouped_facies",
+   "input": {
+    "well_name": "W11",
+    "top_depth": 0.0,
+    "bottom_depth": 90.0,
+    "depth_unit": "m",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth": [
+       0.0,
+       90.0
+      ],
+      "values": [
+       1.0,
+       2.0
+      ],
+      "display_range": null,
+      "color": ""
+     }
+    ],
+    "lithology": [],
+    "facies": [],
+    "markers": [],
+    "facies_groups": {
+     "phase": [
+      {
+       "top": 0.0,
+       "bottom": 90.0,
+       "label": "湖"
+      }
+     ],
+     "sub_phase": [
+      {
+       "top": 0.0,
+       "bottom": 60.0,
+       "label": "浅湖"
+      },
+      {
+       "top": 60.0,
+       "bottom": 90.0,
+       "label": "深湖"
+      }
+     ],
+     "micro_phase": [
+      {
+       "top": 10.0,
+       "bottom": 20.0,
+       "label": "湖底泥"
+      }
+     ]
+    }
+   },
+   "expected": {
+    "well_name": "W11",
+    "top_depth": 0.0,
+    "bottom_depth": 90.0,
+    "document_id": "48b3050c-5579-50e6-a104-096f950d7a47",
+    "curves": [
+     {
+      "mnemonic": "GR",
+      "unit": "API",
+      "depth_unit": "m",
+      "depth_unit_declared": true,
+      "length": 2,
+      "depth_first": 0.0,
+      "depth_last": 90.0,
+      "value_first": 1.0,
+      "value_last": 2.0,
+      "null_indices": [],
+      "curve_id": "fdc606a8-24b5-55b8-8dfe-35469991f0d2",
+      "axis_id": "22a90327-163b-5658-8170-fc511b64e512"
+     }
+    ],
+    "lithology_bounds": [],
+    "facies_bounds": [
+     [
+      0.0,
+      90.0,
+      "湖"
+     ],
+     [
+      0.0,
+      60.0,
+      "浅湖"
+     ],
+     [
+      60.0,
+      90.0,
+      "深湖"
+     ],
+     [
+      10.0,
+      20.0,
+      "湖底泥"
+     ]
+    ],
+    "markers": [],
+    "diagnostics": []
+   },
+   "submit": {
+    "top": 0.0,
+    "bottom": 90.0,
+    "tracks": [
+     {
+      "width_mm": 24.0,
+      "layers": [],
+      "interval_semantic": "facies"
+     },
+     {
+      "width_mm": 40.0,
+      "scale_min": 0.0,
+      "scale_max": 100.0,
+      "scale_mode": "linear",
+      "layers": [
+       {
+        "curve_id": "fdc606a8-24b5-55b8-8dfe-35469991f0d2",
+        "color": "#15803d"
+       }
+      ]
+     }
+    ],
+    "diagnostics": []
+   }
+  },
+  {
+   "name": "uuid_negative_self_check",
+   "input": null,
+   "expected": null,
+   "submit": null,
+   "negative": {
+    "parts": [
+     "document",
+     "W1"
+    ],
+    "real_id": "256c6619-adb8-5400-be40-993d14e2c12b",
+    "must_not_equal": "a7bf2185-13af-5e37-9bfd-c3cb6e557220"
+   }
+  }
+ ]
+}

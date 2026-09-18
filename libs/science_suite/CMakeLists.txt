@@ -109,6 +109,15 @@ if(PWB_SCIENCE_BUILD_VIEWER)
 
     # Host adapter (Pwb::VisualizationWellLog) lives with the visualization
     # library sources; its public header is under libs/visualization/include.
+    # The adapter consumes two leaf libs from elsewhere in the repo (JSON
+    # conventions for templates/parity snapshots, V6 depth-unit vocabulary);
+    # pull them in when the data/science blocks have not already.
+    if(NOT TARGET pwb_domain)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../domain" domain_well_log_dep)
+    endif()
+    if(NOT TARGET pwb_well_science)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../well_science" well_science_well_log_dep)
+    endif()
     add_subdirectory(
         "${CMAKE_CURRENT_SOURCE_DIR}/../visualization/src/well_log" well_log_adapter)
 endif()
