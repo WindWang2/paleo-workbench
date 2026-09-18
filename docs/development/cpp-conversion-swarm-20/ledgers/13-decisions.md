@@ -58,9 +58,16 @@
 ## D6 fp16 对账容差
 - 冻结的是 Python 侧量化后的 fp16 值。C++ 的 fp32 概率若与 Python 差
   ~1 ulp（exp 实现差异），fp16 舍入可能跨舍入边界差 1 fp16 ulp。
-  容差 = `4e-4 + 2^-9 * |want|`（≈1 fp16 ulp）+ 两侧 NaN 互相承认。
-  classmap uint8 **必须逐体素相等**（stub 的 logit 间隔远大于 exp 噪声，
-  见 D4/D5；平局只发生在精确相等的 bit 上，两侧一致）。
+  **实测实现**（2026-09-18 修正表述）：容差 = 1 fp16 ulp（按 want 所在
+  binade 取 `2^(floor(log2|want|)-10)`，次正规带取 2^-24）+ 1e-12；
+  classmap uint8 **必须逐体素相等**（stub 的 logit 间隔远大于 exp 噪声；
+  平局只发生在精确相等的 bit 上，两侧一致）。冻结 probmap 的最小非零值
+  0.4497，次正规带实际不可达，但比较原语按正确步长实现。
+- fp16 编码原语另设**位级**对账：fixture `fp16_table`（534 条）冻结
+  numpy `np.float16` 的输出 bit，覆盖 binade 边界、RNE 两侧平局、次正规
+  带、溢出边、±0/±Inf 与 NaN payload —— C++ `detail::float_to_half_bits`
+  逐位相等。已按探针修正：numpy 对截断后 mantissa 为 0 的非零 NaN payload
+  强制置 1（0x7f800001 → 0x7c01，0x7fc00000 → 0x7e00）。
 - 备选（放弃）：冻结 fp32 概率再比较 —— Python `_softmax` 之后立刻
   astype(float16)，中间 fp32 无从落盘。
 
@@ -78,10 +85,10 @@
   复刻 ndim 诚实错误）与 `IReader::shape()/read_voxel_window(...)`。
   `input_name/output_name/get_providers` 是 ORT dict 协议细节，对几何契约
   无意义，不进接缝。
-- ONNX Runtime 接线：CMake 里 `find_package(onnxruntime CONFIG QUIET)` +
-  `PWB_PREDICTION_WITH_ORT` 缓存变量，**本切片不写 ORT 适配 TU**（本机无
-  ORT，写了即无编译/测试覆盖的 bitrot）。真实模型路径留给接线切片；
-  ISession 即为其契约。此决定如实记录，不假装"已支持 ORT"。
+- ONNX Runtime 接线（2026-09-18 修正表述）：CMake 里
+  `find_package(onnxruntime CONFIG QUIET)` + STATUS 消息，**不设缓存变量、
+  无 ORT 专属 TU**（本机无 ORT，写了即无编译/测试覆盖的 bitrot；变量等
+  真正有消费者时再引入）。真实模型路径留给接线切片；ISession 即为其契约。
 
 ## D9 恢复语义的存储形态（C++）
 - Python 把 classmap/probmap 写 zarr、跨进程持久。C++ 核改为调用方传入
@@ -151,4 +158,43 @@
   中一切非有限 float32/fp16 值统一编码为 "NaN"/"Inf"/"-Inf" 字符串
   （体积数据与 probmap 同法）。`<WORK>` 占位符（D10）同理保证 C++ 端
   nlohmann 解析 + 逐字对账可行。
+
+## D18（审核轮 4，三路子代理对抗审查的处置清单）
+三个并行审查（对抗 spec / Karpathy 质量 / oracle 完整性与可复现性）的
+发现与处置。oracle 复跑三次（含 PYTHONHASHSEED 对照）逐字节一致；stub
+算子逐算子核对一致；classmap 精确断言对跨平台 exp 漂移的裕度实测 46 倍
+（最小非平局 gap 8.31e-6 相对 1.66e-5 vs 最坏 exp 差 ~3.6e-7 相对）。
+
+**已修（代码）**
+1. 会话输出批/通道/尺寸守卫：`out.n == group.size()`、`out.c ≥ 1`、
+   `out.data.size() == n*c*d*h*w`（原 D15 只查空间维；缺任一即是 C++ UB
+   而 Python 响亮报错）——均为 D15 同类的有意偏差，文案 C++ 专属。
+2. 输出 span 尺寸守卫：caller-owned 缓冲（D9）必须等于体素数，否则诚实
+   报错（Python 无此风险面，zarr 数组自建）。
+3. 负 `overlap` 守卫：`overlap < 0` → 拒绝。Python 会带着负 overlap 产出
+   静默回绕索引的垃圾（floor 除语义也不同），垃圾行为不是契约。
+4. 预算计算溢出安全化：tile 体积乘积逐级溢出检查，溢出即按 classes 文案
+   报错（MiB 走 double）；`planned` 比较改写为无溢出等价式
+   `batch > budget / classes_bytes`（正整数下与 Python 精确等价）。
+5. fp16 NaN payload：截断为零的非零 payload 强制置 1（numpy 探针实证），
+   修复小 payload NaN 被错编码成 Inf 的边界。
+6. fp16 位级表（534 条）+ 环境指纹（platform + exp 探针 sha）入 fixture。
+7. 测试健壮性：守卫用例 6 个本地断言（冻结 oracle 无法覆盖）、`setenv`
+   包 WIN32、MSVC 宏包 `-ffp-contract=off`、错误文案失败时打印 got/want、
+   volume 的 "Inf"/"-Inf" 正确解码、TIMEOUT 300→120 对齐仓约定。
+8. 生成器清理：未用参数/死三元/`_progress` 字典中转。
+
+**记录不修（P2/P3）**
+- env `PALEO_ONNX_MAX_MODEL_BYTES`：Python `int()` 接受下划线/Unicode 数字
+  （"1_000"），C++ `strtoll` 拒绝后回落 4 GiB 默认帽 —— 防护方向安全
+  （更宽松的帽），仅 exotic 值有差异。
+- sha256 读取失败哨兵：Python binding 里是 `None`，C++ 是空串（stat 通过
+  后哈希中 I/O 失败的竞态角落，provenance-only）。
+- OOM 分类的类型名：C++ 用 mangled typeid（`St13runtime_error`），mangled
+  名保留类名可读子串，三个关键字命中不受影响；frozen 用例靠消息文本命中。
+- Python `run_tiled_inference` 的 `int(batch)`/`int(t)` 强转语义（str/float
+  接受、向零截断）是 provider 装配层职责（D12），C++ API 收已强转 int。
+- Python cancelled dict 重复 `"shape"` 键（BASE 既有，行为无损，同 D11
+  精神不修）；C++ resume completed 匹配 O(n²) vs Python set（行为等价）。
+- `authoritative_range` 保留未用的 `stride` 参数：与 Python 签名 1:1 对账。
 

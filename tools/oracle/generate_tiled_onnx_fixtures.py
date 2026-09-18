@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 import shutil
 import sys
 import tempfile
@@ -315,14 +316,70 @@ def f32_json(arr: np.ndarray) -> list:
 # --------------------------------------------------------------- run cases
 
 
-def run_case(case: dict, model_path: Path, root: Path, reuse: dict) -> dict:
+def fp16_table() -> list:
+    """np.float16 bit patterns for crafted float32 inputs (bit-exact check
+    of the C++ RNE conversion primitive — binade boundaries, RNE ties both
+    parities, the fp16 subnormal band, overflow edges, ±0/±Inf and NaN
+    payloads including the truncation-to-zero one numpy keeps as NaN)."""
+    rng = np.random.default_rng(20260918)
+    values: list = []
+    for k in range(-30, 20):
+        base = 2.0 ** k
+        for frac in (1.0, 1.0 + 2.0 ** -11, 1.0 + 2.0 ** -10, 1.5,
+                     2.0 - 2.0 ** -10, 2.0 - 2.0 ** -11):
+            values.append(np.float32(base * frac))
+    # RNE tie midpoints of adjacent fp16 subnormals (midpoint needs 11
+    # significand bits — exact in float32): value = (m + 0.5) * 2^-24.
+    for m in range(1, 41):
+        values.append(np.float32((m + 0.5) * 2.0 ** -24))
+    # First normals of a few binades and their upper midpoints.
+    for exp16 in (1, 5, 10, 15, 20, 25, 29, 30):
+        base = 2.0 ** (exp16 - 15)
+        for frac in (1.0 + 2.0 ** -10, 1.0 + 2.0 ** -11 + 2.0 ** -10):
+            values.append(np.float32(base * frac))
+    for v in (0.0, -0.0, 5.9604644775390625e-08, 6.097555160522461e-05,
+              6.103515625e-05, 65504.0, 65519.0, 65520.0, 65521.0, 1e10,
+              -65519.0, -65520.0):
+        values.append(np.float32(v))
+    for payload in (0x000001, 0x000100, 0x001fff, 0x002000, 0x002001,
+                    0x004000, 0x007fffff):
+        for sign in (0x00000000, 0x80000000):
+            values.append(np.array([sign | 0x7f800000 | payload],
+                                   dtype=np.uint32).view(np.float32)[0])
+    values.append(np.array([0x7f800000], dtype=np.uint32).view(np.float32)[0])
+    values.append(np.array([0xff800000], dtype=np.uint32).view(np.float32)[0])
+    for _ in range(150):
+        values.append(np.array(
+            [int(rng.integers(0, 2 ** 32, dtype=np.uint64))],
+            dtype=np.uint32).view(np.float32)[0])
+
+    entries = []
+    with np.errstate(over="ignore"):
+        for x in values:
+            h = np.array([np.float16(x)]).view(np.uint16)[0]
+            entries.append({
+                "bits": int(np.array([x]).view(np.uint32)[0]),
+                "h": int(h),
+            })
+    return entries
+
+
+def exp_probe_digest() -> str:
+    """Platform fingerprint of float32 exp (attribution aid when a fixture
+    is regenerated on another machine: prob drift shows up in probmap)."""
+    import hashlib as _hashlib
+
+    probe = np.linspace(np.float32(-8), np.float32(8), 1024, dtype=np.float32)
+    return _hashlib.sha256(np.exp(probe).tobytes()).hexdigest()[:8]
+
+
+def run_case(case: dict, model_path: Path, root: Path) -> dict:
     shape = tuple(case["volume"]["shape"])
     vol = volume(case["volume"]["kind"], shape, case["volume"]["seed"])
     reader = StubReader(vol)
     # A resumed run reopens the SAME work dir (the in-memory store stand-in
     # keeps data by path, mirroring zarr's on-disk persistence).
-    work = root / (case["reuse_work_of"] or case["id"]) \
-        if case.get("reuse_work_of") else root / case["id"]
+    work = root / (case.get("reuse_work_of") or case["id"])
     work.mkdir(parents=True, exist_ok=True)
     for name in case.get("predone", []):
         (work / "tiles.done").mkdir(parents=True, exist_ok=True)
@@ -333,6 +390,7 @@ def run_case(case: dict, model_path: Path, root: Path, reuse: dict) -> dict:
     to._make_session = lambda mp, prefer_gpu: (StubSession(session_kind), "cpu")
     try:
         cancel = None
+        progress = None
         if case.get("cancel") == "always":
             cancel = lambda: True  # noqa: E731
         elif case.get("cancel") == "after_progress":
@@ -341,14 +399,9 @@ def run_case(case: dict, model_path: Path, root: Path, reuse: dict) -> dict:
             def progress(_ratio, _msg):
                 state["n"] += 1
 
-            case["_progress"] = progress
-
             def cancel():
                 return state["n"] >= case.get("cancel_after", 1)
 
-        kwargs = {}
-        if case.get("cancel") == "after_progress":
-            kwargs["progress"] = case["_progress"]
         try:
             stats = to.run_tiled_inference(
                 reader,
@@ -360,7 +413,7 @@ def run_case(case: dict, model_path: Path, root: Path, reuse: dict) -> dict:
                 prefer_gpu=False,
                 tile=tuple(case["tile"]),
                 cancel=cancel,
-                **kwargs,
+                progress=progress,
             )
         except Exception as exc:  # frozen honest-error paths
             return {
@@ -409,6 +462,8 @@ def main() -> int:
         "meta": {
             "module": "paleo_workbench.prediction.tiled_onnx",
             "numpy": np.__version__,
+            "platform": platform.machine(),
+            "exp_probe": exp_probe_digest(),
             "softmax_budget_bytes": to.SOFTMAX_INTERMEDIATE_BUDGET_BYTES,
             "default_tile": list(to.TILE),
             "default_overlap": to.DEFAULT_RECEPTIVE_FIELD,
@@ -595,8 +650,7 @@ def main() -> int:
                     for i in range(len(starts[0]))
                     for j in range(len(starts[1]))
                     for k in range(len(starts[2]))]
-            result = run_case(spec, model_path, root_tmp, {})
-            spec.pop("_progress", None)
+            result = run_case(spec, model_path, root_tmp)
             # Freeze the actual volume values (C-order float32) so the C++
             # side reads the exact bytes the Python run consumed.
             spec["volume"]["data"] = f32_json(
@@ -673,6 +727,8 @@ def main() -> int:
             run_error("err_ndim3", tiny, session_kind="ndim3"),
         ]
         fixture["run_errors"] = err_runs
+
+        fixture["fp16_table"] = fp16_table()
 
     finally:
         shutil.rmtree(root_tmp, ignore_errors=True)

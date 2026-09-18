@@ -20,17 +20,69 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <thread>
 #include <typeinfo>
 
 #if defined(_WIN32)
-#include <io.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
 #endif
 
 namespace pwb::prediction {
+
+std::uint16_t detail::float_to_half_bits(float value) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof bits);
+    const std::uint16_t sign = static_cast<std::uint16_t>((bits >> 16) & 0x8000u);
+    const std::uint32_t absbits = bits & 0x7fffffffu;
+
+    if (absbits >= 0x7f800000u) {  // Inf / NaN
+        // NaN keeps a truncated payload but never collapses to Inf: numpy
+        // forces the lowest mantissa bit when the truncation would be zero
+        // (probe: 0x7f800001 → 0x7c01, 0x7fc00000 → 0x7e00).
+        const std::uint32_t payload_bits = absbits & 0x007fffffu;
+        std::uint32_t payload = 0u;
+        if (payload_bits != 0u) {
+            payload = (payload_bits >> 13) & 0x03ffu;
+            if (payload == 0u) payload = 1u;
+        }
+        return static_cast<std::uint16_t>(sign | 0x7c00u | payload);
+    }
+
+    const int exp32 = static_cast<int>(absbits >> 23) - 127;
+    const std::uint32_t mant32 = (absbits & 0x007fffffu) | 0x00800000u;
+
+    if (exp32 >= -14) {  // normal half range (and overflow)
+        const std::uint32_t exp16 = static_cast<std::uint32_t>(exp32 + 15);
+        std::uint32_t packed = (exp16 << 10) | ((absbits & 0x007fffffu) >> 13);
+        const std::uint32_t remainder = absbits & 0x1fffu;
+        constexpr std::uint32_t kTie = 0x1000u;
+        if (remainder > kTie || (remainder == kTie && (packed & 1u) != 0u)) {
+            ++packed;  // round-to-nearest-even; carry bumps the exponent
+        }
+        if ((packed >> 10) >= 0x1fu) {
+            return static_cast<std::uint16_t>(sign | 0x7c00u);  // overflow → Inf
+        }
+        return static_cast<std::uint16_t>(sign | packed);
+    }
+
+    if (exp32 < -26) return sign;  // below half subnormal minimum → zero
+
+    // Subnormal half: value = mant(24-bit) * 2^(exp32-23); target m * 2^-24.
+    const int shift = 23 - (exp32 + 24);  // in [14, 25] here
+    const std::uint32_t remainder_mask = (1u << shift) - 1u;
+    const std::uint32_t tie = 1u << (shift - 1);
+    std::uint32_t m = mant32 >> shift;
+    const std::uint32_t remainder = mant32 & remainder_mask;
+    if (remainder > tie || (remainder == tie && (m & 1u) != 0u)) ++m;
+    if (m >= 0x0400u) {  // rounds up into the minimum normal
+        return static_cast<std::uint16_t>(sign | 0x0400u);
+    }
+    return static_cast<std::uint16_t>(sign | m);
+}
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -67,53 +119,6 @@ bool looks_like_oom(const std::string& exception_type_and_message) {
                          && text.find("fail") != std::string::npos;
     return text.find("out of memory") != std::string::npos
         || text.find("oom") != std::string::npos || alloc_fail;
-}
-
-// Round-to-nearest-even float32 → float16 bit pattern (numpy-compatible).
-std::uint16_t float_to_half_bits(float value) {
-    std::uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof bits);
-    const std::uint16_t sign = static_cast<std::uint16_t>((bits >> 16) & 0x8000u);
-    const std::uint32_t absbits = bits & 0x7fffffffu;
-
-    if (absbits >= 0x7f800000u) {  // Inf / NaN
-        // NaN keeps its truncated payload (quiet 0x00400000 → 0x0200 → 0x7e00);
-        // true Inf carries none.
-        const std::uint32_t payload =
-            (absbits & 0x007fffffu) != 0u ? ((absbits >> 13) & 0x03ffu) : 0u;
-        return static_cast<std::uint16_t>(sign | 0x7c00u | payload);
-    }
-
-    const int exp32 = static_cast<int>(absbits >> 23) - 127;
-    const std::uint32_t mant32 = (absbits & 0x007fffffu) | 0x00800000u;
-
-    if (exp32 >= -14) {  // normal half range (and overflow)
-        const std::uint32_t exp16 = static_cast<std::uint32_t>(exp32 + 15);
-        std::uint32_t packed = (exp16 << 10) | ((absbits & 0x007fffffu) >> 13);
-        const std::uint32_t remainder = absbits & 0x1fffu;
-        constexpr std::uint32_t kTie = 0x1000u;
-        if (remainder > kTie || (remainder == kTie && (packed & 1u) != 0u)) {
-            ++packed;  // round-to-nearest-even; carry bumps the exponent
-        }
-        if ((packed >> 10) >= 0x1fu) {
-            return static_cast<std::uint16_t>(sign | 0x7c00u);  // overflow → Inf
-        }
-        return static_cast<std::uint16_t>(sign | packed);
-    }
-
-    if (exp32 < -26) return sign;  // below half subnormal minimum → zero
-
-    // Subnormal half: value = mant(24-bit) * 2^(exp32-23); target m * 2^-24.
-    const int shift = 23 - (exp32 + 24);  // in [14, 25] here
-    const std::uint32_t remainder_mask = (1u << shift) - 1u;
-    const std::uint32_t tie = 1u << (shift - 1);
-    std::uint32_t m = mant32 >> shift;
-    const std::uint32_t remainder = mant32 & remainder_mask;
-    if (remainder > tie || (remainder == tie && (m & 1u) != 0u)) ++m;
-    if (m >= 0x0400u) {  // rounds up into the minimum normal
-        return static_cast<std::uint16_t>(sign | 0x0400u);
-    }
-    return static_cast<std::uint16_t>(sign | m);
 }
 
 // numpy argmax over the channel axis: first maximum; NaN beats everything
@@ -222,9 +227,10 @@ void run_tile_group(const VolumeReader& reader, InferenceSession& session,
         throw TiledInferenceError("model output ndim="
                                   + std::to_string(out.ndim) + " unsupported");
     }
-    // Deviation from Python (documented in 13-decisions.md D15): numpy
+    // Deviation from Python (documented in 13-decisions.md D15/D18): numpy
     // silently clamps an out-of-range crop when a session returns the wrong
-    // spatial tile shape; here that would read out of bounds, so fail
+    // spatial tile shape, and raises IndexError/ValueError for a short batch
+    // or an empty channel axis; here those would read out of bounds, so fail
     // honestly instead.
     if (out.d != tile[0] || out.h != tile[1] || out.w != tile[2]) {
         throw TiledInferenceError(
@@ -234,11 +240,28 @@ void run_tile_group(const VolumeReader& reader, InferenceSession& session,
             + ", " + std::to_string(tile[1]) + ", " + std::to_string(tile[2])
             + ")");
     }
-
-    const int n_cls = out.c;
+    if (out.n != static_cast<int>(group.size())) {
+        throw TiledInferenceError(
+            "model output batch " + std::to_string(out.n)
+            + " does not match the tile group size "
+            + std::to_string(group.size()));
+    }
+    if (out.c < 1) {
+        throw TiledInferenceError("model output has no channels");
+    }
     const std::size_t plane =
         static_cast<std::size_t>(out.d) * static_cast<std::size_t>(out.h)
         * static_cast<std::size_t>(out.w);
+    const std::size_t expected_elements =
+        static_cast<std::size_t>(out.n) * static_cast<std::size_t>(out.c)
+        * plane;
+    if (out.data.size() != expected_elements) {
+        throw TiledInferenceError(
+            "model output data size " + std::to_string(out.data.size())
+            + " does not match its declared shape");
+    }
+
+    const int n_cls = out.c;
     // Softmax over the channel axis when C > 1 (max-subtracted, float32,
     // left-to-right accumulation); the 1-class path expands to the sigmoid
     // pair [1 - out, out]. Both mirror tiled_onnx._softmax / np.concatenate.
@@ -323,7 +346,7 @@ void run_tile_group(const VolumeReader& reader, InferenceSession& session,
                             * static_cast<std::size_t>(shape[2])
                         + g2;
                     classmap[global] = static_cast<std::uint8_t>(argmax);
-                    probmap[global] = float_to_half_bits(max_prob);
+                    probmap[global] = detail::float_to_half_bits(max_prob);
                 }
             }
         }
@@ -357,15 +380,26 @@ std::pair<int, int> authoritative_range(std::size_t index,
 }
 
 void validate_softmax_budget(int batch, int classes, const Tile3& tile) {
-    const long long tile_voxels =
-        static_cast<long long>(tile[0]) * tile[1] * tile[2];
-    const long long bytes_per_unit = std::max<long long>(1, tile_voxels * 4);
-    const long long classes_bytes = classes * bytes_per_unit;
     const long long budget = kSoftmaxIntermediateBudgetBytes;
     const long long budget_mib = budget / 1024 / 1024;
     char message[512];
-    if (classes_bytes > budget) {
-        const double mib = static_cast<double>(classes_bytes) / 1024.0 / 1024.0;
+
+    // Python ints are arbitrary precision; the fixed-width product is
+    // overflow-checked so pathological tiles fail closed exactly like the
+    // Python budget gate instead of wrapping (13-decisions.md D18).
+    const long long kMaxLL = std::numeric_limits<long long>::max();
+    bool overflow = tile[1] > 0 && tile[0] > kMaxLL / tile[1];
+    long long tile_voxels = 0;
+    if (!overflow) {
+        tile_voxels = static_cast<long long>(tile[0]) * tile[1];
+        overflow = tile[2] > 0 && tile_voxels > kMaxLL / tile[2];
+        if (!overflow) tile_voxels *= tile[2];
+    }
+    if (!overflow) overflow = tile_voxels > kMaxLL / 4;
+    long long bytes_per_unit = 1;
+    if (!overflow) bytes_per_unit = std::max<long long>(1, tile_voxels * 4);
+
+    const auto throw_classes_error = [&](double mib) {
         std::snprintf(message, sizeof message,
                       "classes=%d with tile (%d, %d, %d) needs %.0f MiB of "
                       "softmax intermediates per batch item (> %lld MiB "
@@ -373,12 +407,33 @@ void validate_softmax_budget(int batch, int classes, const Tile3& tile) {
                       "runnable tile model",
                       classes, tile[0], tile[1], tile[2], mib, budget_mib);
         throw TiledInferenceError(message);
+    };
+
+    if (overflow) {
+        // The exact count is unrepresentable, so it is definitionally far
+        // above the budget; the MiB figure goes through double (Python
+        // formats the same division as float).
+        const double mib = static_cast<double>(tile[0])
+                         * static_cast<double>(tile[1])
+                         * static_cast<double>(tile[2]) * 4.0
+                         * static_cast<double>(std::max(classes, 0))
+                         / 1024.0 / 1024.0;
+        throw_classes_error(mib);
     }
-    const long long planned = static_cast<long long>(batch) * classes_bytes;
-    if (planned > budget) {
-        const long long max_batch =
-            std::max<long long>(1, budget / classes_bytes);
-        const double mib = static_cast<double>(planned) / 1024.0 / 1024.0;
+
+    const long long classes_bytes = classes * bytes_per_unit;
+    if (classes_bytes > budget) {
+        throw_classes_error(static_cast<double>(classes_bytes) / 1024.0
+                            / 1024.0);
+    }
+    // planned = batch * classes_bytes > budget, overflow-free (Python-exact:
+    // batch > floor(budget / classes_bytes) ⟺ batch * classes_bytes > budget
+    // for positive integers).
+    if (batch > budget / classes_bytes) {
+        const long long max_batch = std::max<long long>(1, budget / classes_bytes);
+        const double mib = static_cast<double>(batch)
+                         * static_cast<double>(classes_bytes) / 1024.0
+                         / 1024.0;
         std::snprintf(message, sizeof message,
                       "batch=%d × classes=%d × tile (%d, %d, %d) would need "
                       "%.0f MiB of softmax intermediates (> %lld MiB budget); "
@@ -461,10 +516,29 @@ TiledRunStats run_tiled_inference(const std::string& model_path,
             "batch must be >= 1, got " + std::to_string(options.batch)
             + "; refusing to silently clamp");
     }
+    if (options.overlap < 0) {
+        // Deviation from Python (D18): a negative receptive field reaches
+        // numpy's silent wrap-around there; fail closed here instead.
+        throw TiledInferenceError("overlap must be >= 0, got "
+                                  + std::to_string(options.overlap));
+    }
     validate_softmax_budget(options.batch, options.classes, tile);
 
     const auto t0 = std::chrono::steady_clock::now();
     const Tile3 shape = reader.shape();
+
+    // Caller-owned output stores (D9) must hold the full volume; anything
+    // else would be a silent out-of-bounds write.
+    const std::size_t voxels = static_cast<std::size_t>(shape[0])
+                             * static_cast<std::size_t>(shape[1])
+                             * static_cast<std::size_t>(shape[2]);
+    if (classmap.size() != voxels || probmap.size() != voxels) {
+        throw TiledInferenceError(
+            "output stores must hold shape[0]*shape[1]*shape[2] = "
+            + std::to_string(voxels) + " elements (got classmap "
+            + std::to_string(classmap.size()) + ", probmap "
+            + std::to_string(probmap.size()) + ")");
+    }
 
     const fs::path work(options.work_root);
     fs::create_directories(work);

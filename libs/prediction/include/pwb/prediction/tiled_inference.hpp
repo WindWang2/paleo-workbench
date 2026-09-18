@@ -75,6 +75,15 @@ public:
                                                  int e2) const = 0;
 };
 
+namespace detail {
+
+// Round-to-nearest-even float32 → float16 bits (the probmap quantization
+// primitive, numpy-compatible: NaN payloads truncate, staying NaN). Exposed
+// for the bit-exact oracle conversion table.
+std::uint16_t float_to_half_bits(float value);
+
+}  // namespace detail
+
 // Batched logits: float32 (N,C,D,H,W), C-order. `ndim` mirrors the numpy
 // rank check (5 = runnable, 4/other = honest TiledInferenceError).
 struct SessionOutput {

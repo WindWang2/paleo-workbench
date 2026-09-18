@@ -101,6 +101,22 @@ int stub_channels(const std::string& kind) {
 }
 
 SessionOutput stub_run(const std::string& kind, const SessionBatch& batch) {
+    // Malformed-output kinds exercising the C++-only honest guards (D15/D18).
+    if (kind == "wrong_d" || kind == "short_n" || kind == "zero_c"
+        || kind == "short_data") {
+        SessionOutput out;
+        out.ndim = 5;
+        out.n = kind == "short_n" ? batch.n - 1 : batch.n;
+        out.c = kind == "zero_c" ? 0 : 2;
+        out.d = kind == "wrong_d" ? batch.d - 1 : batch.d;
+        out.h = batch.h;
+        out.w = batch.w;
+        if (kind != "short_data") {
+            out.data.resize(static_cast<std::size_t>(out.n) * out.c
+                            * out.d * out.h * out.w);
+        }
+        return out;
+    }
     SessionOutput out;
     if (kind == "oom_conv2" && batch.n > 1) {
         throw std::runtime_error("CUDA error: out of memory");
@@ -233,13 +249,33 @@ float half_to_float(std::uint16_t h) {
     return value;
 }
 
-// One float16 ULP at *v* (binade-aware); the C++ pipeline may sit ±1 fp16
-// bit away from the frozen value when a float32 prob straddles a rounding
-// boundary (exp() implementation differences).
+// One float16 ULP at *v* (binade-aware; subnormal step 2^-24 below 2^-14).
+// The C++ pipeline may sit ±1 fp16 bit away from the frozen value when a
+// float32 prob straddles a rounding boundary (exp() implementation
+// differences).
 double fp16_ulp(double v) {
-    if (v == 0.0) return 2.0e-24;  // subnormal step is 2^-24
-    const double e = std::floor(std::log2(std::fabs(v)));
+    const double a = std::fabs(v);
+    if (a < 6.103515625e-05) return 5.9604644775390625e-08;  // 2^-24
+    const double e = std::floor(std::log2(a));
     return std::pow(2.0, e - 10.0);
+}
+
+// POSIX setenv/unsetenv (PALEO_ONNX_MAX_MODEL_BYTES cap case).
+void set_env_var(const char* name, const char* value) {
+#if defined(_WIN32)
+    std::string kv = std::string(name) + "=" + value;
+    _putenv(kv.c_str());
+#else
+    setenv(name, value, 1);
+#endif
+}
+
+void unset_env_var(const char* name) {
+#if defined(_WIN32)
+    _putenv((std::string(name) + "=").c_str());
+#else
+    unsetenv(name);
+#endif
 }
 
 bool same_prob(double want, const Json& want_json, std::uint16_t got_bits) {
@@ -309,6 +345,31 @@ int main() {
           "f16 max subnormal");
     check(std::isinf(half_to_float(0x7c00u)), "f16 inf");
     check(std::isnan(half_to_float(0x7e00u)), "f16 nan");
+
+    // -- fp16 conversion table (numpy bit-exact) ----------------------------
+    // Frozen np.float16 bit patterns for crafted float32 inputs: binade
+    // boundaries, RNE ties both parities, the subnormal band, overflow
+    // edges, ±0/±Inf and NaN payloads (including the truncation-to-zero
+    // payload numpy keeps as NaN). Local harness section; not a run oracle.
+    std::size_t fp16_checked = 0;
+    for (const auto& e : oracle["fp16_table"]) {
+        const std::uint32_t in_bits =
+            static_cast<std::uint32_t>(e["bits"].get<long long>());
+        float x = 0.0f;
+        std::memcpy(&x, &in_bits, sizeof x);
+        const auto got = pwb::prediction::detail::float_to_half_bits(x);
+        const auto want = static_cast<std::uint16_t>(e["h"].get<int>());
+        if (got != want) {
+            char what[96];
+            std::snprintf(what, sizeof what,
+                          "fp16(%08x) = %04x, want %04x", in_bits, got,
+                          want);
+            check(false, what);
+        }
+        ++fp16_checked;
+    }
+    check(fp16_checked >= 200, "fp16 table size");
+    std::printf("fp16 table: %zu bit-exact conversions\n", fp16_checked);
 
     // Temp workspace mirroring the generator's layout (<WORK> in frozen
     // error texts maps to this directory).
@@ -427,8 +488,7 @@ int main() {
                       == c["binding"]["model_file"].get<std::string>(),
                   "model_file ok name");
             check(binding.model_bytes
-                      == static_cast<long long>(
-                          c["binding"]["model_bytes"].get<long long>()),
+                          == c["binding"]["model_bytes"].get<long long>(),
                   "model_file ok bytes");
             check(binding.model_sha256
                       == c["binding"]["model_sha256"].get<std::string>(),
@@ -440,7 +500,7 @@ int main() {
             if (kind == "empty") path = (root / "empty.onnx").string();
             if (kind == "cap") path = (root / "big.onnx").string();
             if (kind == "cap") {
-                setenv("PALEO_ONNX_MAX_MODEL_BYTES", "8", 1);
+                set_env_var("PALEO_ONNX_MAX_MODEL_BYTES", "8");
             }
             bool threw = false;
             std::string got;
@@ -451,12 +511,14 @@ int main() {
                 got = exc.what();
             }
             if (kind == "cap") {
-                unsetenv("PALEO_ONNX_MAX_MODEL_BYTES");
+                unset_env_var("PALEO_ONNX_MAX_MODEL_BYTES");
             }
+            const std::string want_text = replace_all(
+                c["error"].get<std::string>(), "<WORK>", work_token);
             check(threw, "model_file " + kind + " throws");
-            check(got == replace_all(c["error"].get<std::string>(), "<WORK>",
-                                     work_token),
-                  "model_file " + kind + " error text");
+            check(got == want_text,
+                  "model_file " + kind + " error text\n  got:  " + got
+                      + "\n  want: " + want_text);
         }
     }
 
@@ -479,9 +541,16 @@ int main() {
         const Json& volume_json = input["volume"]["data"];
         for (std::size_t i = 0; i < voxels; ++i) {
             // Non-finite volumes are frozen as "NaN"/"Inf"/"-Inf" strings.
-            volume[i] = volume_json[i].is_string()
-                            ? std::numeric_limits<float>::quiet_NaN()
-                            : static_cast<float>(volume_json[i].get<double>());
+            const Json& v = volume_json[i];
+            if (v.is_string()) {
+                const std::string s = v.get<std::string>();
+                volume[i] = s == "Inf" ? std::numeric_limits<float>::infinity()
+                          : s == "-Inf"
+                              ? -std::numeric_limits<float>::infinity()
+                              : std::numeric_limits<float>::quiet_NaN();
+            } else {
+                volume[i] = static_cast<float>(v.get<double>());
+            }
         }
         StubReader reader(shape, std::move(volume));
         StubSession session(input["stub"].get<std::string>());
@@ -539,9 +608,11 @@ int main() {
                 got = exc.what();
             }
             check(threw, id + " throws " + want_type);
-            check(got == replace_all(c["error"].get<std::string>(), "<WORK>",
-                                     work_token),
-                  id + " error text");
+            const std::string want_text = replace_all(
+                c["error"].get<std::string>(), "<WORK>", work_token);
+            check(got == want_text,
+                  id + " error text\n  got:  " + got + "\n  want: "
+                      + want_text);
             continue;
         }
 
@@ -657,9 +728,69 @@ int main() {
             got = exc.what();
         }
         check(threw, id + " throws " + want_type);
-        check(got == replace_all(c["error"].get<std::string>(), "<WORK>",
-                                 work_token),
-              id + " error text");
+        const std::string want_text = replace_all(
+            c["error"].get<std::string>(), "<WORK>", work_token);
+        check(got == want_text,
+              id + " error text\n  got:  " + got + "\n  want: " + want_text);
+    }
+
+    // -- local honest-guard cases (C++-only deviations, D15/D18) ------------
+    // The frozen oracle cannot cover these: the Python code silently clamps
+    // or runs on; here every guard must throw with its exact message.
+    {
+        const Tile3 shape{4, 4, 4};
+        StubReader reader(shape, std::vector<float>(64, 1.0f));
+        std::vector<std::uint8_t> classmap(64, 0);
+        std::vector<std::uint16_t> probmap(64, 0);
+
+        struct GuardCase {
+            const char* id;
+            std::string kind;
+            int overlap;
+            std::size_t classmap_size;
+            std::size_t probmap_size;
+            const char* want;
+        };
+        const GuardCase guards[] = {
+            {"wrong_spatial_dims", "wrong_d", 0, 64, 64,
+             "model output tile shape (3, 4, 4) does not match the input "
+             "tile (4, 4, 4)"},
+            {"short_batch", "short_n", 0, 64, 64,
+             "model output batch 0 does not match the tile group size 1"},
+            {"no_channels", "zero_c", 0, 64, 64,
+             "model output has no channels"},
+            {"short_data", "short_data", 0, 64, 64,
+             "model output data size 0 does not match its declared shape"},
+            {"negative_overlap", "sign", -1, 64, 64,
+             "overlap must be >= 0, got -1"},
+            {"small_span", "sign", 0, 32, 64,
+             "output stores must hold shape[0]*shape[1]*shape[2] = 64 "
+             "elements (got classmap 32, probmap 64)"},
+        };
+        for (const auto& g : guards) {
+            StubSession session(g.kind);
+            TiledRunOptions options;
+            options.classes = 2;
+            options.work_root = (root / ("guard_" + std::string(g.id))).string();
+            options.overlap = g.overlap;
+            options.batch = 1;
+            options.tile = shape;
+            std::vector<std::uint8_t> cm(g.classmap_size, 0);
+            std::vector<std::uint16_t> pm(g.probmap_size, 0);
+            bool threw = false;
+            std::string got;
+            try {
+                pwb::prediction::run_tiled_inference(model_path, reader,
+                                                     session, options, cm,
+                                                     pm);
+            } catch (const TiledInferenceError& exc) {
+                threw = true;
+                got = exc.what();
+            }
+            check(threw && got == g.want,
+                  std::string("guard ") + g.id + "\n  got:  " + got
+                      + "\n  want: " + g.want);
+        }
     }
 
     std::error_code cleanup_ec;
