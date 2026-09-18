@@ -132,6 +132,15 @@ if(PWB_BUILD_CONV_02)
     add_subdirectory(libs/mapping_document)
 endif()
 # END CONV-02
+# BEGIN CONV-06
+# WorkflowSpec DAG pure model + validator (M7 leaf; Qt-free, QGIS-free).
+# Requires Pwb::Domain (ordered JSON + sha256) from PWB_BUILD_DATA=ON.
+option(PWB_BUILD_CONV_06
+    "Build the workflow_spec DAG model/validator ported from workflow/dag" OFF)
+if(PWB_BUILD_CONV_06)
+    add_subdirectory(libs/workflow_spec)
+endif()
+# END CONV-06
 
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
