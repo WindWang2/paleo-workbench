@@ -5,6 +5,7 @@
 #include <bit>
 #include <cstring>
 #include <fstream>
+#include <limits>
 
 #include <pwb/domain/json.hpp>
 
@@ -256,6 +257,15 @@ std::optional<PwbvolLayout> inspect_pwbvol(const std::filesystem::path& file,
     descriptor.iline_step = header["axis_steps"][0].get<double>();
     descriptor.xline_step = header["axis_steps"][1].get<double>();
     descriptor.sample_step = header["axis_steps"][2].get<double>();
+    // A zero/non-finite step would poison downstream physical-coordinate
+    // math (origin + index*step); the writers never emit one, so refuse.
+    for (const double step : {descriptor.iline_step, descriptor.xline_step,
+                              descriptor.sample_step}) {
+        if (!(step > 0.0) || !std::isfinite(step)) {
+            if (error != nullptr) *error = "payload has a degenerate axis step";
+            return std::nullopt;
+        }
+    }
     if (header.contains("axis_units")) {
         descriptor.sample_unit = header["axis_units"][2].get<std::string>();
     }
@@ -264,8 +274,20 @@ std::optional<PwbvolLayout> inspect_pwbvol(const std::filesystem::path& file,
     descriptor.geometry_source = "pwbvol1-header";
     descriptor.payload_offset_bytes = 8u + 4u + header_size;
     descriptor.file_size_bytes = static_cast<std::uint64_t>(size);
-    const std::uint64_t expected = 8u + 4u + header_size
-        + static_cast<std::uint64_t>(descriptor.elements()) * 4u;
+    // Overflow-checked expected size (hostile headers must be refused, not
+    // wrap around into a "plausible" size).
+    const std::uint64_t elements = static_cast<std::uint64_t>(descriptor.ni)
+        * static_cast<std::uint64_t>(descriptor.nc)
+        * static_cast<std::uint64_t>(descriptor.ns);
+    constexpr std::uint64_t kMaxElements =
+        (std::numeric_limits<std::uint64_t>::max() - 12u) / 4u;
+    if (descriptor.ni > (1LL << 31) || descriptor.nc > (1LL << 31)
+        || descriptor.ns > (1LL << 31) || elements > kMaxElements) {
+        if (error != nullptr) *error = "payload shape overflows";
+        return std::nullopt;
+    }
+    const std::uint64_t expected =
+        8u + 4u + header_size + elements * 4u;
     if (static_cast<std::uint64_t>(size) < expected) {
         if (error != nullptr) {
             *error = "payload shorter than the declared shape: file has "

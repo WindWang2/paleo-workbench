@@ -61,8 +61,8 @@
 - tile 读：`read_window(origin, extent)` 半开索引界、C-order 输出；SEG-Y 按
   trace gather、PWBVOL1 按行 seek；cancel 每 trace/行检查一次；取消 =
   返回 0 + "cancelled"，输出内容未定义（调用方丢弃）。
-- tile cache：LRU，键 = tile 原点（tile 形状构造时定，默认 {4,4,2048}，
-  沿 sample 轴长条）；`max_bytes` 构造定 + `set_budget` 运行期收缩立即逐出；
+- tile cache：LRU，键 = tile 网格索引（与 tile 原点双射；tile 形状构造时定，
+  默认 {4,4,2048}，沿 sample 轴长条，非正维度归一为 1）；`max_bytes` 构造定 + `set_budget` 运行期收缩立即逐出；
   env `PWB_SEISMIC_TILE_CACHE_BYTES` 由 service 层解释；调用方持
   `shared_ptr<const vector<float>>` 只读视图，缓存永不外泄可写句柄。
 
@@ -97,7 +97,9 @@ dip/curvature/relative_impedance 则完整复刻 numpy f32 链（NEP 50 弱标�
   cache 字节预算来自构造参数，缺省读 env `PWB_SEISMIC_TILE_CACHE_BYTES`
   （非法/缺失 → 64 MiB）。
 - `BinGridGeometry`：xy↔(il_frac,xl_frac) 公式逐符号对齐 models.py
-  （azimuth 从北顺时针；spacing 可负）；`nearest_il_xl` = round。
+  （azimuth 从北顺时针；spacing 可负）；`nearest_il_xl` 用 llround
+  （半值远离零；Python round 为半值到偶，仅坐标恰落在半格时有差异，
+  头注释已声明）。
 - 工程绑定：CRS 以字符串 id 存于 catalog 版本 result_metadata
   （`spatial.crs` / `spatial.bin_grid`），不引入 libs/project ABI 变更；
   未知 CRS 永不猜测（对齐 mapping_kernel crs_policy 精神）。
