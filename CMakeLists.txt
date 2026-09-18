@@ -202,6 +202,21 @@ if(PWB_BUILD_CONV_12)
     add_subdirectory(libs/geomodel)
 endif()
 # END CONV-12
+# BEGIN CONV-13 — prediction tiled inference geometry (M9 first slice).
+# Qt-free core: tile/halo/center-crop-fusion contract from
+# paleo_workbench/prediction/tiled_onnx.py, frozen against the Python
+# stub oracle (ctest target prediction.tiled_stub). libonnxruntime is
+# NOT required — the inference session is a seam with a CPU stub.
+option(PWB_BUILD_CONV_13
+    "Build the tiled ONNX inference core ported from paleo_workbench/prediction (libs/prediction)" OFF)
+if(PWB_BUILD_CONV_13)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/prediction/CMakeLists.txt")
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_13=ON but libs/prediction is not merged on this branch")
+    endif()
+    add_subdirectory(libs/prediction)
+endif()
+# END CONV-13
 
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
