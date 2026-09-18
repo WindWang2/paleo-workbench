@@ -94,6 +94,22 @@ endif()
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
 # error, never a silent skip (protocol: independent validation).
+# BEGIN CONV-26
+# Data / workspace / catalog / project lifecycle closure (conv-26): SQL-level
+# paged catalog reads, ingest plan build+execute orchestration (import_raw
+# parity, chunked idempotent transactions), project save-as relocation,
+# workspace membership write ops, and the metadata-scale sanity suite inside
+# libs/{catalog,data_suite,project,workspace} + tests/cpp/data. Turning it on
+# implies the data kernel and the ingest parser cores (classifier reuse).
+# Declared BEFORE the PWB_BUILD_DATA block so the implied switch lands in
+# time (CONV-23 precedent).
+option(PWB_BUILD_CONV_26
+    "Build the data lifecycle closure cores (implies PWB_BUILD_DATA/CONV-19)" OFF)
+if(PWB_BUILD_CONV_26)
+    set(PWB_BUILD_DATA ON)
+    set(PWB_BUILD_CONV_19 ON)
+endif()
+# END CONV-26
 if(PWB_BUILD_DATA)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/data_suite/CMakeLists.txt")
         message(FATAL_ERROR "PWB_BUILD_DATA=ON but libs/data_suite is not merged on this branch")
@@ -337,7 +353,11 @@ if(PWB_BUILD_CONV_19)
         message(FATAL_ERROR
             "PWB_BUILD_CONV_19=ON but libs/ingest is not present on this branch")
     endif()
-    add_subdirectory(libs/ingest)
+    # CONV-26: PWB_BUILD_DATA may already have added libs/ingest (data_suite
+    # links Pwb::Ingest); the guard keeps a combined configure single-add.
+    if(NOT TARGET pwb_ingest)
+        add_subdirectory(libs/ingest)
+    endif()
 endif()
 # END CONV-19
 # BEGIN CONV-20

@@ -31,6 +31,19 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../workspace
                  ${CMAKE_CURRENT_BINARY_DIR}/workspace)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../catalog
                  ${CMAKE_CURRENT_BINARY_DIR}/catalog)
+# CONV-26: the ingest orchestration reuses the CONV-19 classifier tables
+# (classify_import_path / preferred extensions) instead of duplicating them.
+# Guarded so an integrated build that already added libs/ingest (root
+# PWB_BUILD_CONV_19 block) does not double-add it.
+if(BUILD_TESTING)
+    # Must precede the ingest add below or its ingest.parsers test does not
+    # register (enable_testing covers subdirectories added after the call).
+    enable_testing()
+endif()
+if(NOT TARGET pwb_ingest)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ingest
+                     ${CMAKE_CURRENT_BINARY_DIR}/ingest)
+endif()
 
 add_library(pwb_data STATIC
     src/commit_coordinator.cpp
@@ -41,7 +54,7 @@ add_library(pwb_data STATIC
 add_library(Pwb::Data ALIAS pwb_data)
 target_compile_features(pwb_data PUBLIC cxx_std_20)
 target_link_libraries(pwb_data
-    PUBLIC Pwb::Domain Pwb::Project Pwb::Workspace Pwb::Catalog)
+    PUBLIC Pwb::Domain Pwb::Project Pwb::Workspace Pwb::Catalog Pwb::Ingest)
 target_include_directories(pwb_data
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
            $<INSTALL_INTERFACE:include>)
@@ -69,6 +82,15 @@ target_link_libraries(pwb-data-loop PRIVATE Pwb::Data)
 if(MSVC)
     target_compile_options(pwb-data-loop PRIVATE /utf-8 /W4 /permissive-)
 endif()
+
+# BEGIN CONV-26
+# Ingest orchestration + entity identity resolution: new TUs only.
+target_sources(pwb_data PRIVATE
+    src/entity_identity.cpp
+    src/ingest_plan.cpp
+    src/ingest_exec.cpp
+)
+# END CONV-26
 
 if(BUILD_TESTING)
     enable_testing()

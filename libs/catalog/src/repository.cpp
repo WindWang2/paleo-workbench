@@ -1028,6 +1028,25 @@ DataError CatalogRepository::publish_result_transaction(
     return DataError(ErrorCode::Ok, "");
 }
 
+DataError CatalogRepository::import_raw_transaction(const DataAsset& asset,
+                                                    const DataVersion& version) {
+    Transaction transaction(db_);
+    auto error = upsert_asset_in_transaction(asset);
+    if (error.code != ErrorCode::Ok) return error;
+    error = upsert_version_rows(version);
+    if (error.code != ErrorCode::Ok) return error;
+    Statement pointer = db_.prepare(
+        "UPDATE assets SET current_version_id = ?, updated_at = ? "
+        "WHERE id = ?");
+    pointer.bind(1, version.id.str());
+    pointer.bind(2, version.created_at);
+    pointer.bind(3, version.asset_id.str());
+    pointer.step_done();
+    bump_revision();
+    transaction.commit();
+    return DataError(ErrorCode::Ok, "");
+}
+
 DataError CatalogRepository::finish_run_transaction(
     const domain::RunId& run_id, const std::string& status,
     const domain::Json& extra_parameters) {

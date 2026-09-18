@@ -75,6 +75,14 @@ public:
         const std::optional<DataAsset>& new_asset, const DataVersion& version,
         const domain::RunId& run_id);
 
+    // One-transaction RAW import (conv-26; service.py import_raw parity):
+    // NEW asset row + version row + derived tables + current pointer +
+    // revision bump — the asset never lands without its first version, no
+    // run involved. All or nothing; payload placement (and its rollback)
+    // stays with the caller (ingest_exec).
+    domain::DataError import_raw_transaction(const DataAsset& asset,
+                                             const DataVersion& version);
+
     // One-transaction run terminal flip: status + parameters merged with
     // extra (extra wins) + revision bump. NotFound when the row is absent.
     domain::DataError finish_run_transaction(
