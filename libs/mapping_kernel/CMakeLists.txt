@@ -76,3 +76,10 @@ if(PWB_BUILD_CONV_17)
         src/crs_contract.cpp)
 endif()
 # END CONV-17
+# BEGIN CONV-18
+# Task 18 — FactorGridResult JSON envelope codec (factor_grid_io.hpp/.cpp).
+# New sources only; the ported numerical cores above stay untouched.
+if(PWB_BUILD_CONV_18)
+    target_sources(pwb_mapping_kernel PRIVATE src/factor_grid_io.cpp)
+endif()
+# END CONV-18
