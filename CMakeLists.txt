@@ -101,6 +101,18 @@ if(PWB_BUILD_CONV_05)
     set(PWB_BUILD_MAPPING_KERNEL ON)
 endif()
 # END CONV-05
+# BEGIN CONV-17 — task 17: geometry_units + crs_contract leaves beside
+# crs_policy (mapping_kernel). The leaves live inside libs/mapping_kernel;
+# turning this on implies the kernel build. Declared BEFORE the kernel
+# subdirectory is added so a standalone -DPWB_BUILD_CONV_17=ON configure
+# really produces the targets (ON must mean it is really there). OFF
+# leaves the tree identical to main.
+option(PWB_BUILD_CONV_17
+    "Build CONV-17 geometry-units/CRS-contract leaves and their oracle test" OFF)
+if(PWB_BUILD_CONV_17 AND NOT PWB_BUILD_MAPPING_KERNEL)
+    set(PWB_BUILD_MAPPING_KERNEL ON)
+endif()
+# END CONV-17
 
 if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)

@@ -112,3 +112,15 @@ if(PWB_BUILD_CONV_10)
         TIMEOUT 120)
 endif()
 # END CONV-10
+# BEGIN CONV-17 — task 17: geometry_units + crs_contract oracle test.
+if(PWB_BUILD_CONV_17)
+    add_executable(mapping_kernel.crs_units crs_units_test.cpp)
+    target_compile_features(mapping_kernel.crs_units PRIVATE cxx_std_20)
+    target_link_libraries(mapping_kernel.crs_units PRIVATE
+        Pwb::MappingKernel Pwb::Domain)
+    target_compile_definitions(mapping_kernel.crs_units PRIVATE
+        PWB_CRS_UNITS_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/crs_units_oracle.json")
+    add_test(NAME mapping_kernel.crs_units COMMAND mapping_kernel.crs_units)
+    set_tests_properties(mapping_kernel.crs_units PROPERTIES TIMEOUT 30)
+endif()
+# END CONV-17

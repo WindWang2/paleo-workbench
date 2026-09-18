@@ -67,3 +67,12 @@ if(PWB_BUILD_CONV_10)
     target_sources(pwb_mapping_kernel PRIVATE src/representative_facies.cpp)
 endif()
 # END CONV-10
+# BEGIN CONV-17 — task 17: geometry_units + crs_contract leaves (beside
+# crs_policy; oracle mapping_kernel.crs_units). Appended only; the target
+# above is untouched when PWB_BUILD_CONV_17 is OFF.
+if(PWB_BUILD_CONV_17)
+    target_sources(pwb_mapping_kernel PRIVATE
+        src/geometry_units.cpp
+        src/crs_contract.cpp)
+endif()
+# END CONV-17
