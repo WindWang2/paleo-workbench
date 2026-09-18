@@ -100,6 +100,16 @@ if(PWB_BUILD_CONV_01)
     endif()
 endif()
 # END CONV-01
+# BEGIN CONV-02
+# Qt-free MapDocument / MapCompositionDocument JSON kernel (swarm
+# cpp-conv-02): data-contract port of mapping/layers.py +
+# mapping/composer/models.py, frozen against the Python oracle.
+option(PWB_BUILD_CONV_02
+    "Build the MapDocument/composition JSON kernel ported from the Python mapping document model" OFF)
+if(PWB_BUILD_CONV_02)
+    add_subdirectory(libs/mapping_document)
+endif()
+# END CONV-02
 
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
