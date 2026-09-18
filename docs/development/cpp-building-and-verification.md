@@ -39,8 +39,9 @@ Hard rules:
 * **Serialise high-memory configurations.** Debug + ASAN and the QGIS-heavy platform closure
   should run one at a time and alone.
 * **Lower the RAM floor when you know the machine is loaded.** The driver refuses to start
-  below `--min-free-gib` (default `4.0`). When free RAM drops because other worktrees are
-  building, pass a smaller floor for *small* targets rather than disabling the check, e.g.
+  below `--min-free-gib` (default `4.0`); the gate has its own, stricter `-MinFreeGiB`
+  (default `8`). When free RAM drops because other worktrees are building, pass a smaller floor
+  for *small* targets rather than disabling the check, e.g.
   `--min-free-gib 2.5 --targets mapping_kernel.ring_ops`.
 * **Rebuild vendored QGIS as rarely as possible.** Configure `PWB_BUILD_PLATFORM=OFF` for
   kernel work — that is exactly what `developer-fast` and `conversion-kernel` do.
@@ -65,19 +66,29 @@ scripts/cpp-migration/invoke-resource-gate.sh Probe
 scripts/cpp-migration/invoke-resource-gate.sh Configure -s . -b build/presets/developer-fast -c Debug
 ```
 
+Gate actions: `Probe`, `Configure`, `Build`, `Test`, and `Exec` (run an arbitrary command under
+the slot). While the slot is held the child environment carries `PWB_GATE_HELD=1` and
+`PWB_GATE_JOBS=<n>`.
+
 Gate exit codes (identical on both platforms):
 
 | Code | Meaning |
 | --- | --- |
 | `0` | success |
 | `1` | internal / environment error (for example: build dir not configured yet) |
-| `64` | invalid usage (bad flag, non-numeric threshold) |
+| `64` | invalid usage (unknown flag, non-numeric threshold, missing `Exec` command) |
 | `75` | resource refusal — another job holds the slot, or free RAM is below the floor |
+| `77` | unsupported platform (POSIX mirror without `flock` or `/proc/meminfo`) |
 | `124` | reserved for a future timeout; never emitted today |
 
 Diagnostic tokens are stable and machine-readable: `RESOURCE_READY`,
 `RESOURCE_BUSY`, `RESOURCE_LOW_MEMORY`, `RESOURCE_STALE_LOCK_RECOVERED`,
-`RESOURCE_GATE_WARNING`, `RESOURCE_GATE_ERROR`.
+`RESOURCE_GATE_WARNING`, `RESOURCE_GATE_UNSUPPORTED`, `RESOURCE_GATE_ERROR`.
+
+**Platform scope.** The PowerShell gate is the one that works on Windows. The POSIX mirror needs
+`flock` and `/proc/meminfo`, so it is Linux-only: invoked from Git-Bash on Windows it reports
+`RESOURCE_GATE_UNSUPPORTED` and exits `77` rather than a misleading low-memory verdict, and
+`test-resource-gate.sh` prints `SELF-TEST SKIPPED` and exits `77` for the same reason.
 
 A lock whose owner process is gone and whose sidecar is older than
 `-StaleLockMinutes` (default `45`) is reclaimed automatically; a live owner is never
@@ -116,7 +127,31 @@ python tools/verify/pwb_local_verify.py all --preset developer-fast
 ```
 
 Useful flags: `--jobs N` (1..8, default 2), `--min-free-gib`, `--config`, `--timeout`,
-`--python <interpreter>`, `--targets a b c`, `-R <regex>`, `--replay`.
+`--python <interpreter>`, `--targets a b c`, `-R <regex>`, `--replay`, `--allow-ungated`.
+
+### The driver refuses to run heavy steps outside the build slot
+
+`configure`, `build`, `test`, `smoke` and `all` are refused with exit `75` unless the process
+holds the shared slot — that is, unless the gate exported `PWB_GATE_HELD=1` to it. Checking free
+memory alone is not enough: two concurrent drivers would each pass the RAM check and then compile
+at the same time. The refusal prints the exact gate command to use:
+
+```powershell
+# Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\cpp-migration\Invoke-ResourceGate.ps1 `
+    -Action Exec -MinFreeGiB 4 -Command python `
+    -CommandArguments "tools/verify/pwb_local_verify.py build --preset developer-fast --targets mapping_kernel.ring_ops"
+```
+
+```bash
+# Linux
+scripts/cpp-migration/invoke-resource-gate.sh Exec -m 4 -- \
+    python tools/verify/pwb_local_verify.py build --preset developer-fast --targets mapping_kernel.ring_ops
+```
+
+The light commands (`doctor`, `presets`, `oracle`, `inventory`, `hygiene`, `pyaudit`) are not
+gated — they do not compile anything. `--allow-ungated` exists for a deliberate single-worktree
+run and prints a warning each time it is used.
 
 ### Why the driver knows about the toolchain
 
@@ -143,12 +178,16 @@ If neither is set up, `doctor` says so before you waste a configure.
 | `developer-fast` | platform OFF, data ON, mapping kernel + a few slices | the tight edit/compile/test loop; no QGIS SDK needed |
 | `conversion-kernel` | every Qt-free/QGIS-free CONV slice + tests | checking a kernel port against its oracle |
 | `native-product-smoke` | platform + data + science + integration tests | the product closure; heavy, run alone |
-| `low-memory` | `conversion-kernel` with one job, Release | when other worktrees are building |
+| `low-memory` | the `developer-fast` slice (5 CONV leaves) with one job, Release | when other worktrees are building |
 | `windows-msvc` / `linux-ninja` | full native closure per platform | platform-specific builds |
 | `windows-msvc-debug/-release`, `linux-gcc-release` | the original CPP-A presets | unchanged, kept for compatibility |
 
-All presets pin `CMAKE_BUILD_PARALLEL_LEVEL=2` and `CTEST_PARALLEL_LEVEL=2` through their
-`environment` block, so the cap survives even when a nested tool would fan out.
+Every preset added by this branch pins `CMAKE_BUILD_PARALLEL_LEVEL` and
+`CTEST_PARALLEL_LEVEL` through its `environment` block, so the cap survives even when a nested
+tool would fan out: the new presets use `2`, and `low-memory` uses `1`. The three original CPP-A
+presets (`windows-msvc-debug`, `windows-msvc-release`, `linux-gcc-release`) carry **no**
+`environment` block — they are left exactly as they were, so their parallelism comes from the
+ambient environment and the verification driver default (2).
 
 Validate the preset file whenever you touch it:
 
@@ -291,6 +330,7 @@ python tools/migration/pwb_python_dependency_audit.py
 
 The inventory is generated from repository facts — CMake options, `libs/*` trees, the Python
 origins recorded in C++ headers, frozen fixtures and application wiring. It classifies every C++
-unit (native complete + wired, native core not wired, partial native, Python-only production,
-oracle/test-only Python, legacy candidate) and it never needs hand maintenance. The committed
-Markdown snapshot is a generated artifact: re-run the generator instead of editing it.
+unit as native complete + wired, native core not wired, partial native, native with no Python
+origin recorded (infrastructure that was never ported), Python-only production, oracle/test-only
+Python, or legacy candidate — and it never needs hand maintenance. The committed Markdown
+snapshot is a generated artifact: re-run the generator instead of editing it.

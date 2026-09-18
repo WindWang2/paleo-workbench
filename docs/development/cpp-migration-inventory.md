@@ -10,7 +10,8 @@ Scope: **29** C++ units, **41** CMake options, **32** oracle generators, **147**
 | --- | --- | --- |
 | `native_complete_wired` | Native complete + wired | 0 |
 | `native_core_not_wired` | Native core exists but not wired | 14 |
-| `partial_native` | Partial native | 15 |
+| `partial_native` | Partial native | 3 |
+| `native_no_python_origin` | Native, no Python origin recorded | 12 |
 | `python_only_production` | Python-only production | 7 |
 | `oracle_test_only_python` | Oracle/test-only Python | 0 |
 | `legacy_deprecated_candidate` | Legacy/deprecated candidate | 0 |
@@ -20,10 +21,10 @@ Scope: **29** C++ units, **41** CMake options, **32** oracle generators, **147**
 | Unit | Status | Switch | Slices | Oracle | Tests | Wiring |
 | --- | --- | --- | --- | --- | --- | --- |
 | `algorithms` | `partial_native` | — | — | — | 0 | always |
-| `application` | `partial_native` | `PWB_BUILD_PLATFORM` | CONV-01 | — | 0 | always |
-| `catalog` | `partial_native` | — | CONV-15 | — | 0 | not wired |
-| `data_suite` | `partial_native` | `PWB_BUILD_DATA` | — | — | 0 | always |
-| `domain` | `partial_native` | — | — | — | 0 | not wired |
+| `application` | `native_no_python_origin` | `PWB_BUILD_PLATFORM` | CONV-01 | — | 0 | always |
+| `catalog` | `native_no_python_origin` | — | CONV-15 | — | 0 | not wired |
+| `data_suite` | `native_no_python_origin` | `PWB_BUILD_DATA` | — | — | 0 | always |
+| `domain` | `native_no_python_origin` | — | — | — | 0 | not wired |
 | `factor_fusion` | `native_core_not_wired` | `PWB_BUILD_CONV_24` | — | yes | 1 | not wired |
 | `factor_host` | `native_core_not_wired` | `PWB_BUILD_CONV_08` | — | yes | 1 | not wired |
 | `geomodel` | `native_core_not_wired` | `PWB_BUILD_CONV_12` | CONV-22 | yes | 2 | not wired |
@@ -33,21 +34,21 @@ Scope: **29** C++ units, **41** CMake options, **32** oracle generators, **147**
 | `mapping_document` | `native_core_not_wired` | `PWB_BUILD_CONV_02` | — | yes | 1 | not wired |
 | `mapping_kernel` | `native_core_not_wired` | `PWB_BUILD_MAPPING_KERNEL` | CONV-03, CONV-04, CONV-05, CONV-10, CONV-17, CONV-18 | yes | 14 | conditional |
 | `prediction` | `native_core_not_wired` | `PWB_BUILD_CONV_13` | CONV-21 | yes | 2 | not wired |
-| `project` | `partial_native` | — | — | — | 0 | not wired |
-| `qgis` | `partial_native` | `PWB_BUILD_PLATFORM` | — | — | 0 | not wired |
-| `seismic_attributes` | `partial_native` | `PWB_BUILD_SEISMIC_ATTRIBUTES` | — | — | 0 | always |
-| `seismic_io` | `partial_native` | `PWB_BUILD_SEISMIC_IO` | — | — | 1 | always |
-| `seismic_viewer` | `partial_native` | `PWB_BUILD_SEISMIC_VIEWER` | — | — | 0 | always |
+| `project` | `native_no_python_origin` | — | — | — | 0 | not wired |
+| `qgis` | `native_no_python_origin` | `PWB_BUILD_PLATFORM` | — | — | 0 | not wired |
+| `seismic_attributes` | `native_no_python_origin` | `PWB_BUILD_SEISMIC_ATTRIBUTES` | — | — | 0 | always |
+| `seismic_io` | `native_no_python_origin` | `PWB_BUILD_SEISMIC_IO` | — | — | 1 | always |
+| `seismic_viewer` | `native_no_python_origin` | `PWB_BUILD_SEISMIC_VIEWER` | — | — | 0 | always |
 | `tool_policy` | `partial_native` | `PWB_BUILD_PLATFORM` | — | — | 0 | not wired |
-| `ui` | `partial_native` | `PWB_BUILD_PLATFORM` | — | — | 0 | always |
+| `ui` | `native_no_python_origin` | `PWB_BUILD_PLATFORM` | — | — | 0 | always |
 | `visualization` | `partial_native` | — | — | — | 0 | always |
 | `well_science` | `native_core_not_wired` | — | — | yes | 2 | not wired |
-| `workflow` | `partial_native` | — | — | — | 0 | always |
+| `workflow` | `native_no_python_origin` | — | — | — | 0 | always |
 | `workflow_contracts` | `native_core_not_wired` | `PWB_BUILD_CONV_23` | — | yes | 1 | not wired |
 | `workflow_engine` | `native_core_not_wired` | `PWB_BUILD_CONV_07` | — | yes | 1 | not wired |
 | `workflow_graph` | `native_core_not_wired` | `PWB_BUILD_CONV_25` | — | yes | 1 | not wired |
 | `workflow_spec` | `native_core_not_wired` | `PWB_BUILD_CONV_06` | — | yes | 1 | not wired |
-| `workspace` | `partial_native` | — | — | — | 0 | not wired |
+| `workspace` | `native_no_python_origin` | — | — | — | 0 | not wired |
 
 ## Python production package coverage
 
@@ -227,18 +228,27 @@ These freeze fixtures consumed by `tests/cpp/**` rather than by a `libs/` unit t
 - `tools/oracle/generate_fixtures.py`
 - `tools/oracle/generate_map_pipeline_fixtures.py`
 
-## Attribution gaps
+## C++ units with no recorded Python origin
 
-- `application`: no Python origin recorded in headers/CMake
-- `catalog`: no Python origin recorded in headers/CMake
-- `data_suite`: no Python origin recorded in headers/CMake
-- `domain`: no Python origin recorded in headers/CMake
-- `project`: no Python origin recorded in headers/CMake
-- `qgis`: no Python origin recorded in headers/CMake
-- `seismic_attributes`: no Python origin recorded in headers/CMake
-- `seismic_io`: no Python origin recorded in headers/CMake
-- `seismic_viewer`: no Python origin recorded in headers/CMake
-- `ui`: no Python origin recorded in headers/CMake
-- `workflow`: no Python origin recorded in headers/CMake
-- `workspace`: no Python origin recorded in headers/CMake
+These are read as native-only infrastructure (never ported from Python) rather than as unfinished ports. If one of them *was* meant to replace a Python module, the header is missing its attribution and the record below is the one to fix.
+
+- `application` (native_no_python_origin)
+- `catalog` (native_no_python_origin)
+- `data_suite` (native_no_python_origin)
+- `domain` (native_no_python_origin)
+- `project` (native_no_python_origin)
+- `qgis` (native_no_python_origin)
+- `seismic_attributes` (native_no_python_origin)
+- `seismic_io` (native_no_python_origin)
+- `seismic_viewer` (native_no_python_origin)
+- `ui` (native_no_python_origin)
+- `workflow` (native_no_python_origin)
+- `workspace` (native_no_python_origin)
+
+## Partial attribution (some recorded origins are gone)
+
+- `geomodel`: missing `paleo_workbench/viz/geomodel.py`
+- `ingest`: missing `paleo_workbench/resources.py`, `paleo_workbench/tokens/format_size.py`
+- `mapping_kernel`: missing `paleo_workbench/mapping/geological_pipeline.py`, `paleo_workbench/mapping/geometry_operations/clip_polygon_to_ring.py`, `paleo_workbench/mapping/topology/repair_invalid_geometry.py`
+- `prediction`: missing `paleo_workbench/prediction.py`, `paleo_workbench/prediction/model_package/ModelPackageError.py`, `paleo_workbench/prediction/tiled_onnx/run_tiled_inference.py`
 

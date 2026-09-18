@@ -82,6 +82,19 @@ Conflict-avoidance measures:
   meaning, so callers in other worktrees keep working.
 * Shared root-file edits are deliberately tiny so that a rebase onto a moved `main` is trivial.
 
+## 4b. Deliberate behaviour changes (kept minimal, each one intentional)
+
+1. **`PWB_BUILD_CONV_04` now implies `PWB_BUILD_MAPPING_KERNEL`.** In `main` the switch was
+   declared *after* `add_subdirectory(libs/mapping_kernel)`, so `-DPWB_BUILD_CONV_04=ON` without
+   also passing `PWB_BUILD_MAPPING_KERNEL=ON` configured nothing at all — a silently dead switch.
+   The implication table makes it work, matching how `CONV-03`, `CONV-05` and `CONV-17` behave.
+2. **`libs/well_science` is added through a guard.** `CONV-09` and `CONV-11` both reach it; the
+   guard makes the second `add_subdirectory()` a no-op instead of redefining its targets.
+3. **No other default changed.** All 33 hoisted switches were compared against their original
+   declaration sites; the defaults that already existed are reproduced exactly. Switches owned by
+   a subdirectory are *not* hoisted, because doing so flips their real default (this was observed
+   and fixed during development: `PWB_BUILD_TOOLS` went ON -> OFF and broke `tests/cpp/data`).
+
 ## 5. Findings recorded but not fixed here
 
 These were discovered while hardening the build graph. They belong to other directions, so this
