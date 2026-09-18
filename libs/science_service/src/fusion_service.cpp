@@ -217,7 +217,7 @@ science::Result<FactorFusionResult> FactorFusionService::run(
             {"message", "fused grids of " + std::to_string(cells)
                             + " cells exceed envelope limit "
                             + std::to_string(limits_.max_envelope_grid_cells)
-                            + "; descriptor-only envelope"},
+                            + "; grids omitted (class_names/qc only)"},
         });
     }
     payload["qc"] = fusion.qc;

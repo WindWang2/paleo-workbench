@@ -361,8 +361,11 @@ public:
                 // Engine scalars the caller may pin; everything else derives
                 // from the samples inside the service (Python production
                 // semantics — never the kernel's [0,1]/10000/6500 defaults).
-                typed.constrained.power =
-                    param_number(request, "constrained_power", 2.0);
+                // The node "power" param feeds both engines (Python task
+                // parity); "constrained_power" pins the engine alone.
+                typed.constrained.power = param_number(
+                    request, "constrained_power",
+                    param_number(request, "power", 2.0));
                 typed.constrained.min_points =
                     static_cast<int>(param_int(request,
                                                "constrained_min_points", 3));

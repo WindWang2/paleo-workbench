@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
+#include <new>
 #include <exception>
 #include <functional>
 #include <stdexcept>

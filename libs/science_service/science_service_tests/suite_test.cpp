@@ -245,6 +245,7 @@ void test_factor_constrained_engine() {
     req.well_records = sample_records();  // values 10..40
     req.use_constrained_idw = true;
     req.interpolate.grid_n = 25;  // maps to engine resolution 25
+    req.interpolate.power = 3.0;  // task power feeds the engine too
     req.constrained_boundary = {{0.0, 0.0},
                                 {12.0, 0.0},
                                 {12.0, 12.0},
@@ -262,6 +263,8 @@ void test_factor_constrained_engine() {
               "constrained: values within derived sample range");
         check(value.envelope.provenance.at("engine") == "constrained_idw",
               "constrained: engine provenance");
+        check(std::fabs(value.grid->power - 3.0) < 1e-12,
+              "constrained: task power reaches the engine");
         check(value.grid->algorithm_id == "constrained_idw",
               "constrained: algorithm id");
         check(static_cast<int>(value.grid->grid_x.size()) == 25,

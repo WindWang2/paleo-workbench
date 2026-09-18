@@ -82,7 +82,9 @@ struct FactorInterpolationRequest {
     //   resolution    <- grid_n clamped into [20, 200]
     // The kernel Config defaults (value [0,1], search 10000, decluster 6500)
     // are NEVER used implicitly — they would silently clamp real factor
-    // fields. An explicit value here wins over the derivation.
+    // fields. An explicit value here wins over the derivation — except
+    // constrained_decluster_radius with active direction lines, where the
+    // production recipe forces declustering off (Python parity).
     std::optional<double> constrained_value_min;
     std::optional<double> constrained_value_max;
     std::optional<double> constrained_search_radius;

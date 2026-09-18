@@ -122,6 +122,14 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
                                       + std::to_string(limits_.max_grid_cells));
     }
     if (request.use_constrained_idw) {
+        // Policy refusal BEFORE the boundary requirement — Python reports
+        // the policy error first (apply_interpolation_to_task).
+        if (request.duplicate_policy == "keep") {
+            return detail::make_error(
+                "factor.constrained_policy",
+                "ValueError: 约束IDW 不支持 duplicate_policy='keep'（引擎 "
+                "first-wins）；请使用 mean/first/error");
+        }
         const int res = request.constrained_grid_resolution.value_or(0);
         if (request.constrained_grid_resolution
             && (res < 4 || res > limits_.max_grid_n)) {
@@ -158,9 +166,6 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
     if (dataset.is_error()) {
         return dataset.error();
     }
-    if (dataset.is_cancelled()) {
-        return dataset.cancelled();
-    }
     if (detail::stage_guard(stop, progress, 0.15, "extract")) {
         return science::TaskCancelled{"extract"};
     }
@@ -182,9 +187,6 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
     if (normalized.is_error()) {
         return normalized.error();
     }
-    if (normalized.is_cancelled()) {
-        return normalized.cancelled();
-    }
     if (detail::stage_guard(stop, progress, 0.35, "normalize")) {
         return science::TaskCancelled{"normalize"};
     }
@@ -199,20 +201,18 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
         // exact EDT + LOS masking, well anchoring, declustering, gap fill).
         // Wells come from the normalized sample set; boundary/barriers/
         // directions pass through as geometry (host resolves task layers).
-        // Python parity (constrained_idw_adapter): the engine is first-wins,
-        // so duplicate_policy='keep' would silently drop twin wells — refuse
-        // exactly like apply_interpolation_to_task does.
-        if (request.duplicate_policy == "keep") {
-            return detail::make_error(
-                "factor.constrained_policy",
-                "ValueError: 约束IDW 不支持 duplicate_policy='keep'（引擎 "
-                "first-wins）；请使用 mean/first/error");
-        }
         // Derive the engine config from the samples unless the caller
         // overrode a field explicitly (kernel Config defaults are never used
         // implicitly — see FactorInterpolationRequest).
         const bool use_dirs = !request.direction_lines.empty();
         pwb::mapping::constrained_idw::Config engine = request.constrained;
+        // The task-level power feeds the engine too (Python routes the task
+        // power straight into run_constrained_idw); the adapter maps the
+        // node "power" param onto interpolate.power, so mirror it here
+        // unless the constrained config pinned a non-default.
+        if (request.constrained.power == 2.0 && interpolate.power != 2.0) {
+            engine.power = interpolate.power;
+        }
         engine.grid_resolution =
             request.constrained_grid_resolution
                 ? *request.constrained_grid_resolution
@@ -234,10 +234,10 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
                     request.constrained_value_min.value_or(lo - pad);
                 engine.value_max =
                     request.constrained_value_max.value_or(hi + pad);
-            } else if (!request.constrained_value_min
-                       || !request.constrained_value_max) {
-                // No finite samples to derive from and no override: disable
-                // clamping rather than pin the kernel's [0, 1] default.
+            } else {
+                // No finite samples to derive from: apply whatever the
+                // caller pinned; with nothing pinned, disable clamping
+                // rather than keep the kernel's [0, 1] default.
                 engine.value_min = request.constrained_value_min;
                 engine.value_max = request.constrained_value_max;
             }
@@ -405,9 +405,6 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
         if (contour_res.is_error()) {
             return contour_res.error();
         }
-        if (contour_res.is_cancelled()) {
-            return contour_res.cancelled();
-        }
         contours = std::move(contour_res.value());
         auto facies_res = detail::catch_kernel<pwb::mapping::FaciesLayerProduct>(
             "factor.products", [&] {
@@ -416,9 +413,6 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
             });
         if (facies_res.is_error()) {
             return facies_res.error();
-        }
-        if (facies_res.is_cancelled()) {
-            return facies_res.cancelled();
         }
         facies = std::move(facies_res.value());
     }

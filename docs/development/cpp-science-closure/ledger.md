@@ -136,7 +136,8 @@ sibling CONV 切片相同的独立配置语义）。
 | 1 | 只读盘点（2 个并行只读 agent）：C++ kernel API 清单 + Python glue 面；建 worktree/scope ledger | 复用图成立：全部数值 kernel 已就位，缺口=服务组合层 | 通过 | 服务层 API 细化 + 编码 |
 | 2 | CONV-28 全量源码落地（10 服务 typed API + envelope + payload source + publisher + 10 适配器 + SDK additive records + oracle 生成器 19 案例 + 3 测试）| 单文件语法检查全绿（构建被并行 worktree 占用门禁槽）| 通过（源码级） | 门禁下 configure/build/ctest |
 | 3 | 编译/链接修复 + oracle 对账修复（单点=拒绝、kNN 并列、NaN<->null、top/bottom thickness、volume: 前缀、CRS 传播、smooth/unit_conversion 表名等） | **44/44 全树 ctest 绿**；E2E demo envelope 实检（全字段 + 指纹 + 产品层）| 通过 | 三轮 review |
-| 4 | 三轮 review（A 正确性/B 架构/C 产品闭环）修复：constrained 值域推导（P0）、sha256 字节摘要、publisher 路径消毒、build_identity 丢失、Windows 守卫、fusion envelope 上限、pack_result 无异常契约、共享解码器、fault adapter（第 10 服务）、测试补真 | 44/44 保持全绿（含新 constrained/capture/registry 用例）| 通过 | ledger 收口 + push + PR |
+| 4 | 三轮 review（A 正确性/B 架构/C 产品闭环）修复：constrained 值域推导（P0）、sha256 字节摘要、publisher 路径消毒、build_identity 丢失、Windows 守卫、fusion envelope 上限、pack_result 无异常契约、共享解码器、fault adapter（第 10 服务）、测试补真 | 44/44 保持全绿（含新 constrained/capture/registry 用例）| 通过 | 二轮复核 |
+| 5 | 二轮复核（A/B reviewer 逐项验证）修正：getpid 的 _WIN32 分支补齐（GetCurrentProcessId）、factor_service 4 处 is_cancelled 死检查删除、keep-policy 拒绝提前到 boundary 之前（Python 错误顺序）、task power 镜像进 constrained engine（+测试断言）、both-overrides 无 finite 样本分支修正、decluster 覆盖例外文档、fusion 截断措辞、<new> include | 44/44 保持全绿；0 error/0 warning 构建 | 通过 | push + PR |
 
 ## 已知限制（如实）
 

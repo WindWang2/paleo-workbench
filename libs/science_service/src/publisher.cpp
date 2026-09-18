@@ -4,7 +4,9 @@
 
 #include <pwb/domain/json.hpp>
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <unistd.h>
 #endif
 
@@ -62,8 +64,15 @@ void DirectoryEnvelopePublisher::atomic_write(
     // Unique temp name in the target directory: pid + deterministic counter
     // (single publisher instance; the mutex serializes writes).
     static std::atomic<unsigned long long> counter{0};
+#if defined(_WIN32)
+    const unsigned long long pid =
+        static_cast<unsigned long long>(GetCurrentProcessId());
+#else
+    const unsigned long long pid =
+        static_cast<unsigned long long>(::getpid());
+#endif
     const std::filesystem::path tmp = target.parent_path()
-        / (".tmp-" + std::to_string(::getpid()) + "-"
+        / (".tmp-" + std::to_string(pid) + "-"
            + std::to_string(counter.fetch_add(1)));
     {
         std::ofstream stream(tmp, std::ios::binary | std::ios::trunc);
