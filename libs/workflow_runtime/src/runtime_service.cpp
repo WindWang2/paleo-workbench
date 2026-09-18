@@ -6,6 +6,7 @@
 #include <pwb/workflow_graph/evidence.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -57,87 +58,15 @@ WorkflowRuntimeService::WorkflowRuntimeService(CatalogRepository& repository,
 
 std::vector<std::string> WorkflowRuntimeService::validate(
     const WorkflowSpec& spec) const {
-    std::vector<std::string> problems;
-    if (spec.workflow_id.empty()) {
-        problems.push_back("workflow_id must not be empty");
-    }
-    std::unordered_set<std::string> known_ops;
+    // Reuse the engine's frozen validator (CONV-07: unknown action,
+    // graph problems, Python message vocabulary) — no second
+    // implementation here. The adapter registry fills the NodeRegistry.
+    pwb::workflow_engine::NodeRegistry registry;
     for (const std::string& op : adapters_.operations()) {
-        known_ops.insert(op);
+        const NodeAdapter* adapter = adapters_.find(op);
+        registry.register_op(op, adapter->fn);
     }
-    std::unordered_set<std::string> seen_nodes;
-    for (const auto& node : spec.nodes) {
-        if (node.node_id.empty()) {
-            problems.push_back("node_id must not be empty");
-            continue;
-        }
-        if (!seen_nodes.insert(node.node_id).second) {
-            problems.push_back("duplicate node id: " + node.node_id);
-        }
-        if (known_ops.count(node.op) == 0) {
-            problems.push_back("unknown operation '" + node.op +
-                               "' for node " + node.node_id);
-        }
-        for (const std::string& dep : node.depends_on) {
-            if (dep == node.node_id) {
-                problems.push_back("node " + node.node_id +
-                                   " depends on itself");
-            }
-        }
-    }
-    for (const auto& node : spec.nodes) {
-        for (const std::string& dep : node.depends_on) {
-            if (seen_nodes.count(dep) == 0) {
-                problems.push_back("node " + node.node_id +
-                                   " depends on unknown node " + dep);
-            }
-        }
-    }
-    // Cycle detection (Kahn) — deterministic node-order problem message.
-    {
-        std::unordered_map<std::string, std::size_t> index;
-        for (std::size_t i = 0; i < spec.nodes.size(); ++i) {
-            index[spec.nodes[i].node_id] = i;
-        }
-        std::vector<int> degree(spec.nodes.size(), 0);
-        std::vector<std::vector<std::size_t>> dependents(spec.nodes.size());
-        for (std::size_t i = 0; i < spec.nodes.size(); ++i) {
-            for (const std::string& dep : spec.nodes[i].depends_on) {
-                const auto it = index.find(dep);
-                if (it == index.end()) continue;
-                dependents[it->second].push_back(i);
-                ++degree[i];
-            }
-        }
-        std::vector<std::size_t> queue;
-        for (std::size_t i = 0; i < spec.nodes.size(); ++i) {
-            if (degree[i] == 0) queue.push_back(i);
-        }
-        std::size_t processed = 0;
-        while (!queue.empty()) {
-            const std::size_t cur = queue.back();
-            queue.pop_back();
-            ++processed;
-            for (std::size_t next : dependents[cur]) {
-                if (--degree[next] == 0) queue.push_back(next);
-            }
-        }
-        if (processed < spec.nodes.size()) {
-            std::vector<std::string> remaining;
-            for (std::size_t i = 0; i < spec.nodes.size(); ++i) {
-                if (degree[i] > 0) remaining.push_back(spec.nodes[i].node_id);
-            }
-            std::sort(remaining.begin(), remaining.end());
-            std::string joined;
-            for (std::size_t i = 0; i < remaining.size(); ++i) {
-                if (i != 0) joined += ", ";
-                joined += remaining[i];
-            }
-            problems.push_back("dependency cycle among nodes [" + joined +
-                               "]");
-        }
-    }
-    return problems;
+    return pwb::workflow_engine::validate_spec(spec, registry);
 }
 
 WorkflowRun WorkflowRuntimeService::execute(const WorkflowSpec& spec,
@@ -160,6 +89,8 @@ WorkflowRun WorkflowRuntimeService::execute(const WorkflowSpec& spec,
 
     // Provenance publish (F): one DataRun per executed node; success also
     // appends an output DataVersion and advances the asset current pointer.
+    // The engine already ran; a repository failure must not silently lose
+    // the run record — poison the open run "failed" and surface the error.
     for (const auto& node_run : run.node_runs) {
         const auto* node = [&] {
             for (const auto& n : spec.nodes) {
@@ -200,22 +131,34 @@ WorkflowRun WorkflowRuntimeService::execute(const WorkflowSpec& spec,
 
         const std::string operation = options.workflow_name + ":" +
                                       node->op;
-        const std::string run_id = repository_.register_run(
-            operation, input_versions, bound_params, std::nullopt, status,
-            node_run.node_id);
-        if (node_run.state == pwb::workflow_engine::NodeState::succeeded) {
-            Json payload = node_run.outputs.is_null()
-                               ? Json::object()
-                               : node_run.outputs;
-            Json metadata = Json::object();
-            metadata["node_id"] = node_run.node_id;
-            metadata["workflow_id"] = spec.workflow_id;
-            const RegisteredAssetVersion registered =
-                repository_.register_result_asset(
-                    options.workflow_name + ":" + node_run.node_id,
-                    config_.output_asset_type, "json", Json::object(),
-                    payload.dump(), "DERIVED", run_id, metadata);
-            repository_.attach_run_output(run_id, registered.version_id);
+        std::string run_id;
+        try {
+            run_id = repository_.register_run(
+                operation, input_versions, bound_params, std::nullopt,
+                status, node_run.node_id);
+            if (node_run.state ==
+                pwb::workflow_engine::NodeState::succeeded) {
+                Json payload = node_run.outputs.is_null()
+                                   ? Json::object()
+                                   : node_run.outputs;
+                Json metadata = Json::object();
+                metadata["node_id"] = node_run.node_id;
+                metadata["workflow_id"] = spec.workflow_id;
+                const RegisteredAssetVersion registered =
+                    repository_.register_result_asset(
+                        options.workflow_name + ":" + node_run.node_id,
+                        config_.output_asset_type, "json", Json::object(),
+                        payload.dump(), "DERIVED", run_id, metadata);
+                repository_.attach_run_output(run_id, registered.version_id);
+            }
+        } catch (...) {
+            if (!run_id.empty()) {
+                try {
+                    repository_.update_run_status(run_id, "failed");
+                } catch (...) {
+                }
+            }
+            throw;
         }
     }
     return run;
@@ -267,12 +210,17 @@ WorkflowRuntimeService::make_freshness_session(
             return std::optional<std::string>(std::nullopt);
         }
     };
-    seam.file_exists = [](const std::string&) { return true; };
+    seam.file_exists = [](const std::string& path) {
+        std::error_code ec;
+        return !path.empty() && std::filesystem::exists(path, ec);
+    };
     FreshnessSession session;
     session.snapshot = std::move(snap);
+    session.context = context;  // own a copy — caller temporaries die at
+                                // the end of the calling expression
     session.service = std::make_unique<FreshnessService>(
-        session.snapshot->graph, context, session.snapshot->versions, seam,
-        check_integrity);
+        session.snapshot->graph, session.context,
+        session.snapshot->versions, seam, check_integrity);
     return session;
 }
 
@@ -285,8 +233,8 @@ RecomputePlan WorkflowRuntimeService::plan(
 }
 
 PlanExecutionResult WorkflowRuntimeService::execute_plan(
-    RecomputePlan& plan, const CurrentProjectVersionContext& context,
-    const CancelToken& token, std::optional<int> generation) {
+    RecomputePlan& plan, const CancelToken& token,
+    std::optional<int> generation) {
     std::map<std::string, StepHandler> handlers;
     for (const std::string& op : adapters_.operations()) {
         const NodeAdapter* adapter = adapters_.find(op);
@@ -309,10 +257,12 @@ PlanExecutionResult WorkflowRuntimeService::execute_plan(
             params["input_version_ids"] = std::move(inputs);
             const pwb::workflow_engine::NodeResult result =
                 adapter->fn(params, token);
-            // Recompute provenance: a new completed run over CURRENT inputs.
+            // Recompute provenance: a new completed run over CURRENT
+            // inputs, carrying the compute parameters (freshness compares
+            // run parameters against expected identities).
             const std::string run_id = repository_.register_run(
                 step.operation, step.input_version_ids,
-                Json::object(), std::nullopt, "complete",
+                params, std::nullopt, "complete",
                 step.domain_task_id);
             if (!result.outputs.is_null() && !result.outputs.empty()) {
                 Json metadata = Json::object();

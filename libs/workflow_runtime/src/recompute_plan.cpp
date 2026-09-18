@@ -227,8 +227,8 @@ const std::map<std::string, std::string> OPERATION_LABELS_ZH = {
     {"integrated_interpretation", "综合解释提交"},
 };
 
-RecomputePlan build_recompute_plan(FreshnessService& freshness,
-                                   const RecomputePlanOptions& options) {
+RecomputePlan build_recompute_plan(
+    const FreshnessService& freshness, const RecomputePlanOptions& options) {
     const pwb::workflow_graph::DependencyGraph& graph = freshness.graph();
     RecomputePlan plan;
     plan.changed_version_ids = options.changed_version_ids;
@@ -465,9 +465,13 @@ PlanExecutionResult PlanExecutor::execute(RecomputePlan& plan,
             break;
         }
 
+        // Python `step.run_id or step.reuse_run_id or ""` — empty
+        // strings fall through too.
         const std::string step_run_key = [&] {
-            if (step.run_id) return *step.run_id;
-            if (step.reuse_run_id) return *step.reuse_run_id;
+            if (step.run_id && !step.run_id->empty()) return *step.run_id;
+            if (step.reuse_run_id && !step.reuse_run_id->empty()) {
+                return *step.reuse_run_id;
+            }
             return std::string();
         }();
 
@@ -544,6 +548,23 @@ PlanExecutionResult PlanExecutor::execute(RecomputePlan& plan,
             if (stop_on_failure_) {
                 result.stopped_early = true;
                 // Continue loop only to mark skips.
+            }
+        } catch (...) {
+            // Python catches every Exception; non-standard throws still
+            // land the step failed with a generic message.
+            const std::string rid = step.run_id.value_or("");
+            plan.failed_run_ids.push_back(rid);
+            failed_run_ids.insert(rid);
+            for (const std::string& vid : step.output_version_ids) {
+                poisoned_versions.insert(vid);
+            }
+            for (const std::string& vid : step.reuse_output_version_ids) {
+                poisoned_versions.insert(vid);
+            }
+            result.messages.push_back("failed " + step.label +
+                                      ": unknown non-standard exception");
+            if (stop_on_failure_) {
+                result.stopped_early = true;
             }
         }
     }

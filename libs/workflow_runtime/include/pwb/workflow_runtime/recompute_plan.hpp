@@ -90,8 +90,8 @@ struct RecomputePlanOptions {
     Json project = Json(nullptr);
 };
 
-RecomputePlan build_recompute_plan(FreshnessService& freshness,
-                                   const RecomputePlanOptions& options);
+[[nodiscard]] RecomputePlan build_recompute_plan(
+    const FreshnessService& freshness, const RecomputePlanOptions& options);
 
 struct PlanExecutionResult {
     RecomputePlan* plan = nullptr;

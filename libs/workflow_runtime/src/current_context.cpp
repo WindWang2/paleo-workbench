@@ -85,7 +85,7 @@ void CurrentProjectVersionContext::set_expected_identity(
     if (input_snapshot_hash) {
         payload["input_snapshot_hash"] = *input_snapshot_hash;
     }
-    if (!parameters.is_null()) {
+    if (parameters.is_object()) {
         Json stripped = Json::object();
         for (auto it = parameters.begin(); it != parameters.end(); ++it) {
             if (display_only_keys_.count(it.key()) != 0) continue;

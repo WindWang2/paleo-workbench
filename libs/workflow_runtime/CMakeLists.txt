@@ -22,7 +22,8 @@ target_link_libraries(pwb_workflow_runtime
         Pwb::Domain
         Pwb::WorkflowEngine
         Pwb::WorkflowGraph
-        Pwb::FactorHost
+    PRIVATE
+        Pwb::FactorHost  # canonical_encode (src/ only — public headers clean)
 )
 target_compile_features(pwb_workflow_runtime PUBLIC cxx_std_20)
 

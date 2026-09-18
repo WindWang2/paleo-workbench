@@ -89,8 +89,8 @@ std::string RuntimeStore::register_run(
     run.status = status;
     run.started_at = next_time();
     run.actor = actor;
-    run_index_[run.run_id] = runs_.size();
     runs_.push_back(std::move(run));
+    run_index_[runs_.back().run_id] = runs_.size() - 1;
     return runs_.back().run_id;
 }
 
@@ -105,8 +105,8 @@ RegisteredAssetVersion RuntimeStore::register_result_asset(
     asset.type = type;
     asset.format = format;
     asset.metadata = asset_metadata;
-    asset_index_[asset.id] = assets_.size();
     assets_.push_back(std::move(asset));
+    asset_index_[assets_.back().id] = assets_.size() - 1;
 
     VersionRecord version;
     version.asset_id = assets_.back().id;
@@ -118,9 +118,10 @@ RegisteredAssetVersion RuntimeStore::register_result_asset(
     version.metadata = version_metadata;
     version.payload_json = payload_json;
     assets_.back().current_version_id = version.version_id;
-    asset_versions_index_[version.asset_id].push_back(versions_.size());
-    version_index_[version.version_id] = versions_.size();
     versions_.push_back(std::move(version));
+    asset_versions_index_[versions_.back().asset_id].push_back(
+        versions_.size() - 1);
+    version_index_[versions_.back().version_id] = versions_.size() - 1;
 
     // stage is recorded in version metadata parity surface (RAW/DERIVED).
     versions_.back().metadata["stage"] = stage;
@@ -148,9 +149,9 @@ std::string RuntimeStore::register_version(
         version.metadata["parent_version_ids"] = parent_version_ids;
     }
     version.payload_json = payload_json;
-    asset_versions_index_[asset_id].push_back(versions_.size());
-    version_index_[version.version_id] = versions_.size();
     versions_.push_back(std::move(version));
+    asset_versions_index_[asset_id].push_back(versions_.size() - 1);
+    version_index_[versions_.back().version_id] = versions_.size() - 1;
     return versions_.back().version_id;
 }
 

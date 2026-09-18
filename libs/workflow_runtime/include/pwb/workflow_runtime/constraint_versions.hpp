@@ -43,6 +43,12 @@ using pwb::domain::Json;
 inline constexpr const char* CONSTRAINT_ASSET_TYPE = "constraints";
 inline constexpr const char* CONSTRAINT_COMMIT_OPERATION = "constraint_commit";
 
+// Python ValueError — payload-unreachable / malformed-ref raise parity.
+struct ConstraintValueError : std::invalid_argument {
+    using std::invalid_argument::invalid_argument;
+    const char* python_class() const { return "ValueError"; }
+};
+
 struct ConstraintCommitReport {
     std::string group_id;
     std::string group_name;
@@ -68,7 +74,7 @@ std::pair<std::string, int> constraint_group_content_hash(const Json& group);
 // Content-unchanged commits return the matching version without creating
 // anything. First commit creates the group asset atomically; later commits
 // append immutable versions to that one asset.
-ConstraintCommitReport commit_constraint_group(
+[[nodiscard]] ConstraintCommitReport commit_constraint_group(
     CatalogRepository& repository, const Json& group,
     const std::string& actor = "", const std::string& notes = "");
 

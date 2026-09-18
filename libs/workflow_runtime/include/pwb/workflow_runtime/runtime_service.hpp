@@ -88,7 +88,7 @@ public:
     // an output version + asset current pointer + run "complete"; failure
     // or cancel lands the run "failed"/"cancelled". Returns the engine's
     // WorkflowRun.
-    WorkflowRun execute(const WorkflowSpec& spec, const CancelToken& token,
+    [[nodiscard]] WorkflowRun execute(const WorkflowSpec& spec, const CancelToken& token,
                         const ExecuteOptions& options = ExecuteOptions{});
 
     // ---- lineage lifecycle (single source of truth: the repository) ----
@@ -110,7 +110,10 @@ public:
     // long as the session lives.
     struct FreshnessSession {
         std::shared_ptr<GraphSnapshot> snapshot;
+        CurrentProjectVersionContext context{};  // owned copy
         std::unique_ptr<FreshnessService> service;
+        // The seam lambdas reference the owning WorkflowRuntimeService —
+        // the session must not outlive it.
     };
     [[nodiscard]] FreshnessSession make_freshness_session(
         const CurrentProjectVersionContext& context,
@@ -126,7 +129,6 @@ public:
     // cancel and publish provenance. Missing adapters mark the step failed
     // (no invented compute) and poison downstream.
     PlanExecutionResult execute_plan(RecomputePlan& plan,
-                                     const CurrentProjectVersionContext& context,
                                      const CancelToken& token,
                                      std::optional<int> generation = std::nullopt);
 

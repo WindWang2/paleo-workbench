@@ -53,6 +53,11 @@ FIXTURE = (
 
 cases: list[dict] = []
 
+# Hermetic payload for the integrity "modified" branch: both the generator
+# and the C++ replay create this file before evaluating (idempotent).
+INTEGRITY_MODIFIED_PATH = Path("/tmp/pwb-runtime-oracle-payload.json")
+INTEGRITY_MODIFIED_PATH.write_text("payload-bytes-v1", encoding="utf-8")
+
 
 def add(cid: str, fn: str, inp: dict, expect: dict) -> None:
     cases.append({"id": cid, "fn": fn, "input": inp, "expect": expect})
@@ -557,6 +562,134 @@ for step in ("factor_map", "prediction", "map_compile", "qc", "export",
         {"spec": STEPS, "step_type": step},
         {"result": None if state is None else state.value})
 
+# ---- selection-mismatch rule coverage (rules 1 / 3 / 4) ----
+# Shared shape: run_h1/run_h2 are two recompute attempts of domain task
+# task_h (asset-per-run), run_b consumes the FIRST attempt's output.
+DOMAIN_BASE = {
+    "versions": [
+        {"asset_id": "asset_raw", "version_id": "ver_raw", "name": "RAW",
+         "producing_run_id": None},
+        {"asset_id": "asset_h1", "version_id": "ver_h_v1", "name": "H1",
+         "producing_run_id": "run_h1"},
+        {"asset_id": "asset_h2", "version_id": "ver_h_v2", "name": "H2",
+         "producing_run_id": "run_h2"},
+        {"asset_id": "asset_b", "version_id": "ver_b_v1", "name": "B",
+         "producing_run_id": "run_b"},
+    ],
+    "runs": [
+        {"run_id": "run_h1", "operation": "factor_map",
+         "input_version_ids": ["ver_raw"],
+         "output_version_ids": ["ver_h_v1"], "status": "complete",
+         "domain_task_id": "task_h",
+         "started_at": "2026-01-01T00:00:01"},
+        {"run_id": "run_h2", "operation": "factor_map",
+         "input_version_ids": ["ver_raw"],
+         "output_version_ids": ["ver_h_v2"], "status": "complete",
+         "domain_task_id": "task_h",
+         "started_at": "2026-01-01T00:00:02"},
+        {"run_id": "run_b", "operation": "prediction",
+         "input_version_ids": ["ver_h_v1"],
+         "output_version_ids": ["ver_b_v1"], "status": "complete",
+         "started_at": "2026-01-01T00:00:03"},
+    ],
+    "context": {"selects": [
+        {"asset_id": "asset_raw", "version_id": "ver_raw"},
+        {"asset_id": "asset_b", "version_id": "ver_b_v1"},
+    ]},
+}
+
+# rule 1: explicit domain-task product tip (task_h -> ver_h_v2) supersedes
+# the consumed ver_h_v1 even though neither asset pointer moved.
+RULE1 = clone(DOMAIN_BASE)
+RULE1["context"]["domain_current"] = [
+    {"domain_task_id": "task_h", "version_id": "ver_h_v2"}]
+add_run_case("fresh_rule1_domain_tip", RULE1, "run_b")
+
+# rule 3: no domain pointer; the SELECTED tip of the same domain task
+# (ver_h_v2) supersedes the unselected ver_h_v1.
+RULE3 = clone(DOMAIN_BASE)
+RULE3["context"]["selects"].append(
+    {"asset_id": "asset_h2", "version_id": "ver_h_v2"})
+add_run_case("fresh_rule3_domain_supersession", RULE3, "run_b")
+
+# rule 4: parent-link supersession — a selected tip whose producing run
+# branched FROM the consumed version (parent_version_id == input).
+RULE4 = clone(PARENT)
+RULE4["context"]["selects"].append(
+    {"asset_id": "asset_f2", "version_id": "ver_f2_v1"})
+add_run_case("fresh_rule4_parent_supersession", RULE4, "run_f2")
+
+# ---- integrity "modified" branch: payload exists, checksum differs ----
+INTEGRITY_MODIFIED = {
+    "versions": [
+        {"asset_id": "asset_h1", "version_id": "ver_h1_v1", "name": "H1",
+         "producing_run_id": None},
+        {"asset_id": "asset_f1", "version_id": "ver_f1_v1", "name": "F1",
+         "producing_run_id": "run_f1",
+         "path": str(INTEGRITY_MODIFIED_PATH),
+         "checksum": "b" * 64, "payload_json": "payload-bytes-v1"},
+    ],
+    "runs": [
+        {"run_id": "run_f1", "operation": "factor_map",
+         "input_version_ids": ["ver_h1_v1"],
+         "output_version_ids": ["ver_f1_v1"], "status": "complete",
+         "started_at": "2026-01-01T00:00:01"},
+    ],
+    "context": {"selects": [
+        {"asset_id": "asset_h1", "version_id": "ver_h1_v1"},
+    ]},
+    "check_integrity": True,
+}
+add_run_case("fresh_integrity_modified_branch", INTEGRITY_MODIFIED,
+             "run_f1")
+
+# ---- step_freshness aggregation ladder branches ----
+STEP_RUNNING = clone(STEPS)
+STEP_RUNNING["runs"][1]["status"] = "running"
+svc_running = build_service(STEP_RUNNING)
+add("step_factor_map_running", "freshness.step_freshness",
+    {"spec": STEP_RUNNING, "step_type": "factor_map"},
+    {"result": svc_running.step_freshness("factor_map").value})
+
+STEP_MISSING = clone(STEPS)
+STEP_MISSING["versions"][1]["path"] = "/nonexistent/gone.json"
+STEP_MISSING["versions"][1]["checksum"] = "e" * 64
+STEP_MISSING["versions"][1]["payload_json"] = "x"
+svc_missing = build_service(STEP_MISSING)
+add("step_factor_map_missing", "freshness.step_freshness",
+    {"spec": STEP_MISSING, "step_type": "factor_map"},
+    {"result": svc_missing.step_freshness("factor_map").value})
+
+STEP_UNKNOWN = clone(STEPS)
+STEP_UNKNOWN["runs"][1]["input_version_ids"] = []
+svc_unknown = build_service(STEP_UNKNOWN)
+add("step_factor_map_unknown", "freshness.step_freshness",
+    {"spec": STEP_UNKNOWN, "step_type": "factor_map"},
+    {"result": svc_unknown.step_freshness("factor_map").value})
+
+STEP_FAILED_LATEST = clone(STEPS)
+STEP_FAILED_LATEST["runs"][1]["status"] = "failed"
+svc_failed = build_service(STEP_FAILED_LATEST)
+add("step_factor_map_failed_latest", "freshness.step_freshness",
+    {"spec": STEP_FAILED_LATEST, "step_type": "factor_map"},
+    {"result": svc_failed.step_freshness("factor_map").value})
+
+# ---- current_context: domain tip replacement discards the old selection
+CTX_DOMAIN_REPLACE = {
+    "domain_current": [
+        {"domain_task_id": "t1", "version_id": "ver_1"},
+        {"domain_task_id": "t1", "version_id": "ver_2"},
+    ],
+    "selects": [{"asset_id": "a1", "version_id": "ver_1"}],
+}
+ctx_dr = build_ctx_from_spec(CTX_DOMAIN_REPLACE)
+add("ctx_domain_replace", "current_context.reselect",
+    {"state": CTX_DOMAIN_REPLACE},
+    capture(lambda: {
+        "current_by_domain_task": dict(ctx_dr.current_by_domain_task),
+        "selected": sorted(ctx_dr.selected_version_ids),
+    }))
+
 # ------------------------------------------------------------- recompute_plan
 
 
@@ -625,6 +758,83 @@ executor_case("exec_no_handler", "")
 executor_case("exec_stop_on_failure_off", "fail:boom",
               stop_on_failure=False)
 executor_case("exec_generation_guard", "ok", cancelled=True)
+
+# 3-step chain: middle fails with stop_on_failure=False — the downstream
+# consumer of the failed outputs must be POISON-SKIPPED, not executed.
+CHAIN3 = {
+    "versions": [
+        {"asset_id": "asset_h1", "version_id": "ver_h1_v1", "name": "H1",
+         "producing_run_id": None},
+        {"asset_id": "asset_f1", "version_id": "ver_f1_v1", "name": "F1",
+         "producing_run_id": "run_f1"},
+        {"asset_id": "asset_m1", "version_id": "ver_m1_v1", "name": "M1",
+         "producing_run_id": "run_m1"},
+        {"asset_id": "asset_p1", "version_id": "ver_p1_v1", "name": "P1",
+         "producing_run_id": "run_p1"},
+    ],
+    "runs": [
+        {"run_id": "run_f1", "operation": "factor_map",
+         "input_version_ids": ["ver_h1_v1"],
+         "output_version_ids": ["ver_f1_v1"], "status": "complete",
+         "started_at": "2026-01-01T00:00:01"},
+        {"run_id": "run_m1", "operation": "map_compile",
+         "input_version_ids": ["ver_f1_v1"],
+         "output_version_ids": ["ver_m1_v1"], "status": "complete",
+         "started_at": "2026-01-01T00:00:02"},
+        {"run_id": "run_p1", "operation": "prediction",
+         "input_version_ids": ["ver_m1_v1"],
+         "output_version_ids": ["ver_p1_v1"], "status": "complete",
+         "started_at": "2026-01-01T00:00:03"},
+    ],
+    "context": {"selects": [
+        {"asset_id": "asset_h1", "version_id": "ver_h1_v2x"},
+        {"asset_id": "asset_f1", "version_id": "ver_f1_v1"},
+        {"asset_id": "asset_m1", "version_id": "ver_m1_v1"},
+        {"asset_id": "asset_p1", "version_id": "ver_p1_v1"},
+    ]},
+}
+CHAIN3["versions"][0]["checksum"] = "1" * 64  # current tip content differs
+svc_chain = build_service(CHAIN3)
+plan_chain = build_recompute_plan(svc_chain)
+
+
+def executor_chain_case(cid, map_behavior, stop_on_failure=True):
+    plan = build_recompute_plan(build_service(CHAIN3))
+
+    def make(op, behavior):
+        def handler(step):
+            if behavior.startswith("fail:"):
+                raise RuntimeError(behavior[5:])
+        return handler
+
+    handlers = {"factor_map": make("factor_map", "ok"),
+                "prediction": make("prediction", "ok")}
+    if map_behavior:
+        handlers["map_compile"] = make("map_compile", map_behavior)
+    executor = PlanExecutor(handlers, generation=0,
+                            stop_on_failure=stop_on_failure)
+    result = executor.execute(plan)
+    add(cid, "recompute.execute_plan",
+        {"spec": CHAIN3,
+         "handlers": {"factor_map": "ok", "prediction": "ok",
+                      "map_compile": map_behavior},
+         "stop_on_failure": stop_on_failure, "cancelled": False,
+         "chain": True},
+        {"result": {"stopped_early": result.stopped_early,
+                    "messages": result.messages,
+                    "completed": plan.completed_run_ids,
+                    "failed": plan.failed_run_ids,
+                    "skipped": plan.skipped_run_ids}})
+
+
+executor_chain_case("exec_poison_downstream", "fail:编译崩溃",
+                    stop_on_failure=False)
+
+# recompute with stale_only=False plans FRESH runs too.
+svc_all = build_service(FRESH_CASE)
+add("plan_all_states", "recompute.build_plan",
+    {"spec": FRESH_CASE, "options": {"stale_only": False}, "project": None},
+    capture(lambda: build_recompute_plan(svc_all, stale_only=False).to_dict()))
 
 # ------------------------------------------------------------ constraint_versions
 from paleo_workbench.workflow import constraint_versions as cv  # noqa: E402
@@ -737,8 +947,9 @@ def group_ns(group: dict):
                 id=line["id"], name=line.get("name", ""),
                 role=line.get("role", ""),
                 active=line.get("active", True),
-                target_horizon=line.get("target_horizon",
-                                        group.get("target_horizon", "")),
+                # The REAL document model gives each line its OWN
+                # target_horizon (default "") — no group fallback.
+                target_horizon=line.get("target_horizon", ""),
                 coordinates=[list(p) for p in line.get("coordinates", [])],
                 azimuth_deg=line.get("azimuth_deg"),
                 semi_major=line.get("semi_major"),
@@ -933,6 +1144,12 @@ staleness_case(
           "line_count": 2, "version_id": "ver_000001"}]}},
     [], True)
 staleness_case(
+    "cv_staleness_no_catalog_version_pin",
+    {"id": "task_f1", "target_horizon": "H1",
+     "parameters": {"constraint_pins": [
+         dict(pin_of(GROUP_G1_V2), version_id="ver_000002")]}},
+    [GROUP_G1_V2], False)
+staleness_case(
     "cv_staleness_no_catalog",
     {"id": "task_f1", "target_horizon": "H1",
      "parameters": {"constraint_pins": [pin_of(GROUP_G1_V2)]}},
@@ -947,6 +1164,37 @@ def commit_all_case(cid: str, groups: list[dict], actor: str = ""):
         capture(lambda: [r.to_dict() for r in cv.commit_all_constraints(
             project, cat, actor=actor)]))
 
+
+# true order-invariance: same names/horizon/group-name, only line ids and
+# order differ -> hash EQUALS GROUP_G1's.
+GROUP_G1_REORDERED = {
+    "id": "gX", "name": "断层约束A", "target_horizon": "H1",
+    "lines": [
+        {"id": "zz-last", "name": "F1-b", "role": "fault", "active": True,
+         "coordinates": [[5.0, 5.0], [6.0, 6.0]]},
+        {"id": "aa-first", "name": "F1-a", "role": "fault", "active": True,
+         "coordinates": [[0.0, 0.0], [1.0, 1.0000000004], [2.0, 0.5]],
+         "properties": {"constraint_kind": "fault", "layer_id": "lyr1"}},
+    ],
+}
+add("cv_hash_reordered_equal", "constraint.content_hash",
+    {"group": GROUP_G1_REORDERED},
+    capture(lambda: cv.constraint_group_content_hash(
+        group_ns(GROUP_G1_REORDERED))))
+
+# pins: explicit line target_horizon participates in identity.
+GROUP_WITH_LINE_HORIZONS = {
+    "id": "gH", "name": "层位约束", "target_horizon": "H1",
+    "lines": [
+        {"id": "h1", "active": True, "role": "fault",
+         "target_horizon": "H2",
+         "coordinates": [[0.0, 0.0], [1.0, 1.0]]},
+    ],
+}
+add("cv_hash_line_horizon", "constraint.content_hash",
+    {"group": GROUP_WITH_LINE_HORIZONS},
+    capture(lambda: cv.constraint_group_content_hash(
+        group_ns(GROUP_WITH_LINE_HORIZONS))))
 
 commit_all_case("cv_commit_all", [GROUP_G1, GROUP_EMPTY], actor="批量")
 
@@ -963,6 +1211,24 @@ def compare_case(cid: str, setup: list[dict], a_idx: int, b_idx: int):
 
 
 compare_case("cv_compare", [GROUP_G1, GROUP_G1_V2], 0, -1)
+# raise parity: version id unknown to the catalog.
+add("cv_compare_missing_version", "constraint.compare",
+    {"setup": SETUP_V2, "a": "ver_999999", "b": "ver_000001"},
+    capture(lambda: cv.compare_constraint_versions(
+        setup_catalog(SETUP_V2), "ver_999999", "ver_000001")))
+# identical payloads -> identical=True (same version twice).
+def compare_same_case(cid: str, setup: list[dict]):
+    cat = setup_catalog(setup)
+    versions = cat.list_versions(next(
+        a for a in cat.assets
+        if a.metadata.get("constraint_group_id") == setup[0]["id"]).id)
+    add(cid, "constraint.compare",
+        {"setup": setup, "a": versions[0].id, "b": versions[0].id},
+        capture(lambda: cv.compare_constraint_versions(
+            cat, versions[0].id, versions[0].id)))
+
+
+compare_same_case("cv_compare_identical", [GROUP_G1])
 
 
 def resolve_case(cid: str, project_groups: list[dict], ref: str,
@@ -999,6 +1265,21 @@ def pinned_ref_case(cid: str, project_groups: list[dict], pinned: str):
             project, cat, f"constraints:g1:{version_id}")))
 
 
+resolve_case("cv_ref_current_never_committed", [GROUP_UTF8],
+             "constraints:current", True)
+add("cv_ref_pinned_no_version", "constraint.resolve_ref",
+    {"setup": SETUP_V2, "project_groups": [GROUP_G1_V2],
+     "ref": "constraints:g1", "with_catalog": True},
+    capture(lambda: cv.resolve_constraint_ref(
+        types.SimpleNamespace(
+            constraint_layers=[group_ns(g) for g in [GROUP_G1_V2]]),
+        setup_catalog(SETUP_V2), "constraints:g1")))
+add("cv_ref_empty_constraints", "constraint.resolve_ref",
+    {"setup": SETUP_V2, "project_groups": [], "ref": "constraints:current",
+     "with_catalog": True},
+    capture(lambda: cv.resolve_constraint_ref(
+        types.SimpleNamespace(constraint_layers=[]),
+        setup_catalog(SETUP_V2), "constraints:current")))
 pinned_ref_case("cv_ref_pinned_latest", [GROUP_G1_V2], "latest")
 pinned_ref_case("cv_ref_pinned_superseded", [GROUP_G1_V2], "oldest")
 resolve_case("cv_ref_unknown_shape", [GROUP_G1_V2], "bogus:ref", True)

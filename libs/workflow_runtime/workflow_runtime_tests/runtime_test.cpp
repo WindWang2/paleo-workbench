@@ -82,8 +82,17 @@ void report_mismatch(const std::string& id, const Json& got,
 
 void compare(const std::string& id, const Json& got_in, const Json& expect) {
     if (expect.contains("raise")) {
-        // No fixture case currently raises; kept for parity completeness.
-        report_mismatch(id + " [expected raise]", got_in, expect);
+        // Raise parity: the C++ side must throw the same python_class +
+        // message the real Python implementation froze.
+        if (got_in.contains("raise") &&
+            got_in.at("raise") == expect.at("raise")) {
+            return;
+        }
+        report_mismatch(id, got_in, expect);
+        return;
+    }
+    if (got_in.contains("raise")) {
+        report_mismatch(id, got_in, expect);
         return;
     }
     // The frozen expectations went through Python's JSON serialization;
@@ -365,12 +374,14 @@ void dispatch_case(const std::string& id, const std::string& fn,
                        sel.at("version_id").get<std::string>(),
                        str_or(sel, "label", ""));
         }
-        if (fn == "current_context.state") {
+        if (state.contains("domain_current")) {
             for (const auto& mark : state.at("domain_current")) {
                 ctx.mark_domain_product_current(
                     mark.at("domain_task_id").get<std::string>(),
                     mark.at("version_id").get<std::string>());
             }
+        }
+        if (fn == "current_context.state") {
             for (const auto& ident : state.at("expected_identity")) {
                 ctx.set_expected_identity(
                     ident.at("key").get<std::string>(),
@@ -420,9 +431,17 @@ void dispatch_case(const std::string& id, const std::string& fn,
             return;
         }
         Json out = Json::object();
-        out["current"] = ctx.current_for_asset("a")
-                             ? Json(*ctx.current_for_asset("a"))
-                             : Json(nullptr);
+        if (state.contains("domain_current")) {
+            Json by_domain = Json::object();
+            for (const auto& [d, v] : ctx.current_by_domain_task()) {
+                by_domain[d] = v;
+            }
+            out["current_by_domain_task"] = by_domain;
+        } else {
+            out["current"] = ctx.current_for_asset("a")
+                                 ? Json(*ctx.current_for_asset("a"))
+                                 : Json(nullptr);
+        }
         Json selected = Json::array();
         {
             std::vector<std::string> sorted(ctx.selected_version_ids()
@@ -527,18 +546,28 @@ void dispatch_case(const std::string& id, const std::string& fn,
         FreshnessService svc = bundle.make_service(false);
         auto plan = pwb::workflow_runtime::build_recompute_plan(
             svc, pwb::workflow_runtime::RecomputePlanOptions{});
-        const std::string behavior =
-            input.at("map_compile_handler").get<std::string>();
         std::map<std::string, pwb::workflow_runtime::StepHandler> handlers;
-        handlers.emplace("factor_map", [](const auto&) {});
-        if (!behavior.empty()) {
-            handlers.emplace("map_compile",
-                             [behavior](const auto&) {
-                                 if (behavior.rfind("fail:", 0) == 0) {
-                                     throw std::runtime_error(
-                                         behavior.substr(5));
-                                 }
-                             });
+        auto make_handler = [](const std::string& behavior) {
+            return [behavior](const auto&) {
+                if (behavior.rfind("fail:", 0) == 0) {
+                    throw std::runtime_error(behavior.substr(5));
+                }
+            };
+        };
+        if (input.contains("chain") && input.at("chain").get<bool>()) {
+            for (auto it = input.at("handlers").begin();
+                 it != input.at("handlers").end(); ++it) {
+                handlers.emplace(
+                    it.key(),
+                    make_handler(it.value().get<std::string>()));
+            }
+        } else {
+            const std::string behavior =
+                input.at("map_compile_handler").get<std::string>();
+            handlers.emplace("factor_map", [](const auto&) {});
+            if (!behavior.empty()) {
+                handlers.emplace("map_compile", make_handler(behavior));
+            }
         }
         pwb::workflow_runtime::PlanExecutor executor(
             std::move(handlers), 0,
@@ -628,10 +657,18 @@ void dispatch_case(const std::string& id, const std::string& fn,
     }
     if (fn == "constraint.compare") {
         auto repo = setup_constraint_repo(input.at("setup"));
-        auto out = pwb::workflow_runtime::compare_constraint_versions(
-            *repo, input.at("a").get<std::string>(),
-            input.at("b").get<std::string>());
-        compare(id, out, expect);
+        try {
+            auto out = pwb::workflow_runtime::compare_constraint_versions(
+                *repo, input.at("a").get<std::string>(),
+                input.at("b").get<std::string>());
+            compare(id, out, expect);
+        } catch (const pwb::workflow_runtime::ConstraintValueError& exc) {
+            compare(id,
+                    Json{{"raise",
+                          Json{{"python_class", exc.python_class()},
+                               {"message", exc.what()}}}},
+                    expect);
+        }
         return;
     }
     if (fn == "constraint.resolve_ref") {
@@ -863,7 +900,7 @@ void end_to_end_closure() {
         adapters.add(std::move(adapter));
 
         pwb::workflow_engine::CancelToken exec_token;
-        auto result = service.execute_plan(plan, ctx2, exec_token);
+        auto result = service.execute_plan(plan, exec_token);
         if (result.stopped_early ||
             !plan.failed_run_ids.empty()) {
             std::printf("FAIL e2e execute_plan: stopped=%d failed=%zu (%s)\n",
@@ -921,7 +958,95 @@ void end_to_end_closure() {
         }
     }
 
-    // (8) admission gate: bounded concurrency + cancel-aware acquire.
+    // (8) mid-flight cancel: a node body that cancels the token lands the
+    // run CANCELLED; provenance records the cancellation honestly.
+    {
+        // The engine hands node bodies a const token (bodies observe, the
+        // OWNER cancels); the adapter cancels through its captured pointer
+        // to the caller-owned token — the production shape (UI thread).
+        pwb::workflow_engine::CancelToken cancel_token;
+        pwb::workflow_runtime::NodeAdapter cancellable;
+        cancellable.operation = "test.cancellable";
+        cancellable.fn = [&cancel_token](const Json&,
+                                         const pwb::workflow_engine::
+                                             CancelToken& tok) {
+            cancel_token.cancel();  // cooperative cancel mid-node
+            tok.throw_if_cancelled();
+            return pwb::workflow_engine::NodeResult{};
+        };
+        cancellable.hints = pwb::workflow_runtime::ResourceHints{1, 0, "可取消"};
+        adapters.add(std::move(cancellable));
+
+        pwb::workflow_engine::WorkflowSpec cancel_spec;
+        cancel_spec.workflow_id = "wf_cancel";
+        cancel_spec.nodes.push_back({"job", "test.cancellable",
+                                     Json::object(), {}});
+        WorkflowRuntimeService::ExecuteOptions cancel_options;
+        cancel_options.workflow_name = "wf_cancel";
+        auto cancel_run =
+            service.execute(cancel_spec, cancel_token, cancel_options);
+        if (cancel_run.state !=
+            pwb::workflow_engine::RunState::cancelled) {
+            std::printf("FAIL e2e cancel: run state %s\n",
+                        pwb::workflow_engine::to_string(
+                            cancel_run.state));
+            ++failures;
+        }
+        const auto& last_run = store.list_runs().back();
+        if (last_run.status != "cancelled" ||
+            last_run.domain_task_id != "job") {
+            std::printf("FAIL e2e cancel provenance: status=%s\n",
+                        last_run.status.c_str());
+            ++failures;
+        }
+
+        // retry seam: re-running the same spec with a fresh token
+        // completes and publishes a new provenance run.
+        pwb::workflow_engine::CancelToken retry_token;
+        auto retry_run =
+            service.execute(cancel_spec, retry_token, cancel_options);
+        if (retry_run.state != pwb::workflow_engine::RunState::completed) {
+            std::printf("FAIL e2e retry: run state %s\n",
+                        pwb::workflow_engine::to_string(retry_run.state));
+            ++failures;
+        }
+    }
+
+    // (8b) inspect APIs: explain_stale + list_outputs over the recompute
+    // run (freshness state + output listing derived from ONE store).
+    {
+        const std::string compute_run_id = [&] {
+            auto runs = store.list_runs();
+            for (auto it = runs.rbegin(); it != runs.rend(); ++it) {
+                if (it->domain_task_id == "compute" &&
+                    it->status == "complete") {
+                    return it->run_id;
+                }
+            }
+            return std::string();
+        }();
+        auto ctx_inspect = service.build_context();
+        auto domain_report = service.explain_stale(
+            ctx_inspect, "domain_task", "compute");
+        if (domain_report.state !=
+                pwb::workflow_runtime::FreshnessState::Fresh &&
+            domain_report.state !=
+                pwb::workflow_runtime::FreshnessState::Stale) {
+            std::printf("FAIL e2e explain_stale: state %s\n",
+                        pwb::workflow_runtime::freshness_state_value(
+                            domain_report.state));
+            ++failures;
+        }
+        auto outputs = service.list_outputs(compute_run_id, ctx_inspect);
+        if (!outputs.at("found").get<bool>() ||
+            !outputs.at("outputs").is_array()) {
+            std::printf("FAIL e2e list_outputs: found=%s\n",
+                        outputs.at("found").dump().c_str());
+            ++failures;
+        }
+    }
+
+    // (8c) admission gate: bounded concurrency + cancel-aware acquire.
     {
         AdmissionGate gate(1);
         if (!gate.try_acquire()) {
@@ -990,6 +1115,13 @@ int main(int argc, char** argv) {
         return 2;
     }
     const Json fixture = read_fixture(argv[1]);
+    // Hermetic payload for the integrity "modified" branch (the generator
+    // writes the same file — idempotent on both sides).
+    {
+        std::ofstream payload("/tmp/pwb-runtime-oracle-payload.json",
+                              std::ios::trunc);
+        payload << "payload-bytes-v1";
+    }
     int total = 0;
     for (const auto& c : fixture.at("cases")) {
         ++total;

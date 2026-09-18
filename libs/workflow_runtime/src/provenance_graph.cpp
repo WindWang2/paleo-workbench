@@ -114,7 +114,9 @@ Json build_product_lifecycle_graph(
             if (factor_task_ids.count(task_id) == 0) continue;
             const Json grid_version_json = pycompat::dict_get(
                 task, "grid_artifact_version_id", Json(nullptr));
-            const bool has_grid = !grid_version_json.is_null();
+            // Python `if not grid_version:` — null AND empty-string (and
+            // any falsy value) mean "no persisted grid".
+            const bool has_grid = pycompat::truthy(grid_version_json);
             const std::string grid_version =
                 has_grid ? pycompat::str_scalar(grid_version_json) : "";
 

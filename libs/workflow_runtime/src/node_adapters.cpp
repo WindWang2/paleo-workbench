@@ -129,6 +129,13 @@ void AdmissionGate::cancel_all() {
     cancel_cv_.notify_all();
 }
 
+void AdmissionGate::reset() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cancelled_ = false;
+    }
+}
+
 unsigned AdmissionGate::active() const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     return in_flight_;

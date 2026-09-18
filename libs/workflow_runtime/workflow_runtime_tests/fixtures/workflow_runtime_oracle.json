@@ -3612,6 +3612,880 @@
       }
     },
     {
+      "id": "fresh_rule1_domain_tip",
+      "fn": "freshness.evaluate_run",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_raw",
+              "version_id": "ver_raw",
+              "name": "RAW",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h_v1",
+              "name": "H1",
+              "producing_run_id": "run_h1"
+            },
+            {
+              "asset_id": "asset_h2",
+              "version_id": "ver_h_v2",
+              "name": "H2",
+              "producing_run_id": "run_h2"
+            },
+            {
+              "asset_id": "asset_b",
+              "version_id": "ver_b_v1",
+              "name": "B",
+              "producing_run_id": "run_b"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_h1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_raw"
+              ],
+              "output_version_ids": [
+                "ver_h_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_h",
+              "started_at": "2026-01-01T00:00:01"
+            },
+            {
+              "run_id": "run_h2",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_raw"
+              ],
+              "output_version_ids": [
+                "ver_h_v2"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_h",
+              "started_at": "2026-01-01T00:00:02"
+            },
+            {
+              "run_id": "run_b",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_h_v1"
+              ],
+              "output_version_ids": [
+                "ver_b_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:03"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_raw",
+                "version_id": "ver_raw"
+              },
+              {
+                "asset_id": "asset_b",
+                "version_id": "ver_b_v1"
+              }
+            ],
+            "domain_current": [
+              {
+                "domain_task_id": "task_h",
+                "version_id": "ver_h_v2"
+              }
+            ]
+          }
+        },
+        "run_id": "run_b"
+      },
+      "expect": {
+        "result": {
+          "state": "STALE",
+          "subject_kind": "run",
+          "subject_id": "run_b",
+          "reasons": [
+            {
+              "type": "UPSTREAM_VERSION_CHANGED",
+              "upstream_version_id": "ver_h_v1",
+              "current_version_id": "ver_h_v2",
+              "operation": "prediction",
+              "detail": "run used ver_h_v1; current is ver_h_v2",
+              "asset_id": "asset_h2"
+            }
+          ],
+          "operation": "prediction",
+          "domain_task_id": null,
+          "output_version_ids": [
+            "ver_b_v1"
+          ],
+          "input_version_ids": [
+            "ver_h_v1"
+          ],
+          "integrity": null
+        }
+      }
+    },
+    {
+      "id": "fresh_rule3_domain_supersession",
+      "fn": "freshness.evaluate_run",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_raw",
+              "version_id": "ver_raw",
+              "name": "RAW",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h_v1",
+              "name": "H1",
+              "producing_run_id": "run_h1"
+            },
+            {
+              "asset_id": "asset_h2",
+              "version_id": "ver_h_v2",
+              "name": "H2",
+              "producing_run_id": "run_h2"
+            },
+            {
+              "asset_id": "asset_b",
+              "version_id": "ver_b_v1",
+              "name": "B",
+              "producing_run_id": "run_b"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_h1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_raw"
+              ],
+              "output_version_ids": [
+                "ver_h_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_h",
+              "started_at": "2026-01-01T00:00:01"
+            },
+            {
+              "run_id": "run_h2",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_raw"
+              ],
+              "output_version_ids": [
+                "ver_h_v2"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_h",
+              "started_at": "2026-01-01T00:00:02"
+            },
+            {
+              "run_id": "run_b",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_h_v1"
+              ],
+              "output_version_ids": [
+                "ver_b_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:03"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_raw",
+                "version_id": "ver_raw"
+              },
+              {
+                "asset_id": "asset_b",
+                "version_id": "ver_b_v1"
+              },
+              {
+                "asset_id": "asset_h2",
+                "version_id": "ver_h_v2"
+              }
+            ]
+          }
+        },
+        "run_id": "run_b"
+      },
+      "expect": {
+        "result": {
+          "state": "STALE",
+          "subject_kind": "run",
+          "subject_id": "run_b",
+          "reasons": [
+            {
+              "type": "UPSTREAM_VERSION_CHANGED",
+              "upstream_version_id": "ver_h_v1",
+              "current_version_id": "ver_h_v2",
+              "operation": "prediction",
+              "detail": "run used ver_h_v1; current is ver_h_v2",
+              "asset_id": "asset_h2"
+            }
+          ],
+          "operation": "prediction",
+          "domain_task_id": null,
+          "output_version_ids": [
+            "ver_b_v1"
+          ],
+          "input_version_ids": [
+            "ver_h_v1"
+          ],
+          "integrity": null
+        }
+      }
+    },
+    {
+      "id": "fresh_rule4_parent_supersession",
+      "fn": "freshness.evaluate_run",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_i1",
+              "version_id": "ver_i1",
+              "name": "I1",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_f2",
+              "version_id": "ver_f2_v1",
+              "name": "F2",
+              "producing_run_id": "run_f2"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "integrated_interpretation",
+              "input_version_ids": [
+                "ver_i1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:01"
+            },
+            {
+              "run_id": "run_f2",
+              "operation": "integrated_interpretation",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f2_v1"
+              ],
+              "status": "complete",
+              "parameters": {
+                "parent_version_id": "ver_f1_v1"
+              },
+              "started_at": "2026-01-01T00:00:02"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_i1",
+                "version_id": "ver_i1"
+              },
+              {
+                "asset_id": "asset_f2",
+                "version_id": "ver_f2_v1"
+              }
+            ]
+          }
+        },
+        "run_id": "run_f2"
+      },
+      "expect": {
+        "result": {
+          "state": "STALE",
+          "subject_kind": "run",
+          "subject_id": "run_f2",
+          "reasons": [
+            {
+              "type": "UPSTREAM_VERSION_CHANGED",
+              "upstream_version_id": "ver_f1_v1",
+              "current_version_id": "ver_f2_v1",
+              "operation": "integrated_interpretation",
+              "detail": "run used ver_f1_v1; current is ver_f2_v1",
+              "asset_id": "asset_f2"
+            }
+          ],
+          "operation": "integrated_interpretation",
+          "domain_task_id": null,
+          "output_version_ids": [
+            "ver_f2_v1"
+          ],
+          "input_version_ids": [
+            "ver_f1_v1"
+          ],
+          "integrity": null
+        }
+      }
+    },
+    {
+      "id": "fresh_integrity_modified_branch",
+      "fn": "freshness.evaluate_run",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1",
+              "path": "/tmp/pwb-runtime-oracle-payload.json",
+              "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "payload_json": "payload-bytes-v1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:01"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_h1",
+                "version_id": "ver_h1_v1"
+              }
+            ]
+          },
+          "check_integrity": true
+        },
+        "run_id": "run_f1"
+      },
+      "expect": {
+        "result": {
+          "state": "FRESH",
+          "subject_kind": "run",
+          "subject_id": "run_f1",
+          "reasons": [
+            {
+              "type": "INTEGRITY_MODIFIED",
+              "upstream_version_id": null,
+              "current_version_id": null,
+              "operation": "factor_map",
+              "detail": "output ver_f1_v1 integrity modified",
+              "asset_id": null
+            }
+          ],
+          "operation": "factor_map",
+          "domain_task_id": null,
+          "output_version_ids": [
+            "ver_f1_v1"
+          ],
+          "input_version_ids": [
+            "ver_h1_v1"
+          ],
+          "integrity": "modified"
+        }
+      }
+    },
+    {
+      "id": "step_factor_map_running",
+      "fn": "freshness.step_freshness",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1a"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v2",
+              "name": "F1",
+              "producing_run_id": "run_f1b"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            },
+            {
+              "asset_id": "asset_i2",
+              "version_id": "ver_i2_v1",
+              "name": "I2",
+              "producing_run_id": "run_i2"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1a",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "failed",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:01"
+            },
+            {
+              "run_id": "run_f1b",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v2"
+              ],
+              "status": "running",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:05"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_f1_v2"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:06"
+            },
+            {
+              "run_id": "run_i2",
+              "operation": "inference",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_i2_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:07"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_h1",
+                "version_id": "ver_h1_v1"
+              },
+              {
+                "asset_id": "asset_f1",
+                "version_id": "ver_f1_v2"
+              }
+            ]
+          }
+        },
+        "step_type": "factor_map"
+      },
+      "expect": {
+        "result": "RUNNING"
+      }
+    },
+    {
+      "id": "step_factor_map_missing",
+      "fn": "freshness.step_freshness",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1a",
+              "path": "/nonexistent/gone.json",
+              "checksum": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "payload_json": "x"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v2",
+              "name": "F1",
+              "producing_run_id": "run_f1b"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            },
+            {
+              "asset_id": "asset_i2",
+              "version_id": "ver_i2_v1",
+              "name": "I2",
+              "producing_run_id": "run_i2"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1a",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "failed",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:01"
+            },
+            {
+              "run_id": "run_f1b",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v2"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:05"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_f1_v2"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:06"
+            },
+            {
+              "run_id": "run_i2",
+              "operation": "inference",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_i2_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:07"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_h1",
+                "version_id": "ver_h1_v1"
+              },
+              {
+                "asset_id": "asset_f1",
+                "version_id": "ver_f1_v2"
+              }
+            ]
+          }
+        },
+        "step_type": "factor_map"
+      },
+      "expect": {
+        "result": "FRESH"
+      }
+    },
+    {
+      "id": "step_factor_map_unknown",
+      "fn": "freshness.step_freshness",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1a"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v2",
+              "name": "F1",
+              "producing_run_id": "run_f1b"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            },
+            {
+              "asset_id": "asset_i2",
+              "version_id": "ver_i2_v1",
+              "name": "I2",
+              "producing_run_id": "run_i2"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1a",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "failed",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:01"
+            },
+            {
+              "run_id": "run_f1b",
+              "operation": "factor_map",
+              "input_version_ids": [],
+              "output_version_ids": [
+                "ver_f1_v2"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:05"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_f1_v2"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:06"
+            },
+            {
+              "run_id": "run_i2",
+              "operation": "inference",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_i2_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:07"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_h1",
+                "version_id": "ver_h1_v1"
+              },
+              {
+                "asset_id": "asset_f1",
+                "version_id": "ver_f1_v2"
+              }
+            ]
+          }
+        },
+        "step_type": "factor_map"
+      },
+      "expect": {
+        "result": "UNKNOWN"
+      }
+    },
+    {
+      "id": "step_factor_map_failed_latest",
+      "fn": "freshness.step_freshness",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1a"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v2",
+              "name": "F1",
+              "producing_run_id": "run_f1b"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            },
+            {
+              "asset_id": "asset_i2",
+              "version_id": "ver_i2_v1",
+              "name": "I2",
+              "producing_run_id": "run_i2"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1a",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "failed",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:01"
+            },
+            {
+              "run_id": "run_f1b",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v2"
+              ],
+              "status": "failed",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:05"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_f1_v2"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:06"
+            },
+            {
+              "run_id": "run_i2",
+              "operation": "inference",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_i2_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:07"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_h1",
+                "version_id": "ver_h1_v1"
+              },
+              {
+                "asset_id": "asset_f1",
+                "version_id": "ver_f1_v2"
+              }
+            ]
+          }
+        },
+        "step_type": "factor_map"
+      },
+      "expect": {
+        "result": "FAILED"
+      }
+    },
+    {
+      "id": "ctx_domain_replace",
+      "fn": "current_context.reselect",
+      "input": {
+        "state": {
+          "domain_current": [
+            {
+              "domain_task_id": "t1",
+              "version_id": "ver_1"
+            },
+            {
+              "domain_task_id": "t1",
+              "version_id": "ver_2"
+            }
+          ],
+          "selects": [
+            {
+              "asset_id": "a1",
+              "version_id": "ver_1"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": {
+          "current_by_domain_task": {
+            "t1": "ver_2"
+          },
+          "selected": [
+            "ver_2"
+          ]
+        }
+      }
+    },
+    {
       "id": "plan_stale_all",
       "fn": "recompute.build_plan",
       "input": {
@@ -4983,6 +5857,215 @@
       }
     },
     {
+      "id": "exec_poison_downstream",
+      "fn": "recompute.execute_plan",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1",
+              "producing_run_id": null,
+              "checksum": "1111111111111111111111111111111111111111111111111111111111111111"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:01"
+            },
+            {
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:02"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_m1_v1"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:03"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_h1",
+                "version_id": "ver_h1_v2x"
+              },
+              {
+                "asset_id": "asset_f1",
+                "version_id": "ver_f1_v1"
+              },
+              {
+                "asset_id": "asset_m1",
+                "version_id": "ver_m1_v1"
+              },
+              {
+                "asset_id": "asset_p1",
+                "version_id": "ver_p1_v1"
+              }
+            ]
+          }
+        },
+        "handlers": {
+          "factor_map": "ok",
+          "prediction": "ok",
+          "map_compile": "fail:编译崩溃"
+        },
+        "stop_on_failure": false,
+        "cancelled": false,
+        "chain": true
+      },
+      "expect": {
+        "result": {
+          "stopped_early": false,
+          "messages": [
+            "ok 单因素图 F1",
+            "failed 古地理图编绘 M1: 编译崩溃",
+            "skip 地震相预测 P1 (upstream failure)"
+          ],
+          "completed": [
+            "run_f1"
+          ],
+          "failed": [
+            "run_m1"
+          ],
+          "skipped": [
+            "run_p1"
+          ]
+        }
+      }
+    },
+    {
+      "id": "plan_all_states",
+      "fn": "recompute.build_plan",
+      "input": {
+        "spec": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1",
+              "producing_run_id": null
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "started_at": "2026-01-01T00:00:01"
+            }
+          ],
+          "context": {
+            "selects": [
+              {
+                "asset_id": "asset_h1",
+                "version_id": "ver_h1_v1"
+              },
+              {
+                "asset_id": "asset_f1",
+                "version_id": "ver_f1_v1"
+              }
+            ]
+          }
+        },
+        "options": {
+          "stale_only": false
+        },
+        "project": null
+      },
+      "expect": {
+        "result": {
+          "steps": [
+            {
+              "order": 1,
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "domain_task_id": null,
+              "action": "requires_compute",
+              "reason": {
+                "type": "OK",
+                "upstream_version_id": null,
+                "current_version_id": null,
+                "operation": "factor_map",
+                "detail": "",
+                "asset_id": null
+              },
+              "reuse_run_id": null,
+              "reuse_output_version_ids": [],
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "label": "单因素图 F1",
+              "can_reuse_existing": false,
+              "requires_compute": true
+            }
+          ],
+          "changed_version_ids": [],
+          "cycle_error": null,
+          "completed_run_ids": [],
+          "failed_run_ids": [],
+          "skipped_run_ids": []
+        }
+      }
+    },
+    {
       "id": "cv_hash_g1",
       "fn": "constraint.content_hash",
       "input": {
@@ -5056,7 +6139,7 @@
       },
       "expect": {
         "result": [
-          "b13e41971f7b9149e2d284b22d5e7f317181855943e7a3a237390484c3d4e6ef",
+          "198baca177fe0237efe12d9a65931eb6a0115fa81fc36ebd64187e32b0acbd18",
           2
         ]
       }
@@ -5115,7 +6198,7 @@
       },
       "expect": {
         "result": [
-          "d2cd4357d0aaacd50cae2e6f3e6ffce682d2247bd15f59bacb14766d46841b1e",
+          "3a6fd709d2ed6e77200ebcac5411854ac87e9a6e8afbd4b12d14d82a2e210801",
           2
         ]
       }
@@ -5172,7 +6255,7 @@
       },
       "expect": {
         "result": [
-          "e3fa48dcd0af47ba86cfffc4ee23bc963d341877b6fa6c6cc6788e83b30a5412",
+          "8b38501c2aab399428b159b001c3d32dfeeec15d45136465d373585272ede9cf",
           1
         ]
       }
@@ -5291,7 +6374,7 @@
           "version_id": "ver_000001",
           "previous_version_id": null,
           "run_id": "run_000001",
-          "content_hash": "b13e41971f7b9149e2d284b22d5e7f317181855943e7a3a237390484c3d4e6ef",
+          "content_hash": "198baca177fe0237efe12d9a65931eb6a0115fa81fc36ebd64187e32b0acbd18",
           "line_count": 2
         }
       }
@@ -5449,7 +6532,7 @@
           "version_id": "ver_000001",
           "previous_version_id": "ver_000001",
           "run_id": null,
-          "content_hash": "b13e41971f7b9149e2d284b22d5e7f317181855943e7a3a237390484c3d4e6ef",
+          "content_hash": "198baca177fe0237efe12d9a65931eb6a0115fa81fc36ebd64187e32b0acbd18",
           "line_count": 2
         }
       }
@@ -5587,7 +6670,7 @@
           "version_id": "ver_000002",
           "previous_version_id": "ver_000001",
           "run_id": "run_000002",
-          "content_hash": "0c63c0b94105ead2b2eb5b0aed1e6dc778d315cdb446a86122f27e91a6f1d356",
+          "content_hash": "954ca1f9dedb926f7f8ceab17c170f56820381622e8f8fc9907d90f66bb2c514",
           "line_count": 2
         }
       }
@@ -5637,7 +6720,7 @@
           "version_id": "ver_000001",
           "previous_version_id": null,
           "run_id": "run_000001",
-          "content_hash": "e3fa48dcd0af47ba86cfffc4ee23bc963d341877b6fa6c6cc6788e83b30a5412",
+          "content_hash": "8b38501c2aab399428b159b001c3d32dfeeec15d45136465d373585272ede9cf",
           "line_count": 1
         }
       }
@@ -6076,7 +7159,7 @@
           {
             "group_id": "g1",
             "group_name": "断层约束A",
-            "content_hash": "0c63c0b94105ead2b2eb5b0aed1e6dc778d315cdb446a86122f27e91a6f1d356",
+            "content_hash": "954ca1f9dedb926f7f8ceab17c170f56820381622e8f8fc9907d90f66bb2c514",
             "line_count": 2,
             "version_id": "ver_000002"
           }
@@ -6240,7 +7323,7 @@
           {
             "group_id": "g1",
             "group_name": "断层约束A",
-            "content_hash": "8167923caa55d03ee81f22008ec0910eca08f295e459485596626b6de7c1e2e4",
+            "content_hash": "2d4de63371389f00a0aada0780db5911c203aedce924555d2a155b3ac78dc232",
             "line_count": 1,
             "version_id": null
           }
@@ -6610,7 +7693,7 @@
           {
             "group_id": "g1",
             "group_name": "断层约束A",
-            "content_hash": "0c63c0b94105ead2b2eb5b0aed1e6dc778d315cdb446a86122f27e91a6f1d356",
+            "content_hash": "954ca1f9dedb926f7f8ceab17c170f56820381622e8f8fc9907d90f66bb2c514",
             "line_count": 2,
             "version_id": null
           }
@@ -6779,7 +7862,7 @@
           {
             "group_id": "群组–β",
             "group_name": "约束·层位Ⅲ",
-            "content_hash": "e3fa48dcd0af47ba86cfffc4ee23bc963d341877b6fa6c6cc6788e83b30a5412",
+            "content_hash": "8b38501c2aab399428b159b001c3d32dfeeec15d45136465d373585272ede9cf",
             "line_count": 1,
             "version_id": null
           }
@@ -6914,7 +7997,7 @@
               {
                 "group_id": "g1",
                 "group_name": "断层约束A",
-                "content_hash": "b13e41971f7b9149e2d284b22d5e7f317181855943e7a3a237390484c3d4e6ef",
+                "content_hash": "198baca177fe0237efe12d9a65931eb6a0115fa81fc36ebd64187e32b0acbd18",
                 "line_count": 2,
                 "version_id": null
               }
@@ -7090,7 +8173,7 @@
               {
                 "group_id": "g1",
                 "group_name": "断层约束A",
-                "content_hash": "8167923caa55d03ee81f22008ec0910eca08f295e459485596626b6de7c1e2e4",
+                "content_hash": "2d4de63371389f00a0aada0780db5911c203aedce924555d2a155b3ac78dc232",
                 "line_count": 1,
                 "version_id": null
               }
@@ -7266,7 +8349,7 @@
               {
                 "group_id": "g1",
                 "group_name": "断层约束A",
-                "content_hash": "0c63c0b94105ead2b2eb5b0aed1e6dc778d315cdb446a86122f27e91a6f1d356",
+                "content_hash": "954ca1f9dedb926f7f8ceab17c170f56820381622e8f8fc9907d90f66bb2c514",
                 "line_count": 2,
                 "version_id": null
               }
@@ -7467,7 +8550,7 @@
               {
                 "group_id": "g1",
                 "group_name": "断层约束A",
-                "content_hash": "b13e41971f7b9149e2d284b22d5e7f317181855943e7a3a237390484c3d4e6ef",
+                "content_hash": "198baca177fe0237efe12d9a65931eb6a0115fa81fc36ebd64187e32b0acbd18",
                 "line_count": 2,
                 "version_id": null
               }
@@ -7876,6 +8959,207 @@
       }
     },
     {
+      "id": "cv_staleness_no_catalog_version_pin",
+      "fn": "constraint.pins_staleness",
+      "input": {
+        "setup": [
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "crs": null,
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.0000000004
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    6.0
+                  ]
+                ]
+              },
+              {
+                "id": "l3",
+                "active": false,
+                "coordinates": [
+                  [
+                    9.0,
+                    9.0
+                  ],
+                  [
+                    9.1,
+                    9.1
+                  ]
+                ]
+              },
+              {
+                "id": "l4",
+                "active": true,
+                "coordinates": []
+              }
+            ]
+          },
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.5
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    7.0
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "task": {
+          "id": "task_f1",
+          "target_horizon": "H1",
+          "parameters": {
+            "constraint_pins": [
+              {
+                "group_id": "g1",
+                "group_name": "断层约束A",
+                "content_hash": "954ca1f9dedb926f7f8ceab17c170f56820381622e8f8fc9907d90f66bb2c514",
+                "line_count": 2,
+                "version_id": "ver_000002"
+              }
+            ]
+          }
+        },
+        "project_groups": [
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.5
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    7.0
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "with_catalog": false
+      },
+      "expect": {
+        "result": {
+          "state": "current",
+          "groups": [
+            {
+              "group_id": "g1",
+              "state": "current",
+              "detail": "",
+              "pinned_version_id": "ver_000002",
+              "line_count": 2
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "cv_staleness_no_catalog",
       "fn": "constraint.pins_staleness",
       "input": {
@@ -8003,7 +9287,7 @@
               {
                 "group_id": "g1",
                 "group_name": "断层约束A",
-                "content_hash": "0c63c0b94105ead2b2eb5b0aed1e6dc778d315cdb446a86122f27e91a6f1d356",
+                "content_hash": "954ca1f9dedb926f7f8ceab17c170f56820381622e8f8fc9907d90f66bb2c514",
                 "line_count": 2,
                 "version_id": null
               }
@@ -8074,6 +9358,100 @@
             }
           ]
         }
+      }
+    },
+    {
+      "id": "cv_hash_reordered_equal",
+      "fn": "constraint.content_hash",
+      "input": {
+        "group": {
+          "id": "gX",
+          "name": "断层约束A",
+          "target_horizon": "H1",
+          "lines": [
+            {
+              "id": "zz-last",
+              "name": "F1-b",
+              "role": "fault",
+              "active": true,
+              "coordinates": [
+                [
+                  5.0,
+                  5.0
+                ],
+                [
+                  6.0,
+                  6.0
+                ]
+              ]
+            },
+            {
+              "id": "aa-first",
+              "name": "F1-a",
+              "role": "fault",
+              "active": true,
+              "coordinates": [
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  1.0000000004
+                ],
+                [
+                  2.0,
+                  0.5
+                ]
+              ],
+              "properties": {
+                "constraint_kind": "fault",
+                "layer_id": "lyr1"
+              }
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": [
+          "198baca177fe0237efe12d9a65931eb6a0115fa81fc36ebd64187e32b0acbd18",
+          2
+        ]
+      }
+    },
+    {
+      "id": "cv_hash_line_horizon",
+      "fn": "constraint.content_hash",
+      "input": {
+        "group": {
+          "id": "gH",
+          "name": "层位约束",
+          "target_horizon": "H1",
+          "lines": [
+            {
+              "id": "h1",
+              "active": true,
+              "role": "fault",
+              "target_horizon": "H2",
+              "coordinates": [
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  1.0
+                ]
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": [
+          "e02da7b9cd39130cef2f7beef1cfb3708c910bf78e8430ec1678bb3a55e3b2c2",
+          1
+        ]
       }
     },
     {
@@ -8168,7 +9546,7 @@
             "version_id": "ver_000001",
             "previous_version_id": null,
             "run_id": "run_000001",
-            "content_hash": "b13e41971f7b9149e2d284b22d5e7f317181855943e7a3a237390484c3d4e6ef",
+            "content_hash": "198baca177fe0237efe12d9a65931eb6a0115fa81fc36ebd64187e32b0acbd18",
             "line_count": 2
           },
           {
@@ -8316,8 +9694,8 @@
           "group_id_a": "g1",
           "group_id_b": "g1",
           "same_group": true,
-          "content_hash_a": "a090c7800edc1b28259d51a64d2abf01a0e37916aa216eab0946f3c9539b1aaa",
-          "content_hash_b": "0f47fe62144fb3e7dc2b0d79de8740f2e7f79db9be770a7635fd446a2744b346",
+          "content_hash_a": "8c44bca3e5b18a7ec457f7d45434ecec39813503d972d4500969d90ddbe711d7",
+          "content_hash_b": "16da7dab063636c0cfd2a7a1b2be586c32d71ac901454541a4cf18cee687204d",
           "lines_added": [],
           "lines_removed": [
             "l3",
@@ -8339,6 +9717,229 @@
           ],
           "lines_unchanged": 0,
           "identical": false
+        }
+      }
+    },
+    {
+      "id": "cv_compare_missing_version",
+      "fn": "constraint.compare",
+      "input": {
+        "setup": [
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "crs": null,
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.0000000004
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    6.0
+                  ]
+                ]
+              },
+              {
+                "id": "l3",
+                "active": false,
+                "coordinates": [
+                  [
+                    9.0,
+                    9.0
+                  ],
+                  [
+                    9.1,
+                    9.1
+                  ]
+                ]
+              },
+              {
+                "id": "l4",
+                "active": true,
+                "coordinates": []
+              }
+            ]
+          },
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.5
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    7.0
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "a": "ver_999999",
+        "b": "ver_000001"
+      },
+      "expect": {
+        "raise": {
+          "python_class": "ValueError",
+          "message": "constraint version 'ver_999999' has no payload location"
+        }
+      }
+    },
+    {
+      "id": "cv_compare_identical",
+      "fn": "constraint.compare",
+      "input": {
+        "setup": [
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "crs": null,
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.0000000004
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    6.0
+                  ]
+                ]
+              },
+              {
+                "id": "l3",
+                "active": false,
+                "coordinates": [
+                  [
+                    9.0,
+                    9.0
+                  ],
+                  [
+                    9.1,
+                    9.1
+                  ]
+                ]
+              },
+              {
+                "id": "l4",
+                "active": true,
+                "coordinates": []
+              }
+            ]
+          }
+        ],
+        "a": "ver_000001",
+        "b": "ver_000001"
+      },
+      "expect": {
+        "result": {
+          "version_a": "ver_000001",
+          "version_b": "ver_000001",
+          "group_id_a": "g1",
+          "group_id_b": "g1",
+          "same_group": true,
+          "content_hash_a": "8c44bca3e5b18a7ec457f7d45434ecec39813503d972d4500969d90ddbe711d7",
+          "content_hash_b": "8c44bca3e5b18a7ec457f7d45434ecec39813503d972d4500969d90ddbe711d7",
+          "lines_added": [],
+          "lines_removed": [],
+          "lines_changed": [],
+          "lines_unchanged": 4,
+          "identical": true
         }
       }
     },
@@ -8672,6 +10273,475 @@
         "result": {
           "status": "current",
           "detail": "断层约束A: matches latest commit"
+        }
+      }
+    },
+    {
+      "id": "cv_ref_current_never_committed",
+      "fn": "constraint.resolve_ref",
+      "input": {
+        "setup": [
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "crs": null,
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.0000000004
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    6.0
+                  ]
+                ]
+              },
+              {
+                "id": "l3",
+                "active": false,
+                "coordinates": [
+                  [
+                    9.0,
+                    9.0
+                  ],
+                  [
+                    9.1,
+                    9.1
+                  ]
+                ]
+              },
+              {
+                "id": "l4",
+                "active": true,
+                "coordinates": []
+              }
+            ]
+          },
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.5
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    7.0
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "project_groups": [
+          {
+            "id": "群组–β",
+            "name": "约束·层位Ⅲ",
+            "target_horizon": "层位——H①",
+            "lines": [
+              {
+                "id": "线–1",
+                "name": "断裂α",
+                "role": "断层",
+                "active": true,
+                "coordinates": [
+                  [
+                    1.25,
+                    2.5
+                  ],
+                  [
+                    3.75,
+                    4.0
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "断层面",
+                  "layer_id": "图层一"
+                }
+              }
+            ]
+          }
+        ],
+        "ref": "constraints:current",
+        "with_catalog": true
+      },
+      "expect": {
+        "result": {
+          "status": "unknown",
+          "detail": "约束·层位Ⅲ: never committed — no baseline"
+        }
+      }
+    },
+    {
+      "id": "cv_ref_pinned_no_version",
+      "fn": "constraint.resolve_ref",
+      "input": {
+        "setup": [
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "crs": null,
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.0000000004
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    6.0
+                  ]
+                ]
+              },
+              {
+                "id": "l3",
+                "active": false,
+                "coordinates": [
+                  [
+                    9.0,
+                    9.0
+                  ],
+                  [
+                    9.1,
+                    9.1
+                  ]
+                ]
+              },
+              {
+                "id": "l4",
+                "active": true,
+                "coordinates": []
+              }
+            ]
+          },
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.5
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    7.0
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "project_groups": [
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.5
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    7.0
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "ref": "constraints:g1",
+        "with_catalog": true
+      },
+      "expect": {
+        "result": {
+          "status": "unknown",
+          "detail": "pinned constraint ref without version or catalog"
+        }
+      }
+    },
+    {
+      "id": "cv_ref_empty_constraints",
+      "fn": "constraint.resolve_ref",
+      "input": {
+        "setup": [
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "crs": null,
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.0000000004
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    6.0
+                  ]
+                ]
+              },
+              {
+                "id": "l3",
+                "active": false,
+                "coordinates": [
+                  [
+                    9.0,
+                    9.0
+                  ],
+                  [
+                    9.1,
+                    9.1
+                  ]
+                ]
+              },
+              {
+                "id": "l4",
+                "active": true,
+                "coordinates": []
+              }
+            ]
+          },
+          {
+            "id": "g1",
+            "name": "断层约束A",
+            "target_horizon": "H1",
+            "lines": [
+              {
+                "id": "l1",
+                "name": "F1-a",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.5
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ],
+                "properties": {
+                  "constraint_kind": "fault",
+                  "layer_id": "lyr1"
+                }
+              },
+              {
+                "id": "l2",
+                "name": "F1-b",
+                "role": "fault",
+                "active": true,
+                "coordinates": [
+                  [
+                    5.0,
+                    5.0
+                  ],
+                  [
+                    6.0,
+                    7.0
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "project_groups": [],
+        "ref": "constraints:current",
+        "with_catalog": true
+      },
+      "expect": {
+        "result": {
+          "status": "unknown",
+          "detail": "no constraints"
         }
       }
     },

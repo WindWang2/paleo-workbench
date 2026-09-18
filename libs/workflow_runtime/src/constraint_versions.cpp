@@ -36,8 +36,11 @@ Json canonical_line(const Json& line) {
         pycompat::str_scalar(pycompat::dict_get(line, "name", Json("")));
     payload["role"] =
         pycompat::str_scalar(pycompat::dict_get(line, "role", Json("")));
-    payload["active"] = pycompat::truthy(pycompat::dict_get(line, "active",
-                                                            Json(true)));
+    payload["active"] = line.is_object() && line.contains("active") &&
+                                line.at("active").is_null()
+                            ? false  // Python bool(None) == False
+                            : pycompat::truthy(pycompat::dict_get(
+                                  line, "active", Json(true)));
     payload["target_horizon"] = pycompat::str_scalar(
         pycompat::dict_get(line, "target_horizon", Json("")));
 
@@ -73,18 +76,13 @@ Json canonical_line(const Json& line) {
     return payload;
 }
 
-// _canonical_group_payload — lines sorted by line_id. Lines missing
-// target_horizon inherit the group's (the Python document model
-// materializes every line with its group's horizon; Json views may omit
-// it — normalize before canonicalizing).
+// _canonical_group_payload — lines sorted by line_id. Python reads each
+// line's OWN target_horizon ("" when absent — the document model default;
+// no group-horizon fallback), so the Json view must carry it explicitly.
 Json canonical_group_payload(const Json& group) {
-    const std::string group_horizon = pycompat::str_scalar(
-        pycompat::dict_get(group, "target_horizon", Json("")));
     std::vector<Json> lines;
-    for (auto line : pycompat::dict_get(group, "lines", Json::array())) {
-        if (line.is_object() && !line.contains("target_horizon")) {
-            line["target_horizon"] = group_horizon;
-        }
+    for (const auto& line :
+         pycompat::dict_get(group, "lines", Json::array())) {
         lines.push_back(canonical_line(line));
     }
     std::sort(lines.begin(), lines.end(),
@@ -300,6 +298,12 @@ ConstraintCommitReport commit_constraint_group(CatalogRepository& repository,
         throw;
     }
     repository.update_run_status(run_id, "complete");
+    // Python's catalog links the run's outputs and advances the asset
+    // current pointer inside register_result_asset / register_version;
+    // the seam keeps those explicit (see catalog_seam.hpp).
+    repository.attach_run_output(run_id, registered->version_id);
+    repository.set_current_version(registered->asset_id,
+                                   registered->version_id);
 
     ConstraintCommitReport report;
     report.group_id = group_id;
@@ -395,17 +399,26 @@ std::vector<Json> pinned_constraint_pins(const Json& task) {
 
 Json constraint_pins_staleness(const Json& task, const Json& project,
                                CatalogRepository* repository) {
+    // Python dict semantics: duplicate keys keep FIRST-appearance order
+    // with the LAST value.
     const std::vector<Json> pins = pinned_constraint_pins(task);
-    std::unordered_map<std::string, Json> pin_by_group;
+    std::map<std::string, Json> pin_by_group;
+    std::vector<std::string> pin_order;
     for (const Json& pin : pins) {
-        pin_by_group[pycompat::str_scalar(
-            pycompat::dict_get(pin, "group_id", Json("")))] = pin;
+        const std::string gid = pycompat::str_scalar(
+            pycompat::dict_get(pin, "group_id", Json("")));
+        if (pin_by_group.emplace(gid, pin).second) {
+            pin_order.push_back(gid);
+        } else {
+            pin_by_group[gid] = pin;
+        }
     }
     const std::string task_horizon = pycompat::str_scalar(
         pycompat::dict_get(task, "target_horizon", Json("")));
     // Same dependency scoping as the pin itself: a group bound to a
     // different horizon can never make this task stale.
     std::vector<std::pair<std::string, Json>> groups;
+    std::set<std::string> group_ids_seen;
     for (const auto& group :
          pycompat::dict_get(project, "constraint_layers", Json::array())) {
         const std::string group_horizon = pycompat::str_scalar(
@@ -414,9 +427,15 @@ Json constraint_pins_staleness(const Json& task, const Json& project,
             group_horizon != task_horizon) {
             continue;
         }
-        groups.emplace_back(
-            pycompat::str_scalar(pycompat::dict_get(group, "id", Json(""))),
-            group);
+        const std::string gid =
+            pycompat::str_scalar(pycompat::dict_get(group, "id", Json("")));
+        if (group_ids_seen.insert(gid).second) {
+            groups.emplace_back(gid, group);
+        } else {
+            for (auto& kv : groups) {
+                if (kv.first == gid) kv.second = group;  // last value wins
+            }
+        }
     }
 
     Json entries = Json::array();
@@ -488,11 +507,8 @@ Json constraint_pins_staleness(const Json& task, const Json& project,
         entry["line_count"] = n_lines;
         entries.push_back(std::move(entry));
     }
-    // Groups that vanished since the pin (pins order — Python dict
-    // insertion order).
-    for (const Json& pin : pins) {
-        const std::string group_id = pycompat::str_scalar(
-            pycompat::dict_get(pin, "group_id", Json("")));
+    // Groups that vanished since the pin (Python dict insertion order).
+    for (const std::string& group_id : pin_order) {
         const auto known = std::find_if(
             groups.begin(), groups.end(),
             [&group_id](const auto& kv) { return kv.first == group_id; });
@@ -501,8 +517,12 @@ Json constraint_pins_staleness(const Json& task, const Json& project,
             entry["group_id"] = group_id;
             entry["state"] = "missing";
             entry["detail"] = "pinned constraint group no longer exists";
+            const auto pin_it = pin_by_group.find(group_id);
             entry["pinned_version_id"] =
-                pycompat::dict_get(pin, "version_id", Json(nullptr));
+                pin_it != pin_by_group.end()
+                    ? pycompat::dict_get(pin_it->second, "version_id",
+                                         Json(nullptr))
+                    : Json(nullptr);
             entries.push_back(std::move(entry));
         }
     }
@@ -533,17 +553,17 @@ Json compare_constraint_versions(CatalogRepository& repository,
     auto load = [&repository](const std::string& version_id) -> Json {
         const auto version = repository.resolve_version(version_id);
         if (!version) {
-            throw std::invalid_argument(
-                "constraint version '" + version_id +
-                "' has no payload location");
+            throw ConstraintValueError(
+                "constraint version " + pycompat::repr_str(version_id) +
+                " has no payload location");
         }
         Json payload;
         try {
             payload = Json::parse(version->payload_json);
         } catch (const std::exception&) {
-            throw std::invalid_argument(
-                "constraint version '" + version_id +
-                "' payload is not valid JSON");
+            throw ConstraintValueError(
+                "constraint version " + pycompat::repr_str(version_id) +
+                " payload is not valid JSON");
         }
         return payload;
     };
@@ -703,12 +723,25 @@ Json resolve_constraint_ref(const Json& project,
     }
 
     if (ref.rfind("constraints:", 0) == 0) {
+        // Python: ref.split(":") — group_id = parts[1], version_id =
+        // parts[2] (exactly the second segment, not the remainder).
         const std::string rest = ref.substr(12);
-        const auto first = rest.find(':');
+        std::vector<std::string> parts;
+        parts.push_back("constraints");
+        std::size_t start = 0;
+        while (start <= rest.size()) {
+            const auto colon = rest.find(':', start);
+            if (colon == std::string::npos) {
+                parts.push_back(rest.substr(start));
+                break;
+            }
+            parts.push_back(rest.substr(start, colon - start));
+            start = colon + 1;
+        }
         const std::string group_id =
-            first == std::string::npos ? rest : rest.substr(0, first);
+            parts.size() > 1 ? parts[1] : std::string();
         const std::string version_id =
-            first == std::string::npos ? "" : rest.substr(first + 1);
+            parts.size() > 2 ? parts[2] : std::string();
         if (version_id.empty() || repository == nullptr) {
             Json out = Json::object();
             out["status"] = "unknown";
@@ -720,8 +753,8 @@ Json resolve_constraint_ref(const Json& project,
         if (!latest) {
             Json out = Json::object();
             out["status"] = "unknown";
-            out["detail"] = "constraint group '" + group_id +
-                            "' has no commits";
+            out["detail"] = "constraint group " +
+                            pycompat::repr_str(group_id) + " has no commits";
             return out;
         }
         if (latest->version_id == version_id) {
@@ -740,7 +773,7 @@ Json resolve_constraint_ref(const Json& project,
 
     Json out = Json::object();
     out["status"] = "unknown";
-    out["detail"] = "unrecognized ref '" + ref + "'";
+    out["detail"] = "unrecognized ref " + pycompat::repr_str(ref);
     return out;
 }
 

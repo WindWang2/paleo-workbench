@@ -102,7 +102,8 @@ public:
     // Cancel-aware blocking acquire.
     bool acquire(const CancelToken& token);
     void release();
-    void cancel_all();  // unblock waiting acquirers (runtime shutdown)
+    void cancel_all();  // unblock waiting acquirers (terminal shutdown)
+    void reset();       // re-arm after cancel_all (new plan generation)
 
     [[nodiscard]] unsigned max_concurrent() const noexcept {
         return max_concurrent_;
@@ -112,7 +113,6 @@ public:
 private:
     const unsigned max_concurrent_;
     mutable std::mutex mutex_;
-    std::condition_variable slot_cv_;
     std::condition_variable cancel_cv_;
     unsigned in_flight_ = 0;
     bool cancelled_ = false;

@@ -5,6 +5,8 @@
 
 #include "python_compat.hpp"
 
+#include <pwb/factor_host/canonical_json.hpp>
+
 #include <algorithm>
 #include <unordered_set>
 
@@ -197,18 +199,20 @@ bool FreshnessService::input_is_withdrawn(
     const std::string& input_version_id) const {
     // A downstream product must never stay FRESH on top of a withdrawn
     // input (H1): a purged/trashed upstream is a provenance defect.
-    VersionRecord rec;
+    const VersionRecord* rec = nullptr;
+    VersionRecord resolved_storage;
     const auto it = versions_.find(input_version_id);
     if (it != versions_.end()) {
-        rec = it->second;
+        rec = &it->second;
     } else if (seam_.resolve_version) {
         auto resolved = seam_.resolve_version(input_version_id);
         if (!resolved) return true;  // purged / unknown version
-        rec = *resolved;
+        resolved_storage = std::move(*resolved);
+        rec = &resolved_storage;
     } else {
         return true;
     }
-    return rec.trashed;
+    return rec->trashed;
 }
 
 std::string FreshnessService::checksum_for(const std::string& version_id) const {
@@ -298,9 +302,8 @@ FreshnessService::selection_mismatch(const std::string& input_version_id) const 
         }
     }
 
-    if (context_.is_current_version(input_version_id)) {
-        return std::nullopt;
-    }
+    // Rule 5 (selected, no competing tip) and rule 6 (unknown) both
+    // report no mismatch — never guess STALE.
     return std::nullopt;
 }
 
@@ -494,28 +497,45 @@ FreshnessReport FreshnessService::evaluate_run_impl(
     if (expected_it != context_.expected_identity().end()) {
         const Json& expected = expected_it->second;
         if (expected.contains("generator_version") &&
-            expected.at("generator_version").is_string()) {
+            pycompat::truthy(expected.at("generator_version"))) {
+            // Python compares the raw values ((run.gen or "") != (exp or
+            // "")) — any non-null truthy expectation compares, not just
+            // strings. Canonical encodings give Python == semantics for
+            // the cross-type mismatch cases.
             const std::string exp_gen =
-                expected.at("generator_version").get<std::string>();
-            const std::string run_gen = run.generator_version.value_or("");
+                pwb::factor_host::canonical_encode(
+                    expected.at("generator_version"));
+            const std::string run_gen = run.generator_version
+                                            ? pwb::factor_host::
+                                                  canonical_encode(
+                                                      Json(*run.generator_version))
+                                            : "\"\"";
             if (run_gen != exp_gen) {
                 reasons.push_back(FreshnessReason{
                     FreshnessReasonType::GeneratorChanged, std::nullopt,
                     std::nullopt, run.operation,
                     "run generator=" + pycompat::repr_optional_str(
                                            run.generator_version) +
-                        " expected=" + pycompat::repr_str(exp_gen),
+                        " expected=" +
+                        pycompat::repr_str(expected.at("generator_version")
+                                               .is_string()
+                                               ? expected.at(
+                                                     "generator_version")
+                                                     .get<std::string>()
+                                               : exp_gen),
                     std::nullopt});
             }
         }
         if (expected.contains("input_snapshot_hash") &&
-            expected.at("input_snapshot_hash").is_string() &&
-            !expected.at("input_snapshot_hash")
-                 .get_ref<const std::string&>()
-                 .empty()) {
-            const std::string exp_snap =
-                expected.at("input_snapshot_hash").get<std::string>();
-            if (run.input_snapshot_hash.value_or("") != exp_snap) {
+            pycompat::truthy(expected.at("input_snapshot_hash"))) {
+            const std::string exp_snap = pwb::factor_host::canonical_encode(
+                expected.at("input_snapshot_hash"));
+            const std::string run_snap =
+                run.input_snapshot_hash
+                    ? pwb::factor_host::canonical_encode(
+                          Json(*run.input_snapshot_hash))
+                    : "\"\"";
+            if (run_snap != exp_snap) {
                 reasons.push_back(FreshnessReason{
                     FreshnessReasonType::ParametersChanged, std::nullopt,
                     std::nullopt, run.operation, "input_snapshot_hash mismatch",
@@ -586,14 +606,19 @@ FreshnessReport FreshnessService::evaluate_run_impl(
     std::optional<std::string> integrity_note;
     if (check_integrity_) {
         for (const std::string& out_vid : run.output_version_ids) {
-            std::optional<VersionRecord> ver;
+            const VersionRecord* ver = nullptr;
+            VersionRecord resolved_storage;
             const auto ver_it = versions_.find(out_vid);
             if (ver_it != versions_.end()) {
-                ver = ver_it->second;
+                ver = &ver_it->second;
             } else if (seam_.resolve_version) {
-                ver = seam_.resolve_version(out_vid);
+                auto resolved = seam_.resolve_version(out_vid);
+                if (resolved) {
+                    resolved_storage = std::move(*resolved);
+                    ver = &resolved_storage;
+                }
             }
-            if (!ver) continue;
+            if (ver == nullptr) continue;
             const std::string& path = ver->path;
             if (path.empty()) continue;
             if (seam_.verify_integrity && seam_.file_exists) {
