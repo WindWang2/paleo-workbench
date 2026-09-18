@@ -130,6 +130,14 @@ std::string EditController::roll_back(const std::string& layer_id) {
     QgsVectorLayer* layer = editingLayerOrError(layer_id, &error);
     if (layer == nullptr) return error;
     layer->rollBack(true);
+    // BEGIN CONV-27
+    // rollBack(deleteBuffer=true) ENDS the QGIS edit session (editBuffer is
+    // gone). The domain capture must end with it: leaving captures_ behind
+    // made the next start_editing's idempotence check return early without
+    // ever calling layer->startEditing() again — a stopped layer could
+    // never re-enter editing (surfaced by the digitize tool lifecycle).
+    disconnectCapture(layer_id);
+    // END CONV-27
     return "";
 }
 
@@ -158,6 +166,27 @@ std::string EditController::move_vertex(const std::string& layer_id,
     layer->triggerRepaint();
     return "";
 }
+
+// BEGIN CONV-27
+std::string EditController::delete_selected(const std::string& layer_id,
+                                            int* deleted_count) {
+    if (deleted_count != nullptr) *deleted_count = 0;
+    std::string error;
+    QgsVectorLayer* layer = editingLayerOrError(layer_id, &error);
+    if (layer == nullptr) return error;
+    if (layer->selectedFeatureCount() == 0) {
+        return "no selected features on " + layer_id;
+    }
+    int removed = 0;
+    // deleteSelectedFeatures is itself one undoable edit command macro.
+    if (!layer->deleteSelectedFeatures(&removed)) {
+        return "deleteSelectedFeatures rejected (provider refused)";
+    }
+    if (deleted_count != nullptr) *deleted_count = removed;
+    layer->triggerRepaint();
+    return "";
+}
+// END CONV-27
 
 std::string EditController::add_feature_geojson(const std::string& layer_id,
                                                 const std::string& geojson_feature) {
