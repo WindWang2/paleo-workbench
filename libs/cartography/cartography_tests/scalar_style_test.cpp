@@ -63,6 +63,39 @@ void run_specs() {
         "scalar spec roundtrip");
     check_json_eq(ScalarStyleSpec::from_dict(Json::object()).to_dict(),
                   from["minimal"], "scalar spec minimal");
+    // Invalid payloads raise through validate() (Python __post_init__).
+    auto expect_from_dict_error = [&](const std::string& case_name,
+                                      const Json& payload) {
+        try {
+            ScalarStyleSpec::from_dict(payload);
+            check(false, "scalar from_dict " + case_name + " (no exception)");
+        } catch (const std::invalid_argument& exc) {
+            check(std::string(exc.what()) ==
+                      fixture()["spec_from_dict"][case_name]["message"]
+                          .get<std::string>(),
+                  "scalar from_dict " + case_name + " message");
+        }
+    };
+    expect_from_dict_error("invalid_n_classes",
+                           Json::parse(R"({"n_classes": 999})"));
+    expect_from_dict_error("invalid_mode",
+                           Json::parse(R"({"mode": "steps"})"));
+    expect_from_dict_error("unsorted_explicit",
+                           Json::parse(R"({"classification": "explicit",
+                                           "explicit_breaks": [3.0, 1.0]})"));
+    // Coercion cases.
+    check_json_eq(
+        ScalarStyleSpec::from_dict(Json::parse(
+                                       R"({"classification": "explicit",
+                                           "explicit_breaks": ["0.5", "2"]})"))
+            .to_dict(),
+        from["string_breaks_coerce"], "scalar from_dict string_breaks_coerce");
+    check_json_eq(ScalarStyleSpec::from_dict(Json::parse(R"({"n_classes": "4"})"))
+                      .to_dict(),
+                  from["string_n_classes"], "scalar from_dict string_n_classes");
+    check_json_eq(ScalarStyleSpec::from_dict(Json::parse(R"({"opacity": 1})"))
+                      .to_dict(),
+                  from["int_opacity"], "scalar from_dict int_opacity");
 }
 
 void expect_invalid(const std::string& what, const Json& want,

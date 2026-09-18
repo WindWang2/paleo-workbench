@@ -32,14 +32,16 @@ ComposerElement make_element(const char* id, const char* element_type,
 TemplatePage TemplatePage::a4(const std::string& paper_size,
                               const std::string& orientation) {
     // templates.py: is_landscape = orientation.lower() == "landscape";
-    // landscape 297x210, otherwise 210x297.
+    // landscape 297x210, otherwise 210x297. The VERBATIM string persists
+    // (templates.py:53 orientation=orientation) — only the branch tests
+    // the lowercased form.
     TemplatePage page;
     page.paper_size = paper_size;
+    page.orientation = orientation;
     std::string lowered = orientation;
     for (char& c : lowered) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
     }
-    page.orientation = lowered;
     if (lowered == "landscape") {
         page.width_mm = 297.0;
         page.height_mm = 210.0;

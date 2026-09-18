@@ -8,12 +8,14 @@ style libraries, template factories, scalar classification). This module is
 the only seam that dispatches to it:
 
 * ``HAS_CPP`` is True only when ``import pwb_cartography`` succeeds.
-* Every entry point mirrors the production Python surface
+* Most entry points mirror the production Python surface one-to-one
   (``mapping.color_ramps`` / ``mapping.geological_symbols`` /
   ``mapping.geological_pipeline.templates`` / ``mapping.scalar_style`` /
   ``mapping.map_render_backend._flatten_qgis_style``); when the extension is
-  absent the caller falls back to those modules, so behavior is identical
-  with and without the extension.
+  absent the caller falls back to those modules. One disclosed difference:
+  ``list_templates`` returns the full five-factory C++ catalog but only the
+  Python-parity factor entry without the extension (the C++ library owns
+  the facies/prediction/constraint/comprehensive vocabulary, D-4).
 * The C++ kernels are the product path for the C++ runtime; this facade
   exists so the Python legacy surface can be accelerated without changing
   any contract. Registry errors propagate with the exact frozen messages

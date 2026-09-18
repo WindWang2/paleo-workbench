@@ -142,10 +142,10 @@ TextStyle TextStyle::from_dict(const Json& data) {
     auto double_key = [&](const char* key, double& target) {
         auto it = data.find(key);
         if (it == data.end() || it->is_null()) return;
-        // Python try/except float(): conversion failures keep the default.
+        // Python try/except float(): conversion failures keep the default;
+        // NaN parses and is applied verbatim (no filtering).
         try {
-            double parsed = json_scalar_to_double(*it);
-            if (!std::isnan(parsed)) target = parsed;
+            target = json_scalar_to_double(*it);
         } catch (const std::exception&) {
         }
     };
@@ -230,13 +230,15 @@ VectorStyle VectorStyle::from_dict(const Json& data) {
     auto get = [&data](const char* key) {
         return data.find(key);
     };
-    // fill/stroke: applied when truthy (non-empty strings).
+    // fill/stroke: str(v) when truthy (non-empty strings; numbers coerce
+    // through str() like Python and parse as gray at render time).
     for (const char* key : {"fill", "stroke"}) {
         auto it = get(key);
-        if (it != data.end() && it->is_string() &&
-            !it->get<std::string>().empty()) {
-            if (std::string(key) == "fill") style.fill = it->get<std::string>();
-            else style.stroke = it->get<std::string>();
+        if (it == data.end() || it->is_null()) continue;
+        const std::string value = json_scalar_to_str(*it);
+        if (!value.empty()) {
+            if (std::string(key) == "fill") style.fill = value;
+            else style.stroke = value;
         }
     }
     // stroke_width / marker_size: max(0.0, float(v)); conversion failures

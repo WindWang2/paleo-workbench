@@ -71,6 +71,20 @@ void run_factor_parity() {
             geological_factor_map_template(portrait)),
         want["factor_portrait"], "templates factor_portrait");
 
+    // Orientation lowercases for the branch but persists verbatim.
+    TemplateMapInput upper_map = no_title;
+    upper_map.map_document_id = "map_upper";
+    TemplateRequest upper;
+    upper.template_name = "factor_map";
+    upper.map = upper_map;
+    upper.factor_name = "grade";
+    upper.orientation = "Portrait";
+    check_json_eq(
+        pwb::mapping_document::dump_composition(
+            geological_factor_map_template(upper)),
+        want["factor_uppercase_orientation"],
+        "templates factor_uppercase_orientation");
+
     TemplateMapInput zero = no_title;
     zero.map_document_id = "map_zero";
     zero.extent = {7.0, 0.0, 7.0, 4.0};

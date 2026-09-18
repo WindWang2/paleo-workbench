@@ -177,6 +177,95 @@
     ],
     "metadata": {}
   },
+  "factor_uppercase_orientation": {
+    "id": "comp_map_upper",
+    "title": "Paleogeographic Map",
+    "paper_size": "A4",
+    "orientation": "Portrait",
+    "width_mm": 210.0,
+    "height_mm": 297.0,
+    "dpi": 300.0,
+    "schema_version": 2,
+    "elements": [
+      {
+        "id": "elem_main_map",
+        "element_type": "main_map",
+        "x_mm": 12.0,
+        "y_mm": 24.0,
+        "width_mm": 136.0,
+        "height_mm": 263.0,
+        "z_index": 1,
+        "visible": true,
+        "locked": false,
+        "properties": {
+          "map_document": {
+            "__ref__": "map_document",
+            "id": "map_upper",
+            "layer_count": 0
+          },
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": "elem_title",
+        "element_type": "title",
+        "x_mm": 12.0,
+        "y_mm": 10.0,
+        "width_mm": 186.0,
+        "height_mm": 14.0,
+        "z_index": 10,
+        "visible": true,
+        "locked": false,
+        "properties": {
+          "text": "Paleogeographic Map"
+        }
+      },
+      {
+        "id": "elem_legend",
+        "element_type": "legend",
+        "x_mm": 153.0,
+        "y_mm": 24.0,
+        "width_mm": 45.0,
+        "height_mm": 80.0,
+        "z_index": 10,
+        "visible": true,
+        "locked": false,
+        "properties": {}
+      },
+      {
+        "id": "elem_north_arrow",
+        "element_type": "north_arrow",
+        "x_mm": 17.0,
+        "y_mm": 29.0,
+        "width_mm": 10.0,
+        "height_mm": 14.0,
+        "z_index": 15,
+        "visible": true,
+        "locked": false,
+        "properties": {}
+      },
+      {
+        "id": "elem_scale_bar",
+        "element_type": "scale_bar",
+        "x_mm": 18.0,
+        "y_mm": 275.0,
+        "width_mm": 30.0,
+        "height_mm": 8.0,
+        "z_index": 15,
+        "visible": true,
+        "locked": false,
+        "properties": {
+          "length_km": 10
+        }
+      }
+    ],
+    "metadata": {}
+  },
   "factor_portrait": {
     "id": "comp_map_beta",
     "title": "Paleogeographic Map",

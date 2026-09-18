@@ -634,6 +634,10 @@ const GeologicalSymbolDef& symbol_by_id(const std::string& symbol_id) {
 
 std::vector<const GeologicalSymbolDef*> symbols_for_role(
     const std::string& role) {
+    // Python LayerRole(role) raises ValueError for unknown strings.
+    if (!is_known_layer_role(role)) {
+        throw std::invalid_argument("'" + role + "' is not a LayerRole");
+    }
     std::vector<const GeologicalSymbolDef*> matches;
     for (const auto& entry : geological_symbols()) {
         const auto& roles = entry.second.applicable_roles;
@@ -734,6 +738,10 @@ Json legacy_style_for_symbol(const std::string& symbol_id,
                         "' is not a valid MarkerSymbol");
                 }
                 style.marker = *parsed;
+            } else if (key == "labels") {
+                // Dataclasses.replace accepts every field; labels rebuilds
+                // through the tolerant TextStyle parser.
+                style.labels = TextStyle::from_dict(value);
             } else {
                 throw std::invalid_argument(
                     "legacy_style_for_symbol() got an unexpected keyword "

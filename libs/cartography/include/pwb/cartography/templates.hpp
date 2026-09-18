@@ -124,8 +124,8 @@ Composition comprehensive_map_template(const TemplateRequest& request);
 
 // ---- product API -----------------------------------------------------------------
 
-// The template catalog: [{"name", "title", "description", "elements":
-// [element ids]}] in registry order (5 standard maps).
+// The template catalog: [{"name", "title", "description"}] in registry
+// order (5 standard maps).
 Json template_catalog();
 
 // Resolve a catalog name to its factory; throws std::out_of_range for

@@ -138,24 +138,17 @@ void run_from_dict() {
 }
 
 void run_hex_parse() {
-    const Json& want = fixture()["hex_parse"];
-    for (const Json& entry : want) {
-        const std::string input = entry["input"].get<std::string>();
-        // Rebuild a probe ramp with the exact stop list, then sample at the
-        // same fractional position (stops include every malformed input, so
-        // this pins _hex_to_rgb + the gray fallback end-to-end).
-        std::vector<ColorStop> stops;
-        const Json& want_entries = fixture()["hex_parse"];
-        for (std::size_t i = 0; i + 1 < want_entries.size(); ++i) {
-            stops.push_back(ColorStop{
-                static_cast<double>(i) / static_cast<double>(want_entries.size()),
-                want_entries[i]["input"].get<std::string>()});
-        }
-        stops.push_back(ColorStop{1.0, "#440154"});
-        ColorRamp probe{"probe", stops};
-        check(probe.evaluate(0.0) == entry["sampled"].get<std::string>(),
-              "color_ramps.hex " + input);
-        break;  // first entry pins the parse path; others covered by grid
+    // _hex_to_rgb frozen DIRECTLY per input (Python int(x,16) semantics:
+    // multi-'#', optional signs, whitespace strip, gray fallback).
+    const Json& want_entries = fixture()["hex_parse"];
+    for (std::size_t i = 0; i < want_entries.size(); ++i) {
+        const auto got =
+            hex_to_rgba(want_entries[i]["input"].get<std::string>());
+        const auto want = want_entries[i]["rgba"];
+        check(got[0] == want[0].get<int>() && got[1] == want[1].get<int>() &&
+                  got[2] == want[2].get<int>() && got[3] == want[3].get<int>(),
+              "color_ramps.hex [" + std::to_string(i) + "] " +
+                  want_entries[i]["input"].get<std::string>());
     }
 }
 

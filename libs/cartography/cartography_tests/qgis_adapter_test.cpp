@@ -93,9 +93,16 @@ void run_symbol_renderer_spec() {
           "symbol spec fault kind");
     check(categorized["classification_field"] == "fault_type",
           "symbol spec fault field");
-    check(categorized["rules"].size() == 5, "symbol spec fault rules");
-    check(categorized["rules"][0]["stroke"] == "#c0392b",
-          "symbol spec fault rule stroke");
+    // The bridge's categorized path consumes classification_field +
+    // categories triples (A7): the fallback palette rides verbatim.
+    check(categorized["categories"].size() == 5,
+          "symbol spec fault categories");
+    check(categorized["categories"][0]["value"] == "normal",
+          "symbol spec fault category value");
+    check(categorized["categories"][1]["color"] == "#a93226",
+          "symbol spec fault category color");
+    check(categorized["legacy_style"]["categories"].size() == 5,
+          "symbol spec fault fallback categories");
     const Json single = symbol_renderer_spec("shoreline_v2");
     check(single["renderer_kind"] == "single", "symbol spec shoreline kind");
     check(single["legacy_style"]["stroke"] == "#1f78b4",
@@ -171,6 +178,25 @@ void run_payload_model() {
           "qgis payload from null");
     check(!QgisStylePayload::from_dict(Json::object()).has_value(),
           "qgis payload from empty");
+    // Blank renderer_xml payloads are invalid -> None (Python from_dict).
+    check(!QgisStylePayload::from_dict(Json::parse(R"({"renderer_xml": "   "})"))
+               .has_value(),
+          "qgis payload blank -> None");
+    // Foreign schema versions raise (Python __post_init__ ValueError).
+    try {
+        QgisStylePayload::from_dict(Json::parse(
+            R"({"renderer_xml": "<r/>", "schema_version": 2})"));
+        check(false, "qgis payload bad schema (no exception)");
+    } catch (const std::invalid_argument& exc) {
+        check(std::string(exc.what()) ==
+                  "unsupported qgis_style schema version 2",
+              "qgis payload bad schema message");
+    }
+    // revision clamps at 1 (Python: max(1, int(revision or 1))).
+    const auto clamped = QgisStylePayload::from_dict(Json::parse(
+        R"({"renderer_xml": "<r/>", "revision": 0})"));
+    check(clamped.has_value() && clamped->revision == 1,
+          "qgis payload revision clamp");
     try {
         QgisStylePayload blank;
         blank.renderer_xml = "   ";

@@ -15,7 +15,8 @@
 //   * flatten_qgis_style       — the persisted-style promotion + unit
 //     conversions of map_render_backend._flatten_qgis_style (label size
 //     px -> pt at 72/96, halo width px -> buffer mm at 25.4/96,
-//     buffer_color fallback from halo_color);
+//     buffer_color fallback from halo_color); non-object inputs raise
+//     (Python dict() construction would);
 //   * QgisStylePayload         — the versioned authoritative payload model
 //     (qgis_style.QgisStylePayload) with revision bumping;
 //   * symbol_renderer_spec     — a geological symbol's renderer_hint as a
@@ -83,8 +84,9 @@ struct QgisStylePayload {
     long long revision = 1;
     long long schema_version = kQgisStyleSchemaVersion;
 
-    // Throws std::invalid_argument when renderer_xml is blank (Python
-    // __post_init__ message) or revision < 1.
+    // Throws std::invalid_argument with the Python __post_init__ messages
+    // when renderer_xml is blank or schema_version is not the current one
+    // (revision itself is not validated here — Python clamps it on load).
     void validate() const;
     QgisStylePayload bumped() const;
     Json to_dict() const;

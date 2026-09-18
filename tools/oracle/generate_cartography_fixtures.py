@@ -176,17 +176,15 @@ def case_color_ramps() -> dict:
         "uppercase_lookup": cr.get_color_ramp("VIRIDIS").to_dict(),
     }
 
-    # hex parsing edges (via a dedicated probe ramp).
+    # hex parsing edges: freeze _hex_to_rgb DIRECTLY per input (the probe
+    # at exact stop positions would return raw strings without parsing).
     hexes = [
         "#440154", "440154", "#440154ff", "#abc", "abc", "#ab", "abcdefgh",
         "", "#", "#GGGGGG", "  #3b528b  ", "#21918C", "#5EC96280",
+        "##440154", "+44015", "44015f", "#-400000",
     ]
-    probe = cr.ColorRamp(name="probe", stops=tuple(
-        cr.ColorStop(0.0, h) for h in hexes
-    ) + (cr.ColorStop(1.0, "#440154"),))
     cases["hex_parse"] = [
-        {"input": h, "sampled": probe.evaluate(i / (len(hexes)))}
-        for i, h in enumerate(hexes)
+        {"input": h, "rgba": list(cr._hex_to_rgb(h))} for h in hexes
     ]
 
     # register + list ordering semantics.
@@ -315,6 +313,26 @@ def case_scalar_style() -> dict:
             ).to_dict()
         ).to_dict(),
         "minimal": ss.ScalarStyleSpec.from_dict({}).to_dict(),
+        # Python from_dict constructs through __post_init__: invalid
+        # payloads raise (R3-5 guard against silent color permutation).
+        "invalid_n_classes": error_of(
+            ss.ScalarStyleSpec.from_dict, {"n_classes": 999}
+        ),
+        "invalid_mode": error_of(
+            ss.ScalarStyleSpec.from_dict, {"mode": "steps"}
+        ),
+        "unsorted_explicit": error_of(
+            ss.ScalarStyleSpec.from_dict,
+            {"classification": "explicit",
+             "explicit_breaks": [3.0, 1.0]},
+        ),
+        "string_breaks_coerce": ss.ScalarStyleSpec.from_dict(
+            {"classification": "explicit", "explicit_breaks": ["0.5", "2"]}
+        ).to_dict(),
+        "string_n_classes": ss.ScalarStyleSpec.from_dict(
+            {"n_classes": "4"}
+        ).to_dict(),
+        "int_opacity": ss.ScalarStyleSpec.from_dict({"opacity": 1}).to_dict(),
     }
 
     validation = {}
@@ -586,6 +604,13 @@ def case_templates() -> dict:
         map_doc, title="Custom Title", factor_name="permeability", unit="mD"
     )
     cases["factor_titled"] = titled.to_dict()
+
+    # Orientation lowercases for the branch but persists verbatim.
+    upper = tp.create_geological_factor_map_template(
+        MapDocument(id="map_upper"), orientation="Portrait",
+        factor_name="grade",
+    )
+    cases["factor_uppercase_orientation"] = upper.to_dict()
 
     map_doc_no_title = MapDocument(id="map_beta")
     portrait = tp.create_geological_factor_map_template(

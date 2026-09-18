@@ -18,6 +18,7 @@ map templates, and the C++ adapter toward the QGIS render bridge.
 | `paleo_workbench/mapping/geological_pipeline/templates.py` | 132 | `create_geological_factor_map_template` | indirect (`test_geological_mapping_pipeline`) | composition document model ported (CONV-02); builder missing | partial |
 | `paleo_workbench/mapping/renderers.py` | 802 | SVG fallback renderers + `RendererRegistry` | fallback-path suites | intentionally NOT ported (QGIS backend is the C++ path) | Python-only (kept legacy) |
 | `paleo_workbench/mapping/facies_patterns.py` | 111 | pattern-id table | `tests/test_facies_patterns.py` | table frozen into symbol registry metadata | Python-only (kept legacy) |
+| `paleo_workbench/mapping/map_render_backend.py` (`_flatten_qgis_style` only) | 2493-2521 | qgis_style payload promotion + px→pt / halo→buffer conversions | flatten cases frozen in `flatten_qgis_oracle.json` | ported as `pwb::cartography::flatten_qgis_style` (+ dispatch seam `cartography_native.flatten_qgis_style`) | partial → C++ (this branch); the rest of the module stays out of scope |
 | `paleo_workbench/mapping/facies_renderer_xml.py` | 179 | hand-rolled categorized SVGFill XML | bridge-verified tests | out of scope here (bridge owns QGIS XML authoring) | Python-only (kept legacy) |
 | `paleo_workbench/mapping/facies_taxonomy.py` | 215 | 3-level taxonomy tree | `tests/test_facies_taxonomy.py` (15) | separate Q1 surface, not this branch | Python-only (kept legacy) |
 
@@ -89,3 +90,19 @@ This Linux box has no repo venv; a dedicated interpreter was created at
 network install, used only to run `tools/oracle/generate_cartography_fixtures.py`
 against the real modules. The committed fixtures are the oracle; the
 generator is reproducible from any environment that can import the modules.
+
+## Known documented deviations (all deliberate, none silent)
+
+- `style_dict_revision`: stable FNV-1a-64 instead of Python's process-salted
+  `hash()` (D-6) — session-local change token, never persisted semantically.
+- `ColorRamp` hex parsing: the C++ group parser accepts optional signs and
+  multi-`#` like `int(x,16)`, but rejects underscore separators inside a
+  2-char group (both Python paths raise for those forms in practice).
+- NaN round-trips: Python stdlib JSON emits `NaN` literals; nlohmann rejects
+  them at parse and writes `null` — a NaN-carrying persisted spec is
+  unreadable by the C++ JSON layer (both sides raise, in kind).
+- `legacy_style_for_symbol` overrides cover the scalar style fields plus
+  `labels`; `categories`/`fill_patterns` keyword overrides are not exposed.
+- Review follow-ups vs `cpp-build-packaging-hardening` (open PR): register
+  `PWB_BUILD_CONV_27` in that branch's `cmake/PwbFeatures.cmake` feature
+  table when packaging lands.

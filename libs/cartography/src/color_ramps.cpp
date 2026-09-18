@@ -128,7 +128,8 @@ std::array<int, 4> hex_to_rgba(const std::string& hex_color) {
         --end;
     }
     s = hex_color.substr(start, end - start);
-    if (!s.empty() && s.front() == '#') s.erase(s.begin());
+    // Python lstrip("#") strips every leading '#'.
+    while (!s.empty() && s.front() == '#') s.erase(s.begin());
 
     static constexpr int kGray[4] = {128, 128, 128, 255};
     auto groups = [&s]() -> std::array<int, 4> {
@@ -142,18 +143,35 @@ std::array<int, 4> hex_to_rgba(const std::string& hex_color) {
         }
         // Parse the 2-digit channel groups; any invalid character falls back
         // to gray exactly like the Python int(..., 16) ValueError path.
+        // int(x, 16) accepts an optional leading sign per NON-OVERLAPPING
+        // slice: s[0:2]="+4" -> 4, s[2:4]="40" -> 64 (a sign + single digit
+        // is a valid slice; digits never bleed across slice bounds).
         auto parse_group = [&s](std::size_t digit_index,
                                 std::size_t group_len) -> int {
+            auto hex_digit_at = [&s](std::size_t index) -> int {
+                if (index >= s.size()) return -1;
+                return hex_val(s[index]);
+            };
             if (group_len == 1) {
                 // 3-digit form: double each character.
-                int hi = hex_val(s[digit_index]);
+                int hi = hex_digit_at(digit_index);
                 if (hi < 0) return -1;
                 return hi * 16 + hi;
             }
-            int hi = hex_val(s[digit_index]);
-            int lo = hex_val(s[digit_index + 1]);
-            if (hi < 0 || lo < 0) return -1;
-            return hi * 16 + lo;
+            std::size_t pos = digit_index;
+            const std::size_t end = digit_index + group_len;
+            int sign = 1;
+            if (pos < end && pos < s.size() &&
+                (s[pos] == '+' || s[pos] == '-')) {
+                if (s[pos] == '-') sign = -1;
+                ++pos;
+            }
+            const int hi = hex_digit_at(pos);
+            if (hi < 0) return -1;
+            if (pos + 1 >= end) return sign * hi;  // sign + single digit
+            const int lo = hex_digit_at(pos + 1);
+            if (lo < 0) return -1;
+            return sign * (hi * 16 + lo);
         };
         int r, g, b, a;
         if (rgb_len == 3) {
@@ -200,6 +218,16 @@ bool py_isclose(double a, double b, double rel_tol, double abs_tol) {
 
 std::string ColorRamp::evaluate(double t) const {
     if (!std::isfinite(t)) return nodata_color;
+    if (stops.empty()) {
+        // Python __post_init__ substitutes black -> white; aggregate init
+        // bypasses it, so guard here (const method, local copy).
+        return ColorRamp{name, {}, nodata_color}
+            .evaluate_clamped(t);
+    }
+    return evaluate_clamped(t);
+}
+
+std::string ColorRamp::evaluate_clamped(double t) const {
     t = std::max(0.0, std::min(1.0, t));
     if (stops.size() == 1) return stops[0].color;
 
@@ -264,21 +292,35 @@ Json ColorRamp::to_dict() const {
 
 ColorRamp ColorRamp::from_dict(const Json& data) {
     if (!data.is_object()) return get_color_ramp("viridis");
+    // str(x) coercion mirroring Python's str() for scalar JSON leaves.
+    auto py_str = [](const Json& value) -> std::string {
+        if (value.is_string()) return value.get<std::string>();
+        if (value.is_boolean()) return value.get<bool>() ? "True" : "False";
+        if (value.is_number_integer()) {
+            return std::to_string(value.get<long long>());
+        }
+        if (value.is_number_float()) {
+            double v = value.get<double>();
+            char buf[40];
+            std::snprintf(buf, sizeof(buf), "%g", v);
+            return buf;
+        }
+        return value.dump();
+    };
     ColorRamp ramp;
-    // name = str(data.get("name") or "custom") — falsy name falls back.
+    // name = str(data.get("name") or "custom") — ANY falsy value (None,
+    // "", 0, 0.0, False) falls back to "custom".
     if (data.contains("name") && !data["name"].is_null()) {
         const Json& raw = data["name"];
-        std::string name;
-        if (raw.is_string()) name = raw.get<std::string>();
-        else if (raw.is_number_integer()) name = std::to_string(raw.get<long long>());
-        else if (raw.is_number_float()) name = [&] {
-            double v = raw.get<double>();
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), "%g", v);
-            return std::string(buf);
-        }();
-        else if (raw.is_boolean()) name = raw.get<bool>() ? "True" : "False";
-        ramp.name = name.empty() ? "custom" : name;
+        const bool falsy = raw.is_string()
+                               ? raw.get<std::string>().empty()
+                           : raw.is_boolean() ? !raw.get<bool>()
+                           : raw.is_number_integer()
+                               ? raw.get<long long>() == 0
+                           : raw.is_number_float()
+                               ? raw.get<double>() == 0.0
+                               : false;
+        ramp.name = falsy ? "custom" : py_str(raw);
     } else {
         ramp.name = "custom";
     }
@@ -286,26 +328,50 @@ ColorRamp ColorRamp::from_dict(const Json& data) {
         for (const Json& item : data["stops"]) {
             if (!item.is_object()) continue;  // non-Mapping entries skipped
             ColorStop stop;
-            double position = 0.0;
-            if (item.contains("position") && !item["position"].is_null()) {
-                if (item["position"].is_number()) {
-                    position = item["position"].is_number_integer()
-                                   ? static_cast<double>(item["position"].get<long long>())
-                                   : item["position"].get<double>();
-                } else {
-                    // Python float(<str>) may succeed; mirror the numeric
-                    // subset and treat non-numeric as the ValueError path.
+            auto position_it = item.find("position");
+            if (position_it != item.end()) {
+                // float(None) raises TypeError; float(<str>) may succeed.
+                if (position_it->is_null()) {
                     throw std::invalid_argument(
-                        "could not convert string to float: " +
-                        item["position"].dump());
+                        "float() argument must be a number, not 'NoneType'");
+                }
+                if (position_it->is_number()) {
+                    stop.position = position_it->is_number_integer()
+                                        ? static_cast<double>(
+                                              position_it->get<long long>())
+                                        : position_it->get<double>();
+                } else if (position_it->is_string()) {
+                    const std::string text =
+                        position_it->get<std::string>();
+                    std::size_t consumed = 0;
+                    try {
+                        double parsed = std::stod(text, &consumed);
+                        while (consumed < text.size() &&
+                               std::isspace(
+                                   static_cast<unsigned char>(
+                                       text[consumed]))) {
+                            ++consumed;
+                        }
+                        if (consumed != text.size()) {
+                            throw std::invalid_argument(text);
+                        }
+                        stop.position = parsed;
+                    } catch (const std::invalid_argument&) {
+                        throw std::invalid_argument(
+                            "could not convert string to float: " + text);
+                    } catch (const std::out_of_range&) {
+                        throw std::invalid_argument(
+                            "could not convert string to float: " + text);
+                    }
+                } else {
+                    throw std::invalid_argument(
+                        "float() argument must be a number");
                 }
             }
-            stop.position = position;
-            if (item.contains("color") && !item["color"].is_null()) {
-                if (!item["color"].is_string()) {
-                    throw std::invalid_argument("stop color must be a string");
-                }
-                stop.color = item["color"].get<std::string>();
+            auto color_it = item.find("color");
+            if (color_it != item.end() && !color_it->is_null()) {
+                stop.color = py_str(*color_it);  // str(16711680) is a valid
+                                                 // 8-digit hex string
             } else {
                 stop.color = "#000000";
             }
@@ -313,10 +379,7 @@ ColorRamp ColorRamp::from_dict(const Json& data) {
         }
     }
     if (data.contains("nodata_color") && !data["nodata_color"].is_null()) {
-        if (!data["nodata_color"].is_string()) {
-            throw std::invalid_argument("nodata_color must be a string");
-        }
-        ramp.nodata_color = data["nodata_color"].get<std::string>();
+        ramp.nodata_color = py_str(data["nodata_color"]);
     }
     ramp.apply_defaults();
     return ramp;

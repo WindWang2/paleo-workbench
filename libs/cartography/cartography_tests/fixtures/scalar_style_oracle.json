@@ -74,6 +74,58 @@
       "unit_label": "",
       "colorbar_title": "",
       "colorbar_decimals": 2
+    },
+    "invalid_n_classes": {
+      "error": "ValueError",
+      "message": "n_classes must be <= 256"
+    },
+    "invalid_mode": {
+      "error": "ValueError",
+      "message": "mode must be one of ('continuous', 'classified'), got 'steps'"
+    },
+    "unsorted_explicit": {
+      "error": "ValueError",
+      "message": "explicit_breaks must be strictly increasing"
+    },
+    "string_breaks_coerce": {
+      "ramp_name": "viridis",
+      "mode": "continuous",
+      "classification": "explicit",
+      "n_classes": 5,
+      "reverse": false,
+      "opacity": 1.0,
+      "nodata_transparent": true,
+      "unit_label": "",
+      "colorbar_title": "",
+      "colorbar_decimals": 2,
+      "explicit_breaks": [
+        0.5,
+        2.0
+      ]
+    },
+    "string_n_classes": {
+      "ramp_name": "viridis",
+      "mode": "continuous",
+      "classification": "equal_interval",
+      "n_classes": 4,
+      "reverse": false,
+      "opacity": 1.0,
+      "nodata_transparent": true,
+      "unit_label": "",
+      "colorbar_title": "",
+      "colorbar_decimals": 2
+    },
+    "int_opacity": {
+      "ramp_name": "viridis",
+      "mode": "continuous",
+      "classification": "equal_interval",
+      "n_classes": 5,
+      "reverse": false,
+      "opacity": 1.0,
+      "nodata_transparent": true,
+      "unit_label": "",
+      "colorbar_title": "",
+      "colorbar_decimals": 2
     }
   },
   "validation_errors": {

@@ -44,6 +44,13 @@ struct ColorRamp {
 
     // Sample the ramp at normalized t in [0, 1]; non-finite -> nodata color.
     std::string evaluate(double t) const;
+
+  private:
+    // The Python-body of evaluate (clamping + interpolation); evaluate()
+    // applies the empty-stops default first.
+    std::string evaluate_clamped(double t) const;
+
+  public:
     // Sample by data value and bounds; non-finite inputs -> nodata color.
     std::string evaluate_value(double value, double vmin, double vmax) const;
     // RGBA LUT (count entries, each {r,g,b,a} in [0,255]); count < 2 -> 2.

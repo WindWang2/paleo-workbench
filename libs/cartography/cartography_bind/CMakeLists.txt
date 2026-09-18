@@ -19,6 +19,19 @@ if(PWB_BUILD_CONV_27_BIND)
             "(vendored under libs/mapping_bind/_vendor/pybind11/include)")
     endif()
 
+    # Module __version__ metadata, parsed from the package version
+    # (pyproject) — same convention as CONV-20.
+    set(_conv27_pyproject
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../pyproject.toml")
+    set(PWB_CARTOGRAPHY_BIND_VERSION "0.0.0-dev")
+    if(EXISTS "${_conv27_pyproject}")
+        file(STRINGS "${_conv27_pyproject}" _conv27_ver_line
+            REGEX "^version[ ]=" LIMIT_COUNT 1)
+        if(_conv27_ver_line MATCHES "version[ ]=[ ]\"([^\"]+)\"")
+            set(PWB_CARTOGRAPHY_BIND_VERSION "${CMAKE_MATCH_1}")
+        endif()
+    endif()
+
     # The static libs were created without PIC; linking them into a MODULE
     # .so requires PIC objects (same build-system-only change as CONV-20
     # decision D15 — no library source is touched).
@@ -40,6 +53,9 @@ if(PWB_BUILD_CONV_27_BIND)
     target_compile_features(cartography_bind_module PRIVATE cxx_std_20)
     target_compile_definitions(cartography_bind_module PRIVATE
         PWB_CARTOGRAPHY_BIND_VERSION="${PWB_CARTOGRAPHY_BIND_VERSION}")
+    # Keep the version visible to the guard in cartography_bind.cpp.
+    unset(_conv27_pyproject)
+    unset(_conv27_ver_line)
     target_link_libraries(cartography_bind_module PRIVATE
         Pwb::Cartography Pwb::MappingDocument)
 endif()

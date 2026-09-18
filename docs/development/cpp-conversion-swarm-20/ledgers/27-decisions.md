@@ -44,8 +44,8 @@ cartography style/symbol/ramp/template surfaces.
   (`i*step+start`, forced endpoint), `np.quantile` linear `_lerp` with the
   `t>=0.5` branch, and Fisher-Jenks DP reproduce numpy's **pairwise
   summation** (blocksize 128, unroll 8, recursive split) so frozen oracle
-  cases match bit-for-bit. Oracle caps DP cases at ≤300 sampled values to
-  keep the O(k·n²)-per-class runtime small.
+  cases match bit-for-bit. Frozen DP cases stay small (≤1500 drawn samples,
+  k≤4) so the O(k·n²)-per-class DP keeps the suite fast.
 - **D-3 Deterministic sample draw = vendored PCG64 + numpy shuffle.**
   `natural_breaks` with >1000 finite values needs
   `default_rng(0).choice(..., replace=False)`. Implemented as numpy-compatible
@@ -60,8 +60,8 @@ cartography style/symbol/ramp/template surfaces.
   and five factories (factor/facies/prediction/constraint/comprehensive).
   The factor factory is Python-parity (oracle-frozen); the other four are
   C++-authored compositions from the same components (no Python counterpart —
-  their tests assert geometry invariants + JSON round-trip, and their fixtures
-  are marked `cpp_golden`).
+  their tests assert geometry invariants + a parse/dump round-trip; the
+  catalog lives only in the C++ library and the bind facade).
 - **D-5 The QGIS adapter emits bridge payloads, not QGIS objects.**
   `qgis_adapter.hpp` produces (a) the scalar renderer payload JSON consumed by
   the existing C++ `build_scalar_renderer_xml`, (b) a `VectorLayerSpec`-shaped
@@ -82,14 +82,17 @@ cartography style/symbol/ramp/template surfaces.
   function-local static guarded by a mutex (matches Python's module-global
   registry with GIL-free C++ semantics). All other registries are immutable
   after first use.
-- **D-8 Product API = `cartography.hpp` facade.** `list_color_ramps`,
-  `resolve_color_ramp`, `register_color_ramp`, `list_symbols`,
-  `symbol_by_id`, `symbols_for_role`, `validate_binding`, `style_presets`,
-  `apply_style_entry` (data-level apply: style payload + binding + effective
-  opacity — no QgsMapLayer dependency), `validate_style`,
-  `list_templates`, `instantiate_template`. `apply_style_entry` mirrors
-  Python `apply_style_to_layer` semantics (`min(layer_opacity, opacity_hint)`,
-  binding under `style_binding`).
+- **D-8 Product API = module surface.** Ramps resolve through
+  `color_ramps.hpp` (`get_color_ramp` / `list_color_ramps` /
+  `register_color_ramp`), symbols through `geological_symbols.hpp`
+  (`geological_symbols` / `symbol_by_id` / `symbols_for_role` /
+  `validate_binding` / `binding_record`), templates through
+  `templates.hpp` (`template_catalog` / `instantiate_template`);
+  `cartography.hpp` adds `validate_style`, `apply_style` (preset or V1
+  library entry; data-level apply: style payload + binding + effective
+  opacity — no QgsMapLayer dependency) and `style_preset_catalog`.
+  `apply_style_entry` mirrors Python `apply_style_to_layer` semantics
+  (`min(layer_opacity, opacity_hint)`, binding under `style_binding`).
 - **D-9 Python classification.** The ported modules get a docstring note
   "C++ port: libs/cartography (CONV-27); this module remains as oracle and
   legacy fallback" — product C++ code never imports them (the only Python

@@ -41,7 +41,14 @@ StyleEntry StyleEntry::from_dict(const Json& data) {
     }
     auto label_it = data.find("legend_label");
     if (label_it != data.end() && !label_it->is_null()) {
-        entry.legend_label = label_it->get<std::string>();
+        // Python str(...) coerces scalar leaves.
+        if (label_it->is_string()) {
+            entry.legend_label = label_it->get<std::string>();
+        } else if (label_it->is_boolean()) {
+            entry.legend_label = label_it->get<bool>() ? "True" : "False";
+        } else if (label_it->is_number_integer()) {
+            entry.legend_label = std::to_string(label_it->get<long long>());
+        }
     }
     auto hint_it = data.find("opacity_hint");
     if (hint_it != data.end() && hint_it->is_number()) {

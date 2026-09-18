@@ -113,60 +113,128 @@ Json ScalarStyleSpec::to_dict() const {
 ScalarStyleSpec ScalarStyleSpec::from_dict(const Json& data) {
     ScalarStyleSpec spec;
     if (!data.is_object()) return spec;
+    // str()/float()/int()/bool() coercions mirroring the Python from_dict.
+    auto py_str = [](const Json& value) -> std::string {
+        if (value.is_string()) return value.get<std::string>();
+        if (value.is_boolean()) return value.get<bool>() ? "True" : "False";
+        if (value.is_number_integer()) {
+            return std::to_string(value.get<long long>());
+        }
+        if (value.is_number_float()) {
+            char buf[40];
+            std::snprintf(buf, sizeof(buf), "%g", value.get<double>());
+            return buf;
+        }
+        return value.dump();
+    };
+    auto py_double = [](const Json& value) -> double {
+        if (value.is_number()) {
+            return value.is_number_integer()
+                       ? static_cast<double>(value.get<long long>())
+                       : value.get<double>();
+        }
+        if (value.is_boolean()) return value.get<bool>() ? 1.0 : 0.0;
+        if (value.is_string()) {
+            const std::string text = value.get<std::string>();
+            std::size_t consumed = 0;
+            double parsed = 0.0;
+            try {
+                parsed = std::stod(text, &consumed);
+            } catch (const std::exception&) {
+                throw std::invalid_argument(
+                    "could not convert string to float: " + text);
+            }
+            while (consumed < text.size() &&
+                   std::isspace(static_cast<unsigned char>(text[consumed]))) {
+                ++consumed;
+            }
+            if (consumed != text.size()) {
+                throw std::invalid_argument(
+                    "could not convert string to float: " + text);
+            }
+            return parsed;
+        }
+        throw std::invalid_argument("float() argument must be a number");
+    };
+    auto py_long = [](const Json& value) -> long long {
+        if (value.is_number_integer()) return value.get<long long>();
+        if (value.is_boolean()) return value.get<bool>() ? 1 : 0;
+        if (value.is_number_float()) {
+            return static_cast<long long>(value.get<double>());  // int() trunc
+        }
+        if (value.is_string()) {
+            const std::string text = value.get<std::string>();
+            try {
+                std::size_t consumed = 0;
+                long long parsed = std::stoll(text, &consumed);
+                while (consumed < text.size() &&
+                       std::isspace(static_cast<unsigned char>(
+                           text[consumed]))) {
+                    ++consumed;
+                }
+                if (consumed != text.size()) throw std::invalid_argument(text);
+                return parsed;
+            } catch (const std::exception&) {
+                throw std::invalid_argument(
+                    "invalid literal for int() with base 10: '" + text + "'");
+            }
+        }
+        throw std::invalid_argument("int() argument must be a number");
+    };
+    auto truthy = [](const Json& value) {
+        if (value.is_string()) return !value.get<std::string>().empty();
+        if (value.is_boolean()) return value.get<bool>();
+        if (value.is_number_integer()) return value.get<long long>() != 0;
+        if (value.is_number_float()) return value.get<double>() != 0.0;
+        return true;
+    };
     auto get = [&data](const char* key) { return data.find(key); };
-    if (auto it = get("ramp_name"); it != data.end() && it->is_string()) {
-        spec.ramp_name = it->get<std::string>();
+    if (auto it = get("ramp_name"); it != data.end() && !it->is_null()) {
+        spec.ramp_name = py_str(*it);
     }
-    if (auto it = get("mode"); it != data.end() && it->is_string()) {
-        spec.mode = it->get<std::string>();
+    if (auto it = get("mode"); it != data.end() && !it->is_null()) {
+        spec.mode = py_str(*it);
     }
-    if (auto it = get("classification"); it != data.end() && it->is_string()) {
-        spec.classification = it->get<std::string>();
+    if (auto it = get("classification"); it != data.end() && !it->is_null()) {
+        spec.classification = py_str(*it);
     }
-    if (auto it = get("n_classes"); it != data.end() && it->is_number_integer()) {
-        spec.n_classes = it->get<long long>();
+    if (auto it = get("n_classes"); it != data.end() && !it->is_null()) {
+        spec.n_classes = py_long(*it);
     }
     if (auto it = get("explicit_breaks");
         it != data.end() && it->is_array() && !it->empty()) {
         std::vector<double> breaks;
-        for (const Json& v : *it) {
-            breaks.push_back(v.is_number_integer()
-                                 ? static_cast<double>(v.get<long long>())
-                                 : v.get<double>());
-        }
+        for (const Json& v : *it) breaks.push_back(py_double(v));
         spec.explicit_breaks = std::move(breaks);
     }
     if (auto it = get("manual_range");
         it != data.end() && it->is_array() && it->size() == 2) {
-        double lo = (*it)[0].is_number_integer()
-                        ? static_cast<double>((*it)[0].get<long long>())
-                        : (*it)[0].get<double>();
-        double hi = (*it)[1].is_number_integer()
-                        ? static_cast<double>((*it)[1].get<long long>())
-                        : (*it)[1].get<double>();
-        spec.manual_range = std::make_pair(lo, hi);
+        spec.manual_range = std::make_pair(py_double((*it)[0]),
+                                           py_double((*it)[1]));
     }
-    if (auto it = get("reverse"); it != data.end() && it->is_boolean()) {
-        spec.reverse = it->get<bool>();
+    if (auto it = get("reverse"); it != data.end() && !it->is_null()) {
+        spec.reverse = truthy(*it);
     }
-    if (auto it = get("opacity"); it != data.end() && it->is_number()) {
-        spec.opacity = it->is_number_integer()
-                           ? static_cast<double>(it->get<long long>())
-                           : it->get<double>();
+    if (auto it = get("opacity"); it != data.end() && !it->is_null()) {
+        spec.opacity = py_double(*it);
     }
-    if (auto it = get("nodata_transparent"); it != data.end() && it->is_boolean()) {
-        spec.nodata_transparent = it->get<bool>();
+    if (auto it = get("nodata_transparent");
+        it != data.end() && !it->is_null()) {
+        spec.nodata_transparent = truthy(*it);
     }
-    if (auto it = get("unit_label"); it != data.end() && it->is_string()) {
-        spec.unit_label = it->get<std::string>();
+    if (auto it = get("unit_label"); it != data.end() && !it->is_null()) {
+        spec.unit_label = py_str(*it);
     }
-    if (auto it = get("colorbar_title"); it != data.end() && it->is_string()) {
-        spec.colorbar_title = it->get<std::string>();
+    if (auto it = get("colorbar_title"); it != data.end() && !it->is_null()) {
+        spec.colorbar_title = py_str(*it);
     }
     if (auto it = get("colorbar_decimals");
-        it != data.end() && it->is_number_integer()) {
-        spec.colorbar_decimals = static_cast<int>(it->get<long long>());
+        it != data.end() && !it->is_null()) {
+        spec.colorbar_decimals = static_cast<int>(py_long(*it));
     }
+    // Python from_dict constructs through __post_init__: invalid payloads
+    // raise instead of silently persisting (R3-5 guard).
+    spec.validate();
     return spec;
 }
 
@@ -331,7 +399,9 @@ ClassifiedBreaks classify_breaks(const ScalarStyleSpec& spec,
                                  const std::vector<double>& values,
                                  double vmin, double vmax,
                                  std::optional<long long> n) {
-    const long long classes = n.value_or(spec.n_classes);
+    // Python: classes = int(n or spec.n_classes) — a falsy n falls back.
+    const long long classes =
+        (n.has_value() && *n != 0) ? *n : spec.n_classes;
     if (spec.manual_range.has_value()) {
         vmin = spec.manual_range->first;
         vmax = spec.manual_range->second;

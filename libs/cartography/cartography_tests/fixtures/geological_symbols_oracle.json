@@ -1142,7 +1142,7 @@
     }
   },
   "symbols_for_role": {
-    "initial_facies_source": [
+    "factor_classification": [
       "facies_v2",
       "facies_hatch_v2"
     ],
@@ -1150,7 +1150,7 @@
       "facies_v2",
       "facies_hatch_v2"
     ],
-    "integrated_facies": [
+    "initial_facies_source": [
       "facies_v2",
       "facies_hatch_v2"
     ],
@@ -1162,7 +1162,7 @@
       "fault_strike_slip_v2",
       "fault_inferred_v2"
     ],
-    "factor_classification": [
+    "integrated_facies": [
       "facies_v2",
       "facies_hatch_v2"
     ]

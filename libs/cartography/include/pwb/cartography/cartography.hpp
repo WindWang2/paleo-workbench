@@ -1,10 +1,11 @@
 // Cartography product API facade (CONV-27).
 //
-// One entry point for the product C++ runtime: list/resolve color ramps,
-// list/validate geological symbols, named style presets, template
-// catalog/instantiation, and style validation/application. Everything below
-// is Qt-free and Python-free; the QGIS path is the bridge payload adapter
-// (qgis_adapter.hpp) feeding native/qgis_render_bridge.
+// One entry point for the product C++ runtime: color ramps resolve through
+// color_ramps.hpp (get_color_ramp/list_color_ramps), symbols through
+// geological_symbols.hpp, scalar styling through scalar_style.hpp; this
+// header adds style validation/application and the preset catalog. The QGIS
+// path is the bridge payload adapter (qgis_adapter.hpp) feeding
+// native/qgis_render_bridge. Everything is Qt-free and Python-free.
 #pragma once
 
 #include <pwb/cartography/color_ramps.hpp>

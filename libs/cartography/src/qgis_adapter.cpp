@@ -27,7 +27,7 @@ Json scalar_renderer_payload(const ScalarStyleSpec& spec,
     } else if (!finite.empty()) {
         vmax = *std::max_element(finite.begin(), finite.end());
     }
-    if (!(vmax > vmin)) vmax = vmin + 1.0;
+    if (vmax <= vmin) vmax = vmin + 1.0;  // NaN max keeps NaN (parity)
 
     const ClassifiedBreaks classified =
         classify_breaks(spec, finite, vmin, vmax, std::nullopt);
@@ -106,30 +106,19 @@ Json symbol_renderer_spec(const std::string& symbol_id) {
     }
     spec["classification_field"] = std::move(classification_field);
     if (kind == "categorized") {
-        Json rules = Json::array();
-        auto rules_it = symbol.renderer_hint.find("rules");
-        if (rules_it != symbol.renderer_hint.end() && rules_it->is_array()) {
-            for (const Json& rule : *rules_it) {
-                // RuleSpec wire: name/expression/label/fill/stroke/
-                // stroke_width/marker_size.
-                Json wire = Json::object();
-                wire["name"] = rule.value("value", "");
-                wire["expression"] =
-                    "\"classification\" = '" + rule.value("value", "") + "'";
-                wire["label"] = rule.value("label", "");
-                if (rule.contains("fill")) {
-                    wire["fill"] = rule.value("fill", "");
-                }
-                if (rule.contains("stroke")) {
-                    wire["stroke"] = rule.value("stroke", "");
-                }
-                if (rule.contains("stroke_width")) {
-                    wire["stroke_width"] = rule.value("stroke_width", 0.0);
-                }
-                rules.push_back(std::move(wire));
-            }
+        // The bridge's categorized path consumes classification_field +
+        // categories (value/color/label triples); rules+expression are the
+        // rule-based renderer's vocabulary, so emit the fallback style's
+        // categories verbatim.
+        Json categories = Json::array();
+        for (const StyleCategory& category : symbol.legacy_fallback.categories) {
+            Json wire = Json::object();
+            wire["value"] = category.value;
+            wire["color"] = category.fill;
+            wire["label"] = category.label;
+            categories.push_back(std::move(wire));
         }
-        spec["rules"] = std::move(rules);
+        spec["categories"] = std::move(categories);
     }
     spec["legacy_style"] = symbol.legacy_fallback.to_dict();
     return spec;
@@ -200,7 +189,8 @@ Json flatten_qgis_style(const Json& style) {
             auto halo_color_it = labels.find("halo_color");
             if (halo_color_it != labels.end() && halo_color_it->is_string() &&
                 !halo_color_it->get<std::string>().empty()) {
-                labels["buffer_color"] = halo_color_it->get<std::string>();
+                std::string halo = halo_color_it->get<std::string>();
+                labels["buffer_color"] = std::move(halo);
             }
         }
         result["labels"] = std::move(labels);
@@ -251,6 +241,14 @@ std::optional<QgisStylePayload> QgisStylePayload::from_dict(const Json& data) {
     }
     QgisStylePayload payload;
     payload.renderer_xml = renderer_it->get<std::string>();
+    // Python from_dict: a blank renderer_xml payload is invalid -> None.
+    {
+        bool blank = true;
+        for (char c : payload.renderer_xml) {
+            if (!std::isspace(static_cast<unsigned char>(c))) blank = false;
+        }
+        if (blank) return std::nullopt;
+    }
     auto labeling_it = data.find("labeling_xml");
     if (labeling_it != data.end() && labeling_it->is_string()) {
         payload.labeling_xml = labeling_it->get<std::string>();
@@ -267,11 +265,20 @@ std::optional<QgisStylePayload> QgisStylePayload::from_dict(const Json& data) {
     }
     auto revision_it = data.find("revision");
     if (revision_it != data.end() && revision_it->is_number_integer()) {
-        payload.revision = revision_it->get<long long>();
+        // Python: revision = max(1, int(data.get("revision") or 1)).
+        payload.revision =
+            std::max(1LL, revision_it->get<long long>());
     }
     auto version_it = data.find("schema_version");
     if (version_it != data.end() && version_it->is_number_integer()) {
         payload.schema_version = version_it->get<long long>();
+    }
+    // Python __post_init__ runs on construction: a foreign schema version
+    // raises (not None) exactly like this.
+    try {
+        payload.validate();
+    } catch (const std::invalid_argument&) {
+        throw;
     }
     return payload;
 }
