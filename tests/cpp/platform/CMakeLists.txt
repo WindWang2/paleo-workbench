@@ -26,6 +26,22 @@ else()
     set(PWB_GDAL_DATA_ENV "")
 endif()
 
+# BEGIN CONV-27
+# GDAL raster drivers (PNG export in the app self-check): the .so set
+# resolves GDAL from the deps prefix; its driver plugins must be on
+# GDAL_DRIVER_PATH or every GDAL raster read/write degrades with
+# "plugin not available" errors.
+set(PWB_GDAL_DRIVER_PATH "")
+if(EXISTS "/home/kevin/pwb-sdks/root/usr/lib/gdalplugins/gdal_PNG.so")
+    set(PWB_GDAL_DRIVER_PATH "/home/kevin/pwb-sdks/root/usr/lib/gdalplugins")
+elseif(EXISTS "/usr/lib/gdalplugins/gdal_PNG.so")
+    set(PWB_GDAL_DRIVER_PATH "/usr/lib/gdalplugins")
+endif()
+if(PWB_GDAL_DRIVER_PATH)
+    string(APPEND PWB_GDAL_DATA_ENV ";GDAL_DRIVER_PATH=${PWB_GDAL_DRIVER_PATH}")
+endif()
+# END CONV-27
+
 function(pwb_add_platform_test name)
     add_executable(platform_${name} ${ARGN})
     target_compile_features(platform_${name} PRIVATE cxx_std_20)
@@ -154,3 +170,37 @@ if(PWB_BUILD_CONV_01)
         TIMEOUT 300)
 endif()
 # END CONV-01
+# BEGIN CONV-27
+# Stage readiness kernel test: pure Qt (no QGIS session required, but the
+# offscreen QApplication env is harmless).
+add_executable(platform_stage_readiness stage_readiness_test.cpp)
+target_compile_features(platform_stage_readiness PRIVATE cxx_std_20)
+target_include_directories(platform_stage_readiness PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(platform_stage_readiness PRIVATE Pwb::Ui)
+add_test(NAME platform.stage_readiness COMMAND platform_stage_readiness)
+set_tests_properties(platform.stage_readiness PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 120)
+
+# Workbench closure integration test (real MainWindow + CONV-27 surface).
+if(PWB_BUILD_CONV_27)
+    add_executable(platform_ui_closure test_ui_closure.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+    set_target_properties(platform_ui_closure PROPERTIES AUTOMOC ON)
+    target_compile_features(platform_ui_closure PRIVATE cxx_std_20)
+    target_include_directories(platform_ui_closure PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+    target_link_libraries(platform_ui_closure PRIVATE
+        Pwb::UiWorkbench Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy)
+    target_compile_definitions(platform_ui_closure PRIVATE
+        PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        PWB_WITH_CONV_27=1)
+    add_test(NAME platform.ui_closure COMMAND platform_ui_closure)
+    set_tests_properties(platform.ui_closure PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+endif()
+# END CONV-27

@@ -62,3 +62,14 @@ if(PWB_BUILD_CONV_16)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_16=1)
 endif()
 # END CONV-16
+# BEGIN CONV-27
+# Qt6/QGIS workbench closure: stage dock + layer tree panel + edit tools +
+# constraint panel + layout persistence (libs/ui Pwb::UiWorkbench).
+if(PWB_BUILD_CONV_27)
+    if(NOT TARGET Pwb::UiWorkbench)
+        message(FATAL_ERROR "PWB_BUILD_CONV_27=ON requires the platform build (PWB_BUILD_PLATFORM=ON)")
+    endif()
+    target_link_libraries(pwb-platform PRIVATE Pwb::UiWorkbench)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_27=1)
+endif()
+# END CONV-27

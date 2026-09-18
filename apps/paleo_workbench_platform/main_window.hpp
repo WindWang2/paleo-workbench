@@ -20,6 +20,15 @@
 
 #include <pwb/application/project_session.hpp>
 #include <pwb/ui/tool_actions.hpp>
+#ifdef PWB_WITH_CONV_27
+// CONV-27 workbench surface: stage dock, domain layer tree, edit tools,
+// constraint panel, layout persistence (all in Pwb::Ui / Pwb::UiWorkbench).
+#include <pwb/ui/constraint_panel.hpp>
+#include <pwb/ui/edit_tool_controller.hpp>
+#include <pwb/ui/layer_tree_panel.hpp>
+#include <pwb/ui/stage_dock.hpp>
+#include <pwb/ui/workbench_layout.hpp>
+#endif
 
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/application/algorithm_runner.hpp>
@@ -149,6 +158,22 @@ public:
                                    const std::string& method, int grid_n,
                                    const std::string& target_horizon);
 #endif
+#ifdef PWB_WITH_CONV_27
+    // ---- CONV-27 workbench surface (test/automation entry points; the
+    // actions below drive the same code paths) ----------------------------
+    // Applies a stage switch through the authoritative session stage.
+    void applyStageValue(const std::string& value);
+    pwb::ui::StageDock* stageDock() const { return stage_dock_; }
+    pwb::ui::LayerTreePanel* layerPanel() const { return layer_panel_; }
+    pwb::ui::EditToolController* editTools() const { return edit_tools_; }
+    pwb::ui::ConstraintPanel* constraintPanel() const {
+        return constraint_dock_;
+    }
+    // Layout persistence (menu actions call the same methods).
+    void saveLayoutState();
+    void resetLayoutState();
+#endif
+
     enum class DirtyCloseDecision { Proceed, SaveAndClose, DiscardAndClose };
 
     // Re-projects policy verdicts onto the actions; public because map
@@ -200,6 +225,15 @@ private:
 
     void onActiveLayerChanged();
     void onCanvasMapToolChanged();
+#ifdef PWB_WITH_CONV_27
+    void install_conv27_surface();
+    void onActiveLayerIdChanged(const QString& layer_id);
+    void deleteSelectedFeatures();
+    void openActiveLayerProperties();
+    pwb::ui::ReadinessInputs readiness_inputs() const;
+    void refresh_readiness();
+    void refresh_constraint_panel();
+#endif
     void setStatusFromPolicy(
         const std::map<std::string, pwb::tool_policy::ToolAvailability>& availability);
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
@@ -214,6 +248,13 @@ private:
     QgsMapCanvas* canvas_ = nullptr;
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;
+#ifdef PWB_WITH_CONV_27
+    pwb::ui::StageDock* stage_dock_ = nullptr;
+    pwb::ui::LayerTreePanel* layer_panel_ = nullptr;
+    pwb::ui::EditToolController* edit_tools_ = nullptr;
+    pwb::ui::ConstraintPanel* constraint_dock_ = nullptr;
+    std::unique_ptr<pwb::ui::WorkbenchLayout> layout_store_;
+#endif
 #ifdef PWB_WITH_CONV_16
     FactorStatsDock* factor_dock_ = nullptr;
 #endif
