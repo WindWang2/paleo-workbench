@@ -26,7 +26,7 @@ std::string RuntimeStore::next_time() {
     if (clock_) return clock_();
     // Default deterministic clock: 2026-01-01T00:00:00Z + 1s per call.
     const long total = tick_++;
-    const long hours = total / 3600;
+    const long hours = (total / 3600) % 24;  // wrap: stay a valid clock
     const long minutes = (total % 3600) / 60;
     const long seconds = total % 60;
     char buf[40];

@@ -16,6 +16,10 @@
 // (Python writes a temp file and hands the path; the payload BYTES are the
 // identity, the file location is incidental — documented divergence).
 //
+// Threading: thread-confined by contract (the SQLite-backed catalog
+// adapter owned by the Data branch enforces its own ownership rules);
+// RuntimeStore carries no locks.
+//
 // Qt-free, Python-free.
 
 #include <pwb/domain/json.hpp>

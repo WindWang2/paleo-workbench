@@ -76,6 +76,8 @@ private:
 // Bounded-concurrency admission latch. acquire() blocks until a slot is
 // free or the token is cancelled (returns false — never queues past a
 // cancel). Thread-safe; RAII lease returns the slot.
+// The returned Lease is RAII and MUST NOT outlive its gate (destroy the
+// lease first, or move it within the gate's scope).
 class AdmissionGate {
 public:
     class Lease {

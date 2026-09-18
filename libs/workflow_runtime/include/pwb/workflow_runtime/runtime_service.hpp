@@ -19,6 +19,10 @@
 // rest — that is the resume path. cancel() is cooperative through the
 // workflow_engine CancelToken shared by node bodies and admission.
 //
+// Threading: thread-confined except AdmissionGate/CancelToken; one
+// service instance drives one execution at a time (the engine runs on
+// the calling thread).
+//
 // Qt-free, Python-free.
 
 #include <pwb/domain/json.hpp>

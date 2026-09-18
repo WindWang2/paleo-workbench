@@ -20,6 +20,10 @@
 //    "paleomap_documents": [{"id", "linked_prediction_task_id"}]}
 // (null / missing keys == empty project).
 //
+// Threading: thread-confined (executor state is plain storage; the
+// cooperative cancel surface is PlanExecutor::cancel from the owner
+// thread only).
+//
 // Qt-free, Python-free.
 
 #include <pwb/domain/json.hpp>

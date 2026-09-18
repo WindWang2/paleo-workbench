@@ -20,6 +20,10 @@
 // (CONV-25); the richer version records (checksum / trashed / path) live in
 // the VersionLookup this service is constructed with.
 //
+// Threading: thread-confined — the const evaluate_* methods lazily
+// populate mutable caches; concurrent calls on one service are a data
+// race (admission/threads live in node_adapters.hpp).
+//
 // Qt-free, Python-free.
 
 #include <pwb/domain/json.hpp>
