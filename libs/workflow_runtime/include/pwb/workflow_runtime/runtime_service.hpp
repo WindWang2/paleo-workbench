@@ -113,8 +113,10 @@ public:
     // snapshot (heap-stable) so the service's references stay valid for as
     // long as the session lives.
     struct FreshnessSession {
+        // All service-referenced state is heap-stable: moving the session
+        // never invalidates the service's references.
         std::shared_ptr<GraphSnapshot> snapshot;
-        CurrentProjectVersionContext context{};  // owned copy
+        std::shared_ptr<CurrentProjectVersionContext> context;
         std::unique_ptr<FreshnessService> service;
         // The seam lambdas reference the owning WorkflowRuntimeService —
         // the session must not outlive it.

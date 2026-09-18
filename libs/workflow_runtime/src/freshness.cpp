@@ -497,11 +497,11 @@ FreshnessReport FreshnessService::evaluate_run_impl(
     if (expected_it != context_.expected_identity().end()) {
         const Json& expected = expected_it->second;
         if (expected.contains("generator_version") &&
-            pycompat::truthy(expected.at("generator_version"))) {
-            // Python compares the raw values ((run.gen or "") != (exp or
-            // "")) — any non-null truthy expectation compares, not just
-            // strings. Canonical encodings give Python == semantics for
-            // the cross-type mismatch cases.
+            !expected.at("generator_version").is_null()) {
+            // Python guards with `is not None` (NOT truthiness — an empty
+            // string expectation still compares) and compares
+            // (run.gen or "") != (exp or ""); canonical encodings give
+            // Python == semantics including the cross-type cases.
             const std::string exp_gen =
                 pwb::factor_host::canonical_encode(
                     expected.at("generator_version"));

@@ -992,7 +992,8 @@ void end_to_end_closure() {
                             cancel_run.state));
             ++failures;
         }
-        const auto& last_run = store.list_runs().back();
+        const auto last_run = store.list_runs().back();  // by value —
+        // list_runs() returns a temporary vector; a reference would dangle.
         if (last_run.status != "cancelled" ||
             last_run.domain_task_id != "job") {
             std::printf("FAIL e2e cancel provenance: status=%s\n",
@@ -1028,11 +1029,9 @@ void end_to_end_closure() {
         auto ctx_inspect = service.build_context();
         auto domain_report = service.explain_stale(
             ctx_inspect, "domain_task", "compute");
-        if (domain_report.state !=
-                pwb::workflow_runtime::FreshnessState::Fresh &&
-            domain_report.state !=
-                pwb::workflow_runtime::FreshnessState::Stale) {
-            std::printf("FAIL e2e explain_stale: state %s\n",
+        if (domain_report.state != pwb::workflow_runtime::FreshnessState::Fresh) {
+            std::printf("FAIL e2e explain_stale: state %s (expected FRESH "
+                        "after recompute)\n",
                         pwb::workflow_runtime::freshness_state_value(
                             domain_report.state));
             ++failures;
@@ -1065,6 +1064,22 @@ void end_to_end_closure() {
             std::printf("FAIL admission: acquire succeeded on cancelled "
                         "token\n");
             ++failures;
+        }
+        // terminal shutdown then re-arm for the next plan generation.
+        gate.cancel_all();
+        pwb::workflow_engine::CancelToken fresh_token;
+        if (gate.acquire(fresh_token)) {
+            std::printf("FAIL admission: acquire succeeded after "
+                        "cancel_all\n");
+            ++failures;
+            gate.release();
+        }
+        gate.reset();
+        if (!gate.try_acquire()) {
+            std::printf("FAIL admission: reset did not re-arm the gate\n");
+            ++failures;
+        } else {
+            gate.release();
         }
     }
 

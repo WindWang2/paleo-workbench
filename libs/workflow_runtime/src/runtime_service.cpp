@@ -216,10 +216,12 @@ WorkflowRuntimeService::make_freshness_session(
     };
     FreshnessSession session;
     session.snapshot = std::move(snap);
-    session.context = context;  // own a copy — caller temporaries die at
-                                // the end of the calling expression
+    // Own a heap-stable copy — caller temporaries die at the end of the
+    // calling expression, and moving the session stays safe.
+    session.context =
+        std::make_shared<CurrentProjectVersionContext>(context);
     session.service = std::make_unique<FreshnessService>(
-        session.snapshot->graph, session.context,
+        session.snapshot->graph, *session.context,
         session.snapshot->versions, seam, check_integrity);
     return session;
 }
