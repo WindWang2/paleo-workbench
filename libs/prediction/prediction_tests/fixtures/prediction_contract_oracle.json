@@ -1,0 +1,6075 @@
+{
+ "meta": {
+  "module": "paleo_workbench.prediction.{postprocess,spatial_result,input_contract,model_package}",
+  "python": "3.14.6",
+  "unicode": "16.0.0",
+  "word_char_ranges": 770,
+  "fx_placeholder": "$FX",
+  "cases": 179,
+  "note": "expects are real production calls; raises carry class + message"
+ },
+ "cases": [
+  {
+   "id": "empty_none",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": null
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {}
+    }
+   }
+  },
+  {
+   "id": "empty_dict",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {}
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {}
+    }
+   }
+  },
+  {
+   "id": "required_list",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "required_asset_types": [
+      "well_log",
+      "seismic"
+     ]
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [
+      "well_log",
+      "seismic"
+     ],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "required_asset_types": [
+       "well_log",
+       "seismic"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "asset_types_fallback",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "asset_types": [
+      "well_log"
+     ]
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [
+      "well_log"
+     ],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "asset_types": [
+       "well_log"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "required_str_scalar",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "required_asset_types": "well_log"
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [
+      "well_log"
+     ],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "required_asset_types": "well_log"
+     }
+    }
+   }
+  },
+  {
+   "id": "optional_str_scalar",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "optional_asset_types": "factor_map"
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [
+      "factor_map"
+     ],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "optional_asset_types": "factor_map"
+     }
+    }
+   }
+  },
+  {
+   "id": "curves_fallback",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "curves": [
+      "GR",
+      "RT"
+     ]
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [
+      "GR",
+      "RT"
+     ],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "curves": [
+       "GR",
+       "RT"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "required_curves_key",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "required_curves": "GR"
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [
+      "GR"
+     ],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "required_curves": "GR"
+     }
+    }
+   }
+  },
+  {
+   "id": "strip_and_drop_empty",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "required_asset_types": [
+      "  ",
+      " well_log ",
+      "",
+      "seismic"
+     ],
+     "required_curves": [
+      " GR ",
+      ""
+     ]
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [
+      "well_log",
+      "seismic"
+     ],
+     "optional_asset_types": [],
+     "required_curves": [
+      "GR"
+     ],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "required_asset_types": [
+       "  ",
+       " well_log ",
+       "",
+       "seismic"
+      ],
+      "required_curves": [
+       " GR ",
+       ""
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "require_flags_truthy",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "require_target_horizon": "false",
+     "require_correlation": 0,
+     "require_horizon_interpretation": [],
+     "require_fault_interpretation": "x"
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": true,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": true,
+     "min_wells": 0,
+     "raw": {
+      "require_target_horizon": "false",
+      "require_correlation": 0,
+      "require_horizon_interpretation": [],
+      "require_fault_interpretation": "x"
+     }
+    }
+   }
+  },
+  {
+   "id": "min_wells_int",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "min_wells": 3
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 3,
+     "raw": {
+      "min_wells": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "min_wells_str",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "min_wells": "3"
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 3,
+     "raw": {
+      "min_wells": "3"
+     }
+    }
+   }
+  },
+  {
+   "id": "min_wells_float",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "min_wells": 2.9
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 2,
+     "raw": {
+      "min_wells": 2.9
+     }
+    }
+   }
+  },
+  {
+   "id": "min_wells_falsy",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "min_wells": 0
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "min_wells": 0
+     }
+    }
+   }
+  },
+  {
+   "id": "min_wells_bool",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "min_wells": true
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 1,
+     "raw": {
+      "min_wells": true
+     }
+    }
+   }
+  },
+  {
+   "id": "unknown_keys_in_raw",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "unknown_future_key": {
+      "x": 1
+     },
+     "required_asset_types": [
+      "well_log"
+     ]
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [
+      "well_log"
+     ],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "unknown_future_key": {
+       "x": 1
+      },
+      "required_asset_types": [
+       "well_log"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "non_str_items",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "required_asset_types": [
+      1,
+      true,
+      null,
+      "well_log"
+     ]
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [
+      "1",
+      "True",
+      "None",
+      "well_log"
+     ],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "required_asset_types": [
+       1,
+       true,
+       null,
+       "well_log"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "both_type_keys",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "required_asset_types": [
+      "seismic"
+     ],
+     "asset_types": [
+      "well_log"
+     ]
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [
+      "seismic"
+     ],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "required_asset_types": [
+       "seismic"
+      ],
+      "asset_types": [
+       "well_log"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "dict_types_iterates_keys",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "required_asset_types": {
+      "well_log": 1,
+      "seismic": 2
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "required_asset_types": [
+      "well_log",
+      "seismic"
+     ],
+     "optional_asset_types": [],
+     "required_curves": [],
+     "require_target_horizon": false,
+     "require_correlation": false,
+     "require_horizon_interpretation": false,
+     "require_fault_interpretation": false,
+     "min_wells": 0,
+     "raw": {
+      "required_asset_types": {
+       "well_log": 1,
+       "seismic": 2
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "non_iterable_types",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": {
+     "required_asset_types": 5
+    }
+   },
+   "expect": {
+    "raises": "TypeError",
+    "message": "'int' object is not iterable"
+   }
+  },
+  {
+   "id": "schema_truthy_non_dict",
+   "fn": "parse_input_schema",
+   "input": {
+    "schema": "abc"
+   },
+   "expect": {
+    "raises": "ValueError",
+    "message": "dictionary update sequence element #0 has length 1; 2 is required"
+   }
+  },
+  {
+   "id": "merge_chain_with_top",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "分流间湾",
+      "probability": 0.531
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "分流间湾",
+      "probability": 0.534
+     },
+     {
+      "top": 2.0,
+      "bottom": 3.0,
+      "facies": "分流间湾",
+      "probability": 0.532
+     },
+     {
+      "top": 3.0,
+      "bottom": 4.0,
+      "facies": "分流间湾",
+      "probability": 0.531
+     }
+    ],
+    "formation_boundaries": [
+     {
+      "name": "珠海组",
+      "depth": 2.0
+     }
+    ]
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 2.0,
+       "facies": "分流间湾",
+       "probability": 0.53,
+       "stratigraphic_unit": "未标定层位",
+       "merged_sample_count": 2,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 2.0,
+       "bottom": 4.0,
+       "facies": "分流间湾",
+       "probability": 0.53,
+       "stratigraphic_unit": "珠海组",
+       "merged_sample_count": 2,
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 4,
+      "split_region_count": 4,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "split_inside_cell",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 1000.0,
+      "bottom": 1001.0,
+      "facies": "分流河道",
+      "probability": 0.627
+     }
+    ],
+    "formation_boundaries": [
+     {
+      "name": "下段",
+      "depth": 1000.5
+     }
+    ]
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 1000.0,
+       "bottom": 1000.5,
+       "facies": "分流河道",
+       "probability": 0.63,
+       "stratigraphic_unit": "未标定层位",
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1000.5,
+       "bottom": 1001.0,
+       "facies": "分流河道",
+       "probability": 0.63,
+       "stratigraphic_unit": "下段",
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "different_facies_no_merge",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "分流间湾",
+      "probability": 0.53
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "分流河道",
+      "probability": 0.53
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "分流间湾",
+       "probability": 0.53,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0,
+       "bottom": 2.0,
+       "facies": "分流河道",
+       "probability": 0.53,
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "different_prob_no_merge",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "分流河道",
+      "probability": 0.53
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "分流河道",
+      "probability": 0.54
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "分流河道",
+       "probability": 0.53,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0,
+       "bottom": 2.0,
+       "facies": "分流河道",
+       "probability": 0.54,
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "gap_no_merge",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5
+     },
+     {
+      "top": 1.0001,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0001,
+       "bottom": 2.0,
+       "facies": "a",
+       "probability": 0.5,
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "touching_eps_merge",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5
+     },
+     {
+      "top": 1.0000009,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 2.0,
+       "facies": "a",
+       "probability": 0.5,
+       "merged_sample_count": 2,
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 2,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "unsorted_input",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 2.0,
+      "bottom": 3.0,
+      "facies": "b",
+      "probability": 0.7
+     },
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 2.0,
+       "facies": "a",
+       "probability": 0.5,
+       "merged_sample_count": 2,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 2.0,
+       "bottom": 3.0,
+       "facies": "b",
+       "probability": 0.7,
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 3,
+      "split_region_count": 3,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "invalid_regions_filtered",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5
+     },
+     {
+      "top": 1.0,
+      "facies": "a"
+     },
+     {
+      "top": 2.0,
+      "bottom": 2.0,
+      "facies": "a"
+     },
+     "not-a-dict",
+     {
+      "top": "x",
+      "bottom": "y"
+     },
+     {
+      "top": 3.0,
+      "bottom": 4.0,
+      "facies": "b",
+      "probability": 0.6
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 3.0,
+       "bottom": 4.0,
+       "facies": "b",
+       "probability": 0.6,
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "merged_sample_count",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5,
+      "merged_sample_count": 3
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     },
+     {
+      "top": 2.0,
+      "bottom": 3.0,
+      "facies": "a",
+      "probability": 0.5,
+      "merged_sample_count": 0
+     },
+     {
+      "top": 3.0,
+      "bottom": 4.0,
+      "facies": "a",
+      "probability": 0.5,
+      "merged_sample_count": "2"
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 4.0,
+       "facies": "a",
+       "probability": 0.5,
+       "merged_sample_count": 7,
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 4,
+      "split_region_count": 4,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "no_boundaries_no_unit",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 1,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "boundary_dedup_same_depth",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": [
+     {
+      "name": "乙",
+      "depth": 1.0
+     },
+     {
+      "name": "甲",
+      "depth": 1.0
+     }
+    ]
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "未标定层位",
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0,
+       "bottom": 2.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "乙",
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "boundary_outside_eps",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": [
+     {
+      "name": "x",
+      "depth": 0.9999995
+     },
+     {
+      "name": "y",
+      "depth": 1.5
+     }
+    ]
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "未标定层位",
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 1,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "boundary_at_edges",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": [
+     {
+      "name": "x",
+      "depth": 0.0
+     },
+     {
+      "name": "y",
+      "depth": 1.0
+     }
+    ]
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "x",
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 1,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "prob_rounding_half_even",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.625
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "b",
+      "probability": 0.635
+     },
+     {
+      "top": 2.0,
+      "bottom": 3.0,
+      "facies": "c",
+      "probability": 0.645
+     },
+     {
+      "top": 3.0,
+      "bottom": 4.0,
+      "facies": "d",
+      "probability": 0.655
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.62,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0,
+       "bottom": 2.0,
+       "facies": "b",
+       "probability": 0.64,
+       "region_id": "inference_api_post_2"
+      },
+      {
+       "top": 2.0,
+       "bottom": 3.0,
+       "facies": "c",
+       "probability": 0.64,
+       "region_id": "inference_api_post_3"
+      },
+      {
+       "top": 3.0,
+       "bottom": 4.0,
+       "facies": "d",
+       "probability": 0.66,
+       "region_id": "inference_api_post_4"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 4,
+      "split_region_count": 4,
+      "postprocessed_region_count": 4,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "prob_clamp_and_invalid",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 1.2
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "b",
+      "probability": -0.3
+     },
+     {
+      "top": 2.0,
+      "bottom": 3.0,
+      "facies": "c",
+      "probability": "abc"
+     },
+     {
+      "top": 3.0,
+      "bottom": 4.0,
+      "facies": "d",
+      "probability": null
+     },
+     {
+      "top": 4.0,
+      "bottom": 5.0,
+      "facies": "e",
+      "probability": true
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 1.0,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0,
+       "bottom": 2.0,
+       "facies": "b",
+       "probability": 0.0,
+       "region_id": "inference_api_post_2"
+      },
+      {
+       "top": 2.0,
+       "bottom": 3.0,
+       "facies": "c",
+       "probability": 0.0,
+       "region_id": "inference_api_post_3"
+      },
+      {
+       "top": 3.0,
+       "bottom": 4.0,
+       "facies": "d",
+       "probability": 0.0,
+       "region_id": "inference_api_post_4"
+      },
+      {
+       "top": 4.0,
+       "bottom": 5.0,
+       "facies": "e",
+       "probability": 1.0,
+       "region_id": "inference_api_post_5"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 5,
+      "split_region_count": 5,
+      "postprocessed_region_count": 5,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "empty_regions",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 0,
+      "split_region_count": 0,
+      "postprocessed_region_count": 0,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "extra_keys_preserved",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5,
+      "custom": "keep-me",
+      "confidence": 0.9
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "custom": "keep-me",
+       "confidence": 0.9,
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 1,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "facies_empty_no_merge",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "",
+      "probability": 0.5
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "",
+       "probability": 0.5,
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0,
+       "bottom": 2.0,
+       "facies": "",
+       "probability": 0.5,
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "facies_whitespace_vs_stripped",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": " a ",
+      "probability": 0.5
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 2.0,
+       "facies": " a ",
+       "probability": 0.5,
+       "merged_sample_count": 2,
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 2,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "multi_top_full_span",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 4.0,
+      "facies": "a",
+      "probability": 0.5
+     },
+     {
+      "top": 4.0,
+      "bottom": 8.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": [
+     {
+      "name": "一",
+      "depth": 2.0
+     },
+     {
+      "name": "二",
+      "depth": 6.0
+     }
+    ]
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 2.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "未标定层位",
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 2.0,
+       "bottom": 6.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "一",
+       "merged_sample_count": 2,
+       "region_id": "inference_api_post_2"
+      },
+      {
+       "top": 6.0,
+       "bottom": 8.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "二",
+       "region_id": "inference_api_post_3"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 4,
+      "postprocessed_region_count": 3,
+      "formation_boundary_count": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "boundary_non_dict_dropped",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": [
+     {
+      "name": "x",
+      "depth": "nan"
+     },
+     {
+      "depth": 1.0
+     },
+     null,
+     "junk"
+    ]
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "未标定层位",
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0,
+       "bottom": 2.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "未标定层位",
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "numeric_strings",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": "0.0",
+      "bottom": "1.0",
+      "facies": "a",
+      "probability": "0.55"
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.55,
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 1,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "unspecified_stratum_default",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": [
+     {
+      "name": "   ",
+      "depth": 1.0
+     }
+    ]
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 1.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "未标定层位",
+       "region_id": "inference_api_post_1"
+      },
+      {
+       "top": 1.0,
+       "bottom": 2.0,
+       "facies": "a",
+       "probability": 0.5,
+       "stratigraphic_unit": "未标定层位",
+       "region_id": "inference_api_post_2"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 1,
+      "split_region_count": 2,
+      "postprocessed_region_count": 2,
+      "formation_boundary_count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "merged_sample_count_bad",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5,
+      "merged_sample_count": "abc"
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "raises": "ValueError",
+    "message": "invalid literal for int() with base 10: 'abc'"
+   }
+  },
+  {
+   "id": "merged_sample_count_float",
+   "fn": "postprocess_prediction_regions",
+   "input": {
+    "regions": [
+     {
+      "top": 0.0,
+      "bottom": 1.0,
+      "facies": "a",
+      "probability": 0.5,
+      "merged_sample_count": 2.9
+     },
+     {
+      "top": 1.0,
+      "bottom": 2.0,
+      "facies": "a",
+      "probability": 0.5
+     }
+    ],
+    "formation_boundaries": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "top": 0.0,
+       "bottom": 2.0,
+       "facies": "a",
+       "probability": 0.5,
+       "merged_sample_count": 3,
+       "region_id": "inference_api_post_1"
+      }
+     ],
+     {
+      "applied": true,
+      "confidence_display_precision": "1%",
+      "raw_region_count": 2,
+      "split_region_count": 2,
+      "postprocessed_region_count": 1,
+      "formation_boundary_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "id": "match_well_strat",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17.las",
+    "well_log": null,
+    "inputs": {
+     "tops-v1": {
+      "asset_type": "well_stratification",
+      "name": "tops.dat",
+      "path": "$FX/tops.dat"
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "珠海组",
+       "depth": 1589.0,
+       "source": "well_stratification"
+      },
+      {
+       "name": "恩平组",
+       "depth": 1623.0,
+       "source": "well_stratification"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "unmatched_well_keeps_las_only",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "ZZ9.las",
+    "well_log": {
+     "intervals": {
+      "formation": [
+       {
+        "top": 300.0,
+        "name": "沙一段"
+       },
+       {
+        "top": null,
+        "name": "skip"
+       },
+       {
+        "top": "bad",
+        "name": "skip2"
+       }
+      ]
+     }
+    },
+    "inputs": {
+     "tops-v1": {
+      "asset_type": "well_stratification",
+      "name": "tops.dat",
+      "path": "$FX/tops.dat"
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "沙一段",
+       "depth": 300.0,
+       "source": "las_formation"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "las_only",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": {
+     "intervals": {
+      "formation": [
+       {
+        "top": 100.0
+       },
+       {
+        "top": 200.0,
+        "name": "孔店组"
+       }
+      ]
+     }
+    },
+    "inputs": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "未标定层位",
+       "depth": 100.0,
+       "source": "las_formation"
+      },
+      {
+       "name": "孔店组",
+       "depth": 200.0,
+       "source": "las_formation"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "unreadable_path",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": null,
+    "inputs": {
+     "x": {
+      "asset_type": "well_stratification",
+      "name": "missing.dat",
+      "path": "$FX/missing.dat"
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [],
+     [
+      "井分层文件不可读取: missing.dat"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "path_missing_name_fallback",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": null,
+    "inputs": {
+     "x": {
+      "asset_type": "well_stratification",
+      "path": "$FX/missing2.dat"
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [],
+     [
+      "井分层文件不可读取: missing2.dat"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "empty_path",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": null,
+    "inputs": {
+     "x": {
+      "asset_type": "well_stratification",
+      "name": "empty.dat",
+      "path": ""
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [],
+     [
+      "井分层文件不可读取: empty.dat"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "non_strat_type_skipped",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": null,
+    "inputs": {
+     "x": {
+      "asset_type": "well_log",
+      "name": "tops.dat",
+      "path": "$FX/tops.dat"
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [],
+     []
+    ]
+   }
+  },
+  {
+   "id": "dedup_two_sources_same_depth",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17.las",
+    "well_log": {
+     "intervals": {
+      "formation": [
+       {
+        "top": 1589.0,
+        "name": "另一标签"
+       }
+      ]
+     }
+    },
+    "inputs": {
+     "tops-v1": {
+      "asset_type": "well_stratification",
+      "name": "tops.dat",
+      "path": "$FX/tops.dat"
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "另一标签",
+       "depth": 1589.0,
+       "source": "las_formation"
+      },
+      {
+       "name": "恩平组",
+       "depth": 1623.0,
+       "source": "well_stratification"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "well_key_punct_and_case",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "a-17.LAS",
+    "well_log": null,
+    "inputs": {
+     "tops-v1": {
+      "asset_type": "well_stratification",
+      "name": "tops.dat",
+      "path": "$FX/tops.dat"
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "珠海组",
+       "depth": 1589.0,
+       "source": "well_stratification"
+      },
+      {
+       "name": "恩平组",
+       "depth": 1623.0,
+       "source": "well_stratification"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "well_key_chinese",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "井九.dat",
+    "well_log": null,
+    "inputs": {
+     "tops-v1": {
+      "asset_type": "well_stratification",
+      "name": "tops.dat",
+      "path": "$FX/tops.dat"
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "孔店组",
+       "depth": 500.0,
+       "source": "well_stratification"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "well_log_none",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": null,
+    "inputs": null
+   },
+   "expect": {
+    "result": [
+     [],
+     []
+    ]
+   }
+  },
+  {
+   "id": "inputs_truthy_non_dict",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": null,
+    "inputs": "junk"
+   },
+   "expect": {
+    "raises": "AttributeError",
+    "message": "'str' object has no attribute 'values'"
+   }
+  },
+  {
+   "id": "info_non_dict",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": null,
+    "inputs": {
+     "x": "junk"
+    }
+   },
+   "expect": {
+    "raises": "AttributeError",
+    "message": "'str' object has no attribute 'get'"
+   }
+  },
+  {
+   "id": "interval_missing_name_attr",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": {
+     "intervals": {
+      "formation": [
+       {
+        "top": 42.0
+       }
+      ]
+     }
+    },
+    "inputs": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "未标定层位",
+       "depth": 42.0,
+       "source": "las_formation"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "interval_name_null",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": {
+     "intervals": {
+      "formation": [
+       {
+        "top": 42.0,
+        "name": null
+       }
+      ]
+     }
+    },
+    "inputs": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "未标定层位",
+       "depth": 42.0,
+       "source": "las_formation"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "non_object_interval",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": {
+     "intervals": {
+      "formation": [
+       5,
+       {
+        "top": 7.0,
+        "name": "x"
+       }
+      ]
+     }
+    },
+    "inputs": null
+   },
+   "expect": {
+    "result": [
+     [
+      {
+       "name": "x",
+       "depth": 7.0,
+       "source": "las_formation"
+      }
+     ],
+     []
+    ]
+   }
+  },
+  {
+   "id": "well_log_non_dict",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": "junk",
+    "inputs": null
+   },
+   "expect": {
+    "result": [
+     [],
+     []
+    ]
+   }
+  },
+  {
+   "id": "intervals_non_dict",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": {
+     "intervals": "x"
+    },
+    "inputs": null
+   },
+   "expect": {
+    "result": [
+     [],
+     []
+    ]
+   }
+  },
+  {
+   "id": "formation_non_list",
+   "fn": "resolve_formation_boundaries",
+   "input": {
+    "well_name": "A17",
+    "well_log": {
+     "intervals": {
+      "formation": {
+       "top": 1.0
+      }
+     }
+    },
+    "inputs": null
+   },
+   "expect": {
+    "result": [
+     [],
+     []
+    ]
+   }
+  },
+  {
+   "id": "direct_field",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial_output_type": "WELL_INTERVALS"
+    }
+   },
+   "expect": {
+    "result": "WELL_INTERVALS"
+   }
+  },
+  {
+   "id": "in_summary",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial_output_type": "NONE"
+     }
+    }
+   },
+   "expect": {
+    "result": "NONE"
+   }
+  },
+  {
+   "id": "in_output_schema",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "output_schema": {
+      "spatial_output_type": "CLASSIFIED_RASTER"
+     }
+    }
+   },
+   "expect": {
+    "result": "CLASSIFIED_RASTER"
+   }
+  },
+  {
+   "id": "in_summary_spatial",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial": {
+       "spatial_output_type": "VECTOR_POLYGONS"
+      }
+     }
+    }
+   },
+   "expect": {
+    "result": "VECTOR_POLYGONS"
+   }
+  },
+  {
+   "id": "spatial_type_key",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial": {
+      "type": "WELL_INTERVALS"
+     }
+    }
+   },
+   "expect": {
+    "result": "WELL_INTERVALS"
+   }
+  },
+  {
+   "id": "infer_features",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": [
+       {
+        "x": 1
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": "VECTOR_POLYGONS"
+   }
+  },
+  {
+   "id": "infer_polygons",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial": {
+      "polygons": [
+       {
+        "y": 2
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": "VECTOR_POLYGONS"
+   }
+  },
+  {
+   "id": "infer_intervals",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial": {
+      "intervals": [
+       1,
+       2
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": "WELL_INTERVALS"
+   }
+  },
+  {
+   "id": "infer_well_intervals",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial": {
+      "well_intervals": [
+       1
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": "WELL_INTERVALS"
+   }
+  },
+  {
+   "id": "infer_grid",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial": {
+      "grid": [
+       [
+        1
+       ]
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": "CLASSIFIED_RASTER"
+   }
+  },
+  {
+   "id": "infer_classes",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial": {
+      "classes": [
+       0,
+       1
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": "CLASSIFIED_RASTER"
+   }
+  },
+  {
+   "id": "nothing",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "a": 1
+    }
+   },
+   "expect": {
+    "result": "NONE"
+   }
+  },
+  {
+   "id": "none_payload",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": null
+   },
+   "expect": {
+    "result": "NONE"
+   }
+  },
+  {
+   "id": "non_dict_payload",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": "junk"
+   },
+   "expect": {
+    "raises": "AttributeError",
+    "message": "'str' object has no attribute 'get'"
+   }
+  },
+  {
+   "id": "whitespace_stripped",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial_output_type": "  NONE  "
+    }
+   },
+   "expect": {
+    "result": "NONE"
+   }
+  },
+  {
+   "id": "non_str_value",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial_output_type": 7
+    }
+   },
+   "expect": {
+    "result": "7"
+   }
+  },
+  {
+   "id": "empty_str_falls_through",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial_output_type": "",
+     "result_summary": {
+      "spatial_output_type": "NONE"
+     }
+    }
+   },
+   "expect": {
+    "result": "NONE"
+   }
+  },
+  {
+   "id": "first_wins",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial_output_type": "NONE",
+     "result_summary": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     }
+    }
+   },
+   "expect": {
+    "result": "NONE"
+   }
+  },
+  {
+   "id": "grid_none_not_raster",
+   "fn": "spatial_type_of",
+   "input": {
+    "payload": {
+     "spatial": {
+      "grid": null,
+      "classes": null
+     }
+    }
+   },
+   "expect": {
+    "result": "NONE"
+   }
+  },
+  {
+   "id": "features_polygon",
+   "fn": "extract_polygon_features",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": [
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0,
+            0
+           ],
+           [
+            1,
+            0
+           ],
+           [
+            1,
+            1
+           ],
+           [
+            0,
+            0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "a": 1
+        }
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     {
+      "type": "Feature",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0,
+          0
+         ],
+         [
+          1,
+          0
+         ],
+         [
+          1,
+          1
+         ],
+         [
+          0,
+          0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "a": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "polygons_key",
+   "fn": "extract_polygon_features",
+   "input": {
+    "payload": {
+     "spatial": {
+      "polygons": [
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0,
+            0
+           ],
+           [
+            1,
+            0
+           ],
+           [
+            1,
+            1
+           ],
+           [
+            0,
+            0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "a": 1
+        }
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     {
+      "type": "Feature",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0,
+          0
+         ],
+         [
+          1,
+          0
+         ],
+         [
+          1,
+          1
+         ],
+         [
+          0,
+          0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "a": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "multipolygon_ok",
+   "fn": "extract_polygon_features",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": [
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "MultiPolygon",
+         "coordinates": [
+          [
+           [
+            [
+             0,
+             0
+            ],
+            [
+             1,
+             0
+            ],
+            [
+             1,
+             1
+            ],
+            [
+             0,
+             0
+            ]
+           ]
+          ]
+         ]
+        }
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     {
+      "type": "Feature",
+      "geometry": {
+       "type": "MultiPolygon",
+       "coordinates": [
+        [
+         [
+          [
+           0,
+           0
+          ],
+          [
+           1,
+           0
+          ],
+          [
+           1,
+           1
+          ],
+          [
+           0,
+           0
+          ]
+         ]
+        ]
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "mixed_skips",
+   "fn": "extract_polygon_features",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": [
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0,
+            0
+           ],
+           [
+            1,
+            0
+           ],
+           [
+            1,
+            1
+           ],
+           [
+            0,
+            0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "a": 1
+        }
+       },
+       "junk",
+       {
+        "no": "geometry"
+       },
+       {
+        "geometry": "not-a-dict"
+       },
+       {
+        "geometry": {
+         "type": "LineString",
+         "coordinates": [
+          [
+           0,
+           0
+          ],
+          [
+           1,
+           1
+          ]
+         ]
+        }
+       },
+       {
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": []
+        }
+       },
+       {
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": null
+        }
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     {
+      "type": "Feature",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0,
+          0
+         ],
+         [
+          1,
+          0
+         ],
+         [
+          1,
+          1
+         ],
+         [
+          0,
+          0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "a": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "spatial_non_dict",
+   "fn": "extract_polygon_features",
+   "input": {
+    "payload": {
+     "spatial": "junk"
+    }
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "features_non_list",
+   "fn": "extract_polygon_features",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": "junk"
+     }
+    }
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "summary_spatial",
+   "fn": "extract_polygon_features",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            [
+             0,
+             0
+            ],
+            [
+             1,
+             0
+            ],
+            [
+             1,
+             1
+            ],
+            [
+             0,
+             0
+            ]
+           ]
+          ]
+         },
+         "properties": {
+          "a": 1
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     {
+      "type": "Feature",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0,
+          0
+         ],
+         [
+          1,
+          0
+         ],
+         [
+          1,
+          1
+         ],
+         [
+          0,
+          0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "a": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "summary_wins_over_payload",
+   "fn": "extract_polygon_features",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            [
+             0,
+             0
+            ],
+            [
+             1,
+             0
+            ],
+            [
+             1,
+             1
+            ],
+            [
+             0,
+             0
+            ]
+           ]
+          ]
+         },
+         "properties": {
+          "a": 1
+         }
+        }
+       ]
+      }
+     },
+     "spatial": {
+      "features": [
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "MultiPolygon",
+         "coordinates": [
+          [
+           [
+            [
+             0,
+             0
+            ],
+            [
+             1,
+             0
+            ],
+            [
+             1,
+             1
+            ],
+            [
+             0,
+             0
+            ]
+           ]
+          ]
+         ]
+        }
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": [
+     {
+      "type": "Feature",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0,
+          0
+         ],
+         [
+          1,
+          0
+         ],
+         [
+          1,
+          1
+         ],
+         [
+          0,
+          0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "a": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "unknown_type",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "WEIRD"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "unknown spatial_output_type: 'WEIRD'"
+    ]
+   }
+  },
+  {
+   "id": "unknown_type_repr",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "x'y"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "unknown spatial_output_type: \"x'y\""
+    ]
+   }
+  },
+  {
+   "id": "empty_type_ok",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": ""
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "none_ok",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "NONE"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "require_scientific_missing",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "NONE",
+     "result_summary": {}
+    },
+    "expected_type": null,
+    "require_scientific": true
+   },
+   "expect": {
+    "result": [
+     "result is not marked final_scientific_prediction"
+    ]
+   }
+  },
+  {
+   "id": "require_scientific_ok",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "NONE",
+     "result_summary": {
+      "final_scientific_prediction": true
+     }
+    },
+    "expected_type": null,
+    "require_scientific": true
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "polygons_no_features",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "spatial": {
+      "features": [],
+      "crs": "EPSG:4326"
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "VECTOR_POLYGONS result has no valid polygon features"
+    ]
+   }
+  },
+  {
+   "id": "polygons_ok",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "final_scientific_prediction": true,
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            [
+             100.0,
+             30.0
+            ],
+            [
+             101.0,
+             30.0
+            ],
+            [
+             101.0,
+             31.0
+            ],
+            [
+             100.0,
+             30.0
+            ]
+           ]
+          ]
+         }
+        }
+       ],
+       "crs": "EPSG:4326"
+      }
+     },
+     "spatial_output_type": "VECTOR_POLYGONS"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "polygon_short_ring",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "final_scientific_prediction": true,
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            [
+             0,
+             0
+            ],
+            [
+             1,
+             1
+            ],
+            [
+             0,
+             0
+            ]
+           ]
+          ]
+         }
+        }
+       ],
+       "crs": "EPSG:4326"
+      }
+     },
+     "spatial_output_type": "VECTOR_POLYGONS"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "feature[0] has non-finite or empty coordinates"
+    ]
+   }
+  },
+  {
+   "id": "polygon_nonfinite",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "final_scientific_prediction": true,
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            [
+             0,
+             0
+            ],
+            [
+             1,
+             0
+            ],
+            [
+             1,
+             "nan"
+            ],
+            [
+             0,
+             0
+            ]
+           ]
+          ]
+         }
+        }
+       ],
+       "crs": "EPSG:4326"
+      }
+     },
+     "spatial_output_type": "VECTOR_POLYGONS"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "feature[0] has non-finite or empty coordinates"
+    ]
+   }
+  },
+  {
+   "id": "polygon_string_coords",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "final_scientific_prediction": true,
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            "0",
+            "0"
+           ],
+           [
+            "1",
+            "0"
+           ],
+           [
+            "1",
+            "1"
+           ],
+           [
+            "0",
+            "0"
+           ]
+          ]
+         }
+        }
+       ],
+       "crs": "EPSG:4326"
+      }
+     },
+     "spatial_output_type": "VECTOR_POLYGONS"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "feature[0] has non-finite or empty coordinates"
+    ]
+   }
+  },
+  {
+   "id": "polygon_inf_coord_passes",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "final_scientific_prediction": true,
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            [
+             0,
+             0
+            ],
+            [
+             1,
+             0
+            ],
+            [
+             1,
+             "inf"
+            ],
+            [
+             0,
+             0
+            ]
+           ]
+          ]
+         }
+        }
+       ],
+       "crs": "EPSG:4326"
+      }
+     },
+     "spatial_output_type": "VECTOR_POLYGONS"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "multipolygon_finite",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "final_scientific_prediction": true,
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "MultiPolygon",
+          "coordinates": [
+           [
+            [
+             [
+              100.0,
+              30.0
+             ],
+             [
+              101.0,
+              30.0
+             ],
+             [
+              101.0,
+              31.0
+             ],
+             [
+              100.0,
+              30.0
+             ]
+            ]
+           ]
+          ]
+         }
+        }
+       ],
+       "crs": "EPSG:4326"
+      }
+     },
+     "spatial_output_type": "VECTOR_POLYGONS"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "demo_square_rejected",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "final_scientific_prediction": true,
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            [
+             114.0,
+             22.5
+            ],
+            [
+             114.04,
+             22.5
+            ],
+            [
+             114.04,
+             22.54
+            ],
+            [
+             114.0,
+             22.54
+            ],
+            [
+             114.0,
+             22.5
+            ]
+           ]
+          ]
+         }
+        }
+       ],
+       "crs": "EPSG:4326"
+      }
+     },
+     "spatial_output_type": "VECTOR_POLYGONS"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "feature[0] matches demo fixed-square geometry (114/22.5)"
+    ]
+   }
+  },
+  {
+   "id": "polygons_missing_crs",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "final_scientific_prediction": true,
+      "spatial": {
+       "features": [
+        {
+         "type": "Feature",
+         "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+           [
+            [
+             100.0,
+             30.0
+            ],
+            [
+             101.0,
+             30.0
+            ],
+            [
+             101.0,
+             31.0
+            ],
+            [
+             100.0,
+             30.0
+            ]
+           ]
+          ]
+         }
+        }
+       ],
+       "crs": ""
+      }
+     },
+     "spatial_output_type": "VECTOR_POLYGONS"
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "VECTOR_POLYGONS missing crs"
+    ]
+   }
+  },
+  {
+   "id": "intervals_none",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "WELL_INTERVALS",
+     "spatial": {}
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "WELL_INTERVALS result has no intervals"
+    ]
+   }
+  },
+  {
+   "id": "intervals_ok",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "WELL_INTERVALS",
+     "spatial": {
+      "intervals": [
+       {
+        "top": 1,
+        "bottom": 2
+       }
+      ]
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "intervals_via_predicted_regions",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "WELL_INTERVALS",
+     "result_summary": {
+      "predicted_regions": [
+       {
+        "top": 1.0
+       }
+      ]
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "intervals_regions_no_bounds",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "WELL_INTERVALS",
+     "result_summary": {
+      "predicted_regions": [
+       {
+        "x": 1
+       }
+      ]
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "WELL_INTERVALS result has no intervals"
+    ]
+   }
+  },
+  {
+   "id": "raster_ok",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "CLASSIFIED_RASTER",
+     "spatial": {
+      "grid": [
+       [
+        1,
+        2
+       ]
+      ],
+      "crs": "EPSG:32650",
+      "geotransform": [
+       0,
+       1,
+       0,
+       0,
+       0,
+       -1
+      ]
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "raster_missing_grid",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "CLASSIFIED_RASTER",
+     "spatial": {
+      "crs": "EPSG:32650",
+      "geotransform": [
+       0,
+       1,
+       0,
+       0,
+       0,
+       -1
+      ]
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "CLASSIFIED_RASTER missing grid or artifact_path"
+    ]
+   }
+  },
+  {
+   "id": "raster_missing_crs",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "CLASSIFIED_RASTER",
+     "spatial": {
+      "grid": [
+       [
+        1
+       ]
+      ],
+      "geotransform": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "CLASSIFIED_RASTER missing crs"
+    ]
+   }
+  },
+  {
+   "id": "raster_bad_geotransform",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "CLASSIFIED_RASTER",
+     "spatial": {
+      "grid": [
+       [
+        1
+       ]
+      ],
+      "crs": "c",
+      "geotransform": [
+       0,
+       1
+      ]
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "CLASSIFIED_RASTER missing 6-element geotransform or artifact_path"
+    ]
+   }
+  },
+  {
+   "id": "raster_artifact_path",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "CLASSIFIED_RASTER",
+     "spatial": {
+      "artifact_path": "x.npz",
+      "crs": "c"
+     }
+    },
+    "expected_type": null,
+    "require_scientific": false
+   },
+   "expect": {
+    "result": []
+   }
+  },
+  {
+   "id": "expected_type_overrides",
+   "fn": "validate_spatial_result",
+   "input": {
+    "payload": {
+     "spatial_output_type": "NONE"
+    },
+    "expected_type": "WELL_INTERVALS",
+    "require_scientific": false
+   },
+   "expect": {
+    "result": [
+     "WELL_INTERVALS result has no intervals"
+    ]
+   }
+  },
+  {
+   "id": "grid_list",
+   "fn": "bounded_result_summary",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial": {
+       "grid": [
+        [
+         1,
+         2
+        ],
+        [
+         3,
+         4
+        ]
+       ],
+       "crs": "c"
+      },
+      "other": 1
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "spatial": {
+      "crs": "c",
+      "grid_shape": [
+       2,
+       2
+      ],
+      "grid_omitted": true
+     },
+     "other": 1
+    }
+   }
+  },
+  {
+   "id": "no_spatial",
+   "fn": "bounded_result_summary",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "a": 1
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "a": 1
+    }
+   }
+  },
+  {
+   "id": "spatial_no_grid",
+   "fn": "bounded_result_summary",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial": {
+       "crs": "c"
+      }
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "spatial": {
+      "crs": "c"
+     }
+    }
+   }
+  },
+  {
+   "id": "grid_none",
+   "fn": "bounded_result_summary",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial": {
+       "grid": null,
+       "crs": "c"
+      }
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "spatial": {
+      "grid": null,
+      "crs": "c"
+     }
+    }
+   }
+  },
+  {
+   "id": "empty_grid",
+   "fn": "bounded_result_summary",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial": {
+       "grid": []
+      }
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "spatial": {
+      "grid_shape": [
+       0,
+       0
+      ],
+      "grid_omitted": true
+     }
+    }
+   }
+  },
+  {
+   "id": "spatial_non_dict_summary",
+   "fn": "bounded_result_summary",
+   "input": {
+    "payload": {
+     "result_summary": {
+      "spatial": "junk",
+      "a": 1
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "spatial": "junk",
+     "a": 1
+    }
+   }
+  },
+  {
+   "id": "no_summary",
+   "fn": "bounded_result_summary",
+   "input": {
+    "payload": {
+     "x": 1
+    }
+   },
+   "expect": {
+    "result": {}
+   }
+  },
+  {
+   "id": "ok",
+   "fn": "is_map_compilable",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": [
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            100.0,
+            30.0
+           ],
+           [
+            101.0,
+            30.0
+           ],
+           [
+            101.0,
+            31.0
+           ],
+           [
+            100.0,
+            30.0
+           ]
+          ]
+         ]
+        }
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": true
+   }
+  },
+  {
+   "id": "no_features",
+   "fn": "is_map_compilable",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": []
+     }
+    }
+   },
+   "expect": {
+    "result": false
+   }
+  },
+  {
+   "id": "wrong_type",
+   "fn": "is_map_compilable",
+   "input": {
+    "payload": {
+     "spatial": {
+      "intervals": [
+       {
+        "a": 1
+       }
+      ],
+      "spatial_output_type": "WELL_INTERVALS"
+     }
+    }
+   },
+   "expect": {
+    "result": false
+   }
+  },
+  {
+   "id": "demo_square",
+   "fn": "is_map_compilable",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": [
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            114.0,
+            22.5
+           ],
+           [
+            114.04,
+            22.5
+           ],
+           [
+            114.04,
+            22.54
+           ],
+           [
+            114.0,
+            22.5
+           ]
+          ]
+         ]
+        }
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": false
+   }
+  },
+  {
+   "id": "demo_square_second",
+   "fn": "is_map_compilable",
+   "input": {
+    "payload": {
+     "spatial": {
+      "features": [
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            100.0,
+            30.0
+           ],
+           [
+            101.0,
+            30.0
+           ],
+           [
+            101.0,
+            31.0
+           ],
+           [
+            100.0,
+            30.0
+           ]
+          ]
+         ]
+        }
+       },
+       {
+        "type": "Feature",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            114.0,
+            22.5
+           ],
+           [
+            114.04,
+            22.5
+           ],
+           [
+            114.04,
+            22.54
+           ],
+           [
+            114.0,
+            22.5
+           ]
+          ]
+         ]
+        }
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": false
+   }
+  },
+  {
+   "id": "null_payload",
+   "fn": "is_map_compilable",
+   "input": {
+    "payload": null
+   },
+   "expect": {
+    "result": false
+   }
+  },
+  {
+   "id": "empty_payload",
+   "fn": "is_map_compilable",
+   "input": {
+    "payload": {}
+   },
+   "expect": {
+    "result": false
+   }
+  },
+  {
+   "id": "dict_passthrough",
+   "fn": "load_manifest_dict",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "extra": {
+      "a": [
+       1
+      ]
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "extra": {
+      "a": [
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "file_ok",
+   "fn": "load_manifest_dict",
+   "input": {
+    "source": "$FX/ok_manifest.json"
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1"
+    }
+   }
+  },
+  {
+   "id": "file_missing",
+   "fn": "load_manifest_dict",
+   "input": {
+    "source": "$FX/missing_manifest.json"
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "Manifest not found: $FX/missing_manifest.json"
+   }
+  },
+  {
+   "id": "file_bad_json",
+   "fn": "load_manifest_dict",
+   "input": {
+    "source": "$FX/bad_manifest.json"
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "Invalid manifest JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+   }
+  },
+  {
+   "id": "file_non_object",
+   "fn": "load_manifest_dict",
+   "input": {
+    "source": "$FX/list_manifest.json"
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "Manifest root must be a JSON object"
+   }
+  },
+  {
+   "id": "file_bad_utf8",
+   "fn": "load_manifest_dict",
+   "input": {
+    "source": "$FX/nonutf8_manifest.json"
+   },
+   "expect": {
+    "raises": "UnicodeDecodeError",
+    "message": "'utf-8' codec can't decode byte 0xff in position 14: invalid start byte"
+   }
+  },
+  {
+   "id": "minimal_defaults",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "full_fields",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "model_version": "2.5",
+     "artifact": "w.onnx",
+     "checksum": " abc ",
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {
+      "x": 1
+     },
+     "metadata": {
+      "k": "v"
+     },
+     "provenance": {
+      "src": "t"
+     },
+     "runtime": "onnxruntime",
+     "deterministic": false,
+     "demo_only": false,
+     "scientific": true,
+     "model_type": "ml",
+     "spatial_output_type": "CLASSIFIED_RASTER",
+     "preprocessing_version": "pp-1"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "2.5",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "w.onnx",
+     "checksum": "abc",
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {
+      "x": 1,
+      "spatial_output_type": "CLASSIFIED_RASTER"
+     },
+     "preprocessing_version": "pp-1",
+     "runtime": "onnxruntime",
+     "deterministic": false,
+     "spatial_output_type": "CLASSIFIED_RASTER",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {
+      "src": "t"
+     },
+     "metadata": {
+      "k": "v"
+     }
+    }
+   }
+  },
+  {
+   "id": "version_fallback",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "version": "3"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "3",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "name_fallback",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "capability": "facies",
+     "provider": "onnx"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "m1",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "demo_only_implies_non_scientific",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "demo_only": true
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": true,
+     "scientific": false,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "explicit_scientific_false",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "scientific": false
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": false,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "strict_bool_true_str",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "deterministic": "true"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "strict_bool_bad_str",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "deterministic": "yes"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "deterministic must be a boolean, got 'yes'"
+   }
+  },
+  {
+   "id": "strict_bool_int",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "deterministic": 1
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "deterministic must be a boolean, got 1"
+   }
+  },
+  {
+   "id": "strict_bool_none",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "demo_only": null
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "demo_only must be a boolean, got None"
+   }
+  },
+  {
+   "id": "missing_model_id",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "model_id is required"
+   }
+  },
+  {
+   "id": "missing_model_name_and_id",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "  ",
+     "capability": "c",
+     "provider": "p"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "model_id is required"
+   }
+  },
+  {
+   "id": "missing_capability",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "provider": "onnx"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "capability is required"
+   }
+  },
+  {
+   "id": "missing_provider",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "provider is required"
+   }
+  },
+  {
+   "id": "unknown_spatial",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "spatial_output_type": "VOXELS"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "Unknown spatial_output_type: 'VOXELS'"
+   }
+  },
+  {
+   "id": "empty_spatial_falls_none",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "spatial_output_type": " "
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "NONE",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "artifact_uri_fallback",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact_uri": "u.onnx"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "u.onnx",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "artifact_base_dir",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "sub/../w.onnx"
+    },
+    "base_dir": "$FX/base"
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "$FX/base/w.onnx",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "checksum_blank_to_none",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "checksum": "   "
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "VECTOR_POLYGONS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "input_schema_non_dict",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "input_schema": [
+      "well_log"
+     ]
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "input_schema and output_schema must be objects"
+   }
+  },
+  {
+   "id": "output_schema_non_dict",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "output_schema": "x"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "input_schema and output_schema must be objects"
+   }
+  },
+  {
+   "id": "metadata_non_dict",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "metadata": 5
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "metadata and provenance must be objects"
+   }
+  },
+  {
+   "id": "provenance_non_dict",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "provenance": "p"
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "raises": "ModelPackageError",
+    "message": "metadata and provenance must be objects"
+   }
+  },
+  {
+   "id": "output_schema_enriched",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "spatial_output_type": "NONE",
+     "output_schema": {
+      "a": 1
+     }
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "a": 1,
+      "spatial_output_type": "NONE"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "NONE",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "output_schema_not_enriched",
+   "fn": "parse_model_package_manifest",
+   "input": {
+    "source": {
+     "model_id": "m1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "output_schema": {
+      "spatial_output_type": "WELL_INTERVALS"
+     }
+    },
+    "base_dir": null
+   },
+   "expect": {
+    "result": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "模型一",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {
+      "spatial_output_type": "WELL_INTERVALS"
+     },
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    }
+   }
+  },
+  {
+   "id": "valid_no_artifact_req",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": []
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "valid_with_artifact",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "$FX/weights.onnx",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": true,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": []
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "$FX/weights.onnx",
+    "checksum": "8f9f0a15a96844a43a98932df73f07eca785345ae3b400228b0b77cfff1d4e6d",
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "demo_provider",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "demo",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "provider 'demo' cannot be registered as a production package"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "demo",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "local_asset_provider",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "local_asset",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "provider 'local_asset' cannot be registered as a production package"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "local_asset",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "case_sensitive_provider",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "Demo",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": []
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "Demo",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "demo_model_type",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "demo",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "model_type 'demo' cannot be a production package"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "demo",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "heuristic_model_type",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "heuristic",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "model_type 'heuristic' cannot be a production package"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "heuristic",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "demo_only",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": true,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "demo_only packages cannot be registered as production"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": true,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "non_scientific",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": false,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "scientific=false packages cannot be registered as production"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": false,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "missing_artifact",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": true,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "artifact path is required for production packages"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "artifact_not_found",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "$FX/no.onnx",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": true,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "artifact file missing: $FX/no.onnx"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "$FX/no.onnx",
+    "checksum": null,
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "checksum_mismatch",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "$FX/weights.onnx",
+     "checksum": "deadbeef",
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": true,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "checksum mismatch: manifest=deadbeef file=8f9f0a15a96844a43a98932df73f07eca785345ae3b400228b0b77cfff1d4e6d"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "$FX/weights.onnx",
+    "checksum": "deadbeef",
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "checksum_filled",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "$FX/weights.onnx",
+     "checksum": null,
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": true,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": []
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "$FX/weights.onnx",
+    "checksum": "8f9f0a15a96844a43a98932df73f07eca785345ae3b400228b0b77cfff1d4e6d",
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "checksum_ok",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "$FX/weights.onnx",
+     "checksum": "8f9f0a15a96844a43a98932df73f07eca785345ae3b400228b0b77cfff1d4e6d",
+     "input_schema": {
+      "required_asset_types": [
+       "well_log"
+      ]
+     },
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": true,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": []
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "$FX/weights.onnx",
+    "checksum": "8f9f0a15a96844a43a98932df73f07eca785345ae3b400228b0b77cfff1d4e6d",
+    "input_schema": {
+     "required_asset_types": [
+      "well_log"
+     ]
+    },
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "missing_input_schema",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "onnx",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": false,
+     "scientific": true,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "input_schema is required for production packages"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "onnx",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {},
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": false,
+    "scientific": true,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "allow_non_scientific_bypass",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "demo",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "heuristic",
+     "demo_only": true,
+     "scientific": false,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": false,
+    "allow_non_scientific": true
+   },
+   "expect": {
+    "result": []
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "demo",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {},
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "heuristic",
+    "demo_only": true,
+    "scientific": false,
+    "provenance": {},
+    "metadata": {}
+   }
+  },
+  {
+   "id": "multiple_errors",
+   "fn": "validate_model_package",
+   "input": {
+    "manifest": {
+     "model_id": "m1",
+     "model_version": "1",
+     "model_name": "n",
+     "capability": "facies",
+     "provider": "demo",
+     "artifact": "",
+     "checksum": null,
+     "input_schema": {},
+     "output_schema": {},
+     "preprocessing_version": "",
+     "runtime": "python_callable",
+     "deterministic": true,
+     "spatial_output_type": "VECTOR_POLYGONS",
+     "model_type": "ml",
+     "demo_only": true,
+     "scientific": false,
+     "provenance": {},
+     "metadata": {}
+    },
+    "require_artifact": true,
+    "allow_non_scientific": false
+   },
+   "expect": {
+    "result": [
+     "provider 'demo' cannot be registered as a production package",
+     "demo_only packages cannot be registered as production",
+     "scientific=false packages cannot be registered as production",
+     "artifact path is required for production packages",
+     "input_schema is required for production packages"
+    ]
+   },
+   "manifest_after": {
+    "model_id": "m1",
+    "model_version": "1",
+    "model_name": "n",
+    "capability": "facies",
+    "provider": "demo",
+    "artifact": "",
+    "checksum": null,
+    "input_schema": {},
+    "output_schema": {},
+    "preprocessing_version": "",
+    "runtime": "python_callable",
+    "deterministic": true,
+    "spatial_output_type": "VECTOR_POLYGONS",
+    "model_type": "ml",
+    "demo_only": true,
+    "scientific": false,
+    "provenance": {},
+    "metadata": {}
+   }
+  }
+ ]
+}
