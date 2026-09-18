@@ -50,6 +50,22 @@ if(PWB_BUILD_CONV_18 AND NOT PWB_BUILD_MAPPING_KERNEL)
 endif()
 # END CONV-18
 
+# BEGIN CONV-PROVIDERS — native capability-provider runtime (SDK + builtins):
+# the provider/plugin/extension contract, registry, and typed invocation
+# pipeline ported from paleo_workbench/providers/* (frozen against
+# provider_oracle.json), plus the native factor-stats and map-thumbnail
+# providers. Needs Pwb::Domain (PWB_BUILD_DATA), the mapping kernel
+# (factor dataset adapter) and the mapping document kernel (thumbnail
+# render input); the implied switches land BEFORE the kernel/data/CONV-02
+# subdirectory blocks below.
+option(PWB_BUILD_PROVIDERS
+    "Build the native provider SDK + builtins (libs/providers; implies PWB_BUILD_DATA + PWB_BUILD_MAPPING_KERNEL + CONV-02)" OFF)
+if(PWB_BUILD_PROVIDERS)
+    set(PWB_BUILD_DATA ON)
+    set(PWB_BUILD_MAPPING_KERNEL ON)
+    set(PWB_BUILD_CONV_02 ON)
+endif()
+# END CONV-PROVIDERS
 # BEGIN CONV-23 — workflow/contracts pure contract layer (M7): pydantic-lite
 # contract models, the 14 generated module declarations, registry +
 # consistency validation, metadata-only readiness evaluation and the two
@@ -202,6 +218,12 @@ if(PWB_BUILD_CONV_02)
     add_subdirectory(libs/mapping_document)
 endif()
 # END CONV-02
+# CONV-PROVIDERS subdirectory — placed after the mapping kernel/document
+# blocks so Pwb::MappingKernel and Pwb::MappingDocument exist (ALIAS targets
+# must be defined when referenced).
+if(PWB_BUILD_PROVIDERS)
+    add_subdirectory(libs/providers)
+endif()
 # BEGIN CONV-06
 # WorkflowSpec DAG pure model + validator (M7 leaf; Qt-free, QGIS-free).
 # Requires Pwb::Domain (ordered JSON + sha256) from PWB_BUILD_DATA=ON.
