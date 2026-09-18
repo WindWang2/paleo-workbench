@@ -694,6 +694,38 @@ void test_state_persistence() {
           "strict coercions: 'yes'→true, '0.75'→0.75");
     check(degraded.view_presets().count("v1") == 1, "view preset restored");
 
+    // Malformed payload shapes degrade honestly (never crash, ADR-03)
+    SceneObjectManager manager_bad;
+    Geo3DWorkspaceController malformed([&manager_bad]() { return &manager_bad; });
+    check(malformed.restore_state(Json::object()).empty(),
+          "empty payload restores nothing");
+    check(malformed.restore_state(Json(nullptr)).empty(),
+          "null payload restores nothing");
+    Json array_payload = Json::array({1, 2, 3});
+    check(malformed.restore_state(array_payload).empty(),
+          "array payload restores nothing");
+    Json scalar_objects = Json::object();
+    scalar_objects["objects"] = 42;
+    scalar_objects["measurements"] = "bogus";
+    scalar_objects["clip"] = 7;
+    scalar_objects["views"] = "nope";
+    check(malformed.restore_state(scalar_objects).empty(),
+          "scalar-typed sections are skipped wholesale");
+
+    // Unicode names survive the meta round-trip
+    DomainObject unicode_well =
+        pwb::geomodel::build_simplified_vertical_well(
+            "井-中文-№1", {1.0, 2.0, 0.0}, 30.0, "EPSG:4326");
+    controller.add_object(std::move(unicode_well));
+    Json unicode_payload = controller.save_state();
+    bool unicode_found = false;
+    for (const auto& object : unicode_payload["objects"]) {
+        if (object["name"].get<std::string>() == "井-中文-№1") {
+            unicode_found = true;
+        }
+    }
+    check(unicode_found, "Unicode well name persists verbatim");
+
     // as_bool matrix (frozen semantics)
     check(state_as_bool(Json(true), false), "bool true");
     check(!state_as_bool(Json(std::string("false")), true),
@@ -703,6 +735,11 @@ void test_state_persistence() {
     check(state_as_bool(Json(0.5), true), "0.5 falls to the default (true)");
     check(state_as_bool(Json(std::string("YES")), false),
           "case-insensitive yes");
+    check(state_as_bool(Json(std::string(" true ")), false),
+          "whitespace stripped like Python .strip().lower()");
+    // infinity via overflow string falls to the default (not finite)
+    check(state_as_float(Json(std::string("1e400")), 0.25) == 0.25,
+          "1e400 → inf is not finite → default");
 }
 
 void test_state_coercions_and_inspector() {

@@ -43,7 +43,8 @@
       { "value": 2.0, "default": 0.5, "lo": 0.0, "hi": 1.0, "expected": 1.0 },
       { "value": "nan", "default": 0.25, "lo": null, "hi": null, "expected": 0.25 },
       { "value": "bogus", "default": 0.25, "lo": null, "hi": null, "expected": 0.25 },
-      { "value": -5.0, "default": 0.0, "lo": 1.0, "hi": null, "expected": 1.0 }
+      { "value": -5.0, "default": 0.0, "lo": 1.0, "hi": null, "expected": 1.0 },
+      { "value": "1e400", "default": 0.25, "lo": null, "hi": null, "expected": 0.25 }
     ]
   }
 }

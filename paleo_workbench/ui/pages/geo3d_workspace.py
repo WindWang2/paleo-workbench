@@ -1,5 +1,11 @@
 """Geo3D workspace controller — V5 page-side bridge (G9/G16/G17).
 
+LEGACY REFERENCE (CONV-GEO3D): the C++ port (scene adapter, measurement
+machine, bounds-derived clipping, seven-key Geo3DWorkspaceState persistence)
+lives in ``libs/geo3d_viz`` (``pwb::geo3d_viz::Geo3DWorkspaceController``).
+This module stays as the behavior oracle; new product code must not import
+it.
+
 Owns the page's :class:`ModelAssembly` + :class:`GeologicalSceneAdapter`
 and the workspace UI logic that stays out of the legacy page monolith:
 

@@ -26,11 +26,26 @@ Branch: `feat/cpp-geoviz-3d-native` · Base: `origin/main` @ `ff67dcf3` · Workt
 - 2D map/QGIS 画布本体——只提供同步 seam（well_selected 信号、extent/CRS getter）。
 - `lazy_visualization_tabs.py` / `composite_visualization_panel.py`（纯 2D 预览，与 3D 无耦合）。
 
+## 已知限制（如实声明）
+
+- **工程持久化的产品接线延后**：`Geo3DWorkspaceController::save_state()/restore_state()`
+  作为 lib API 提供并有 oracle 级测试覆盖（七键 schema、demo 排除、逐条降级），
+  但平台 dock 尚未接项目存储（Python 侧 `project.geo3d_workspace` 的宿主等价物
+  属于 CONV-26 数据/项目生命周期分支的接线面）。后续分支把 dock 的状态写进
+  项目 store 时调用这两个 API 即可，无 lib 层缺口。
+- **井震联合场景未接**：`SceneTransform` seam 已预留（identity 默认），
+  well-seismic LOD 体加载管线（joint_host.py 对应物）留待后续分支。
+- **真 GL 渲染在本机未做像素验证**：构建机 offscreen 无 GL 上下文，widget 以
+  诚实 GL-less 降级路径通过全部测试（registry/pick/pose/生命周期全功能）；
+  现代 GL 渲染路径为编译级验证 + 代码审查，需在有 GL 的环境跑一次 smoke。
+- **测量计数器为 per-controller**：Python 是模块级全局；单控制器等价，
+  多控制器场景靠 `-N` 冲突后缀兜底（有意偏差，已冻结在测试中）。
+
 ## 已被其他 PR 完成的内容（不重复实现）
 
 - CONV-12（PR 已合并）：builders/measurements/section/qc 数值核 → `pwb::geomodel`，直接复用。
 - CONV-22（PR #1334 已合并）：DomainObject/ModelAssembly/QC/export/advisor 契约 → 直接复用。
-- 开放 PR #1346/#1348（CONV-26）、#1351（CONV-27 UI）、#1352（CONV-28）、#1359（well-log host）、#1353（product closure）：与本分支无文件交集（它们不触碰 `libs/geo3d_viz`）；唯一潜在冲突点是 `apps/paleo_workbench_platform/CMakeLists.txt` 与 `main_window.cpp` —— 本分支用独立的 BEGIN/END CONV-GEO3D 块与 `geo3d_dock.{hpp,cpp}` 新文件，最小化冲突面。
+- 开放 PR #1346/#1348（CONV-26）、#1351（CONV-27 UI）、#1352（CONV-28）、#1359（well-log host）、#1353（product closure）：不触碰 `libs/geo3d_viz`（lib 本体零冲突）。**接线文件存在文本冲突面**（双方都在同锚点追加 guard 块）：根 `CMakeLists.txt`（CONV-25 锚点，与 #1348/#1352）、`apps/paleo_workbench_platform/CMakeLists.txt` 与 `main_window.{hpp,cpp}`（与 #1351/#1353/#1359 相邻 hunk）。全部为机械冲突（无同名 option/target/类），后合并者 rebase 时并列保留各自 BEGIN/END 块即可。
 
 ## 共享冲突文件
 
