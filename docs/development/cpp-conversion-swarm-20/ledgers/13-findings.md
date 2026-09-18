@@ -470,9 +470,16 @@ normalize 中点邻接、representative_facies 厚度求和、mock 锚点最近�
 ## 19. 已知风险与 FP 对齐策略
 1. np.exp(float32) vs std::exp —— 允许 1 ulp 内偏差；类图设计保证 argmax
    边界远离噪声（见 decisions：stub 通道间隔 ≥ 大裕度 + 精确平局用例单独
-   构造 dyadic 值）。
-2. fp16 量化：冻结 Python fp16 值，C++ 对账容差 = 2^-9 相对 + 4e-4 绝对
-   （约 1 fp16 ulp）；NaN/inf 逐位等价比较。
+   构造 dyadic 值）。生成器侧设 **argmax 裕度守卫**：观察真实 `_softmax`
+   的 top-2 相对 gap，全局最小值冻结进 meta 并断言 > 100×float32 eps
+   （实测 1.663e-5 ≈ 46× 最坏跨平台 exp 漂移；C=1 sigmoid 路径不经
+   `_softmax`，其 gap = |2·conv−1| = 0.5 或设计内精确 0）。
+2. fp16 量化：冻结 Python fp16 值，C++ 对账容差 = 1 fp16 ulp（按 want
+   所在 binade `2^(floor(log2|want|)-10)`，次正规带 2^-24）+ 1e-12；
+   NaN/Inf 逐位等价比较（实现 `fp16_ulp`/`same_prob`，与 decisions D6
+   一致）。编码原语另有 534 条 numpy 位级冻结表（fixture `fp16_table`）。
+   numpy 对截断后 mantissa 为 0 的非零 NaN payload **强制置 1**
+   （0x7f800001 → 0x7c01），C++ 编码器已按此对齐。
 3. 元素级 FP 顺序：Python `0.25*L + 0.5*C + 0.25*R`（左结合）与 C++ 同表达式
    逐元素一致；C++ 编译对该 TU 关 FP 收缩（-ffp-contract=off），禁 FMA。
 4. softmax 的 `e / e.sum(axis=1)`：C 类 ≤4，numpy 对短轴求和即顺序累加；

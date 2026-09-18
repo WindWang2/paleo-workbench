@@ -388,6 +388,37 @@ def run_case(case: dict, model_path: Path, root: Path) -> dict:
     session_kind = case["stub"]
     original = to._make_session
     to._make_session = lambda mp, prefer_gpu: (StubSession(session_kind), "cpu")
+    # Argmax-margin audit (observation only): watch the REAL _softmax the
+    # production code calls and track the smallest non-tie top-2 probability
+    # gap. The classmap oracle asserts exact equality per voxel — that is
+    # only robust against cross-platform exp() drift while this gap stays
+    # orders of magnitude above it (measured 1.66e-5 relative ≈ 46× the
+    # worst exp drift). Guarded by assertion in main(); the C=1 sigmoid path
+    # does not go through _softmax (its gap is |2·conv−1| = 0.5 or exact 0
+    # by construction here) and reports null.
+    softmax_audit = {"min_rel_gap": None, "ties": 0}
+    audit_softmax = session_kind != "sigmoid1"
+    original_softmax = to._softmax
+    if audit_softmax:
+        def observing_softmax(x):
+            probs = original_softmax(x)
+            kth = probs.shape[1] - 2
+            part = np.partition(probs, kth, axis=1)
+            first = np.take(part, probs.shape[1] - 1, axis=1)
+            second = np.take(part, kth, axis=1)
+            gap = first - second
+            softmax_audit["ties"] += int(np.count_nonzero(gap == 0.0))
+            valid = gap > 0.0
+            if bool(np.any(valid)):
+                rel = float(np.min(gap[valid] / first[valid]))
+                if softmax_audit["min_rel_gap"] is None:
+                    softmax_audit["min_rel_gap"] = rel
+                else:
+                    softmax_audit["min_rel_gap"] = min(
+                        softmax_audit["min_rel_gap"], rel)
+            return probs
+
+        to._softmax = observing_softmax
     try:
         cancel = None
         progress = None
@@ -423,6 +454,7 @@ def run_case(case: dict, model_path: Path, root: Path) -> dict:
             }
     finally:
         to._make_session = original
+        to._softmax = original_softmax
 
     class_store = _ZARR_STORES[str(work / "classmap")]
     prob_store = _ZARR_STORES[str(work / "probmap")]
@@ -443,6 +475,10 @@ def run_case(case: dict, model_path: Path, root: Path) -> dict:
         "classmap": [int(x) for x in class_store.data.reshape(-1)],
         "probmap": f16_json(prob_store.data),
         "markers": markers,
+        "argmax_margin": {
+            "min_rel_gap": softmax_audit["min_rel_gap"],
+            "exact_ties": softmax_audit["ties"],
+        },
     }
 
 
@@ -667,7 +703,29 @@ def main() -> int:
         assert fresh["classmap"] == resumed["classmap"]
         assert fresh["probmap"] == resumed["probmap"]
         assert len(resumed["markers"]) == len(fresh["markers"])
+
+        # Argmax-margin guard: exact classmap equality is only robust while
+        # the smallest non-tie top-2 probability gap stays far above
+        # cross-platform exp() drift. 100 × float32 eps is the floor; the
+        # frozen volumes measure 1.66e-5 relative (≈ 46× worst-case drift).
+        # Violating this means the volumes/stub were changed into a regime
+        # where a different platform's exp could flip a classmap voxel.
+        gaps = [r["argmax_margin"]["min_rel_gap"] for r in run_results
+                if r.get("argmax_margin", {}).get("min_rel_gap") is not None]
+        min_gap = min(gaps) if gaps else None
+        if min_gap is not None:
+            floor = 100.0 * float(np.finfo(np.float32).eps)
+            assert min_gap > floor, (
+                f"argmax margin {min_gap:.3e} fell below the {floor:.3e} "
+                "cross-platform safety floor; regenerate-safe classmap "
+                "equality is no longer guaranteed")
         fixture["runs"] = run_results
+        fixture_meta_extras = {
+            "argmax_min_rel_gap": min_gap,
+            "argmax_margin_floor_rel": (
+                100.0 * float(np.finfo(np.float32).eps)
+                if min_gap is not None else None),
+        }
 
         # -- run-level honest errors ---------------------------------------
         def run_error(case_id, reader, *, model_path_override=None,
@@ -729,6 +787,7 @@ def main() -> int:
         fixture["run_errors"] = err_runs
 
         fixture["fp16_table"] = fp16_table()
+        fixture["meta"].update(fixture_meta_extras)
 
     finally:
         shutil.rmtree(root_tmp, ignore_errors=True)
