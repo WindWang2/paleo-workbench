@@ -145,3 +145,40 @@ native-product 全量 ctest 65/65、`--self-check` 12/12、部署树 12/12。
 遗留观察（不阻塞）：vendored sqlite3.c 的 `clearSelect+0x280` 在最终
 二进制里也有一个自旋字节序列，但 data.* 全部通过（该路径未被踩到，
 sqlite amalgamation 不在本分支责任面内，如实记录移交）。
+
+
+## Review 记录与最终验证（2026-09-18 收口）
+
+三轮只读 review（A 正确性/语义/边界；B 架构/生命周期/线程/ABI；C 产品
+闭环/重复/残留/资源）产出 1×P1 + 若干 P2/P3，全部修复（commit 03538c2c）：
+
+| 级别 | 发现 | 处置 |
+|---|---|---|
+| P1 | auditServices 把"hard 但未在本构建"判失败 → 非产品配置全回归 | 审计只问"本构建承载的服务是否可达"；module-only 13/13 + self-check 9/9 恢复 |
+| P2 | --headless-self-check 的 qputenv 晚于 QgsApplication 构造（死承诺） | 构造前 argv 预扫描设 QT_QPA_PLATFORM |
+| P2 | attributeRunner() shutdown 后悬垂 | runner 全生命周期存活（与 session() 同契约） |
+| P2 | kernel 类能力被标 "linked"（误导） | configure summary 与 --capabilities 均改 "kernel-only" |
+| P2 | seismic_attributes 开而 data 集成缺时 runtime_ok 假阳性 | 诚实降级 false + 原因 |
+| P2 | 审计脚本路径/模式/二进制探测缺口 | 产品闭包全路径 + PySide/PyRun/QProcess/dlopen 模式 + 真实产物路径 |
+| P2 | check_diagnostics Windows 必红 | 接受 not-probed（非 POSIX） |
+| P3 | 进程内扫描缺 shiboken、电池后未复扫 / NaN max 守卫 / 断链闭包假绿 等 | 全部修复（见 commit message） |
+
+顺手修复的基线预存在问题（main 上同样存在，非本分支引入）：
+main_window.cpp 的 data_store.hpp include 与 openProjectDialog 定义未按
+PWB_WITH_DATA_INTEGRATION 保护（module-only 编译损坏）；PwbQgisSdk 为
+带 GDAL 依赖的 vendor 快照补 OGR 头（find_package QUIET，可退化为旧行为）。
+
+最终验证矩阵（本机，全部经共享资源门禁 -j2）：
+
+| 配置 | ctest | 自检 |
+|---|---|---|
+| linux-native-product（产品闭包） | 65/65 | --self-check 12/12；--capabilities/--diagnostics exit 0 |
+| module-only（PLATFORM=ON, DATA/SCIENCE=OFF） | 13/13 | --self-check 9/9（fixture 门控项 skip-by-design） |
+| 部署树（deploy-native-product.sh） | — | 12/12 |
+
+已知限制（如实）：本验证主机的选择性 codegen 损坏事件（见 §工具链
+note）使全部证据采集自同一台已知会偶发损坏的主机；PR 合并前若条件允
+许，建议在第二台干净主机复跑一次 integrated gate。`.ninja_log` 时间重
+叠分析显示本 worktree 构建目录曾出现过一次超过 -j2 的并行段（疑似早
+期等待锁循环期间的遗留，无法归因到具体调用）；后续全部构建/测试均经
+invoke-resource-gate.sh（2 jobs + ≥8 GiB + 共享锁），无绕过记录。
