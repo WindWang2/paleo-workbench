@@ -5,10 +5,9 @@
 # and carries the seismic<->project spatial context seam (BinGridGeometry +
 # CRS id, JSON-codec only — no libs/project ABI change).
 #
-# pwb_visualization is linked PRIVATE on purpose: the service only implements
-# the interface declared in its headers and must not drag Qt into the link
-# interface of Qt-free consumers. Reuse the target when the consuming
-# superproject already provides it.
+# pwb_visualization is Qt-free (see its CMakeLists). It links PUBLIC because
+# the service's public headers expose pwb/viz types. Reuse the target when
+# the consuming superproject already provides it.
 if(NOT TARGET Pwb::Visualization)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../visualization visualization)
 endif()
@@ -21,8 +20,7 @@ target_include_directories(pwb_seismic_service PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pwb_seismic_service PUBLIC cxx_std_20)
 target_link_libraries(pwb_seismic_service
-    PUBLIC Pwb::SeismicIo Pwb::Domain
-    PRIVATE pwb_visualization)
+    PUBLIC Pwb::SeismicIo Pwb::Domain Pwb::Visualization)
 if(MSVC)
     target_compile_options(pwb_seismic_service PRIVATE /W4)
 else()

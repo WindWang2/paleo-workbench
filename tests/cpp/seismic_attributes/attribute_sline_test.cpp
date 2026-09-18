@@ -239,12 +239,14 @@ TEST(sl_plane_analytic) {
                       dip_params);
     const double want_il = std::atan2(0.7, 1.3);
     const double want_xl = std::atan2(-0.4, 1.3);
+    // The plane itself is float32-quantized (values up to ~31, ulp ~2e-6),
+    // so the analytic dip holds only to the f32 rounding of the input.
     for (std::size_t i = 0; i < dip_il.size(); ++i) {
         PWB_CHECK_MSG(std::fabs(static_cast<double>(dip_il[i]) - want_il)
-                          < 1e-6,
+                          < 1e-4,
                       "plane dip_il analytic mismatch");
         PWB_CHECK_MSG(std::fabs(static_cast<double>(dip_xl[i]) - want_xl)
-                          < 1e-6,
+                          < 1e-4,
                       "plane dip_xl analytic mismatch");
     }
     const std::vector<float> azimuth = run_attribute(

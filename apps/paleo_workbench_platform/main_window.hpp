@@ -24,8 +24,10 @@
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/application/algorithm_runner.hpp>
 #endif
-#if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/seismic_io/volume_descriptor.hpp>
+#endif
+#if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/seismic_service/volume_service.hpp>
 #endif
 
@@ -94,10 +96,9 @@ public:
     // an attribute input and viewable in the seismic dock.
     std::string importSegy(const QString& path, std::string* error);
 #endif
-#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_SEISMIC_SERVICE) \
-    && defined(PWB_WITH_DATA_INTEGRATION)
-    // Cancelable variant: same staging + publication, but the SEG-Y read
-    // polls `cancel` between traces (used by the threaded import dialog).
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+    // Cancelable variant: same staging + publication as importSegy, but
+    // the SEG-Y read polls `cancel` between traces (threaded import dialog).
     std::string importSegy(const QString& path, std::string* error,
                            pwb::seismic_io::CancelFlag cancel);
 #endif

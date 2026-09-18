@@ -54,7 +54,8 @@ int main() {
         check(stats.entries <= 3, "entry cap respected");
         check(stats.evictions >= 4, "evictions happened");
         check(stats.misses == 12, "12 misses total");
-        check(stats.hits == 24 - 12, "hits on retained tiles");
+        // Round-robin over a 3-entry cache defeats LRU: no hits.
+        check(stats.hits == 0, "round-robin defeats the small cache");
         // The tile touched last in each round must be retained: re-request
         // it and see no new load.
         const int loads_before = loads;

@@ -95,9 +95,10 @@ std::shared_ptr<const TileCache::Buffer> TileCache::get_or_load(
         std::lock_guard<std::mutex> lock(mutex_);
         const auto it = map_.find(key);
         if (it != map_.end()) {
-            // Racer won the race: serve the winner, discard ours.
+            // Racer won the race: serve the winner's buffer. This lookup
+            // was already counted as a miss; it must not count a hit too
+            // (hits + misses == total lookups).
             order_.splice(order_.end(), order_, it->second.lru);
-            ++hits_;
             return it->second.buffer;
         }
         insert_locked(key, buffer);

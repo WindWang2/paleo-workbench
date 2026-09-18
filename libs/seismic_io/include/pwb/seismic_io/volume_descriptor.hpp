@@ -133,15 +133,16 @@ struct VolumeDescriptor {
 
 // Cooperative cancellation. `cancelled()` is checked between traces / rows
 // in every window-read loop; the flag is single-shot (set once, never
-// cleared) so reads observe a stable decision.
+// cleared) so reads observe a stable decision. Default construction creates
+// a live (uncancelled) flag — a `const CancelFlag` member is the idiomatic
+// "no cancellation" argument.
 class CancelFlag {
 public:
-    CancelFlag() = default;
+    CancelFlag()
+        : state_(std::make_shared<std::atomic<bool>>(false)) {}
 
     static CancelFlag make() {
-        CancelFlag flag;
-        flag.state_ = std::make_shared<std::atomic<bool>>(false);
-        return flag;
+        return CancelFlag();
     }
 
     void cancel() {
@@ -155,6 +156,8 @@ public:
     }
 
 private:
+    explicit CancelFlag(std::shared_ptr<std::atomic<bool>> state)
+        : state_(std::move(state)) {}
     std::shared_ptr<std::atomic<bool>> state_;
 };
 

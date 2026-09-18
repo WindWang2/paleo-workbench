@@ -357,6 +357,13 @@
    },
    "meta": {
     "bin_grid": {
+     "il_azimuth_deg": -20.000730568979296,
+     "il_spacing_m": 24.997651889933618,
+     "x_origin": 500000.0,
+     "xl_spacing_m": 49.995303779469474,
+     "y_origin": 3000000.0
+    },
+    "bin_grid_constructed": {
      "il_azimuth_deg": 20.0,
      "il_spacing_m": 25.0,
      "x_origin": 500000.0,
@@ -368,7 +375,7 @@
     "format": 5,
     "iline_start": 100.0,
     "iline_step": 2.0,
-    "note": "bin-grid calibration; CDP corner inference",
+    "note": "bin-grid calibration; expectation = the pinned loader's own corner-trace inference of the written bytes",
     "probes": [
      {
       "il_frac": 0.0,
@@ -381,24 +388,24 @@
       "y_roundtrip": 3000000.0
      },
      {
-      "il_frac": 1.9999999999961813,
-      "nearest_il": 2,
+      "il_frac": 0.766108203231897,
+      "nearest_il": 1,
       "nearest_xl": 0,
-      "x": 499982.89899283374,
-      "x_roundtrip": 499982.89899283374,
-      "xl_frac": -2.0442314507818082e-13,
-      "y": 3000046.984631039,
-      "y_roundtrip": 3000046.984631039
+      "x": 499991.44949641684,
+      "x_roundtrip": 499991.44949641684,
+      "xl_frac": -0.3214288786879427,
+      "y": 3000023.4923155196,
+      "y_roundtrip": 3000023.4923155196
      },
      {
-      "il_frac": 3.808509063674137e-12,
-      "nearest_il": 0,
-      "nearest_xl": 3,
-      "x": 500140.9538931179,
-      "x_roundtrip": 500140.9538931179,
-      "xl_frac": 3.0000000000009366,
-      "y": 3000051.303021499,
-      "y_roundtrip": 3000051.303021499
+      "il_frac": 1.2857155147431343,
+      "nearest_il": 1,
+      "nearest_xl": 1,
+      "x": 500046.9846310393,
+      "x_roundtrip": 500046.9846310393,
+      "xl_frac": 0.7661082032401803,
+      "y": 3000017.1010071663,
+      "y_roundtrip": 3000017.1010071663
      }
     ],
     "shape": [
@@ -602,7 +609,7 @@
    }
   }
  },
- "comparison": "window dumps: exact f32 equality except NaN positions must match bitwise; max_abs bound 1e-6 for IBM-decoded values",
+ "comparison": "format-5/pwbvol1 windows: exact f32 equality (NaN positions bitwise); IBM format-1 windows: dual criterion |a-e| <= max(1e-4, 1e-6*|e|) absorbing the encoder-side 24-bit mantissa loss",
  "interpreter": {
   "executable": "/home/kevin/project/worktrees/cpp-seismic-native-stack/.venv-oracle/bin/python",
   "numpy": "2.5.3",

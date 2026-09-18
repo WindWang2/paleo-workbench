@@ -46,7 +46,7 @@ std::vector<float> read_f32(const fs::path& path) {
 
 // Compares a read_slice plane against the corresponding plane extracted from
 // the frozen full-volume oracle dump.
-void check_plane(const pwb::viz::ISeismicVolume& volume,
+void check_plane(pwb::viz::ISeismicVolume& volume,
                  pwb::viz::VolumeAxis axis, std::int64_t index,
                  const std::vector<float>& full,
                  const std::array<std::int64_t, 3>& shape,
@@ -54,7 +54,7 @@ void check_plane(const pwb::viz::ISeismicVolume& volume,
     const std::int64_t rows = axis == pwb::viz::VolumeAxis::inline_
                                   ? shape[1]
                                   : shape[0];
-    const std::int64_t cols = axis == pwb::viz::VolumeAxis::sample_
+    const std::int64_t cols = axis == pwb::viz::VolumeAxis::sample
                                   ? shape[1]
                                   : shape[2];
     std::vector<float> plane(static_cast<std::size_t>(rows * cols));
@@ -279,8 +279,8 @@ int main() {
             bool ok = true;
             for (std::int64_t i = 0; i < n && ok; ++i) {
                 for (std::int64_t j = 0; j < n && ok; ++j) {
-                    const float want = 0.001f
-                        * static_cast<float>(i + j) + 0.001f * t;
+                    const float want =
+                        0.001f * static_cast<float>(i + j + (n / 2));
                     ok = plane[static_cast<std::size_t>(i * n + j)] == want;
                 }
             }

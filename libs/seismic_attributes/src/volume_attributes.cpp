@@ -718,8 +718,10 @@ private:
 
         // 2. Smooth the slopes: uniform_filter(size=2w+1, mode="reflect")
         // per axis, float64 running sums, float32 between passes. Line
-        // bases: axis0 lines are (xl, t) -> base = xl*ns + t; axis1 lines
-        // are (il, t) -> base = il*nc*ns + t; axis2 lines are (il, xl).
+        // bases (packed il*nc*ns + xl*ns + t): axis0 lines are (xl, t) ->
+        // base = xl*ns + t; axis1 lines are (il, t) -> base =
+        // il*nc*ns + t; axis2 lines are (il, xl) -> base =
+        // il*nc*ns + xl*ns.
         auto smooth_all = [&](std::vector<float>& slope) {
             std::vector<float> scratch(vol.size());
             sliding_mean_axis(
@@ -733,7 +735,10 @@ private:
                 ns, wins[1]);
             sliding_mean_axis(
                 slope.data(), scratch.data(), ns, ni * nc,
-                [](std::int64_t line) { return line; }, 1, wins[2]);
+                [nc, ns](std::int64_t line) {
+                    return (line / nc) * (nc * ns) + (line % nc) * ns;
+                },
+                1, wins[2]);
             slope.swap(scratch);
         };
         smooth_all(slope_il);

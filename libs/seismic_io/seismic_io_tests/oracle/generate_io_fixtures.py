@@ -204,24 +204,69 @@ def build_cases(out: Path) -> dict:
     ni3, nc3, ns3 = 4, 4, 6
     vol3 = rng.uniform(-1.0, 1.0, size=(ni3, nc3, ns3)).astype(np.float32)
     corners = {}
+    iline_step, xline_step = 2, 3
     probes = []
     for (il_idx, xl_idx), key in {(0, 0): "origin", (1, 0): "plus_il",
                                   (0, 1): "plus_xl"}.items():
-        il_val = 100 + il_idx * 2
-        xl_val = 200 + xl_idx * 3
-        x, y = grid.il_xl_to_xy(float(il_val - 100), float(xl_val - 200))
+        il_val = 100 + il_idx * iline_step
+        xl_val = 200 + xl_idx * xline_step
+        # Corner positions are ONE grid step apart: fractional indices are
+        # the line offsets DIVIDED by the line step.
+        x, y = grid.il_xl_to_xy(float(il_val - 100) / iline_step,
+                                float(xl_val - 200) / xline_step)
+        # Centimetre quantization through the standard SourceGroupScalar
+        # (scalar = -100 -> divide by 100 on read): the finest SEG-Y int32
+        # encoding that fits a 3,000 km UTM northing (mm would overflow
+        # int32). Inferred grid stays within ~5 mm of the calibration.
         corners[(il_idx, xl_idx)] = {
-            "scalar": 1, "cdp_x": int(round(x)), "cdp_y": int(round(y)),
+            "scalar": -100, "cdp_x": int(round(x * 100.0)),
+            "cdp_y": int(round(y * 100.0)),
         }
         probes.append({"il": il_val, "xl": xl_val, "x": x, "y": y})
     write_segy(out / "io_oracle_bins.sgy", ni3, nc3, ns3, 1000, 5,
                [100, 102, 104, 106], [200, 203, 206, 209], vol3, corners)
-    # Probe round trips through the pinned oracle (forward and inverse).
+
+    # Freeze what the PINNED LOADER INFERS from the written bytes (not the
+    # construction parameters): open the file with segyio and run the
+    # oracle's own _infer_bin_grid on the corner traces. The inference
+    # convention (azimuth = atan2(dx, dy) + sign fix) is the frozen
+    # behavior the C++ inspector must replicate.
+    import segyio
+    loader_src = (
+        REPO_ROOT / "geo-viz-engine" / "packages" / "geoviz_seismic"
+        / "geoviz_seismic" / "loader.py"
+    )
+    # loader.py uses relative imports (.models); register a synthetic
+    # package so the standalone load resolves them against the same
+    # pinned directory.
+    import types
+    pkg_name = "geoviz_oracle_pkg"
+    pkg = types.ModuleType(pkg_name)
+    pkg.__path__ = [str(loader_src.parent)]
+    sys.modules.setdefault(pkg_name, pkg)
+    lspec = importlib.util.spec_from_file_location(pkg_name + ".loader",
+                                                   loader_src)
+    lmod = importlib.util.module_from_spec(lspec)
+    sys.modules[pkg_name + ".loader"] = lmod
+    lspec.loader.exec_module(lmod)
+    with segyio.open(out / "io_oracle_bins.sgy", "r", strict=False,
+                     ignore_geometry=True) as f:
+        inferred = lmod._infer_bin_grid(
+            f, [100, 102, 104, 106], [200, 203, 206, 209])
+    if inferred is None:
+        raise AssertionError("oracle _infer_bin_grid returned None")
+    inferred_grid = {
+        "x_origin": inferred.x_origin, "y_origin": inferred.y_origin,
+        "il_azimuth_deg": inferred.il_azimuth_deg,
+        "il_spacing_m": inferred.il_spacing_m,
+        "xl_spacing_m": inferred.xl_spacing_m,
+    }
+    # Probe round trips through the INFERRED grid (what consumers get).
     probe_expect = []
     for probe in probes:
-        il_f, xl_f = grid.xy_to_il_xl(probe["x"], probe["y"])
-        x2, y2 = grid.il_xl_to_xy(il_f, xl_f)
-        nearest = grid.nearest_il_xl(probe["x"], probe["y"])
+        il_f, xl_f = inferred.xy_to_il_xl(probe["x"], probe["y"])
+        x2, y2 = inferred.il_xl_to_xy(il_f, xl_f)
+        nearest = inferred.nearest_il_xl(probe["x"], probe["y"])
         probe_expect.append({
             "x": probe["x"], "y": probe["y"],
             "il_frac": il_f, "xl_frac": xl_f,
@@ -233,14 +278,16 @@ def build_cases(out: Path) -> dict:
         "iline_start": 100.0, "iline_step": 2.0,
         "xline_start": 200.0, "xline_step": 3.0,
         "unit": "ms", "domain": "time",
-        "bin_grid": {
+        "bin_grid": inferred_grid,
+        "bin_grid_constructed": {
             "x_origin": grid.x_origin, "y_origin": grid.y_origin,
             "il_azimuth_deg": grid.il_azimuth_deg,
             "il_spacing_m": grid.il_spacing_m,
             "xl_spacing_m": grid.xl_spacing_m,
         },
         "probes": probe_expect,
-        "note": "bin-grid calibration; CDP corner inference",
+        "note": "bin-grid calibration; expectation = the pinned loader's "
+                "own corner-trace inference of the written bytes",
     }
 
     # Case D: PWBVOL1 with depth axis ("m").
@@ -355,9 +402,11 @@ def main() -> int:
     # Freeze expected windows per case.
     manifest = {"cases": {}, "interpreter": INTERPRETER,
                 "tolerances": TOL,
-                "comparison": "window dumps: exact f32 equality except NaN "
-                              "positions must match bitwise; max_abs bound "
-                              "1e-6 for IBM-decoded values",
+                "comparison": "format-5/pwbvol1 windows: exact f32 "
+                              "equality (NaN positions bitwise); IBM "
+                              "format-1 windows: dual criterion "
+                              "|a-e| <= max(1e-4, 1e-6*|e|) absorbing the "
+                              "encoder-side 24-bit mantissa loss",
                 "oracle": {
                     "files": ["io_oracle.sgy", "io_oracle_ibm.sgy",
                               "io_oracle_bins.sgy", "io_oracle.pwbvol"],

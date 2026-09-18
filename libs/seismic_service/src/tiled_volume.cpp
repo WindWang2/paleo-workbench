@@ -88,6 +88,13 @@ public:
         const std::array<std::int64_t, 3> tile_shape = cache_->config().tile_shape;
         // Per-call flag: a cancelled plane read never poisons later reads.
         const CancelFlag cancel;
+        // True 3-D tile grid: the fixed axis addresses its own tile too, so
+        // keys are unique per tile and adjacent planes share cached tiles.
+        const std::array<std::int64_t, 3> plane_tile{
+            index / tile_shape[0], index / tile_shape[1],
+            index / tile_shape[2]};
+        const std::int64_t fixed_offset =
+            index - plane_tile[fixed] * tile_shape[fixed];
 
         // Iterate the plane's tiles; each tile is one cached window read and
         // a strided scatter into the canonical output plane.
@@ -95,30 +102,21 @@ public:
              ++row_tile) {
             for (std::int64_t col_tile = 0;
                  col_tile * tile_shape[col_axis] < cols; ++col_tile) {
-                std::array<std::int64_t, 3> tile{0, 0, 0};
+                std::array<std::int64_t, 3> tile = plane_tile;
                 tile[row_axis] = row_tile;
                 tile[col_axis] = col_tile;
                 std::string error;
                 const auto buffer = cache_->get_or_load(
                     tile,
-                    [this, fixed, index, &cancel, &tile_shape, &tile](
+                    [this, &cancel, &tile_shape, &tile](
                         std::string* load_error) {
                         std::array<std::int64_t, 3> load_origin{0, 0, 0};
-                        load_origin[fixed] = index;
+                        std::array<std::int64_t, 3> load_extent{0, 0, 0};
                         for (std::size_t a = 0; a < 3; ++a) {
-                            if (a != fixed) {
-                                load_origin[a] =
-                                    tile[a] * tile_shape[a];
-                            }
-                        }
-                        std::array<std::int64_t, 3> load_extent = tile_shape;
-                        load_extent[fixed] = 1;  // the slice's own axis
-                        for (std::size_t a = 0; a < 3; ++a) {
-                            if (a != fixed) {
-                                load_extent[a] = std::min(
-                                    tile_shape[a],
-                                    geometry_.shape[a] - load_origin[a]);
-                            }
+                            load_origin[a] = tile[a] * tile_shape[a];
+                            load_extent[a] = std::min(
+                                tile_shape[a],
+                                geometry_.shape[a] - load_origin[a]);
                         }
                         auto chunk = std::make_shared<TileCache::Buffer>();
                         chunk->resize(static_cast<std::size_t>(load_extent[0]
@@ -137,8 +135,8 @@ public:
                 if (buffer == nullptr) {
                     return 0;
                 }
-                scatter_tile(axis, row_axis, col_axis, cols, tile_shape,
-                             tile, *buffer, out);
+                scatter_tile(row_axis, col_axis, fixed, fixed_offset, cols,
+                             tile_shape, tile, *buffer, out);
             }
         }
         return out.size();
@@ -177,32 +175,43 @@ public:
 
 private:
     // Copies one tile buffer into the plane at the canonical positions.
-    void scatter_tile(VolumeAxis axis, std::size_t row_axis,
-                      std::size_t col_axis, std::int64_t cols,
+    // Copies the plane-relevant elements of one tile buffer into the output
+    // plane. The buffer is C-order over the tile's loaded extents; the
+    // plane element (row = base[row_axis]+r, col = base[col_axis]+c) sits
+    // at buffer index with idx[fixed] = fixed_offset.
+    void scatter_tile(std::size_t row_axis, std::size_t col_axis,
+                      std::size_t fixed, std::int64_t fixed_offset,
+                      std::int64_t cols,
                       const std::array<std::int64_t, 3>& tile_shape,
                       const TileCache::Key& tile, const TileCache::Buffer& buffer,
                       std::span<float> out) const {
+        const std::array<std::int64_t, 3> shape = geometry_.shape;
         std::array<std::int64_t, 3> base{0, 0, 0};
         base[row_axis] = tile[row_axis] * tile_shape[row_axis];
         base[col_axis] = tile[col_axis] * tile_shape[col_axis];
-        const std::array<std::int64_t, 3> shape = geometry_.shape;
+        std::array<std::int64_t, 3> loaded{0, 0, 0};
+        for (std::size_t a = 0; a < 3; ++a) {
+            loaded[a] = std::min(tile_shape[a],
+                                 shape[a] - tile[a] * tile_shape[a]);
+        }
         const std::int64_t tile_rows =
             std::min(tile_shape[row_axis], shape[row_axis] - base[row_axis]);
         const std::int64_t tile_cols =
             std::min(tile_shape[col_axis], shape[col_axis] - base[col_axis]);
-        // Tile buffers are C-order over (0, 1, 2) restricted to the tile's
-        // loaded extents; the loaded row stride equals the loaded col count.
-        const std::int64_t buffer_cols =
-            std::min(tile_shape[col_axis], shape[col_axis] - base[col_axis]);
         for (std::int64_t r = 0; r < tile_rows; ++r) {
-            float* dst = out.data()
-                + static_cast<std::size_t>((base[row_axis] + r) * cols
-                                           + base[col_axis]);
-            const float* src = buffer.data()
-                + static_cast<std::size_t>(r * buffer_cols);
-            std::copy(src, src + static_cast<std::size_t>(tile_cols), dst);
+            for (std::int64_t c = 0; c < tile_cols; ++c) {
+                std::array<std::int64_t, 3> idx{0, 0, 0};
+                idx[fixed] = fixed_offset;
+                idx[row_axis] = r;
+                idx[col_axis] = c;
+                const std::size_t src =
+                    static_cast<std::size_t>(idx[0] * loaded[1] * loaded[2]
+                                             + idx[1] * loaded[2] + idx[2]);
+                out[static_cast<std::size_t>((base[row_axis] + r) * cols
+                                             + base[col_axis] + c)] =
+                    buffer[src];
+            }
         }
-        (void)axis;
     }
 
     VolumeDescriptor descriptor_;
