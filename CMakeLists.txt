@@ -91,6 +91,21 @@ if(PWB_BUILD_CONV_25)
 endif()
 # END CONV-25
 
+# BEGIN CONV-GEO3D — native 3D geomodel viewer (libs/geo3d_viz): the C++
+# replacement of the pyqtgraph 3D visualization runtime (scene model +
+# geological scene adapter + Qt6 OpenGL viewport + workspace controller).
+# Consumes the pwb::geomodel contract kernels, so it implies CONV-22 (and
+# through it CONV-12/19) and Pwb::Domain (PWB_BUILD_DATA). Declared BEFORE
+# the PWB_BUILD_DATA block so the implied switches land in time; the
+# subdirectory itself joins after the CONV-12 geomodel kernels.
+option(PWB_BUILD_GEO3D_VIZ
+    "Build the CONV-GEO3D native 3D geomodel viewer (implies CONV-22 + data)" OFF)
+if(PWB_BUILD_GEO3D_VIZ)
+    set(PWB_BUILD_CONV_22 ON)
+    set(PWB_BUILD_DATA ON)
+endif()
+# END CONV-GEO3D
+
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
 # error, never a silent skip (protocol: independent validation).
@@ -340,6 +355,18 @@ if(PWB_BUILD_CONV_19)
     add_subdirectory(libs/ingest)
 endif()
 # END CONV-19
+# BEGIN CONV-GEO3D
+# Added after the CONV-12 geomodel kernels and the CONV-19 ingest cores so
+# the sibling targets exist and the lib's standalone guards all skip.
+if(PWB_BUILD_GEO3D_VIZ)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/geo3d_viz/CMakeLists.txt")
+        message(FATAL_ERROR
+            "PWB_BUILD_GEO3D_VIZ=ON but libs/geo3d_viz is not "
+            "delivered on this branch")
+    endif()
+    add_subdirectory(libs/geo3d_viz)
+endif()
+# END CONV-GEO3D
 # BEGIN CONV-20
 # Optional pybind11 facade (branch feat/cpp-conv-20-pybind-facade): exposes
 # the Qt-free mapping_kernel cores to Python as module `pwb_mapping_kernel`,

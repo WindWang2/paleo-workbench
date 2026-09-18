@@ -18,6 +18,10 @@
 #include "factor_stats_dock.hpp"
 #endif
 
+#ifdef PWB_WITH_GEO3D_VIZ
+#include "geo3d_dock.hpp"
+#endif
+
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -278,6 +282,20 @@ void MainWindow::buildUi() {
     factor_dock_ = new FactorStatsDock(this);
     addDockWidget(Qt::RightDockWidgetArea, factor_dock_);
 #endif
+
+// BEGIN CONV-GEO3D
+#ifdef PWB_WITH_GEO3D_VIZ
+    // Native 3D geomodel viewer dock: Qt6 viewport + workspace controller
+    // (no Python in the product chain). Well selections re-broadcast to
+    // the 2D map seam via Geo3DDock::well_selected.
+    geo3d_dock_ = new Geo3DDock(this);
+    addDockWidget(Qt::RightDockWidgetArea, geo3d_dock_);
+    connect(geo3d_dock_, &Geo3DDock::well_selected, this,
+            [this](const QString& well) {
+                statusBar()->showMessage(tr("3D 选中井: %1").arg(well), 5000);
+            });
+#endif
+// END CONV-GEO3D
 
 #ifdef PWB_WITH_WELL_LOG
     // C's WLE-backed well-log host in a dock (same Qt ABI, one process;

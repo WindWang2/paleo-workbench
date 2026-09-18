@@ -62,3 +62,14 @@ if(PWB_BUILD_CONV_16)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_16=1)
 endif()
 # END CONV-16
+
+# BEGIN CONV-GEO3D
+# Native 3D geomodel viewer dock (Qt6 viewport + workspace controller, no
+# Python). Joins the link closure only when the PWB_BUILD_GEO3D_VIZ slice
+# built Pwb::Geo3DViz.
+if(TARGET Pwb::Geo3DViz)
+    target_sources(pwb-platform PRIVATE geo3d_dock.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::Geo3DViz)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_GEO3D_VIZ=1)
+endif()
+# END CONV-GEO3D

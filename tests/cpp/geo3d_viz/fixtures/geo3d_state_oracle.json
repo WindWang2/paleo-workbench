@@ -1,0 +1,49 @@
+{
+  "source": "paleo_workbench/ui/pages/geo3d_workspace.py::save_state + paleo_workbench/project/models.py::Geo3DWorkspaceState",
+  "generator": "tools/oracle/generate_geo3d_fixtures.py",
+  "note": "save_state structure for the frozen scenario (viewport absent, one real well + one demo well + one distance measurement, x-clip at 0.25, well:w-1 selected). Regenerate with the oracle venv when the Python oracle changes.",
+  "payload_keys": ["objects", "measurements", "display", "clip", "camera", "views", "selected"],
+  "expected": {
+    "objects_count": 1,
+    "demo_objects_excluded": true,
+    "measurements": [
+      {
+        "object_id": "measure:distance-1",
+        "name": "Distance",
+        "measurement_kind": "distance",
+        "result": 5.0,
+        "unit": "m",
+        "crs": "EPSG:4326",
+        "vertical_domain": "depth",
+        "extra_keys": ["unit"]
+      }
+    ],
+    "clip": {
+      "x": { "enabled": true, "value": 0.25, "invert": false },
+      "y": { "enabled": false, "value": 0.5, "invert": false },
+      "z": { "enabled": false, "value": 0.5, "invert": false }
+    },
+    "camera_empty_without_viewport": true,
+    "views": [],
+    "selected": "well:w-1"
+  },
+  "coercions": {
+    "as_bool": [
+      { "value": true, "default": false, "expected": true },
+      { "value": "false", "default": true, "expected": false },
+      { "value": "", "default": true, "expected": false },
+      { "value": 1, "default": false, "expected": true },
+      { "value": 0.5, "default": true, "expected": true },
+      { "value": "YES", "default": false, "expected": true },
+      { "value": "off", "default": true, "expected": false },
+      { "value": null, "default": true, "expected": true }
+    ],
+    "as_float": [
+      { "value": "0.75", "default": 0.5, "lo": 0.0, "hi": 1.0, "expected": 0.75 },
+      { "value": 2.0, "default": 0.5, "lo": 0.0, "hi": 1.0, "expected": 1.0 },
+      { "value": "nan", "default": 0.25, "lo": null, "hi": null, "expected": 0.25 },
+      { "value": "bogus", "default": 0.25, "lo": null, "hi": null, "expected": 0.25 },
+      { "value": -5.0, "default": 0.0, "lo": 1.0, "hi": null, "expected": 1.0 }
+    ]
+  }
+}
