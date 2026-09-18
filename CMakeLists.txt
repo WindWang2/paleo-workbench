@@ -442,3 +442,9 @@ endif()
 # Print what is actually ON, and why (declared vs implied-by:<feature>).
 pwb_feature_summary()
 
+# ---------------------------------------------------------------- packaging --
+# Opt-in native packaging skeleton (branch cpp-build-packaging-hardening).
+# Included LAST so it never alters a configure where PWB_ENABLE_PACKAGING=OFF
+# (it registers zero install rules in that case; the other worktrees are
+# unaffected). When ON, the module self-activates (pwb_install_all).
+include(cmake/PwbInstall.cmake)

@@ -62,3 +62,39 @@ if(PWB_BUILD_CONV_16)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_16=1)
 endif()
 # END CONV-16
+
+# BEGIN PWB-PACKAGING
+# Opt-in diagnostic helper (separate executable, NOT linked into pwb-platform).
+# Built only when the app's UI/Application Qt-linked libs exist, mirroring the
+# platform target's own guard. It reports the install tree it expects and is
+# used by the native packaging skeleton (cmake/PwbInstall.cmake).
+if(TARGET Pwb::Ui OR TARGET Pwb::Application)
+    include(GNUInstallDirs)
+    add_executable(pwb-diagnose diag_main.cpp)
+    set_target_properties(pwb-diagnose PROPERTIES AUTOMOC ON)
+    target_compile_features(pwb-diagnose PRIVATE cxx_std_20)
+    target_include_directories(pwb-diagnose PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    if(TARGET Pwb::Ui)
+        target_link_libraries(pwb-diagnose PRIVATE Pwb::Ui)
+    else()
+        target_link_libraries(pwb-diagnose PRIVATE Pwb::Application)
+    endif()
+    target_compile_definitions(pwb-diagnose PRIVATE
+        PWB_HAS_QT
+        PWB_VERSION="${PROJECT_VERSION}"
+        PWB_INSTALL_PREFIX="${CMAKE_INSTALL_PREFIX}"
+        PWB_RESOURCE_DIR="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/paleo-workbench/resources"
+        PWB_TEMPLATE_DIR="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/paleo-workbench/templates"
+        PWB_ICON_DIR="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/paleo-workbench/icons"
+        PWB_SCHEMA_DIR="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/paleo-workbench/schema"
+        PWB_BIN_DIR="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+    if(DEFINED PALEO_QGIS_RUNTIME)
+        target_compile_definitions(pwb-diagnose PRIVATE
+            PWB_QGIS_RUNTIME_DIR="${PALEO_QGIS_RUNTIME}")
+    endif()
+    if(DEFINED PWB_QT_RUNTIME)
+        target_compile_definitions(pwb-diagnose PRIVATE
+            PWB_QT_RUNTIME_DIR="${PWB_QT_RUNTIME}")
+    endif()
+endif()
+# END PWB-PACKAGING
