@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string_view>
 
 namespace pwb::geo3d_viz {
 
@@ -49,7 +50,8 @@ bool state_as_bool(const Json& value, bool default_value) {
         return default_value;
     }
     if (value.is_string()) {
-        std::string low = value.get<std::string>();
+        // Python value.strip().lower()
+        std::string low = pwb::geomodel::py_strip(value.get<std::string>());
         std::transform(low.begin(), low.end(), low.begin(),
                        [](unsigned char c) { return std::tolower(c); });
         if (low == "true" || low == "1" || low == "yes" || low == "on") {
@@ -547,6 +549,7 @@ void Geo3DWorkspaceController::emit_measurement(
     if (result.measurement_kind == "plane_orientation") {
         extra["strike_deg"] = result.strike_deg;
         extra["dip_deg"] = result.dip_deg;
+        extra["planarity_ratio"] = result.planarity_ratio;
         extra["note"] =
             "dip result; strike in extra — planarity<0.05 means picks are "
             "near-collinear";
@@ -627,7 +630,9 @@ void Geo3DWorkspaceController::apply_clip_state() {
             // extent would clip with fabricated coordinates — skip.
             continue;
         }
-        const int axis_index = axis == "x" ? 0 : axis == "y" ? 1 : 2;
+        const std::string_view axis_view(axis);
+        const int axis_index =
+            axis_view == "x" ? 0 : axis_view == "y" ? 1 : 2;
         const double lo = bounds->first[axis_index];
         const double hi = bounds->second[axis_index];
         const double value = lo + (hi - lo) * it->second.value;
@@ -655,6 +660,12 @@ std::optional<CameraPose> Geo3DWorkspaceController::capture_camera() {
         if (const std::optional<CameraPose> pose = facade_->camera_pose()) {
             camera_ = pose;
         }
+    }
+    if (camera_.has_value()) {
+        camera_json_ = Json::object();
+        camera_json_["distance"] = camera_->distance;
+        camera_json_["elevation"] = camera_->elevation_deg;
+        camera_json_["azimuth"] = camera_->azimuth_deg;
     }
     return camera_;
 }
@@ -712,7 +723,7 @@ Json Geo3DWorkspaceController::save_state() {
     for (const char* axis : {"x", "y", "z"}) {
         clip[axis] = clip_state_.at(axis).to_json();
     }
-    Json camera = Json::object();
+    Json camera = camera_json_;
     if (const std::optional<CameraPose> pose = capture_camera()) {
         camera["distance"] = pose->distance;
         camera["elevation"] = pose->elevation_deg;
@@ -796,22 +807,28 @@ std::vector<std::string> Geo3DWorkspaceController::restore_state(
         }
     }
     if (payload.contains("camera") && payload["camera"].is_object()) {
+        // Python keeps the persisted shape verbatim ({k: _as_float(v, 0.0)}
+        // over the keys present) — a partial dict stays partial, so the next
+        // save does not fabricate zeroed companions.
         const Json& camera = payload["camera"];
-        if (!camera.empty()) {
-            // Python keeps any finite float triple ({k: _as_float(v, 0.0)}).
+        camera_json_ = Json::object();
+        for (auto it = camera.begin(); it != camera.end(); ++it) {
+            camera_json_[it.key()] =
+                state_as_float(it.value(), 0.0);
+        }
+        camera_.reset();
+        if (!camera_json_.empty()) {
             CameraPose pose;
             pose.distance = state_as_float(
-                camera.contains("distance") ? camera["distance"] : Json(0.0),
-                0.0);
+                camera.contains("distance") ? camera["distance"] : Json(),
+                250.0);
             pose.elevation_deg = state_as_float(
-                camera.contains("elevation") ? camera["elevation"] : Json(0.0),
-                0.0);
+                camera.contains("elevation") ? camera["elevation"] : Json(),
+                30.0, nullptr, nullptr);
             pose.azimuth_deg = state_as_float(
-                camera.contains("azimuth") ? camera["azimuth"] : Json(0.0),
-                0.0);
+                camera.contains("azimuth") ? camera["azimuth"] : Json(),
+                -45.0);
             camera_ = pose;
-        } else {
-            camera_.reset();
         }
     }
     view_presets_.clear();
@@ -849,6 +866,13 @@ std::vector<std::string> Geo3DWorkspaceController::restore_state(
             : "";
     if (!selected.empty() && assembly_.contains(selected)) {
         set_selected(selected, false);
+    }
+    // The Python page applies the restored pose once the viewport is live
+    // (geological_modeling_3d_page _on_geo3d_viewport_ready); with the
+    // facade already attached we apply immediately so the next capture does
+    // not overwrite the restored camera with the viewport default.
+    if (facade_ != nullptr && camera_.has_value()) {
+        facade_->apply_camera_pose(*camera_);
     }
     return restored;
 }

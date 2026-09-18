@@ -188,13 +188,19 @@ int main(int argc, char** argv) {
     // ------------------------------------------------------------------
     for (int cycle = 0; cycle < 10; ++cycle) {
         auto* w = new Geo3DViewportWidget();
-        Geo3DWorkspaceController c([&w]() { return &w->scene_manager(); });
-        c.set_viewport(w);
-        c.add_object(demo_well());
-        w->resize(200, 150);
-        w->show();
-        pump_events(app);
-        delete w;  // controller outlives? no: c destructs before w (scoped)
+        {
+            // the controller dies with the viewport in sight (destroy
+            // order: controller first, then the widget)
+            Geo3DWorkspaceController c(
+                [&w]() { return &w->scene_manager(); });
+            c.set_viewport(w);
+            c.add_object(demo_well());
+            w->resize(200, 150);
+            w->show();
+            pump_events(app);
+            c.set_viewport(nullptr);
+        }
+        delete w;
     }
     check(true, "10 open/close cycles without a crash");
 

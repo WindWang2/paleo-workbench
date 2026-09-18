@@ -16,6 +16,8 @@
 // Qt-free, Python-free.
 
 #include <array>
+#include <optional>
+#include <utility>
 
 #include <pwb/geo3d_viz/scene_object_manager.hpp>  // Mat4, Ray
 

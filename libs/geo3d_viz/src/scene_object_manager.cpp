@@ -1,7 +1,5 @@
 #include <pwb/geo3d_viz/scene_object_manager.hpp>
 
-#include <pwb/domain/sha256.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -63,25 +61,6 @@ const std::vector<Rgba>& facies_palette() {
         {0.45f, 0.55f, 0.70f, 1.0f},  // 7 other
     };
     return palette;
-}
-
-std::string finite_checksum(const std::vector<double>& values,
-                            const std::array<std::size_t, 2>& shape) {
-    if (values.empty()) return "s" + std::to_string(shape[0]) + "x" +
-                                   std::to_string(shape[1]) + ":";
-    // canonical = nan_to_num(values, nan=0, posinf=0, neginf=0)
-    std::string canonical;
-    canonical.reserve(values.size() * 8);
-    for (double v : values) {
-        double c = std::isfinite(v) ? v : 0.0;
-        // Explicit little-endian byte order (numpy tobytes is native order;
-        // x86-64 is LE — the digest only needs to be deterministic).
-        unsigned char bytes[8];
-        std::memcpy(bytes, &c, 8);
-        canonical.append(reinterpret_cast<const char*>(bytes), 8);
-    }
-    return "s" + std::to_string(shape[0]) + "x" + std::to_string(shape[1]) +
-           ":" + pwb::domain::Sha256::of_bytes(canonical);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +313,11 @@ void require_finite_verts(const std::vector<Vec3f>& verts) {
 
 void SceneObjectManager::validate_mesh_arrays(SceneObject& object) {
     require_finite_verts(object.verts);
+    if (object.mode == ObjectMode::Mesh && object.faces.empty() &&
+        !object.verts.empty()) {
+        throw SceneObjectError(
+            "mesh objects require faces (or empty verts)");
+    }
     if (object.faces.empty()) return;
     std::int64_t min_index = std::numeric_limits<std::int64_t>::max();
     std::int64_t max_index = std::numeric_limits<std::int64_t>::min();
@@ -436,28 +420,28 @@ void SceneObjectManager::set_visibility(const std::string& name, bool visible) {
     const auto it = objects_.find(name);
     if (it == objects_.end() || it->second.visible == visible) return;
     it->second.visible = visible;
-    touch();
+    // Appearance state (visibility/opacity/color/pickable) is read live
+    // from the registry at draw time — no GL rebuild needed, so the
+    // geometry revision stays untouched (opacity sliders must not re-upload
+    // whole meshes).
 }
 
 void SceneObjectManager::set_opacity(const std::string& name, float opacity) {
     const auto it = objects_.find(name);
     if (it == objects_.end()) return;
     it->second.opacity = std::clamp(opacity, 0.0f, 1.0f);
-    touch();
 }
 
 void SceneObjectManager::set_color(const std::string& name, const Rgba& color) {
     const auto it = objects_.find(name);
     if (it == objects_.end()) return;
-    it->second.color = color;
-    touch();
+    it->second.color = color;  // read live at draw time
 }
 
 void SceneObjectManager::set_pickable(const std::string& name, bool pickable) {
     const auto it = objects_.find(name);
     if (it == objects_.end()) return;
     it->second.pickable = pickable;
-    touch();
 }
 
 void SceneObjectManager::set_clip_planes(
@@ -465,8 +449,12 @@ void SceneObjectManager::set_clip_planes(
     const std::optional<std::vector<ClipEquation>>& planes) {
     const auto it = objects_.find(name);
     if (it == objects_.end()) return;
+    // Validate before writing: a rejected payload never lands in state
+    // (Python _validate_clip_planes runs ahead of the assignment).
+    SceneObject probe = it->second;
+    probe.clip_planes = planes;
+    validate_clip_planes(probe);
     it->second.clip_planes = planes;
-    validate_clip_planes(it->second);
     touch();
 }
 

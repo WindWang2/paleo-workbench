@@ -259,6 +259,25 @@ void Geo3DViewportWidget::rebuild_from_registry() {
         const SceneObject* object = manager_.get(name);
         if (object == nullptr || !object->visible) continue;
         if (object->mode == ObjectMode::Mesh && !object->faces.empty()) {
+            // Defensive bounds check before the GL upload: the registry
+            // validates on add, but a hostile/foreign payload must degrade
+            // (skip) instead of reading out of bounds on the GL thread.
+            bool indices_ok = true;
+            for (const auto& f : object->faces) {
+                for (std::int64_t i : f) {
+                    if (i < 0 ||
+                        static_cast<std::size_t>(i) >= object->verts.size()) {
+                        indices_ok = false;
+                        break;
+                    }
+                }
+                if (!indices_ok) break;
+            }
+            if (!indices_ok ||
+                (!object->face_colors.empty() &&
+                 object->face_colors.size() != object->faces.size())) {
+                continue;
+            }
             // Non-indexed triangle soup with per-vertex colors; face colors
             // duplicate per face → flat shading (Python smooth=False path).
             GlMesh mesh;
@@ -384,8 +403,11 @@ void Geo3DViewportWidget::paintGL() {
         stroke_program_->release();
     }
 
-    // opaque pass first, then blended objects (stable two-pass ordering)
+    // Opaque pass first, then blended objects without depth writes (the
+    // Python translucent glOptions contract — no self-occlusion sorting
+    // artifacts between transparent layers).
     for (int pass = 0; pass < 2; ++pass) {
+        glDepthMask(pass == 0 ? GL_TRUE : GL_FALSE);
         for (const std::string& name : manager_.names()) {
             const SceneObject* object = manager_.get(name);
             if (object == nullptr || !object->visible) continue;
@@ -398,10 +420,11 @@ void Geo3DViewportWidget::paintGL() {
             }
             const auto stroke_it = strokes_.find(name);
             if (stroke_it != strokes_.end()) {
-                draw_stroke(stroke_it->second);
+                draw_stroke(stroke_it->second, *object);
             }
         }
     }
+    glDepthMask(GL_TRUE);
 
     // Text overlay painted over the GL frame.
     QPainter painter(this);
@@ -433,20 +456,25 @@ void Geo3DViewportWidget::draw_mesh(GlMesh& mesh,
     mesh_program_->release();
 }
 
-void Geo3DViewportWidget::draw_stroke(GlStroke& stroke) {
+void Geo3DViewportWidget::draw_stroke(GlStroke& stroke,
+                                      const SceneObject& object) {
     if (!stroke.vertices.isCreated() || stroke.vertex_count == 0) return;
     stroke_program_->bind();
     stroke_program_->setUniformValue("u_mvp", full_mvp(camera_));
     stroke_program_->setUniformValue(
-        "u_color", QVector4D(stroke.color[0], stroke.color[1], stroke.color[2],
-                             stroke.color[3]));
-    stroke_program_->setUniformValue("u_opacity", stroke.opacity);
+        "u_color", QVector4D(object.color[0], object.color[1], object.color[2],
+                             object.color[3]));
+    stroke_program_->setUniformValue("u_opacity", object.opacity);
     stroke_program_->setUniformValue("u_point_size",
-                                     stroke.is_points ? stroke.size : 1.0f);
-    if (!stroke.is_points && stroke.width > 0.0f) {
-        glLineWidth(stroke.width);
+                                     object.mode == ObjectMode::Points
+                                         ? object.size
+                                         : 1.0f);
+    // core-profile drivers clamp line width to 1 — the width is a best
+    // effort hint, matching the GL-fixed-function lineage.
+    if (object.mode == ObjectMode::Lines && object.width > 0.0f) {
+        glLineWidth(object.width);
     }
-    pass_clip_planes(*stroke_program_, stroke.clip_planes);
+    pass_clip_planes(*stroke_program_, object.clip_planes);
     stroke.vertices.bind();
     const int pos_loc = stroke_program_->attributeLocation("a_pos");
     glEnableVertexAttribArray(static_cast<GLuint>(pos_loc));
@@ -511,7 +539,7 @@ void Geo3DViewportWidget::mouseMoveEvent(QMouseEvent* event) {
     last_pos_ = pos;
     const double ex = pos.x() - press_pos_.x();
     const double ey = pos.y() - press_pos_.y();
-    if (!dragged_ && ex * ex + ey * ey < kClickDragThresholdSq) return;
+    if (!dragged_ && ex * ex + ey * ey <= kClickDragThresholdSq) return;
     dragged_ = true;
     const bool pan_request = pressed_button_ == Qt::MiddleButton ||
                              pressed_button_ == Qt::RightButton ||
@@ -526,8 +554,11 @@ void Geo3DViewportWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void Geo3DViewportWidget::mouseReleaseEvent(QMouseEvent* event) {
-    if (pressed_ && !dragged_) {
-        // click (the orbit gesture never engaged)
+    // Python contract (geological_modeling_3d_page): only left-button
+    // clicks feed the pick/measure state machines; other buttons belong to
+    // the camera.
+    if (pressed_ && !dragged_ && pressed_button_ == Qt::LeftButton &&
+        event->button() == Qt::LeftButton) {
         emit viewport_clicked(event->position().x(), event->position().y());
     }
     pressed_ = false;

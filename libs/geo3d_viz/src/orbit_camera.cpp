@@ -180,7 +180,7 @@ bool OrbitCamera::project_to_screen(const Vec3& world, double& px,
         apply4(view, {world[0], world[1], world[2], 1.0});
     if (eye_p[3] <= 0.0) return false;  // behind the eye
     const std::array<double, 4> clip = apply4(proj, eye_p);
-    if (std::abs(clip[3]) < 1e-12) return false;
+    if (clip[3] <= 0.0) return false;  // behind the near plane: no mirror
     const double ndc_x = clip[0] / clip[3];
     const double ndc_y = clip[1] / clip[3];
     px = (ndc_x + 1.0) * 0.5 * width_;

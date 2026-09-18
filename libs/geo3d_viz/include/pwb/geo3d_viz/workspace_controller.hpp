@@ -112,8 +112,8 @@ public:
     // object management
     // ------------------------------------------------------------------
 
-    // Add (or replace), resync + incremental QC. Returns the stored object
-    // or the input when the assembly rejected it (duplicate id policy).
+    // Add (or replace), resync + incremental QC. Returns the stored object,
+    // or nullptr when the assembly rejected the id (status emitted).
     const DomainObject* add_object(DomainObject object);
     bool remove_object(const std::string& object_id);
     int clear(const std::optional<std::string>& kind = std::nullopt);
@@ -221,6 +221,9 @@ private:
     std::map<std::string, ClipAxisState> clip_state_;
     std::map<std::string, CameraPose> view_presets_;
     std::optional<CameraPose> camera_;
+    // Persisted camera shape (may be partial after restore — Python keeps
+    // {k: _as_float(v, 0.0)} over the keys present only).
+    Json camera_json_ = Json::object();
     std::map<std::string, long long> measure_counters_;  // kind → counter
 };
 

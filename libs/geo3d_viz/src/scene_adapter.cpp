@@ -259,17 +259,20 @@ SceneSyncReport GeologicalSceneAdapter::sync(
 
 void GeologicalSceneAdapter::prune_state(
     const std::vector<std::string>& live_ids) {
-    const auto gone = [&](const std::string& oid) {
-        return std::find(live_ids.begin(), live_ids.end(), oid) == live_ids.end();
-    };
+    // Collect first, then erase (never invalidate the range-for iterator).
+    std::vector<std::string> gone;
     for (const auto& [oid, token] : synced_tokens_) {
         (void)token;
-        if (gone(oid)) {
-            synced_tokens_.erase(oid);
-            derived_.erase(oid);
-            visibility_.erase(oid);
-            opacity_.erase(oid);
+        if (std::find(live_ids.begin(), live_ids.end(), oid) ==
+            live_ids.end()) {
+            gone.push_back(oid);
         }
+    }
+    for (const std::string& oid : gone) {
+        synced_tokens_.erase(oid);
+        derived_.erase(oid);
+        visibility_.erase(oid);
+        opacity_.erase(oid);
     }
 }
 
@@ -350,7 +353,7 @@ std::optional<std::vector<std::string>> GeologicalSceneAdapter::build_well(
         manager.add(std::move(head));
         names.push_back(head_name);
     }
-    if (styles_.show_well_labels) {
+    if (styles_.show_well_labels && !render.empty()) {
         SceneObject label;
         const std::string label_name = oid + "#label";
         label.name = label_name;
@@ -512,8 +515,10 @@ std::optional<std::vector<std::string>> GeologicalSceneAdapter::build_tunnel(
     const TubeMesh tube = generate_tube_geometry(render, tunnel.radius);
     if (tube.faces.empty()) return std::vector<std::string>{};
     SceneObject object;
-    // The engine kind registry has no dedicated tunnel kind; Python passes
-    // no kind → the generic registry default.
+    // Intentional divergence (documented in the migration note): Python
+    // passes kind="tunnel", which the engine's OBJECT_KINDS rejects, so
+    // tunnels never actually rendered there; the C++ registry renders them
+    // under the generic kind instead.
     object.name = oid;
     object.kind = ObjectKind::Generic;
     object.mode = ObjectMode::Mesh;
@@ -546,7 +551,11 @@ pwb::geomodel::MeasurementResult measurement_result_from_domain(
         if (extra.contains("dz")) out.dz = extra["dz"].get<double>();
         if (extra.contains("top_id")) out.top_id = extra["top_id"].get<std::string>();
         if (extra.contains("base_id")) out.base_id = extra["base_id"].get<std::string>();
-        if (extra.contains("signed_dz")) out.signed_dz = extra["signed_dz"].get<double>();
+        if (extra.contains("signed")) {
+            out.signed_dz = extra["signed"].get<double>();
+        } else if (extra.contains("signed_dz")) {
+            out.signed_dz = extra["signed_dz"].get<double>();
+        }
         if (extra.contains("strike_deg")) out.strike_deg = extra["strike_deg"].get<double>();
         if (extra.contains("dip_deg")) out.dip_deg = extra["dip_deg"].get<double>();
         if (extra.contains("planarity_ratio"))
@@ -718,14 +727,22 @@ Json GeologicalSceneAdapter::display_state(const std::string& object_id) const {
 }
 
 void GeologicalSceneAdapter::restore_display(const Json& display) {
+    // Python: bool(state.get("visible", True)) — truthiness of ANY JSON
+    // value (bool(0) is false, non-empty strings true, ...), not a
+    // boolean-only read.
     if (!display.is_object()) return;
     for (auto it = display.begin(); it != display.end(); ++it) {
         const std::string oid = it.key();
         const Json& state = it.value();
         if (!state.is_object()) continue;
         bool visible = true;
-        if (state.contains("visible") && state["visible"].is_boolean()) {
-            visible = state["visible"].get<bool>();
+        if (state.contains("visible")) {
+            const Json& v = state["visible"];
+            if (v.is_boolean()) visible = v.get<bool>();
+            else if (v.is_number()) visible = v.get<double>() != 0.0;
+            else if (v.is_string()) visible = !v.get<std::string>().empty();
+            else if (v.is_null()) visible = false;
+            else if (v.is_array() || v.is_object()) visible = !v.empty();
         }
         double opacity = 1.0;
         if (state.contains("opacity") && state["opacity"].is_number()) {

@@ -124,8 +124,11 @@ private:
 
     void rebuild_from_registry();
     void release_gl_objects();
+    // (the shader carries 3 clip-plane slots; the adapter emits at most the
+    //  3 axis planes — the registry's 6-plane ceiling stays authoritative
+    //  for validation while the viewport applies the first 3)
     void draw_mesh(GlMesh& mesh, const SceneObject& object);
-    void draw_stroke(GlStroke& stroke);
+    void draw_stroke(GlStroke& stroke, const SceneObject& object);
     void paint_text_overlay(QPainter& painter);
     void update_hover_coordinates(const QPointF& pos);
 
