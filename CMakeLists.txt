@@ -438,7 +438,7 @@ if(PWB_BUILD_CONV_16)
         target_compile_definitions(platform_factor_hud PRIVATE
             PWB_FACTOR_HUD_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/platform/fixtures/factor_hud/oracle.json")
         add_test(NAME platform.factor_hud COMMAND platform_factor_hud)
-        set_tests_properties(platform_factor_hud PROPERTIES
+        set_tests_properties(platform.factor_hud PROPERTIES
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
             TIMEOUT 120)
     endif()

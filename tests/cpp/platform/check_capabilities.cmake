@@ -19,9 +19,11 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "--capabilities exited ${result}\n${output}\n${stderr}")
 endif()
 
-separate_arguments(expected NATIVE_COMMAND "${PWB_EXPECTED_HARD_CAPS}")
+# PWB_EXPECTED_HARD_CAPS arrives as a plain semicolon list; IN LISTS splits
+# it natively (separate_arguments NATIVE_COMMAND would keep it as ONE
+# element because the mode splits on whitespace, not semicolons).
 set(failed)
-foreach(id IN LISTS expected)
+foreach(id IN LISTS PWB_EXPECTED_HARD_CAPS)
     # capability <id> linked runtime-ok ...
     string(REGEX MATCH "capability ${id} linked runtime-ok" matched "${output}")
     if(matched STREQUAL "")

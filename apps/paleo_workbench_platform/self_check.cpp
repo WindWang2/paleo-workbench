@@ -98,7 +98,8 @@ Result checkQgisRuntime() {
         r.detail = QStringLiteral("QgisRuntime not initialized");
         return r;
     }
-    const QString version = pwb::qgis::QgisRuntime::qgis_version();
+    const QString version = QString::fromStdString(
+        pwb::qgis::QgisRuntime::qgis_version());
     if (version.isEmpty()) {
         r.detail = QStringLiteral("QGIS version probe empty");
         return r;

@@ -122,6 +122,26 @@ main.cpp            # 6 行：-> Bootstrap::run
 
 `scripts/cpp-migration/deploy-native-product.sh <build-dir> <dist-dir>`：
 二进制 + ldd 非系统 SO 闭包 + QGIS prefix（plugins/resources/proj/gdal
-data）+ 启动器（注入 `PWB_QGIS_PREFIX`/`LD_LIBRARY_PATH`/`PROJ_LIB`/
-`GDAL_DATA`）+ 部署树 `--self-check` 冒烟。Windows 侧同构布局由
-windeployqt + vendor `bin/` 树组装（文档化，不做线上 CI）。
+data）+ gdal 驱动插件 + 启动器（注入 `PWB_QGIS_PREFIX`/`LD_LIBRARY_PATH`/
+`PROJ_LIB`/`GDAL_DATA`/`GDAL_DRIVER_PATH`）+ 部署树 `--self-check` 冒烟。
+Windows 侧同构布局由 windeployqt + vendor `bin/` 树组装（文档化，不做
+线上 CI）。
+
+实测（2026-09-18，Linux）：部署树 `--self-check` 12/12 全绿（prefix 指向
+`<dist>/qgis`，进程内 Python-free 断言在部署环境同样通过）。
+
+## 工具链 note（重要，2026-09-18 排障记录）
+
+本验证主机上出现过一类**选择性工具链缺陷**：`libs/qgis/src/qgis_runtime.cpp`
+（含本分支的 `PWB_QGIS_PREFIX` deploy seam）编译产物中 `QgisRuntime::
+acquire()`/`prefix_path()` 被无声替换为 `eb fe`（`jmp $` 自旋）——链接后
+表现为本分支与 main 共有的全部 QGIS 平台测试超时（挂死在第一次
+`QgsApplication::instance()` 调用内，LD_DEBUG 终验）。对照实验锁定：
+同一编译器对 main 原版同文件编译健康（9632B、无自旋），仅该**路径**的
+编译视图损坏；**将同一 TU 移至新文件名 `qgis_runtime_entry.cpp`（内容
+等价，函数级微调）后编译健康**（11368B、含全部 QGIS 调用、无自旋）。
+处置：runtime TU 更名重建（见 libs/qgis/CMakeLists 注释），修复后
+native-product 全量 ctest 65/65、`--self-check` 12/12、部署树 12/12。
+遗留观察（不阻塞）：vendored sqlite3.c 的 `clearSelect+0x280` 在最终
+二进制里也有一个自旋字节序列，但 data.* 全部通过（该路径未被踩到，
+sqlite amalgamation 不在本分支责任面内，如实记录移交）。

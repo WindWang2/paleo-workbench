@@ -141,7 +141,8 @@ QStringList collected_tail() {
 EnvironmentReport probe_environment() {
     EnvironmentReport report;
     report.qt_version = QString::fromLatin1(qVersion());
-    report.qgis_version = pwb::qgis::QgisRuntime::qgis_version();
+    report.qgis_version = QString::fromStdString(
+        pwb::qgis::QgisRuntime::qgis_version());
     report.qgis_prefix_path =
         QString::fromStdString(pwb::qgis::QgisRuntime::prefix_path());
     report.qt_platform = QGuiApplication::platformName();

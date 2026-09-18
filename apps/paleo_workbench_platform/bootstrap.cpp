@@ -135,7 +135,7 @@ int Bootstrap::run(int argc, char** argv) {
                                      "(versions/providers/probes/log tail)")});
     parser.process(app);
 
-    const bool headless = parser.isSet(QStringLiteral("headless-self-check"));
+    bool headless = parser.isSet(QStringLiteral("headless-self-check"));
     const RunMode mode = parse_mode(parser, &headless);
 
     // Single QGIS init for the process; failures are a startup fatal with

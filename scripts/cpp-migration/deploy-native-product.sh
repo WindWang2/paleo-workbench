@@ -27,9 +27,14 @@ if [ $# -ne 2 ]; then
 fi
 BuildDir="$(cd "$1" && pwd)"
 DistDir="$2"
-Exe="$BuildDir/bin/pwb-platform"
-[ -x "$Exe" ] || Exe="$BuildDir/pwb-platform"
-[ -x "$Exe" ] || { echo "pwb-platform not found under $1"; exit 2; }
+# CMake single-config generators drop the exe next to its object dir.
+for candidate in \
+    "$BuildDir/bin/pwb-platform" \
+    "$BuildDir/apps/paleo_workbench_platform/pwb-platform" \
+    "$BuildDir/pwb-platform"; do
+    [ -x "$candidate" ] && Exe="$candidate" && break
+done
+[ -n "${Exe:-}" ] || { echo "pwb-platform not found under $1"; exit 2; }
 
 QgisPrefix="${PALEO_QGIS_SDK_DIR:-}"
 [ -n "$QgisPrefix" ] || QgisPrefix="$(cd "$BuildDir" && cmake -L . 2>/dev/null | awk -F= '/^PALEO_QGIS_SDK_DIR/{print $2}' | head -1)"
@@ -72,7 +77,7 @@ collect_closure "$Exe"
 # QGIS provider plugins resolve their own deps (gdal/proj already above).
 echo "   copied $(printf '%s\n' "${!Copied[@]}" | wc -l) objects"
 
-# ---- 3) proj/gdal data -----------------------------------------------------
+# ---- 3) proj/gdal data + gdal driver plugins -------------------------------
 if [ -n "$ProjData" ] && [ -d "$ProjData" ]; then
     mkdir -p "$DistDir/share"
     cp -R "$ProjData" "$DistDir/share/proj"
@@ -81,6 +86,15 @@ if [ -n "$GdalData" ] && [ -d "$GdalData" ]; then
     mkdir -p "$DistDir/share"
     cp -R "$GdalData" "$DistDir/share/gdal"
 fi
+# Optional: the geo SDK's gdal driver plugins (raster import/export reach).
+for gdal_plugins in "$PWB_LOCAL_SDK/lib/gdalplugins" \
+                    "${PWB_DEPLOY_GDAL_PLUGINS:-}"; do
+    if [ -n "$gdal_plugins" ] && [ -d "$gdal_plugins" ]; then
+        mkdir -p "$DistDir/lib"
+        cp -R "$gdal_plugins" "$DistDir/lib/gdalplugins"
+        break
+    fi
+done
 
 # ---- 4) launcher -----------------------------------------------------------
 cat > "$DistDir/bin/pwb-platform" <<LAUNCHER
@@ -91,6 +105,7 @@ export PWB_QGIS_PREFIX="\$Here/qgis"
 export LD_LIBRARY_PATH="\$Here/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 [ -d "\$Here/share/proj" ] && export PROJ_LIB="\$Here/share/proj" PROJ_DATA="\$Here/share/proj"
 [ -d "\$Here/share/gdal" ] && export GDAL_DATA="\$Here/share/gdal"
+[ -d "\$Here/lib/gdalplugins" ] && export GDAL_DRIVER_PATH="\$Here/lib/gdalplugins"
 exec "\$Here/libexec/pwb-platform" "\$@"
 LAUNCHER
 chmod +x "$DistDir/bin/pwb-platform"
