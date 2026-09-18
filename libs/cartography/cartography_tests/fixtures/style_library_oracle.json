@@ -1,0 +1,436 @@
+{
+  "schema_version": 1,
+  "categories": [
+    "well_symbols",
+    "facies_fills",
+    "contour",
+    "fault",
+    "horizon",
+    "uncertainty",
+    "boundary",
+    "reference",
+    "annotation"
+  ],
+  "document": {
+    "schema_version": 1,
+    "styles": [
+      {
+        "key": "well_standard",
+        "category": "well_symbols",
+        "title": "标准井位",
+        "style": {
+          "fill": "#22b8a7",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "well",
+          "marker_size": 8.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "well",
+          "field": ""
+        },
+        "legend_label": "井位",
+        "opacity_hint": null
+      },
+      {
+        "key": "well_fenced",
+        "category": "well_symbols",
+        "title": "围栏井位",
+        "style": {
+          "fill": "#e45756",
+          "stroke": "#3a1a1a",
+          "stroke_width": 1.2,
+          "line_pattern": "solid",
+          "marker": "triangle",
+          "marker_size": 9.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "well",
+          "field": "well_type"
+        },
+        "legend_label": "围栏井",
+        "opacity_hint": null
+      },
+      {
+        "key": "facies_v1",
+        "category": "facies_fills",
+        "title": "沉积相标准色板",
+        "style": {
+          "fill": "#b0bec5",
+          "stroke": "#26364d",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "categorized",
+          "field": "facies_name",
+          "categories": [
+            [
+              "泥岩",
+              "#9aa7b5",
+              "泥岩"
+            ],
+            [
+              "砂岩",
+              "#f2d38a",
+              "砂岩"
+            ],
+            [
+              "河口坝",
+              "#e8b04b",
+              "河口坝"
+            ],
+            [
+              "浅湖",
+              "#8fc7c2",
+              "浅湖"
+            ],
+            [
+              "半深湖",
+              "#5f9ea0",
+              "半深湖"
+            ],
+            [
+              "深湖",
+              "#3d6b8e",
+              "深湖"
+            ],
+            [
+              "扇三角洲",
+              "#d9a066",
+              "扇三角洲"
+            ],
+            [
+              "冲积扇",
+              "#c47f4e",
+              "冲积扇"
+            ]
+          ]
+        },
+        "binding": {
+          "field": "facies_name",
+          "classes": [
+            "泥岩",
+            "砂岩",
+            "河口坝",
+            "浅湖",
+            "半深湖",
+            "深湖",
+            "扇三角洲",
+            "冲积扇"
+          ],
+          "source": "geological-style-library-v1/facies_v1"
+        },
+        "legend_label": "沉积相",
+        "opacity_hint": null
+      },
+      {
+        "key": "contour_index",
+        "category": "contour",
+        "title": "计曲线",
+        "style": {
+          "fill": "#6c8ebf",
+          "stroke": "#7a4f21",
+          "stroke_width": 1.6,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "contour",
+          "field": "is_index_contour"
+        },
+        "legend_label": "计曲线",
+        "opacity_hint": null
+      },
+      {
+        "key": "contour_intermediate",
+        "category": "contour",
+        "title": "首曲线",
+        "style": {
+          "fill": "#6c8ebf",
+          "stroke": "#a9763f",
+          "stroke_width": 0.8,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "contour",
+          "field": "is_index_contour"
+        },
+        "legend_label": "首曲线",
+        "opacity_hint": null
+      },
+      {
+        "key": "fault_major",
+        "category": "fault",
+        "title": "主干断层",
+        "style": {
+          "fill": "#6c8ebf",
+          "stroke": "#c0392b",
+          "stroke_width": 2.0,
+          "line_pattern": "dash",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "fault",
+          "field": "fault_level"
+        },
+        "legend_label": "主干断层",
+        "opacity_hint": null
+      },
+      {
+        "key": "fault_secondary",
+        "category": "fault",
+        "title": "次级断层",
+        "style": {
+          "fill": "#6c8ebf",
+          "stroke": "#e67e22",
+          "stroke_width": 1.2,
+          "line_pattern": "dash_dot",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "fault",
+          "field": "fault_level"
+        },
+        "legend_label": "次级断层",
+        "opacity_hint": null
+      },
+      {
+        "key": "horizon_top",
+        "category": "horizon",
+        "title": "层位顶界",
+        "style": {
+          "fill": "#6c8ebf",
+          "stroke": "#2f6fab",
+          "stroke_width": 1.4,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "horizon",
+          "field": ""
+        },
+        "legend_label": "层位顶界",
+        "opacity_hint": null
+      },
+      {
+        "key": "uncertainty_band",
+        "category": "uncertainty",
+        "title": "不确定度分级",
+        "style": {
+          "fill": "#808080",
+          "stroke": "#4d4d4d",
+          "stroke_width": 0.6,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "graduated",
+          "field": "confidence",
+          "ranges": [
+            [
+              0.0,
+              0.5,
+              "#c9b8d8",
+              "低置信度 (<0.5)"
+            ],
+            [
+              0.5,
+              0.8,
+              "#8fa8c8",
+              "中等置信度"
+            ],
+            [
+              0.8,
+              1.01,
+              "#7fbf9e",
+              "高置信度"
+            ]
+          ]
+        },
+        "binding": {
+          "field": "confidence",
+          "classes": [
+            "低置信度 (<0.5)",
+            "中等置信度",
+            "高置信度"
+          ],
+          "note": "透明度经图层 opacity 应用，样式色板保持可读"
+        },
+        "legend_label": "置信度",
+        "opacity_hint": null
+      },
+      {
+        "key": "study_boundary",
+        "category": "boundary",
+        "title": "工区边界",
+        "style": {
+          "fill": "#6c8ebf",
+          "stroke": "#34495e",
+          "stroke_width": 2.2,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "boundary",
+          "field": ""
+        },
+        "legend_label": "工区边界",
+        "opacity_hint": null
+      },
+      {
+        "key": "reference_basemap",
+        "category": "reference",
+        "title": "参考底图",
+        "style": {
+          "fill": "#f5f2ea",
+          "stroke": "#b8b0a0",
+          "stroke_width": 0.6,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "reference",
+          "field": ""
+        },
+        "legend_label": "参考底图",
+        "opacity_hint": 0.4
+      },
+      {
+        "key": "annotation_text",
+        "category": "annotation",
+        "title": "图面标注",
+        "style": {
+          "fill": "#6c8ebf",
+          "stroke": "#2c3e50",
+          "stroke_width": 0.8,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "binding": {
+          "class": "annotation",
+          "field": ""
+        },
+        "legend_label": "标注",
+        "opacity_hint": null
+      }
+    ]
+  },
+  "lookups": {
+    "hit": {
+      "key": "fault_major",
+      "category": "fault",
+      "title": "主干断层",
+      "style": {
+        "fill": "#6c8ebf",
+        "stroke": "#c0392b",
+        "stroke_width": 2.0,
+        "line_pattern": "dash",
+        "marker": "circle",
+        "marker_size": 6.0,
+        "renderer": "single",
+        "field": ""
+      },
+      "binding": {
+        "class": "fault",
+        "field": "fault_level"
+      },
+      "legend_label": "主干断层",
+      "opacity_hint": null
+    },
+    "miss": {
+      "error": "KeyError",
+      "message": "unknown style 'fault.nope'; available: ['fault.fault_major', 'fault.fault_secondary']"
+    },
+    "miss_category": {
+      "error": "KeyError",
+      "message": "unknown style 'nope.x'; available: []"
+    }
+  },
+  "apply_plain": {
+    "style": {
+      "fill": "#6c8ebf",
+      "stroke": "#c0392b",
+      "stroke_width": 2.0,
+      "line_pattern": "dash",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "style_binding": {
+        "class": "fault",
+        "field": "fault_level"
+      }
+    },
+    "opacity": 1.0
+  },
+  "apply_opacity_hint": {
+    "style": {
+      "fill": "#f5f2ea",
+      "stroke": "#b8b0a0",
+      "stroke_width": 0.6,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "style_binding": {
+        "class": "reference",
+        "field": ""
+      }
+    },
+    "opacity": 0.4
+  },
+  "apply_opacity_min": {
+    "style": {
+      "fill": "#f5f2ea",
+      "stroke": "#b8b0a0",
+      "stroke_width": 0.6,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "style_binding": {
+        "class": "reference",
+        "field": ""
+      }
+    },
+    "opacity": 0.2
+  },
+  "load_errors": {
+    "bad_version": {
+      "error": "ValueError",
+      "message": "style library schema 7 unsupported; expected 1"
+    }
+  }
+}

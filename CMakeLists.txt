@@ -90,6 +90,25 @@ if(PWB_BUILD_CONV_25)
     add_subdirectory(libs/workflow_graph)
 endif()
 # END CONV-25
+# BEGIN CONV-27 — cartography style/template/symbol/ramp registry (the
+# early-excluded cartography surfaces): Qt-free style value types + color
+# ramp registry + geological symbol V2 registry + style libraries + scalar
+# classification kernels + componentized map template library + QGIS bridge
+# payload adapter, in libs/cartography, frozen against the Python oracle.
+# Builds on Pwb::Domain (ordered JSON) and the CONV-02 composition/document
+# models, so the implied switches land BEFORE the data and CONV-02 blocks.
+option(PWB_BUILD_CONV_27
+    "Build the cartography style/template/symbol/ramp registry (libs/cartography; implies PWB_BUILD_DATA + CONV-02)" OFF)
+if(PWB_BUILD_CONV_27)
+    set(PWB_BUILD_DATA ON)
+    set(PWB_BUILD_CONV_02 ON)
+endif()
+if(PWB_BUILD_CONV_27)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/cartography/CMakeLists.txt")
+        message(FATAL_ERROR "PWB_BUILD_CONV_27=ON but libs/cartography is not present on this branch")
+    endif()
+endif()
+# END CONV-27
 
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
@@ -202,6 +221,12 @@ if(PWB_BUILD_CONV_02)
     add_subdirectory(libs/mapping_document)
 endif()
 # END CONV-02
+# BEGIN CONV-27 (subdirectory) — added after the data and CONV-02 blocks so
+# Pwb::Domain and Pwb::MappingDocument exist when the library configures.
+if(PWB_BUILD_CONV_27)
+    add_subdirectory(libs/cartography)
+endif()
+# END CONV-27 (subdirectory)
 # BEGIN CONV-06
 # WorkflowSpec DAG pure model + validator (M7 leaf; Qt-free, QGIS-free).
 # Requires Pwb::Domain (ordered JSON + sha256) from PWB_BUILD_DATA=ON.
