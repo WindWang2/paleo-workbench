@@ -178,7 +178,8 @@ ReadinessItem check_seismic_prediction_confidence(const ReadinessInputs& in) {
     const bool all_mock = in.real_prediction_tasks == 0;
     if (all_mock) {
         return ok("seismic_prediction_confidence", "地震预测已关联",
-                  "全部为 mock 演示任务（概率未标定）");
+                  std::to_string(in.mock_prediction_tasks)
+                      + " 个 mock 演示任务（概率未标定）");
     }
     if (in.low_confidence_regions > 0) {
         return warn("seismic_prediction_confidence",

@@ -88,7 +88,11 @@ void LayerTreePanel::refresh_indicators() {
         if (node != nullptr && indicator != nullptr) {
             view_->removeIndicator(node, indicator);
         }
-        if (indicator != nullptr) indicator->deleteLater();
+        // Even when the node is gone, deleting the indicator lets the
+        // view's bookkeeping release it (no dangling entries accumulate).
+        if (indicator != nullptr) {
+            indicator->deleteLater();
+        }
     }
     edit_indicators_.clear();
 
@@ -133,7 +137,8 @@ void LayerTreePanel::refresh_indicators() {
             view_->addIndicator(node, indicator);
             edit_indicators_[layer_id] = indicator;
         }
-        if (!facts_abstract.isEmpty()) {
+        if (!facts_abstract.isEmpty()
+            && layer->metadata().abstract() != facts_abstract) {
             QgsLayerMetadata metadata = layer->metadata();
             metadata.setAbstract(facts_abstract);
             layer->setMetadata(metadata);
@@ -142,10 +147,10 @@ void LayerTreePanel::refresh_indicators() {
 }
 
 std::vector<std::string> LayerTreePanel::editing_indicated_layer_ids() const {
+    // Tree order (header contract), not map-key order.
     std::vector<std::string> ids;
-    for (const auto& [layer_id, indicator] : edit_indicators_) {
-        (void)indicator;
-        ids.push_back(layer_id);
+    for (const std::string& layer_id : session_.layerIdsTopFirst()) {
+        if (edit_indicators_.count(layer_id) > 0) ids.push_back(layer_id);
     }
     return ids;
 }

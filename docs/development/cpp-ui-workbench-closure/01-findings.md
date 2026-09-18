@@ -29,3 +29,18 @@
 4. `seismic_prediction_confidence` 的 all-mock 判定以"real==0 且有概率摘要"近似（输入结构无 per-task adapter_kind 粒度）。
 5. freshness/staleness 恒为最新（freshness 归 CONV-26 workflow 线，接口就绪后接上）。
 6. QA 几何问题计数恒 0（QA 面归后续方向）。
+7. `initial_facies_crs`：QGIS 新工程自带默认 CRS，"工程 CRS 未设置" error
+   分支实际不可达（Python 的 coordinate.project_crs 真可为空）——状态保真
+   差异，随 B 侧文档 CRS 面接入后消除。
+8. 预测/freshness/QA 输入恒为默认（readiness 中 "测井预测未关联" warning、
+   "单因素均为最新"、"QA 无几何错误" 为常量），待预测面板（Science 线）与
+   freshness（CONV-26）接上后自然点亮。
+10. 验收步骤「保存项目」是分层的：矢量编辑经「提交编辑」走 staged→B
+    目录事务；UI 布局在关闭时保存；整工程（工作区 state/QGIS 工程）保存
+    归 CONV-26 数据线（file 菜单尚无「保存工程」动作）。
+11. 就绪度随动作态刷新（refreshActionStates 一并重算，纯内核无 I/O）。
+
+已接受的既有面：anyDirtyEditSession 只检查活动图层（多图层脏关闭提示
+   属后续加固）；edit_indicators_ 对已删节点不显式 removeIndicator（QGIS 视
+   图侧按活节点查询，仅遗留无害簿记）；PwbQgisSdk 的 deps 前缀默认值是本机
+   路径（cache/env 可覆盖）。

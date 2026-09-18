@@ -531,6 +531,9 @@ void MainWindow::refreshActionStates() {
     }
     if (layer_panel_ != nullptr) layer_panel_->refresh_indicators();
     refresh_constraint_panel();
+    // Readiness is a pure kernel pass over session state — keep it fresh
+    // on layer/selection/edit changes, not only on stage switches.
+    refresh_readiness();
 #endif
 }
 
@@ -556,6 +559,11 @@ QString MainWindow::openVectorLayer(const QString& path) {
     QgsVectorLayer* layer = session_->map().addVectorLayer(
         path.toStdString(), layer_id.toStdString(), binding, &error);
     if (layer == nullptr) return QString::fromStdString(error);
+#ifdef PWB_WITH_CONV_27
+    // Style sidecar written next to the layer's data file (QGIS QML
+    // convention) — re-apply so styling survives reopen.
+    pwb::ui::layer_style::apply_style_sidecar(layer, layer->source());
+#endif
 
     pwb::application::DomainLayerFacts facts;
     facts.layer_id = layer_id.toStdString();
@@ -811,6 +819,12 @@ QString MainWindow::openProject(const QString& project_file) {
         std::string add_error;
         QgsVectorLayer* layer = session_->map().addVectorLayer(
             working.string(), binding.layer_id, qbinding, &add_error);
+#ifdef PWB_WITH_CONV_27
+        if (layer != nullptr) {
+            pwb::ui::layer_style::apply_style_sidecar(
+                layer, layer->source());
+        }
+#endif
         if (layer == nullptr) {
             if (first_error.empty()) first_error = add_error;
             ++skipped;
@@ -1294,7 +1308,10 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
 #ifdef PWB_WITH_CONV_27
     // UI layout only; business state lives in the store/catalog round.
-    if (layout_store_ != nullptr) layout_store_->save(*this);
+    // A pending reset must NOT be overwritten by this close.
+    if (layout_store_ != nullptr && !layout_reset_pending_) {
+        layout_store_->save(*this);
+    }
 #endif
     // Contract teardown order: session (edit -> canvas detach -> layers ->
     // project) before widget children die with the window.
@@ -1722,9 +1739,11 @@ void MainWindow::showFactorStatistics(
 namespace {
 // Polygon-bearing output roles: factor products (CONV-01) and integrated
 // interpretation count as "initial facies present" evidence for stage 1.
+// Vocabulary constants come from layer_roles.hpp (single role registry).
 bool facies_polygon_role(const std::string& role) {
-    return role == "factor_classification" || role == "integrated_facies"
-        || role == "initial_facies_draft" || role == "facies_boundary";
+    using namespace pwb::tool_policy::layer_role;
+    return role == kFactorClassification || role == kIntegratedFacies
+        || role == kInitialFaciesDraft || role == kFaciesBoundary;
 }
 }  // namespace
 
@@ -1787,15 +1806,15 @@ void MainWindow::install_conv27_surface() {
               for (QgsMapLayer* layer : layers) {
                 auto* vector_layer = qobject_cast<QgsVectorLayer*>(layer);
                 if (vector_layer == nullptr) continue;
+                // layersAdded fires once per layer, so these connect once
+                // (UniqueConnection is not valid for functor slots — it
+                // asserts in debug builds).
                 connect(vector_layer, &QgsVectorLayer::selectionChanged,
-                        this, [this]() { refreshActionStates(); },
-                        Qt::UniqueConnection);
+                        this, [this]() { refreshActionStates(); });
                 connect(vector_layer, &QgsVectorLayer::editingStarted,
-                        this, [this]() { refreshActionStates(); },
-                        Qt::UniqueConnection);
+                        this, [this]() { refreshActionStates(); });
                 connect(vector_layer, &QgsVectorLayer::editingStopped,
-                        this, [this]() { refreshActionStates(); },
-                        Qt::UniqueConnection);
+                        this, [this]() { refreshActionStates(); });
               }
             });
 
@@ -1817,7 +1836,9 @@ void MainWindow::onActiveLayerIdChanged(const QString& layer_id) {
 void MainWindow::applyStageValue(const std::string& value) {
     const auto stage = pwb::tool_policy::stage_from_value(value);
     if (!stage.has_value()) return;
-    session_->set_mapping_stage(value);
+    // Canonicalize: the session string feeds the evaluator's stage
+    // whitelist comparisons, which speak canonical values only.
+    session_->set_mapping_stage(pwb::tool_policy::stage_value(*stage));
     if (stage_dock_ != nullptr) stage_dock_->set_current_stage(*stage);
     refreshActionStates();
     refresh_readiness();
@@ -1865,19 +1886,27 @@ pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {
             session_->map().vectorLayerById(layer_id);
         if (layer == nullptr) continue;
         if (facies_polygon_role(role)) {
-            in.facies_polygon_count +=
-                static_cast<int>(layer->featureCount());
-            in.facies_polygons_loaded = true;
+            // Python counts Polygon/MultiPolygon FEATURES (not layers):
+            // filter by geometry type; skip unknown counts (-1).
+            if (layer->geometryType() == Qgis::GeometryType::Polygon
+                && layer->featureCount() > 0) {
+                in.facies_polygon_count +=
+                    static_cast<int>(layer->featureCount());
+                in.facies_polygons_loaded = true;
+            }
         }
-        if (role == "factor_contour" || role == "factor_grid"
-            || role == "factor_classification") {
+        // One factor run = one task: the pipeline emits a contour layer
+        // per run (classification/grid layers are its siblings).
+        if (role == pwb::tool_policy::layer_role::kFactorContour) {
             ++in.factor_tasks_complete;
             ++in.factor_tasks_total;
         }
-        if (role == "initial_facies_draft" && layer->featureCount() > 0) {
+        if (role == pwb::tool_policy::layer_role::kInitialFaciesDraft
+            && layer->featureCount() > 0) {
             ++in.facies_draft_layers;
         }
-        if (role == "integrated_facies" || role == "integrated_boundary") {
+        if (role == pwb::tool_policy::layer_role::kIntegratedFacies
+            || role == pwb::tool_policy::layer_role::kIntegratedBoundary) {
             ++in.integrated_draft_layers;
         }
         if (pwb::tool_policy::layer_role::is_line_role(role)) {
@@ -1947,6 +1976,7 @@ void MainWindow::saveLayoutState() {
 
 void MainWindow::resetLayoutState() {
     if (layout_store_ != nullptr) layout_store_->reset();
+    layout_reset_pending_ = true;
     statusBar()->showMessage(tr("布局已重置（下次启动恢复默认）"), 6000);
 }
 #endif

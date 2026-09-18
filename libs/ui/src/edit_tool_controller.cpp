@@ -59,16 +59,6 @@ bool EditToolController::handles_tool(const std::string& tool_id) {
         || tool_id == kAddLineToolId || tool_id == kAddPolygonToolId;
 }
 
-bool EditToolController::tool_matches_layer_kind(const std::string& tool_id,
-                                                 const std::string& layer_kind) {
-    // tool_availability.py _KIND_REQUIRED parity.
-    if (layer_kind.empty()) return false;
-    if (tool_id == kAddPointToolId) return layer_kind == "point";
-    if (tool_id == kAddLineToolId) return layer_kind == "line";
-    if (tool_id == kAddPolygonToolId) return layer_kind == "polygon";
-    return true;   // selection is kind-agnostic
-}
-
 QgsMapToolDigitizeFeature* EditToolController::digitize_tool(
     const std::string& tool_id) const {
     if (tool_id == kAddPointToolId) return add_point_tool_;

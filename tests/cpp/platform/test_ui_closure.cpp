@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
         bool horizon_error = false;
         for (const QString& row : rows) {
             if (row.contains(QStringLiteral("未设定编图层位"))
-                && row.startsWith(QStringLiteral("✗"))) {
+                && row.startsWith(QStringLiteral("✕"))) {
                 horizon_error = true;
             }
         }

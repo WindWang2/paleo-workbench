@@ -58,12 +58,14 @@ bool WorkbenchLayout::restore(QMainWindow& window) {
     // Reject empty/truncated blobs before touching the window.
     if (state.size() < 4) return false;
 
-    // Dock/toolbar state is the verdict; geometry is best-effort (a window
-    // position that no longer parses must not discard a good dock layout).
+    // Dock/toolbar state is the verdict; geometry applies only when the
+    // state parsed (a corrupt blob must not half-apply: no window move on
+    // a layout we are about to reject).
+    if (!window.restoreState(state)) return false;
     if (!geometry.isEmpty()) {
         window.restoreGeometry(geometry);
     }
-    return window.restoreState(state);
+    return true;
 }
 
 void WorkbenchLayout::reset() {

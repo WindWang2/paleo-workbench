@@ -35,11 +35,6 @@ public:
 
     // Tool ids this controller owns (anything else returns false).
     static bool handles_tool(const std::string& tool_id);
-    // Digitize tool ids valid for the given layer kind ("point"/"line"/
-    // "polygon"/"" unknown).
-    static bool tool_matches_layer_kind(const std::string& tool_id,
-                                        const std::string& layer_kind);
-
     // Arms the tool (canvas takes it). Unknown/unhandled ids are ignored.
     void arm(const std::string& tool_id);
     // Currently armed tool id (policy vocabulary; "" when another surface

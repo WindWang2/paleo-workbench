@@ -22,7 +22,12 @@ bool open_renderer_properties(QgsVectorLayer* layer, QgsMapCanvas* canvas,
 }
 
 QString sidecar_path(const QString& layer_uri) {
-    return layer_uri + QStringLiteral(".qml");
+    // OGR URIs carry options ("file.gpkg|layername=x") — the sidecar keys
+    // off the data FILE only, or the name would be unusable on disk.
+    QString file = layer_uri;
+    const int pipe = file.indexOf(QLatin1Char('|'));
+    if (pipe >= 0) file.truncate(pipe);
+    return file + QStringLiteral(".qml");
 }
 
 bool save_style_sidecar(QgsMapLayer* layer, const QString& layer_uri) {
@@ -33,7 +38,11 @@ bool save_style_sidecar(QgsMapLayer* layer, const QString& layer_uri) {
     if (!error.isEmpty()) return false;
     QFile out(sidecar_path(layer_uri));
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
-    out.write(doc.toString().toUtf8());
+    const QByteArray bytes = doc.toString().toUtf8();
+    if (out.write(bytes) != bytes.size() || !out.flush()) {
+        out.close();
+        return false;   // short write (disk full/RO) is NOT a saved style
+    }
     out.close();
     return true;
 }

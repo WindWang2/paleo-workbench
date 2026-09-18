@@ -171,6 +171,8 @@ if(PWB_BUILD_CONV_01)
 endif()
 # END CONV-01
 # BEGIN CONV-27
+# Slice tests (kernel + closure) register only when the slice is on.
+if(PWB_BUILD_CONV_27)
 # Stage readiness kernel test: pure Qt (no QGIS session required, but the
 # offscreen QApplication env is harmless).
 add_executable(platform_stage_readiness stage_readiness_test.cpp)
@@ -184,8 +186,7 @@ set_tests_properties(platform.stage_readiness PROPERTIES
     TIMEOUT 120)
 
 # Workbench closure integration test (real MainWindow + CONV-27 surface).
-if(PWB_BUILD_CONV_27)
-    add_executable(platform_ui_closure test_ui_closure.cpp
+add_executable(platform_ui_closure test_ui_closure.cpp
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
     set_target_properties(platform_ui_closure PROPERTIES AUTOMOC ON)
     target_compile_features(platform_ui_closure PRIVATE cxx_std_20)

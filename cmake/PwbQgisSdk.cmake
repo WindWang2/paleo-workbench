@@ -129,13 +129,16 @@ target_include_directories(PwbQgis::Sdk INTERFACE
     "${PALEO_QGIS_BUILD_DIR}/src/core"
     "${PALEO_QGIS_BUILD_DIR}/src/gui"
     "${PALEO_QGIS_BUILD_DIR}/src/analysis"
-    "${PALEO_QGIS_BUILD_DIR}/src/ui"
 )
 target_link_libraries(PwbQgis::Sdk INTERFACE
     PwbQgis::Core PwbQgis::Gui PwbQgis::Analysis
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::Svg Qt6::PrintSupport)
 
 # BEGIN CONV-27
+# Generated ui_*.h (e.g. ui_qgsrendererpropsdialogbase.h pulled by the
+# symbology dialogs) live in the vendor build's src/ui autogen dir.
+target_include_directories(PwbQgis::Sdk INTERFACE
+    "${PALEO_QGIS_BUILD_DIR}/src/ui")
 # QGIS headers include their bundled/external dependencies unqualified
 # (nlohmann/json_fwd.hpp from qgsabstractgeometry.h, qwt from gui headers,
 # spatialindex from analysis headers, geos_c.h from geometry headers). The

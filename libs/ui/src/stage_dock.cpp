@@ -16,7 +16,7 @@ const char* status_glyph(ReadinessItemStatus status) {
     switch (status) {
         case ReadinessItemStatus::Ok: return "✓";
         case ReadinessItemStatus::Warning: return "!";
-        case ReadinessItemStatus::Error: return "✗";
+        case ReadinessItemStatus::Error: return "✕";
         case ReadinessItemStatus::Info: return "·";
     }
     return "·";
@@ -120,17 +120,16 @@ void StageDock::set_readiness(pwb::tool_policy::MappingStage stage,
             row += QStringLiteral(" — ") + QString::fromStdString(item.detail);
         }
         list->addItem(row);
-        // Tooltip carries the click-through target when present.
-        if (!item.target.empty()) {
-            list->item(list->count() - 1)
-                ->setToolTip(QString::fromStdString(item.target));
-        }
+        // Python panel: tooltip = detail or title (human text, not the
+        // internal target id).
+        const std::string& tip =
+            !item.detail.empty() ? item.detail : item.title;
+        list->item(list->count() - 1)
+            ->setToolTip(QString::fromStdString(tip));
     }
     if (status_labels_[slot] != nullptr) {
-        const std::size_t warning_count = readiness.warnings().size();
-        status_labels_[slot]->setText(
-            QString::fromUtf8(readiness.label()) + QStringLiteral("（%1 项提醒）")
-                .arg(static_cast<qsizetype>(warning_count)));
+        // Python panel wording: exactly the readiness label.
+        status_labels_[slot]->setText(QString::fromUtf8(readiness.label()));
     }
 }
 

@@ -254,6 +254,9 @@ private:
     pwb::ui::EditToolController* edit_tools_ = nullptr;
     pwb::ui::ConstraintPanel* constraint_dock_ = nullptr;
     std::unique_ptr<pwb::ui::WorkbenchLayout> layout_store_;
+    // Set by 重置布局: the next close skips the layout save so the reset
+    // actually survives into the next launch (defaults restore).
+    bool layout_reset_pending_ = false;
 #endif
 #ifdef PWB_WITH_CONV_16
     FactorStatsDock* factor_dock_ = nullptr;
