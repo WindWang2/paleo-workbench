@@ -16,10 +16,22 @@
 #   RESOURCE_BUSY holder_pid=.. age_min=..
 #   RESOURCE_LOW_MEMORY free_gib=.. required=..
 #   RESOURCE_STALE_LOCK_RECOVERED age_min=..
+#   RESOURCE_GATE_WARNING detail=..
 #   RESOURCE_GATE_ERROR detail=..
+#
+# Actions: Probe (admission check only), Configure | Build | Test (run the
+# corresponding cmake/ctest step under the slot), Exec (run an arbitrary command
+# under the slot, e.g. a verification driver). While the slot is held the child
+# environment carries PWB_GATE_HELD=1 and PWB_GATE_JOBS=<n>.
+#
+# Exec invocation note: `powershell -File` can only bind ONE argument to the
+# string[] parameter -CommandArguments, so pass the child command line as a
+# single string, e.g.
+#   -Action Exec -Command cmd.exe -CommandArguments "/c exit 7"
+# When called from another PowerShell script you may splat the array instead.
 [CmdletBinding()]
 param(
-    [ValidateSet('Probe', 'Configure', 'Build', 'Test')]
+    [ValidateSet('Probe', 'Configure', 'Build', 'Test', 'Exec')]
     [string]$Action = 'Probe',
     [string]$SourceDir,
     [string]$BuildDir,
@@ -31,7 +43,12 @@ param(
     [string]$MinFreeGiB = '8',
     [Alias('j')]
     [string]$Jobs = '2',
-    [int]$StaleLockMinutes = 45,
+    # Typed as string on purpose: a [int] parameter makes a non-numeric value
+    # throw a raw binding error (exit 1, no diagnostic token) instead of the
+    # documented exit 64. Validated below like MinFreeGiB and Jobs.
+    [string]$StaleLockMinutes = '45',
+    [string]$Command,
+    [string[]]$CommandArguments = @(),
     [Alias('F')]
     [switch]$ForceRecoverLock
 )
@@ -48,6 +65,29 @@ function Test-PidAlive {
     if ($CandidatePid -le 0) { return $false }
     try { return ($null -ne (Get-Process -Id $CandidatePid -ErrorAction SilentlyContinue)) }
     catch { return $false }
+}
+
+function Split-CommandLine {
+    # `powershell -File` can bind only one argument to a string[] parameter, so
+    # callers pass the child command line as a single string. Split it here,
+    # honouring double quotes, and remember the original quoting so a single
+    # token that legitimately contains spaces (e.g. cmd's "/c ...") still works.
+    param([string]$Line)
+    $tokens = New-Object System.Collections.ArrayList
+    $current = ''
+    $inQuote = $false
+    $started = $false
+    foreach ($ch in $Line.ToCharArray()) {
+        if ($ch -eq '"') { $inQuote = -not $inQuote; $started = $true; continue }
+        if ($ch -eq ' ' -and -not $inQuote) {
+            if ($started) { [void]$tokens.Add($current); $current = ''; $started = $false }
+            continue
+        }
+        $current += $ch
+        $started = $true
+    }
+    if ($started) { [void]$tokens.Add($current) }
+    return ,$tokens.ToArray()
 }
 
 function Resolve-GatePaths {
@@ -91,8 +131,16 @@ try {
         Write-Diag ("RESOURCE_GATE_WARNING detail=Jobs {0} clamped to 8 (unbounded parallelism rejected)" -f $jobs)
         $jobs = 8
     }
-    if ($StaleLockMinutes -le 0) {
-        Write-Diag ("RESOURCE_GATE_ERROR detail=StaleLockMinutes must be a positive integer (got {0})" -f $StaleLockMinutes)
+    try { $staleMinutes = [double]$StaleLockMinutes } catch {
+        Write-Diag ("RESOURCE_GATE_ERROR detail=invalid StaleLockMinutes: '{0}' must be a positive number" -f $StaleLockMinutes)
+        exit 64
+    }
+    if ($staleMinutes -le 0) {
+        Write-Diag ("RESOURCE_GATE_ERROR detail=StaleLockMinutes must be a positive number (got {0})" -f $StaleLockMinutes)
+        exit 64
+    }
+    if ($Action -eq 'Exec' -and [string]::IsNullOrWhiteSpace($Command)) {
+        Write-Diag 'RESOURCE_GATE_ERROR detail=Command is required for Exec.'
         exit 64
     }
 
@@ -128,7 +176,7 @@ try {
         $holderPid = $null
         if ($ownerText -match 'pid=(\d+)') { $holderPid = [int]$Matches[1] }
         $ageMin = [Math]::Max(0.0, ([DateTime]::Now - (Get-Item -LiteralPath $ownerPath).LastWriteTime).TotalMinutes)
-        $stale = $ForceRecoverLock -or ($ageMin -ge $StaleLockMinutes)
+        $stale = $ForceRecoverLock -or ($ageMin -ge $staleMinutes)
         if ($stale -and -not (Test-PidAlive $holderPid)) {
             Write-Diag ("RESOURCE_STALE_LOCK_RECOVERED age_min={0:N1}" -f $ageMin)
         }
@@ -150,6 +198,30 @@ try {
     if ($Action -eq 'Probe') {
         Write-Diag ("RESOURCE_READY free_gib={0:N1} jobs={1} lock={2}" -f $freeGiB, $jobs, $gatePath)
         exit 0
+    }
+
+    # Mark every child process as running UNDER the slot. Tools that would
+    # otherwise start their own heavy work (tools/verify/pwb_local_verify.py)
+    # refuse to run heavy steps without it, so the single-slot guarantee cannot
+    # be bypassed by calling a driver instead of this gate.
+    [Environment]::SetEnvironmentVariable('PWB_GATE_HELD', '1', 'Process')
+    [Environment]::SetEnvironmentVariable('PWB_GATE_JOBS', [string]$jobs, 'Process')
+
+    # Exec runs an arbitrary command under the slot (used to wrap a driver or a
+    # bespoke script). It deliberately needs no BuildDir.
+    if ($Action -eq 'Exec') {
+        $childArgs = @($CommandArguments | Where-Object { $_ -ne $null -and $_ -ne '' })
+        if ($childArgs.Count -eq 1 -and $childArgs[0] -match '\s') {
+            $childArgs = Split-CommandLine $childArgs[0]
+        }
+        if ($childArgs.Count -gt 0) {
+            & $Command @childArgs
+        } else {
+            & $Command
+        }
+        $exitCode = $LASTEXITCODE
+        if ($null -eq $exitCode) { $exitCode = 0 }
+        exit $exitCode
     }
 
     # --- action-specific guards ---

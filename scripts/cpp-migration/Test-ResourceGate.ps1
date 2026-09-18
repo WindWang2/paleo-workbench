@@ -6,6 +6,8 @@
 #   (e) -Jobs 99                   -> clamped to 8 (jobs=8 + warning), exit 0
 #   (f) invalid usage              -> RESOURCE_GATE_ERROR, exit 64
 #   (g) Build with missing build dir -> RESOURCE_GATE_ERROR "run Configure first", exit 1
+#   (h) Exec -- child                -> child exit code propagated, PWB_GATE_HELD set
+#   (i) -StaleLockMinutes abc        -> RESOURCE_GATE_ERROR, exit 64 (not a raw binder error)
 # Prints PASS/FAIL per case and exits non-zero if any FAIL.
 $ErrorActionPreference = 'Stop'
 
@@ -18,8 +20,17 @@ $gateScript = Join-Path $PSScriptRoot 'Invoke-ResourceGate.ps1'
 
 function Invoke-Gate {
     param([string[]]$GateArgs)
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $gateScript @GateArgs 2>&1
-    $code = $LASTEXITCODE
+    # A native child that writes to stderr becomes a *terminating* error while
+    # $ErrorActionPreference is 'Stop', which would abort the harness instead of
+    # recording a result. Relax it only for the duration of the child call.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $gateScript @GateArgs 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
     return (@($out) -join "`n"), $code
 }
 
@@ -78,7 +89,9 @@ try {
     Clean-Lock $lockPath $ownerPath
     New-Item -ItemType File -Path $lockPath -Force | Out-Null
     New-Item -ItemType File -Path $ownerPath -Force | Out-Null
-    Set-Content -LiteralPath $ownerPath -Value 'pid=1 action=Test root=x time=2020-01-01T00:00:00Z' -NoNewline
+    # A pid that cannot exist: pid 1 is init on Linux and always alive, which
+    # would make recovery correctly refuse and this case fail there.
+    Set-Content -LiteralPath $ownerPath -Value 'pid=999999 action=Test root=x time=2020-01-01T00:00:00Z' -NoNewline
     $old = (Get-Date).AddMinutes(-(60 + 45))
     (Get-Item -LiteralPath $ownerPath).LastWriteTime = $old
     (Get-Item -LiteralPath $lockPath).LastWriteTime = $old
@@ -99,6 +112,31 @@ try {
     Clean-Lock $lockPath $ownerPath
     $out, $code = Invoke-Gate @('-Action', 'Build', '-BuildDir', 'build/__gate_test_missing__', '-MinFreeGiB', $successThreshold)
     Record '(g) Build missing build dir refused' ($code -eq 1 -and $out -match 'RESOURCE_GATE_ERROR' -and $out -match 'Configure first') ("exit=$code; $out")
+
+    # (h) Exec runs a child under the slot: the marker must be visible to the
+    # child and the child's exit code must be propagated unchanged.
+    # NOTE: `powershell -File` can bind only ONE argument to the string[]
+    # parameter -CommandArguments, and a single space-containing token gets
+    # re-quoted on the way to a native child (cmd.exe then sees a stray quote).
+    # So the marker probe is a space-free batch file, and the exit-code probe
+    # uses the one child command line that survives the round trip.
+    $probeBat = Join-Path ([IO.Path]::GetTempPath()) 'pwb_gate_marker_probe.bat'
+    Set-Content -LiteralPath $probeBat -Encoding Ascii `
+        -Value "@echo off`r`necho GATE_MARKER=%PWB_GATE_HELD%`r`nexit /b 0"
+    Clean-Lock $lockPath $ownerPath
+    $out, $code = Invoke-Gate @('-Action', 'Exec', '-MinFreeGiB', $successThreshold,
+        '-Command', $probeBat)
+    $markerOk = ($code -eq 0 -and $out -match 'GATE_MARKER=1')
+    $out2, $code2 = Invoke-Gate @('-Action', 'Exec', '-MinFreeGiB', $successThreshold,
+        '-Command', 'cmd.exe', '-CommandArguments', '/c exit 7')
+    try { Remove-Item -LiteralPath $probeBat -Force -ErrorAction SilentlyContinue } catch {}
+    Record '(h) Exec sets PWB_GATE_HELD and propagates child exit code' `
+        ($markerOk -and $code2 -eq 7) ("marker_exit=$code child_exit=$code2")
+
+    # (i) a non-numeric StaleLockMinutes is invalid usage, not a raw binder error
+    Clean-Lock $lockPath $ownerPath
+    $out, $code = Invoke-Gate @('-Action', 'Probe', '-MinFreeGiB', $successThreshold, '-StaleLockMinutes', 'abc')
+    Record '(i) invalid StaleLockMinutes' ($code -eq 64 -and $out -match 'RESOURCE_GATE_ERROR') ("exit=$code; $out")
 } finally {
     Clean-Lock $lockPath $ownerPath
 }

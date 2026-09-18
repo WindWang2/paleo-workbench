@@ -68,7 +68,9 @@ endif()
 # Built only when the app's UI/Application Qt-linked libs exist, mirroring the
 # platform target's own guard. It reports the install tree it expects and is
 # used by the native packaging skeleton (cmake/PwbInstall.cmake).
-if(TARGET Pwb::Ui OR TARGET Pwb::Application)
+# Gated on PWB_ENABLE_PACKAGING as well: without it the configured build graph
+# must be identical to main, and an extra executable target is a graph change.
+if(PWB_ENABLE_PACKAGING AND (TARGET Pwb::Ui OR TARGET Pwb::Application))
     include(GNUInstallDirs)
     add_executable(pwb-diagnose diag_main.cpp)
     set_target_properties(pwb-diagnose PROPERTIES AUTOMOC ON)

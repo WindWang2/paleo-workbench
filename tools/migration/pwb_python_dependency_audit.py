@@ -39,6 +39,20 @@ from typing import Optional
 
 DEV_TOOLING_PREFIXES = ("tests/", "tools/oracle/")
 
+EXIT_OK = 0
+EXIT_FAIL_ON = 1
+EXIT_REPO = 2
+EXIT_USAGE = 64
+
+# Categories accepted by --fail-on. Anything else is rejected, because a typo
+# would otherwise produce a gate that can never fire.
+FAIL_ON_CATEGORIES = frozenset({
+    "native_test_depends_on_python",
+    "packaging_python_requirement",
+    "python_fallback_seam",
+    "oracle_only_module",
+})
+
 # CMake tokens that actually invoke / require a Python interpreter.
 RE_FIND_PACKAGE = re.compile(r"find_package\s*\(\s*Python", re.IGNORECASE)
 RE_COMMAND_PY = re.compile(r"COMMAND\s+(python|python3|\$\{PYTHON)", re.IGNORECASE)
@@ -417,6 +431,15 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # --- CI gate ---
     gate_cats = [c.strip() for c in re.split(r"[,\s]+", args.fail_on) if c.strip()]
+    # An unrecognised category would otherwise silently never fire, which is the
+    # worst possible failure mode for a gate.
+    unknown = [c for c in gate_cats if c not in FAIL_ON_CATEGORIES]
+    if unknown:
+        sys.stderr.write(
+            "error: unknown --fail-on categor(y|ies): " + ", ".join(unknown)
+            + "\n       known categories: " + ", ".join(sorted(FAIL_ON_CATEGORIES))
+            + "\n")
+        return EXIT_USAGE
     exit_code = 0
     if gate_cats:
         s = report["summary"]

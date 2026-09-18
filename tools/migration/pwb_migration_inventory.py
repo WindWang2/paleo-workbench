@@ -71,6 +71,7 @@ STATUS_LABELS: Dict[str, str] = {
     "native_complete_wired": "Native complete + wired",
     "native_core_not_wired": "Native core exists but not wired",
     "partial_native": "Partial native",
+    "native_no_python_origin": "Native, no Python origin recorded",
     "python_only_production": "Python-only production",
     "oracle_test_only_python": "Oracle/test-only Python",
     "legacy_deprecated_candidate": "Legacy/deprecated candidate",
@@ -461,6 +462,12 @@ def classify(fact: UnitFact) -> str:
         return "native_complete_wired"
     if has_oracle:
         return "native_core_not_wired"
+    # Infrastructure libraries that were never ported from Python (domain,
+    # catalog, project, workspace, ui, ...) record no Python origin. Reporting
+    # them as "partial native" would imply an unfinished port, which is a
+    # different and misleading statement.
+    if not fact.python_origins:
+        return "native_no_python_origin"
     if not fact.python_origins_present and fact.python_origins_absent:
         return "legacy_deprecated_candidate"
     return "partial_native"
@@ -509,7 +516,10 @@ def build_inventory(root: str) -> dict:
         fact.status = classify(fact)
 
         if not fact.python_origins:
-            fact.notes.append("no Python origin recorded in headers/CMake (attribution gap)")
+            fact.notes.append(
+                "no Python origin recorded: treated as native-only infrastructure "
+                "(not a port) rather than an unfinished one"
+            )
         if fact.python_origins_absent and fact.python_origins_present:
             fact.notes.append("some recorded Python origins no longer exist in the tree")
         if fact.wired and not fact.fixtures:
@@ -707,14 +717,32 @@ def render_markdown(inv: dict) -> str:
             out.append(f"- `{item}`")
         out.append("")
 
-    out.append("## Attribution gaps")
+    out.append("## C++ units with no recorded Python origin")
+    out.append("")
+    out.append(
+        "These are read as native-only infrastructure (never ported from Python) "
+        "rather than as unfinished ports. If one of them *was* meant to replace a "
+        "Python module, the header is missing its attribution and the record below "
+        "is the one to fix."
+    )
     out.append("")
     gaps = [u for u in inv["units"] if not u["python_origins"]]
     if not gaps:
         out.append("None — every C++ unit records its Python origin.")
     else:
         for u in gaps:
-            out.append(f"- `{u['unit']}`: no Python origin recorded in headers/CMake")
+            out.append(f"- `{u['unit']}` ({u['status']})")
+    out.append("")
+
+    partial = [u for u in inv["units"]
+               if u["python_origins_absent"] and u["python_origins_present"]]
+    out.append("## Partial attribution (some recorded origins are gone)")
+    out.append("")
+    if not partial:
+        out.append("None — every recorded Python origin still exists in the tree.")
+    else:
+        for u in partial:
+            out.append(f"- `{u['unit']}`: missing {', '.join('`' + p + '`' for p in u['python_origins_absent'])}")
     out.append("")
     return "\n".join(out) + "\n"
 

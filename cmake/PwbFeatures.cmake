@@ -114,9 +114,11 @@ pwb_declare_feature(PWB_BUILD_CONV_08
     "CONV-08 factor interpolation task host" OFF)
 pwb_declare_feature(PWB_BUILD_CONV_09
     "CONV-09 well_science DTW kernel" OFF)
-pwb_declare_feature(PWB_BUILD_CONV_10
-    "CONV-10 representative_facies leaf inside mapping_kernel" OFF
-    IMPLIES PWB_BUILD_MAPPING_KERNEL)
+# NOTE: PWB_BUILD_CONV_10 is NOT declared here. It is owned by
+# libs/mapping_kernel/CMakeLists.txt, which declares it with the same default
+# (OFF) and consumes it locally. Hoisting a subdirectory-owned switch duplicates
+# the declaration and is exactly the hazard that flipped PWB_BUILD_TOOLS when
+# this module was first written; it is reported read-only instead.
 pwb_declare_feature(PWB_BUILD_CONV_11
     "CONV-11 well-curve ops kernel" OFF)
 pwb_declare_feature(PWB_BUILD_CONV_12
@@ -163,6 +165,7 @@ pwb_declare_feature(PWB_BUILD_CONV_25
 # listed for reporting only, and the summary reads their resolved value.
 set(PWB_FEATURE_REPORT_ONLY
     "PWB_BUILD_TOOLS"
+    "PWB_BUILD_CONV_10"
     "PWB_SCIENCE_BUILD_TESTS"
     "PWB_SCIENCE_BUILD_VIEWER"
     "PWB_SCIENCE_VIEWER_TESTS"
@@ -223,7 +226,9 @@ function(pwb_resolve_feature_dependencies)
     if(NOT _stabilised)
         message(FATAL_ERROR
             "PwbFeatures: the implication graph did not stabilise within "
-            "${_max_rounds} rounds — there is a cycle in cmake/PwbFeatures.cmake.")
+            "${_max_rounds} rounds. Either there is a cycle in the IMPLIES table "
+            "in cmake/PwbFeatures.cmake, or an implication chain is deeper than "
+            "${_max_rounds}; raise _max_rounds only after checking for a cycle.")
     endif()
 
     # Unknown switches on either edge type are typos that would otherwise make
@@ -276,8 +281,11 @@ function(pwb_add_subdirectory_once dir)
         message(STATUS "PwbFeatures: ${dir} already added; skipping duplicate")
         return()
     endif()
-    set(PWB_SUBDIR_ADDED_${_key} TRUE CACHE INTERNAL
-        "add_subdirectory guard for ${dir}")
+    # Deliberately NOT a cache entry: a cached guard would survive across
+    # reconfigures, so switching the owning slices off and on again in the same
+    # build tree would skip the directory and silently build nothing.
+    # Directory-scope is exactly the right lifetime for "within this configure".
+    set(PWB_SUBDIR_ADDED_${_key} TRUE PARENT_SCOPE)
     add_subdirectory(${dir})
 endfunction()
 

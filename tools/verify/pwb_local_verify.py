@@ -275,9 +275,15 @@ def free_gib() -> Optional[float]:
                     ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
                 ]
 
+            # Explicit signatures: without them ctypes defaults to c_int for the
+            # return value and would truncate the BOOL, and a 64-bit struct
+            # passed by reference is only safe with declared types.
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GlobalMemoryStatusEx.argtypes = [ctypes.POINTER(MEMORYSTATUSEX)]
+            kernel32.GlobalMemoryStatusEx.restype = ctypes.c_int
             status = MEMORYSTATUSEX()
             status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            if not kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
                 return None
             return status.ullAvailPhys / (1024.0 ** 3)
         except Exception:
@@ -309,10 +315,10 @@ class Repo:
 
     def require(self) -> None:
         if not os.path.exists(os.path.join(self.root, "CMakeLists.txt")):
-            raise SystemExit(
-                f"error: {self.root} does not look like the repository root "
-                "(no CMakeLists.txt)"
-            )
+            # Exit 2 (repository error), matching the documented contract.
+            print(f"error: {self.root} does not look like the repository root "
+                  "(no CMakeLists.txt)", file=sys.stderr)
+            raise SystemExit(EXIT_REPO)
 
     @property
     def presets_path(self) -> str:
@@ -494,8 +500,58 @@ def _preset_binary_dir(repo: Repo, name: str) -> Optional[str]:
     return binary_dir.replace("${sourceDir}", repo.root).replace("\\", "/")
 
 
+GATE_PS = "scripts/cpp-migration/Invoke-ResourceGate.ps1"
+GATE_SH = "scripts/cpp-migration/invoke-resource-gate.sh"
+
+
+def find_gate_script(repo: "Repo") -> Optional[str]:
+    rel = GATE_PS if sys.platform == "win32" else GATE_SH
+    path = os.path.join(repo.root, rel)
+    return path if os.path.exists(path) else None
+
+
+def require_gate(repo: "Repo", args: argparse.Namespace) -> Optional[int]:
+    """Refuse a heavy step that is not running inside the shared build slot.
+
+    Checking the free-memory floor is not enough: without the slot lock two
+    invocations of this driver (or one of them plus a gate-wrapped build) could
+    compile concurrently and defeat the whole point of the gate. The gate exports
+    PWB_GATE_HELD=1 to its children, including `-Action Exec`.
+    """
+    if os.environ.get("PWB_GATE_HELD") == "1":
+        log(f"gate slot held (PWB_GATE_JOBS={os.environ.get('PWB_GATE_JOBS', '?')})")
+        return None
+    if args.allow_ungated:
+        log("WARNING: --allow-ungated given; running WITHOUT the shared build slot")
+        return None
+    gate = find_gate_script(repo)
+    if not gate:
+        log("WARNING: no resource gate found; running WITHOUT the shared build slot")
+        return None
+
+    log(f"REFUSED: '{args.command}' is a heavy step and this process does not hold "
+        "the shared build slot (PWB_GATE_HELD is not 1).")
+    log("The gate allows one heavy build per worktree across all 7 worktrees; "
+        "running outside it is what makes the machine OOM.")
+    log("Run it through the gate instead:")
+    driver = "tools/verify/pwb_local_verify.py"
+    if sys.platform == "win32":
+        log(f'  powershell -NoProfile -ExecutionPolicy Bypass -File "{GATE_PS}" '
+            f"-Action Exec -MinFreeGiB {args.min_free_gib:g} -Command python "
+            f'-CommandArguments "{driver} {args.command} ..."')
+    else:
+        log(f"  {GATE_SH} Exec -- python {driver} {args.command} ...")
+    log("Or pass --allow-ungated if you have deliberately excluded this machine "
+        "from the shared budget (for example a single-worktree run).")
+    return EXIT_RESOURCE
+
+
 def guard_resources(args: argparse.Namespace) -> Optional[int]:
     mem = free_gib()
+    if mem is None:
+        # Do not pretend the floor was checked. Say so, loudly, every time.
+        log(f"RESOURCE_MEMORY_UNKNOWN detail=free memory could not be measured; "
+            f"floor {args.min_free_gib:g} GiB NOT enforced")
     if mem is None:
         return None
     if mem < args.min_free_gib:
@@ -761,6 +817,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--min-free-gib", type=float, default=DEFAULT_MIN_FREE_GIB,
                         help="refuse heavy steps below this much free RAM")
     parser.add_argument("--verbose", action="store_true", help="verbose feature graph on configure")
+    parser.add_argument("--allow-ungated", action="store_true",
+                        help="run heavy steps without the shared build slot (see docs)")
     args = parser.parse_args(argv)
 
     jobs, warning = clamp_jobs(args.jobs)
@@ -773,6 +831,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     heavy = {"configure", "build", "test", "smoke", "all"}
     if args.command in heavy:
+        # Order matters: prove we hold the shared slot before judging memory, so
+        # two concurrent drivers cannot both pass the RAM check and compile.
+        refusal = require_gate(repo, args)
+        if refusal is not None:
+            return refusal
         refusal = guard_resources(args)
         if refusal is not None:
             return refusal

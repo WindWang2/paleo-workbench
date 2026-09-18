@@ -8,8 +8,17 @@
 #   (e) -j 99                        -> clamped to 8 (jobs=8 + warning), exit 0
 #   (f) invalid usage                -> RESOURCE_GATE_ERROR, exit 64
 #   (g) Build with missing build dir -> RESOURCE_GATE_ERROR "run Configure first", exit 1
-# Prints PASS/FAIL per case and exits non-zero if any FAIL.
+#   (h) Exec -- sh -c exit 7        -> child exit code propagated, PWB_GATE_HELD visible
+# Prints PASS/FAIL per case. Exit codes: 0 all cases passed, 1 a case failed,
+# 77 SKIPPED because this host lacks flock / /proc/meminfo (the POSIX gate is
+# Linux-only, so the mirror is not runnable from Git-Bash on Windows).
 set -u
+
+if ! command -v flock >/dev/null 2>&1 || [ ! -r /proc/meminfo ]; then
+  echo "SELF-TEST SKIPPED: this POSIX gate needs flock and /proc/meminfo (Linux)."
+  echo "Use scripts/cpp-migration/Test-ResourceGate.ps1 on Windows."
+  exit 77
+fi
 
 gate_script="$(cd "$(dirname "$0")" && pwd)/invoke-resource-gate.sh"
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "RESOURCE_GATE_ERROR: not in a worktree" >&2; exit 1; }
@@ -64,9 +73,12 @@ invoke_gate Probe -m "$low_threshold"
 check "(c) low memory" "$ok" "exit=$GATE_CODE out=$GATE_OUT"
 
 # (d) stale lock recovery
+# The recorded owner must be a DEAD pid. pid 1 is init and is always alive on
+# Linux, so kill -0 would succeed and recovery would (correctly) be refused -
+# use a pid that cannot exist instead.
 clean_lock
 touch "$gate_path" "$owner_path"
-echo "pid=1 action=Test root=x time=2020-01-01T00:00:00Z" > "$owner_path"
+echo "pid=999999 action=Test root=x time=2020-01-01T00:00:00Z" > "$owner_path"
 touch -d "$(date -d '90 minutes ago' +%Y-%m-%dT%H:%M:%S)" "$gate_path" "$owner_path"
 invoke_gate Probe -m "$success_threshold"
 [ $GATE_CODE -eq 0 ] && echo "$GATE_OUT" | grep -q RESOURCE_STALE_LOCK_RECOVERED && echo "$GATE_OUT" | grep -q RESOURCE_READY && ok=1 || ok=0
@@ -89,6 +101,12 @@ clean_lock
 invoke_gate Build -b "$repo_root/build/__gate_test_missing__" -m "$success_threshold"
 [ $GATE_CODE -eq 1 ] && echo "$GATE_OUT" | grep -q RESOURCE_GATE_ERROR && echo "$GATE_OUT" | grep -q "Configure first" && ok=1 || ok=0
 check "(g) Build missing build dir refused" "$ok" "exit=$GATE_CODE out=$GATE_OUT"
+
+# (h) Exec propagates the child exit code and marks the child as gated
+clean_lock
+invoke_gate Exec -m "$success_threshold" -- sh -c 'test "$PWB_GATE_HELD" = 1 || exit 9; exit 7'
+if [ $GATE_CODE -eq 7 ]; then ok=1; else ok=0; fi
+check "(h) Exec propagates child exit code and sets PWB_GATE_HELD" "$ok" "exit=$GATE_CODE out=$GATE_OUT"
 
 clean_lock
 echo "SELF-TEST: pass=$pass fail=$fail"

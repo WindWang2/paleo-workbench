@@ -9,20 +9,29 @@
 #     [-s SourceDir] [-b BuildDir] [-c Configuration] [-t 'target;list']
 #     [-a cmakeArg;...] [-r TestRegex] [-m MinFreeGiB] [-j Jobs]
 #     [-M StaleLockMinutes] [-F]
+#   invoke-resource-gate.sh Exec -- <command> [args...]
+#
+# PLATFORM SCOPE: this POSIX mirror needs `flock` and /proc/meminfo, so it is
+# Linux-only in practice. On a platform that lacks them (for example Git-Bash on
+# Windows) it refuses with RESOURCE_GATE_UNSUPPORTED and exit 77 instead of
+# reporting a misleading low-memory verdict. Use Invoke-ResourceGate.ps1 there.
 #
 # Exit codes: 0 success; 1 internal/usage error; 64 invalid usage (EX_USAGE);
-# 75 resource refusal (busy or low memory); 124 reserved (timeout).
+# 75 resource refusal (busy or low memory); 77 unsupported platform;
+# 124 reserved (timeout).
 #
 # Diagnostic tokens (machine-readable, exactly one summary line per outcome):
 #   RESOURCE_READY free_gib=.. jobs=.. lock=<path>
 #   RESOURCE_BUSY holder_pid=.. age_min=..
 #   RESOURCE_LOW_MEMORY free_gib=.. required=..
 #   RESOURCE_STALE_LOCK_RECOVERED age_min=..
+#   RESOURCE_GATE_WARNING detail=..
+#   RESOURCE_GATE_UNSUPPORTED detail=..
 #   RESOURCE_GATE_ERROR detail=..
 set -u
 
 Action="${1:-Probe}"; shift 1 2>/dev/null || true
-Usage="usage: invoke-resource-gate.sh {Probe|Configure|Build|Test} [-s SourceDir] [-b BuildDir] [-c Configuration] [-t 'target;list'] [-a cmakeArg;...] [-r TestRegex] [-m MinFreeGiB] [-j Jobs] [-M StaleLockMinutes] [-F]"
+Usage="usage: invoke-resource-gate.sh {Probe|Configure|Build|Test|Exec} [-s SourceDir] [-b BuildDir] [-c Configuration] [-t 'target;list'] [-a cmakeArg;...] [-r TestRegex] [-m MinFreeGiB] [-j Jobs] [-M StaleLockMinutes] [-F] | Exec -- cmd [args...]"
 SourceDir=""; BuildDir=""; Configuration="Release"; Targets=""; CmakeArguments=""; TestRegex="."; MinFreeGiB="8"; Jobs="2"; StaleLockMinutes="45"; ForceRecoverLock=0
 while getopts ":s:b:c:t:a:r:m:j:M:F" opt; do
   case "$opt" in
@@ -36,9 +45,23 @@ while getopts ":s:b:c:t:a:r:m:j:M:F" opt; do
     j) Jobs="$OPTARG" ;;
     M) StaleLockMinutes="$OPTARG" ;;
     F) ForceRecoverLock=1 ;;
-    *) echo "$Usage" >&2; exit 1 ;;
+    *) echo "RESOURCE_GATE_ERROR detail=unknown option -$OPTARG"; echo "$Usage" >&2; exit 64 ;;
   esac
 done
+# Remaining operands are the Exec command line (after an optional `--`).
+shift $((OPTIND - 1)) 2>/dev/null || true
+[ "${1:-}" = "--" ] && shift 1
+ExecCommand=("$@")
+
+# --- platform capability check (Linux-only mirror) ---
+if ! command -v flock >/dev/null 2>&1; then
+  echo "RESOURCE_GATE_UNSUPPORTED detail=flock is not available on this platform; use Invoke-ResourceGate.ps1"
+  exit 77
+fi
+if [ ! -r /proc/meminfo ]; then
+  echo "RESOURCE_GATE_UNSUPPORTED detail=/proc/meminfo is not readable on this platform; use Invoke-ResourceGate.ps1"
+  exit 77
+fi
 
 # --- validate flags (invalid usage -> 64, before touching the lock) ---
 case "$MinFreeGiB" in
@@ -127,6 +150,20 @@ fi
 if [ "$Action" = Probe ]; then
   echo "RESOURCE_READY free_gib=$free_gib jobs=$Jobs lock=$gate_path"
   exit 0
+fi
+
+# Mark every child process as running UNDER the slot (parity with the PowerShell
+# gate), so a tool that would otherwise start its own heavy work refuses to.
+export PWB_GATE_HELD=1 PWB_GATE_JOBS="$Jobs"
+
+# Exec runs an arbitrary command under the slot; it needs no BuildDir.
+if [ "$Action" = Exec ]; then
+  if [ "${#ExecCommand[@]}" -eq 0 ]; then
+    echo "RESOURCE_GATE_ERROR detail=Exec needs a command (use: Exec -- cmd args...)" >&2
+    exit 64
+  fi
+  "${ExecCommand[@]}"
+  exit $?
 fi
 
 # --- action-specific guards ---
