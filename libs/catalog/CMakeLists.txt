@@ -39,3 +39,13 @@ endif()
 
 install(TARGETS pwb_catalog EXPORT PwbDataTargets ARCHIVE DESTINATION lib)
 install(DIRECTORY include/pwb DESTINATION include)
+
+# BEGIN CONV-15
+# Catalog GC / payload dedup / entity pagination (conv-15): new TUs only —
+# the existing add_library list above is untouched.
+target_sources(pwb_catalog PRIVATE
+    src/gc.cpp
+    src/dedup.cpp
+    src/entity_view.cpp
+)
+# END CONV-15

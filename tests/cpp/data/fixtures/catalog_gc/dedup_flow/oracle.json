@@ -1,0 +1,80 @@
+{
+  "blob_of_v2_still_there": true,
+  "blob_report_after": {
+    "metrics": {
+      "blobs_on_disk": 3,
+      "bytes_deduped": 800,
+      "bytes_on_disk": 1642,
+      "referenced_digests": 1,
+      "unreferenced_blobs": 2
+    },
+    "referenced": [
+      "e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547"
+    ],
+    "unreferenced": [
+      "1cd022505e522523a607746175d5595e852b64e1b12e79de08ae833dbfe18a38",
+      "3ad4219dbabadcceb946a5fd80b371a7478225ae271e0010c1304aeffc5fa634"
+    ]
+  },
+  "digest_junk": "3ad4219dbabadcceb946a5fd80b371a7478225ae271e0010c1304aeffc5fa634",
+  "digest_p": "e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
+  "digest_q": "1cd022505e522523a607746175d5595e852b64e1b12e79de08ae833dbfe18a38",
+  "metrics_after": {
+    "blobs_on_disk": 3,
+    "bytes_deduped": 800,
+    "bytes_on_disk": 1642,
+    "referenced_digests": 1,
+    "unreferenced_blobs": 2
+  },
+  "metrics_before": {
+    "blobs_on_disk": 3,
+    "bytes_deduped": 800,
+    "bytes_on_disk": 1642,
+    "referenced_digests": 2,
+    "unreferenced_blobs": 1
+  },
+  "plan_after": [
+    "1cd022505e522523a607746175d5595e852b64e1b12e79de08ae833dbfe18a38",
+    "3ad4219dbabadcceb946a5fd80b371a7478225ae271e0010c1304aeffc5fa634"
+  ],
+  "plan_before": [
+    "3ad4219dbabadcceb946a5fd80b371a7478225ae271e0010c1304aeffc5fa634"
+  ],
+  "purge_removed": 1,
+  "scenario": "dedup_flow",
+  "sweep": {
+    "remaining_blobs": [
+      "demo.artifacts/blobs/e0/e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547"
+    ],
+    "removed": [
+      "1cd022505e522523a607746175d5595e852b64e1b12e79de08ae833dbfe18a38",
+      "3ad4219dbabadcceb946a5fd80b371a7478225ae271e0010c1304aeffc5fa634"
+    ],
+    "removed_have_been": [
+      "1cd022505e522523a607746175d5595e852b64e1b12e79de08ae833dbfe18a38",
+      "3ad4219dbabadcceb946a5fd80b371a7478225ae271e0010c1304aeffc5fa634"
+    ]
+  },
+  "v2_is_blob_backed": true,
+  "v2_path_after_restore": "demo.artifacts/blobs/e0/e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
+  "v2_path_after_trash": "demo.artifacts/blobs/e0/e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
+  "v2_path_before": "demo.artifacts/blobs/e0/e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
+  "versions": [
+    {
+      "asset_id": "asset_7c088f02f44d",
+      "id": "ver_d67d13a93479",
+      "path": "demo.artifacts/blobs/e0/e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
+      "sha256": "e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
+      "size_bytes": 800,
+      "trashed": false
+    },
+    {
+      "asset_id": "asset_584e3aaf4e1a",
+      "id": "ver_f51fca088c04",
+      "path": "demo.artifacts/raw/asset_584e3aaf4e1a/ver_f51fca088c04/one.bin",
+      "sha256": "e0e8d653952f5d585f0fb6598c535fc055ce38204e6acfc7bc88a4add903a547",
+      "size_bytes": 800,
+      "trashed": false
+    }
+  ]
+}
