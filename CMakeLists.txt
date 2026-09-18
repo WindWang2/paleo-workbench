@@ -229,6 +229,21 @@ if(PWB_BUILD_CONV_12)
     add_subdirectory(libs/geomodel)
 endif()
 # END CONV-12
+# BEGIN CONV-21 — prediction contract cores (M9): pure halves of
+# prediction/{postprocess,spatial_result,input_contract,model_package}
+# inside libs/prediction, frozen against the Python oracle. The slice needs
+# the prediction lib (CONV-13), the interchange Unicode leaves (CONV-14)
+# and the ingest parse/py_compat cores (CONV-19); turning it on implies
+# all three so a standalone -DPWB_BUILD_CONV_21=ON configure really builds.
+# Declared BEFORE those subdirectories are added.
+option(PWB_BUILD_CONV_21
+    "Build the CONV-21 prediction contract cores (implies CONV-13/14/19)" OFF)
+if(PWB_BUILD_CONV_21)
+    set(PWB_BUILD_CONV_13 ON)
+    set(PWB_BUILD_CONV_14 ON)
+    set(PWB_BUILD_CONV_19 ON)
+endif()
+# END CONV-21
 # BEGIN CONV-13 — prediction tiled inference geometry (M9 first slice).
 # Qt-free core: tile/halo/center-crop-fusion contract from
 # paleo_workbench/prediction/tiled_onnx.py, frozen against the Python
