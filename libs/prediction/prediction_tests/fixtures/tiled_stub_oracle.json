@@ -14,7 +14,9 @@
   "model_name": "stub-model.onnx",
   "model_bytes": 26,
   "model_content": "paleo-tiled-stub-model-v1\n",
-  "model_sha256": "d99442636291436fd985692691644e9364bbd5683e1a7e56c6f2716ac7f9b7d6"
+  "model_sha256": "d99442636291436fd985692691644e9364bbd5683e1a7e56c6f2716ac7f9b7d6",
+  "argmax_min_rel_gap": 1.6629557649139315e-05,
+  "argmax_margin_floor_rel": 1.1920928955078125e-05
  },
  "tile_starts": [
   {
@@ -1029,6 +1031,10 @@
     "t_00001_00001_00000",
     "t_00001_00001_00001"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 0.8646647334098816,
+    "exact_ties": 1250
+   },
    "input": {
     "id": "sign_small_ov0",
     "stub": "sign",
@@ -2029,6 +2035,10 @@
     "t_00001_00001_00000",
     "t_00001_00001_00001"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 0.8646647334098816,
+    "exact_ties": 1250
+   },
    "input": {
     "id": "sign_ov0_batch1",
     "stub": "sign",
@@ -4559,6 +4569,10 @@
     "t_00001_00001_00000",
     "t_00001_00001_00001"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 0.0005414211773313582,
+    "exact_ties": 736
+   },
    "input": {
     "id": "conv2_ov4",
     "stub": "conv2",
@@ -7870,6 +7884,10 @@
     "t_00005_00000_00002",
     "t_00005_00000_00003"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 2.312633478140924e-05,
+    "exact_ties": 288
+   },
    "input": {
     "id": "conv2_ov3_odd",
     "stub": "conv2",
@@ -9437,6 +9455,10 @@
     "t_00001_00001_00000",
     "t_00001_00001_00001"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 0.007782089989632368,
+    "exact_ties": 8
+   },
    "input": {
     "id": "conv3_ties",
     "stub": "conv3",
@@ -10122,6 +10144,10 @@
     "t_00000_00000_00000",
     "t_00001_00000_00000"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 0.500460684299469,
+    "exact_ties": 0
+   },
    "input": {
     "id": "conv3_nan",
     "stub": "conv3",
@@ -10508,6 +10534,10 @@
    "markers": [
     "t_00000_00000_00000"
    ],
+   "argmax_margin": {
+    "min_rel_gap": null,
+    "exact_ties": 0
+   },
    "input": {
     "id": "sigmoid1_half",
     "stub": "sigmoid1",
@@ -11273,6 +11303,10 @@
     "t_00002_00001_00002",
     "t_00002_00001_00003"
    ],
+   "argmax_margin": {
+    "min_rel_gap": null,
+    "exact_ties": 0
+   },
    "input": {
     "id": "sigmoid1_mix",
     "stub": "sigmoid1",
@@ -12686,6 +12720,10 @@
     "t_00002_00002_00001",
     "t_00002_00002_00002"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 1.6629557649139315e-05,
+    "exact_ties": 0
+   },
    "input": {
     "id": "oom_halving",
     "stub": "oom_conv2",
@@ -13874,6 +13912,10 @@
     0.0
    ],
    "markers": [],
+   "argmax_margin": {
+    "min_rel_gap": null,
+    "exact_ties": 0
+   },
    "input": {
     "id": "cancel_immediate",
     "stub": "sign",
@@ -14868,6 +14910,10 @@
    "markers": [
     "t_00000_00000_00000"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 0.8646647334098816,
+    "exact_ties": 18
+   },
    "input": {
     "id": "cancel_then_resume",
     "stub": "sign",
@@ -15870,6 +15916,10 @@
     "t_00001_00001_00000",
     "t_00001_00001_00001"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 0.8646647334098816,
+    "exact_ties": 1232
+   },
    "input": {
     "id": "resume_after_cancel",
     "stub": "sign",
@@ -18406,6 +18456,10 @@
     "t_00001_00001_00000",
     "t_00001_00001_00001"
    ],
+   "argmax_margin": {
+    "min_rel_gap": 0.0006327414885163307,
+    "exact_ties": 480
+   },
    "input": {
     "id": "resume_predone",
     "stub": "conv2",
@@ -20182,6 +20236,10 @@
     "t_00001_00001_00000",
     "t_00001_00001_00001"
    ],
+   "argmax_margin": {
+    "min_rel_gap": null,
+    "exact_ties": 0
+   },
    "input": {
     "id": "resume_all_done",
     "stub": "sign",

@@ -61,6 +61,16 @@ struct Scratch {
                  fs::copy_options::recursive
                      | fs::copy_options::overwrite_existing,
                  ec);
+        // Git cannot track empty directories, so a scenario that needs them
+        // (gc_orphans classifies empty_dir orphans) lists them one per line
+        // in empty_dirs.txt, relative to the tree root; materialize here.
+        std::ifstream empties(scenario_dir(name) / "empty_dirs.txt");
+        std::string relative;
+        while (std::getline(empties, relative)) {
+            if (!relative.empty()) {
+                fs::create_directories(scratch.root / relative, ec);
+            }
+        }
         scratch.project = scratch.root / "demo.paleo.json";
         return scratch;
     }
