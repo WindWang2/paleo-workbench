@@ -83,6 +83,15 @@ public:
     domain::DataError import_raw_transaction(const DataAsset& asset,
                                              const DataVersion& version);
 
+    // Rewrite managed version paths after a save-as relocation (conv-26;
+    // service.py rebase_artifact_paths parity): stored paths are relative
+    // to the project dir and carry the `<name>.artifacts/` first segment,
+    // which changes with the project name. Only the first segment is
+    // touched; trash metadata original_path and model artifact_uri rows
+    // are rewritten the same way. One transaction + revision bump when
+    // anything changed; returns the number of rewritten values.
+    int rebase_artifact_paths();
+
     // One-transaction run terminal flip: status + parameters merged with
     // extra (extra wins) + revision bump. NotFound when the row is absent.
     domain::DataError finish_run_transaction(

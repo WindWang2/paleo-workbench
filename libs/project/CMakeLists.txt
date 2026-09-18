@@ -24,3 +24,8 @@ endif()
 
 install(TARGETS pwb_project EXPORT PwbDataTargets ARCHIVE DESTINATION lib)
 install(DIRECTORY include/pwb DESTINATION include)
+
+# BEGIN CONV-26
+# Save-As artifact relocation (staged copy/move + owned-path rebase).
+target_sources(pwb_project PRIVATE src/relocation.cpp)
+# END CONV-26

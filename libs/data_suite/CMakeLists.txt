@@ -84,11 +84,13 @@ if(MSVC)
 endif()
 
 # BEGIN CONV-26
-# Ingest orchestration + entity identity resolution: new TUs only.
+# Ingest orchestration + entity identity resolution + save-as flow: new
+# TUs only.
 target_sources(pwb_data PRIVATE
     src/entity_identity.cpp
     src/ingest_plan.cpp
     src/ingest_exec.cpp
+    src/save_as.cpp
 )
 # END CONV-26
 

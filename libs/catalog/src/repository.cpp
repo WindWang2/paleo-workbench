@@ -1047,6 +1047,95 @@ DataError CatalogRepository::import_raw_transaction(const DataAsset& asset,
     return DataError(ErrorCode::Ok, "");
 }
 
+int CatalogRepository::rebase_artifact_paths() {
+    // The staged catalog belongs to the target before its project JSON
+    // lands (service.py rebase_artifact_paths): an interruption after the
+    // JSON replace must never leave a valid target project pointing at
+    // the old artifact-directory name.
+    auto status_result = status();
+    if (status_result.health == StoreHealth::Corrupt ||
+        status_result.health == StoreHealth::Unreadable) {
+        return -1;
+    }
+    auto opened = Database::open(sqlite_path_, SqliteOpenMode::ReadWrite);
+    if (!opened.is_ok()) return -1;
+    db_ = std::move(opened.value());
+    auto document = load_document_from(db_);
+    if (!document.is_ok()) return -1;
+    const std::string current =
+        sqlite_path_.parent_path().parent_path().filename().string();
+    auto rewrite = [&current](const std::string& raw,
+                              std::string* out) -> bool {
+        if (raw.empty()) return false;
+        const std::string posix =
+            std::filesystem::path(raw).generic_string();
+        const std::size_t slash = posix.find('/');
+        if (slash == std::string::npos || slash == 0) return false;
+        const std::string head = posix.substr(0, slash);
+        const std::string suffix = ".artifacts";
+        if (head.size() <= suffix.size() ||
+            head.substr(head.size() - suffix.size()) != suffix ||
+            head == current) {
+            return false;
+        }
+        *out = current + posix.substr(slash);
+        return true;
+    };
+    int changed = 0;
+    Transaction transaction(db_);
+    for (auto& version : document.value().versions) {
+        if (!version.managed) continue;
+        std::string rewritten;
+        if (rewrite(version.path, &rewritten)) {
+            Statement update = db_.prepare(
+                "UPDATE versions SET path = ? WHERE id = ?");
+            update.bind(1, rewritten);
+            update.bind(2, version.id.str());
+            update.step_done();
+            ++changed;
+        }
+        auto trash = version.metadata.find("trash");
+        if (trash != version.metadata.end() && trash->is_object()) {
+            auto original = trash->find("original_path");
+            if (original != trash->end() && original->is_string()) {
+                std::string trash_rewritten;
+                if (rewrite(original->get<std::string>(),
+                            &trash_rewritten)) {
+                    Json merged = version.metadata;
+                    merged["trash"]["original_path"] = trash_rewritten;
+                    Statement update = db_.prepare(
+                        "UPDATE versions SET metadata = ? WHERE id = ?");
+                    update.bind(1, json_column(merged, "{}"));
+                    update.bind(2, version.id.str());
+                    update.step_done();
+                    ++changed;
+                }
+            }
+        }
+    }
+    if (db_.table_exists("model_versions")) {
+        // Registry rows pass through verbatim on this side; the URI prefix
+        // rewrite is mechanical and stays schema-stable.
+        Statement scan =
+            db_.prepare("SELECT id, artifact_uri FROM model_versions");
+        while (scan.step()) {
+            if (scan.is_null(1)) continue;
+            std::string rewritten;
+            if (rewrite(scan.text(1), &rewritten)) {
+                Statement update = db_.prepare(
+                    "UPDATE model_versions SET artifact_uri = ? WHERE id = ?");
+                update.bind(1, rewritten);
+                update.bind(2, scan.text(0));
+                update.step_done();
+                ++changed;
+            }
+        }
+    }
+    if (changed > 0) bump_revision();
+    transaction.commit();
+    return changed;
+}
+
 DataError CatalogRepository::finish_run_transaction(
     const domain::RunId& run_id, const std::string& status,
     const domain::Json& extra_parameters) {

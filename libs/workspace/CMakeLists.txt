@@ -21,3 +21,8 @@ endif()
 
 install(TARGETS pwb_workspace EXPORT PwbDataTargets ARCHIVE DESTINATION lib)
 install(DIRECTORY include/pwb DESTINATION include)
+
+# BEGIN CONV-26
+# Membership mutation surface (set/remove/rebind + stale-reference repair).
+target_sources(pwb_workspace PRIVATE src/mutations.cpp)
+# END CONV-26
