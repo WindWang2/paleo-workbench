@@ -266,6 +266,25 @@ int main() {
         (void)message;
     }
 
+    {
+        // report_name declaring traversal is refused (pattern hardening).
+        TempDir temp;
+        pp::FactorStatsProvider provider;
+        pp::ProviderInputs inputs;
+        inputs.set("dataset", pp::make_dataset_typed_input("dataset", sample_dataset()));
+        pp::ProviderContext context;
+        context.work_dir = temp.path().generic_string();
+        Json params = Json::object();
+        params["report_name"] = "../escape";
+        std::string message;
+        check(expect<pp::ProviderRejectedInputError>(
+                  [&] { pp::execute_provider(provider, inputs, params, &context, nullptr); },
+                  &message),
+              "report_name traversal refused");
+        check(message.find("must match ^[a-z0-9._-]+$") != std::string::npos,
+              "report_name pattern message");
+    }
+
     // --- map thumbnail: real render into a contained PNG ---------------------
     {
         TempDir temp;
@@ -364,17 +383,43 @@ int main() {
                                  std::istreambuf_iterator<char>());
         check(bytes == bytes2, "render is byte-deterministic");
 
-        // Cancel before execute: the context token aborts the run (#1137
-        // surfaces through check_cancelled inside providers that poll it; the
-        // thumbnail provider is short-running so the executor-level contract
-        // is that a pre-cancelled token refuses to start).
-        pp::CancelToken token;
-        token.cancel();
-        pp::ProviderContext cancelled_context;
-        cancelled_context.work_dir = temp.path().generic_string();
-        cancelled_context.cancel = &token;
-        // The thumbnail provider does not poll the token mid-render; the SDK
-        // contract (check_cancelled) is exercised in providers.execution.
+        // Regression (review P0): world coordinates astronomically outside
+        // the document extent must not trigger int-cast UB or unbounded
+        // rasterization loops — the render stays bounded and completes.
+        {
+            Json wild_point = Json::object();
+            Json wild_geometry = Json::object();
+            wild_geometry["type"] = "Point";
+            wild_geometry["coordinates"] = Json::array({1.0e300, -1.0e300});
+            wild_point["geometry"] = wild_geometry;
+            Json wild_line = Json::object();
+            Json wild_line_geometry = Json::object();
+            wild_line_geometry["type"] = "LineString";
+            wild_line_geometry["coordinates"] =
+                Json::array({Json::array({-1.0e300, 1.0e300}),
+                             Json::array({1.0e300, -1.0e300})});
+            wild_line["geometry"] = wild_line_geometry;
+            Json wild_layer = Json::object();
+            wild_layer["id"] = "wild";
+            wild_layer["features"] = Json::array({wild_point, wild_line});
+            Json wild_doc = Json::object();
+            wild_doc["id"] = "doc-wild";
+            wild_doc["layers"] = Json::array({wild_layer});
+            pp::TypedInput wild_input;
+            wild_input.type_name = "MapDocument";
+            wild_input.payload = wild_doc;
+            pp::ProviderInputs wild_inputs;
+            wild_inputs.set("document", wild_input);
+            pp::ProviderContext wild_context;
+            wild_context.work_dir = temp2.path().generic_string();
+            Json wild_params = Json::object();
+            wild_params["output_path"] = "thumbs/wild.png";
+            wild_params["width"] = 128;
+            wild_params["height"] = 96;
+            auto wild_result = pp::execute_provider(provider, wild_inputs, wild_params,
+                                                    &wild_context, nullptr);
+            check(wild_result.artifacts.size() == 1, "wild-coordinate render completes");
+        }
     }
     {
         // Output path escaping the workspace is refused (#1177).
@@ -423,6 +468,33 @@ int main() {
               "overwrite refused");
         check(message.find("refusing to overwrite existing file") != std::string::npos,
               "overwrite message parity");
+    }
+    {
+        // An input named "document" typed as MapDocumentRef resolves through
+        // the context's document table (review: no self-contradicting error).
+        TempDir temp;
+        pp::MapThumbnailProvider provider;
+        Json doc_payload = Json::object();
+        doc_payload["id"] = "doc-7";
+        doc_payload["layers"] = Json::array();
+        pp::TypedInput ref_input;
+        ref_input.type_name = "MapDocumentRef";
+        Json ref_payload = Json::object();
+        ref_payload["document_id"] = "doc-7";
+        ref_input.payload = ref_payload;
+        pp::ProviderInputs inputs;
+        inputs.set("document", ref_input);
+        pp::ProviderContext context;
+        context.work_dir = temp.path().generic_string();
+        Json extras = Json::object();
+        Json table = Json::object();
+        table["doc-7"] = doc_payload;
+        extras["map_documents"] = table;
+        context.extras = extras;
+        Json params = Json::object();
+        params["output_path"] = "ref-thumbnail.png";
+        auto result = pp::execute_provider(provider, inputs, params, &context, nullptr);
+        check(result.artifacts.size() == 1, "ref-typed document input resolves");
     }
     {
         // Missing document is rejected with the Python type-name message.

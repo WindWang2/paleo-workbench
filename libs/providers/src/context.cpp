@@ -4,9 +4,36 @@
 
 #include <cstdlib>
 #include <filesystem>  // NOLINT(misc-include-cleaner): path containment
+#include <memory>
+#include <mutex>
 #include <string>
 
 namespace pwb::providers {
+
+namespace {
+std::mutex& sink_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+std::shared_ptr<const LogSink>& sink_slot() {
+    static std::shared_ptr<const LogSink> slot = std::make_shared<const LogSink>();
+    return slot;
+}
+}  // namespace
+
+void set_log_sink(LogSink sink) {
+    std::lock_guard<std::mutex> lock(sink_mutex());
+    sink_slot() = std::make_shared<const LogSink>(std::move(sink));
+}
+
+void log_event(const char* level, const std::string& message) {
+    std::shared_ptr<const LogSink> sink;
+    {
+        std::lock_guard<std::mutex> lock(sink_mutex());
+        sink = sink_slot();
+    }
+    if (sink && *sink) (*sink)(level, message);
+}
 
 namespace {
 
@@ -21,13 +48,19 @@ std::string expanduser(std::string value) {
     return value;
 }
 
-std::filesystem::path normalized(const std::filesystem::path& p) {
+std::filesystem::path normalized(const std::filesystem::path& p,
+                                 const std::string& provider_id) {
     // weakly_canonical resolves the existing prefix (symlinks included) and
     // normalizes the rest — the Python Path.resolve(strict=False) semantics
-    // this port needs.
+    // this port needs. A resolution failure fails CLOSED: a security check
+    // must not degrade to lexical normalization.
     std::error_code ec;
     auto canonical = std::filesystem::weakly_canonical(p, ec);
-    if (ec) return std::filesystem::absolute(p).lexically_normal();
+    if (ec) {
+        throw ProviderExecutionError(
+            provider_id, "ValueError",
+            "cannot resolve output path '" + p.generic_string() + "': " + ec.message());
+    }
     return canonical;
 }
 
@@ -58,10 +91,11 @@ std::filesystem::path resolve_contained_output(const ProviderContext& context,
             "no workspace_root/work_dir in the execution context; refusing "
             "to write an output path that cannot be containment-checked");
     }
-    const std::filesystem::path root = normalized(expanduser(root_raw));
+    const std::filesystem::path root = normalized(expanduser(root_raw), provider_id);
     std::filesystem::path candidate = expanduser(raw);
     std::filesystem::path resolved =
-        candidate.is_absolute() ? normalized(candidate) : normalized(root / candidate);
+        candidate.is_absolute() ? normalized(candidate, provider_id)
+                                : normalized(root / candidate, provider_id);
     // Containment AFTER resolution: relative traversal ("../..") must not
     // escape the workspace either.
     if (!is_under(resolved, root)) {

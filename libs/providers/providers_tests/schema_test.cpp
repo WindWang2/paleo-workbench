@@ -148,6 +148,24 @@ int main() {
               problems[0] == "parameters.mode: 'slow' not in enum ['fast', '精细']",
           "enum message parity with Unicode");
 
+    // Negative array bounds never trip (Python numeric comparison parity).
+    Json nschema = Json::object();
+    nschema["type"] = "object";
+    Json nprops = Json::object();
+    Json ntags = Json::object();
+    ntags["type"] = "array";
+    ntags["minItems"] = -1;
+    ntags["maxItems"] = -1;
+    nprops["tags"] = ntags;
+    nschema["properties"] = nprops;
+    Json nparams = Json::object();
+    nparams["tags"] = Json::array();
+    problems = validate(nschema, nparams);
+    check(problems.size() == 1 &&
+              problems[0] == "parameters.tags: 0 items > maxItems -1",
+          "negative maxItems trips, negative minItems does not: " +
+              (problems.empty() ? "<none>" : problems[0]));
+
     // Python type names of JSON values.
     check(pp::json_python_type_name(Json::object()) == "dict", "object → dict");
     check(pp::json_python_type_name(Json::array()) == "list", "array → list");

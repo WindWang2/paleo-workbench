@@ -163,13 +163,15 @@ void check(const Json& value, const Json& sub, const std::string& path,
     }
 
     if (value.is_array()) {
-        if (sub.contains("minItems") && sub.at("minItems").is_number_integer() &&
-            value.size() < static_cast<std::size_t>(sub.at("minItems").get<long long>())) {
+        // Python compares len(value) against the bound numerically; negative
+        // bounds simply never trip (len >= 0), float bounds format as floats.
+        if (sub.contains("minItems") && sub.at("minItems").is_number() &&
+            static_cast<double>(value.size()) < sub.at("minItems").get<double>()) {
             problems.push_back(path + ": " + std::to_string(value.size()) +
                                " items < minItems " + python_str(sub.at("minItems")));
         }
-        if (sub.contains("maxItems") && sub.at("maxItems").is_number_integer() &&
-            value.size() > static_cast<std::size_t>(sub.at("maxItems").get<long long>())) {
+        if (sub.contains("maxItems") && sub.at("maxItems").is_number() &&
+            static_cast<double>(value.size()) > sub.at("maxItems").get<double>()) {
             problems.push_back(path + ": " + std::to_string(value.size()) +
                                " items > maxItems " + python_str(sub.at("maxItems")));
         }
@@ -239,8 +241,19 @@ std::string python_repr(const Json& value) {
     }
     if (value.is_string()) {
         const std::string s = value.get<std::string>();
-        if (s.find('\'') != std::string::npos && s.find('"') == std::string::npos) {
+        const bool has_single = s.find('\'') != std::string::npos;
+        const bool has_double = s.find('"') != std::string::npos;
+        if (has_single && !has_double) {
             return "\"" + s + "\"";
+        }
+        if (has_single) {
+            // Both quote kinds: Python keeps single quotes and escapes them.
+            std::string out = "'";
+            for (char c : s) {
+                if (c == '\'') out += "\\'";
+                else out += c;
+            }
+            return out + "'";
         }
         return "'" + s + "'";
     }

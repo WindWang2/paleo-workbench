@@ -20,10 +20,21 @@ const std::regex& version_pattern() {
 }
 
 // Python repr of a string: single quotes preferred, double quotes when the
-// value contains a single quote but no double quote.
+// value contains a single quote but no double quote, and an escaped single
+// quote when both kinds appear.
 std::string repr_string(const std::string& value) {
-    if (value.find('\'') != std::string::npos && value.find('"') == std::string::npos) {
+    const bool has_single = value.find('\'') != std::string::npos;
+    const bool has_double = value.find('"') != std::string::npos;
+    if (has_single && !has_double) {
         return "\"" + value + "\"";
+    }
+    if (has_single) {
+        std::string out = "'";
+        for (char c : value) {
+            if (c == '\'') out += "\\'";
+            else out += c;
+        }
+        return out + "'";
     }
     return "'" + value + "'";
 }

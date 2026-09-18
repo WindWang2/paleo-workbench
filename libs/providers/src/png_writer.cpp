@@ -66,6 +66,15 @@ std::vector<std::uint8_t> zlib_store(const std::uint8_t* data, std::size_t lengt
     std::vector<std::uint8_t> out;
     out.push_back(0x78);  // CMF: deflate, 32K window
     out.push_back(0x01);  // FLG: check bits for {CMF,FLG}, no dict, fastest
+    if (length == 0) {
+        // An empty payload still needs one (final, empty) stored block to be
+        // a well-formed zlib stream.
+        out.push_back(1);
+        out.push_back(0x00);
+        out.push_back(0x00);
+        out.push_back(0xFF);
+        out.push_back(0xFF);
+    }
     std::size_t offset = 0;
     while (offset < length) {
         const std::size_t block = std::min<std::size_t>(65535u, length - offset);
@@ -137,6 +146,7 @@ bool write_rgb(const std::filesystem::path& path, std::uint32_t width,
         }
         stream.write(reinterpret_cast<const char*>(bytes.data()),
                      static_cast<std::streamsize>(bytes.size()));
+        stream.close();  // surface flush errors before reporting success
         if (!stream) {
             if (error != nullptr) *error = "short write to " + path.generic_string();
             return false;

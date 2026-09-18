@@ -92,10 +92,39 @@ convention (CONV-16 precedent).
 - Provider inputs carry typed names + JSON payloads; in-process domain
   objects travel in their JSON form (`make_dataset_typed_input` adapter for
   `pwb::mapping::FactorDataset`).
-- Schema bounds of non-numeric JSON types are skipped instead of raising
-  TypeError (Python would propagate a TypeError from
-  `validate_parameters`; C++ treats non-numeric bounds as absent). Frozen
-  oracle cases do not exercise that path.
+- Malformed-schema edges where Python would raise TypeError inside
+  `validate_parameters` are handled defensively (fail-open skip) in the C++
+  port: non-numeric `minimum`/`maximum`, non-array `enum`, and non-string
+  entries of `required` are treated as absent instead of throwing. Frozen
+  oracle cases do not exercise those paths. Negative `minItems`/`maxItems`
+  follow Python's numeric comparison (maxItems < 0 trips, minItems < 0 does
+  not).
+- `validate_parameters` also exists as an independent port inside
+  `libs/workflow_spec` (CONV-06, `src/validation.cpp`), which predates this
+  branch. The fork is intentional: `pwb_providers` PUBLIC-links the mapping
+  kernels, which workflow_spec must not drag in, so a shared leaf validator
+  would need its own extraction PR. Known behavioral delta between the two:
+  workflow_spec throws `ModelError` on non-numeric schema bounds (fail-closed)
+  while this SDK skips them (see previous bullet). Follow-up: extract a
+  common validator or document the fork as permanent.
+- Registry borrowing contract: `get`/`find`/`by_family` return non-owning
+  views; `register_provider(replace=true)`/`unregister` destroy the previous
+  instance. Mutating registration must be externally serialized against
+  execution (the composition root registers at startup, then only reads).
+- Validation strictness deltas (all fail-closed or cosmetic, documented for
+  honesty): C++ `regex_match` rejects a trailing-newline provider_id where
+  Python `re.match` with `$` would accept it; the blank-`display_name` check
+  uses ASCII whitespace where Python `str.strip()` also strips Unicode
+  spaces (U+3000 etc.); `resolve_contained_output` comparison is
+  case-sensitive, so Windows hosts may see false "outside workspace"
+  rejections when path case differs (fail-closed direction).
+- Catalog bookkeeping failures and the #1146 under-reservation warning are
+  emitted through `pwb::providers::set_log_sink` (default quiet) instead of
+  Python's `logging` module.
+- The `geology.factor_stats` C++ provider enforces the declared
+  `report_name` pattern (`^[a-z0-9._-]+$`) that the Python example left
+  unenforced — a strict hardening over the source (the Python example could
+  traverse out of the work dir via `report_name`).
 - Platform `main_window` call-sites are intentionally untouched here to keep
   the shared-file surface minimal against the in-flight platform PRs.
 

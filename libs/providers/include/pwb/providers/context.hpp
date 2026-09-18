@@ -96,6 +96,14 @@ public:
     virtual std::unique_ptr<IAdmissionLease> admit(const AdmissionRequest& request) = 0;
 };
 
+// Minimal observability seam. Python logs swallowed catalog bookkeeping
+// failures and the #1146 under-reservation warning through `logging`; the
+// C++ SDK exposes the same events through an injectable sink. Default is
+// quiet; hosts install a sink at startup if they want the events.
+using LogSink = std::function<void(const char* level, const std::string& message)>;
+void set_log_sink(LogSink sink);
+void log_event(const char* level, const std::string& message);
+
 struct ProviderContext {
     ICatalogPort* catalog = nullptr;  // non-owning; may be null
     std::string workspace_root;       // containment root for file outputs

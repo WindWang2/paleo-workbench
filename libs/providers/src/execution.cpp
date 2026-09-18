@@ -65,12 +65,15 @@ AdmissionRequest admission_request_of(const ProviderDescriptor& descriptor,
 }
 
 // Input payloads carrying a catalog version identity feed the DataRun.
+// Python filters on truthiness: an empty version_id string is skipped.
 std::vector<std::string> input_version_ids(const ProviderInputs& inputs) {
     std::vector<std::string> ids;
     for (const auto& [name, input] : inputs.entries()) {
         if (input.payload.is_object() && input.payload.contains("version_id") &&
             input.payload.at("version_id").is_string()) {
-            ids.push_back(input.payload.at("version_id").get<std::string>());
+            const std::string version_id =
+                input.payload.at("version_id").get<std::string>();
+            if (!version_id.empty()) ids.push_back(version_id);
         }
     }
     return ids;
@@ -104,6 +107,19 @@ ProviderResult execute_provider(IProvider& provider, const ProviderInputs& input
     if (owns_lease && admission != nullptr) {
         lease = admission->admit(admission_request_of(descriptor, descriptor.provider_id));
     }
+    if (!owns_lease) {
+        // #1146: an enclosing reservation that understates this execution's
+        // declared RAM is worth surfacing (Python logs a warning).
+        const long long enclosing_ram = enclosing->request().estimated_ram_bytes;
+        if (enclosing_ram != 0 &&
+            enclosing_ram < descriptor.resource_profile.estimated_ram_bytes) {
+            log_event("warning",
+                      "provider " + descriptor.provider_id + " declares " +
+                          std::to_string(descriptor.resource_profile.estimated_ram_bytes) +
+                          " RAM bytes but the enclosing admission reserved only " +
+                          std::to_string(enclosing_ram));
+        }
+    }
 
     // RAII stand-in for Python's `finally: lease.release()`.
     struct LeaseGuard {
@@ -130,8 +146,14 @@ ProviderResult execute_provider(IProvider& provider, const ProviderInputs& input
         spec.generator_version = descriptor.version;
         try {
             run_ref = catalog->begin_run(spec);
-        } catch (...) {
+        } catch (const std::exception& exc) {
+            log_event("error", std::string("provider run begin failed (continuing "
+                                          "without run record): ") +
+                                   exc.what());
             run_ref = std::nullopt;  // continue without a run record
+        } catch (...) {
+            log_event("error", "provider run begin failed (continuing without run record)");
+            run_ref = std::nullopt;
         }
         if (run_ref.has_value()) ctx.run_id = run_ref->run_id;
     }
@@ -140,8 +162,12 @@ ProviderResult execute_provider(IProvider& provider, const ProviderInputs& input
         if (run_ref.has_value() && catalog != nullptr) {
             try {
                 catalog->complete_run(run_ref->run_id, status);
+            } catch (const std::exception& exc) {
+                log_event("error", "provider run " + status + "-status update failed: " +
+                                       exc.what());
             } catch (...) {
-                // catalog bookkeeping failures never mask the outcome
+                log_event("error",
+                          "provider run " + status + "-status update failed: unknown error");
             }
         }
     };
@@ -181,10 +207,10 @@ ProviderResult execute_provider(IProvider& provider, const ProviderInputs& input
             for (const auto& reason : verification->reasons) {
                 if (!reason.empty()) result.warnings.push_back(reason);
             }
-            if (verification->extra.is_object() && !verification->extra.empty()) {
-                if (!result.metrics.contains("verification")) {
-                    result.metrics["verification"] = verification->extra;
-                }
+            // Python setdefault: the key lands even when the verification
+            // dict carried nothing beyond the verdict (empty object).
+            if (!result.metrics.contains("verification")) {
+                result.metrics["verification"] = verification->extra;
             }
         }
 

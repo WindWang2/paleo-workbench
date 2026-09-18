@@ -115,6 +115,13 @@ public:
     // provider_id → reason; copy under the lock.
     std::map<std::string, std::string> quarantined() const;
 
+    // Borrowing contract: get/find/by_family return non-owning views. A
+    // concurrent register_provider(replace=true) or unregister destroys the
+    // previous instance — mutating registration must be externally
+    // serialized against execution (the composition root registers at
+    // startup, then only reads). Python's GC keeps replaced objects alive
+    // for outstanding references; C++ does not.
+
 private:
     mutable std::mutex mutex_;
     std::vector<std::pair<std::string, std::unique_ptr<IProvider>>> order_;

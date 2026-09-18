@@ -4,6 +4,7 @@
 // first-class outcome), error wrapping, and the fail-closed verify hook.
 
 #include <cstdio>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -87,14 +88,15 @@ public:
     }
 };
 
-// Admission port recording leases.
+// Admission port recording leases. Records live in a deque: admit() hands
+// out Record pointers, which must stay valid across reallocation.
 class FakeAdmission : public pp::IAdmissionPort {
 public:
     struct Record {
         pp::AdmissionRequest request;
         bool released = false;
     };
-    std::vector<Record> admitted;
+    std::deque<Record> admitted;
     bool reject = false;
 
     std::unique_ptr<pp::IAdmissionLease> admit(const pp::AdmissionRequest& request) override {
@@ -382,6 +384,21 @@ int main() {
         check(verified.metrics.contains("verification") &&
                   verified.metrics.at("verification").at("depth") == 2,
               "verifier extras land in metrics");
+    }
+    {
+        // Python setdefault parity: a dict verification with only a verdict
+        // still inserts an (empty) metrics["verification"] object.
+        StubProvider p("export.verified.empty");
+        p.on_verify = [](const pp::ProviderResult&, pp::ProviderContext&) {
+            return pp::Verification{};  // verdict pass, no reasons, no extras
+        };
+        Json empty_params = Json::object();
+        pp::ProviderInputs no_inputs;
+        auto verified = pp::execute_provider(p, no_inputs, empty_params, nullptr, nullptr);
+        check(verified.metrics.contains("verification") &&
+                  verified.metrics.at("verification").is_object() &&
+                  verified.metrics.at("verification").empty(),
+              "empty verification still recorded (setdefault parity)");
     }
     {
         StubProvider p("export.reject");

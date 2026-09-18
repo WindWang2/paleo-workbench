@@ -5,6 +5,7 @@
 // report artifact into the execution work dir; catalog-registered as an
 // INTERMEDIATE when a run is bound. The verify hook is fail-closed: mean
 // outside [min, max] (or empty statistics) is a contract violation.
+#include <pwb/providers/builtin_adapters.hpp>
 #include <pwb/providers/builtin.hpp>
 
 #include <pwb/providers/errors.hpp>
@@ -198,6 +199,15 @@ ProviderResult FactorStatsProvider::execute(const ProviderInputs& inputs,
                 !parameters.at("report_name").get<std::string>().empty()
             ? parameters.at("report_name").get<std::string>()
             : "factor-stats";
+    // Enforce the declared pattern ^[a-z0-9._-]+$ (the ported validator
+    // subset has no `pattern` support; harden here so report_name cannot
+    // traverse out of the work dir).
+    if (report_name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789._-") !=
+        std::string::npos) {
+        throw ProviderRejectedInputError(
+            descriptor().provider_id,
+            "parameter 'report_name' must match ^[a-z0-9._-]+$");
+    }
     if (context.work_dir.empty()) {
         throw ProviderRejectedInputError(
             descriptor().provider_id,
