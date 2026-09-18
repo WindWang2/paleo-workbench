@@ -610,11 +610,17 @@ Result<CatalogDocument> CatalogRepository::open_read_write() {
         return DataError(ErrorCode::CorruptDatabase,
                          "catalog store unreadable: " + status_result.detail);
     }
+    // Parents first: sqlite cannot create the metadata/ directory itself,
+    // so a fresh project (no artifacts tree yet) must have it staged
+    // before the Create open (conv-26 fix; previously only worked when the
+    // caller had pre-built the layout).
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(sqlite_path_.parent_path(), ec);
+    }
     auto opened = Database::open(sqlite_path_, SqliteOpenMode::Create);
     if (!opened.is_ok()) return opened.error();
     db_ = std::move(opened.value());
-    std::error_code ec;
-    std::filesystem::create_directories(sqlite_path_.parent_path(), ec);
     auto schema_error = db_.ensure_schema();
     if (schema_error.code != ErrorCode::Ok) return schema_error;
     // A freshly created store has no sync_state rows yet — the status

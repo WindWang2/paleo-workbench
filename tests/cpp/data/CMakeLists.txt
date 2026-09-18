@@ -125,4 +125,9 @@ pwb_data_test(data_paged_sql paged_sql_test.cpp data.paged_sql)
 pwb_data_test(data_ingest_plan ingest_plan_test.cpp data.ingest_plan)
 # Save-As relocation + workspace membership mutations.
 pwb_data_test(data_lifecycle_ops lifecycle_ops_test.cpp data.lifecycle_ops)
+# E2E acceptance loop (create→import→runs→workspace→save→save-as→reopen→
+# paginate→audit), pure C++.
+pwb_data_test(data_lifecycle_e2e lifecycle_e2e_test.cpp data.lifecycle_e2e)
+# Deterministic perf sanity at 120k metadata records (not a benchmark).
+pwb_data_test(data_metadata_scale metadata_scale_test.cpp data.metadata_scale)
 # END CONV-26
