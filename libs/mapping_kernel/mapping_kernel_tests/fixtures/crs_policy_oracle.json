@@ -22,8 +22,8 @@
       "EPSG:3857"
     ]
   },
-  "pyproj_available": false,
-  "pyproj_version": null,
+  "pyproj_available": true,
+  "pyproj_version": "3.7.2",
   "builtin": {
     "crs_is_geographic": [
       {
@@ -400,7 +400,7 @@
       {
         "id": "utm_32650",
         "crs": "EPSG:32650",
-        "result": null
+        "result": false
       },
       {
         "id": "whitespace_only",
@@ -452,9 +452,9 @@
         "result": {
           "policy": "planar",
           "crs": "EPSG:32650",
-          "axes_known": null,
-          "annotation": "distance_policy=planar; CRS EPSG:32650 axis units unverifiable (unknown id or pyproj unavailable) — planar assumption unconfirmed",
-          "warning": "CRS EPSG:32650 axis units could not be verified; distance policy applied without confirmation"
+          "axes_known": false,
+          "annotation": "distance_policy=planar; CRS EPSG:32650 projected/verified planar metres",
+          "warning": null
         }
       },
       {
@@ -464,7 +464,7 @@
         "result": {
           "policy": "planar_degrees",
           "crs": "EPSG:32650",
-          "axes_known": null,
+          "axes_known": false,
           "annotation": "distance_policy=planar_degrees; operator explicitly accepted degree-as-planar distances",
           "warning": "planar_degrees declared for a non-geographic CRS"
         }
@@ -476,7 +476,7 @@
         "result": {
           "policy": "projected",
           "crs": "EPSG:32650",
-          "axes_known": null,
+          "axes_known": false,
           "annotation": "distance_policy=projected; CRS EPSG:32650 declared projected by operator",
           "warning": null
         }
