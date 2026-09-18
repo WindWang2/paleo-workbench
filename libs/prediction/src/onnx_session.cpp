@@ -48,6 +48,7 @@ using OrtGetApiBaseFn = const OrtApiBase*(ORT_API_CALL*)(void)NO_EXCEPTION;
 struct RuntimeCache {
     void* handle = nullptr;
     const OrtApi* api = nullptr;
+    OrtEnv* env = nullptr;  // process-lifetime; never released (see README)
     std::string path;
     std::string version;
     std::string error;
@@ -211,8 +212,23 @@ const RuntimeCache& ensure_runtime(const std::string& explicit_path) {
             unload_library(handle);
             continue;
         }
+        // One OrtEnv per process (ORT's recommendation): every session shares
+        // it, so the thread pools are not multiplied per prediction run.
+        OrtEnv* env = nullptr;
+        OrtStatus* env_status = api->CreateEnv(
+            ORT_LOGGING_LEVEL_WARNING, "paleo_workbench_prediction", &env);
+        if (env_status != nullptr) {
+            const char* message = api->GetErrorMessage(env_status);
+            failures += candidate + ": CreateEnv failed: "
+                        + (message != nullptr ? std::string(message)
+                                              : std::string()) + "; ";
+            api->ReleaseStatus(env_status);
+            unload_library(handle);
+            continue;
+        }
         cache.handle = handle;
         cache.api = api;
+        cache.env = env;
         cache.path = candidate;
         cache.version = base->GetVersionString != nullptr
                             ? base->GetVersionString()
@@ -239,6 +255,52 @@ void check_status(const OrtApi* api, OrtStatus* status,
     api->ReleaseStatus(status);
     throw TiledInferenceError("onnxruntime: " + context + ": " + message);
 }
+
+// Releases an OrtValue on every early-return path after Run.
+struct OrtValueReleaser {
+    const OrtApi* api = nullptr;
+    OrtValue* value = nullptr;
+
+    OrtValueReleaser(const OrtApi* session_api, OrtValue* session_value)
+        : api(session_api), value(session_value) {}
+    OrtValueReleaser(const OrtValueReleaser&) = delete;
+    OrtValueReleaser& operator=(const OrtValueReleaser&) = delete;
+    ~OrtValueReleaser() {
+        if (api != nullptr && value != nullptr) api->ReleaseValue(value);
+    }
+};
+
+// Releases an OrtTypeInfo on every early-return path after GetTypeInfo.
+struct TypeInfoReleaser {
+    const OrtApi* api = nullptr;
+    OrtTypeInfo* value = nullptr;
+
+    TypeInfoReleaser(const OrtApi* session_api, OrtTypeInfo* session_value)
+        : api(session_api), value(session_value) {}
+    TypeInfoReleaser(const TypeInfoReleaser&) = delete;
+    TypeInfoReleaser& operator=(const TypeInfoReleaser&) = delete;
+    ~TypeInfoReleaser() {
+        if (api != nullptr && value != nullptr) api->ReleaseTypeInfo(value);
+    }
+};
+
+// Releases an OrtTensorTypeAndShapeInfo on every early-return path after
+// GetTensorTypeAndShape.
+struct TensorShapeInfoReleaser {
+    const OrtApi* api = nullptr;
+    OrtTensorTypeAndShapeInfo* value = nullptr;
+
+    TensorShapeInfoReleaser(const OrtApi* session_api,
+                            OrtTensorTypeAndShapeInfo* session_value)
+        : api(session_api), value(session_value) {}
+    TensorShapeInfoReleaser(const TensorShapeInfoReleaser&) = delete;
+    TensorShapeInfoReleaser& operator=(const TensorShapeInfoReleaser&) = delete;
+    ~TensorShapeInfoReleaser() {
+        if (api != nullptr && value != nullptr) {
+            api->ReleaseTensorTypeAndShapeInfo(value);
+        }
+    }
+};
 
 std::string element_type_name(ONNXTensorElementDataType type) {
     switch (type) {
@@ -390,6 +452,7 @@ OnnxTensorInfo read_tensor_info(const OrtApi* api, const OrtSession* session,
     OrtStatus* status =
         input ? api->SessionGetInputTypeInfo(session, index, &type_info)
               : api->SessionGetOutputTypeInfo(session, index, &type_info);
+    const TypeInfoReleaser type_info_guard{api, type_info};
     check_status(api, status, input ? "SessionGetInputTypeInfo"
                                     : "SessionGetOutputTypeInfo");
     if (type_info == nullptr) {
@@ -398,19 +461,32 @@ OnnxTensorInfo read_tensor_info(const OrtApi* api, const OrtSession* session,
                                   + " " + std::to_string(index));
     }
     ONNXType onnx_type = ONNX_TYPE_UNKNOWN;
-    api->GetOnnxTypeFromTypeInfo(type_info, &onnx_type);
+    OrtStatus* onnx_type_status =
+        api->GetOnnxTypeFromTypeInfo(type_info, &onnx_type);
+    if (onnx_type_status != nullptr) {
+        const std::string message = status_message(api, onnx_type_status);
+        api->ReleaseStatus(onnx_type_status);
+        throw TiledInferenceError("onnxruntime: GetOnnxTypeFromTypeInfo: "
+                                  + message);
+    }
     if (onnx_type != ONNX_TYPE_TENSOR) {
-        api->ReleaseTypeInfo(type_info);
         throw TiledInferenceError(
             "onnxruntime: model " + std::string(input ? "input" : "output")
             + " " + std::to_string(index)
             + " is not a tensor; tiled seismic expects tensor ports");
     }
     const OrtTensorTypeAndShapeInfo* shape_info = nullptr;
-    const OrtStatus* cast_status =
+    OrtStatus* cast_status =
         api->CastTypeInfoToTensorInfo(type_info, &shape_info);
-    if (cast_status != nullptr || shape_info == nullptr) {
-        api->ReleaseTypeInfo(type_info);
+    if (cast_status != nullptr) {
+        const std::string message = status_message(api, cast_status);
+        api->ReleaseStatus(cast_status);
+        throw TiledInferenceError(
+            "onnxruntime: model " + std::string(input ? "input" : "output")
+            + " " + std::to_string(index) + " has no tensor shape info: "
+            + message);
+    }
+    if (shape_info == nullptr) {
         throw TiledInferenceError(
             "onnxruntime: model " + std::string(input ? "input" : "output")
             + " " + std::to_string(index) + " has no tensor shape info");
@@ -419,16 +495,18 @@ OnnxTensorInfo read_tensor_info(const OrtApi* api, const OrtSession* session,
     info.name = get_tensor_name(api, session, index, input);
     ONNXTensorElementDataType element_type =
         ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
-    api->GetTensorElementType(shape_info, &element_type);
+    check_status(api, api->GetTensorElementType(shape_info, &element_type),
+                 "GetTensorElementType");
     info.element_type = element_type_name(element_type);
     std::size_t rank = 0;
-    api->GetDimensionsCount(shape_info, &rank);
+    check_status(api, api->GetDimensionsCount(shape_info, &rank),
+                 "GetDimensionsCount");
     std::vector<std::int64_t> dims(rank, -1);
     if (rank > 0) {
-        api->GetDimensions(shape_info, dims.data(), rank);
+        check_status(api, api->GetDimensions(shape_info, dims.data(), rank),
+                     "GetDimensions");
     }
     info.shape.assign(dims.begin(), dims.end());
-    api->ReleaseTypeInfo(type_info);
     return info;
 }
 
@@ -439,15 +517,23 @@ ONNXTensorElementDataType tensor_element_type(const OrtApi* api,
     OrtStatus* status =
         input ? api->SessionGetInputTypeInfo(session, index, &type_info)
               : api->SessionGetOutputTypeInfo(session, index, &type_info);
+    const TypeInfoReleaser type_info_guard{api, type_info};
     check_status(api, status, "SessionGetTypeInfo");
     const OrtTensorTypeAndShapeInfo* shape_info = nullptr;
-    api->CastTypeInfoToTensorInfo(type_info, &shape_info);
+    OrtStatus* cast_status =
+        api->CastTypeInfoToTensorInfo(type_info, &shape_info);
+    if (cast_status != nullptr) {
+        const std::string message = status_message(api, cast_status);
+        api->ReleaseStatus(cast_status);
+        throw TiledInferenceError("onnxruntime: CastTypeInfoToTensorInfo: "
+                                  + message);
+    }
     ONNXTensorElementDataType element_type =
         ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
     if (shape_info != nullptr) {
-        api->GetTensorElementType(shape_info, &element_type);
+        check_status(api, api->GetTensorElementType(shape_info, &element_type),
+                     "GetTensorElementType");
     }
-    api->ReleaseTypeInfo(type_info);
     return element_type;
 }
 
@@ -539,7 +625,7 @@ std::string onnx_runtime_version() {
 
 struct OnnxRuntimeSession::Impl {
     const OrtApi* api = nullptr;
-    OrtEnv* env = nullptr;
+    OrtEnv* env = nullptr;  // borrowed from the process-wide runtime cache
     OrtSession* session = nullptr;
     OrtMemoryInfo* memory_info = nullptr;
     ONNXTensorElementDataType input_element_type =
@@ -551,9 +637,9 @@ struct OnnxRuntimeSession::Impl {
 
     ~Impl() {
         if (api == nullptr) return;
+        // env is process-wide and intentionally never released.
         if (memory_info != nullptr) api->ReleaseMemoryInfo(memory_info);
         if (session != nullptr) api->ReleaseSession(session);
-        if (env != nullptr) api->ReleaseEnv(env);
     }
 };
 
@@ -578,7 +664,7 @@ OnnxRuntimeSession OnnxRuntimeSession::open_file(
     const ModelBinding binding = check_onnx_model_file(model_path);
     std::string error;
     std::optional<std::string> bytes =
-        detail::read_file_bytes(fs::path(model_path), &error);
+        detail::read_file_bytes(detail::path_from_utf8(model_path), &error);
     if (!bytes.has_value()) {
         throw TiledInferenceError("ONNX model " + model_path
                                   + " could not be read: " + error);
@@ -601,6 +687,7 @@ OnnxRuntimeSession OnnxRuntimeSession::open_bytes(
 
     auto impl = std::make_unique<Impl>();
     impl->api = api;
+    impl->env = runtime.env;
     impl->info.runtime_library = runtime.path;
     impl->info.runtime_version = runtime.version;
     impl->info.model_sha256 = model_sha256;
@@ -611,11 +698,6 @@ OnnxRuntimeSession OnnxRuntimeSession::open_bytes(
         throw TiledInferenceError(
             "ONNX model bytes are empty; refusing to create a session");
     }
-
-    check_status(api,
-                 api->CreateEnv(ORT_LOGGING_LEVEL_WARNING,
-                                "paleo_workbench_prediction", &impl->env),
-                 "CreateEnv");
 
     const auto make_options = [&]() -> OrtSessionOptions* {
         OrtSessionOptions* session_options = nullptr;
@@ -811,13 +893,16 @@ SessionOutput OnnxRuntimeSession::run(const SessionBatch& batch) {
 
     const std::int64_t tensor_shape[5] = {batch.n, 1, batch.d, batch.h,
                                           batch.w};
+    // The tensor's byte length follows the model's input element type; for
+    // float64 the buffer is 8 B/element (ORT rejects a short p_data_len).
+    const std::size_t input_bytes =
+        batch.data.size() * element_size(state.input_element_type);
     OrtValue* input_value = nullptr;
     check_status(
         api,
         api->CreateTensorWithDataAsOrtValue(
-            state.memory_info, const_cast<void*>(input_data),
-            batch.data.size() * sizeof(float), tensor_shape, 5,
-            state.input_element_type, &input_value),
+            state.memory_info, const_cast<void*>(input_data), input_bytes,
+            tensor_shape, 5, state.input_element_type, &input_value),
         "CreateTensorWithDataAsOrtValue");
 
     const char* input_names[] = {state.info.input.name.c_str()};
@@ -832,12 +917,16 @@ SessionOutput OnnxRuntimeSession::run(const SessionBatch& batch) {
     if (outputs[0] == nullptr) {
         throw TiledInferenceError("onnxruntime: Run returned a null output");
     }
+    // RAII: every early return below (element type, cap, dimension range,
+    // status failures) releases the OrtValue exactly once.
+    const OrtValueReleaser output_guard{api, outputs[0]};
     OrtValue* output_value = outputs[0];
 
     OrtTensorTypeAndShapeInfo* shape_info = nullptr;
-    check_status(api,
-                 api->GetTensorTypeAndShape(output_value, &shape_info),
-                 "GetTensorTypeAndShape");
+    OrtStatus* shape_status =
+        api->GetTensorTypeAndShape(output_value, &shape_info);
+    const TensorShapeInfoReleaser shape_guard{api, shape_info};
+    check_status(api, shape_status, "GetTensorTypeAndShape");
     std::size_t rank = 0;
     check_status(api, api->GetDimensionsCount(shape_info, &rank),
                  "GetDimensionsCount");
@@ -850,9 +939,7 @@ SessionOutput OnnxRuntimeSession::run(const SessionBatch& batch) {
         ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
     check_status(api, api->GetTensorElementType(shape_info, &output_type),
                  "GetTensorElementType");
-    api->ReleaseTensorTypeAndShapeInfo(shape_info);
     if (!is_convertible_to_float(output_type)) {
-        api->ReleaseValue(output_value);
         throw TiledInferenceError(
             "onnxruntime: model output element type "
             + element_type_name(output_type)
@@ -866,7 +953,6 @@ SessionOutput OnnxRuntimeSession::run(const SessionBatch& batch) {
         || elements
                > static_cast<std::size_t>(kMaxOnnxTensorBytes)
                      / output_element_bytes) {
-        api->ReleaseValue(output_value);
         throw TiledInferenceError(
             "onnxruntime: model output needs more than "
             + std::to_string(kMaxOnnxTensorBytes)
@@ -884,7 +970,6 @@ SessionOutput OnnxRuntimeSession::run(const SessionBatch& batch) {
         if (dim < 0
             || dim > static_cast<std::int64_t>(
                          std::numeric_limits<int>::max())) {
-            api->ReleaseValue(output_value);
             throw TiledInferenceError(
                 "onnxruntime: model output dimension out of range");
         }
@@ -898,7 +983,6 @@ SessionOutput OnnxRuntimeSession::run(const SessionBatch& batch) {
         }
     }
     convert_output_to_float(output_type, raw_output, elements, out.data);
-    api->ReleaseValue(output_value);
     return out;
 }
 

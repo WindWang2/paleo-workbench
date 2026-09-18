@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,14 @@ struct MapLayerDescriptor {
     std::string crs;
     int classes = 0;
     Json class_names = Json::array();
+    // Georeferencing for a QGIS/GDAL consumer of the headerless raw raster:
+    // shape, geotransform (GDAL order), dtype and byte order let a map
+    // publication build a VRT without re-reading the descriptor.
+    Tile3 shape{};
+    std::array<double, 6> geotransform{};
+    bool has_geotransform = false;
+    std::string dtype;
+    std::string byte_order = "little";
     Json style_hints = Json::object();
 
     Json to_json() const;
@@ -40,6 +49,13 @@ struct MapLayerDescriptor {
 // Class map + (when persisted) probability map layers, from a
 // PredictionOutputDescriptor::to_json() object. Empty paths produce no
 // descriptor: an unwritten artifact is never advertised.
+//
+// The artifacts are headerless raw rasters; the descriptor carries shape,
+// geotransform, dtype and byte order so a map publication can build a
+// GDAL/QGIS-readable VRT. Note that the frozen CONV-21
+// spatial_result::is_map_compilable() predicate only accepts
+// VECTOR_POLYGONS — a CLASSIFIED_RASTER is published through these layer
+// descriptors, not through that predicate.
 std::vector<MapLayerDescriptor> prediction_map_layers(
     const Json& output_descriptor);
 

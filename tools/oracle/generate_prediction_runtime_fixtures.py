@@ -255,6 +255,26 @@ def make_tie_c1(path: Path) -> None:
     onnx.save(model, str(path))
 
 
+def make_identity_dtype(path: Path, element_type) -> None:
+    """Identity model with a float16/float64 input port (conversion seam)."""
+    import onnx
+    from onnx import TensorProto, helper
+
+    value = [None, 1, None, None, None]
+    graph = helper.make_graph(
+        [helper.make_node("Identity", ["input"], ["logits"])],
+        "identity_dtype",
+        [helper.make_tensor_value_info("input", element_type, value)],
+        [helper.make_tensor_value_info("logits", element_type, value)],
+    )
+    model = helper.make_model(
+        graph, opset_imports=[helper.make_opsetid("", 17)]
+    )
+    model.ir_version = 9
+    onnx.checker.check_model(model)
+    onnx.save(model, str(path))
+
+
 def make_bad_rank(path: Path) -> None:
     """Squeeze channel axis -> rank-4 output (the honest ndim error)."""
     import onnx
@@ -485,6 +505,10 @@ def main() -> int:
     make_conv3d_c3_in2(models / "conv3d_c3_in2.onnx")
     make_identity_c1(models / "identity_c1.onnx")
     make_tie_c1(models / "tie_c1.onnx")
+    make_identity_dtype(models / "identity_f16in.onnx",
+                        __import__("onnx").TensorProto.FLOAT16)
+    make_identity_dtype(models / "identity_f64in.onnx",
+                        __import__("onnx").TensorProto.DOUBLE)
     make_bad_rank(models / "bad_rank.onnx")
     (models / "corrupt.onnx").write_bytes(
         (models / "conv3d_c3.onnx").read_bytes()[:64]
@@ -507,6 +531,14 @@ def main() -> int:
     nodata_volume[9, 11, 8] = np.float32(NODATA_DECLARED)
     nodata_volume_path = FIXTURE_ROOT / "volumes" / "block_nodata_f32.raw"
     nodata_volume.tofile(nodata_volume_path)
+    # A sentinel that is NOT exactly representable in float32: the comparison
+    # must happen in the source dtype, not in double.
+    odd_sentinel = -999.1
+    odd_volume = volume.copy()
+    odd_volume[1, 2, 3] = np.float32(odd_sentinel)
+    odd_volume[8, 7, 6] = np.float32(odd_sentinel)
+    odd_volume_path = FIXTURE_ROOT / "volumes" / "block_nodata_odd_f32.raw"
+    odd_volume.tofile(odd_volume_path)
 
     baseline_metadata = {
         "prediction_runtime": {
@@ -591,6 +623,41 @@ def main() -> int:
         {},
         nodata_metadata,
         model_id="conv3d-c3-nodata",
+    )
+    nodata_norm_metadata = {
+        "prediction_runtime": {
+            "classes": CLASSES,
+            "class_names": CLASS_NAMES,
+            "input_bands": ["amplitude"],
+            "normalization": {"mean": 0.5, "std": 2.0},
+            "nodata": NODATA_DECLARED,
+            "tile": list(TILE),
+            "overlap": OVERLAP,
+        }
+    }
+    write_package(
+        FIXTURE_ROOT / "packages" / "conv3d_nodata_norm",
+        models / "conv3d_c3.onnx",
+        {},
+        nodata_norm_metadata,
+        model_id="conv3d-c3-nodata-norm",
+    )
+    odd_metadata = {
+        "prediction_runtime": {
+            "classes": CLASSES,
+            "class_names": CLASS_NAMES,
+            "input_bands": ["amplitude"],
+            "nodata": -999.1,
+            "tile": list(TILE),
+            "overlap": OVERLAP,
+        }
+    }
+    write_package(
+        FIXTURE_ROOT / "packages" / "conv3d_nodata_odd",
+        models / "conv3d_c3.onnx",
+        {},
+        odd_metadata,
+        model_id="conv3d-c3-nodata-odd",
     )
     # Multi-band declaration: the native single-volume pipeline must refuse.
     multiband_metadata = {
@@ -943,6 +1010,221 @@ def main() -> int:
         }
     )
 
+    # 5a. Nodata declared by the package only (the descriptor omits the
+    # sentinel): the runtime must fall back to the package declaration.
+    nodata_fallback_input = dict(input_descriptor)
+    nodata_fallback_input["uri"] = rel(nodata_volume_path)
+    nodata_fallback_reader = PreprocessedReader(
+        ArrayReader(nodata_volume), nodata=NODATA_DECLARED
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        stats, classmap, probmap = run_production_with_reader(
+            nodata_fallback_reader,
+            FIXTURE_ROOT / "packages" / "conv3d_nodata" / "model.onnx",
+            Path(tmp) / "work", batch=1,
+        )
+    nodata_fallback_invalid = int(
+        np.count_nonzero(nodata_volume == np.float32(NODATA_DECLARED))
+    )
+    cases.append(
+        {
+            "id": "run_nodata_package_fallback",
+            "package": "packages/conv3d_nodata/manifest.json",
+            "input": nodata_fallback_input,
+            "options": {
+                "tile": list(TILE),
+                "overlap": OVERLAP,
+                "batch": 1,
+                "keep_probmap": True,
+                "write_outputs": True,
+            },
+            "expect": {
+                "stats": {
+                    "tiles_total": int(stats["tiles_total"]),
+                    "tiles_done": int(stats["tiles_done"]),
+                    "cancelled": False,
+                    "classes": CLASSES,
+                    "overlap": OVERLAP,
+                    "batch": 1,
+                    "device_mode": "cpu",
+                },
+                "model_sha256": sha256_file(
+                    FIXTURE_ROOT / "packages" / "conv3d_nodata" / "model.onnx"
+                ),
+                "summary": reference_summary(
+                    classmap, probmap, CLASSES, CLASS_NAMES,
+                    nodata_fallback_invalid, True,
+                ),
+                "classmap": [int(v) for v in classmap.ravel(order="C")],
+                "probmap_bits": probmap_bits(probmap),
+                "spatial_type": "CLASSIFIED_RASTER",
+                "validate_errors": [],
+                "band_name": "amplitude",
+                "invalid_voxels": nodata_fallback_invalid,
+            },
+        }
+    )
+
+    # 5b. Nodata + package normalization: replacement happens first, then the
+    # transform (the ordering the native reader implements).
+    nodata_norm_input = dict(input_descriptor)
+    nodata_norm_input["uri"] = rel(nodata_volume_path)
+    nodata_norm_input["nodata"] = NODATA_DECLARED
+    nodata_norm_reader = PreprocessedReader(
+        ArrayReader(nodata_volume), mean=0.5, std=2.0,
+        nodata=NODATA_DECLARED,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        stats, classmap, probmap = run_production_with_reader(
+            nodata_norm_reader,
+            FIXTURE_ROOT / "packages" / "conv3d_nodata_norm" / "model.onnx",
+            Path(tmp) / "work", batch=1,
+        )
+    nodata_norm_invalid = int(
+        np.count_nonzero(nodata_volume == np.float32(NODATA_DECLARED))
+    )
+    cases.append(
+        {
+            "id": "run_nodata_normalization",
+            "package": "packages/conv3d_nodata_norm/manifest.json",
+            "input": nodata_norm_input,
+            "options": {
+                "tile": list(TILE),
+                "overlap": OVERLAP,
+                "batch": 1,
+                "keep_probmap": True,
+                "write_outputs": True,
+            },
+            "expect": {
+                "stats": {
+                    "tiles_total": int(stats["tiles_total"]),
+                    "tiles_done": int(stats["tiles_done"]),
+                    "cancelled": False,
+                    "classes": CLASSES,
+                    "overlap": OVERLAP,
+                    "batch": 1,
+                    "device_mode": "cpu",
+                },
+                "model_sha256": sha256_file(
+                    FIXTURE_ROOT
+                    / "packages"
+                    / "conv3d_nodata_norm"
+                    / "model.onnx"
+                ),
+                "summary": reference_summary(
+                    classmap, probmap, CLASSES, CLASS_NAMES,
+                    nodata_norm_invalid, True,
+                ),
+                "classmap": [int(v) for v in classmap.ravel(order="C")],
+                "probmap_bits": probmap_bits(probmap),
+                "spatial_type": "CLASSIFIED_RASTER",
+                "validate_errors": [],
+                "band_name": "amplitude",
+                "invalid_voxels": nodata_norm_invalid,
+            },
+        }
+    )
+
+    # 5c. A nodata sentinel that is not exactly representable in float32.
+    odd_input = dict(input_descriptor)
+    odd_input["uri"] = rel(odd_volume_path)
+    odd_input["nodata"] = -999.1
+    odd_reader = PreprocessedReader(ArrayReader(odd_volume), nodata=-999.1)
+    with tempfile.TemporaryDirectory() as tmp:
+        stats, classmap, probmap = run_production_with_reader(
+            odd_reader,
+            FIXTURE_ROOT / "packages" / "conv3d_nodata_odd" / "model.onnx",
+            Path(tmp) / "work", batch=1,
+        )
+    odd_invalid = int(
+        np.count_nonzero(odd_volume == np.float32(-999.1))
+    )
+    cases.append(
+        {
+            "id": "run_nodata_odd_sentinel",
+            "package": "packages/conv3d_nodata_odd/manifest.json",
+            "input": odd_input,
+            "options": {
+                "tile": list(TILE),
+                "overlap": OVERLAP,
+                "batch": 1,
+                "keep_probmap": True,
+                "write_outputs": True,
+            },
+            "expect": {
+                "stats": {
+                    "tiles_total": int(stats["tiles_total"]),
+                    "tiles_done": int(stats["tiles_done"]),
+                    "cancelled": False,
+                    "classes": CLASSES,
+                    "overlap": OVERLAP,
+                    "batch": 1,
+                    "device_mode": "cpu",
+                },
+                "model_sha256": sha256_file(
+                    FIXTURE_ROOT
+                    / "packages"
+                    / "conv3d_nodata_odd"
+                    / "model.onnx"
+                ),
+                "summary": reference_summary(
+                    classmap, probmap, CLASSES, CLASS_NAMES, odd_invalid, True
+                ),
+                "classmap": [int(v) for v in classmap.ravel(order="C")],
+                "probmap_bits": probmap_bits(probmap),
+                "spatial_type": "CLASSIFIED_RASTER",
+                "validate_errors": [],
+                "band_name": "amplitude",
+                "invalid_voxels": odd_invalid,
+            },
+        }
+    )
+
+    # 5d. keep_probmap=false: the probability map is still fused for the
+    # summary but is not persisted (probmap_stored=false, no artifact).
+    with tempfile.TemporaryDirectory() as tmp:
+        stats, classmap, probmap = run_production(
+            volume, FIXTURE_ROOT / "packages" / "conv3d" / "model.onnx",
+            Path(tmp) / "work", batch=1,
+        )
+    cases.append(
+        {
+            "id": "run_keep_probmap_false",
+            "package": "packages/conv3d/manifest.json",
+            "input": input_descriptor,
+            "options": {
+                "tile": list(TILE),
+                "overlap": OVERLAP,
+                "batch": 1,
+                "keep_probmap": False,
+                "write_outputs": True,
+            },
+            "expect": {
+                "stats": {
+                    "tiles_total": int(stats["tiles_total"]),
+                    "tiles_done": int(stats["tiles_done"]),
+                    "cancelled": False,
+                    "classes": CLASSES,
+                    "overlap": OVERLAP,
+                    "batch": 1,
+                    "device_mode": "cpu",
+                },
+                "model_sha256": sha256_file(
+                    FIXTURE_ROOT / "packages" / "conv3d" / "model.onnx"
+                ),
+                "summary": reference_summary(
+                    classmap, probmap, CLASSES, CLASS_NAMES, 0, False
+                ),
+                "classmap": [int(v) for v in classmap.ravel(order="C")],
+                "probmap_bits": probmap_bits(probmap),
+                "spatial_type": "CLASSIFIED_RASTER",
+                "validate_errors": [],
+                "band_name": "amplitude",
+                "probmap_absent": True,
+            },
+        }
+    )
+
     # 6. Float16 source conversion.
     with tempfile.TemporaryDirectory() as tmp:
         stats, classmap, probmap = run_production(
@@ -1070,6 +1352,16 @@ def main() -> int:
             "expect": {
                 "raises": "InputContractError",
                 "message_contains": "single seismic volume",
+            },
+        },
+        {
+            "id": "error_output_crs_missing",
+            "package": "packages/conv3d/manifest.json",
+            "input": {**input_descriptor, "crs": ""},
+            "options": {"classes": CLASSES, "write_outputs": False},
+            "expect": {
+                "raises": "InputContractError",
+                "message_contains": "spatial contract",
             },
         },
         {
@@ -1214,6 +1506,8 @@ def main() -> int:
             "crs": CRS,
             "geotransform": GEOTRANSFORM,
             "cases": len(cases) + len(error_cases),
+            "runs": len(cases),
+            "error_cases": len(error_cases),
             "error_count_note": (
                 "success cases replay full classmap/probmap/summary; error "
                 "cases assert the C++ error class + message fragment"

@@ -12,6 +12,11 @@ Json MapLayerDescriptor::to_json() const {
     out["crs"] = crs;
     out["classes"] = classes;
     out["class_names"] = class_names;
+    out["shape"] = shape;
+    out["geotransform"] = geotransform;
+    out["has_geotransform"] = has_geotransform;
+    out["dtype"] = dtype;
+    out["byte_order"] = byte_order;
     out["style_hints"] = style_hints;
     return out;
 }
@@ -28,27 +33,48 @@ std::vector<MapLayerDescriptor> prediction_map_layers(
         output.value("classmap_path", std::string());
     const std::string probmap_path =
         output.value("probmap_path", std::string());
+    Tile3 shape{};
+    if (output.contains("shape") && output["shape"].is_array()
+        && output["shape"].size() == 3) {
+        shape = Tile3{output["shape"][0].get<int>(),
+                      output["shape"][1].get<int>(),
+                      output["shape"][2].get<int>()};
+    }
+    std::array<double, 6> geotransform{};
+    bool has_geotransform = false;
+    if (output.contains("geotransform") && output["geotransform"].is_array()
+        && output["geotransform"].size() == 6) {
+        for (std::size_t i = 0; i < 6; ++i) {
+            geotransform[i] = output["geotransform"][i].get<double>();
+        }
+        has_geotransform = output.value("has_geotransform", true);
+    }
+    const auto fill = [&](MapLayerDescriptor* layer, const char* name,
+                          const char* kind, const std::string& uri,
+                          const char* dtype) {
+        layer->name = name;
+        layer->kind = kind;
+        layer->uri = uri;
+        layer->crs = crs;
+        layer->classes = classes;
+        layer->class_names = class_names;
+        layer->shape = shape;
+        layer->geotransform = geotransform;
+        layer->has_geotransform = has_geotransform;
+        layer->dtype = dtype;
+    };
     if (!classmap_path.empty()) {
         MapLayerDescriptor classmap;
-        classmap.name = "facies class map";
-        classmap.kind = "classmap";
-        classmap.uri = classmap_path;
-        classmap.crs = crs;
-        classmap.classes = classes;
-        classmap.class_names = class_names;
+        fill(&classmap, "facies class map", "classmap", classmap_path,
+             "uint8");
         classmap.style_hints["palette"] = "facies";
         classmap.style_hints["renderer"] = "categorical";
-        classmap.style_hints["nodata_value"] = 255;
         layers.push_back(std::move(classmap));
     }
     if (!probmap_path.empty()) {
         MapLayerDescriptor probmap;
-        probmap.name = "facies probability map";
-        probmap.kind = "probmap";
-        probmap.uri = probmap_path;
-        probmap.crs = crs;
-        probmap.classes = classes;
-        probmap.class_names = class_names;
+        fill(&probmap, "facies probability map", "probmap", probmap_path,
+             "float16");
         probmap.style_hints["palette"] = "confidence";
         probmap.style_hints["renderer"] = "continuous";
         probmap.style_hints["range"] = Json::array({0.0, 1.0});

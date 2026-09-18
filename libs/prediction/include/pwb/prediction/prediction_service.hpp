@@ -24,6 +24,7 @@
 #include <string_view>
 
 #include "pwb/domain/json.hpp"
+#include "pwb/prediction/integration_seams.hpp"
 #include "pwb/prediction/model_package_runtime.hpp"
 #include "pwb/prediction/prediction_input.hpp"
 #include "pwb/prediction/prediction_pipeline.hpp"
@@ -53,6 +54,8 @@ std::string_view to_string(PredictionTaskStatus status);
 
 struct PredictionTaskSnapshot {
     PredictionTaskStatus status = PredictionTaskStatus::Created;
+    // Live during a run: ratio + message (the CONV-13 progress seam). The
+    // tile counters are filled when the run reaches a terminal state.
     int tiles_done = 0;
     int tiles_total = 0;
     double ratio = 0.0;
@@ -94,6 +97,8 @@ public:
     // Runs the full pipeline. Throws InputContractError / ModelPackageError /
     // TiledInferenceError for contract violations; a cancelled run returns a
     // Cancelled result instead (partial progress stays resumable on disk).
+    // Not reentrant: one execute() at a time; request_cancel() only affects
+    // a running execute.
     PredictionTaskResult execute();
 
     void request_cancel();
@@ -112,6 +117,7 @@ private:
     PredictionTaskSnapshot snapshot_;
     Json result_descriptor_ = Json::object();
     std::atomic<bool> cancel_requested_{false};
+    std::atomic<bool> running_{false};
 };
 
 // JSON in / JSON out entry point for the Workflow branch. `parameters`:
@@ -123,6 +129,15 @@ private:
 struct PredictionWorkflowNode {
     static Json descriptor();
     static Json run(const Json& parameters);
+    // Workflow-engine integration: the engine's CancelToken and progress can
+    // be bridged without this library depending on the engine.
+    static Json run(const Json& parameters, std::function<bool()> cancel,
+                    std::function<void(double, const std::string&)> progress);
+    // Notifies the sink with started/progress/finished (or failed) payloads
+    // around one run; the sink is optional.
+    static Json run_observed(const Json& parameters,
+                             IPredictionTaskSink* sink,
+                             std::function<bool()> cancel = {});
 };
 
 // Parses a workflow-node parameter object into a request (shared by the node

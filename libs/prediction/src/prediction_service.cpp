@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -55,8 +56,15 @@ long long get_integer(const Json& object, const char* key,
                       long long fallback) {
     const auto it = object.find(key);
     if (it == object.end() || it->is_null()) return fallback;
-    if (it->is_number_integer()) return it->get<long long>();
-    if (it->is_number_float()) {
+    if (it->is_number_unsigned()) {
+        const unsigned long long number = it->get<unsigned long long>();
+        if (number <= static_cast<unsigned long long>(
+                          std::numeric_limits<long long>::max())) {
+            return static_cast<long long>(number);
+        }
+    } else if (it->is_number_integer()) {
+        return it->get<long long>();
+    } else if (it->is_number_float()) {
         const double number = it->get<double>();
         if (number >= -9.0e18 && number <= 9.0e18
             && number == std::floor(number)) {
@@ -64,7 +72,19 @@ long long get_integer(const Json& object, const char* key,
         }
     }
     throw InputContractError(std::string("prediction node field '") + key
-                             + "' must be an integer");
+                             + "' must be an integer in range");
+}
+
+// 32-bit narrowing with an explicit range check: a wrapped classes/batch
+// value would silently change semantics (e.g. 2^32 -> 0 -> "unset").
+int get_int32(const Json& object, const char* key, int fallback) {
+    const long long value = get_integer(object, key, fallback);
+    if (value < std::numeric_limits<int>::min()
+        || value > std::numeric_limits<int>::max()) {
+        throw InputContractError(std::string("prediction node field '") + key
+                                 + "' is out of the 32-bit range");
+    }
+    return static_cast<int>(value);
 }
 
 SeismicGridDescriptor parse_grid_descriptor(const Json& value) {
@@ -84,11 +104,30 @@ SeismicGridDescriptor parse_grid_descriptor(const Json& value) {
             "prediction node input.shape must be a 3-element array");
     }
     for (std::size_t i = 0; i < 3; ++i) {
-        if (!(*shape_it)[i].is_number_integer()) {
+        const Json& dim = (*shape_it)[i];
+        long long value = 0;
+        if (dim.is_number_unsigned()) {
+            const unsigned long long raw = dim.get<unsigned long long>();
+            if (raw > static_cast<unsigned long long>(
+                          std::numeric_limits<int>::max())) {
+                throw InputContractError(
+                    "prediction node input.shape entry is out of the 32-bit "
+                    "range");
+            }
+            value = static_cast<long long>(raw);
+        } else if (dim.is_number_integer()) {
+            value = dim.get<long long>();
+        } else {
             throw InputContractError(
                 "prediction node input.shape entries must be integers");
         }
-        descriptor.shape[i] = (*shape_it)[i].get<int>();
+        if (value < std::numeric_limits<int>::min()
+            || value > std::numeric_limits<int>::max()) {
+            throw InputContractError(
+                "prediction node input.shape entry is out of the 32-bit "
+                "range");
+        }
+        descriptor.shape[i] = static_cast<int>(value);
     }
 
     const auto nodata_it = input.find("nodata");
@@ -128,7 +167,7 @@ SeismicGridDescriptor parse_grid_descriptor(const Json& value) {
 PredictionPipelineOptions parse_pipeline_options(const Json& value) {
     const Json options = require_object(value, "options");
     PredictionPipelineOptions parsed;
-    parsed.classes = static_cast<int>(get_integer(options, "classes", 0));
+    parsed.classes = get_int32(options, "classes", 0);
     const auto tile_it = options.find("tile");
     if (tile_it != options.end() && !tile_it->is_null()) {
         if (!tile_it->is_array() || tile_it->size() != 3) {
@@ -136,19 +175,41 @@ PredictionPipelineOptions parse_pipeline_options(const Json& value) {
                 "prediction node options.tile must be a 3-element array");
         }
         for (std::size_t i = 0; i < 3; ++i) {
-            if (!(*tile_it)[i].is_number_integer()) {
+            const Json& entry = (*tile_it)[i];
+            long long value = 0;
+            if (entry.is_number_unsigned()) {
+                const unsigned long long raw =
+                    entry.get<unsigned long long>();
+                if (raw > static_cast<unsigned long long>(
+                              std::numeric_limits<int>::max())) {
+                    throw InputContractError(
+                        "prediction node options.tile entries must be "
+                        "integers in the 32-bit range");
+                }
+                value = static_cast<long long>(raw);
+            } else if (entry.is_number_integer()) {
+                value = entry.get<long long>();
+            } else {
                 throw InputContractError(
-                    "prediction node options.tile entries must be integers");
+                    "prediction node options.tile entries must be integers "
+                    "in the 32-bit range");
             }
-            parsed.tile[i] = (*tile_it)[i].get<int>();
+            if (value < std::numeric_limits<int>::min()
+                || value > std::numeric_limits<int>::max()) {
+                throw InputContractError(
+                    "prediction node options.tile entries must be integers "
+                    "in the 32-bit range");
+            }
+            parsed.tile[i] = static_cast<int>(value);
         }
     }
-    parsed.overlap = static_cast<int>(get_integer(options, "overlap", -1));
-    parsed.batch = static_cast<int>(get_integer(options, "batch", 0));
+    parsed.overlap = get_int32(options, "overlap", -1);
+    parsed.batch = get_int32(options, "batch", 0);
     parsed.prefer_gpu = get_bool(options, "prefer_gpu", false);
     parsed.keep_probmap = get_bool(options, "keep_probmap", true);
     parsed.write_mask = get_bool(options, "write_mask", false);
     parsed.write_outputs = get_bool(options, "write_outputs", true);
+    parsed.resume = get_bool(options, "resume", true);
     parsed.output_dir = get_string(options, "output_dir", "");
     parsed.work_root = get_string(options, "work_root", "");
     parsed.output_budget_bytes = get_integer(
@@ -243,6 +304,10 @@ Json PredictionTaskRuntime::to_json() const {
 Json PredictionTaskRuntime::validate() {
     Json errors = Json::array();
     update_snapshot(PredictionTaskStatus::Running, 0, 0, 0.0, "validating");
+    std::string runtime_error;
+    if (!onnx_runtime_available(&runtime_error)) {
+        errors.push_back("ONNX Runtime is unavailable: " + runtime_error);
+    }
     try {
         LoadedModelPackage package = load_model_package(
             request_.manifest_path, request_.package_options);
@@ -264,6 +329,11 @@ Json PredictionTaskRuntime::validate() {
                 "package does not declare them and the run did not supply "
                 "them");
         }
+        if (request_.input.crs.empty()) {
+            errors.push_back(
+                "prediction result requires an input CRS for "
+                "CLASSIFIED_RASTER publication (set input.crs)");
+        }
         update_snapshot(errors.empty() ? PredictionTaskStatus::Validated
                                        : PredictionTaskStatus::Failed,
                         0, 0, 0.0,
@@ -276,6 +346,17 @@ Json PredictionTaskRuntime::validate() {
 }
 
 PredictionTaskResult PredictionTaskRuntime::execute() {
+    if (running_.exchange(true)) {
+        throw InputContractError(
+            "PredictionTaskRuntime::execute is not reentrant; a task runs "
+            "one execute() at a time (request_cancel() only affects the "
+            "running execute)");
+    }
+    struct RunningGuard {
+        std::atomic<bool>* flag;
+        ~RunningGuard() { flag->store(false); }
+    } guard{&running_};
+
     const Clock::time_point start = Clock::now();
     cancel_requested_.store(false);
     update_snapshot(PredictionTaskStatus::Running, 0, 0, 0.0,
@@ -292,7 +373,16 @@ PredictionTaskResult PredictionTaskRuntime::execute() {
                                      request_.package_options);
 
         PredictionPipelineOptions options = request_.options;
-        options.cancel = [this]() { return cancel_requested_.load(); };
+        // validate() and execute() must agree: forward the caller's grid
+        // contract (require_crs/require_geotransform/max_voxels).
+        options.input_options = request_.input_options;
+        // Compose the caller's cancel seam (e.g. a workflow CancelToken
+        // bridged by PredictionWorkflowNode::run) with request_cancel().
+        const auto user_cancel = options.cancel;
+        options.cancel = [this, user_cancel]() {
+            if (cancel_requested_.load()) return true;
+            return user_cancel ? user_cancel() : false;
+        };
         const auto user_progress = options.progress;
         options.progress = [this, user_progress](
                                double ratio, const std::string& message) {
@@ -445,7 +535,7 @@ Json PredictionWorkflowNode::descriptor() {
     out["display_name"] = "Tiled ONNX facies prediction";
     out["family"] = "prediction";
     out["deterministic"] = true;
-    out["cpu_only"] = true;
+    out["device"] = "cpu_primary_gpu_best_effort";
     Json inputs = Json::array();
     inputs.push_back(Json{{"name", "manifest_path"}, {"type", "path"}});
     inputs.push_back(
@@ -463,9 +553,34 @@ Json PredictionWorkflowNode::descriptor() {
         Json{{"name", "overlap"}, {"type", "integer"}, {"required", false}});
     parameters.push_back(
         Json{{"name", "batch"}, {"type", "integer"}, {"required", false}});
+    parameters.push_back(
+        Json{{"name", "resume"}, {"type", "boolean"}, {"required", false}});
+    parameters.push_back(Json{{"name", "prefer_gpu"},
+                              {"type", "boolean"},
+                              {"required", false}});
+    parameters.push_back(Json{{"name", "keep_probmap"},
+                              {"type", "boolean"},
+                              {"required", false}});
+    parameters.push_back(
+        Json{{"name", "write_mask"}, {"type", "boolean"}, {"required", false}});
+    parameters.push_back(Json{{"name", "write_outputs"},
+                              {"type", "boolean"},
+                              {"required", false}});
     parameters.push_back(Json{{"name", "output_dir"},
                               {"type", "path"},
                               {"required", true}});
+    parameters.push_back(Json{{"name", "work_root"},
+                              {"type", "path"},
+                              {"required", false}});
+    parameters.push_back(Json{{"name", "output_budget_bytes"},
+                              {"type", "integer"},
+                              {"required", false}});
+    parameters.push_back(Json{{"name", "input_options"},
+                              {"type", "object"},
+                              {"required", false}});
+    parameters.push_back(Json{{"name", "package_options"},
+                              {"type", "object"},
+                              {"required", false}});
     out["parameters"] = std::move(parameters);
     out["error_classes"] = Json::array(
         {"InputContractError", "ModelPackageError", "TiledInferenceError"});
@@ -473,10 +588,61 @@ Json PredictionWorkflowNode::descriptor() {
 }
 
 Json PredictionWorkflowNode::run(const Json& parameters) {
-    PredictionTaskRuntime runtime(
-        prediction_task_request_from_json(parameters));
+    return run(parameters, std::function<bool()>(),
+               std::function<void(double, const std::string&)>());
+}
+
+Json PredictionWorkflowNode::run(
+    const Json& parameters, std::function<bool()> cancel,
+    std::function<void(double, const std::string&)> progress) {
+    PredictionTaskRequest request =
+        prediction_task_request_from_json(parameters);
+    if (cancel) request.options.cancel = std::move(cancel);
+    if (progress) request.options.progress = std::move(progress);
+    PredictionTaskRuntime runtime(std::move(request));
     const PredictionTaskResult result = runtime.execute();
     return result.result_descriptor;
+}
+
+Json PredictionWorkflowNode::run_observed(const Json& parameters,
+                                          IPredictionTaskSink* sink,
+                                          std::function<bool()> cancel) {
+    PredictionTaskRequest request =
+        prediction_task_request_from_json(parameters);
+    const std::string manifest_path = request.manifest_path;
+    if (cancel) request.options.cancel = std::move(cancel);
+    if (sink != nullptr) {
+        request.options.progress = [sink](double ratio,
+                                          const std::string& message) {
+            Json progress = Json::object();
+            progress["status"] = "running";
+            progress["ratio"] = ratio;
+            progress["message"] = message;
+            sink->on_progress(progress);
+        };
+    }
+    PredictionTaskRuntime runtime(std::move(request));
+    if (sink != nullptr) {
+        Json started = Json::object();
+        started["status"] = "running";
+        started["manifest_path"] = manifest_path;
+        sink->on_started(started);
+    }
+    try {
+        const PredictionTaskResult result = runtime.execute();
+        if (sink != nullptr) {
+            notify_prediction_sink(result.result_descriptor, sink);
+        }
+        return result.result_descriptor;
+    } catch (const std::exception& exc) {
+        if (sink != nullptr) {
+            Json failure = Json::object();
+            failure["status"] = "failed";
+            failure["error"] = exc.what();
+            sink->on_failed(failure);
+        }
+        throw;
+    }
 }
 
 }  // namespace pwb::prediction

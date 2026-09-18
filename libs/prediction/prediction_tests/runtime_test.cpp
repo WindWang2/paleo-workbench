@@ -111,6 +111,26 @@ fs::path prepare_dir(const std::string& name) {
     return dir;
 }
 
+// Independent binary16 decoder (deliberately NOT the library helper): the
+// golden comparison must not be able to hide a bug in the code under test.
+float test_half_to_float(std::uint16_t bits) {
+    const int sign = (bits >> 15) & 1;
+    const int exponent = (bits >> 10) & 0x1f;
+    const int mantissa = bits & 0x3ff;
+    double value = 0.0;
+    if (exponent == 0) {
+        value = std::ldexp(static_cast<double>(mantissa), -24);
+    } else if (exponent == 31) {
+        if (mantissa != 0) return std::numeric_limits<float>::quiet_NaN();
+        return sign != 0 ? -std::numeric_limits<float>::infinity()
+                         : std::numeric_limits<float>::infinity();
+    } else {
+        value = std::ldexp(1.0 + static_cast<double>(mantissa) / 1024.0,
+                           exponent - 15);
+    }
+    return static_cast<float>(sign != 0 ? -value : value);
+}
+
 double fp16_ulp(double want) {
     const double value = std::abs(want);
     if (value == 0.0) return std::ldexp(1.0, -24);
@@ -264,30 +284,73 @@ void compare_classmap(const Json& expected, const std::vector<std::uint8_t>& got
               + " first=" + std::to_string(first));
 }
 
+std::size_t probmap_mismatches(const Json& expected,
+                               const std::vector<std::uint16_t>& got,
+                               double* worst) {
+    *worst = 0.0;
+    if (expected.size() != got.size()) return expected.size() + got.size() + 1;
+    std::size_t mismatches = 0;
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        const double want = static_cast<double>(test_half_to_float(
+            static_cast<std::uint16_t>(expected[i].get<int>())));
+        const double have =
+            static_cast<double>(test_half_to_float(got[i]));
+        if (!same_probability(have, want)) {
+            ++mismatches;
+            *worst = std::max(*worst, std::abs(have - want));
+        }
+    }
+    return mismatches;
+}
+
 void compare_probmap(const Json& expected,
                      const std::vector<std::uint16_t>& got,
                      const std::string& case_id) {
-    check(expected.size() == got.size(), case_id + ": probmap size");
-    if (expected.size() != got.size()) return;
-    std::size_t mismatches = 0;
     double worst = 0.0;
-    std::size_t first = 0;
-    for (std::size_t i = 0; i < got.size(); ++i) {
-        const double want = static_cast<double>(
-            detail::half_bits_to_float(
-                static_cast<std::uint16_t>(expected[i].get<int>())));
-        const double have =
-            static_cast<double>(detail::half_bits_to_float(got[i]));
-        if (!same_probability(have, want)) {
-            if (mismatches == 0) first = i;
-            ++mismatches;
-            worst = std::max(worst, std::abs(have - want));
-        }
-    }
+    const std::size_t mismatches = probmap_mismatches(expected, got, &worst);
     check(mismatches == 0,
           case_id + ": probmap mismatches=" + std::to_string(mismatches)
-              + " first=" + std::to_string(first) + " worst="
-              + std::to_string(worst));
+              + " worst=" + std::to_string(worst));
+}
+
+// Negative self-check: the comparator must actually reject a perturbed
+// probability map (otherwise every probmap comparison above is vacuous).
+void run_comparator_self_check(const Json& baseline) {
+    const Json& expected = baseline["expect"]["probmap_bits"];
+    std::vector<std::uint16_t> golden(expected.size());
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        golden[i] = static_cast<std::uint16_t>(expected[i].get<int>());
+    }
+    double worst = 0.0;
+    check(probmap_mismatches(expected, golden, &worst) == 0,
+          "comparator self-check: identical maps pass");
+    std::vector<std::uint16_t> perturbed = golden;
+    std::size_t index = 0;
+    while (index < perturbed.size()) {
+        const std::uint16_t bits = perturbed[index];
+        const int exponent = (bits >> 10) & 0x1f;
+        const double value =
+            static_cast<double>(test_half_to_float(bits));
+        if (exponent > 0 && exponent < 24 && value >= 0.25 && value <= 0.75) {
+            break;
+        }
+        ++index;
+    }
+    check(index < perturbed.size(), "comparator self-check: mutable sample");
+    if (index < perturbed.size()) {
+        // One exponent step: far beyond the 1-fp16-ulp tolerance, so the
+        // comparator must reject it.
+        perturbed[index] =
+            static_cast<std::uint16_t>(perturbed[index] ^ 0x0400);
+        check(probmap_mismatches(expected, perturbed, &worst) >= 1,
+              "comparator self-check: a perturbed probability is rejected");
+    }
+    check(test_half_to_float(0x3800) == 0.5f, "half decoder: 0.5");
+    check(test_half_to_float(0x3C00) == 1.0f, "half decoder: 1.0");
+    check(test_half_to_float(0x0001) == std::ldexp(1.0f, -24),
+          "half decoder: minimum subnormal");
+    check(std::isinf(test_half_to_float(0x7C00)), "half decoder: +inf");
+    check(std::isnan(test_half_to_float(0x7E00)), "half decoder: NaN");
 }
 
 void run_success_case(const Json& test_case) {
@@ -326,8 +389,17 @@ void run_success_case(const Json& test_case) {
 
     const std::vector<std::uint8_t> classmap = read_bytes(result.paths.classmap);
     compare_classmap(expect["classmap"], classmap, case_id);
-    const std::vector<std::uint16_t> probmap = read_u16(result.paths.probmap);
-    compare_probmap(expect["probmap_bits"], probmap, case_id);
+    std::vector<std::uint16_t> probmap;
+    if (expect.value("probmap_absent", false)) {
+        check(result.paths.probmap.empty(), case_id + ": probmap not persisted");
+        check(!fs::exists(output_dir / "probmap.raw"),
+              case_id + ": no probmap.raw on disk");
+        check(!result.summary["probmap_stored"].get<bool>(),
+              case_id + ": summary reports probmap_stored=false");
+    } else {
+        probmap = read_u16(result.paths.probmap);
+        compare_probmap(expect["probmap_bits"], probmap, case_id);
+    }
 
     // Artifact integrity: the descriptor's digests describe the bytes on disk.
     const Json& descriptor = result.output_descriptor;
@@ -337,9 +409,12 @@ void run_success_case(const Json& test_case) {
     check(descriptor["classmap_sha256"].get<std::string>()
               == pwb::domain::Sha256::of_file(result.paths.classmap).value_or(""),
           case_id + ": descriptor classmap sha256");
-    check(descriptor["probmap_sha256"].get<std::string>()
-              == pwb::domain::Sha256::of_file(result.paths.probmap).value_or(""),
-          case_id + ": descriptor probmap sha256");
+    if (!result.paths.probmap.empty()) {
+        check(descriptor["probmap_sha256"].get<std::string>()
+                  == pwb::domain::Sha256::of_file(result.paths.probmap)
+                         .value_or(""),
+              case_id + ": descriptor probmap sha256");
+    }
 
     // Spatial envelope must satisfy the frozen spatial contract.
     const Json spatial_errors =
@@ -514,6 +589,101 @@ void run_deterministic_repeat_case(const Json& test_case) {
     compare_classmap(expect["classmap"], first_classmap, case_id);
 }
 
+void run_resume_fingerprint_case(const Json& baseline,
+                                 const Json& other_case) {
+    const std::string case_id = "resume_fingerprint";
+    const fs::path output_dir = prepare_dir(case_id);
+    const PredictionTaskResult first = PredictionTaskRuntime(
+        prediction_task_request_from_json(
+            task_parameters(baseline, output_dir, true))).execute();
+    check(first.succeeded(), case_id + ": first run");
+    const std::vector<std::uint8_t> baseline_classmap =
+        read_bytes(first.paths.classmap);
+
+    // Same fingerprint: every tile is skipped and the seeded buffers are
+    // returned unchanged.
+    const PredictionTaskResult second = PredictionTaskRuntime(
+        prediction_task_request_from_json(
+            task_parameters(baseline, output_dir, true))).execute();
+    check(second.succeeded(), case_id + ": resumed run");
+    check(second.stats.tiles_done == 0,
+          case_id + ": all tiles skipped on an identical rerun");
+    check(read_bytes(second.paths.classmap) == baseline_classmap,
+          case_id + ": seeded classmap identical");
+
+    // Different model/classes/tile: the fingerprint must reject the stale
+    // buffers, clear the markers and recompute every tile.
+    const PredictionTaskResult other = PredictionTaskRuntime(
+        prediction_task_request_from_json(
+            task_parameters(other_case, output_dir, true))).execute();
+    check(other.succeeded(), case_id + ": different-input run");
+    check(other.stats.tiles_done == other.stats.tiles_total,
+          case_id + ": stale markers cleared on a fingerprint mismatch");
+    compare_classmap(other_case["expect"]["classmap"],
+                     read_bytes(other.paths.classmap), case_id);
+}
+
+void run_dtype_input_case() {
+    const std::string case_id = "dtype_input_conversion";
+    const std::vector<float> values = {0.5f,  -0.25f, 0.75f, 0.125f,
+                                       0.0625f, -0.5f, 1.0f,  0.0f};
+    for (const char* model : {"identity_f16in.onnx", "identity_f64in.onnx"}) {
+        OnnxRuntimeSession session = OnnxRuntimeSession::open_file(
+            (fixture_root() / "models" / model).string());
+        SessionBatch batch;
+        batch.n = 1;
+        batch.d = 2;
+        batch.h = 2;
+        batch.w = 2;
+        batch.data = values;
+        const SessionOutput out = session.run(batch);
+        check(out.ndim == 5 && out.n == 1 && out.c == 1 && out.d == 2
+                  && out.h == 2 && out.w == 2,
+              std::string(case_id) + ": " + model + " output shape");
+        check(out.data.size() == values.size(),
+              std::string(case_id) + ": " + model + " output size");
+        for (std::size_t i = 0;
+             i < out.data.size() && i < values.size(); ++i) {
+            check(std::abs(out.data[i] - values[i]) <= 1e-6f,
+                  std::string(case_id) + ": " + model + " value "
+                      + std::to_string(i));
+        }
+    }
+}
+
+class RecordingSink final : public IPredictionTaskSink {
+public:
+    int started = 0;
+    int progress = 0;
+    int finished = 0;
+    int failed = 0;
+
+    void on_started(const Json&) override { ++started; }
+    void on_progress(const Json&) override { ++progress; }
+    void on_finished(const Json&) override { ++finished; }
+    void on_failed(const Json&) override { ++failed; }
+};
+
+void run_workflow_sink_case(const Json& test_case) {
+    const std::string case_id = "workflow_sink";
+    RecordingSink sink;
+    const Json result = PredictionWorkflowNode::run_observed(
+        task_parameters(test_case, prepare_dir(case_id), true), &sink);
+    check(result["status"] == "succeeded", case_id + ": status");
+    check(sink.started == 1, case_id + ": started notified");
+    check(sink.progress >= 1, case_id + ": progress notified");
+    check(sink.finished == 1 && sink.failed == 0,
+          case_id + ": finished notified");
+
+    // The workflow-engine overload bridges a CancelToken: a pre-cancelled
+    // run returns the cancelled descriptor instead of throwing.
+    const Json cancelled = PredictionWorkflowNode::run(
+        task_parameters(test_case, prepare_dir(case_id + "-cancel"), true),
+        []() { return true; }, {});
+    check(cancelled["status"] == "cancelled",
+          case_id + ": cancel overload");
+}
+
 void run_workflow_node_case(const Json& test_case,
                             const std::string& output_dir) {
     const std::string case_id = "workflow_node_descriptor";
@@ -546,6 +716,15 @@ void run_workflow_node_case(const Json& test_case,
     check(layers.size() == 2, case_id + ": classmap + probmap layers");
     check(layers.size() >= 1 && layers[0].kind == "classmap",
           case_id + ": first layer is the class map");
+    if (!layers.empty()) {
+        check(layers[0].shape == Tile3{10, 12, 9},
+              case_id + ": layer shape");
+        check(layers[0].dtype == "uint8", case_id + ": layer dtype");
+        check(layers[0].has_geotransform
+                  && layers[0].geotransform[1] == 25.0,
+              case_id + ": layer geotransform");
+        check(layers[0].crs == "EPSG:32650", case_id + ": layer crs");
+    }
     check(prediction_map_layers(Json::object()).empty(),
           case_id + ": no layers for an empty descriptor");
 }
@@ -589,9 +768,26 @@ int main() {
 
     // C++-only closures over the baseline oracle case.
     const Json& baseline = fixture["cases"][0];
+    run_comparator_self_check(baseline);
     run_cancel_and_resume_case(baseline);
+    // Nodata runs persist a validity mask; cancellation + resume must seed
+    // both the fused buffers and the mask so the resumed summary matches.
+    const Json* nodata_case = nullptr;
+    for (const Json& test_case : fixture["cases"]) {
+        if (test_case["id"].get<std::string>() == "run_nodata_mask") {
+            nodata_case = &test_case;
+            break;
+        }
+    }
+    check(nodata_case != nullptr, "fixture case run_nodata_mask present");
+    if (nodata_case != nullptr) {
+        run_cancel_and_resume_case(*nodata_case);
+    }
     run_deterministic_repeat_case(baseline);
+    run_resume_fingerprint_case(baseline, fixture["cases"][1]);
+    run_dtype_input_case();
     run_workflow_node_case(baseline, prepare_dir("workflow-node").string());
+    run_workflow_sink_case(baseline);
 
     std::cout << (g_failures == 0 ? "OK" : "FAILED") << ": " << g_checks
               << " checks, " << g_failures << " failures\n";

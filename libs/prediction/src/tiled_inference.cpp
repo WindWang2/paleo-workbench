@@ -25,6 +25,13 @@
 #include <typeinfo>
 
 #if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -114,6 +121,28 @@ float detail::half_bits_to_float(std::uint16_t bits) {
 namespace {
 
 namespace fs = std::filesystem;
+
+// UTF-8 -> native path: std::filesystem::path(std::string) interprets bytes
+// as the ANSI code page on Windows, so JSON-carried UTF-8 model paths would
+// be mis-decoded there.
+fs::path utf8_path(const std::string& text) {
+    if (text.empty()) return fs::path();
+#if defined(_WIN32)
+    const int size = ::MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+        static_cast<int>(text.size()), nullptr, 0);
+    if (size > 0) {
+        std::wstring wide(static_cast<std::size_t>(size), L'\0');
+        ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+                              static_cast<int>(text.size()), wide.data(),
+                              size);
+        return fs::path(wide);
+    }
+    // Not valid UTF-8: fall back to the native narrow interpretation rather
+    // than dropping the path.
+#endif
+    return fs::path(text);
+}
 
 std::string tile_key(const std::array<std::size_t, 3>& t) {
     char buffer[64];
@@ -473,7 +502,7 @@ void validate_softmax_budget(int batch, int classes, const Tile3& tile) {
 }
 
 ModelBinding check_onnx_model_file(const std::string& model_path) {
-    const fs::path path(model_path);
+    const fs::path path = utf8_path(model_path);
     std::error_code ec;
     const fs::file_status status = fs::status(path, ec);
     const bool regular = !ec && status.type() == fs::file_type::regular;
@@ -523,7 +552,7 @@ TiledRunStats run_tiled_inference(const std::string& model_path,
                                   const TiledRunOptions& options,
                                   std::span<std::uint8_t> classmap,
                                   std::span<std::uint16_t> probmap) {
-    if (!fs::is_regular_file(fs::path(model_path))) {
+    if (!fs::is_regular_file(utf8_path(model_path))) {
         throw TiledInferenceError("ONNX model not found: " + model_path);
     }
     (void)check_onnx_model_file(model_path);
@@ -568,7 +597,7 @@ TiledRunStats run_tiled_inference(const std::string& model_path,
             + std::to_string(probmap.size()) + ")");
     }
 
-    const fs::path work(options.work_root);
+    const fs::path work = utf8_path(options.work_root);
     fs::create_directories(work);
     const fs::path done_dir = work / "tiles.done";
     fs::create_directories(done_dir);

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <set>
 #include <string>
 #include <utility>
@@ -64,6 +65,17 @@ bool as_finite_double(const Json& value, double* out) {
 // int(value) semantics for metadata integers: integral numbers and numeric
 // strings, Python's int() accepted set (no booleans, no fractions).
 bool as_int(const Json& value, long long* out) {
+    // nlohmann treats unsigned integers as is_number_integer() too, and
+    // get<long long>() would wrap; handle them before the signed branch.
+    if (value.is_number_unsigned()) {
+        const unsigned long long number = value.get<unsigned long long>();
+        if (number > static_cast<unsigned long long>(
+                         std::numeric_limits<long long>::max())) {
+            return false;
+        }
+        *out = static_cast<long long>(number);
+        return true;
+    }
     if (value.is_number_integer()) {
         *out = value.get<long long>();
         return true;
@@ -94,7 +106,8 @@ bool as_int(const Json& value, long long* out) {
 
 int positive_int_field(const Json& value, const std::string& path) {
     long long number = 0;
-    if (!as_int(value, &number) || number <= 0) {
+    if (!as_int(value, &number) || number <= 0 ||
+        number > std::numeric_limits<int>::max()) {
         field_error(path, "a positive integer");
     }
     return static_cast<int>(number);
@@ -301,7 +314,8 @@ PredictionModelMetadata parse_prediction_metadata(const Json& metadata,
                                                        "overlap");
     if (!overlap_value.is_null()) {
         long long number = 0;
-        if (!as_int(overlap_value, &number) || number < 0) {
+        if (!as_int(overlap_value, &number) || number < 0 ||
+            number > std::numeric_limits<int>::max()) {
             field_error("overlap", "a non-negative integer");
         }
         out.overlap = static_cast<int>(number);
@@ -310,7 +324,8 @@ PredictionModelMetadata parse_prediction_metadata(const Json& metadata,
     const Json& batch_value = metadata_number_source(block, metadata, "batch");
     if (!batch_value.is_null()) {
         long long number = 0;
-        if (!as_int(batch_value, &number) || number < 1) {
+        if (!as_int(batch_value, &number) || number < 1 ||
+            number > std::numeric_limits<int>::max()) {
             field_error("batch", "an integer >= 1");
         }
         out.batch = static_cast<int>(number);
@@ -389,7 +404,7 @@ LoadedModelPackage load_model_package(const std::string& manifest_path,
                                       const ModelPackageLoadOptions& options) {
     LoadedModelPackage out;
     out.manifest_path = manifest_path;
-    const fs::path manifest_fs(manifest_path);
+    const fs::path manifest_fs = detail::path_from_utf8(manifest_path);
     std::error_code ec;
     if (!fs::is_regular_file(manifest_fs, ec)) {
         throw ModelPackageError("Manifest not found: " + manifest_path);
@@ -409,11 +424,11 @@ LoadedModelPackage load_model_package(const std::string& manifest_path,
     }
 
     if (!out.manifest.artifact.empty()) {
-        fs::path artifact(out.manifest.artifact);
+        fs::path artifact = detail::path_from_utf8(out.manifest.artifact);
         if (options.enforce_within_root) {
             try {
                 artifact = pwb::interchange::ensure_within_root(
-                    fs::path(out.package_root), artifact);
+                    detail::path_from_utf8(out.package_root), artifact);
             } catch (const std::exception& exc) {
                 throw ModelPackageError(
                     "artifact path escapes the model package root: "

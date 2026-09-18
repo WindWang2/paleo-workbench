@@ -11,10 +11,14 @@
 // - a missing runtime library raises TiledInferenceError with the searched
 //   locations (never silently degrades to a stub);
 // - tensor/type/shape contract violations fail before any voxel is scored;
-// - device_mode() reports "cpu" unless a CUDA provider really created the
-//   session. The CPU closure is the deliverable; requesting GPU fails fast
-//   instead of pretending (the Python provider falls back, but a native
-//   silent fallback would misreport provenance).
+// - device_mode() reports "cuda" only when the CUDA provider really created
+//   the session. prefer_gpu is best-effort (mirrors the Python provider):
+//   a failed provider append/session falls back to CPU and the provenance
+//   reports device_mode="cpu" + gpu_requested=true — never a fake GPU.
+//
+// The library is loaded once per process: a later OnnxSessionOptions::
+// library_path is ignored after the first successful load (documented
+// first-wins discovery).
 
 #pragma once
 
@@ -39,10 +43,12 @@ struct OnnxSessionOptions {
     // Explicit runtime library path. Empty -> PALEO_ONNXRUNTIME_LIBRARY,
     // then the CMake-baked hint, then the platform default search.
     std::string library_path;
-    // GPU is a documented future seam. true fails fast (honest) instead of
-    // silently running CPU under a GPU-labelled provenance envelope.
+    // Best-effort GPU: CUDA is appended when requested and any failure
+    // falls back to CPU with an honest device_mode report.
     bool prefer_gpu = false;
-    // 0 = onnxruntime default. The resource gate sets these explicitly.
+    // 0 = onnxruntime default. The build-time resource gate does not set
+    // these; the Python provider's runtime governor allowance is not wired
+    // into the native path (bounded memory comes from the tile budget).
     int intra_op_threads = 0;
     int inter_op_threads = 0;
 };

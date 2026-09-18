@@ -69,15 +69,22 @@ private:
 
 // Preprocessing decorator applied between the reader and the session:
 // quality mask (1 = valid), nodata replacement (sentinel -> 0.0) and the
-// package's per-band/scalar normalization. It also owns the validity mask
-// the summary and the optional mask output consume, so nodata voxels are
-// marked exactly once regardless of tile overlap.
+// package's per-band/scalar normalization (applied after the replacement,
+// matching the oracle reference). It also owns the validity mask the
+// summary and the mask output consume, so nodata voxels are marked exactly
+// once regardless of tile overlap.
+//
+// Lifetime/threading: the base reader is borrowed and must outlive this
+// decorator; read_voxel_window() mutates the validity mask and is not
+// thread-safe. A resumed run seeds `seed_valid_mask` (a previous run's
+// persisted mask) so skipped tiles keep their nodata accounting.
 class PreprocessedVolumeReader final : public VolumeReader {
 public:
     PreprocessedVolumeReader(const VolumeReader* base, const Tile3& shape,
                              std::optional<double> nodata,
                              const BandNormalization& normalization,
-                             std::vector<std::uint8_t> quality_mask);
+                             std::vector<std::uint8_t> quality_mask,
+                             std::vector<std::uint8_t> seed_valid_mask = {});
 
     Tile3 shape() const override;
     std::vector<float> read_voxel_window(int s0, int e0, int s1, int e1,
@@ -140,18 +147,33 @@ struct PredictionPipelineOptions {
     int overlap = -1;
     int batch = 0;
     bool prefer_gpu = false;
+    // Persist probmap.raw. The probability map is always fused in memory
+    // (the summary needs it); this flag only controls the artifact.
     bool keep_probmap = true;
+    // The validity mask (nodata/quality) is always persisted when tracking
+    // is active because resume needs it; this flag additionally persists an
+    // all-valid mask for runs without tracking.
     bool write_mask = false;
     bool write_outputs = true;
-    std::string output_dir;   // required when write_outputs
-    std::string work_root;    // empty -> <output_dir>/inference.work
+    std::string output_dir;  // required when write_outputs or no work_root
+    std::string work_root;   // empty -> <output_dir>/inference.work
     long long output_budget_bytes = kDefaultOutputBudgetBytes;
-    // Reuse <output_dir>/{classmap,probmap}.raw (a complete result or a
-    // cancelled run's partial dump) and keep the per-tile markers so a
-    // resumed execute only computes missing tiles. When no persisted
-    // buffers exist, stale markers are cleared instead of skipping tiles
-    // into a zero-filled map.
+    // Reuse <output_dir>/{classmap,probmap,valid_mask}.raw (a complete
+    // result or a cancelled run's partial dump) and keep the per-tile
+    // markers so a resumed execute only computes missing tiles. Seeding
+    // requires the persisted run fingerprint (model/source digests, shape,
+    // classes, tile/overlap, normalization, nodata) to match exactly;
+    // otherwise stale markers are cleared instead of returning old
+    // predictions under new provenance.
     bool resume = true;
+    // Grid contract enforcement forwarded from the task request
+    // (require_crs/require_geotransform/require_source_uri/max_voxels). The
+    // pipeline intersects max_voxels with the output-buffer budget.
+    InputValidationOptions input_options;
+    // Content identity of an in-memory volume (sha256 hex). A file-backed
+    // input is hashed automatically; an in-memory input without this
+    // override has no resume identity and never seeds from a previous run.
+    std::string source_sha256;
     std::function<bool()> cancel;
     std::function<void(double, const std::string&)> progress;
 };
@@ -179,6 +201,11 @@ struct PredictionSummaryOptions {
 // confidences are counted, never folded into the stats. `classes` fixes the
 // class-count array length; out-of-range class ids land in
 // `out_of_range_class_count` instead of silently growing the array.
+//
+// Coverage convention: every voxel (nodata included) counts toward
+// voxels_total/class_counts/confidence stats; nodata voxels are additionally
+// reported via `voxels_nodata` (the sentinel was replaced by 0.0 before
+// inference, so they are scored like any other voxel).
 Json compute_prediction_summary(std::span<const std::uint8_t> classmap,
                                 std::span<const std::uint16_t> probmap,
                                 int classes,

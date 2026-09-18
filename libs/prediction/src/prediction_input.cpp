@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "runtime_io.hpp"
+
 namespace pwb::prediction {
 namespace {
 
@@ -179,18 +181,24 @@ Json validate_prediction_input(const SeismicGridDescriptor& input,
     }
     if (!input.uri.empty()) {
         std::error_code ec;
-        const fs::path path(input.uri);
+        const fs::path path = detail::path_from_utf8(input.uri);
         if (!fs::is_regular_file(path, ec)) {
             push_error(&errors, "input volume not found: " + input.uri);
         } else if (voxels > 0 && element_bytes > 0) {
-            const auto expected = voxels * element_bytes;
+            // Checked multiply: a wrapped expectation would mis-state the
+            // size error for absurd shapes.
+            const bool overflow =
+                voxels > std::numeric_limits<unsigned long long>::max()
+                             / element_bytes;
+            const auto expected =
+                overflow ? 0 : voxels * element_bytes;
             const auto actual =
                 static_cast<unsigned long long>(fs::file_size(path, ec));
             if (ec) {
                 push_error(&errors,
                            "input volume " + input.uri
                                + " could not be sized");
-            } else if (actual != expected) {
+            } else if (overflow || actual != expected) {
                 push_error(
                     &errors,
                     "input volume " + input.uri + " is "
@@ -206,7 +214,7 @@ Json validate_prediction_input(const SeismicGridDescriptor& input,
 
     if (!input.quality_mask_uri.empty()) {
         std::error_code ec;
-        const fs::path mask(input.quality_mask_uri);
+        const fs::path mask = detail::path_from_utf8(input.quality_mask_uri);
         if (!fs::is_regular_file(mask, ec)) {
             push_error(&errors,
                        "quality mask not found: " + input.quality_mask_uri);
