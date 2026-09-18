@@ -340,7 +340,9 @@ int main(int argc, char** argv) {
                       QStringLiteral("print the platform diagnostics report")});
     parser.process(app);
 
-    // --version / --diagnostics answer before any QGIS init (cheap, no GUI).
+    // --version answers before any QGIS init (cheap, no GUI);
+    // --diagnostics intentionally runs after QgisRuntime::acquire() below —
+    // its probe needs the real provider/CRS stack.
     if (parser.isSet(QStringLiteral("version"))) {
         std::printf("%s\n",
                     pwb::platform_services::version_line().c_str());

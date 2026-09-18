@@ -22,7 +22,8 @@
 namespace pwb::platform_services {
 namespace {
 
-// CRS probes mirror health.py: identity + projected systems must resolve,
+// CRS probes mirror health.py's domain set {4326, 4490, 4214, 4610} plus
+// 3857 (the transform-probe target): identity systems must resolve,
 // validate and round-trip their authority code.
 std::vector<std::pair<std::string, bool>> run_crs_probes() {
     std::vector<std::pair<std::string, bool>> probes;
@@ -31,8 +32,10 @@ std::vector<std::pair<std::string, bool>> run_crs_probes() {
         const char* wkt_hint;
     } cases[] = {
         {"EPSG:4326", "WGS 84"},
-        {"EPSG:3857", "Pseudo-Mercator"},
         {"EPSG:4490", "CGCS2000"},
+        {"EPSG:4214", "Beijing 1954"},
+        {"EPSG:4610", "CGCS2000 / lon-lat"},
+        {"EPSG:3857", "Pseudo-Mercator"},
     };
     for (const auto& probe : cases) {
         QgsCoordinateReferenceSystem crs(probe.authid);
@@ -71,7 +74,6 @@ nlohmann::ordered_json RuntimeProbe::to_json() const {
         {"prefix_path", prefix_path},
         {"proj_available", proj_available},
         {"proj_version", proj_version},
-        {"proj_db_path", proj_db_path},
         {"provider_count", provider_count},
         {"providers", provider_list},
         {"crs_probes", probes},

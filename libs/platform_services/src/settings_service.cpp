@@ -10,33 +10,20 @@
 namespace pwb::platform_services {
 namespace {
 
-// clamp_geometry_to_screens (panel_float_controller.py): when the saved
-// monitor is gone the window must come back onto a visible screen — same
-// multi-monitor contract as the floating panels.
+// Resolves the live screen set and delegates (panel_float_controller.py
+// clamp_geometry_to_screens contract).
 QRect clamp_geometry_to_screens(const QRect& geometry) {
-    QRect available;
     const QList<QScreen*> screens = QGuiApplication::screens();
+    if (screens.isEmpty()) return geometry;
+    QList<QRect> available;
     for (const QScreen* screen : screens) {
-        if (screen->geometry().intersects(geometry)) {
-            return geometry;  // still visible where it was: untouched
-        }
-        available = available.isNull()
-                        ? screen->availableGeometry()
-                        : available.united(screen->availableGeometry());
+        available.append(screen->availableGeometry());
     }
-    if (available.isNull()) return geometry;
-    QRect clamped = geometry;
-    if (clamped.width() > available.width()) {
-        clamped.setWidth(available.width());
-    }
-    if (clamped.height() > available.height()) {
-        clamped.setHeight(available.height());
-    }
-    clamped.moveLeft(std::clamp(clamped.x(), available.left(),
-                                available.right() - clamped.width() + 1));
-    clamped.moveTop(std::clamp(clamped.y(), available.top(),
-                               available.bottom() - clamped.height() + 1));
-    return clamped;
+    const QScreen* primary = QGuiApplication::primaryScreen();
+    const QRect primary_rect =
+        primary != nullptr ? primary->availableGeometry()
+                           : available.first();
+    return clamp_to_desktop(geometry, available, primary_rect);
 }
 
 QStringList load_string_list(QSettings& settings, const QString& key,
@@ -52,6 +39,9 @@ QStringList load_string_list(QSettings& settings, const QString& key,
         const QString single = stored.toString();
         if (!single.isEmpty()) items.append(single);
     }
+    // DELIBERATE DIFFERENCE vs command_registry.py: stored empty strings
+    // are dropped instead of kept (only reachable via a hand-edited store;
+    // both push paths already reject empties).
     QStringList cleaned;
     for (const QString& item : items) {
         if (!item.isEmpty()) cleaned.append(item);
@@ -73,6 +63,25 @@ void push_string_list(QSettings& settings, const QString& key, int cap,
 }
 
 }  // namespace
+
+QRect clamp_to_desktop(const QRect& geometry, const QList<QRect>& screens,
+                       const QRect& primary) {
+    if (screens.isEmpty()) return geometry;
+    QRect visible = screens.first();
+    for (const QRect& screen : screens) {
+        visible = visible.united(screen);
+    }
+    if (!geometry.intersects(visible)) {
+        const QSize size = geometry.size().boundedTo(primary.size());
+        return QRect(primary.x() + 24, primary.y() + 24, size.width(),
+                     size.height());
+    }
+    const int x = std::min(std::max(geometry.x(), visible.left()),
+                           std::max(visible.left(), visible.right() - 60));
+    const int y = std::min(std::max(geometry.y(), visible.top()),
+                           std::max(visible.top(), visible.bottom() - 60));
+    return QRect(x, y, geometry.width(), geometry.height());
+}
 
 QString settings_organization() { return QStringLiteral("PaleoWorkbench"); }
 QString settings_application() { return QStringLiteral("Workstation"); }
@@ -151,7 +160,10 @@ void migrate_legacy_settings() {
 void save_window_layout(QSettings& settings, QMainWindow& window,
                         bool force) {
     if (!window.isVisible() && !force) return;
-    settings.setValue(LayoutKeys::inspector_hidden, false);
+    // NOTE: layout/inspector_user_hidden is intentionally NOT written —
+    // the native shell has no inspector; a constant false would clobber a
+    // Python-written true on the shared store (Python's restore self-heals
+    // a missing flag, shell.py _restore_inspector_visibility).
     settings.setValue(LayoutKeys::state_version, kLayoutStateVersion);
     settings.setValue(LayoutKeys::window_state, window.saveState());
     if (window.isVisible()) {

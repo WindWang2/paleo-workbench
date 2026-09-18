@@ -59,9 +59,10 @@ public:
     void apply(QWidget& shell);
 
 signals:
-    // (theme, density) Python-vocabulary strings, emitted after every change
-    // and after load_persisted restored a value — the app re-applies QSS and
-    // resyncs checkable menu state on it.
+    // (theme, density) Python-vocabulary strings, emitted after every
+    // CHANGED value (set_theme/set_density/toggle_density; no-change values
+    // emit nothing, and load_persisted never emits) — the shell re-applies
+    // its sheet and resyncs the checkable menu state on it.
     void theme_changed(const QString& theme, const QString& density);
 
 private:

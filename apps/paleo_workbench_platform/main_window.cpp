@@ -25,7 +25,6 @@
 #include <QVBoxLayout>
 
 #include <pwb/platform_services/diagnostics_report.hpp>
-#include <pwb/platform_services/resource_locator.hpp>
 #include <pwb/platform_services/settings_service.hpp>
 #include <pwb/platform_services/theme_service.hpp>
 
@@ -1378,12 +1377,10 @@ void MainWindow::refreshRecentProjects() {
 
 void MainWindow::openRecentProject(const QString& project_file) {
 #ifdef PWB_WITH_DATA_INTEGRATION
+    // openProject's success path already heads the MRU and refreshes the
+    // menu — here only the failure needs surfacing.
     const QString error = openProject(project_file);
-    if (error.isEmpty()) {
-        pwb::platform_services::push_recent_project(*services_settings_,
-                                                    project_file);
-        refreshRecentProjects();
-    } else {
+    if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("打开工程失败"), error);
     }
 #else

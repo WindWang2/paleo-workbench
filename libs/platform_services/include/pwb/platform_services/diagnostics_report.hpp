@@ -22,7 +22,6 @@ struct RuntimeProbe {
     std::string prefix_path;
     bool proj_available = false;
     std::string proj_version;
-    std::string proj_db_path;
     int provider_count = 0;
     std::vector<std::string> providers;
     std::vector<std::pair<std::string, bool>> crs_probes;

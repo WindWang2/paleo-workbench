@@ -119,6 +119,13 @@ void check_theme_tokens_parity() {
     PWB_CHECK(theme_from_string("High-Contrast") == ThemeMode::Light);
     PWB_CHECK(theme_from_normalized("HIGH-CONTRAST") ==
               ThemeMode::HighContrast);
+    PWB_CHECK(theme_from_normalized("High_Contrast") ==
+              ThemeMode::HighContrast);
+    PWB_CHECK(theme_from_normalized("high_contrast") ==
+              ThemeMode::HighContrast);
+    // Python palette_for lowercases and dash-normalizes but does NOT trim:
+    // a padded value misses the key table and falls back to light.
+    PWB_CHECK(theme_from_normalized("dark ") == ThemeMode::Light);
     PWB_CHECK(theme_from_normalized("midnight") == ThemeMode::Light);
     PWB_CHECK(density_from_string("compact") == Density::Compact);
     PWB_CHECK(density_from_string("ultra") == Density::Comfortable);
@@ -162,6 +169,11 @@ void check_theme_service() {
         PWB_CHECK(emissions.size() == 4);
         PWB_CHECK(emissions.at(0) == "dark" && emissions.at(1) == "comfortable");
         PWB_CHECK(emissions.at(2) == "dark" && emissions.at(3) == "compact");
+        // No-change setters neither emit nor re-persist (Python manager
+        // parity): repeated clicks must not re-polish the app.
+        theme.set_theme(ThemeMode::Dark);
+        theme.set_density(Density::Compact);
+        PWB_CHECK(emissions.size() == 4);
         // Persistence landed in the bound store under the Python keys.
         PWB_CHECK(store.value("ui/theme").toString() == "dark");
         PWB_CHECK(store.value("ui/density").toString() == "compact");
@@ -245,6 +257,37 @@ void check_legacy_migration() {
 
     // Idempotent: a second run moves nothing.
     PWB_CHECK(!migrate_legacy_layout_settings(target));
+
+    // Partial stores: each legacy identity alone, plus missing inspector
+    // flag — each must migrate independently and stay idempotent.
+    {
+        QSettings shell_only("PaleoWorkbench", "WorkstationV3");
+        shell_only.setValue("layout/windowState.v4",
+                            QByteArray("v3-only-blob"));
+        shell_only.sync();
+        QSettings fresh_target(dir.path() + "/t2.ini", QSettings::IniFormat);
+        PWB_CHECK(migrate_legacy_layout_settings(fresh_target));
+        PWB_CHECK(fresh_target.contains("layout/window_state"));
+        PWB_CHECK(fresh_target.value("layout/state_version").toInt()
+                  == kLayoutStateVersion);
+        PWB_CHECK(
+            !fresh_target.contains("layout/inspector_user_hidden"));
+        QSettings panels("PaleoWorkbench", "paleo-workbench");
+        PWB_CHECK(!panels.contains("panel_layout/mapping:layer_tree/floating")
+                  || panels.allKeys().isEmpty());
+        PWB_CHECK(!migrate_legacy_layout_settings(fresh_target));
+    }
+    {
+        QSettings panels_only("PaleoWorkbench", "paleo-workbench");
+        panels_only.setValue("panel_layout/preview/docked_sizes", "1,2,3");
+        panels_only.sync();
+        QSettings fresh_target(dir.path() + "/t3.ini", QSettings::IniFormat);
+        PWB_CHECK(migrate_legacy_layout_settings(fresh_target));
+        PWB_CHECK(fresh_target.value("panel_layout/preview/docked_sizes")
+                      .toString() == "1,2,3");
+        PWB_CHECK(!fresh_target.contains("layout/window_state"));
+        PWB_CHECK(!migrate_legacy_layout_settings(fresh_target));
+    }
 }
 
 void check_window_layout_fence() {
@@ -299,6 +342,46 @@ void check_window_layout_fence() {
     }
 }
 
+void check_clamp_to_desktop() {
+    const QRect primary(0, 0, 1920, 1040);   // available geometry
+    const QRect secondary(1920, 0, 1920, 1080);
+    const QList<QRect> dual = {primary, secondary};
+
+    // Fully offscreen -> primary, +24px margin, size bounded to primary.
+    const QRect gone(5000, 5000, 2000, 1000);
+    const QRect clamped = clamp_to_desktop(gone, dual, primary);
+    PWB_CHECK(clamped.x() == 24 && clamped.y() == 24);
+    PWB_CHECK(clamped.width() == 1920 && clamped.height() == 1000);
+
+    // Crossing the desktop's right edge: size preserved, position pulled
+    // back so at least 60px stays visible. Qt QRect::right() is inclusive:
+    // union right = 3839 -> clamp at 3839-60 = 3779.
+    const QRect partial(3800, 100, 800, 600);
+    const QRect pulled = clamp_to_desktop(partial, dual, primary);
+    PWB_CHECK(pulled.width() == 800 && pulled.height() == 600);
+    PWB_CHECK(pulled.x() == 3779);
+    // Inside the union but left of the secondary screen: untouched — the
+    // Python contract clamps against the desktop union, not per screen.
+    const QRect spanning(1800, 100, 800, 600);
+    PWB_CHECK(clamp_to_desktop(spanning, dual, primary) == spanning);
+
+    // Fully inside: untouched.
+    const QRect inside(100, 100, 400, 300);
+    PWB_CHECK(clamp_to_desktop(inside, dual, primary) == inside);
+
+    // Straddling the top edge: y pulled to 0 (>=60px visible rule keeps it
+    // at max(y, top) = 0, then min(0, bottom-60) = 0).
+    const QRect straddle(100, -200, 400, 300);
+    const QList<QRect> single = {primary};
+    PWB_CHECK(clamp_to_desktop(straddle, single, primary).y() == 0);
+    // Fully above the screen: reset to primary +24px margin.
+    const QRect above(100, -500, 400, 300);
+    const QRect reset = clamp_to_desktop(above, single, primary);
+    PWB_CHECK(reset.x() == 24 && reset.y() == 24);
+    // No screens: unchanged (no monitor info -> no opinion).
+    PWB_CHECK(clamp_to_desktop(inside, {}, primary) == inside);
+}
+
 void check_recent_lists() {
     QTemporaryDir dir;
     QSettings store(dir.path() + "/recent.ini", QSettings::IniFormat);
@@ -308,10 +391,20 @@ void check_recent_lists() {
         push_recent_command(store, QStringLiteral("cmd-%1").arg(i));
     }
     PWB_CHECK(load_recent_commands(store).size() == kRecentCommandsMax);
+    // Load-side coercion: an over-cap stored list trims from the tail.
+    QStringList overcap;
+    for (int i = 0; i < 15; ++i) overcap << QStringLiteral("old-%1").arg(i);
+    store.setValue("ui/recent_commands", overcap);
+    const QStringList trimmed = load_recent_commands(store);
+    PWB_CHECK(trimmed.size() == kRecentCommandsMax);
+    PWB_CHECK(trimmed.first() == "old-0");
+    PWB_CHECK(!trimmed.contains("old-14"));
     push_recent_command(store, "cmd-11");  // moves to front, no duplicate
     const QStringList commands = load_recent_commands(store);
     PWB_CHECK(commands.first() == "cmd-11");
     PWB_CHECK(commands.count("cmd-11") == 1);
+    push_recent_command(store, "");  // empty id is a no-op
+    PWB_CHECK(load_recent_commands(store).first() == "cmd-11");
 
     // Single stored string coerces to a one-element list.
     store.setValue("ui/recent_commands", "solo");
@@ -324,6 +417,13 @@ void check_recent_lists() {
     PWB_CHECK(load_recent_projects(store).size() == kRecentProjectsMax);
     push_recent_project(store, "/proj-12");
     PWB_CHECK(load_recent_projects(store).first() == "/proj-12");
+    // Mid-list project moves to the front without duplicating.
+    const int before = load_recent_projects(store).size();
+    push_recent_project(store, "/proj-5");
+    const QStringList projects_moved = load_recent_projects(store);
+    PWB_CHECK(projects_moved.first() == "/proj-5");
+    PWB_CHECK(projects_moved.count("/proj-5") == 1);
+    PWB_CHECK(projects_moved.size() == before);
     clear_recent_projects(store);
     PWB_CHECK(load_recent_projects(store).isEmpty());
     push_recent_project(store, "");  // empty push is a no-op
@@ -449,6 +549,7 @@ int main(int argc, char** argv) {
     check_theme_service();
     check_legacy_migration();
     check_window_layout_fence();
+    check_clamp_to_desktop();
     check_recent_lists();
     check_diagnostics();
     check_session_policy();

@@ -17,10 +17,20 @@
 // (PaleoWorkbench, Workstation).
 
 #include <QStringList>
+#include <QList>
+#include <QRect>
 #include <QSettings>
 #include <QMainWindow>
 
 namespace pwb::platform_services {
+
+// clamp_geometry_to_screens core (panel_float_controller.py 1:1): screens
+// are the available geometries, primary the primary screen's available
+// rect. Offscreen entirely -> primary +24px margin, size bounded; partial
+// overlap -> position clamped so >=60px stays visible; size preserved.
+QRect clamp_to_desktop(const QRect& geometry, const QList<QRect>& screens,
+                       const QRect& primary);
+
 
 // Storage identity (ui/layout_persistence.py SETTINGS_ORG / SETTINGS_APP).
 QString settings_organization();  // "PaleoWorkbench"

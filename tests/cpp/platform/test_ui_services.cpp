@@ -6,6 +6,7 @@
 // the developer's real config is never touched.
 
 #include <cstdio>
+#include <memory>
 
 #include <QAction>
 #include <QApplication>
@@ -45,7 +46,9 @@ int main(int argc, char** argv) {
     const QString store_path = dir.path() + "/services.ini";
 
     {
-        MainWindow window(nullptr, new QSettings(store_path, QSettings::IniFormat));
+        auto injected = std::make_unique<QSettings>(store_path,
+                                                    QSettings::IniFormat);
+        MainWindow window(nullptr, injected.get());
 
         // -- menus exist --------------------------------------------------
         QMenu* settings_menu = find_menu(window.menuBar(), "设置(S)");
@@ -116,8 +119,9 @@ int main(int argc, char** argv) {
     {
         // Restore path: a fresh window with the same store comes back dark
         // (theme persisted through the same store).
-        MainWindow restored(nullptr,
-                            new QSettings(store_path, QSettings::IniFormat));
+        auto injected2 = std::make_unique<QSettings>(store_path,
+                                                     QSettings::IniFormat);
+        MainWindow restored(nullptr, injected2.get());
         PWB_CHECK(!restored.styleSheet().isEmpty());
         PWB_CHECK(restored.styleSheet().contains("#2dd4bf"));
         restored.close();
