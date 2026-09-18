@@ -9,7 +9,11 @@ add_library(pwb_mapping_kernel STATIC
     src/extract.cpp
     src/crs_policy.cpp
     src/class_grid.cpp
-    src/sample_normalization.cpp)
+    src/sample_normalization.cpp
+    # BEGIN CONV-03
+    src/layer_products.cpp
+    # END CONV-03
+)
 add_library(Pwb::MappingKernel ALIAS pwb_mapping_kernel)
 target_include_directories(pwb_mapping_kernel PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
