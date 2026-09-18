@@ -81,3 +81,16 @@ add_test(NAME mapping_kernel.layer_products
          COMMAND mapping_kernel.layer_products)
 set_tests_properties(mapping_kernel.layer_products PROPERTIES TIMEOUT 120)
 # END CONV-03
+# BEGIN CONV-05
+if(PWB_BUILD_CONV_05)
+    add_executable(mapping_kernel.constrained_idw constrained_idw_test.cpp)
+    target_compile_features(mapping_kernel.constrained_idw PRIVATE cxx_std_20)
+    target_link_libraries(mapping_kernel.constrained_idw PRIVATE
+        Pwb::MappingKernel Pwb::Domain)
+    target_compile_definitions(mapping_kernel.constrained_idw PRIVATE
+        PWB_CIDW_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/constrained_idw_oracle.json")
+    add_test(NAME mapping_kernel.constrained_idw
+             COMMAND mapping_kernel.constrained_idw)
+    set_tests_properties(mapping_kernel.constrained_idw PROPERTIES TIMEOUT 600)
+endif()
+# END CONV-05

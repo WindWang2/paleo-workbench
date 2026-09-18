@@ -49,3 +49,10 @@ if(PWB_BUILD_CONV_04)
     endif()
 endif()
 # END CONV-04
+# BEGIN CONV-05
+# constrained-IDW (Haiyou) surface kernel, frozen against the Python oracle
+# (tools/oracle/generate_constrained_idw_fixtures.py).
+if(PWB_BUILD_CONV_05)
+    target_sources(pwb_mapping_kernel PRIVATE src/constrained_idw.cpp)
+endif()
+# END CONV-05
