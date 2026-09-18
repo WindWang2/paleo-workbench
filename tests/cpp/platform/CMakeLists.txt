@@ -127,3 +127,30 @@ set_tests_properties(platform.qgis_smoke_app PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
     TIMEOUT 300)
+
+# BEGIN CONV-01
+# Swarm task 01: map-pipeline E2E — the REAL MainWindow runs the frozen
+# mapping_kernel chain (well points -> IDW -> contours + facies polygons)
+# and the two product layers appear in the layer tree with oracle-checked
+# feature payloads. Only registered when the slice is enabled (the block
+# compiles main_window.cpp like the other MainWindow tests).
+if(PWB_BUILD_CONV_01)
+    add_executable(platform_map_pipeline map_pipeline_test.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+    set_target_properties(platform_map_pipeline PROPERTIES AUTOMOC ON)
+    target_compile_features(platform_map_pipeline PRIVATE cxx_std_20)
+    target_include_directories(platform_map_pipeline PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+    target_link_libraries(platform_map_pipeline PRIVATE
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data)
+    target_compile_definitions(platform_map_pipeline PRIVATE
+        PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        PWB_WITH_CONV_01=1)
+    add_test(NAME platform.map_pipeline COMMAND platform_map_pipeline)
+    set_tests_properties(platform.map_pipeline PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+endif()
+# END CONV-01

@@ -125,6 +125,18 @@ public:
     pwb::application::AlgorithmRunner::Outcome attributeOutcome(
         const std::string& request_id);
 #endif
+#ifdef PWB_WITH_CONV_01
+    // CONV-01 地质因子图: runs the frozen mapping_kernel pipeline over the
+    // well records of point layer `layer_id` (or the reserved id
+    // "builtin.sample_wells": the frozen 8-well porosity fixture) and adds
+    // the contour + facies memory layers to the canvas. Returns "" on
+    // success; a non-empty QString is the error text (the kernel's
+    // validate() wording verbatim on the failure branch).
+    QString runGeologicalFactorMap(const QString& layer_id,
+                                   const std::string& factor_name,
+                                   const std::string& method, int grid_n,
+                                   const std::string& target_horizon);
+#endif
     enum class DirtyCloseDecision { Proceed, SaveAndClose, DiscardAndClose };
 
     // Re-projects policy verdicts onto the actions; public because map
@@ -172,6 +184,9 @@ private:
         const std::map<std::string, pwb::tool_policy::ToolAvailability>& availability);
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     void runAttributeDialog();
+#endif
+#ifdef PWB_WITH_CONV_01
+    void geologicalFactorMapDialog();
 #endif
 
     std::unique_ptr<pwb::application::ProjectSession> session_;

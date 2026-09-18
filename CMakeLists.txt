@@ -80,6 +80,27 @@ if(PWB_BUILD_MAPPING_KERNEL)
     add_subdirectory(libs/mapping_kernel)
 endif()
 
+# BEGIN CONV-01
+# Swarm task 01: wire the frozen mapping_kernel into the platform's
+# 地质因子图 action (well points -> interpolate -> contour/facies
+# QgsVectorLayers). Requires the kernel (numeric core) and the platform
+# closure (MainWindow wiring); fail closed instead of building a stub.
+option(PWB_BUILD_CONV_01
+    "Build the CONV-01 map-pipeline slice (MainWindow geological factor map)" OFF)
+if(PWB_BUILD_CONV_01)
+    if(NOT PWB_BUILD_MAPPING_KERNEL)
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_01=ON requires PWB_BUILD_MAPPING_KERNEL=ON "
+            "(the frozen kernel is the numeric core of the slice)")
+    endif()
+    if(NOT PWB_BUILD_PLATFORM)
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_01=ON requires PWB_BUILD_PLATFORM=ON "
+            "(the slice wires MainWindow + QgsVectorLayer)")
+    endif()
+endif()
+# END CONV-01
+
 # The integrated configuration is all-or-nothing by definition: the app's
 # real link closure must contain B and C, and the integration tests prove
 # it (no substitutes). Fail loudly when the combo is impossible.
