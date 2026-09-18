@@ -217,6 +217,21 @@ if(PWB_BUILD_CONV_11)
     endif()
 endif()
 # END CONV-11
+# BEGIN CONV-22 — geomodel contract/writer cores (M8): domain object
+# contracts, QC ladder + export gate, the five export writers + read-back
+# validators + provenance sidecars, advisor rules, lithology tables, and the
+# pure builders constructors — inside libs/geomodel, frozen against the
+# Python oracle. The slice needs the geomodel kernels (CONV-12) and the
+# ingest XML/py_compat cores (CONV-19); turning it on implies both (and the
+# test needs Pwb::Domain, i.e. PWB_BUILD_DATA=ON). Declared BEFORE the
+# CONV-12 subdirectory is added.
+option(PWB_BUILD_CONV_22
+    "Build the CONV-22 geomodel contract/export cores (implies CONV-12/19)" OFF)
+if(PWB_BUILD_CONV_22)
+    set(PWB_BUILD_CONV_12 ON)
+    set(PWB_BUILD_CONV_19 ON)
+endif()
+# END CONV-22
 # BEGIN CONV-12
 # geomodel geometric kernels (CONV-12): faithful C++ port of the Python viz
 # formation-volume stack — paleo_workbench/viz/formation_volume.py,
