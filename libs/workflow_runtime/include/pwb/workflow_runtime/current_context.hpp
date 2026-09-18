@@ -66,7 +66,7 @@ public:
         return current_by_asset_;
     }
     [[nodiscard]] const std::vector<std::string>& selected_version_ids() const {
-        return selected_version_ids_;
+        return selected_order_;
     }
     [[nodiscard]] const std::map<std::string, std::string>& labels() const {
         return labels_;

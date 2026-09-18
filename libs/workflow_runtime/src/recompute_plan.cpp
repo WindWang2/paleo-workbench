@@ -115,7 +115,8 @@ std::string step_label(const DataRunRef& run,
             name = label_it->second;
         }
         if (name.empty()) {
-            const DataVersionRef* ver = freshness.graph().version(first);
+            const pwb::workflow_graph::DataVersionRef* ver =
+                freshness.graph().version(first);
             if (ver != nullptr) name = ver->name;
         }
         if (!name.empty()) {

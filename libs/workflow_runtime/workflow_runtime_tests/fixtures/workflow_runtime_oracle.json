@@ -393,17 +393,17 @@
       },
       "expect": {
         "result": {
-          "state": "STALE",
+          "state": "FRESH",
           "subject_kind": "run",
           "subject_id": "run_f1",
           "reasons": [
             {
-              "type": "UPSTREAM_VERSION_CHANGED",
-              "upstream_version_id": "ver_h1_v1",
-              "current_version_id": "ver_h1_v2",
+              "type": "OK",
+              "upstream_version_id": null,
+              "current_version_id": null,
               "operation": "factor_map",
-              "detail": "run used ver_h1_v1; current is ver_h1_v2",
-              "asset_id": "asset_h1"
+              "detail": "",
+              "asset_id": null
             }
           ],
           "operation": "factor_map",
@@ -680,7 +680,7 @@
               "version_id": "ver_f1_v1",
               "name": "F1",
               "producing_run_id": "run_f1",
-              "path": "/tmp/payload_f1.json",
+              "path": "/nonexistent/payload_f1.json",
               "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "payload_json": "changed!"
             }
@@ -714,16 +714,16 @@
       },
       "expect": {
         "result": {
-          "state": "FRESH",
+          "state": "MISSING",
           "subject_kind": "run",
           "subject_id": "run_f1",
           "reasons": [
             {
-              "type": "OK",
+              "type": "MISSING_PAYLOAD",
               "upstream_version_id": null,
               "current_version_id": null,
               "operation": "factor_map",
-              "detail": "",
+              "detail": "output ver_f1_v1 payload missing",
               "asset_id": null
             }
           ],
@@ -735,7 +735,7 @@
           "input_version_ids": [
             "ver_h1_v1"
           ],
-          "integrity": null
+          "integrity": "missing"
         }
       }
     },
@@ -1236,16 +1236,16 @@
       },
       "expect": {
         "result": {
-          "state": "FRESH",
+          "state": "STALE",
           "subject_kind": "run",
           "subject_id": "run_f1",
           "reasons": [
             {
-              "type": "OK",
-              "upstream_version_id": null,
+              "type": "MISSING_LINEAGE",
+              "upstream_version_id": "ver_h1_v1",
               "current_version_id": null,
               "operation": "factor_map",
-              "detail": "",
+              "detail": "input ver_h1_v1 withdrawn/trashed from catalog",
               "asset_id": null
             }
           ],
@@ -4742,16 +4742,17 @@
       },
       "expect": {
         "result": {
-          "stopped_early": false,
+          "stopped_early": true,
           "messages": [
             "reuse 单因素图 (task_f1)",
-            "ok 古地理图编绘 M1"
+            "no handler for operation 'map_compile'; mark failed"
           ],
           "completed": [
-            "run_f1_old",
+            "run_f1_old"
+          ],
+          "failed": [
             "run_m1"
           ],
-          "failed": [],
           "skipped": []
         }
       }
@@ -8843,7 +8844,8 @@
             ]
           }
         ],
-        "ref": "constraints:g1:ver_000002"
+        "ref": "constraints:g1:ver_000002",
+        "with_catalog": true
       },
       "expect": {
         "result": {
@@ -9021,7 +9023,8 @@
             ]
           }
         ],
-        "ref": "constraints:g1:ver_000001"
+        "ref": "constraints:g1:ver_000001",
+        "with_catalog": true
       },
       "expect": {
         "result": {

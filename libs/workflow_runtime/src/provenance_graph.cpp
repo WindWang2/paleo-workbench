@@ -32,7 +32,7 @@ Json make_node(const std::string& node_id, const std::string& kind,
 }  // namespace
 
 Json build_product_lifecycle_graph(
-    const Json& project, const CatalogRepository* repository,
+    const Json& project, CatalogRepository* repository,
     const std::optional<std::string>& product_id) {
     Json nodes = Json::array();
     Json edges = Json::array();

@@ -34,8 +34,10 @@ using pwb::domain::Json;
 // their factor tasks' grid versions, the constraint state each task pinned;
 // the catalog contributes fusion run lineage (repository == nullptr skips
 // that section without a gap, mirroring Python catalog_service=None).
+// (Non-const pointer: the CatalogRepository interface is not const-correct
+// yet — a read-only catalog adapter branch will fix that upstream.)
 Json build_product_lifecycle_graph(const Json& project,
-                                   const CatalogRepository* repository,
+                                   CatalogRepository* repository,
                                    const std::optional<std::string>& product_id =
                                        std::nullopt);
 

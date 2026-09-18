@@ -76,6 +76,19 @@ struct RegisteredAssetVersion {
     std::string version_id;
 };
 
+// Callback bundle mirroring the Python catalog access points freshness
+// uses beyond the graph snapshot (resolve_version / verify_integrity /
+// payload existence). All callbacks are best-effort: nullopt means
+// unknown. Optional members may be empty (no callback installed).
+struct CatalogSeam {
+    std::function<std::optional<VersionRecord>(const std::string& id)>
+        resolve_version;
+    // "verified" | "modified" | ... — Python IntegrityStatus value string.
+    std::function<std::optional<std::string>(const std::string& id)>
+        verify_integrity;
+    std::function<bool(const std::string& path)> file_exists;
+};
+
 class CatalogRepository {
 public:
     virtual ~CatalogRepository() = default;
@@ -122,6 +135,12 @@ public:
 
     virtual void update_run_status(const std::string& run_id,
                                    const std::string& status) = 0;
+
+    // Wire a produced version into its run's output_version_ids (the
+    // Python catalog does this inside register_*; the seam keeps it
+    // explicit so the provenance publish path stays visible).
+    virtual void attach_run_output(const std::string& run_id,
+                                   const std::string& version_id) = 0;
 
     // Project selection pointer (asset tip).
     virtual void set_current_version(const std::string& asset_id,
@@ -188,7 +207,7 @@ public:
     // this inside register_result_asset / register_version; the runtime
     // keeps it explicit so the provenance publish path is visible).
     void attach_run_output(const std::string& run_id,
-                           const std::string& version_id);
+                           const std::string& version_id) override;
 
     [[nodiscard]] const std::vector<VersionRecord>& versions() const {
         return versions_;

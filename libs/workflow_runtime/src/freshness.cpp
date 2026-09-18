@@ -455,8 +455,9 @@ FreshnessReport FreshnessService::evaluate_run_impl(
         if (!mismatch) continue;
         reasons.push_back(FreshnessReason{
             FreshnessReasonType::UpstreamVersionChanged, in_vid,
-            mismatch->first, run.operation, mismatch->second,
-            "run used " + in_vid + "; current is " + mismatch->first});
+            mismatch->first, run.operation,
+            "run used " + in_vid + "; current is " + mismatch->first,
+            mismatch->second});
     }
 
     // Transitive: an input produced by a stale run makes this run stale.

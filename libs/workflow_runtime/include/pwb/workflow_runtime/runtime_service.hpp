@@ -52,10 +52,18 @@ public:
         unsigned max_concurrency = 1;
         // Asset type stamped on workflow output versions.
         std::string output_asset_type = "workflow_output";
+
+        // User-provided (not defaulted): Config{} must be usable as a
+        // default argument inside this enclosing class (GCC NSDMI rule).
+        Config() {}
+        Config(unsigned concurrency, std::string asset_type)
+            : max_concurrency(concurrency),
+              output_asset_type(std::move(asset_type)) {}
     };
 
     WorkflowRuntimeService(CatalogRepository& repository,
-                           NodeAdapterRegistry& adapters, Config config = {});
+                           NodeAdapterRegistry& adapters,
+                           Config config = Config{});
 
     // ---- workflow spec lifecycle ----
     // Fail-closed static validation (unknown op / graph problems). Empty
@@ -71,6 +79,8 @@ public:
         // Progress callback (node_id, state).
         std::function<void(const std::string&, const std::string&)>
             on_progress;
+
+        ExecuteOptions() {}
     };
 
     // Execute a spec through the adapter registry on the calling thread,
@@ -79,7 +89,7 @@ public:
     // or cancel lands the run "failed"/"cancelled". Returns the engine's
     // WorkflowRun.
     WorkflowRun execute(const WorkflowSpec& spec, const CancelToken& token,
-                        const ExecuteOptions& options = {});
+                        const ExecuteOptions& options = ExecuteOptions{});
 
     // ---- lineage lifecycle (single source of truth: the repository) ----
     // Rebuild the catalog lineage graph + version records from the store.

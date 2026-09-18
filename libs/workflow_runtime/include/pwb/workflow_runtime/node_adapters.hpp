@@ -29,6 +29,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -110,7 +111,7 @@ public:
 
 private:
     const unsigned max_concurrent_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable slot_cv_;
     std::condition_variable cancel_cv_;
     unsigned in_flight_ = 0;

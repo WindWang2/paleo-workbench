@@ -6,6 +6,9 @@
 #include <pwb/workflow_engine/ops.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <initializer_list>
+#include <utility>
 
 namespace pwb::workflow_runtime {
 

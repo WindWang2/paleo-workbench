@@ -73,11 +73,18 @@ Json canonical_line(const Json& line) {
     return payload;
 }
 
-// _canonical_group_payload — lines sorted by line_id.
+// _canonical_group_payload — lines sorted by line_id. Lines missing
+// target_horizon inherit the group's (the Python document model
+// materializes every line with its group's horizon; Json views may omit
+// it — normalize before canonicalizing).
 Json canonical_group_payload(const Json& group) {
+    const std::string group_horizon = pycompat::str_scalar(
+        pycompat::dict_get(group, "target_horizon", Json("")));
     std::vector<Json> lines;
-    for (const auto& line :
-         pycompat::dict_get(group, "lines", Json::array())) {
+    for (auto line : pycompat::dict_get(group, "lines", Json::array())) {
+        if (line.is_object() && !line.contains("target_horizon")) {
+            line["target_horizon"] = group_horizon;
+        }
         lines.push_back(canonical_line(line));
     }
     std::sort(lines.begin(), lines.end(),
@@ -190,8 +197,9 @@ std::pair<std::string, int> constraint_group_content_hash(const Json& group) {
     }
     Json lines_arr = Json::array();
     for (auto& line : content_lines) lines_arr.push_back(std::move(line));
+    const int content_line_count = static_cast<int>(lines_arr.size());
     content["lines"] = std::move(lines_arr);
-    return {payload_hash(content), static_cast<int>(lines_arr.size())};
+    return {payload_hash(content), content_line_count};
 }
 
 ConstraintCommitReport commit_constraint_group(CatalogRepository& repository,

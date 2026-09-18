@@ -27,6 +27,7 @@
 #include <pwb/workflow_runtime/staleness.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -79,12 +80,16 @@ void report_mismatch(const std::string& id, const Json& got,
     ++failures;
 }
 
-void compare(const std::string& id, const Json& got, const Json& expect) {
+void compare(const std::string& id, const Json& got_in, const Json& expect) {
     if (expect.contains("raise")) {
         // No fixture case currently raises; kept for parity completeness.
-        report_mismatch(id + " [expected raise]", got, expect);
+        report_mismatch(id + " [expected raise]", got_in, expect);
         return;
     }
+    // The frozen expectations went through Python's JSON serialization;
+    // normalize the computed side the same way (int/unsigned and float
+    // spellings collapse exactly like Python's json round-trip).
+    const Json got = Json::parse(got_in.dump());
     if (!equals(got, expect.at("result"))) {
         report_mismatch(id, got, expect.at("result"));
     }
@@ -99,9 +104,29 @@ struct ServiceBundle {
     FreshnessService::VersionLookup versions;
     CurrentProjectVersionContext context{};
 
-    FreshnessService service() && = delete;
     FreshnessService make_service(bool check_integrity) {
-        return FreshnessService(graph, context, versions, {}, check_integrity);
+        // Seam parity with the generator's FakeCatalog: integrity re-hashes
+        // the recorded payload against the checksum; payload existence is
+        // the real filesystem (fixture paths are hermetically absent).
+        pwb::workflow_runtime::CatalogSeam seam;
+        seam.verify_integrity =
+            [this](const std::string& id) -> std::optional<std::string> {
+                const auto it = versions.find(id);
+                if (it == versions.end() || it->second.checksum.empty() ||
+                    it->second.payload_json.empty()) {
+                    return std::nullopt;
+                }
+                return pwb::domain::Sha256::of_bytes(
+                           it->second.payload_json) == it->second.checksum
+                           ? std::optional<std::string>("verified")
+                           : std::optional<std::string>("modified");
+            };
+        seam.file_exists = [](const std::string& path) {
+            std::error_code ec;
+            return !path.empty() && std::filesystem::exists(path, ec);
+        };
+        return FreshnessService(graph, context, versions, seam,
+                                check_integrity);
     }
 };
 
@@ -242,13 +267,7 @@ public:
     JsonCatalogStub(Json runs, Json versions)
         : runs_json_(std::move(runs)), versions_json_(std::move(versions)) {}
 
-    std::vector<AssetRecord> list_assets() override {
-        std::vector<AssetRecord> out;
-        for (const auto& r : runs_json_) {
-            (void)r;
-        }
-        return out;
-    }
+    std::vector<AssetRecord> list_assets() override { return {}; }
     std::optional<AssetRecord> resolve_asset(const std::string&) override {
         return std::nullopt;
     }
@@ -306,6 +325,9 @@ public:
     }
     void update_run_status(const std::string&, const std::string&) override {
         throw std::logic_error("stub: update_run_status");
+    }
+    void attach_run_output(const std::string&, const std::string&) override {
+        throw std::logic_error("stub: attach_run_output");
     }
     void set_current_version(const std::string&, const std::string&) override {
         throw std::logic_error("stub: set_current_version");
@@ -478,19 +500,12 @@ void dispatch_case(const std::string& id, const std::string& fn,
                 str_list(opts.contains("changed_version_ids")
                              ? opts.at("changed_version_ids")
                              : Json::array());
-            options.stale_only =
-                opts.value("stale_only", true);  // default true in Python
             if (opts.contains("stale_only")) {
                 options.stale_only = opts.at("stale_only").get<bool>();
             }
             options.operations =
                 str_list(opts.contains("operations") ? opts.at("operations")
                                                      : Json::array());
-            if (!options.operations.empty()) {
-                // Python: operations=[] is no filter only when None; an
-                // empty list also means no filter in the fixture cases.
-                if (options.operations.empty()) options.operations.clear();
-            }
         }
         if (input.contains("project") && input.at("project").is_object()) {
             options.project = input.at("project");

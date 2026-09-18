@@ -77,19 +77,6 @@ if(PWB_BUILD_CONV_24)
     set(PWB_BUILD_CONV_08 ON)
 endif()
 # END CONV-24
-# BEGIN CONV-25 — workflow dependency graph + evidence selectors (M7 tail):
-# the catalog-lineage DAG (dependency_graph.py) and the typed evidence
-# selector/resolution contract (interpretation/evidence.py) — in
-# libs/workflow_graph, frozen against the Python oracle. Needs Pwb::Domain
-# (ordered JSON); declared BEFORE the PWB_BUILD_DATA block so the implied
-# switch lands in time.
-option(PWB_BUILD_CONV_25
-    "Build the CONV-25 workflow graph + evidence kernel (libs/workflow_graph; implies PWB_BUILD_DATA)" OFF)
-if(PWB_BUILD_CONV_25)
-    set(PWB_BUILD_DATA ON)
-    add_subdirectory(libs/workflow_graph)
-endif()
-# END CONV-25
 # BEGIN CONV-26 — workflow runtime closure (M7 tail): freshness /
 # current-context, recompute planning + executor, constraint version
 # lifecycle, provenance graph, node adapter bridge + resource model, and
@@ -110,6 +97,19 @@ if(PWB_BUILD_CONV_26)
 endif()
 # END CONV-26
 
+# BEGIN CONV-25 — workflow dependency graph + evidence selectors (M7 tail):
+# the catalog-lineage DAG (dependency_graph.py) and the typed evidence
+# selector/resolution contract (interpretation/evidence.py) — in
+# libs/workflow_graph, frozen against the Python oracle. Needs Pwb::Domain
+# (ordered JSON); declared BEFORE the PWB_BUILD_DATA block so the implied
+# switch lands in time.
+option(PWB_BUILD_CONV_25
+    "Build the CONV-25 workflow graph + evidence kernel (libs/workflow_graph; implies PWB_BUILD_DATA)" OFF)
+if(PWB_BUILD_CONV_25)
+    set(PWB_BUILD_DATA ON)
+    add_subdirectory(libs/workflow_graph)
+endif()
+# END CONV-25
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
 # error, never a silent skip (protocol: independent validation).

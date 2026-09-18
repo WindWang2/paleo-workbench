@@ -124,17 +124,12 @@ class FakeCatalog:
 def build_service(spec: dict) -> FreshnessService:
     versions = [make_version(v) for v in spec["versions"]]
     runs = [make_run(r) for r in spec["runs"]]
-    graph_versions = [
-        DataVersionRef(
-            asset_id=v.asset_id,
-            version_id=v.version_id,
-            name=v.name,
-            producing_run_id=v.producing_run_id,
-        )
-        for v in versions
-    ]
+    # The REAL system's graph.versions records are the catalog's full
+    # DataVersionRef objects (checksum / trashed included — freshness reads
+    # them off the graph first). Model that faithfully: the graph holds the
+    # same rich records, not a stripped projection.
     graph = DependencyGraph.from_catalog(
-        types.SimpleNamespace(list_versions=lambda: graph_versions,
+        types.SimpleNamespace(list_versions=lambda: versions,
                               list_runs=lambda: runs)
     )
     ctx = build_ctx_from_spec(spec.get("context", {}))
@@ -277,7 +272,7 @@ INTEGRITY = {
         {"asset_id": "asset_h1", "version_id": "ver_h1_v1", "name": "H1",
          "producing_run_id": None},
         {"asset_id": "asset_f1", "version_id": "ver_f1_v1", "name": "F1",
-         "producing_run_id": "run_f1", "path": "/tmp/payload_f1.json",
+         "producing_run_id": "run_f1", "path": "/nonexistent/payload_f1.json",
          "checksum": "a" * 64, "payload_json": "changed!"},
     ],
     "runs": [
@@ -606,9 +601,11 @@ def executor_case(cid: str, handler_behavior: str, stop_on_failure=True,
         if handler_behavior.startswith("fail:"):
             raise RuntimeError(handler_behavior[5:])
 
-    executor = PlanExecutor(
-        {"factor_map": lambda step: None, "map_compile": handler},
-        generation=0, stop_on_failure=stop_on_failure)
+    handlers = {"factor_map": lambda step: None}
+    if handler_behavior:
+        handlers["map_compile"] = handler
+    executor = PlanExecutor(handlers,
+                            generation=0, stop_on_failure=stop_on_failure)
     if cancelled:
         executor.bump_generation()  # pre-cancel via generation guard
     result = executor.execute(plan)
@@ -997,7 +994,7 @@ def pinned_ref_case(cid: str, project_groups: list[dict], pinned: str):
         constraint_layers=[group_ns(g) for g in project_groups])
     add(cid, "constraint.resolve_ref",
         {"setup": SETUP_V2, "project_groups": project_groups,
-         "ref": f"constraints:g1:{version_id}"},
+         "ref": f"constraints:g1:{version_id}", "with_catalog": True},
         capture(lambda: cv.resolve_constraint_ref(
             project, cat, f"constraints:g1:{version_id}")))
 
