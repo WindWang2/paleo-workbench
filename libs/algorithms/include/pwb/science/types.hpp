@@ -117,6 +117,16 @@ struct ProducedVolume {
     std::string unit;
 };
 
+// Structured non-volume product attached to a result — e.g. a science service
+// result envelope serialized as JSON (CONV-28). Additive v1 extension: pure
+// volume algorithms leave this empty; consumers must treat an absent record
+// list as "no structured products", never as an error.
+struct ProducedRecord {
+    std::string name;         // stable product name, e.g. "envelope"
+    std::string media_type;   // e.g. "application/json"
+    std::string content_json; // serialized payload (UTF-8)
+};
+
 struct ProvenanceRecord {
     std::string algorithm_id;
     std::string algorithm_version;
@@ -134,6 +144,9 @@ struct AlgorithmResultV1 {
     std::vector<ProducedVolume> outputs;
     ProvenanceRecord provenance;
     std::vector<Diagnostic> diagnostics;
+    // Structured non-volume products (CONV-28, additive tail member — the
+    // default is empty so pre-existing aggregate initializers keep working).
+    std::vector<ProducedRecord> records;
 };
 
 // ---------------------------------------------------------------------------
