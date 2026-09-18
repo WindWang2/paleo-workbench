@@ -32,3 +32,26 @@
 3. `QgsRectangle::include` 在 QGIS 4.2 只收 `QgsPointXY`；矩形并集用 `combineExtentWith`。
 4. `composition_page_pixels` 的 falsy 强制（width_mm=0 → 1.0）意味着零尺寸元素经 JSON wire 后不可达——oracle 生成器必须先 `from_dict(to_dict(doc))` 再冻结，否则两侧输入形态不一致。
 5. nlohmann 把 JSON 整数 parse 成 unsigned，而内核常量是 signed——沿用 CONV-02 的 `py_int_json` 约定（非负 → uint64），oracle 才能语义相等。
+
+## 独立 review（Round A/B）结论与处置
+
+Review 结论：无 P0。逐项处置：
+1. (P1) py_truthy/py_float_or parity 修复最初只在工作区未提交 → 已连同两个
+   新冻结用例（grid_string_zero_spacing、grid_bad_spacing_no_main_map）一起
+   入库；43 spec 用例。
+2. (P2) mkdir(parents=True) 未移植 → 已移植到 export_composition_reported。
+3. (P2) float 错误消息缺 repr 引号 → py_repr（'abc'）。
+4. (P2) GRID 求值顺序（main-map 门先于 spacing 强制）→ 已对齐 + 用例冻结。
+5. (P3) 镜像字段 falsy 读作 "" → 已对齐；去掉 no-op 三元。
+6. (P3) str(float) 指数窗口/非有限值差异（nlohmann dump vs CPython repr）→
+   已知边界，元数据/预算冻结值全部一致；记录为已知限制。
+7. (P3) "1e999"/"0x10"/LC_NUMERIC 等 stod 边缘 → 已知边界（"1e999" 报
+   ValueError 风格消息而非 inf；记录）。
+8. (P3) executor payload 严格读取 → 已加固（absent/falsy → 0/false）。
+9. (P2) MapSession::layerIdsTopFirst 关闭会话空引用 → 加 guard。
+10. (P2) CompositionExportRequest::background 死字段 → 接通
+    （spec["page"]["background"]）。
+11. (P3) 委托层的解析顺序并集（镜像/doc-scan 之外的 id/name 兜底）行为等价
+    （mirror doc_id 与 QGIS id/name 键空间不相交）；3026 行交叉引用注释已
+    刷新。
+12. (P3) validate_layout 不可达分支 → 删除。

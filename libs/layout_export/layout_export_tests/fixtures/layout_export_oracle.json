@@ -3322,6 +3322,147 @@
       }
     },
     {
+      "id": "grid_string_zero_spacing",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_oracle",
+          "title": "oracle",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_map",
+              "element_type": "main_map",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {}
+            },
+            {
+              "id": "el_grid",
+              "element_type": "grid",
+              "x_mm": 8.0,
+              "y_mm": 12.0,
+              "width_mm": 180.0,
+              "height_mm": 150.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "spacing_mm": "0"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": [
+            {
+              "type": "map",
+              "key": "map",
+              "x": 8.0,
+              "y": 12.0,
+              "w": 180.0,
+              "h": 150.0,
+              "crs": "EPSG:4326",
+              "extent": [
+                0.0,
+                0.0,
+                10.0,
+                9.0
+              ],
+              "frame": true,
+              "grid": {
+                "enabled": true,
+                "interval_x": 0.0,
+                "interval_y": 0.0,
+                "annotation": true
+              }
+            }
+          ]
+        },
+        "warnings": []
+      }
+    },
+    {
+      "id": "grid_bad_spacing_no_main_map",
+      "expectation_source": "python-product",
+      "input": {
+        "composition": {
+          "id": "comp_nomap2",
+          "title": "n2",
+          "paper_size": "A4",
+          "orientation": "landscape",
+          "width_mm": 297.0,
+          "height_mm": 210.0,
+          "dpi": 300.0,
+          "schema_version": 2,
+          "elements": [
+            {
+              "id": "el_grid",
+              "element_type": "grid",
+              "x_mm": 0.0,
+              "y_mm": 0.0,
+              "width_mm": 10.0,
+              "height_mm": 10.0,
+              "z_index": 0,
+              "visible": true,
+              "locked": false,
+              "properties": {
+                "spacing_mm": "abc"
+              }
+            }
+          ],
+          "metadata": {}
+        },
+        "map_extent": [
+          0.0,
+          0.0,
+          10.0,
+          9.0
+        ],
+        "crs": "EPSG:4326",
+        "mirror_layers": null
+      },
+      "cpp_expected": {
+        "error": null,
+        "spec": {
+          "page": {
+            "width_mm": 297.0,
+            "height_mm": 210.0
+          },
+          "items": []
+        },
+        "warnings": [
+          "grid element el_grid has no main map to attach to; dropped"
+        ]
+      }
+    },
+    {
       "id": "zero_width_coerced_by_parse",
       "expectation_source": "python-product",
       "input": {

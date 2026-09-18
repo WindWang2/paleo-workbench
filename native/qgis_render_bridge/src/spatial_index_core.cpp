@@ -9,6 +9,7 @@
 // push_back 持引用。
 
 #include "spatial_index_core.hpp"
+#include <mutex>
 
 #include <algorithm>
 #include <cmath>

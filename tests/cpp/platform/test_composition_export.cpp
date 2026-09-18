@@ -15,6 +15,7 @@
 #include <exception>
 #include <filesystem>
 
+#include <qgslayertreeview.h>
 #include <qgsvectorlayer.h>
 
 #include <pwb/domain/json.hpp>
@@ -115,25 +116,30 @@ int main(int argc, char** argv) {
         PWB_CHECK_MSG(layer != nullptr, error);
         session.setDestinationCrs("EPSG:4326", &error);
 
-        pwb::qgis::CompositionLayoutService service(session);
-        pwb::qgis::CompositionExportRequest request;
-        request.format = "png";
-        request.dpi = 96.0;
-        request.has_extent = true;
-        request.extent[0] = 108.0;
-        request.extent[1] = 28.0;
-        request.extent[2] = 118.0;
-        request.extent[3] = 36.0;
-        request.crs = "EPSG:4326";
-        request.mirror_layers = Json::array({Json::object(
-            {{"id", "export.layer"}, {"layer_type", "vector"}})});
+        // The on-screen legend equivalent: the layer tree panel. Created
+        // so canvas_state_json reports legend=true like the real product.
+        QgsLayerTreeView* tree_view = session.createLayerTree(nullptr);
+        PWB_CHECK(tree_view != nullptr);
 
-        // --- canvas state + validate ------------------------------------
+        // --- canvas state first; the request derives from it ------------
         const std::string canvas_state = session.canvas_state_json();
         Json state = Json::parse(canvas_state);
         PWB_CHECK(state.value("crs", std::string()) == "EPSG:4326");
         PWB_CHECK(state.contains("extent") && state["extent"].is_array());
         PWB_CHECK(state.contains("layers") && state["layers"].size() == 1);
+        PWB_CHECK(state.value("legend", false));
+
+        pwb::qgis::CompositionLayoutService service(session);
+        pwb::qgis::CompositionExportRequest request;
+        request.format = "png";
+        request.dpi = 96.0;
+        request.has_extent = true;
+        for (int i = 0; i < 4; ++i) {
+            request.extent[i] = state["extent"][i].get<double>();
+        }
+        request.crs = state.value("crs", std::string());
+        request.mirror_layers = Json::array({Json::object(
+            {{"id", "export.layer"}, {"layer_type", "vector"}})});
 
         const Json composition = default_composition();
         const std::string composition_json = composition_dump(composition);
@@ -154,8 +160,9 @@ int main(int argc, char** argv) {
         PWB_CHECK(std::filesystem::file_size(png) > 0);
         const QImage image(QString::fromStdWString(png.wstring()));
         PWB_CHECK(!image.isNull());
-        PWB_CHECK(png_report.value("width_px", 0LL) == image.width());
-        PWB_CHECK(png_report.value("height_px", 0LL) == image.height());
+        const Json& dims = png_report.at("dimensions");
+        PWB_CHECK(dims.value("width_px", 0LL) == image.width());
+        PWB_CHECK(dims.value("height_px", 0LL) == image.height());
         bool non_white = false;
         for (int y = 0; y < image.height() && !non_white; y += 4) {
             for (int x = 0; x < image.width() && !non_white; x += 4) {

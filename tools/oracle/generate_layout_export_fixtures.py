@@ -396,6 +396,19 @@ def spec_cases():
             _el("el_grid", ElementType.GRID, 8.0, 12.0, 180.0, 150.0,
                 props={"spacing_mm": 2.5})),
         map_extent=(100.0, 0.0, 110.0, 9.0)))
+    # Truthy-string zero: "0" is a truthy STRING, so float("0") is 0.0 (the
+    # falsy-coercion default does NOT apply) — freezes py_float_or/py_truthy.
+    cases.append(run_spec_case(
+        "grid_string_zero_spacing", _base_composition(
+            _el("el_grid", ElementType.GRID, 8.0, 12.0, 180.0, 150.0,
+                props={"spacing_mm": "0"}))))
+    # No main map + non-numeric spacing: the main-map gate runs BEFORE the
+    # spacing coercion → warn + drop, not a raise (Python evaluation order).
+    cases.append(run_spec_case(
+        "grid_bad_spacing_no_main_map", MapCompositionDocument(
+            id="comp_nomap2", title="n2",
+            elements=[_el("el_grid", ElementType.GRID, 0.0, 0.0, 10.0, 10.0,
+                          props={"spacing_mm": "abc"})])))
 
     # 27-28 — fail-closed geometry and image validation.
     # Zero width is truthy-coerced to the 1.0 default by the document

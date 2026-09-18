@@ -110,6 +110,7 @@ QgsVectorLayer* MapSession::vectorLayerById(const std::string& layer_id) const {
 
 std::vector<std::string> MapSession::layerIdsTopFirst() const {
     std::vector<std::string> order;
+    if (project_ == nullptr) return order;   // closed session
     const QList<QgsMapLayer*> layers = project_->layerTreeRoot()->layerOrder();
     for (QgsMapLayer* layer : layers) {
         if (layer == nullptr || !layer->isSpatial()) continue;

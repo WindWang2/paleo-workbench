@@ -3023,7 +3023,8 @@ std::vector<std::string> QgisMapStack::mirrorTreeOrderTopFirst() const {
 }
 
 std::string QgisMapStack::layoutMapLayerOrder() const {
-  // 与 layoutExport 的 map 图层装配同源（mirror_by_doc 解析 + 全树走查
+  // 与 layout_spec_exec::execute_layout_spec 的 map 图层装配同源
+  // （mirror 解析 + 全树走查；layoutExport 已委托给共享执行器
   // 反转）；任一处改装配逻辑必须同步改这里（注释交叉引用）。
   const std::vector<std::string> order = mirrorTreeOrderTopFirst();
   QJsonArray array;

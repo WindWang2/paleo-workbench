@@ -150,6 +150,9 @@ struct ExportRequest {
     std::string format = "pdf";  // pdf|svg|png
     double dpi = 300.0;
     bool geo_pdf = false;
+    // Page fill override (executor consumes spec["page"]["background"]);
+    // "" keeps the layout default (white), matching Python.
+    std::string background;
     // C++ executor extension: force vector output for pdf/svg (no raster
     // fallback layers). Emitted as the spec root key "force_vector".
     bool force_vector = false;

@@ -31,16 +31,6 @@ Json failure_report(const std::string& failure) {
     return out;
 }
 
-std::string join(const std::vector<std::string>& parts,
-                 const std::string& sep) {
-    std::string out;
-    for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (i != 0) out += sep;
-        out += parts[i];
-    }
-    return out;
-}
-
 pwb::layout_export::ExportRequest to_kernel_request(
     const CompositionExportRequest& request, const std::string& project_crs) {
     pwb::layout_export::ExportRequest kernel;
@@ -48,6 +38,7 @@ pwb::layout_export::ExportRequest to_kernel_request(
     kernel.dpi = request.dpi;
     kernel.geo_pdf = request.geo_pdf;
     kernel.force_vector = request.force_vector;
+    kernel.background = request.background;
     kernel.has_map_extent = request.has_extent;
     for (int i = 0; i < 4; ++i) kernel.map_extent[i] = request.extent[i];
     kernel.crs = request.crs.empty() ? project_crs : request.crs;
@@ -122,14 +113,10 @@ Json CompositionLayoutService::validate_layout(
         }
         out["items"] = items.size();
         out["spec"] = spec;
-        out["ok"] = hybrid.empty();
-        if (!hybrid.empty()) {
-            out["failure"] =
-                "composition has elements with no native layout counterpart ("
-                + join(hybrid, ", ")
-                + "); the native chain is fail-closed (no composer fallback)";
-        }
+        out["ok"] = true;
     } catch (const std::invalid_argument& ex) {
+        // Fail-closed surface: unmapped elements / bad geometry / missing
+        // image paths all raise out of the builder.
         warnings.push_back(ex.what());
         out["spec"] = nullptr;
         out["items"] = 0;

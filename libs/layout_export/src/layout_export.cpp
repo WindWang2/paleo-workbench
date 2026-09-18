@@ -71,37 +71,42 @@ std::string python_str(const Json& value) {
     return value.dump();
 }
 
-// Python `str(props.get(key) or default)`: falsy JSON values (null, false,
-// 0, "", empty container) take the default; truthy non-strings are str()'d.
+// Python repr of a str: single quotes, backslashes and single quotes
+// escaped (definition further below; used by py_float_or's error).
+std::string py_repr(const std::string& text);
+
+// Python truthiness for a JSON value (null/false/0/""/empty container are
+// falsy — the `or` fallbacks in the Python property reads).
+bool py_truthy(const Json& value) {
+    if (value.is_null()) return false;
+    if (value.is_boolean()) return value.get<bool>();
+    if (value.is_number()) return value.get<double>() != 0.0;
+    if (value.is_string()) return !value.get<std::string>().empty();
+    if (value.is_array() || value.is_object()) return !value.empty();
+    return true;
+}
+
+// Python `str(props.get(key) or default)`: falsy JSON values take the
+// default; truthy non-strings are str()'d.
 std::string py_str_or(const Json& props, const char* key,
                       const std::string& fallback) {
     if (!props.is_object()) return fallback;
     const auto it = props.find(key);
-    if (it == props.end() || it->is_null()) return fallback;
-    if (it->is_boolean() && !it->get<bool>()) return fallback;
-    if (it->is_number() && it->get<double>() == 0.0) return fallback;
-    if (it->is_string() && it->get<std::string>().empty()) return fallback;
+    if (it == props.end() || !py_truthy(*it)) return fallback;
     return python_str(*it);
 }
 
 // Python `float(props.get(key) or default)` (falsy → default; numeric
-// strings parse; True → 1.0).
+// strings parse; True → 1.0). (py_repr is defined further below.)
 double py_float_or(const Json& props, const char* key, double fallback) {
     if (!props.is_object()) return fallback;
     const auto it = props.find(key);
-    if (it == props.end() || it->is_null()) return fallback;
-    if (it->is_boolean()) return it->get<bool>() ? 1.0 : fallback;
-    if (it->is_number_integer()) {
-        const long long v = it->get<long long>();
-        return v == 0 ? fallback : static_cast<double>(v);
-    }
-    if (it->is_number_float()) {
-        const double v = it->get<double>();
-        return v == 0.0 ? fallback : v;
-    }
+    if (it == props.end() || !py_truthy(*it)) return fallback;
+    if (it->is_boolean()) return 1.0;
+    if (it->is_number_integer()) return static_cast<double>(it->get<long long>());
+    if (it->is_number_float()) return it->get<double>();
     if (it->is_string()) {
         const std::string text = it->get<std::string>();
-        if (text.empty()) return fallback;
         try {
             std::size_t consumed = 0;
             const double v = std::stod(text, &consumed);
@@ -109,10 +114,14 @@ double py_float_or(const Json& props, const char* key, double fallback) {
                 || text.find_first_not_of(" \t\n\r\f\v", consumed)
                     == std::string::npos;
             if (!only_space) throw std::invalid_argument("trailing");
-            return v == 0.0 ? fallback : v;
+            // "0" is a TRUTHY string, so float("0") is 0.0 (no fallback).
+            return v;
+        } catch (const std::invalid_argument&) {
+            throw std::invalid_argument("could not convert string to float: "
+                                        + py_repr(text));
         } catch (const std::exception&) {
-            throw std::invalid_argument(
-                "could not convert string to float: " + text);
+            throw std::invalid_argument("could not convert string to float: "
+                                        + py_repr(text));
         }
     }
     return fallback;
@@ -227,18 +236,14 @@ std::vector<MirrorLayer> normalize_mirror_layers(const Json& mirror_layers) {
     for (const Json& entry : layers) {
         MirrorLayer layer;
         if (entry.is_object()) {
+            // Python: str(_layer_field(layer, key, "") or "") — falsy
+            // values (0, false, [], missing) all read as "".
             const auto id = entry.find("id");
-            layer.id = id != entry.end() && id->is_string()
-                ? id->get<std::string>()
-                : (id != entry.end() && !id->is_null()
-                       ? python_str(*id)
-                       : std::string());
+            if (id != entry.end() && py_truthy(*id)) layer.id = python_str(*id);
             const auto type = entry.find("layer_type");
-            layer.layer_type = type != entry.end() && type->is_string()
-                ? type->get<std::string>()
-                : (type != entry.end() && !type->is_null()
-                       ? python_str(*type)
-                       : std::string());
+            if (type != entry.end() && py_truthy(*type)) {
+                layer.layer_type = python_str(*type);
+            }
             const auto style = entry.find("style");
             if (style != entry.end()) layer.style = *style;
         }
@@ -286,7 +291,7 @@ std::vector<std::string> legend_filter_doc_ids(
     const std::string& element_type, const std::vector<MirrorLayer>& mirror) {
     std::vector<std::string> ids;
     auto push_id = [&ids](const MirrorLayer& layer) {
-        ids.push_back(layer.id.empty() ? "" : layer.id);
+        ids.push_back(layer.id);
     };
     if (element_type == "colorbar") {
         for (const MirrorLayer& layer : mirror) {
@@ -469,11 +474,15 @@ Json build_layout_spec(const Composition& doc, const BuildSpecInput& input,
             // Paper-mm spacing → map units via the main map's
             // extent-to-width scale (same projection assumption as the
             // canvas). Last GRID element wins; no main map → warn + drop.
-            const double spacing_mm = py_float_or(props, "spacing_mm", 10.0);
+            // Evaluation order matches Python: the main-map gate runs
+            // BEFORE the spacing coercion (a non-numeric spacing with no
+            // main map warns and drops instead of raising).
             if (main_map == nullptr || main_map->width_mm <= 0.0) {
                 warn("grid element " + element->id
                      + " has no main map to attach to; dropped");
             } else {
+                const double spacing_mm =
+                    py_float_or(props, "spacing_mm", 10.0);
                 const double extent_width =
                     std::max(1e-9, input.map_extent[2] - input.map_extent[0]);
                 grid_spacing_units =
@@ -610,6 +619,14 @@ LayoutExportReport export_composition_reported(
     report.dpi = request.dpi;
     report.path = output_path.string();
 
+    // Python: out.parent.mkdir(parents=True, exist_ok=True) before anything
+    // else, so an export into a fresh directory succeeds.
+    if (!output_path.parent_path().empty()) {
+        std::error_code mkdir_ec;
+        std::filesystem::create_directories(output_path.parent_path(),
+                                            mkdir_ec);
+    }
+
     // A budget breach is a caller error: raise, never degrade.
     check_pixel_budget(doc, request.dpi);
 
@@ -671,6 +688,9 @@ LayoutExportReport export_composition_reported(
             spec = build_layout_spec(doc, input, &report.warnings);
             if (request.geo_pdf) spec["geo_pdf"] = true;
             if (request.force_vector) spec["force_vector"] = true;
+            if (!request.background.empty()) {
+                spec["page"]["background"] = request.background;
+            }
         } catch (const std::invalid_argument& ex) {
             report.warnings.push_back(ex.what());
             no_engine_reason = ex.what();
@@ -693,15 +713,25 @@ LayoutExportReport export_composition_reported(
                                              request.format, request.dpi);
             report.engine = "qgis_layout";
             report.ok = payload.is_object()
-                && payload.value("ok", false) == true;
-            report.items = payload.is_object()
-                ? payload.value("items", static_cast<long long>(0))
-                : 0;
+                && payload.contains("ok") && payload["ok"].is_boolean()
+                && payload["ok"].get<bool>();
+            report.items = 0;
+            report.width_px = 0;
+            report.height_px = 0;
             if (payload.is_object()) {
-                report.width_px =
-                    payload.value("width_px", static_cast<long long>(0));
-                report.height_px =
-                    payload.value("height_px", static_cast<long long>(0));
+                // Python: int(payload.get("items") or 0) — falsy/absent → 0.
+                const auto items = payload.find("items");
+                if (items != payload.end() && items->is_number_integer()) {
+                    report.items = items->get<long long>();
+                }
+                const auto width = payload.find("width_px");
+                if (width != payload.end() && width->is_number_integer()) {
+                    report.width_px = width->get<long long>();
+                }
+                const auto height = payload.find("height_px");
+                if (height != payload.end() && height->is_number_integer()) {
+                    report.height_px = height->get<long long>();
+                }
             }
             Json filters = Json::object();
             if (spec.is_object()) {
