@@ -63,6 +63,20 @@ if(PWB_BUILD_CONV_23)
     add_subdirectory(libs/workflow_contracts)
 endif()
 # END CONV-23
+# BEGIN CONV-24 — factor_fusion + factor_units pure kernels (M7 tail):
+# Normalization/evidence/rule/model contracts, weighted + rule_based fusion,
+# sensitivity reports, and the factor-unit lookup/validation tables — in
+# libs/factor_fusion, frozen against the Python oracle. Needs Pwb::Domain
+# (PWB_BUILD_DATA) and Pwb::FactorHost (python_repr_double for the
+# fingerprint encoder), so the implied switches land BEFORE the data and
+# CONV-08 subdirectory blocks below.
+option(PWB_BUILD_CONV_24
+    "Build the CONV-24 factor fusion kernel (libs/factor_fusion; implies PWB_BUILD_DATA + CONV-08)" OFF)
+if(PWB_BUILD_CONV_24)
+    set(PWB_BUILD_DATA ON)
+    set(PWB_BUILD_CONV_08 ON)
+endif()
+# END CONV-24
 
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
@@ -205,6 +219,10 @@ if(PWB_BUILD_CONV_08)
     add_subdirectory(libs/factor_host)
 endif()
 # END CONV-08
+# CONV-24 subdirectory — placed after CONV-08 so Pwb::FactorHost exists.
+if(PWB_BUILD_CONV_24)
+    add_subdirectory(libs/factor_fusion)
+endif()
 # BEGIN CONV-09
 # M8 first slice: DTW well-log matcher kernel (viz/dtw_log_matcher.py port),
 # Qt-free, frozen against the Python oracle. Tests need Pwb::Domain
