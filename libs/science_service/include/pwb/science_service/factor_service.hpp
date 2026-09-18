@@ -74,6 +74,20 @@ struct FactorInterpolationRequest {
     std::vector<std::vector<std::array<double, 2>>> barrier_lines;
     std::vector<std::vector<std::array<double, 2>>> direction_lines;
     std::vector<std::array<double, 2>> constrained_boundary;
+    // Constrained-engine overrides. nullopt = DERIVE FROM THE SAMPLES, the
+    // production Python semantics (constrained_idw_adapter):
+    //   value range   <- finite sample min/max (+tiny pad)
+    //   search radius <- 1.05 * sample-bbox diagonal, >= 0.75 * span
+    //   decluster     <- 0.15 * search radius (forced to 0 with directions)
+    //   resolution    <- grid_n clamped into [20, 200]
+    // The kernel Config defaults (value [0,1], search 10000, decluster 6500)
+    // are NEVER used implicitly — they would silently clamp real factor
+    // fields. An explicit value here wins over the derivation.
+    std::optional<double> constrained_value_min;
+    std::optional<double> constrained_value_max;
+    std::optional<double> constrained_search_radius;
+    std::optional<double> constrained_decluster_radius;
+    std::optional<int> constrained_grid_resolution;
     // Also produce contour + facies GeoJSON layer products.
     bool include_layer_products = false;
     pwb::mapping::ContourLayerOptions contour_options;

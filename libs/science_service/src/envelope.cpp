@@ -72,6 +72,16 @@ Json ScienceEnvelope::to_json() const {
 }
 
 ScienceEnvelope ScienceEnvelope::from_json(const Json& data) {
+    try {
+        return from_json_impl(data);
+    } catch (const nlohmann::detail::exception& e) {
+        // nlohmann type_error/out_of_range surface as the documented
+        // invalid_argument contract, not as JSON-internal exceptions.
+        throw std::invalid_argument(std::string("envelope shape: ") + e.what());
+    }
+}
+
+ScienceEnvelope ScienceEnvelope::from_json_impl(const Json& data) {
     if (!data.is_object()) {
         throw std::invalid_argument("envelope must be a JSON object");
     }

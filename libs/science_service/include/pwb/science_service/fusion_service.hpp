@@ -63,8 +63,15 @@ private:
 
 // Legacy grid dict (mapping::to_legacy_dict shape) -> factor_fusion carrier
 // with float32 normalization semantics. Shared with the payload-source path.
-// Throws std::invalid_argument with a stable message on a foreign shape.
+// Throws std::invalid_argument with a stable message on a foreign shape
+// (including row-width/height mismatches).
 [[nodiscard]] pwb::factor_fusion::FactorGrid legacy_dict_to_fusion_grid(
+    const pwb::domain::Json& legacy, const std::string& factor_name);
+
+// Same decode into the mapping-kernel grid carrier (axes float64, cells
+// float32, NaN nodata; variance_grid rides along when shape-consistent).
+// The one decoder both fusion and the layer-products adapter consume.
+[[nodiscard]] pwb::mapping::FactorGrid legacy_dict_to_mapping_grid(
     const pwb::domain::Json& legacy, const std::string& factor_name);
 
 }  // namespace pwb::science_service

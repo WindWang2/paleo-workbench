@@ -170,15 +170,29 @@ void test_factor_duplicates_and_errors() {
               "factor: empty code factor.no_samples");
     }
 
-    // Unknown factor name on records without the key -> no samples.
+    // Unknown factor name on records that carry NO value keys -> the
+    // extract value lookup finds nothing -> clean no-samples error.
     FactorInterpolationRequest unknown_req;
     unknown_req.factor_name = "not_a_factor";
-    unknown_req.well_records = sample_records();
+    unknown_req.well_records = Json::array(
+        {Json{{"well_id", "w1"}, {"x", 0.0}, {"y", 0.0}, {"gr", 5.0}},
+         Json{{"well_id", "w2"}, {"x", 10.0}, {"y", 10.0}, {"gr", 6.0}}});
     auto res_unknown = svc.run(unknown_req);
-    // "gr" records still have "value" fallback, so unknown name extracts via
-    // alias only if configured; a truly absent factor name must fail clean.
-    check(res_unknown.has_value() || res_unknown.is_error(),
-          "factor: unknown name handled without exception");
+    check(res_unknown.is_error(), "factor: valueless records error");
+    if (res_unknown.is_error()) {
+        check(res_unknown.error().diagnostics.at(0).code
+                  == "factor.no_samples",
+              "factor: valueless records no_samples");
+    }
+    // ...and a factor name that IS the record key extracts directly.
+    FactorInterpolationRequest keyed_req;
+    keyed_req.factor_name = "thickness_m";
+    keyed_req.well_records = Json::array(
+        {Json{{"x", 0.0}, {"y", 0.0}, {"thickness_m", 5.0}},
+         Json{{"x", 10.0}, {"y", 10.0}, {"thickness_m", 6.0}}});
+    keyed_req.interpolate.grid_n = 8;
+    auto keyed = svc.run(keyed_req);
+    check(keyed.has_value(), "factor: keyed factor extracts");
 
     // Single point: the interpolation kernel refuses (< 2 valid points) with
     // the frozen Python message (pinned by the service oracle too).
@@ -220,6 +234,68 @@ void test_factor_resource_and_cancel() {
     if (cancelled.is_cancelled()) {
         check(!cancelled.cancelled().stage.empty(),
               "factor: cancelled stage named");
+    }
+}
+
+void test_factor_constrained_engine() {
+    FactorInterpolationService svc;
+
+    FactorInterpolationRequest req;
+    req.factor_name = "gr";
+    req.well_records = sample_records();  // values 10..40
+    req.use_constrained_idw = true;
+    req.interpolate.grid_n = 25;  // maps to engine resolution 25
+    req.constrained_boundary = {{0.0, 0.0},
+                                {12.0, 0.0},
+                                {12.0, 12.0},
+                                {0.0, 12.0}};
+    auto res = svc.run(req);
+    check(res.has_value(), "constrained: runs");
+    if (res.has_value()) {
+        auto& value = res.value();
+        // The derived value range [~10, ~40] must NOT clamp the surface to
+        // the kernel's [0,1] default (the Python host-integration contract).
+        const auto& stats = value.grid->statistics;
+        check(stats.max > 5.0,
+              "constrained: values not clamped to [0,1]");
+        check(stats.min >= 9.0 && stats.max <= 41.0,
+              "constrained: values within derived sample range");
+        check(value.envelope.provenance.at("engine") == "constrained_idw",
+              "constrained: engine provenance");
+        check(value.grid->algorithm_id == "constrained_idw",
+              "constrained: algorithm id");
+        check(static_cast<int>(value.grid->grid_x.size()) == 25,
+              "constrained: resolution from grid_n");
+        check(value.envelope.quality.contains("engine_diagnostics"),
+              "constrained: engine diagnostics recorded");
+    }
+
+    // keep policy refused with the frozen Python message.
+    FactorInterpolationRequest keep_req = req;
+    keep_req.duplicate_policy = "keep";
+    auto keep = svc.run(keep_req);
+    check(keep.is_error(), "constrained: keep policy refused");
+    if (keep.is_error()) {
+        check(keep.error().diagnostics.at(0).code
+                  == "factor.constrained_policy",
+              "constrained: keep policy code");
+        check(keep.error().diagnostics.at(0).message.find(
+                  "duplicate_policy='keep'")
+                  != std::string::npos,
+              "constrained: keep policy frozen message");
+    }
+
+    // Boundary is mandatory for this engine.
+    FactorInterpolationRequest no_boundary;
+    no_boundary.factor_name = "gr";
+    no_boundary.well_records = sample_records();
+    no_boundary.use_constrained_idw = true;
+    auto missing = svc.run(no_boundary);
+    check(missing.is_error(), "constrained: boundary required");
+    if (missing.is_error()) {
+        check(missing.error().diagnostics.at(0).code
+                  == "factor.constrained_boundary",
+              "constrained: boundary code");
     }
 }
 
@@ -631,12 +707,33 @@ void test_payload_source_and_publisher() {
     std::filesystem::remove_all(tmp);
 }
 
+void test_capture_publisher() {
+    // In-memory capture: workflow adapters that keep results in-process.
+    InMemoryCapturePublisher capture;
+    science::AlgorithmResultV1 result;
+    result.request_id = "req-cap";
+    result.records.push_back(
+        science::ProducedRecord{"envelope", "application/json", "{}"});
+    capture.publish_success(result);
+    science::IResultPublisherV1::Failure failure;
+    failure.request_id = "req-cap-f";
+    failure.code = "x";
+    failure.message = "m";
+    capture.publish_failure(failure);
+    check(capture.successes().size() == 1
+              && capture.successes().at(0).request_id == "req-cap",
+          "capture: success captured");
+    check(capture.failures().size() == 1
+              && capture.failures().at(0).code == "x",
+          "capture: failure captured");
+}
+
 void test_registry_and_node_request() {
     auto source = std::make_shared<InMemoryPayloadSource>();
     science::AlgorithmRegistry registry;
     const std::vector<std::string> ids =
         register_science_services(registry, source, "test-build");
-    check(ids.size() == 9, "registry: 9 services registered");
+    check(ids.size() == 10, "registry: 10 services registered");
     check(registry.find("mapping.factor_interpolate") != nullptr,
           "registry: factor interpolate findable");
     check(registry.find("geomodel.export") != nullptr,
@@ -647,6 +744,13 @@ void test_registry_and_node_request() {
     check(factor->descriptor().supports_cancel, "registry: factor cancelable");
     check(factor->descriptor().build_identity == "test-build",
           "registry: build identity stamped");
+    const auto* geomodel_export = registry.find("geomodel.export");
+    check(geomodel_export != nullptr
+              && geomodel_export->descriptor().build_identity
+                     == "test-build",
+          "registry: geomodel build identity stamped");
+    check(registry.find("geomodel.fault_displacement") != nullptr,
+          "registry: fault displacement registered");
 
     // node_request mapping: object values copied as JSON texts.
     const Json node_params = Json{{"factor_name", "gr"},
@@ -699,11 +803,13 @@ int main() {
     test_factor_pipeline();
     test_factor_duplicates_and_errors();
     test_factor_resource_and_cancel();
+    test_factor_constrained_engine();
     test_well_services();
     test_fusion_service();
     test_facies_surface_service();
     test_geomodel_services();
     test_payload_source_and_publisher();
+    test_capture_publisher();
     test_registry_and_node_request();
     test_envelope_roundtrip();
     if (g_failures != 0) {

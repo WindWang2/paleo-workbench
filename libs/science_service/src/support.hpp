@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <exception>
 #include <functional>
@@ -28,7 +29,11 @@ namespace pwb::science_service::detail {
                         now.time_since_epoch())
                         .count() % 1000;
     std::tm tm_buf{};
+#if defined(_WIN32)
+    gmtime_s(&tm_buf, &secs);
+#else
     gmtime_r(&secs, &tm_buf);
+#endif
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
                   tm_buf.tm_year + 1900, tm_buf.tm_mon + 1, tm_buf.tm_mday,
@@ -92,6 +97,8 @@ template <typename T>
                                               const std::function<T()>& fn) {
     try {
         return fn();
+    } catch (const std::bad_alloc&) {
+        throw;
     } catch (const std::invalid_argument& e) {
         return science::AlgorithmError{
             {error_diag(code, std::string("ValueError: ") + e.what())}};

@@ -151,6 +151,8 @@ namespace {
     return out;
 }
 
+// Boundary/ring params: a malformed entry is an ERROR, not a silently
+// dropped vertex — a shrunken polygon would change the geological intent.
 [[nodiscard]] std::vector<std::array<double, 2>> param_ring(
     const AlgorithmRequestV1& request, const std::string& key) {
     if (!param_present(request, key)) {
@@ -158,14 +160,16 @@ namespace {
     }
     const Json v = param_json(request, key);
     std::vector<std::array<double, 2>> out;
-    if (v.is_array()) {
-        for (const auto& item : v) {
-            if (item.is_array() && item.size() == 2 && item.at(0).is_number()
-                && item.at(1).is_number()) {
-                out.push_back({item.at(0).get<double>(),
-                               item.at(1).get<double>()});
-            }
+    if (!v.is_array()) {
+        throw std::invalid_argument("'" + key + "' must be an array of [x, y]");
+    }
+    for (const auto& item : v) {
+        if (!item.is_array() || item.size() != 2 || !item.at(0).is_number()
+            || !item.at(1).is_number()) {
+            throw std::invalid_argument("'" + key
+                                        + "' entries must be [x, y] pairs");
         }
+        out.push_back({item.at(0).get<double>(), item.at(1).get<double>()});
     }
     return out;
 }
@@ -213,6 +217,30 @@ void fill_provenance(science::ProvenanceRecord& record,
     record.started_utc = started;
     record.finished_utc = detail::utc_now_iso();
     record.wall_time_ms = wall_ms;
+}
+
+// Post-run packing (records/diagnostics/provenance) is JSON-heavy and must
+// honour the no-exceptions-escape IAlgorithm contract even on hostile input
+// (e.g. invalid UTF-8 in params would make the strict dump throw). Wrap the
+// packing step for every adapter.
+template <typename Pack>
+[[nodiscard]] science::Result<AlgorithmResultV1> pack_result(
+    const AlgorithmRequestV1& request, const AlgorithmDescriptor& descriptor,
+    const std::string& started, std::uint64_t t0, Pack pack) {
+    AlgorithmResultV1 result;
+    result.request_id = request.request_id;
+    try {
+        pack(result);
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const std::exception& e) {
+        return detail::make_error("result.pack",
+                                  std::string("result packing failed: ")
+                                      + e.what());
+    }
+    fill_provenance(result.provenance, request, descriptor, started,
+                    detail::epoch_ms() - t0);
+    return result;
 }
 
 [[nodiscard]] science::ProducedRecord envelope_record(
@@ -330,33 +358,37 @@ public:
                 param_bool(request, "use_constrained_idw", false)
                 || param_string(request, "engine") == "constrained_idw";
             if (typed.use_constrained_idw) {
-                typed.constrained.grid_resolution = static_cast<int>(
-                    param_int(request, "constrained_grid_resolution", 160));
+                // Engine scalars the caller may pin; everything else derives
+                // from the samples inside the service (Python production
+                // semantics — never the kernel's [0,1]/10000/6500 defaults).
                 typed.constrained.power =
                     param_number(request, "constrained_power", 2.0);
-                typed.constrained.search_radius = param_number(
-                    request, "constrained_search_radius", 10000.0);
                 typed.constrained.min_points =
                     static_cast<int>(param_int(request,
                                                "constrained_min_points", 3));
                 typed.constrained.max_points =
                     static_cast<int>(param_int(request,
                                                "constrained_max_points", 12));
-                if (param_present(request, "constrained_value_min")) {
-                    const Json v =
-                        param_json(request, "constrained_value_min");
-                    typed.constrained.value_min =
-                        v.is_number()
-                            ? std::optional<double>(v.get<double>())
-                            : std::nullopt;
+                if (auto v = param_number_opt(request,
+                                              "constrained_grid_resolution")) {
+                    typed.constrained_grid_resolution =
+                        static_cast<int>(*v);
                 }
-                if (param_present(request, "constrained_value_max")) {
-                    const Json v =
-                        param_json(request, "constrained_value_max");
-                    typed.constrained.value_max =
-                        v.is_number()
-                            ? std::optional<double>(v.get<double>())
-                            : std::nullopt;
+                if (auto v = param_number_opt(request,
+                                              "constrained_value_min")) {
+                    typed.constrained_value_min = *v;
+                }
+                if (auto v = param_number_opt(request,
+                                              "constrained_value_max")) {
+                    typed.constrained_value_max = *v;
+                }
+                if (auto v = param_number_opt(request,
+                                              "constrained_search_radius")) {
+                    typed.constrained_search_radius = *v;
+                }
+                if (auto v = param_number_opt(request,
+                                              "constrained_decluster_radius")) {
+                    typed.constrained_decluster_radius = *v;
                 }
                 // Geometry passthrough: [[ [x,y], ... ], ...] line lists.
                 for (const char* key :
@@ -415,25 +447,31 @@ public:
         }
         auto& value = outcome.value();
 
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        if (value.grid && !value.grid->grid_z.empty()) {
-            science::ProducedVolume volume;
-            volume.name = "factor_grid";
-            volume.unit = value.envelope.units;
-            volume.volume.data = value.grid->grid_z.data();
-            volume.volume.shape = {
-                1, static_cast<std::int64_t>(value.grid->grid_y.size()),
-                static_cast<std::int64_t>(value.grid->grid_x.size())};
-            volume.volume.strides = {0, 0, 0};  // packed C-order
-            volume.volume.lifetime = value.grid;
-            result.outputs.push_back(std::move(volume));
-        }
-        result.records.push_back(envelope_record(value.envelope));
-        result.diagnostics = diagnostics_from_envelope(value.envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               if (value.grid && !value.grid->grid_z.empty()) {
+                                   science::ProducedVolume volume;
+                                   volume.name = "factor_grid";
+                                   volume.unit = value.envelope.units;
+                                   volume.volume.data =
+                                       value.grid->grid_z.data();
+                                   volume.volume.shape = {
+                                       1,
+                                       static_cast<std::int64_t>(
+                                           value.grid->grid_y.size()),
+                                       static_cast<std::int64_t>(
+                                           value.grid->grid_x.size())};
+                                   volume.volume.strides = {0, 0, 0};
+                                   volume.volume.lifetime = value.grid;
+                                   result.outputs.push_back(
+                                       std::move(volume));
+                               }
+                               result.records.push_back(
+                                   envelope_record(value.envelope));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(value.envelope);
+                           });
     }
 
 private:
@@ -506,38 +544,10 @@ public:
                     "grid_json (legacy grid dict) is required");
             }
             const Json legacy = param_json(request, "grid_json");
-            // Legacy dict -> mapping FactorGrid via the CONV-18 codec shape.
-            // (parse through factor_grid_io: axis lists + nested grid lists)
-            const Json& grid_x = legacy.at("grid_x");
-            const Json& grid_y = legacy.at("grid_y");
-            const Json& rows = legacy.at("grid_z");
-            for (const auto& x : grid_x) {
-                grid.grid_x.push_back(x.get<double>());
-            }
-            for (const auto& y : grid_y) {
-                grid.grid_y.push_back(y.get<double>());
-            }
-            for (const auto& row : rows) {
-                for (const auto& cell : row) {
-                    grid.grid_z.push_back(
-                        cell.is_number()
-                            ? pwb::factor_fusion::to_grid_cell(
-                                  cell.get<double>())
-                            : std::numeric_limits<float>::quiet_NaN());
-                }
-            }
-            if (legacy.contains("variance_grid")
-                && legacy.at("variance_grid").is_array()) {
-                for (const auto& row : legacy.at("variance_grid")) {
-                    for (const auto& cell : row) {
-                        grid.variance_grid.push_back(
-                            cell.is_number()
-                                ? pwb::factor_fusion::to_grid_cell(
-                                      cell.get<double>())
-                                : std::numeric_limits<float>::quiet_NaN());
-                    }
-                }
-            }
+            // Shared decoder (the same one fusion uses): shape-validated
+            // legacy dict -> mapping grid carrier.
+            grid = legacy_dict_to_mapping_grid(
+                legacy, param_string(request, "factor_name", "factor"));
             ctx.factor_name = param_string(request, "factor_name", "factor");
             ctx.unit = param_string(request, "unit");
             ctx.crs = param_string(request, "crs");
@@ -611,14 +621,15 @@ public:
         envelope.provenance = std::move(provenance);
         envelope.compute_fingerprint();
 
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        result.records.push_back(envelope_record(envelope));
-        result.diagnostics = diagnostics_from_envelope(envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
         detail::stage_guard(stop, progress, 1.0, "envelope");
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(envelope));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(envelope);
+                           });
     }
 
 private:
@@ -711,14 +722,15 @@ public:
         if (outcome.is_cancelled()) {
             return outcome.cancelled();
         }
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        result.records.push_back(envelope_record(outcome.value().envelope));
-        result.diagnostics =
-            diagnostics_from_envelope(outcome.value().envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(outcome.value().envelope));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(
+                                       outcome.value().envelope);
+                           });
     }
 
 private:
@@ -795,14 +807,15 @@ public:
         if (outcome.is_cancelled()) {
             return outcome.cancelled();
         }
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        result.records.push_back(envelope_record(outcome.value().envelope));
-        result.diagnostics =
-            diagnostics_from_envelope(outcome.value().envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(outcome.value().envelope));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(
+                                       outcome.value().envelope);
+                           });
     }
 
 private:
@@ -861,14 +874,15 @@ public:
         if (outcome.is_cancelled()) {
             return outcome.cancelled();
         }
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        result.records.push_back(envelope_record(outcome.value().envelope));
-        result.diagnostics =
-            diagnostics_from_envelope(outcome.value().envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(outcome.value().envelope));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(
+                                       outcome.value().envelope);
+                           });
     }
 
 private:
@@ -946,14 +960,15 @@ public:
         if (outcome.is_cancelled()) {
             return outcome.cancelled();
         }
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        result.records.push_back(envelope_record(outcome.value().envelope));
-        result.diagnostics =
-            diagnostics_from_envelope(outcome.value().envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(outcome.value().envelope));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(
+                                       outcome.value().envelope);
+                           });
     }
 
 private:
@@ -981,12 +996,14 @@ private:
 // ---- geomodel adapters ------------------------------------------------------
 
 [[nodiscard]] AlgorithmDescriptor geomodel_descriptor(
-    const std::string& id, const std::string& display, bool cancelable) {
+    const std::string& id, const std::string& display, bool cancelable,
+    const std::string& build_identity) {
     AlgorithmDescriptor d;
     d.algorithm_id = id;
     d.version = "1.0.0";
     d.display_name = display;
     d.family = "geomodel";
+    d.build_identity = build_identity;
     PortSpec out;
     out.name = "model";
     out.kind = PortKind::artifact;
@@ -1001,7 +1018,8 @@ class GeomodelBuildAdapter : public AdapterBase {
 public:
     GeomodelBuildAdapter(std::string build_identity, ResourceLimits limits)
         : AdapterBase(geomodel_descriptor("geomodel.build",
-                                          "Geomodel volume shell build", true)),
+                                          "Geomodel volume shell build", true,
+                                          build_identity)),
           service_(descriptor_.build_identity, limits) {}
 
     science::Result<AlgorithmResultV1> run(const AlgorithmRequestV1& request,
@@ -1034,14 +1052,15 @@ public:
         if (outcome.is_cancelled()) {
             return outcome.cancelled();
         }
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        result.records.push_back(envelope_record(outcome.value().envelope));
-        result.diagnostics =
-            diagnostics_from_envelope(outcome.value().envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(outcome.value().envelope));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(
+                                       outcome.value().envelope);
+                           });
     }
 
 private:
@@ -1052,7 +1071,8 @@ class GeomodelSectionAdapter : public AdapterBase {
 public:
     GeomodelSectionAdapter(std::string build_identity, ResourceLimits limits)
         : AdapterBase(geomodel_descriptor("geomodel.section",
-                                          "Geomodel section extraction", true)),
+                                          "Geomodel section extraction", true,
+                                          build_identity)),
           service_(descriptor_.build_identity, limits) {}
 
     science::Result<AlgorithmResultV1> run(const AlgorithmRequestV1& request,
@@ -1077,25 +1097,73 @@ public:
         if (outcome.is_cancelled()) {
             return outcome.cancelled();
         }
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        result.records.push_back(envelope_record(outcome.value().envelope));
-        result.diagnostics =
-            diagnostics_from_envelope(outcome.value().envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(outcome.value().envelope));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(
+                                       outcome.value().envelope);
+                           });
     }
 
 private:
     GeomodelSectionService service_;
 };
 
+class GeomodelFaultDisplacementAdapter : public AdapterBase {
+public:
+    GeomodelFaultDisplacementAdapter(std::string build_identity,
+                                     ResourceLimits limits)
+        : AdapterBase(geomodel_descriptor("geomodel.fault_displacement",
+                                          "Geomodel fault displacement",
+                                          false, build_identity)),
+          service_(descriptor_.build_identity, limits) {}
+
+    science::Result<AlgorithmResultV1> run(const AlgorithmRequestV1& request,
+                                           science::ProgressSink progress,
+                                           std::stop_token stop) override {
+        const std::string started = detail::utc_now_iso();
+        const std::uint64_t t0 = detail::epoch_ms();
+        FaultDisplacementRequest typed;
+        try {
+            typed.mesh = param_json(request, "mesh_json");
+            typed.spec = param_json(request, "spec_json");
+        } catch (const std::exception& e) {
+            return detail::make_error("request.params",
+                                      std::string("invalid params_json: ")
+                                          + e.what());
+        }
+        auto outcome =
+            service_.run(typed, std::move(progress), std::move(stop));
+        if (outcome.is_error()) {
+            return outcome.error();
+        }
+        if (outcome.is_cancelled()) {
+            return outcome.cancelled();
+        }
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(outcome.value()));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(
+                                       outcome.value());
+                           });
+    }
+
+private:
+    FaultDisplacementService service_;
+};
+
 class GeomodelExportAdapter : public AdapterBase {
 public:
     GeomodelExportAdapter(std::string build_identity, ResourceLimits limits)
         : AdapterBase(geomodel_descriptor("geomodel.export",
-                                          "Geomodel export (QC-gated)", false)),
+                                          "Geomodel export (QC-gated)", false,
+                                          build_identity)),
           service_(descriptor_.build_identity, limits) {}
 
     science::Result<AlgorithmResultV1> run(const AlgorithmRequestV1& request,
@@ -1123,23 +1191,29 @@ public:
         if (outcome.is_cancelled()) {
             return outcome.cancelled();
         }
-        AlgorithmResultV1 result;
-        result.request_id = request.request_id;
-        result.records.push_back(envelope_record(outcome.value().envelope));
-        // Export bytes ride as an extra record (the envelope carries the
-        // sidecar + size + sha256).
-        science::ProducedRecord file_record;
-        file_record.name =
-            outcome.value().envelope.payload.value("out_name",
-                                                   std::string("export"));
-        file_record.media_type = "application/octet-stream";
-        file_record.content_json = std::move(outcome.value().file_bytes);
-        result.records.push_back(std::move(file_record));
-        result.diagnostics =
-            diagnostics_from_envelope(outcome.value().envelope);
-        fill_provenance(result.provenance, request, descriptor_, started,
-                        detail::epoch_ms() - t0);
-        return result;
+        return pack_result(request, descriptor_, started,
+                           detail::epoch_ms() - t0,
+                           [&](AlgorithmResultV1& result) {
+                               result.records.push_back(
+                                   envelope_record(outcome.value().envelope));
+                               // Export bytes ride as an extra record (the
+                               // envelope carries sidecar + size + sha256).
+                               science::ProducedRecord file_record;
+                               file_record.name = outcome.value().envelope
+                                                      .payload.value(
+                                                          "out_name",
+                                                          std::string(
+                                                              "export"));
+                               file_record.media_type =
+                                   "application/octet-stream";
+                               file_record.content_json =
+                                   std::move(outcome.value().file_bytes);
+                               result.records.push_back(
+                                   std::move(file_record));
+                               result.diagnostics =
+                                   diagnostics_from_envelope(
+                                       outcome.value().envelope);
+                           });
     }
 
 private:
@@ -1197,6 +1271,12 @@ std::unique_ptr<science::IAlgorithm> make_geomodel_section_adapter(
                                                     limits);
 }
 
+std::unique_ptr<science::IAlgorithm> make_geomodel_fault_displacement_adapter(
+    std::string build_identity, ResourceLimits limits) {
+    return std::make_unique<GeomodelFaultDisplacementAdapter>(
+        std::move(build_identity), limits);
+}
+
 std::unique_ptr<science::IAlgorithm> make_geomodel_export_adapter(
     std::string build_identity, ResourceLimits limits) {
     return std::make_unique<GeomodelExportAdapter>(std::move(build_identity),
@@ -1218,6 +1298,8 @@ std::vector<std::string> register_science_services(
     adapters.push_back(make_factor_fusion_adapter(build_identity, limits));
     adapters.push_back(make_geomodel_build_adapter(build_identity, limits));
     adapters.push_back(make_geomodel_section_adapter(build_identity, limits));
+    adapters.push_back(
+        make_geomodel_fault_displacement_adapter(build_identity, limits));
     adapters.push_back(make_geomodel_export_adapter(build_identity, limits));
     std::vector<std::string> registered;
     for (auto& adapter : adapters) {

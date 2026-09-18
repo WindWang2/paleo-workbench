@@ -72,9 +72,6 @@ science::Result<CurveOperationResult> CurveOperationService::run(
     // Scope discipline (mirrors curve_interpretation's CURVE_OPERATIONS
     // table): depth-scoped operations need the axis; curve ops need values.
     const bool needs_depth = request.operation == "resample"
-                             || request.operation == "interp_display"
-                             || request.operation == "interp_scientific"
-                             || request.operation == "missing_intervals"
                              || request.operation == "depth_shift";
     if (needs_depth) {
         if (request.depth.size() != request.values.size()) {

@@ -77,7 +77,7 @@ int main() {
 
     science::AlgorithmRegistry registry;
     const auto ids = register_science_services(registry, source, "e2e-build");
-    check(ids.size() == 9, "e2e: services registered");
+    check(ids.size() == 10, "e2e: services registered");
 
     // Host-owned adapter instance (the AlgorithmRunner pattern: the host
     // keeps shared ownership for TaskRuntime submission; the registry above

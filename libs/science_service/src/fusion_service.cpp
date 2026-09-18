@@ -72,16 +72,42 @@ FactorGrid legacy_dict_to_fusion_grid(const Json& legacy,
         std::vector<float> variance;
         variance.reserve(grid.grid_z.size());
         for (const auto& row : legacy.at("variance_grid")) {
-            if (row.is_array()) {
-                for (const auto& v : row) {
-                    variance.push_back(cell_value(v));
-                }
+            if (!row.is_array()) {
+                throw std::invalid_argument(
+                    "variance_grid rows must be arrays for factor '"
+                    + factor_name + "'");
+            }
+            for (const auto& v : row) {
+                variance.push_back(cell_value(v));
             }
         }
-        if (variance.size() == grid.grid_z.size()) {
-            grid.variance_grid = std::move(variance);
+        if (variance.size() != grid.grid_z.size()) {
+            throw std::invalid_argument(
+                "variance_grid size mismatch for factor '" + factor_name
+                + "'");
         }
+        grid.variance_grid = std::move(variance);
     }
+    return grid;
+}
+
+pwb::mapping::FactorGrid legacy_dict_to_mapping_grid(
+    const Json& legacy, const std::string& factor_name) {
+    // One decoder, two carriers: reuse the fusion decode (it owns the shape
+    // validation) and widen into the mapping grid vocabulary.
+    pwb::factor_fusion::FactorGrid decoded =
+        legacy_dict_to_fusion_grid(legacy, factor_name);
+    pwb::mapping::FactorGrid grid;
+    grid.grid_x = std::move(decoded.grid_x);
+    grid.grid_y = std::move(decoded.grid_y);
+    grid.grid_z = std::move(decoded.grid_z);
+    if (decoded.variance_grid) {
+        grid.variance_grid = std::move(*decoded.variance_grid);
+    }
+    grid.grid_n = static_cast<int>(std::max(decoded.grid_x.size(),
+                                            decoded.grid_y.size()));
+    grid.n_samples = 0;
+    grid.method = "legacy";
     return grid;
 }
 
@@ -167,26 +193,32 @@ science::Result<FactorFusionResult> FactorFusionService::run(
 
     Json payload = Json::object();
     payload["class_names"] = fusion.class_names;
+    const std::size_t cells = fusion.likelihood.grid_z.size();
+    // Reuse the frozen CONV-18 nested-list encoder (same finite->double /
+    // non-finite->null semantics) instead of a third hand-rolled copy.
     auto grid_payload = [](const FactorGrid& g) {
         Json out = Json::object();
         out["width"] = g.width;
         out["height"] = g.height;
-        Json rows = Json::array();
-        for (int r = 0; r < g.height; ++r) {
-            Json row = Json::array();
-            for (int c = 0; c < g.width; ++c) {
-                const float v = g.grid_z[static_cast<std::size_t>(r) * g.width + c];
-                row.push_back(std::isfinite(v) ? Json(v) : Json(nullptr));
-            }
-            rows.push_back(std::move(row));
-        }
-        out["grid_z"] = std::move(rows);
+        out["grid_z"] = pwb::mapping::encode_legacy_grid_lists(
+            g.grid_z, g.height, g.width);
         return out;
     };
-    payload["likelihood"] = grid_payload(fusion.likelihood);
-    payload["confidence"] = grid_payload(fusion.confidence);
-    if (fusion.variance) {
-        payload["variance"] = grid_payload(*fusion.variance);
+    if (cells <= limits_.max_envelope_grid_cells) {
+        payload["likelihood"] = grid_payload(fusion.likelihood);
+        payload["confidence"] = grid_payload(fusion.confidence);
+        if (fusion.variance) {
+            payload["variance"] = grid_payload(*fusion.variance);
+        }
+    } else {
+        envelope.diagnostics.push_back(Json{
+            {"code", "envelope.grid_omitted"},
+            {"severity", "warning"},
+            {"message", "fused grids of " + std::to_string(cells)
+                            + " cells exceed envelope limit "
+                            + std::to_string(limits_.max_envelope_grid_cells)
+                            + "; descriptor-only envelope"},
+        });
     }
     payload["qc"] = fusion.qc;
     envelope.payload = std::move(payload);

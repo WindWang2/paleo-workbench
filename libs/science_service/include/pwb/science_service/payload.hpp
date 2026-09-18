@@ -18,6 +18,7 @@
 #include <pwb/science/outcome.hpp>
 #include <pwb/science/types.hpp>
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -63,6 +64,10 @@ public:
 // In-memory source over DTO dicts: the "catalog-like input DTO" provider for
 // tests, workflow adapters and the local-persistence demo path. Later
 // registrations win (deterministic overwrite, no versioning here).
+// Threading: resolve() runs on the TaskRuntime worker thread — populate all
+// payloads BEFORE submitting tasks, or synchronize put_*/resolve externally
+// (no internal lock by design; payloads are the request path, not shared
+// mutable state).
 class InMemoryPayloadSource : public IPayloadSource {
 public:
     science::Result<Payload> resolve(const science::VersionRef& ref) override;

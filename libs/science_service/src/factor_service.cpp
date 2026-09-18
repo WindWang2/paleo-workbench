@@ -122,8 +122,9 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
                                       + std::to_string(limits_.max_grid_cells));
     }
     if (request.use_constrained_idw) {
-        const int res = request.constrained.grid_resolution;
-        if (res < 4 || res > limits_.max_grid_n) {
+        const int res = request.constrained_grid_resolution.value_or(0);
+        if (request.constrained_grid_resolution
+            && (res < 4 || res > limits_.max_grid_n)) {
             return detail::make_error(
                 limit_code("grid_n"),
                 "constrained grid_resolution " + std::to_string(res)
@@ -198,6 +199,97 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
         // exact EDT + LOS masking, well anchoring, declustering, gap fill).
         // Wells come from the normalized sample set; boundary/barriers/
         // directions pass through as geometry (host resolves task layers).
+        // Python parity (constrained_idw_adapter): the engine is first-wins,
+        // so duplicate_policy='keep' would silently drop twin wells — refuse
+        // exactly like apply_interpolation_to_task does.
+        if (request.duplicate_policy == "keep") {
+            return detail::make_error(
+                "factor.constrained_policy",
+                "ValueError: 约束IDW 不支持 duplicate_policy='keep'（引擎 "
+                "first-wins）；请使用 mean/first/error");
+        }
+        // Derive the engine config from the samples unless the caller
+        // overrode a field explicitly (kernel Config defaults are never used
+        // implicitly — see FactorInterpolationRequest).
+        const bool use_dirs = !request.direction_lines.empty();
+        pwb::mapping::constrained_idw::Config engine = request.constrained;
+        engine.grid_resolution =
+            request.constrained_grid_resolution
+                ? *request.constrained_grid_resolution
+                : std::clamp(interpolate.grid_n, 20, 200);
+        {
+            double lo = std::numeric_limits<double>::infinity();
+            double hi = -std::numeric_limits<double>::infinity();
+            for (const SamplePoint& p : points) {
+                if (std::isfinite(p.value)) {
+                    lo = std::min(lo, p.value);
+                    hi = std::max(hi, p.value);
+                }
+            }
+            if (std::isfinite(lo) && std::isfinite(hi)) {
+                const double pad = hi == lo
+                                       ? std::max(std::fabs(lo) * 1e-6, 1e-9)
+                                       : std::max((hi - lo) * 1e-9, 1e-12);
+                engine.value_min =
+                    request.constrained_value_min.value_or(lo - pad);
+                engine.value_max =
+                    request.constrained_value_max.value_or(hi + pad);
+            } else if (!request.constrained_value_min
+                       || !request.constrained_value_max) {
+                // No finite samples to derive from and no override: disable
+                // clamping rather than pin the kernel's [0, 1] default.
+                engine.value_min = request.constrained_value_min;
+                engine.value_max = request.constrained_value_max;
+            }
+        }
+        {
+            double xmin = std::numeric_limits<double>::infinity();
+            double xmax = -std::numeric_limits<double>::infinity();
+            double ymin = xmin;
+            double ymax = xmax;
+            for (const SamplePoint& p : points) {
+                xmin = std::min(xmin, p.x);
+                xmax = std::max(xmax, p.x);
+                ymin = std::min(ymin, p.y);
+                ymax = std::max(ymax, p.y);
+            }
+            const double span_x = std::isfinite(xmin) ? xmax - xmin : 0.0;
+            const double span_y = std::isfinite(ymin) ? ymax - ymin : 0.0;
+            double span = std::max(std::max(span_x, span_y), 0.0);
+            if (!std::isfinite(span) || span <= 0.0) {
+                span = 1.0;
+            }
+            const double diagonal =
+                (span_x > 0.0 || span_y > 0.0)
+                    ? std::hypot(span_x, span_y)
+                    : span;
+            const double derived_search =
+                std::max(std::max(diagonal * 1.05, span * 0.75), 1e-6);
+            engine.search_radius =
+                request.constrained_search_radius.value_or(derived_search);
+            const double derived_decluster =
+                use_dirs ? 0.0
+                         : std::max(std::max(derived_search * 0.15,
+                                             span * 0.05),
+                                    1e-6);
+            engine.decluster_radius =
+                request.constrained_decluster_radius.value_or(
+                    derived_decluster);
+        }
+        if (use_dirs) {
+            // Production recipe with active direction lines (#927): the
+            // curve-corridor distance supplies the anisotropy, so isolated-
+            // well boosting must be off and the direction terms reinforced.
+            engine.decluster_radius = 0.0;
+            engine.decluster_strength = 0.0;
+            engine.along_track_blend_strength = 1.0;
+            engine.along_track_min_cell_g = 0.025;
+            engine.along_track_exp_k = 8.0;
+            engine.direction_taper_plateau = 0.95;
+            engine.direction_smoothing_strength = 3.0;
+            engine.direction_perpendicular_strength = 1.85;
+            engine.direction_corridor_strength = 2.65;
+        }
         auto constrained = detail::catch_kernel<
             pwb::mapping::constrained_idw::Result>(
             "factor.interpolate_constrained", [&] {
@@ -222,7 +314,7 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
                 pwb::mapping::constrained_idw::BoundaryPolygon polygon;
                 for (const auto& p : !request.constrained_boundary.empty()
                                           ? request.constrained_boundary
-                                          : request.interpolate.boundary) {
+                                          : interpolate.boundary) {
                     polygon.exterior.push_back(
                         {p[0], p[1]});
                 }
@@ -250,8 +342,7 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
                 }
                 return pwb::mapping::constrained_idw::
                     generate_constrained_idw(wells, {polygon}, barriers,
-                                             directions,
-                                             request.constrained);
+                                             directions, engine);
             });
         if (constrained.is_error()) {
             return constrained.error();
@@ -271,8 +362,8 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
         }
         fused.algorithm_id = pwb::factor_host::kConstrainedIdwLabel;
         fused.method = "constrained_idw";
-        fused.power = request.constrained.power;
-        fused.grid_n = request.constrained.grid_resolution;
+        fused.power = engine.power;
+        fused.grid_n = engine.grid_resolution;
         fused.n_samples = static_cast<int>(points.size());
         fused.duplicates_merged = norm_report.n_duplicates_merged;
         fused.statistics =
@@ -429,9 +520,12 @@ science::Result<FactorInterpolationResult> FactorInterpolationService::run(
     provenance["engine"] = request.use_constrained_idw
                                ? pwb::factor_host::kConstrainedIdwLabel
                                : "interpolate_factor";
+    // grid_n reports the grid ACTUALLY produced (the kernel enforces a
+    // >=10 floor; the constrained engine derives resolution separately).
     provenance["interpolate"] = Json{
         {"method", request.interpolate.method},
-        {"grid_n", request.interpolate.grid_n},
+        {"grid_n", grid->grid_n},
+        {"grid_n_requested", request.interpolate.grid_n},
         {"power", request.interpolate.power},
         {"min_neighbors", request.interpolate.min_neighbors},
         {"variogram_model", request.interpolate.variogram_model},

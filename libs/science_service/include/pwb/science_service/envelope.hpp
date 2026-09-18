@@ -65,6 +65,9 @@ struct ScienceEnvelope {
     void compute_fingerprint();
     // Pure verifier: the sha256 the payload hashes to, without storing.
     [[nodiscard]] std::string fingerprint_of_payload() const;
+
+private:
+    [[nodiscard]] static ScienceEnvelope from_json_impl(const Json& data);
 };
 
 // Serialize with Python-compatible formatting

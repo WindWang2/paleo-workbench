@@ -5,6 +5,7 @@
 #include <pwb/geomodel/export_contract.hpp>
 #include <pwb/geomodel/mesh_qc.hpp>
 #include <pwb/geomodel/volume.hpp>
+#include <pwb/domain/sha256.hpp>
 #include <pwb/factor_host/fingerprint.hpp>
 
 #include <algorithm>
@@ -289,11 +290,19 @@ science::Result<GeomodelBuildResult> GeomodelBuildService::run(
         return science::TaskCancelled{"hex"};
     }
 
-    // Volume between the two lattice sheets (float64 divergence theorem).
-    const double volume = pwb::geomodel::closed_mesh_volume(
-        horizon_sheet(top), horizon_sheet(base),
-        static_cast<std::size_t>(top.rows),
-        static_cast<std::size_t>(top.cols));
+    // Volume between the two lattice sheets (float64 divergence theorem),
+    // guarded like every other kernel call in the service.
+    auto volume_res = detail::catch_kernel<double>(
+        "geomodel.volume", [&] {
+            return pwb::geomodel::closed_mesh_volume(
+                horizon_sheet(top), horizon_sheet(base),
+                static_cast<std::size_t>(top.rows),
+                static_cast<std::size_t>(top.cols));
+        });
+    if (volume_res.is_error()) {
+        return volume_res.error();
+    }
+    const double volume = volume_res.value();
 
     // Mesh QC numerics (mesh_qc kernels).
     const double degenerate =
@@ -498,8 +507,8 @@ science::Result<ScienceEnvelope> FaultDisplacementService::run(
                     "spec fault_line must carry at least one [x, y] anchor");
             }
             pwb::geomodel::FaultSpec spec;
-            // The kernel takes a single anchor point; the production
-            // adapter reduces the trace to its first vertex.
+            // The kernel takes a single anchor point; the trace reduces to
+            // its first vertex (the production adapter's rule).
             spec.fault_line_x = line.front()[0];
             spec.fault_line_y = line.front()[1];
             spec.throw_z = request.spec.value("throw_z", 0.0);
@@ -519,6 +528,21 @@ science::Result<ScienceEnvelope> FaultDisplacementService::run(
     ScienceEnvelope envelope;
     envelope.result_type = "geomodel_fault_displacement";
     envelope.units = "m";
+    {
+        // The kernel is point-anchored; a multi-vertex trace is reduced to
+        // its first vertex — say so instead of silently relocating the
+        // displacement centre.
+        const auto line = ring_from_json(request.spec.at("fault_line"),
+                                         "fault_line");
+        if (line.size() > 1) {
+            envelope.diagnostics.push_back(Json{
+                {"code", "fault.anchor_reduced"},
+                {"severity", "info"},
+                {"message", "fault_line has " + std::to_string(line.size())
+                                + " vertices; the kernel anchor uses the "
+                                  "first vertex"}});
+        }
+    }
     Json payload = Json::object();
     payload["spec"] = request.spec;
     payload["n_vertices"] =
@@ -602,8 +626,10 @@ science::Result<GeomodelExportResult> GeomodelExportService::run(
     payload["sidecar_name"] = written.value().sidecar_name;
     payload["sidecar"] = written.value().sidecar;
     payload["file_size_bytes"] = written.value().file.size();
-    payload["file_sha256"] = pwb::factor_host::stable_sha256(
-        Json(written.value().file));
+    // sha256 of the raw file BYTES (hashlib.sha256 parity), not of a JSON
+    // encoding of them.
+    payload["file_sha256"] =
+        pwb::domain::Sha256::of_bytes(written.value().file);
     envelope.payload = std::move(payload);
     Json provenance = Json::object();
     provenance["algorithm_id"] = "geomodel.export";

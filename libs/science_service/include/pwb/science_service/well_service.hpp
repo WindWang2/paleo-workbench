@@ -3,9 +3,12 @@
 // pwb::science_service — well science services (CONV-28): typed request/
 // result envelopes over the frozen well_science kernels.
 //
-//   well.curve_operation — the 11-operation interpretation toolbox
+//   well.curve_operation — the frozen interpretation toolbox
 //     (pwb::well_science curve_ops.hpp, CONV-11) dispatched by name with
 //     required-parameter validation from the same kernel registry table.
+//     9 of the 11 registered operations are dispatched (depth_unit_normalize
+//     and derive_curve are registered in the table but not dispatched yet —
+//     they refuse with a stable error instead of half-running).
 //   well.log_match — the DTW correlation kernel (dtw.hpp, CONV-09) with the
 //     production decimation policy: curves whose cost matrix would exceed
 //     max_dtw_cost_cells are min-max downsampled first (exactly the
@@ -35,10 +38,9 @@ namespace pwb::science_service {
 // ---------------------------------------------------------------------------
 
 struct CurveOperationRequest {
-    // One of pwb::well_science::curve_operations() names:
-    // moving_average | median_filter | normalize | clip_outliers |
-    // convert_units | resample | interp_display | interp_scientific |
-    // missing_intervals | depth_shift | despike | baseline_shift
+    // One of the dispatched pwb::well_science::curve_operations() names:
+    // smooth | median_filter | normalize | clip_outliers | unit_conversion |
+    // resample | depth_shift | despike | baseline_shift
     std::string operation;
     pwb::domain::Json params = pwb::domain::Json::object();
     std::vector<double> depth;   // required for depth-scoped operations

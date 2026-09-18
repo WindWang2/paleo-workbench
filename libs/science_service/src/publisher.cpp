@@ -4,7 +4,9 @@
 
 #include <pwb/domain/json.hpp>
 
+#if !defined(_WIN32)
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <cctype>
@@ -27,13 +29,15 @@ DirectoryEnvelopePublisher::DirectoryEnvelopePublisher(
     }
 }
 
-std::filesystem::path DirectoryEnvelopePublisher::request_dir(
-    const std::string& request_id) const {
-    // Sanitize: the request id is foreign input at this boundary — only
-    // path-safe characters may reach the filesystem.
+namespace {
+
+// Path-segment sanitizer for foreign names at the publisher boundary — only
+// path-safe characters may reach the filesystem (request ids AND record
+// names; a record name like "../../x" must never escape the publish dir).
+[[nodiscard]] std::string sanitize_segment(const std::string& raw) {
     std::string safe;
-    safe.reserve(request_id.size());
-    for (char c : request_id) {
+    safe.reserve(raw.size());
+    for (char c : raw) {
         safe.push_back((std::isalnum(static_cast<unsigned char>(c)) || c == '-'
                         || c == '_' || c == '.')
                            ? c
@@ -42,7 +46,14 @@ std::filesystem::path DirectoryEnvelopePublisher::request_dir(
     if (safe.empty() || safe == "." || safe == "..") {
         safe = "unnamed";
     }
-    return root_ / safe;
+    return safe;
+}
+
+}  // namespace
+
+std::filesystem::path DirectoryEnvelopePublisher::request_dir(
+    const std::string& request_id) const {
+    return root_ / sanitize_segment(request_id);
 }
 
 void DirectoryEnvelopePublisher::atomic_write(
@@ -66,7 +77,14 @@ void DirectoryEnvelopePublisher::atomic_write(
             throw std::runtime_error("short write to " + tmp.string());
         }
     }
-    std::filesystem::rename(tmp, target);
+    std::error_code rename_ec;
+    std::filesystem::rename(tmp, target, rename_ec);
+    if (rename_ec) {
+        std::filesystem::remove(tmp);
+        throw std::runtime_error("cannot move " + tmp.string() + " to "
+                                 + target.string() + ": "
+                                 + rename_ec.message());
+    }
 }
 
 void DirectoryEnvelopePublisher::publish_success(
@@ -87,7 +105,8 @@ void DirectoryEnvelopePublisher::publish_success(
             envelope_written = true;
             continue;
         }
-        atomic_write(dir / "records" / record.name, record.content_json);
+        atomic_write(dir / "records" / sanitize_segment(record.name),
+                     record.content_json);
     }
     if (!envelope_written) {
         // Volume-only result: still publish a minimal envelope so the
