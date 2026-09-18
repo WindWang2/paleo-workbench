@@ -87,6 +87,12 @@ std::string pin_mesa_egl_on_wayland(
         if (std::filesystem::is_regular_file(candidate, ec)) {
 #if defined(Q_OS_UNIX)
             setenv("__EGL_VENDOR_LIBRARY_FILENAMES", candidate.c_str(), 1);
+            std::fprintf(
+                stderr,
+                "paleo-workbench: pinned EGL to Mesa (%s) — NVIDIA EGL "
+                "segfaults when docking GL panels on Wayland "
+                "(PALEO_ALLOW_NVIDIA_EGL=1 overrides).\n",
+                candidate.c_str());
             return candidate;
 #endif
         }

@@ -42,7 +42,6 @@
 #include <pwb/platform_services/diagnostics_report.hpp>
 #include <pwb/platform_services/qt_session_policy.hpp>
 #include <pwb/platform_services/settings_service.hpp>
-#include <pwb/platform_services/theme_service.hpp>
 
 #include "main_window.hpp"
 

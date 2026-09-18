@@ -37,8 +37,9 @@ public:
     ThemeMode theme() const { return theme_; }
     Density density() const { return density_; }
 
-    // Exact-value setters; no-ops (and still persisted, like the Python
-    // manager) when the value already is current. Both emit themeChanged.
+    // Exact-value setters; a value that already is current is a no-op (the
+    // Python manager neither emits nor re-persists on unchanged values).
+    // Changes emit theme_changed and persist.
     void set_theme(ThemeMode mode);
     void set_density(Density density);
     void toggle_density();  // compact <-> comfortable

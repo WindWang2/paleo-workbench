@@ -52,5 +52,37 @@ diagnostics / startup-shutdown / QGIS runtime detection / launcher glue）。
 | resources/icons/i18n | Python UI | ResourceLocator (QStandardPaths) | (实现中) | replace-core |
 | recent projects | ??? | SettingsService recent 列表 | (实现中) | native-new |
 
-## 本地验证
-（待填：build/ctest/oracle 结果）
+## 本地验证（已执行）
+
+- Configure: linux-gcc-release 语义（Ninja, Release, PWB_BUILD_PLATFORM=ON,
+  DATA=OFF, SCIENCE=OFF），QGIS SDK admission 主仓 vendor 树只读复用。
+- Build: `cmake --build build/cpp-platform --parallel 3`（硬上限 -j3）全绿。
+- CTest: platform 11/11 通过，含新增
+  - `platform.services`：palette_for 106-token × 5 场景逐值对账、density
+    ×3、主题/密度强制转换、QSS 主题差异化、legacy 迁移（幂等/不覆盖/删旧
+    键/嵌套组）、窗口布局版本栅栏（fence==5 / 缺失 / 99 全部走默认）、
+    recent_commands cap8+去重+单串强制转换、recent_projects cap10+清空、
+    诊断探针（providers/CRS/transform 真值）、会话策略（headless 透传、
+    xcb 清除、PALEO_FORCE_XCB、Mesa pin/已钉/退出/无 Wayland）、资源定位
+    （override/穿越拒绝/诚实 miss）。含负自检：损坏的 palette 必须判
+    FAIL（证明对账器可失败）。
+  - `platform.ui_services`：设置/帮助/最近工程菜单、主题切换落盘+窗口级
+    QSS 重渲染、closeEvent 布局落盘（version fence）、第二窗口恢复深色。
+  - 全部 GUI 测试 offscreen + 注入式 QSettings（temp ini），不污染用户配置。
+- Oracle: `tools/oracle/generate_platform_services_fixtures.py` 重跑
+  byte-identical（md5 三件全对）。
+- App CLI: `--version` → `paleo-workbench 0.2.17a0 (native <qt>)`；
+  `--diagnostics` → 真实 QGIS 版本/prefix/17 providers/CRS×3 ok/transform ok
+  /paths/environment（与 Python main.py 输出形状对齐）。
+- app self-check（platform.qgis_smoke_app）：通过。
+
+## Review 轮次
+
+- Round A（parity，独立 agent）：结论见 PR。
+- Round B（C++/Qt 架构，本 agent 自审）：已修 — EGL pin 的 stderr 警告
+  移植（操作员可见性）、main.cpp 无用 include 清理、QSS 应用从 qApp 全局
+  改为窗口级（qApp 全局 repolish 在 offscreen+QGIS 组合下 SIGSEGV，且
+  窗口级级联本就是更收敛的语义）、load_persisted 去副作用（纯状态恢复，
+  显式 apply 在控件树完成后执行）。
+- Round C（产品闭环/Python 残留/并行冲突，独立 agent）：结论见 PR。
+

@@ -28,11 +28,13 @@ ThemeService::ThemeService(QObject* parent) : QObject(parent) {}
 void ThemeService::set_store(QSettings* store) { store_ = store; }
 
 void ThemeService::set_theme(ThemeMode mode) {
+    if (mode == theme_) return;  // Python manager: unchanged value -> no emit
     theme_ = mode;
     emit_and_persist();
 }
 
 void ThemeService::set_density(Density density) {
+    if (density == density_) return;
     density_ = density;
     emit_and_persist();
 }
