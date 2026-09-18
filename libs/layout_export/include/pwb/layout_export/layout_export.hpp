@@ -150,6 +150,9 @@ struct ExportRequest {
     std::string format = "pdf";  // pdf|svg|png
     double dpi = 300.0;
     bool geo_pdf = false;
+    // C++ executor extension: force vector output for pdf/svg (no raster
+    // fallback layers). Emitted as the spec root key "force_vector".
+    bool force_vector = false;
     bool has_map_extent = false;
     std::array<double, 4> map_extent{0.0, 0.0, 0.0, 0.0};
     std::string crs;

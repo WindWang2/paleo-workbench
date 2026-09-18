@@ -47,6 +47,11 @@ pwb_add_platform_test(qgis_smoke test_qgis_smoke.cpp)
 pwb_add_platform_test(edit_cycle test_edit_cycle.cpp)
 pwb_add_platform_test(lifecycle_cycles test_lifecycle.cpp)
 pwb_add_platform_test(export_layout test_export.cpp)
+# BEGIN CONV-27
+if(PWB_BUILD_CONV_27)
+    pwb_add_platform_test(composition_export test_composition_export.cpp)
+endif()
+# END CONV-27
 pwb_add_platform_test(adapters_substitutes test_adapters.cpp)
 
 # UI wiring test compiles the real MainWindow (moc included) next to the app.

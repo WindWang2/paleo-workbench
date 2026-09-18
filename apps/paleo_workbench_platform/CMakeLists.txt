@@ -62,3 +62,12 @@ if(PWB_BUILD_CONV_16)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_16=1)
 endif()
 # END CONV-16
+# BEGIN CONV-27
+# Composition/Layout/Export C++ closure: the export dialog routes through
+# CompositionLayoutService (kernel spec + shared executor + parity).
+# Service and kernel join the link closure via Pwb::Qgis (CONV-27 gated in
+# libs/qgis).
+if(PWB_BUILD_CONV_27)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_27=1)
+endif()
+# END CONV-27

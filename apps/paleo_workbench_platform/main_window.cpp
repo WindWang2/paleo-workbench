@@ -47,6 +47,9 @@
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/qgis/layout_service.hpp>
+#ifdef PWB_WITH_CONV_27
+#include <pwb/qgis/composition_layout_service.hpp>
+#endif
 #include <pwb/qgis/layer_adapter.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 
@@ -879,12 +882,142 @@ void MainWindow::redoEdition() {
     refreshActionStates();
 }
 
+#ifdef PWB_WITH_CONV_27
+namespace {
+// CONV-27: the platform's built-in export composition — an A4-landscape
+// product page assembled from the live session state (map extent/CRS from
+// the canvas, layers from the tree). It travels through the real native
+// chain: composition JSON → layout_export kernel spec → shared spec
+// executor → QgsLayout file + report.
+std::string build_platform_composition() {
+    pwb::domain::Json composition = pwb::domain::Json::object();
+    composition["id"] = "comp_platform_export";
+    composition["title"] = "平台导出构图";
+    composition["paper_size"] = "A4";
+    composition["orientation"] = "landscape";
+    composition["width_mm"] = 297.0;
+    composition["height_mm"] = 210.0;
+    composition["dpi"] = 300.0;
+    pwb::domain::Json elements = pwb::domain::Json::array();
+    auto add_element = [&elements](const char* id, const char* type,
+                                   double x, double y, double w, double h,
+                                   long long z, pwb::domain::Json props) {
+        pwb::domain::Json element = pwb::domain::Json::object();
+        element["id"] = id;
+        element["element_type"] = type;
+        element["x_mm"] = x;
+        element["y_mm"] = y;
+        element["width_mm"] = w;
+        element["height_mm"] = h;
+        element["z_index"] = z;
+        element["visible"] = true;
+        element["locked"] = false;
+        element["properties"] = std::move(props);
+        elements.push_back(std::move(element));
+    };
+    add_element("el_neatline", "neatline", 2.0, 2.0, 293.0, 206.0, 0,
+                pwb::domain::Json::object());
+    add_element("el_map", "main_map", 8.0, 16.0, 204.0, 164.0, 1,
+                pwb::domain::Json::object());
+    add_element("el_title", "title", 8.0, 3.0, 281.0, 10.0, 2,
+                pwb::domain::Json::object(
+                    {{"text", "古地理图"}, {"font_size", 14.0},
+                     {"align", "center"}, {"color", "#000000"}}));
+    add_element("el_legend", "legend", 218.0, 16.0, 71.0, 100.0, 3,
+                pwb::domain::Json::object({{"items",
+                                            pwb::domain::Json::array()}}));
+    add_element("el_scale", "scale_bar", 8.0, 186.0, 44.0, 8.0, 4,
+                pwb::domain::Json::object({{"units", ""}}));
+    add_element("el_arrow", "north_arrow", 270.0, 186.0, 10.0, 15.0, 5,
+                pwb::domain::Json::object());
+    composition["elements"] = elements;
+    composition["metadata"] = pwb::domain::Json::object();
+    return composition.dump();
+}
+}  // namespace
+#endif
+
 void MainWindow::exportLayoutDialog() {
     const QString path = QFileDialog::getSaveFileName(
         this, tr("导出布局"), QString(),
         tr("PNG 图像 (*.png);;PDF 文档 (*.pdf);;SVG 矢量 (*.svg)"));
     if (path.isEmpty()) return;
     const QString suffix = QFileInfo(path).suffix().toLower();
+#ifdef PWB_WITH_CONV_27
+    // CONV-27: full native chain with pre-flight validation and screen/
+    // export parity — no second layout authority, no Python.
+    bool accepted = false;
+    const double dpi = QInputDialog::getDouble(
+        this, tr("导出布局"), tr("输出 DPI"), 300.0, 36.0, 1200.0, 0,
+        &accepted);
+    if (!accepted) return;
+
+    const pwb::domain::Json canvas_state =
+        pwb::domain::Json::parse(session_->map().canvas_state_json());
+    const std::string composition = build_platform_composition();
+
+    pwb::qgis::CompositionExportRequest request;
+    request.format = suffix.toStdString();
+    request.dpi = dpi;
+    if (canvas_state.contains("extent")
+        && canvas_state["extent"].is_array()
+        && canvas_state["extent"].size() == 4) {
+        request.has_extent = true;
+        for (int i = 0; i < 4; ++i) {
+            request.extent[i] = canvas_state["extent"][i].get<double>();
+        }
+    }
+    request.crs = canvas_state.value("crs", std::string());
+
+    pwb::qgis::CompositionLayoutService composition_layouts(session_->map());
+
+    // Fail-closed pre-flight: hybrid/unmapped elements surface here,
+    // itemized, before any page is written.
+    const pwb::domain::Json validation =
+        composition_layouts.validate_layout(composition, request);
+    if (!validation.value("ok", false)) {
+        QMessageBox::warning(
+            this, tr("导出布局"),
+            QString::fromStdString(validation.value(
+                "failure", std::string("composition validation failed"))));
+        return;
+    }
+
+    // Screen/export parity check (extent/CRS/layers/grid/legend).
+    const pwb::domain::Json parity = composition_layouts.parity_report(
+        session_->map().canvas_state_json(), composition, request);
+
+    const pwb::domain::Json report = composition_layouts.export_layout(
+        composition, std::filesystem::path(path.toStdWString()), request);
+    if (!report.value("ok", false)) {
+        QMessageBox::warning(
+            this, tr("导出布局"),
+            QString::fromStdString(
+                report.value("failure", std::string("export failed"))));
+        return;
+    }
+    QString status = tr("已导出: %1 (items=%2)")
+                         .arg(path)
+                         .arg(static_cast<qulonglong>(
+                             report.value("items", static_cast<long long>(0))));
+    const long long width_px =
+        report.value("width_px", static_cast<long long>(0));
+    if (width_px > 0) {
+        status += tr(" %1×%2 px")
+                      .arg(static_cast<qulonglong>(width_px))
+                      .arg(static_cast<qulonglong>(report.value(
+                          "height_px", static_cast<long long>(0))));
+    }
+    const pwb::domain::Json warnings = report.value(
+        "warnings", pwb::domain::Json::array());
+    if (warnings.is_array() && !warnings.empty()) {
+        status += tr(" · 警告 %1 条").arg(static_cast<qulonglong>(warnings.size()));
+    }
+    if (!parity.value("equal", true)) {
+        status += tr(" · 画布/导出存在差异");
+    }
+    statusBar()->showMessage(status, 8000);
+#else
     pwb::qgis::LayoutService layouts(session_->map());
     pwb::qgis::LayoutSpec spec;
     const std::string error = layouts.export_layout(
@@ -895,6 +1028,7 @@ void MainWindow::exportLayoutDialog() {
     } else {
         statusBar()->showMessage(tr("已导出: %1").arg(path), 8000);
     }
+#endif
 }
 
 #ifdef PWB_WITH_CONV_01

@@ -670,6 +670,7 @@ LayoutExportReport export_composition_reported(
             input.mirror_layers = request.mirror_layers;
             spec = build_layout_spec(doc, input, &report.warnings);
             if (request.geo_pdf) spec["geo_pdf"] = true;
+            if (request.force_vector) spec["force_vector"] = true;
         } catch (const std::invalid_argument& ex) {
             report.warnings.push_back(ex.what());
             no_engine_reason = ex.what();
