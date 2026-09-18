@@ -1,4 +1,8 @@
-"""Color ramps and palettes for continuous geological property mapping and GIS layers."""
+"""Color ramps and palettes for continuous geological property mapping and GIS layers.
+
+C++ port: libs/cartography (CONV-27) — frozen against this module as oracle;
+legacy fallback. Optional dispatch seam: mapping.cartography_native (HAS_CPP).
+"""
 
 from __future__ import annotations
 

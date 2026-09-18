@@ -11,6 +11,9 @@ The library is data, not code paths: entries serialise to a JSON document
 touching renderers. Applying an entry to a layer records the binding in the
 layer style payload (``style_binding``), keeping style↔science traceability
 on the layer itself.
+C++ port: libs/cartography (CONV-27) — frozen against this module as
+oracle; legacy fallback. Optional dispatch seam:
+mapping.cartography_native (HAS_CPP).
 """
 
 from __future__ import annotations

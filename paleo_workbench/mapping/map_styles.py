@@ -5,6 +5,10 @@ snapshot seam, persistence, and both render backends share one vocabulary.
 ``VectorStyle.to_dict`` keeps the established flat dict keys (``fill``,
 ``stroke``, ``stroke_width``, ``marker_size``, ``labels``) and only adds new
 ones, so persisted projects and the QGIS bridge payload stay compatible.
+
+
+C++ port: libs/cartography (CONV-27) — frozen against this module as oracle;
+legacy fallback. Optional dispatch seam: mapping.cartography_native (HAS_CPP).
 """
 
 from __future__ import annotations

@@ -207,3 +207,37 @@ from the real Python implementations by
 `libs/mapping_bind/oracle/generate_fixtures.py`), and
 `tests/test_mapping_kernel_bind.py` (skipped when the module is missing)
 compares facade vs pure Python live.
+
+
+## Cartography registries (CONV-27)
+
+The cartography style surface is ported to the Qt-free library
+`libs/cartography` (`pwb::cartography`, alias `Pwb::Cartography`): color
+ramp registry (11 builtins), `VectorStyle`/`TextStyle` value types + the 8
+named presets, `ScalarStyleSpec` + numpy-exact classification
+(linspace/quantile `_lerp`/Fisher-Jenks with pairwise sums and the PCG64
+Floyd sample draw), the geological symbol V2 registry (15 symbols), the
+geological style library V1 (12 entries), the componentized map template
+library (factor map Python-parity + facies/prediction/constraint/
+comprehensive variants), the QGIS render bridge payload adapter and the
+product API facade (`cartography.hpp`). The renderer XML itself stays
+authored by QGIS in `native/qgis_render_bridge` (C++); the adapter emits its
+inputs.
+
+Optional pybind facade: `libs/cartography/cartography_bind/` builds module
+`pwb_cartography` (option `PWB_BUILD_CONV_27_BIND`, off by default, never in
+the integrated gate), consumed by the `HAS_CPP` dispatch seam
+`paleo_workbench/mapping/cartography_native.py`.
+
+Parity: `libs/cartography/cartography_tests/` (8 ctest executables, frozen
+fixtures from `tools/oracle/generate_cartography_fixtures.py` + a negative
+self-check) and `tests/test_cartography_native_bind.py` (skipped when the
+module is missing) compare facade vs pure Python live.
+
+Python module status after CONV-27 (module docstrings carry the same note):
+`color_ramps.py`, `map_styles.py`, `scalar_style.py`,
+`geological_symbols.py`, `geological_style_library.py`, `qgis_style.py`,
+`geological_pipeline/templates.py` — kept as oracle + legacy fallback; the
+C++ library is authoritative for the product runtime. `renderers.py`
+(SVG fallback), `facies_renderer_xml.py` (hand-rolled XML) and
+`facies_taxonomy.py` stay Python-only by scope decision (CONV-27 D-9).

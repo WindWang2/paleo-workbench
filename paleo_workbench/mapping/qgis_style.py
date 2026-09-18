@@ -20,6 +20,9 @@ Payload contract (schema_version 1)::
 
 This module is Qt-free and QGIS-free: it validates and versions payloads but
 never interprets renderer XML (that is the native bridge's job).
+C++ port (payload model): libs/cartography (CONV-27) — frozen against
+this module as oracle; legacy fallback. Optional dispatch seam:
+mapping.cartography_native (HAS_CPP).
 """
 
 from __future__ import annotations

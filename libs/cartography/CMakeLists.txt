@@ -34,3 +34,7 @@ target_link_libraries(pwb_cartography PUBLIC Pwb::Domain Pwb::MappingDocument)
 if(BUILD_TESTING)
     add_subdirectory(cartography_tests)
 endif()
+
+# Optional pybind facade — never part of the integrated gate (CONV-20
+# discipline); its CMakeLists self-gates on the sub-option.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cartography_bind/CMakeLists.txt")
