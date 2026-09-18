@@ -169,6 +169,20 @@ int main(int argc, char** argv) {
         15000));
     PWB_CHECK(host.view()->capability_report().graphics_available);
 
+    // 1b. Unknown depth unit at the host level: axis label falls back to "m"
+    //     and the diagnostic stays visible (unit honesty is user-visible).
+    {
+        PWB_CHECK(host.load_document(make_standard_well("W-unknown-unit",
+                                                        "furlongs"),
+                                     WellLogTrackLayout{}, &error));
+        PWB_CHECK(host.axis_unit_text() == "m");
+        bool honest = false;
+        for (const auto& diagnostic : host.last_plan_diagnostics()) {
+            if (diagnostic.find("depth-unit:unknown") == 0) honest = true;
+        }
+        PWB_CHECK(honest);
+    }
+
     // 2. Depth sync: selection round-trips through SelectionEventV1.
     std::vector<SelectionEventV1> selection_events;
     host.set_selection_callback([&selection_events](const SelectionEventV1& event) {

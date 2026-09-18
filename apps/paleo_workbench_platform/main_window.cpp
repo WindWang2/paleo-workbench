@@ -305,10 +305,14 @@ void MainWindow::buildUi() {
     track_panel->bind(well_log_host);
     well_log_host->set_cursor_callback(
         [this](const pwb::viz::WellLogCursorEvent& event) {
-            if (!event.valid) return;
+            if (!event.valid) {
+                cursor_label_->hide();
+                return;
+            }
             cursor_label_->setText(tr("深度 %1 %2")
                                        .arg(event.depth)
                                        .arg(QString::fromStdString(event.unit)));
+            cursor_label_->show();
         });
     well_log_host->set_interpretation_callback(
         [this](const pwb::viz::WellLogInterpretationEvent& event) {

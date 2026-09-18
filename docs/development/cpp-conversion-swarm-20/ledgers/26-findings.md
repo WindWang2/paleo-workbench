@@ -33,3 +33,11 @@ Python 文件均以注释/docstring 标注（replaced/oracle/legacy/partial）,�
 - `python_repr_double` 本地实现的指数格式分支（>1e16 / <1e-4）仅在 fixture 覆盖的量级内对账;factor_host 的 canonical_json 有更完整实现,若两切片交汇应合并为共享工具（见 decisions D4）。
 - interpretion 事件（interval_selected/marker_hit）为宿主侧派生契约（SelectionEventV1 之外的新 v1 事件）,跨面板复用时应保持 Qt-free 头 `well_log_events.hpp` 为唯一契约源。
 - 与并行 PR 冲突面：`apps/paleo_workbench_platform/CMakeLists.txt`（PR #1347 也触碰）——本分支仅在其 WLE 块内加 1 行 `target_sources`。
+
+## Review 记录（3 轮）
+
+- **Round 1（独立 subagent review）**：无 P0；4 P1（input_index 键映射漂移、跨井模板不 reconcile、双命令部分失败失同步、grouped-lithology/interval seam 缺失）+ 12 P2 全部修复。关键修复：`EngineCurveSubmission.input_index`、`apply_track_layout` 内建 reconcile、SetPresentation 失败后向新文档 resync、`python_repr_double` 指数阈值规则、`WellLogCurveSource` 扩 interpretation 上下文、游标事件接状态栏。
+- **Round 2（独立 subagent review）**：1 P1（input_mnemonics 在失败路径提前污染 State——改为局部变量成功路径提交）+ P2（load_las 清 DTO plan 状态、面板模板加载检查返回值、fixture 补 interval+log+fallback 组合案例、host 层未知单位测试、ledger D3 措辞、Unicode strip 限制声明、游标 label 清除隐藏）全部修复。
+- **Round 3（自查）**：diff 面 26 文件无越界；`#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)` guard 无意外改动；fixture 生成幂等（重跑 byte-identical）；4 个 open PR（#1346/#1347/#1348/#1349）与全部新增文件零交集（仅 #1347 同触 `apps/paleo_workbench_platform/CMakeLists.txt`，本分支仅 +2 行且在对方未触碰的 WLE 块内，机械可解）。
+
+本地验证基线：build/science ctest 9/9（含 3 个 viewer 测试）、build/platform ctest 40/40、pwb-platform 全链接（AUTOMOC 面板）。

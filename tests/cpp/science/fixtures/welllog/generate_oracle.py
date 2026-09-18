@@ -298,6 +298,8 @@ def build_cases():
                 Curve("RXO", "ohmm", [0.0, 1.0], [5.0, 7.0], (0.0, 0.0)),
                 Curve("DEN", "g/cm3", [0.0, 1.0], [2.0, 2.4], (2.0, NAN)),
             ],
+            lithology=[Interval(0.0, 10.0, lithology="泥岩")],
+            markers=[Marker(5.0, "K1")],
         ),
     ))
 

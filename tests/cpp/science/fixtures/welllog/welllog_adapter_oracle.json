@@ -647,9 +647,22 @@
       "color": ""
      }
     ],
-    "lithology": [],
+    "lithology": [
+     {
+      "top": 0.0,
+      "bottom": 10.0,
+      "label": "泥岩"
+     }
+    ],
     "facies": [],
-    "markers": [],
+    "markers": [
+     {
+      "depth": 5.0,
+      "label": "K1",
+      "semantic": "formation_top",
+      "id": ""
+     }
+    ],
     "facies_groups": null
    },
    "expected": {
@@ -701,15 +714,32 @@
       "axis_id": "163ca5d0-f38a-585b-a765-1b746db18d2d"
      }
     ],
-    "lithology_bounds": [],
+    "lithology_bounds": [
+     [
+      0.0,
+      10.0,
+      "泥岩"
+     ]
+    ],
     "facies_bounds": [],
-    "markers": [],
+    "markers": [
+     {
+      "depth": 5.0,
+      "label": "K1",
+      "semantic": "formation_top"
+     }
+    ],
     "diagnostics": []
    },
    "submit": {
     "top": 0.0,
     "bottom": 10.0,
     "tracks": [
+     {
+      "width_mm": 24.0,
+      "layers": [],
+      "interval_semantic": "lithology"
+     },
      {
       "width_mm": 40.0,
       "scale_min": 0.0,

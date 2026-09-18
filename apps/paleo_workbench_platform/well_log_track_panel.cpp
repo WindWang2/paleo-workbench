@@ -286,7 +286,10 @@ void WellLogTrackPanel::on_load_template() {
                              QString::fromStdString(error));
         return;
     }
-    (void)host()->apply_track_layout(restored);
+    QString apply_error;
+    if (!host()->apply_track_layout(restored, &apply_error)) {
+        QMessageBox::warning(this, tr("模板应用失败"), apply_error);
+    }
     refresh();
 }
 

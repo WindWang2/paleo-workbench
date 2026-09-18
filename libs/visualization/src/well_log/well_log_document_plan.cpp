@@ -504,6 +504,10 @@ std::string stable_entity_id(std::vector<std::string_view> parts) {
             joined.push_back('|');
         }
         std::string_view part = parts[i];
+        // ASCII whitespace only: Python str.strip() also strips Unicode
+        // spaces (U+00A0/U+3000/...). Parts in this product are mnemonics
+        // and labels without those; a part carrying one would derive a
+        // different (still stable) id — declared limitation, not parity.
         constexpr std::string_view kStrip = " \t\n\r\f\v";
         while (!part.empty() && kStrip.find(part.front()) != std::string_view::npos) {
             part.remove_prefix(1);

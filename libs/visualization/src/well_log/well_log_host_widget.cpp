@@ -739,6 +739,13 @@ bool WellLogHostWidget::load_las(const QString& path, QString* error) {
     state_->document_id_text_value = std::move(presentation_document_text);
     state_->axis_unit = std::move(axis_unit);
     state_->axis_domain = axis_domain;
+    // The LAS path has no adapted DTO plan behind it: clear plan-side state
+    // so apply_track_layout/track_layout cannot act on a previous DTO load.
+    state_->layout = WellLogTrackLayout{};
+    state_->plan = EngineLoadPlan{};
+    state_->input_mnemonics.clear();
+    state_->plan_diagnostics.clear();
+    state_->presentation_diagnostics.clear();
     state_->view->set_document_id(state_->document_id);
     state_->has_document = true;
     return true;
@@ -755,7 +762,7 @@ bool WellLogHostWidget::load_document(const WellLogDocumentInput& input,
         return false;
     }
     EngineLoadPlan plan = adapt_well_log_data(input);
-    state_->plan_diagnostics = plan.diagnostics;
+    const std::vector<std::string> plan_diagnostics_copy = plan.diagnostics;
     const auto envelope = submit_depth_envelope(plan);
     if (!envelope.has_value()) {
         if (error != nullptr) {
@@ -763,10 +770,12 @@ bool WellLogHostWidget::load_document(const WellLogDocumentInput& input,
         }
         return false;
     }
-    state_->input_mnemonics.clear();
-    state_->input_mnemonics.reserve(input.curves.size());
+    // Reconcile basis for this load, kept local until the load succeeds so
+    // a failed reload cannot re-schema the previous document's layout.
+    std::vector<std::string> input_mnemonics;
+    input_mnemonics.reserve(input.curves.size());
     for (std::size_t i = 0; i < input.curves.size(); ++i) {
-        state_->input_mnemonics.push_back(
+        input_mnemonics.push_back(
             input.curves[i].mnemonic.empty() ? "CURVE_" + std::to_string(i)
                                              : input.curves[i].mnemonic);
     }
@@ -785,13 +794,13 @@ bool WellLogHostWidget::load_document(const WellLogDocumentInput& input,
     }
     const auto& axis = document.sampling_axes().front();
     WellLogTrackLayout layout =
-        reconcile_track_layout(saved_layout, state_->input_mnemonics);
+        reconcile_track_layout(saved_layout, input_mnemonics);
 
     std::size_t track_count = 0;
+    std::vector<std::string> presentation_diagnostics;
     auto presentation = build_presentation(plan, layout, document.id(), axis,
                                            track_count,
-                                           state_->presentation_diagnostics);
-    state_->plan_diagnostics = plan.diagnostics;
+                                           presentation_diagnostics);
 
     const auto presentation_document_id = document.id();
     const auto presentation_revision = document.revision().value;
@@ -831,6 +840,9 @@ bool WellLogHostWidget::load_document(const WellLogDocumentInput& input,
         state_->layout = std::move(layout);
         state_->plan = std::move(plan);
         state_->track_count = 0;
+        state_->input_mnemonics = input_mnemonics;
+        state_->plan_diagnostics = plan_diagnostics_copy;
+        state_->presentation_diagnostics = std::move(presentation_diagnostics);
         state_->view->set_document_id(state_->document_id);
         state_->has_document = true;
         if (error != nullptr) {
@@ -850,6 +862,9 @@ bool WellLogHostWidget::load_document(const WellLogDocumentInput& input,
     state_->layout = std::move(layout);
     state_->plan = std::move(plan);
     state_->track_count = track_count;
+    state_->input_mnemonics = std::move(input_mnemonics);
+    state_->plan_diagnostics = plan_diagnostics_copy;
+    state_->presentation_diagnostics = std::move(presentation_diagnostics);
     state_->view->set_document_id(state_->document_id);
     state_->has_document = true;
     return true;

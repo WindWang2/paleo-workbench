@@ -14,7 +14,7 @@ Python/PySide6 测井 host 面向 C++20/Qt6 的迁移首闭环：`welllog_engine
 
 - 深度单位词表直接链 `Pwb::WellScience`（CONV-11 的 `classify_depth_unit`,V6 §2-3 oracle-frozen）——science_suite viewer 块按需 `add_subdirectory(libs/well_science)` 补挂（fail-closed 前提下目标缺失则自建）。
 - JSON 用 `Pwb::Domain` 的 nlohmann 惯例（`ordered_json`,键序确定）。domain 同样按需补挂。
-- UUIDv5 所需 SHA-1 为本地实现（仓库只有 SHA-256）,RFC 3174 向量 + Python hashlib 对账覆盖。
+- UUIDv5 所需 SHA-1 为本地实现（仓库只有 SHA-256）,正确性由 oracle fixture 的端到端 uuid5 对账（12 案例）+ negative self-check 钉死,无独立 RFC 向量测试。
 
 ## D4 与 Python oracle 的对账契约
 
