@@ -94,3 +94,9 @@
 ## D-24 审核轮 3 采纳与保留（Karpathy 审核后的取舍）
 - 采纳：`*_or` 强制转换 helpers 下沉到唯一消费者 composition.cpp；extras 收集收敛为 `collect_extras`；`find_layer`/`remove_layer` 返回值进入测试行使（remove 返回值经 fixture `"returns"` 字段对账）；模型名去 `_Model` 后缀（对齐 mapping_kernel 裸名风格）；`is_vector_family`/`is_known_element_type` 移入 .cpp；删除零调用的 `operator==`/公共 `paper_size_mm`/死 using/死 errno/恒真分支。
 - 保留（记录）：根 CMakeLists 的 `option(PWB_BUILD_CONV_02)` 留在 BEGIN CONV-02 块内（prompt §3 的模板形态优先于文件内 option 集中区，且块外零改动）。`dump_layer` 对 style/metadata 的 object 守卫保留——dump 是公共 API，接受程序化构造的模型（其 Json 成员默认为 null），守卫使 dump 全态化而非死防御。
+
+## D-25 工单重派时的裁定：不重做已合入的交付，转为独立复验收（2026-09-18）
+- **事实**：工单重派时 origin/main 已是 ff67dcf3，本切片的全部交付（libs/mapping_document、oracle 生成器、48 案例 fixture、`mapping_document.roundtrip`、02-findings/02-pr、CONV-02 CMake 块）已经 f0d150a9 → PR #1315 → merge b218a895 进入 main。工单的基线描述（`35987e13`）写作时点早于该合入。
+- **选择**：按 goal-loop「对用户流程更诚实、更少抽象」——重新实现已绿的核违反 Karpathy 外科手术原则且产出零差异 PR；故第 13 轮做全项独立复验收（fresh worktree 重建、fixture sha256 再生对比、Python 活体探针对照 D-09/D-12/D-15/D-22、ctest ×2、Qt-free grep、§8 逐条核对），证据记入账本第 13 轮与「§8 复验收」段。
+- **§8.7/§8.8 的字面满足方式**：交付 commit f0d150a9 与 PR #1315（标题/正文与 §9 模板一致）已在 main 历史；不重开同题重复 PR。本轮唯一的树增量（台账第 13 轮 + 本条 D-25）以同名分支重推并开台账留档 PR #1350（不含生产代码，声明引用 #1315）。
+- **否**的备选：在陈旧基线上重放实现（产净零 diff，不可审）；只跑 ctest 不读台账就宣布通过（未核 §8.1-8.3，不诚实）。
