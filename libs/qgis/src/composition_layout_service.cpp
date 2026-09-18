@@ -1,4 +1,4 @@
-// CompositionLayoutService — implementation (CONV-27).
+// CompositionLayoutService — implementation (CONV-29).
 
 #include <pwb/qgis/composition_layout_service.hpp>
 
@@ -84,7 +84,7 @@ Json CompositionLayoutService::validate_layout(
     const std::string& composition_json,
     const CompositionExportRequest& request) {
     Json out = Json::object();
-    Composition doc;
+    pwb::mapping_document::Composition doc;
     try {
         doc = pwb::mapping_document::parse_composition(
             Json::parse(composition_json));
@@ -146,7 +146,7 @@ Json CompositionLayoutService::export_layout(
     const std::string& composition_json,
     const std::filesystem::path& output_path,
     const CompositionExportRequest& request) {
-    Composition doc;
+    pwb::mapping_document::Composition doc;
     try {
         doc = pwb::mapping_document::parse_composition(
             Json::parse(composition_json));
@@ -261,7 +261,7 @@ Json CompositionLayoutService::parity_report(
         return failure_report(std::string("canvas state parse failed: ")
                               + ex.what());
     }
-    Composition doc;
+    pwb::mapping_document::Composition doc;
     try {
         doc = pwb::mapping_document::parse_composition(
             Json::parse(composition_json));

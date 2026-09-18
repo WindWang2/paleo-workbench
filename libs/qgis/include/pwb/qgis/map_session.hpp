@@ -57,7 +57,7 @@ public:
     QgsVectorLayer* vectorLayerById(const std::string& layer_id) const;
     std::vector<std::string> layerIdsTopFirst() const;
 
-    // CONV-27: screen-state snapshot for export parity. Shape:
+    // CONV-29: screen-state snapshot for export parity. Shape:
     // {"extent":[xmin,ymin,xmax,ymax]|null, "crs": authid,
     //  "layers":[{"id","visible"}...] (top-first), "grid": false,
     //  "legend": <has an on-screen layer tree>}.

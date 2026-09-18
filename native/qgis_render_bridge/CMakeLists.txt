@@ -91,6 +91,7 @@ if(PALEO_WITH_QGIS_RENDERER)
 
     add_library(qgis_render_bridge_core STATIC
         src/qgis_render_bridge.cpp
+        src/layout_spec_exec.cpp
         src/style_codec.cpp
         src/gui_service.cpp
         src/geometry_service.cpp

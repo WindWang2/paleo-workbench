@@ -1,4 +1,4 @@
-// CompositionLayoutService — CONV-27 product wiring of the full native
+// CompositionLayoutService — CONV-29 product wiring of the full native
 // composition export chain:
 //
 //   Composition JSON (mapping_document kernel) → layout_export kernel spec
@@ -7,7 +7,7 @@
 //
 // No Python anywhere on this path; the pybind bridge is the legacy runtime
 // facing the same executor. Every service entry returns a JSON report and
-// never fakes success (fail-closed policy, 27-decisions.md D-03).
+// never fakes success (fail-closed policy, 29-decisions.md D-03).
 
 #pragma once
 

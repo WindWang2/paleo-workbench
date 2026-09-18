@@ -1,4 +1,4 @@
-// platform.composition_export — CONV-27 full-chain product test: composition
+// platform.composition_export — CONV-29 full-chain product test: composition
 // JSON → layout_export kernel spec → shared wire-spec executor → native
 // PNG/PDF/SVG + honest reports. Covers validate / export / preview /
 // map-body / parity / fail-closed hybrid / pixel budget / transparent map
@@ -29,7 +29,7 @@ using pwb::domain::Json;
 
 namespace {
 
-Json composition_with_elements(std::initializer_list<Json> extra_types) {
+Json composition_with_elements(const Json& extra_types) {
     Json composition = Json::object();
     composition["id"] = "comp_platform_test";
     composition["title"] = "platform test";
@@ -218,13 +218,11 @@ int main(int argc, char** argv) {
         const Json parity = service.parity_report(canvas_state,
                                                   composition_json, request);
         PWB_CHECK(parity.value("equal", false));
-        const Json drifted_request = request;
         pwb::qgis::CompositionExportRequest shifted = request;
         shifted.extent[0] = 100.0;  // export extent no longer the canvas one
         const Json parity_drift = service.parity_report(canvas_state,
                                                         composition_json, shifted);
         PWB_CHECK(!parity_drift.value("equal", true));
-        (void)drifted_request;
 
         // --- fail-closed: hybrid element --------------------------------
         const Json hybrid = composition_with_elements(Json::array(

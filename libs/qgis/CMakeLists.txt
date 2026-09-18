@@ -14,12 +14,12 @@ target_link_libraries(pwb_qgis PUBLIC PwbQgis::Sdk)
 target_compile_definitions(pwb_qgis PRIVATE
     PALEO_QGIS_PREFIX_PATH="${PALEO_QGIS_SDK_DIR}")
 
-# BEGIN CONV-27
+# BEGIN CONV-29
 # Composition/Layout/Export C++ wiring: the composition export service and
 # the shared wire-spec executor (single authority with the pybind bridge —
 # the TU is compiled into both targets). Off by default; Pwb::LayoutExport
 # becomes PUBLIC so consumers (app, platform tests) get the kernel too.
-if(PWB_BUILD_CONV_27)
+if(PWB_BUILD_CONV_29)
     target_sources(pwb_qgis PRIVATE
         src/composition_layout_service.cpp
         ${CMAKE_SOURCE_DIR}/native/qgis_render_bridge/src/layout_spec_exec.cpp)
@@ -27,4 +27,4 @@ if(PWB_BUILD_CONV_27)
         ${CMAKE_SOURCE_DIR}/native/qgis_render_bridge/src)
     target_link_libraries(pwb_qgis PUBLIC Pwb::LayoutExport)
 endif()
-# END CONV-27
+# END CONV-29

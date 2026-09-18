@@ -1,4 +1,4 @@
-// Qt-free layout-export kernel (CONV-27).
+// Qt-free layout-export kernel (CONV-29).
 //
 // Port of the composition → layout-spec behavior layer that CONV-02
 // explicitly deferred (ledger 02-decisions.md D-01):
@@ -10,7 +10,7 @@
 //
 // Behavior parity with Python is frozen by tools/oracle/
 // generate_layout_export_fixtures.py and replayed in layout_export_tests.
-// Documented deviations (27-decisions.md):
+// Documented deviations (29-decisions.md):
 //   * D-03: no composer SVG fallback engine — when the Python path would
 //     degrade to composer_fallback the C++ orchestration returns an honest
 //     ok=false report (failure diagnostics) instead of a second renderer;
@@ -131,7 +131,7 @@ struct LayoutExportReport {
     std::vector<std::string> unmapped_elements;  // hybrid element ids
     long long items = 0;
     std::vector<std::string> hybrid_items;  // hybrid element TYPES
-    // C++ superset (27-decisions.md D-06): failure diagnostics + page
+    // C++ superset (29-decisions.md D-06): failure diagnostics + page
     // dimensions; empty/0 when not applicable.
     std::string failure;
     long long width_px = 0;
@@ -176,7 +176,7 @@ LayoutExportReport export_composition_reported(
     const ExportRequest& request, const LayoutExecutor* executor);
 
 // ---------------------------------------------------------------------------
-// Screen/export parity (27-decisions.md D-07).
+// Screen/export parity (29-decisions.md D-07).
 // State shape (both sides): {"extent":[xmin,ymin,xmax,ymax], "crs": str,
 //   "layers":[{"id":str,"visible":bool}...],   // top-first
 //   "grid":{"enabled":bool,"interval_x":num,"interval_y":num}, "legend":bool}

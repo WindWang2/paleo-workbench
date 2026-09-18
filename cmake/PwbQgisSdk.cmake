@@ -130,6 +130,23 @@ target_include_directories(PwbQgis::Sdk INTERFACE
     "${PALEO_QGIS_BUILD_DIR}/src/gui"
     "${PALEO_QGIS_BUILD_DIR}/src/analysis"
 )
+# QGIS headers include their bundled/external dependencies unqualified
+# (nlohmann/json_fwd.hpp from qgsabstractgeometry.h, qwt from gui headers,
+# spatialindex from analysis headers, geos/gdal from the deps prefix the
+# vendor build resolved against). The imported SDK must carry the same
+# -isystem set the vendor build used, or every consumer TU fails at the
+# first core header. (Same fix as the cpp-ui-workbench-closure slice —
+# shared-conflict file; keep content identical to merge cleanly.)
+pwb_sdk_path(PWB_QGIS_DEPS_PREFIX "/home/kevin/pwb-sdks/root/usr")
+file(GLOB _pwb_qwt_dir "${PALEO_QGIS_SOURCE_DIR}/external/qwt-*")
+target_include_directories(PwbQgis::Sdk INTERFACE
+    "${PALEO_QGIS_SOURCE_DIR}/external/nlohmann"
+    "${PALEO_QGIS_SOURCE_DIR}/external/spatialindex/include"
+    "${PWB_QGIS_DEPS_PREFIX}/include")
+if(_pwb_qwt_dir)
+    list(GET _pwb_qwt_dir 0 _pwb_qwt_first)
+    target_include_directories(PwbQgis::Sdk INTERFACE "${_pwb_qwt_first}")
+endif()
 target_link_libraries(PwbQgis::Sdk INTERFACE
     PwbQgis::Core PwbQgis::Gui PwbQgis::Analysis
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::Svg Qt6::PrintSupport)

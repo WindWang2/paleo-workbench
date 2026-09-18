@@ -47,7 +47,7 @@
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/qgis/layout_service.hpp>
-#ifdef PWB_WITH_CONV_27
+#ifdef PWB_WITH_CONV_29
 #include <pwb/qgis/composition_layout_service.hpp>
 #endif
 #include <pwb/qgis/layer_adapter.hpp>
@@ -882,9 +882,9 @@ void MainWindow::redoEdition() {
     refreshActionStates();
 }
 
-#ifdef PWB_WITH_CONV_27
+#ifdef PWB_WITH_CONV_29
 namespace {
-// CONV-27: the platform's built-in export composition — an A4-landscape
+// CONV-29: the platform's built-in export composition — an A4-landscape
 // product page assembled from the live session state (map extent/CRS from
 // the canvas, layers from the tree). It travels through the real native
 // chain: composition JSON → layout_export kernel spec → shared spec
@@ -943,8 +943,8 @@ void MainWindow::exportLayoutDialog() {
         tr("PNG 图像 (*.png);;PDF 文档 (*.pdf);;SVG 矢量 (*.svg)"));
     if (path.isEmpty()) return;
     const QString suffix = QFileInfo(path).suffix().toLower();
-#ifdef PWB_WITH_CONV_27
-    // CONV-27: full native chain with pre-flight validation and screen/
+#ifdef PWB_WITH_CONV_29
+    // CONV-29: full native chain with pre-flight validation and screen/
     // export parity — no second layout authority, no Python.
     bool accepted = false;
     const double dpi = QInputDialog::getDouble(

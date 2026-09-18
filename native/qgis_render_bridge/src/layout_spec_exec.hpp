@@ -1,4 +1,4 @@
-// layout_spec_exec — the single layout wire-spec executor (CONV-27 D-02).
+// layout_spec_exec — the single layout wire-spec executor (CONV-29 D-02).
 //
 // Consumes the layout spec JSON produced by the layout-export kernel
 // ({"page":{width_mm,height_mm,background},"items":[...]}) and renders it

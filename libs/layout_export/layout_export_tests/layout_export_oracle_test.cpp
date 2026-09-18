@@ -1,5 +1,5 @@
 // layout_export.spec_builder — C++ layout-export kernel vs the frozen
-// Python oracle (CONV-27).
+// Python oracle (CONV-29).
 //
 // For every frozen case the C++ kernel must reproduce: the wire spec JSON
 // (semantic equality — int vs float is a type difference), the exact

@@ -1,6 +1,9 @@
-# CONV-27 — Composer / Layout / Export C++ 化（决策账本）
+# CONV-29 — Composer / Layout / Export C++ 化（决策账本）
 
 每条记录：选择、被否的备选、理由。
+（注：本切片初建时误取 CONV-27 号；因本地 cpp-ui-workbench-closure 分支已
+占用 27、28 已被 science 分支占用，重命名为 CONV-29。历史提交信息中的
+CONV-27 字样以本账本为准。）
 
 ## D-01 — 内核位置：新建 Qt-free `libs/layout_export`（pwb_layout_export）
 - 选择：`build_layout_spec` / `hybrid_element_types` / 镜像门控 / 像素预算 /
@@ -46,10 +49,10 @@
 - 理由：JSON 边界上只有两种真实形态（裸序列 / 快照包装），语义等价、契约
   更诚实；fixture 两侧同形冻结。
 
-## D-05 — 产品接线：CONV-27 选项门，默认路径零扰动
-- 选择：root CMakeLists `PWB_BUILD_CONV_27`（隐含 CONV_02+DATA）；libs/qgis
+## D-05 — 产品接线：CONV-29 选项门，默认路径零扰动
+- 选择：root CMakeLists `PWB_BUILD_CONV_29`（隐含 CONV_02+DATA）；libs/qgis
   追加 `composition_layout_service.cpp` 并 PUBLIC 链接 `Pwb::LayoutExport`；
-  app 的导出对话框在 `PWB_BUILD_CONV_27` 编译期内改走
+  app 的导出对话框在 `PWB_BUILD_CONV_29` 编译期内改走
   Composition→LayoutSpec→QgsLayout 全链；关掉选项时与 main 行为逐字节一致。
 - 被否：无条件改 libs/qgis 依赖图（四个并行 worktree 共享该目录，最小化
   ABI/构建面）；给 app 引入独立 composition 编辑 UI（超范围）。
@@ -74,7 +77,18 @@
 - 理由：状态级比对可被 oracle 冻结且足以在导出前拦截 “画布≠导出” 的真实
   缺口；共享图层实例使 style 漂移在结构上不可能，如实披露即可。
 
-## D-08 — CONV 编号取 27
-- 选择：CONV-27。
-- 理由：两个在开 PR（#1346 数据、#1348 workflow）都自称 CONV-26，取 27 避免
-  账本/选项名三方碰撞。
+## D-08 — CONV 编号取 29
+- 选择：CONV-29。
+- 理由：两个在开 PR（#1346 数据、#1348 workflow）都自称 CONV-26，本地
+  cpp-ui-workbench-closure 分支占 27、science 分支占 28，取 29 避免账本/
+  选项名多方碰撞。
+
+## D-09 — PwbQgisSdk 补 QGIS external 头目录（共享冲突文件）
+- 选择：`cmake/PwbQgisSdk.cmake` 给 `PwbQgis::Sdk` 追加 vendored QGIS 的
+  external/nlohmann、external/spatialindex/include、deps prefix 与 qwt
+  include 目录（与 cpp-ui-workbench-closure 分支的修复内容一致，注释互指）。
+- 被否：只在 pwb_qgis 目标上私有加目录（治标，其他 PwbQgis::Sdk 消费者
+  依然编不过）；等该分支先合并再 rebase（本切片在 Linux 上无法验证构建）。
+- 理由：没有这组 include，本机 GCC16/Linux 上任何 PwbQgis::Sdk 消费者都在
+  qgsabstractgeometry.h 的 nlohmann/json_fwd.hpp 处失败；同内容同位置在
+  合并时可干净冲突消解。

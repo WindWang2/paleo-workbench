@@ -1,4 +1,4 @@
-// Qt-free layout-export kernel (CONV-27) — implementation.
+// Qt-free layout-export kernel (CONV-29) — implementation.
 // Python source of truth: paleo_workbench/mapping/layout_export.py
 // (frozen by tools/oracle/generate_layout_export_fixtures.py).
 
@@ -734,7 +734,7 @@ LayoutExportReport export_composition_reported(
 
     // Python would route here into the composer SVG renderer
     // (engine="composer_fallback", ok=true). The native chain has no second
-    // engine (27-decisions.md D-03): this is an honest failure report.
+    // engine (29-decisions.md D-03): this is an honest failure report.
     report.engine = "none";
     report.ok = false;
     report.failure = "composer fallback unavailable in the native chain "

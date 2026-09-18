@@ -153,8 +153,12 @@ std::string MapSession::canvas_state_json() const {
                     continue;  // untransformable layer: honest extent gap
                 }
             }
-            extent = has_extent ? extent.include(box) : box;
-            has_extent = true;
+            if (has_extent) {
+                extent.combineExtentWith(box);
+            } else {
+                extent = box;
+                has_extent = true;
+            }
         }
     }
     if (has_extent) {
