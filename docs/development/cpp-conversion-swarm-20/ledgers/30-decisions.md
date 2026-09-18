@@ -85,3 +85,8 @@ Python 侧不再作为产品运行时扩展（冻结语义仅作对账基准）�
   不可中断阶段（如 read_segy 大文件读取）。
 - **限制 3**：JobOwner 注册表随使用线性增长（小对象，窗口生命周期；Qt parent
   链保证无泄漏），不做主动回收。
+- **限制 4（review 复核确认的非阻塞 nit）**：(a) submit 拒绝消息里 key 用朴素单引号
+  包裹，Python 用 repr() 转义——仅当 key 含引号时有措辞差（冻结表 key='k' 无影响）；
+  (b) superviseAttributeRun 的 alive 检查是 check-then-act，in-flight 的
+  attributeOutcome 与成员析构之间残留微窗口（依赖 1000ms 有界失效才可达，比修复前的
+  无限轮询已收窄数量级）。
