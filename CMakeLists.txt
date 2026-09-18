@@ -152,3 +152,11 @@ if(PWB_BUILD_PLATFORM)
         endif()
     endif()
 endif()
+
+# BEGIN CONV-04
+# Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
+# closure/orientation repair kernel slice without shapely. Option declared
+# here for discoverability; -DPWB_BUILD_CONV_04=ON gates the additions in
+# libs/mapping_kernel. Existing CONV blocks and targets are untouched.
+option(PWB_BUILD_CONV_04 "Build CONV-04 ring_ops kernel slice" OFF)
+# END CONV-04

@@ -1,0 +1,3784 @@
+{
+ "generator": "tools/oracle/generate_ring_ops_fixtures.py",
+ "note": "Expected values come from the real Python product code (repair_invalid_geometry / clip_polygon_to_ring / clip_polyline_to_ring with shapely 2.1.2). portable cases are frozen contracts for the C++ ring_ops kernel; non-portable cases are shapely-only territory and are skipped by the C++ test with their reason printed. Canonicalization: rings rotation-normalized to the lexicographically smallest vertex, |area|-largest ring is the exterior, exteriors CCW / holes CW (only when every ring has non-zero area), coordinates round(v, 9), comparison tolerance 1e-9.",
+ "counts": {
+  "portable": 35,
+  "shapely_optional": 16,
+  "total": 51
+ },
+ "cases": [
+  {
+   "id": "repair_polygon_valid_unchanged",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_polygon_cw_exterior",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_polygon_hole_ccw",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      [
+       [
+        3,
+        3
+       ],
+       [
+        7,
+        3
+       ],
+       [
+        7,
+        7
+       ],
+       [
+        3,
+        7
+       ],
+       [
+        3,
+        3
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ],
+     [
+      [
+       3.0,
+       3.0
+      ],
+      [
+       3.0,
+       7.0
+      ],
+      [
+       7.0,
+       7.0
+      ],
+      [
+       7.0,
+       3.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_polygon_hole_cw",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      [
+       [
+        3,
+        3
+       ],
+       [
+        3,
+        7
+       ],
+       [
+        7,
+        7
+       ],
+       [
+        7,
+        3
+       ],
+       [
+        3,
+        3
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ],
+     [
+      [
+       3.0,
+       3.0
+      ],
+      [
+       3.0,
+       7.0
+      ],
+      [
+       7.0,
+       7.0
+      ],
+      [
+       7.0,
+       3.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_polygon_unclosed_cw",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        0,
+        4
+       ],
+       [
+        4,
+        4
+       ],
+       [
+        4,
+        0
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       4.0
+      ],
+      [
+       0.0,
+       4.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_polygon_unclosed_ccw",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        4,
+        0
+       ],
+       [
+        4,
+        4
+       ],
+       [
+        0,
+        4
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       4.0
+      ],
+      [
+       0.0,
+       4.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_polygon_empty_coords",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": []
+   },
+   "expected": [],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_multipolygon_empty",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": true,
+    "parts": []
+   },
+   "expected": [],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_multipolygon_mixed_orientation",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": true,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ],
+     [
+      [
+       [
+        20,
+        20
+       ],
+       [
+        23,
+        20
+       ],
+       [
+        23,
+        23
+       ],
+       [
+        20,
+        23
+       ],
+       [
+        20,
+        20
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       20.0,
+       20.0
+      ],
+      [
+       23.0,
+       20.0
+      ],
+      [
+       23.0,
+       23.0
+      ],
+      [
+       20.0,
+       23.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_multipolygon_unclosed",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": true,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        2,
+        0
+       ],
+       [
+        2,
+        2
+       ],
+       [
+        0,
+        2
+       ]
+      ]
+     ],
+     [
+      [
+       [
+        5,
+        5
+       ],
+       [
+        7,
+        5
+       ],
+       [
+        7,
+        7
+       ],
+       [
+        5,
+        7
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.0
+      ],
+      [
+       2.0,
+       2.0
+      ],
+      [
+       0.0,
+       2.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       7.0,
+       5.0
+      ],
+      [
+       7.0,
+       7.0
+      ],
+      [
+       5.0,
+       7.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_multipolygon_unclosed_triangle",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": true,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        2,
+        0
+       ],
+       [
+        2,
+        2
+       ],
+       [
+        0,
+        2
+       ]
+      ]
+     ],
+     [
+      [
+       [
+        5,
+        5
+       ],
+       [
+        6,
+        5
+       ],
+       [
+        5,
+        6
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       6.0,
+       5.0
+      ],
+      [
+       5.0,
+       6.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.0
+      ],
+      [
+       2.0,
+       2.0
+      ],
+      [
+       0.0,
+       2.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_short_ring_identity_fallback",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        1
+       ],
+       [
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        5,
+        5
+       ],
+       [
+        6,
+        6
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0
+      ],
+      [
+       0.0,
+       1.0
+      ]
+     ],
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       6.0,
+       6.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_two_vertex_ring_identity",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        1,
+        0
+       ],
+       [
+        1,
+        1
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_multipolygon_short_ring_identity",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": true,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        2,
+        0
+       ],
+       [
+        2,
+        2
+       ],
+       [
+        0,
+        2
+       ]
+      ]
+     ],
+     [
+      [
+       [
+        5,
+        5
+       ],
+       [
+        6,
+        6
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       6.0,
+       6.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.0
+      ],
+      [
+       2.0,
+       2.0
+      ],
+      [
+       0.0,
+       2.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_degenerate_three_coord_ring",
+   "op": "repair",
+   "portable": false,
+   "skip_reason": "degenerate zero-area ring: shapely make_valid makes a line",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        1,
+        0
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": null,
+   "expected_type": "LineString"
+  },
+  {
+   "id": "repair_bowtie_diagonal",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       5.0,
+       5.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_bowtie_asymmetric",
+   "op": "repair",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        6,
+        3
+       ],
+       [
+        4,
+        0
+       ],
+       [
+        0,
+        4
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       2.666666667,
+       1.333333333
+      ],
+      [
+       4.0,
+       0.0
+      ],
+      [
+       6.0,
+       3.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       2.666666667,
+       1.333333333
+      ],
+      [
+       0.0,
+       4.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_star_multi_crossing",
+   "op": "repair",
+   "portable": false,
+   "skip_reason": "invalid geometry outside the shapely-free bounded contract",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        2,
+        8
+       ],
+       [
+        5,
+        -2
+       ],
+       [
+        8,
+        8
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       4.4,
+       0.0
+      ],
+      [
+       5.0,
+       -2.0
+      ],
+      [
+       5.6,
+       0.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       6.615384615,
+       3.384615385
+      ],
+      [
+       8.0,
+       8.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       4.4,
+       0.0
+      ],
+      [
+       3.384615385,
+       3.384615385
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       2.0,
+       8.0
+      ],
+      [
+       5.0,
+       5.0
+      ],
+      [
+       3.384615385,
+       3.384615385
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       5.6,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       6.615384615,
+       3.384615385
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_multipolygon_overlap_optional",
+   "op": "repair",
+   "portable": false,
+   "skip_reason": "MultiPolygon parts overlap: make_valid unions them",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": true,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ],
+     [
+      [
+       [
+        5,
+        5
+       ],
+       [
+        8,
+        5
+       ],
+       [
+        8,
+        8
+       ],
+       [
+        5,
+        8
+       ],
+       [
+        5,
+        5
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ],
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       5.0,
+       8.0
+      ],
+      [
+       8.0,
+       8.0
+      ],
+      [
+       8.0,
+       5.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "repair_hole_outside_exterior",
+   "op": "repair",
+   "portable": false,
+   "skip_reason": "invalid geometry outside the shapely-free bounded contract",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        4,
+        0
+       ],
+       [
+        4,
+        4
+       ],
+       [
+        0,
+        4
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      [
+       [
+        6,
+        6
+       ],
+       [
+        6,
+        8
+       ],
+       [
+        8,
+        8
+       ],
+       [
+        8,
+        6
+       ],
+       [
+        6,
+        6
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       6.0,
+       6.0
+      ],
+      [
+       8.0,
+       6.0
+      ],
+      [
+       8.0,
+       8.0
+      ],
+      [
+       6.0,
+       8.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       4.0
+      ],
+      [
+       0.0,
+       4.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "repair_spike_ring",
+   "op": "repair",
+   "portable": false,
+   "skip_reason": "invalid geometry outside the shapely-free bounded contract",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        4,
+        0
+       ],
+       [
+        2,
+        0
+       ],
+       [
+        0,
+        4
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       4.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_rect_ring_inside",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      2,
+      3
+     ],
+     [
+      8,
+      3
+     ],
+     [
+      8,
+      9
+     ],
+     [
+      2,
+      9
+     ],
+     [
+      2,
+      3
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       2.0,
+       3.0
+      ],
+      [
+       8.0,
+       3.0
+      ],
+      [
+       8.0,
+       9.0
+      ],
+      [
+       2.0,
+       9.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_rect_ring_contains",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      -5,
+      -5
+     ],
+     [
+      15,
+      -5
+     ],
+     [
+      15,
+      15
+     ],
+     [
+      -5,
+      15
+     ],
+     [
+      -5,
+      -5
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_rect_ring_overlap",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      5,
+      5
+     ],
+     [
+      15,
+      5
+     ],
+     [
+      15,
+      15
+     ],
+     [
+      5,
+      15
+     ],
+     [
+      5,
+      5
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       10.0,
+       5.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       5.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_l_concave_ring",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      -2,
+      -2
+     ],
+     [
+      14,
+      -2
+     ],
+     [
+      14,
+      4
+     ],
+     [
+      4,
+      4
+     ],
+     [
+      4,
+      14
+     ],
+     [
+      -2,
+      14
+     ],
+     [
+      -2,
+      -2
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       4.0
+      ],
+      [
+       4.0,
+       4.0
+      ],
+      [
+       4.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_c_ring_splits_band",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        -1,
+        4
+       ],
+       [
+        11,
+        4
+       ],
+       [
+        11,
+        7
+       ],
+       [
+        -1,
+        7
+       ],
+       [
+        -1,
+        4
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      8,
+      10
+     ],
+     [
+      8,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       4.0
+      ],
+      [
+       2.0,
+       4.0
+      ],
+      [
+       2.0,
+       7.0
+      ],
+      [
+       0.0,
+       7.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       8.0,
+       4.0
+      ],
+      [
+       10.0,
+       4.0
+      ],
+      [
+       10.0,
+       7.0
+      ],
+      [
+       8.0,
+       7.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "clip_diagonal_quad_ring",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      2,
+      -1
+     ],
+     [
+      13,
+      6
+     ],
+     [
+      11,
+      13
+     ],
+     [
+      -1,
+      9
+     ],
+     [
+      2,
+      -1
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       5.666666667
+      ],
+      [
+       1.7,
+       0.0
+      ],
+      [
+       3.571428571,
+       0.0
+      ],
+      [
+       10.0,
+       4.090909091
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       2.0,
+       10.0
+      ],
+      [
+       0.0,
+       9.333333333
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_holed_subject_right_half",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      [
+       [
+        3,
+        3
+       ],
+       [
+        3,
+        7
+       ],
+       [
+        7,
+        7
+       ],
+       [
+        7,
+        3
+       ],
+       [
+        3,
+        3
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      5,
+      -2
+     ],
+     [
+      20,
+      -2
+     ],
+     [
+      20,
+      12
+     ],
+     [
+      5,
+      12
+     ],
+     [
+      5,
+      -2
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       5.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       5.0,
+       10.0
+      ],
+      [
+       5.0,
+       7.0
+      ],
+      [
+       7.0,
+       7.0
+      ],
+      [
+       7.0,
+       3.0
+      ],
+      [
+       5.0,
+       3.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_ring_inside_hole_empty",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "none",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ],
+      [
+       [
+        3,
+        3
+       ],
+       [
+        3,
+        7
+       ],
+       [
+        7,
+        7
+       ],
+       [
+        7,
+        3
+       ],
+       [
+        3,
+        3
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      4,
+      4
+     ],
+     [
+      6,
+      4
+     ],
+     [
+      6,
+      6
+     ],
+     [
+      4,
+      6
+     ],
+     [
+      4,
+      4
+     ]
+    ]
+   },
+   "expected": null,
+   "expected_type": ""
+  },
+  {
+   "id": "clip_multipolygon_subject",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": true,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ],
+     [
+      [
+       [
+        20,
+        20
+       ],
+       [
+        24,
+        20
+       ],
+       [
+        24,
+        24
+       ],
+       [
+        20,
+        24
+       ],
+       [
+        20,
+        20
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      5,
+      -2
+     ],
+     [
+      20,
+      -2
+     ],
+     [
+      20,
+      12
+     ],
+     [
+      5,
+      12
+     ],
+     [
+      5,
+      -2
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       5.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       5.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_multipolygon_both_kept",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": true,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        4,
+        0
+       ],
+       [
+        4,
+        4
+       ],
+       [
+        0,
+        4
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ],
+     [
+      [
+       [
+        6,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        4
+       ],
+       [
+        6,
+        4
+       ],
+       [
+        6,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      -1,
+      -1
+     ],
+     [
+      11,
+      -1
+     ],
+     [
+      11,
+      5
+     ],
+     [
+      -1,
+      5
+     ],
+     [
+      -1,
+      -1
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       4.0
+      ],
+      [
+       0.0,
+       4.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       6.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       4.0
+      ],
+      [
+       6.0,
+       4.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "clip_disjoint_none",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "none",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      30,
+      30
+     ],
+     [
+      40,
+      30
+     ],
+     [
+      40,
+      40
+     ],
+     [
+      30,
+      40
+     ],
+     [
+      30,
+      30
+     ]
+    ]
+   },
+   "expected": null,
+   "expected_type": ""
+  },
+  {
+   "id": "clip_cw_ring_same_result",
+   "op": "clip_polygon",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      2,
+      3
+     ],
+     [
+      2,
+      9
+     ],
+     [
+      8,
+      9
+     ],
+     [
+      8,
+      3
+     ],
+     [
+      2,
+      3
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       2.0,
+       3.0
+      ],
+      [
+       8.0,
+       3.0
+      ],
+      [
+       8.0,
+       9.0
+      ],
+      [
+       2.0,
+       9.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_vertex_on_edge",
+   "op": "clip_polygon",
+   "portable": false,
+   "skip_reason": "vertex-on-edge or collinear contact between boundaries",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      5,
+      -5
+     ],
+     [
+      15,
+      5
+     ],
+     [
+      5,
+      15
+     ],
+     [
+      -5,
+      5
+     ],
+     [
+      5,
+      -5
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_collinear_overlap_optional",
+   "op": "clip_polygon",
+   "portable": false,
+   "skip_reason": "vertex-on-edge or collinear contact between boundaries",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      5
+     ],
+     [
+      0,
+      5
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       5.0
+      ],
+      [
+       0.0,
+       5.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "Polygon"
+  },
+  {
+   "id": "clip_ring_two_points_error",
+   "op": "clip_polygon",
+   "portable": false,
+   "skip_reason": "python raised: A linearring requires at least 4 coordinates.",
+   "python_outcome": "error",
+   "python_error": "A linearring requires at least 4 coordinates.",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      5,
+      5
+     ]
+    ]
+   },
+   "expected": null,
+   "expected_type": ""
+  },
+  {
+   "id": "clip_selfintersecting_ring",
+   "op": "clip_polygon",
+   "portable": false,
+   "skip_reason": "clip ring not simple: shapely make_valid territory",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "is_multi": false,
+    "parts": [
+     [
+      [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        0,
+        10
+       ],
+       [
+        0,
+        0
+       ]
+      ]
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       5.0,
+       5.0
+      ],
+      [
+       0.0,
+       10.0
+      ]
+     ]
+    ],
+    [
+     [
+      [
+       5.0,
+       5.0
+      ],
+      [
+       10.0,
+       0.0
+      ],
+      [
+       10.0,
+       10.0
+      ]
+     ]
+    ]
+   ],
+   "expected_type": "MultiPolygon"
+  },
+  {
+   "id": "line_crosses",
+   "op": "clip_polyline",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      -2,
+      5
+     ],
+     [
+      12,
+      5
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      0.0,
+      5.0
+     ],
+     [
+      10.0,
+      5.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_inside",
+   "op": "clip_polyline",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      1,
+      1
+     ],
+     [
+      9,
+      9
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      1.0,
+      1.0
+     ],
+     [
+      9.0,
+      9.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_outside",
+   "op": "clip_polyline",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      -2,
+      -5
+     ],
+     [
+      12,
+      -5
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": []
+  },
+  {
+   "id": "line_two_pieces",
+   "op": "clip_polyline",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      -1,
+      5
+     ],
+     [
+      13,
+      5
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      8,
+      10
+     ],
+     [
+      8,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      0.0,
+      5.0
+     ],
+     [
+      2.0,
+      5.0
+     ]
+    ],
+    [
+     [
+      8.0,
+      5.0
+     ],
+     [
+      10.0,
+      5.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_bent_two_entries",
+   "op": "clip_polyline",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      -1,
+      2
+     ],
+     [
+      11,
+      2
+     ],
+     [
+      11,
+      8
+     ],
+     [
+      -1,
+      8
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      0.0,
+      2.0
+     ],
+     [
+      10.0,
+      2.0
+     ]
+    ],
+    [
+     [
+      0.0,
+      8.0
+     ],
+     [
+      10.0,
+      8.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_closed_loop_inside",
+   "op": "clip_polyline",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      2,
+      2
+     ],
+     [
+      8,
+      2
+     ],
+     [
+      8,
+      8
+     ],
+     [
+      2,
+      8
+     ],
+     [
+      2,
+      2
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      2.0,
+      2.0
+     ],
+     [
+      8.0,
+      2.0
+     ],
+     [
+      8.0,
+      8.0
+     ],
+     [
+      2.0,
+      8.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_single_point",
+   "op": "clip_polyline",
+   "portable": false,
+   "skip_reason": "python raised: IllegalArgumentException: point array must contain 0 or >1 elements\n",
+   "python_outcome": "error",
+   "python_error": "IllegalArgumentException: point array must contain 0 or >1 elements\n",
+   "input": {
+    "line": [
+     [
+      5,
+      5
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": null
+  },
+  {
+   "id": "line_zero_length_optional",
+   "op": "clip_polyline",
+   "portable": false,
+   "skip_reason": "zero-length segment in the input line",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      5,
+      5
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      0.0,
+      0.0
+     ],
+     [
+      5.0,
+      5.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_ring_two_points_error",
+   "op": "clip_polyline",
+   "portable": false,
+   "skip_reason": "python raised: A linearring requires at least 4 coordinates.",
+   "python_outcome": "error",
+   "python_error": "A linearring requires at least 4 coordinates.",
+   "input": {
+    "line": [
+     [
+      1,
+      1
+     ],
+     [
+      9,
+      9
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      5,
+      5
+     ]
+    ]
+   },
+   "expected": null
+  },
+  {
+   "id": "line_diagonal_two_crossings",
+   "op": "clip_polyline",
+   "portable": true,
+   "skip_reason": "",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      -2,
+      0
+     ],
+     [
+      12,
+      10
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      0.0,
+      1.428571429
+     ],
+     [
+      10.0,
+      8.571428571
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_through_ring_vertex_optional",
+   "op": "clip_polyline",
+   "portable": false,
+   "skip_reason": "line/ring touch or collinear contact",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      -1,
+      -1
+     ],
+     [
+      11,
+      11
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      0.0,
+      0.0
+     ],
+     [
+      10.0,
+      10.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_selfintersecting_optional",
+   "op": "clip_polyline",
+   "portable": false,
+   "skip_reason": "self-intersecting line: GEOS noding territory",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      1,
+      1
+     ],
+     [
+      9,
+      9
+     ],
+     [
+      9,
+      1
+     ],
+     [
+      1,
+      9
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      1.0,
+      1.0
+     ],
+     [
+      5.0,
+      5.0
+     ]
+    ],
+    [
+     [
+      1.0,
+      9.0
+     ],
+     [
+      5.0,
+      5.0
+     ]
+    ],
+    [
+     [
+      5.0,
+      5.0
+     ],
+     [
+      9.0,
+      9.0
+     ],
+     [
+      9.0,
+      1.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_collinear_with_edge",
+   "op": "clip_polyline",
+   "portable": false,
+   "skip_reason": "line/ring touch or collinear contact",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      -2,
+      0
+     ],
+     [
+      12,
+      0
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      0.0,
+      0.0
+     ],
+     [
+      10.0,
+      0.0
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "line_grazes_corner",
+   "op": "clip_polyline",
+   "portable": false,
+   "skip_reason": "line/ring touch or collinear contact",
+   "python_outcome": "ok",
+   "python_error": "",
+   "input": {
+    "line": [
+     [
+      -2,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      12
+     ]
+    ],
+    "ring": [
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      10
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   },
+   "expected": [
+    [
+     [
+      0.0,
+      0.0
+     ],
+     [
+      10.0,
+      0.0
+     ]
+    ],
+    [
+     [
+      10.0,
+      0.0
+     ],
+     [
+      10.0,
+      10.0
+     ]
+    ]
+   ]
+  }
+ ]
+}
