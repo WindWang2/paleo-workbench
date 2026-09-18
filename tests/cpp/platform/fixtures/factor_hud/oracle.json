@@ -1,0 +1,260 @@
+{
+ "cases": [
+  {
+   "id": "seq_2x2",
+   "cells": [
+    1.0,
+    2.0,
+    3.0,
+    4.0
+   ],
+   "stats": {
+    "min": 1.0,
+    "max": 4.0,
+    "mean": 2.5,
+    "std": 1.118033988749895,
+    "valid_count": 4,
+    "total_count": 4
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "1 ~ 4",
+    "mean": "2.5",
+    "std": "1.11803",
+    "valid_count": "4 / 4"
+   }
+  },
+  {
+   "id": "with_nan",
+   "cells": [
+    1.0,
+    null,
+    3.0,
+    5.0
+   ],
+   "stats": {
+    "min": 1.0,
+    "max": 5.0,
+    "mean": 3.0,
+    "std": 1.632993161855452,
+    "valid_count": 3,
+    "total_count": 4
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "1 ~ 5",
+    "mean": "3",
+    "std": "1.63299",
+    "valid_count": "3 / 4"
+   }
+  },
+  {
+   "id": "all_nan",
+   "cells": [
+    null,
+    null,
+    null,
+    null
+   ],
+   "stats": {
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "valid_count": 0,
+    "total_count": 4
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "—",
+    "mean": "—",
+    "std": "—",
+    "valid_count": "0 / 4"
+   }
+  },
+  {
+   "id": "with_inf",
+   "cells": [
+    1.0,
+    null,
+    -2.0,
+    4.0
+   ],
+   "stats": {
+    "min": -2.0,
+    "max": 4.0,
+    "mean": 1.0,
+    "std": 2.449489742783178,
+    "valid_count": 3,
+    "total_count": 4
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "-2 ~ 4",
+    "mean": "1",
+    "std": "2.44949",
+    "valid_count": "3 / 4"
+   }
+  },
+  {
+   "id": "single_cell",
+   "cells": [
+    7.5
+   ],
+   "stats": {
+    "min": 7.5,
+    "max": 7.5,
+    "mean": 7.5,
+    "std": 0.0,
+    "valid_count": 1,
+    "total_count": 1
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "7.5 ~ 7.5",
+    "mean": "7.5",
+    "std": "0",
+    "valid_count": "1 / 1"
+   }
+  },
+  {
+   "id": "empty_grid",
+   "cells": [],
+   "stats": {
+    "min": null,
+    "max": null,
+    "mean": null,
+    "std": null,
+    "valid_count": 0,
+    "total_count": 0
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "—",
+    "mean": "—",
+    "std": "—",
+    "valid_count": "0 / 0"
+   }
+  },
+  {
+   "id": "constant_field",
+   "cells": [
+    2.0,
+    2.0,
+    2.0,
+    2.0
+   ],
+   "stats": {
+    "min": 2.0,
+    "max": 2.0,
+    "mean": 2.0,
+    "std": 0.0,
+    "valid_count": 4,
+    "total_count": 4
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "2 ~ 2",
+    "mean": "2",
+    "std": "0",
+    "valid_count": "4 / 4"
+   }
+  },
+  {
+   "id": "negatives",
+   "cells": [
+    -4.0,
+    -1.0,
+    0.0,
+    3.0
+   ],
+   "stats": {
+    "min": -4.0,
+    "max": 3.0,
+    "mean": -0.5,
+    "std": 2.5,
+    "valid_count": 4,
+    "total_count": 4
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "-4 ~ 3",
+    "mean": "-0.5",
+    "std": "2.5",
+    "valid_count": "4 / 4"
+   }
+  },
+  {
+   "id": "float32_rounding",
+   "cells": [
+    0.10000000149011612,
+    0.20000000298023224,
+    0.30000001192092896,
+    0.699999988079071
+   ],
+   "stats": {
+    "min": 0.10000000149011612,
+    "max": 0.699999988079071,
+    "mean": 0.3250000011175871,
+    "std": 0.22776083346772266,
+    "valid_count": 4,
+    "total_count": 4
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "0.1 ~ 0.7",
+    "mean": "0.325",
+    "std": "0.227761",
+    "valid_count": "4 / 4"
+   }
+  },
+  {
+   "id": "large_magnitude_g",
+   "cells": [
+    1234567.0,
+    9.999999747378752e-05
+   ],
+   "stats": {
+    "min": 9.999999747378752e-05,
+    "max": 1234567.0,
+    "mean": 617283.50005,
+    "std": 617283.49995,
+    "valid_count": 2,
+    "total_count": 2
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "0.0001 ~ 1.23457e+06",
+    "mean": "617284",
+    "std": "617283",
+    "valid_count": "2 / 2"
+   }
+  },
+  {
+   "id": "via_factor_grid_result",
+   "cells": [
+    10.0,
+    220.5,
+    47.25,
+    null,
+    88.0,
+    3.5
+   ],
+   "stats": {
+    "min": 3.5,
+    "max": 220.5,
+    "mean": 73.85,
+    "std": 79.29684735221193,
+    "valid_count": 5,
+    "total_count": 6
+   },
+   "display": {
+    "factor": "砂岩厚度",
+    "range": "3.5 ~ 220.5",
+    "mean": "73.85",
+    "std": "79.2968",
+    "valid_count": "5 / 6"
+   }
+  }
+ ]
+}
