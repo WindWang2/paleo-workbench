@@ -27,6 +27,11 @@ option(PWB_BUILD_SEISMIC_ATTRIBUTES
     "Build the CPP-E seismic attribute library (fails when absent)" OFF)
 option(PWB_BUILD_SEISMIC_IO
     "Build the post-stack SEG-Y reader (libs/seismic_io)" OFF)
+option(PWB_BUILD_SEISMIC_SERVICE
+    "Build the native seismic volume service (libs/seismic_service; implies seismic_io + Visualization headers)" OFF)
+if(PWB_BUILD_SEISMIC_SERVICE)
+    set(PWB_BUILD_SEISMIC_IO ON)
+endif()
 option(PWB_BUILD_MAPPING_KERNEL
     "Build the contouring+interpolator kernel ported from the Python mapping pipeline" OFF)
 # BEGIN CONV-08
@@ -118,6 +123,16 @@ if(PWB_BUILD_SEISMIC_VIEWER)
             "stand in for the production viewer.")
     endif()
     add_subdirectory(libs/seismic_viewer)
+endif()
+# Native seismic volume service (S line): inspect/tile-cache backend for the
+# viewer; requires the Visualization contract headers and seismic_io.
+if(PWB_BUILD_SEISMIC_SERVICE)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/seismic_service/CMakeLists.txt")
+        message(FATAL_ERROR
+            "PWB_BUILD_SEISMIC_SERVICE=ON but libs/seismic_service is not "
+            "delivered on this branch (S line).")
+    endif()
+    add_subdirectory(libs/seismic_service)
 endif()
 if(PWB_BUILD_SEISMIC_ATTRIBUTES)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/seismic_attributes/CMakeLists.txt")
