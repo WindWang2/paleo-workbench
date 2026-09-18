@@ -50,6 +50,20 @@ if(PWB_BUILD_CONV_18 AND NOT PWB_BUILD_MAPPING_KERNEL)
 endif()
 # END CONV-18
 
+# BEGIN CONV-23 — workflow/contracts pure contract layer (M7): pydantic-lite
+# contract models, the 14 generated module declarations, registry +
+# consistency validation, metadata-only readiness evaluation and the two
+# deterministic markdown reports — inside libs/workflow_contracts, frozen
+# against the Python oracle. Needs Pwb::Domain (ordered JSON); declared
+# BEFORE the PWB_BUILD_DATA block so the implied switch lands in time.
+option(PWB_BUILD_CONV_23
+    "Build the CONV-23 workflow contract layer (libs/workflow_contracts; implies PWB_BUILD_DATA)" OFF)
+if(PWB_BUILD_CONV_23)
+    set(PWB_BUILD_DATA ON)
+    add_subdirectory(libs/workflow_contracts)
+endif()
+# END CONV-23
+
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
 # error, never a silent skip (protocol: independent validation).
