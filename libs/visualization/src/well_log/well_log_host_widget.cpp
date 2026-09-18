@@ -241,7 +241,7 @@ build_presentation(const EngineLoadPlan& plan,
                                                            nullptr);
     for (std::size_t i = 0; i < plan.curves.size(); ++i) {
         const auto& curve = plan.curves[i];
-        const auto key = curve_key_for(i, curve.mnemonic);
+        const auto key = curve_key_for(curve.input_index, curve.mnemonic);
         for (std::size_t k = 0; k < layout.curve_keys.size(); ++k) {
             if (layout.curve_keys[k] == key) {
                 curve_by_key[k] = &curve;
@@ -435,6 +435,13 @@ struct WellLogHostWidget::State {
     WellLogTrackLayout layout;
     EngineLoadPlan plan;
     std::vector<std::string> plan_diagnostics;
+    // Input-schema mnemonics (index-aligned with the source document), the
+    // reconcile basis for saved layouts (B: keys are input-indexed even when
+    // adapt drops curve_empty submissions).
+    std::vector<std::string> input_mnemonics;
+    // Layout-derived diagnostics (log_scale_fallback): replaced, not
+    // appended, on every presentation rebuild.
+    std::vector<std::string> presentation_diagnostics;
     // Shared guard so view signals firing late in shutdown cannot reach a
     // destroyed State through the captured raw pointer.
     std::shared_ptr<bool> alive = std::make_shared<bool>(true);
@@ -756,32 +763,34 @@ bool WellLogHostWidget::load_document(const WellLogDocumentInput& input,
         }
         return false;
     }
+    state_->input_mnemonics.clear();
+    state_->input_mnemonics.reserve(input.curves.size());
+    for (std::size_t i = 0; i < input.curves.size(); ++i) {
+        state_->input_mnemonics.push_back(
+            input.curves[i].mnemonic.empty() ? "CURVE_" + std::to_string(i)
+                                             : input.curves[i].mnemonic);
+    }
     welllog::WellLogDocument document;
     EntityId axis_id{};
     if (!build_document(plan, cancel, document, axis_id, error)) {
         return false;
     }
+    if (document.sampling_axes().empty()) {
+        // Defensive: build_document skips curves on unparseable ids; a
+        // document without axes must fail closed, never reach .front().
+        if (error != nullptr) {
+            *error = QStringLiteral("adapted document has no sampling axis");
+        }
+        return false;
+    }
     const auto& axis = document.sampling_axes().front();
-    WellLogTrackLayout layout = reconcile_track_layout(
-        saved_layout, [&] {
-            std::vector<std::string> mnemonics;
-            mnemonics.reserve(input.curves.size());
-            for (std::size_t i = 0; i < input.curves.size(); ++i) {
-                mnemonics.push_back(
-                    input.curves[i].mnemonic.empty()
-                        ? "CURVE_" + std::to_string(i)
-                        : input.curves[i].mnemonic);
-            }
-            return mnemonics;
-        }());
+    WellLogTrackLayout layout =
+        reconcile_track_layout(saved_layout, state_->input_mnemonics);
 
     std::size_t track_count = 0;
-    std::vector<std::string> presentation_diagnostics;
     auto presentation = build_presentation(plan, layout, document.id(), axis,
-                                           track_count, presentation_diagnostics);
-    for (const auto& diagnostic : presentation_diagnostics) {
-        plan.diagnostics.push_back(diagnostic);
-    }
+                                           track_count,
+                                           state_->presentation_diagnostics);
     state_->plan_diagnostics = plan.diagnostics;
 
     const auto presentation_document_id = document.id();
@@ -807,6 +816,23 @@ bool WellLogHostWidget::load_document(const WellLogDocumentInput& input,
     const auto presentation_ok =
         state_->session->execute(welllog::SetPresentationCommand{std::move(presentation)});
     if (!presentation_ok.has_value()) {
+        // The engine already replaced the document, so a rollback would
+        // restore nothing: resync host state to the NEW document (view,
+        // ids, plan) and surface the error — the host and engine stay
+        // consistent, the presentation just falls back to engine defaults.
+        state_->document_id = presentation_document_id;
+        state_->axis_id = axis_id;
+        state_->revision = presentation_revision;
+        state_->document_id_text_value = std::move(presentation_document_text);
+        state_->axis_unit = std::move(axis_unit);
+        state_->axis_domain = axis_domain;
+        state_->engine_axis_domain = axis.domain;
+        state_->engine_axis_unit = axis.unit;
+        state_->layout = std::move(layout);
+        state_->plan = std::move(plan);
+        state_->track_count = 0;
+        state_->view->set_document_id(state_->document_id);
+        state_->has_document = true;
         if (error != nullptr) {
             *error = QStringLiteral("SetPresentationCommand rejected by engine");
         }
@@ -842,12 +868,18 @@ bool WellLogHostWidget::load_from_source(WellLogCurveSource& source,
         }
         return false;
     }
+    // v1 note: the pull loop runs synchronously on the calling (UI) thread
+    // with cooperative-cancel checkpoints between curves; moving it onto a
+    // worker thread is follow-up work once a host needs it.
     WellLogDocumentInput input;
     input.well_name = source.well_name();
     input.depth_unit = source.depth_unit();
     const auto envelope = source.depth_envelope();
     input.top_depth = envelope.first;
     input.bottom_depth = envelope.second;
+    input.lithology = source.lithology_intervals();
+    input.facies = source.facies_intervals();
+    input.markers = source.markers();
     input.curves.reserve(source.curve_count());
     for (std::size_t i = 0; i < source.curve_count(); ++i) {
         if (token.load()) {
@@ -890,11 +922,16 @@ bool WellLogHostWidget::apply_track_layout(const WellLogTrackLayout& layout,
     axis.id = state_->axis_id;
     axis.domain = state_->engine_axis_domain;
     axis.unit = state_->engine_axis_unit;
+    // Saved templates are reconciled against the loaded well's input schema
+    // (keys are input-indexed), so a template from another well falls back
+    // to the default instead of producing zero visible tracks.
+    const WellLogTrackLayout effective =
+        reconcile_track_layout(layout, state_->input_mnemonics);
     std::size_t track_count = 0;
-    std::vector<std::string> diagnostics;
-    auto presentation = build_presentation(state_->plan, layout,
+    auto presentation = build_presentation(state_->plan, effective,
                                            state_->document_id, axis,
-                                           track_count, diagnostics);
+                                           track_count,
+                                           state_->presentation_diagnostics);
     const auto presentation_ok = state_->session->execute(
         welllog::SetPresentationCommand{std::move(presentation)});
     if (!presentation_ok.has_value()) {
@@ -903,11 +940,8 @@ bool WellLogHostWidget::apply_track_layout(const WellLogTrackLayout& layout,
         }
         return false;
     }
-    state_->layout = layout;
+    state_->layout = effective;
     state_->track_count = track_count;
-    for (const auto& diagnostic : diagnostics) {
-        state_->plan_diagnostics.push_back(diagnostic);
-    }
     return true;
 }
 
@@ -1110,7 +1144,10 @@ std::size_t WellLogHostWidget::last_track_count() const noexcept {
 }
 
 std::vector<std::string> WellLogHostWidget::last_plan_diagnostics() const {
-    return state_->plan_diagnostics;
+    std::vector<std::string> merged = state_->plan_diagnostics;
+    merged.insert(merged.end(), state_->presentation_diagnostics.begin(),
+                  state_->presentation_diagnostics.end());
+    return merged;
 }
 
 QString WellLogHostWidget::axis_unit_text() const {

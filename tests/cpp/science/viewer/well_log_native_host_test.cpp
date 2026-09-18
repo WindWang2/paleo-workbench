@@ -417,6 +417,30 @@ int main(int argc, char** argv) {
                     static_cast<long long>(timer.elapsed()));
     }
 
+    // 13b. Regression (review B1): a saved layout references input indices;
+    //       a curve dropped by adapt (all-NaN values) must NOT shift the
+    //       keys of surviving curves — the GR track stays visible.
+    {
+        WellLogDocumentInput input = make_standard_well("W-drop");
+        input.lithology.clear();
+        input.facies.clear();
+        input.markers.clear();
+        // index 1 (RT) becomes curve_empty: no finite values.
+        input.curves[1] = make_curve("RT", "ohmm", {1000.0, 1001.0},
+                                     {std::nan(""), std::nan("")});
+        WellLogTrackLayout saved;
+        {
+            const std::vector<std::string> mnemonics = {"GR", "RT", "AC"};
+            saved = pwb::viz::default_track_layout(mnemonics);
+        }
+        PWB_CHECK_MSG(host.load_document(input, saved, &error),
+                      error.toStdString().c_str());
+        // RT dropped from the plan; GR (input key curve:0:GR) still renders.
+        PWB_CHECK(host.last_track_count() == 2);
+        PWB_CHECK(host.track_layout().visible[0]);
+        PWB_CHECK(host.track_layout().curve_keys.size() == 3);
+    }
+
     // 14. Saved template JSON round-trips and drives the live presentation
     //     (config serialization). A template saved for another well's schema
     //     is dropped by reconcile on load, so apply it to the current well.

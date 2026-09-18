@@ -79,9 +79,14 @@ WellLogDocumentInput input_from_json(const nlohmann::json& entry) {
     }
     if (!entry.value("facies_groups", nlohmann::json()).is_null()) {
         WellLogFaciesGroupsInput groups;
+        const auto& group = entry.at("facies_groups");
+        for (const auto& interval : group.value("lithology", nlohmann::json::array())) {
+            groups.lithology.push_back({f64_decode(interval.at("top")),
+                                        f64_decode(interval.at("bottom")),
+                                        interval.value("label", "")});
+        }
         for (const auto& key : {"phase", "sub_phase", "micro_phase"}) {
-            for (const auto& interval : entry.at("facies_groups").value(key,
-                                                                 nlohmann::json::array())) {
+            for (const auto& interval : group.value(key, nlohmann::json::array())) {
                 std::vector<WellLogIntervalInput>* target = key == std::string("phase")
                                                                  ? &groups.phase
                                                             : key == std::string("sub_phase")

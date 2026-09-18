@@ -177,9 +177,13 @@ def data_to_json(data: Data) -> dict:
         "facies_groups": None,
     }
     if data.intervals is not None:
+        payload["facies_groups"] = {
+            "lithology": [interval_to_json(i, "lithology")
+                          for i in data.intervals.lithology],
+        }
         grouped_facies = data.intervals.facies
         if grouped_facies is not None:
-            payload["facies_groups"] = {
+            payload["facies_groups"].update({
                 "phase": [interval_to_json(i, "facies") for i in grouped_facies.phase],
                 "sub_phase": [
                     interval_to_json(i, "facies") for i in grouped_facies.sub_phase
@@ -187,7 +191,7 @@ def data_to_json(data: Data) -> dict:
                 "micro_phase": [
                     interval_to_json(i, "facies") for i in grouped_facies.micro_phase
                 ],
-            }
+            })
     return payload
 
 
@@ -310,6 +314,9 @@ def build_cases():
                 Interval(0.0, 50.0, lithology="泥岩"),
                 Interval(60.0, 40.0, lithology="砂岩"),  # bottom <= top
                 Interval(70.0, NAN, lithology="灰岩"),   # non-finite
+                # repr(edge) branch coverage inside interval ids.
+                Interval(1e15, 2e15, lithology="极端"),
+                Interval(1e-5, 2e-5, lithology="微观"),
             ],
             facies=[Interval(0.0, 30.0, name="浅湖")],
             markers=[
@@ -353,6 +360,7 @@ def build_cases():
             depth_unit="m",
             curves=[Curve("GR", "API", [0.0, 90.0], [1.0, 2.0])],
             intervals=WellIntervals(
+                lithology=[Interval(30.0, 45.0, lithology="灰岩")],
                 facies=FaciesData(
                     phase=[Interval(0.0, 90.0, facies="湖")],
                     sub_phase=[Interval(0.0, 60.0, facies="浅湖"),

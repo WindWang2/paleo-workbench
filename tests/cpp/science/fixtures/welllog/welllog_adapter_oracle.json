@@ -790,6 +790,16 @@
       "top": 70.0,
       "bottom": "NaN",
       "label": "灰岩"
+     },
+     {
+      "top": 1000000000000000.0,
+      "bottom": 2000000000000000.0,
+      "label": "极端"
+     },
+     {
+      "top": 1e-05,
+      "bottom": 2e-05,
+      "label": "微观"
      }
     ],
     "facies": [
@@ -853,6 +863,16 @@
       0.0,
       50.0,
       "泥岩"
+     ],
+     [
+      1000000000000000.0,
+      2000000000000000.0,
+      "极端"
+     ],
+     [
+      1e-05,
+      2e-05,
+      "微观"
      ]
     ],
     "facies_bounds": [
@@ -1184,6 +1204,13 @@
     "facies": [],
     "markers": [],
     "facies_groups": {
+     "lithology": [
+      {
+       "top": 30.0,
+       "bottom": 45.0,
+       "label": "灰岩"
+      }
+     ],
      "phase": [
       {
        "top": 0.0,
@@ -1233,7 +1260,13 @@
       "axis_id": "22a90327-163b-5658-8170-fc511b64e512"
      }
     ],
-    "lithology_bounds": [],
+    "lithology_bounds": [
+     [
+      30.0,
+      45.0,
+      "灰岩"
+     ]
+    ],
     "facies_bounds": [
      [
       0.0,
@@ -1263,6 +1296,11 @@
     "top": 0.0,
     "bottom": 90.0,
     "tracks": [
+     {
+      "width_mm": 24.0,
+      "layers": [],
+      "interval_semantic": "lithology"
+     },
      {
       "width_mm": 24.0,
       "layers": [],

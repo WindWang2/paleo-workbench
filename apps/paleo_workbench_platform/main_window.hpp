@@ -214,6 +214,10 @@ private:
     QgsMapCanvas* canvas_ = nullptr;
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;
+#ifdef PWB_WITH_WELL_LOG
+    // Live depth readout from the well-log view crosshair (cursor linkage).
+    QLabel* cursor_label_ = nullptr;
+#endif
 #ifdef PWB_WITH_CONV_16
     FactorStatsDock* factor_dock_ = nullptr;
 #endif

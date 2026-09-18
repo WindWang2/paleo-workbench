@@ -278,16 +278,14 @@ default_track_layout(const std::vector<std::string>& mnemonics) {
                 static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
         }
         // Strip before comparing: the oracle compares the stripped mnemonic.
-        while (!upper.empty() &&
-               (upper.back() == ' ' || upper.back() == '\t')) {
-            upper.pop_back();
-        }
-        std::size_t begin = 0;
-        while (begin < upper.size() &&
-               (upper[begin] == ' ' || upper[begin] == '\t')) {
-            ++begin;
-        }
-        if (upper.substr(begin) == "GR") {
+        const std::string stripped = [](const std::string& s) {
+            constexpr const char* kWhitespace = " \t\n\r\f\v";
+            const auto begin = s.find_first_not_of(kWhitespace);
+            if (begin == std::string::npos) return std::string{};
+            const auto end = s.find_last_not_of(kWhitespace);
+            return s.substr(begin, end - begin + 1);
+        }(upper);
+        if (stripped == "GR") {
             gr_index = i;
             break;
         }

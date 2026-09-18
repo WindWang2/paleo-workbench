@@ -1,9 +1,11 @@
 from __future__ import annotations
 # [C++ migration status — partial] LAS parse + depth-unit envelope now
 # go through the engine (LasSourceAdapter) / pwb::well_science
-# classify_depth_unit inside the C++ host; the cooperative-cancel and
-# LRU-cache behaviour is ported per-curve in WellLogHostWidget::
-# load_from_source. This module remains for the Python entry point.
+# classify_depth_unit inside the C++ host, with cooperative cancellation
+# checkpoints between curves (WellLogHostWidget::load_from_source). The
+# LRU document cache is NOT ported: the C++ engine keeps a retained
+# document per session, so there is nothing to cache. This module remains
+# for the Python entry point.
 
 import logging
 import math

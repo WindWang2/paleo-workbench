@@ -60,6 +60,10 @@ struct WellLogCurveInput {
     // "#rrggbb" override; empty = mnemonic palette default.
     std::string color;
 };
+// Note: Python duck-typed attributes with no typed equivalent here
+// (display_range falsy→(0,100), curve.name str()-coercion, the facies
+// label-attr choice between .facies/.name) are the DTO builder's
+// responsibility: this seam receives already-normalized values.
 
 struct WellLogIntervalInput {
     double top{0.0};
@@ -77,6 +81,11 @@ struct WellLogMarkerInput {
 };
 
 struct WellLogFaciesGroupsInput {
+    // Mirrors the Python WellIntervals shape: a lithology bucket plus the
+    // grouped facies buckets. adapt_well_log_data falls back to the grouped
+    // lithology only when the document-level lithology list is empty (the
+    // Python `if not lithology` rule).
+    std::vector<WellLogIntervalInput> lithology;
     std::vector<WellLogIntervalInput> phase;
     std::vector<WellLogIntervalInput> sub_phase;
     std::vector<WellLogIntervalInput> micro_phase;
@@ -110,6 +119,17 @@ public:
     // Full curve with sample buffers (lazy; may block).
     [[nodiscard]] virtual WellLogCurveInput
     load_curve(std::size_t index, const std::atomic_bool& cancel) = 0;
+    // Interpretation context; empty by default so a curve-only source stays
+    // valid._loaded into the plan verbatim (facies/lithology tracks, tops).
+    [[nodiscard]] virtual std::vector<WellLogIntervalInput> lithology_intervals() const {
+        return {};
+    }
+    [[nodiscard]] virtual std::vector<WellLogIntervalInput> facies_intervals() const {
+        return {};
+    }
+    [[nodiscard]] virtual std::vector<WellLogMarkerInput> markers() const {
+        return {};
+    }
 };
 
 // --- normalized plan -------------------------------------------------------
@@ -119,6 +139,10 @@ struct EngineCurveSubmission {
     std::string axis_id;
     std::string curve_id;
     std::string mnemonic;
+    // Position in the SOURCE document input (not the adapted curve list):
+    // layout keys are input-indexed, so presentation mapping survives
+    // curve_empty drops.
+    std::size_t input_index{0};
     std::string depth_unit;  // "m"/"ft" label; "m" when unknown (see declared)
     std::string value_unit;
     std::shared_ptr<const std::vector<double>> depth;

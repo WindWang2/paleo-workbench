@@ -183,7 +183,12 @@ void WellLogTrackPanel::on_move_group(int offset) {
     if (target < 0 || target >= static_cast<long long>(layout.groups.size())) {
         return;
     }
-    (void)host()->apply_track_layout(layout.move_group(key, static_cast<std::size_t>(target)));
+    try {
+        (void)host()->apply_track_layout(
+            layout.move_group(key, static_cast<std::size_t>(target)));
+    } catch (const std::exception&) {
+        // Stale key after a reload: refresh() re-syncs the list.
+    }
     refresh();
 }
 
@@ -211,6 +216,8 @@ void WellLogTrackPanel::on_merge_selected() {
         QMessageBox::information(this, tr("合并受限"),
                                  QString::fromLocal8Bit(e.what()));
         return;
+    } catch (const std::exception&) {
+        // Stale key after a reload: refresh() re-syncs the list.
     }
     refresh();
 }
@@ -220,7 +227,11 @@ void WellLogTrackPanel::on_unmerge_selected() {
     auto* item = curves_->currentItem();
     if (item == nullptr) return;
     const auto key = item->data(Qt::UserRole).toString().toStdString();
-    (void)host()->apply_track_layout(host()->track_layout().unmerge(key));
+    try {
+        (void)host()->apply_track_layout(host()->track_layout().unmerge(key));
+    } catch (const std::exception&) {
+        // Stale key after a reload: refresh() re-syncs the list.
+    }
     refresh();
 }
 
@@ -232,7 +243,12 @@ void WellLogTrackPanel::on_scale_mode_changed(int index) {
     std::optional<pwb::viz::TrackScaleMode> mode;
     if (index == 1) mode = pwb::viz::TrackScaleMode::linear;
     if (index == 2) mode = pwb::viz::TrackScaleMode::logarithmic;
-    (void)host()->apply_track_layout(host()->track_layout().with_scale_mode(key, mode));
+    try {
+        (void)host()->apply_track_layout(
+            host()->track_layout().with_scale_mode(key, mode));
+    } catch (const std::exception&) {
+        // Stale key after a reload: refresh() re-syncs the list.
+    }
     refresh();
 }
 

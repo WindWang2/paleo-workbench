@@ -274,6 +274,11 @@ void MainWindow::buildUi() {
 
     status_label_ = new QLabel(QStringLiteral("ready"), this);
     statusBar()->addWidget(status_label_);
+#ifdef PWB_WITH_WELL_LOG
+    cursor_label_ = new QLabel(this);
+    cursor_label_->hide(); // appears with the first crosshair event
+    statusBar()->addPermanentWidget(cursor_label_);
+#endif
 
 #ifdef PWB_WITH_CONV_16
     // conv-16: read-only factor statistics HUD (FactorGrid.statistics).
@@ -298,6 +303,13 @@ void MainWindow::buildUi() {
     track_panel_dock->setWidget(track_panel);
     addDockWidget(Qt::RightDockWidgetArea, track_panel_dock);
     track_panel->bind(well_log_host);
+    well_log_host->set_cursor_callback(
+        [this](const pwb::viz::WellLogCursorEvent& event) {
+            if (!event.valid) return;
+            cursor_label_->setText(tr("深度 %1 %2")
+                                       .arg(event.depth)
+                                       .arg(QString::fromStdString(event.unit)));
+        });
     well_log_host->set_interpretation_callback(
         [this](const pwb::viz::WellLogInterpretationEvent& event) {
             const QString label = QString::fromStdString(event.label);

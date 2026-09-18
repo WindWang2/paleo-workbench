@@ -17,8 +17,10 @@ namespace {
 
 // --- SHA-1 (RFC 3174), only for UUIDv5 entity ids ---------------------------
 // No SHA-1 lives in the repo's shared libs (pwb_domain ships SHA-256 only);
-// the engine's io layer hashes for manifests, not for UUIDv5. Kept local and
-// validated against RFC vectors in well_log_plan_test.cpp.
+// the engine's io layer hashes for manifests, not for UUIDv5. Kept local:
+// correctness is pinned end-to-end by the Python-oracle parity fixture
+// (uuid5 ids across 12 cases) plus the negative self-check, not by local
+// RFC test vectors.
 
 class Sha1 {
 public:
@@ -148,21 +150,55 @@ std::string uuid5_hex(const std::string& name) {
     return out;
 }
 
-// Python repr(float) — shortest round-trip with ".0" for integral values.
+// Python repr(float): shortest round-trip digits, fixed notation for
+// decimal exponents in [-4, 16), scientific ("1e+16" style, 2-digit
+// exponent) outside, ".0" on integral values.
 std::string python_repr_double(double value) {
     if (std::isnan(value)) return "nan";
     if (std::isinf(value)) return value > 0 ? "inf" : "-inf";
+    if (value == 0.0) return std::signbit(value) ? "-0.0" : "0.0";
     char buffer[64];
-    const auto result =
-        std::to_chars(buffer, buffer + sizeof(buffer), value);
-    std::string text(buffer, result.ptr);
-    if (text.find('.') == std::string::npos &&
-        text.find('e') == std::string::npos &&
-        text.find('n') == std::string::npos &&
-        text.find('i') == std::string::npos) {
-        text += ".0";
+    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value,
+                                      std::chars_format::scientific);
+    const std::string text(buffer, result.ptr);
+    const auto epos = text.find('e');
+    std::string mantissa = text.substr(0, epos);
+    const int exp10 = std::atoi(text.c_str() + epos + 1);
+    bool negative = false;
+    if (!mantissa.empty() && mantissa.front() == '-') {
+        negative = true;
+        mantissa.erase(0, 1);
     }
-    return text;
+    std::string digits;
+    for (const char c : mantissa) {
+        if (c != '.') digits += c;
+    }
+    std::string out = negative ? "-" : "";
+    if (exp10 < -4 || exp10 >= 16) {
+        out += digits.substr(0, 1);
+        if (digits.size() > 1) {
+            out += '.';
+            out += digits.substr(1);
+        }
+        char exponent[8];
+        std::snprintf(exponent, sizeof(exponent), "%c%02d",
+                      exp10 < 0 ? '-' : '+', std::abs(exp10));
+        out += 'e';
+        out += exponent;
+    } else if (exp10 >= static_cast<int>(digits.size()) - 1) {
+        out += digits;
+        out.append(static_cast<std::size_t>(exp10) - (digits.size() - 1), '0');
+        out += ".0";
+    } else if (exp10 >= 0) {
+        out += digits.substr(0, static_cast<std::size_t>(exp10) + 1);
+        out += '.';
+        out += digits.substr(static_cast<std::size_t>(exp10) + 1);
+    } else {
+        out += "0.";
+        out.append(static_cast<std::size_t>(-exp10) - 1, '0');
+        out += digits;
+    }
+    return out;
 }
 
 // --- vendored color tables (mirror the Python adapter verbatim) -------------
@@ -468,11 +504,11 @@ std::string stable_entity_id(std::vector<std::string_view> parts) {
             joined.push_back('|');
         }
         std::string_view part = parts[i];
-        while (!part.empty() &&
-               (part.front() == ' ' || part.front() == '\t')) {
+        constexpr std::string_view kStrip = " \t\n\r\f\v";
+        while (!part.empty() && kStrip.find(part.front()) != std::string_view::npos) {
             part.remove_prefix(1);
         }
-        while (!part.empty() && (part.back() == ' ' || part.back() == '\t')) {
+        while (!part.empty() && kStrip.find(part.back()) != std::string_view::npos) {
             part.remove_suffix(1);
         }
         joined.append(part);
@@ -537,6 +573,7 @@ EngineLoadPlan adapt_well_log_data(const WellLogDocumentInput& input) {
             continue;
         }
         EngineCurveSubmission submission;
+        submission.input_index = index;
         submission.document_id = document_id;
         submission.axis_id =
             stable_entity_id({"axis", plan.well_name, mnemonic,
@@ -560,6 +597,11 @@ EngineLoadPlan adapt_well_log_data(const WellLogDocumentInput& input) {
 
     std::vector<WellLogIntervalInput> lithology = input.lithology;
     std::vector<WellLogIntervalInput> facies = input.facies;
+    if (lithology.empty() && input.facies_groups.has_value()) {
+        // Python: `if not lithology and grouped is not None: lithology =
+        // grouped.lithology`.
+        lithology = input.facies_groups->lithology;
+    }
     if (facies.empty() && input.facies_groups.has_value()) {
         const auto& grouped = *input.facies_groups;
         facies.reserve(grouped.phase.size() + grouped.sub_phase.size() +
