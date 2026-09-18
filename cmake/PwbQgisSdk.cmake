@@ -134,6 +134,15 @@ target_include_directories(PwbQgis::Sdk INTERFACE
     "${PALEO_QGIS_BUILD_DIR}/src/gui"
     "${PALEO_QGIS_BUILD_DIR}/src/analysis"
 )
+# QGIS public headers include <ogr_api.h> whenever the vendored build was
+# configured against GDAL (qgsvectorfilewriter.h). The vendored .so set
+# already links a GDAL — surface its headers through the SDK so consumers
+# compile against the same ABI they run. QUIET: SDK snapshots built without
+# this exposure keep the previous include closure.
+find_package(GDAL QUIET)
+if(GDAL_FOUND AND GDAL_INCLUDE_DIR)
+    target_include_directories(PwbQgis::Sdk INTERFACE "${GDAL_INCLUDE_DIR}")
+endif()
 target_link_libraries(PwbQgis::Sdk INTERFACE
     PwbQgis::Core PwbQgis::Gui PwbQgis::Analysis
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::Svg Qt6::PrintSupport)

@@ -181,8 +181,9 @@ Result checkMappingKernel() {
     options.grid_n = 16;
     const pwb::mapping::FactorGrid grid =
         pwb::mapping::interpolate_factor(samples, options);
-    if (grid.statistics.min > grid.statistics.max
-        || grid.statistics.min != grid.statistics.min /* NaN guard */) {
+    if (grid.statistics.min != grid.statistics.min
+        || grid.statistics.max != grid.statistics.max /* NaN guards */
+        || grid.statistics.min > grid.statistics.max) {
         r.detail = QStringLiteral("interpolate_factor statistics unusable");
         return r;
     }
@@ -580,6 +581,11 @@ QVector<SelfCheck::Result> SelfCheck::run(const QString& source_dir) {
     }
 #endif
 #endif
+
+    // Python-free re-scan after the provider/render/QGIS workload ran:
+    // something dlopened during the battery must not have pulled a python
+    // runtime in either (the first scan ran before any of it).
+    add(checkPythonFree());
 
     // Service registry audit: every hard capability of this build has a
     // reachable service in the (still alive) context.

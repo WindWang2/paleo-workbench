@@ -44,6 +44,9 @@ QgisPrefix="${PALEO_QGIS_SDK_DIR:-}"
 ProjData="${PWB_DEPLOY_PROJ_DATA:-}"
 GdalData="${PWB_DEPLOY_GDAL_DATA:-}"
 
+case "$DistDir" in
+    ""|"/") echo "refusing to wipe unsafe DistDir '$DistDir'"; exit 2 ;;
+esac
 rm -rf "$DistDir"
 mkdir -p "$DistDir/bin" "$DistDir/libexec" "$DistDir/lib" "$DistDir/qgis"
 

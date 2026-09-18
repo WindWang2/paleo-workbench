@@ -30,14 +30,29 @@ int main(int argc, char** argv) {
         PWB_CHECK(caps.size()
                   == static_cast<int>(
                       pwb::app::capabilities::kBuildCapabilityCount));
-        int hard = 0;
+        int hard = 0;          // hard rows in the build table
+        int hard_in_closure = 0;  // ... actually carried by THIS build
         for (const auto& cap : caps) {
             if (cap.cls != pwb::app::capabilities::BuildClass::hard) continue;
             ++hard;
+            if (cap.in_closure) ++hard_in_closure;
             if (cap.in_closure) {
-                PWB_CHECK_MSG(cap.runtime_ok,
-                              "hard capability runtime-degraded: "
-                                  + cap.id.toStdString());
+#if !defined(PWB_WITH_SEISMIC_ATTRIBUTES) || !defined(PWB_WITH_DATA_INTEGRATION)
+                // This test target compiles AppContext WITHOUT the
+                // attribute macro pair, so the seismic runner cannot exist
+                // and the capability honestly degrades — the product build
+                // (pwb-platform, platform.capabilities) asserts the linked
+                // behavior instead.
+                const bool allowed_degraded =
+                    cap.id == QLatin1String("seismic_attributes");
+#else
+                const bool allowed_degraded = false;
+#endif
+                if (!allowed_degraded) {
+                    PWB_CHECK_MSG(cap.runtime_ok,
+                                  "hard capability runtime-degraded: "
+                                      + cap.id.toStdString());
+                }
             }
         }
         PWB_CHECK(hard > 0);
@@ -45,7 +60,7 @@ int main(int argc, char** argv) {
         // Service audit: all hard services reachable.
         const AppContext::ServiceAudit audit = context.auditServices();
         PWB_CHECK_MSG(audit.ok, "service audit failed");
-        PWB_CHECK(audit.entries.size() == hard);
+        PWB_CHECK(audit.entries.size() == hard_in_closure);
 
         context.shutdown();
         // Idempotent shutdown + the session survives for callers that

@@ -45,7 +45,9 @@
 #include <qgsvectorlayer.h>
 #include <qgsvertexmarker.h>
 
+#ifdef PWB_WITH_DATA_INTEGRATION
 #include <pwb/application/adapters/data_store.hpp>
+#endif
 #include <pwb/qgis/layout_service.hpp>
 #include <pwb/qgis/layer_adapter.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
@@ -535,8 +537,8 @@ void MainWindow::openRasterDialog() {
     }
 }
 
-void MainWindow::openProjectDialog() {
 #ifdef PWB_WITH_DATA_INTEGRATION
+void MainWindow::openProjectDialog() {
     const QString path = QFileDialog::getOpenFileName(
         this, tr("打开工程"), QString(),
         tr("Paleo 工程 (*.paleo.json *.paleo);;所有文件 (*)"));
@@ -545,8 +547,8 @@ void MainWindow::openProjectDialog() {
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("打开工程"), error);
     }
-#endif
 }
+#endif
 
 #ifdef PWB_WITH_DATA_INTEGRATION
 void MainWindow::newProjectDialog() {

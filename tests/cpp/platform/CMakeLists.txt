@@ -61,10 +61,18 @@ pwb_add_platform_test(export_layout test_export.cpp)
 pwb_add_platform_test(adapters_substitutes test_adapters.cpp)
 
 # Composition-root unit battery (native-product closure): service audit +
-# capability matrix over a real AppContext, without a MainWindow.
+# capability matrix over a real AppContext, without a MainWindow. The
+# attribute macro pair + kernel link mirror the app target so the runtime
+# capability probe is exercised the same way pwb-platform builds it.
 pwb_add_platform_test(app_context test_app_context.cpp
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/app_context.cpp
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/diagnostics.cpp)
+if(TARGET Pwb::SeismicAttributes AND TARGET Pwb::Data
+        AND TARGET Pwb::Science AND TARGET Pwb::Workflow)
+    target_link_libraries(platform_app_context PRIVATE Pwb::SeismicAttributes)
+    target_compile_definitions(platform_app_context PRIVATE
+        PWB_WITH_SEISMIC_ATTRIBUTES=1)
+endif()
 
 # UI wiring test compiles the real MainWindow (moc included) next to the app.
 add_executable(platform_ui_wiring test_ui_wiring.cpp
@@ -201,8 +209,10 @@ set_tests_properties(platform.diagnostics PROPERTIES
     TIMEOUT 120)
 
 # Python-free link closure (POSIX only): ldd over the product binary must
-# not resolve any python/PySide shared object. Windows equivalents run via
-# the deploy script's manifest check instead.
+# not resolve any python/PySide shared object. On Windows the in-process
+# half (self-check's /proc-equivalent scan is POSIX-only there, so the
+# --diagnostics verdict reads not-probed) plus a manual deploy-tree review
+# carry the equivalent claim.
 if(UNIX)
     add_test(NAME platform.python_free
         COMMAND ${CMAKE_COMMAND}

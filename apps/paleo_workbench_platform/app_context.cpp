@@ -2,7 +2,9 @@
 
 #include "diagnostics.hpp"
 
+#ifdef PWB_WITH_DATA_INTEGRATION
 #include <pwb/application/adapters/data_store.hpp>
+#endif
 
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/seismic_attributes/attributes.hpp>
@@ -12,7 +14,9 @@ namespace pwb::app {
 
 struct AppContext::Impl {
     std::unique_ptr<pwb::application::ProjectSession> session;
+#ifdef PWB_WITH_DATA_INTEGRATION
     std::shared_ptr<pwb::application::PwbDataStore> project_store;
+#endif
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     std::unique_ptr<pwb::application::AlgorithmRunner> attribute_runner;
 #endif
@@ -66,6 +70,7 @@ pwb::application::AlgorithmRunner& AppContext::attributeRunner() const {
 }
 #endif
 
+#ifdef PWB_WITH_DATA_INTEGRATION
 void AppContext::setProjectStore(
     std::shared_ptr<pwb::application::PwbDataStore> store) {
     impl_->project_store = std::move(store);
@@ -74,6 +79,7 @@ void AppContext::setProjectStore(
 std::shared_ptr<pwb::application::PwbDataStore> AppContext::projectStore() const {
     return impl_->project_store;
 }
+#endif
 
 void AppContext::shutdown() {
     if (impl_->closed) return;
@@ -84,10 +90,13 @@ void AppContext::shutdown() {
     // shutdown order of the CPP-A contract. Idempotent when the window
     // already ran it.
     if (impl_->session != nullptr) impl_->session->close();
-#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-    impl_->attribute_runner.reset();
-#endif
+    // attribute_runner stays alive: attributeRunner() must remain valid for
+    // the whole context lifetime (same contract as session()); its worker
+    // set drains naturally once nothing submits. The store handle is the
+    // only service whose lifetime follows the open project.
+#ifdef PWB_WITH_DATA_INTEGRATION
     impl_->project_store.reset();
+#endif
     diagnostics::info(diagnostics::LogArea::Startup,
                       QStringLiteral("app context shut down"));
 }
@@ -101,8 +110,15 @@ QVector<AppContext::RuntimeCapability> AppContext::capabilities() const {
         cap.cls = build.cls;
         cap.in_closure = build.in_closure;
         cap.runtime_ok = build.in_closure;
-        cap.detail = build.in_closure ? QStringLiteral("linked")
-                                      : QStringLiteral("not in this build");
+        if (build.cls == capabilities::BuildClass::kernel) {
+            cap.detail = build.in_closure
+                ? QStringLiteral("kernel present, not wired into the product")
+                : QStringLiteral("not in this build");
+        } else {
+            cap.detail = build.in_closure
+                ? QStringLiteral("linked")
+                : QStringLiteral("not in this build");
+        }
         // Runtime refinement: services this context actually owns.
         if (cap.id == QLatin1String("seismic_attributes")) {
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
@@ -113,13 +129,21 @@ QVector<AppContext::RuntimeCapability> AppContext::capabilities() const {
                       impl_->attribute_runner->algorithms().size()))
                 : QStringLiteral("no attribute kernels registered");
 #else
+            // The switch is ON but the runner needs the data-integration
+            // macro pair — without it no kernel can even register, so a
+            // runtime-ok here would be a silent false positive.
+            cap.runtime_ok = false;
             cap.detail = QStringLiteral("build lacks data integration");
 #endif
         } else if (cap.id == QLatin1String("data_integration")) {
+#ifdef PWB_WITH_DATA_INTEGRATION
             cap.detail = QStringLiteral("store handle %1")
                               .arg(impl_->project_store != nullptr
                                        ? QStringLiteral("attached")
                                        : QStringLiteral("idle"));
+#else
+            cap.detail = QStringLiteral("module-only build");
+#endif
         }
         result.append(cap);
     }
@@ -131,10 +155,16 @@ AppContext::ServiceAudit AppContext::auditServices() const {
     audit.ok = true;
     audit.entries.reserve(static_cast<int>(capabilities::kBuildCapabilityCount));
     for (const RuntimeCapability& cap : capabilities()) {
-        if (cap.cls != capabilities::BuildClass::hard) continue;
+        // Module-only builds are legal: a hard capability not in this
+        // build's closure is a capabilities()-reported fact, not a service
+        // failure. The audit asks "is every service this binary carries
+        // actually reachable", never "did you build everything".
+        if (cap.cls != capabilities::BuildClass::hard || !cap.in_closure) {
+            continue;
+        }
         AuditEntry entry;
         entry.id = cap.id;
-        entry.ok = cap.in_closure && cap.runtime_ok;
+        entry.ok = cap.runtime_ok;
         entry.detail = cap.detail;
         if (!entry.ok) audit.ok = false;
         audit.entries.append(entry);

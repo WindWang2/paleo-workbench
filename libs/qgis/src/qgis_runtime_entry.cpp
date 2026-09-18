@@ -27,7 +27,7 @@ void QgisRuntime::acquire() {
     bool expected = false;
     if (!g_initialized.compare_exchange_strong(expected, true)) {
         throw std::logic_error(
-            "QgisRuntime::acquire called twice - QGIS must init exactly once per process");
+            "QgisRuntime::acquire called twice — QGIS must init exactly once per process");
     }
     if (QgsApplication::instance() == nullptr) {
         g_initialized.store(false);

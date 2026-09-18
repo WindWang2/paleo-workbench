@@ -20,9 +20,10 @@ public:
         QString detail;  // failure diagnostics / pass summary
     };
 
-    // Dev-tree fixture root (deployed trees pass an empty dir: the
-    // fixture-gated checks report themselves as skipped-by-design and the
-    // rest still runs).
+    // Fixture root (the compile-time source dir). Fixture-gated checks
+    // (well-log LAS, SEG-Y chain) skip themselves by design when the file
+    // is absent — which is exactly what happens on a deployed tree; every
+    // other check runs everywhere.
     static QVector<Result> run(const QString& source_dir);
 
     static QString render(const QVector<Result>& results);

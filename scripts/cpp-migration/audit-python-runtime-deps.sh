@@ -24,17 +24,31 @@ RepoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 Status=0
 
 scan_sources() {
+    # The product link closure (apps CMakeLists), not just the shell libs.
     local paths=(
         "$RepoRoot/apps"
         "$RepoRoot/libs/application"
         "$RepoRoot/libs/qgis"
         "$RepoRoot/libs/ui"
         "$RepoRoot/libs/tool_policy"
+        "$RepoRoot/libs/data_suite"
+        "$RepoRoot/libs/domain"
+        "$RepoRoot/libs/project"
+        "$RepoRoot/libs/workspace"
+        "$RepoRoot/libs/catalog"
+        "$RepoRoot/libs/algorithms"
+        "$RepoRoot/libs/visualization"
+        "$RepoRoot/libs/workflow"
+        "$RepoRoot/libs/workflow_engine"
+        "$RepoRoot/libs/mapping_kernel"
+        "$RepoRoot/libs/seismic_viewer"
+        "$RepoRoot/libs/seismic_attributes"
+        "$RepoRoot/libs/seismic_io"
     )
     echo "== source audit: ${paths[*]}"
     # Raw patterns: Python C API, PySide/shiboken includes, spawning python.
     local hits
-    hits=$(grep -rnE '(#include[[:space:]]*<Python\.h>|#include[[:space:]]*"Python\.h"|Py_Initialize|PyImport_AppendInittab|subprocess.*python|system\("python)' \
+    hits=$(grep -rnE '(#include[[:space:]]*<Python\.h>|#include[[:space:]]*"Python\.h"|#include[[:space:]]*<PySide|#include[[:space:]]*<shiboken|Py_Initialize|Py_RunString|PyRun_|PyImport_|subprocess.*python|system\("python|QProcess[^;]*start[^;]*python|startDetached.*python|dlopen[^;]*python)' \
         "${paths[@]}" 2>/dev/null || true)
     if [ -n "$hits" ]; then
         echo "VIOLATION (must-remove class):"
@@ -92,10 +106,13 @@ case "${1:-}" in
         scan_sources
         if [ -x "$RepoRoot/build/native-product/bin/pwb-platform" ]; then
             scan_link_closure "$RepoRoot/build/native-product/bin/pwb-platform"
+        elif [ -x "$RepoRoot/build/native-product/apps/paleo_workbench_platform/pwb-platform" ]; then
+            scan_link_closure "$RepoRoot/build/native-product/apps/paleo_workbench_platform/pwb-platform"
         elif [ -x "$RepoRoot/build/native-product/pwb-platform" ]; then
             scan_link_closure "$RepoRoot/build/native-product/pwb-platform"
         else
-            echo "== link audit: no built product binary under build/native-product (skipped)"
+            echo "== link audit: no built product binary under build/native-product — SKIPPED (source audit only)"
+        LinkSkipped=1
         fi
         ;;
     *)
@@ -103,7 +120,9 @@ case "${1:-}" in
         ;;
 esac
 
-if [ "$Status" -eq 0 ]; then
+if [ "$Status" -eq 0 ] && [ "${LinkSkipped:-0}" -eq 1 ]; then
+    echo "AUDIT PASS (link audit skipped)"
+elif [ "$Status" -eq 0 ]; then
     echo "AUDIT PASS"
 fi
 exit "$Status"

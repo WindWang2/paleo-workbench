@@ -51,9 +51,13 @@ public:
     pwb::application::AlgorithmRunner& attributeRunner() const;
 #endif
 
+#ifdef PWB_WITH_DATA_INTEGRATION
     // Shared project store handle (set by the project open/new flows).
+    // Module-only builds have no PwbDataStore type — guarded like every
+    // other data-integration surface (the define is PUBLIC on Pwb::Application).
     void setProjectStore(std::shared_ptr<pwb::application::PwbDataStore> store);
     std::shared_ptr<pwb::application::PwbDataStore> projectStore() const;
+#endif
 
     // Ordered teardown: close the session (map tools unset, canvas
     // detached from layers, project layers dropped) while the host window

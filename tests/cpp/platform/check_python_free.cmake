@@ -21,6 +21,13 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "ldd exited ${result}: ${stderr}")
 endif()
 
+# A broken closure ("not found") would make the python scan vacuous —
+# treat it as a failure first.
+string(FIND "${output}" "not found" broken)
+if(NOT broken LESS 0)
+    message(FATAL_ERROR "link closure incomplete (ldd: not found):\n${output}")
+endif()
+
 string(TOLOWER "${output}" lowered)
 foreach(banned IN ITEMS "python" "pyside" "shiboken")
     string(FIND "${lowered}" "${banned}" position)

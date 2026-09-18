@@ -8,6 +8,8 @@
 #include <QCommandLineParser>
 #include <QTextStream>
 
+#include <string_view>
+
 #include <qgsapplication.h>
 
 #include <pwb/qgis/qgis_runtime.hpp>
@@ -24,9 +26,9 @@ struct StartupFatal {
     QString message;
 };
 
-RunMode parse_mode(const QCommandLineParser& parser, bool* headless) {
-    *headless = parser.isSet(QStringLiteral("headless-self-check"));
-    if (*headless || parser.isSet(QStringLiteral("self-check"))) {
+RunMode parse_mode(const QCommandLineParser& parser) {
+    if (parser.isSet(QStringLiteral("headless-self-check"))
+        || parser.isSet(QStringLiteral("self-check"))) {
         return RunMode::SelfCheck;
     }
     if (parser.isSet(QStringLiteral("capabilities"))) return RunMode::Capabilities;
@@ -66,11 +68,9 @@ int run_diagnostics(QTextStream& out) {
     return 0;
 }
 
-int run_self_check(QTextStream& out, bool headless) {
-    if (headless
-        && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
-        qputenv("QT_QPA_PLATFORM", "offscreen");
-    }
+int run_self_check(QTextStream& out) {
+    // (The offscreen fallback for --headless-self-check already ran before
+    // QgsApplication constructed; nothing platform-related can change now.)
     const QVector<SelfCheck::Result> results =
         SelfCheck::run(QStringLiteral(PWB_SOURCE_DIR));
     out << SelfCheck::render(results);
@@ -93,12 +93,12 @@ int run_interactive() {
     return code;
 }
 
-int dispatch(RunMode mode, bool headless) {
+int dispatch(RunMode mode) {
     QTextStream out(stdout);
     switch (mode) {
     case RunMode::Capabilities: return run_capabilities(out);
     case RunMode::Diagnostics: return run_diagnostics(out);
-    case RunMode::SelfCheck: return run_self_check(out, headless);
+    case RunMode::SelfCheck: return run_self_check(out);
     case RunMode::Interactive: return run_interactive();
     }
     return 2;
@@ -107,6 +107,20 @@ int dispatch(RunMode mode, bool headless) {
 }  // namespace
 
 int Bootstrap::run(int argc, char** argv) {
+    // The Qt platform plugin is chosen when QGuiApplication constructs, so
+    // the headless fallback must be in the environment BEFORE that — the
+    // QCommandLineParser below runs too late (bootstrap.hpp contract).
+    bool headless_flag = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) == "--headless-self-check") {
+            headless_flag = true;
+            break;
+        }
+    }
+    if (headless_flag && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+    }
+
     diagnostics::install_message_collector();
 
     // QgsApplication must be THE application object (QGIS 4.x contract);
@@ -135,8 +149,7 @@ int Bootstrap::run(int argc, char** argv) {
                                      "(versions/providers/probes/log tail)")});
     parser.process(app);
 
-    bool headless = parser.isSet(QStringLiteral("headless-self-check"));
-    const RunMode mode = parse_mode(parser, &headless);
+    const RunMode mode = parse_mode(parser);
 
     // Single QGIS init for the process; failures are a startup fatal with
     // a structured report (never a silent half-initialized runtime).
@@ -160,7 +173,7 @@ int Bootstrap::run(int argc, char** argv) {
 
     int exit_code = 2;
     try {
-        exit_code = dispatch(mode, headless);
+        exit_code = dispatch(mode);
     } catch (const std::exception& error) {
         // Top-level exception gate: report with subsystem attribution and
         // the collected log tail; never let it cross exec()/main().

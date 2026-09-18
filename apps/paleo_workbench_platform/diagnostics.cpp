@@ -97,7 +97,8 @@ QString scan_python_runtime() {
         if (pos == std::string::npos) continue;
         const std::string path = line.substr(pos);
         if (path.find("python") != std::string::npos
-            || path.find("pyside") != std::string::npos) {
+            || path.find("pyside") != std::string::npos
+            || path.find("shiboken") != std::string::npos) {
             hits.insert(path);
         }
     }

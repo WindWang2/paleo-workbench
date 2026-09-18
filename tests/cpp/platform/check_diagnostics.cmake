@@ -24,10 +24,10 @@ foreach(required IN ITEMS
         message(FATAL_ERROR "diagnostics report missing '${required}':\n${output}")
     endif()
 endforeach()
-# python runtime must read verified (POSIX probe) — anything else is a
-# product defect (a mapped python/pyside object).
-string(FIND "${output}" "python runtime: verified" position)
-if(position LESS 0)
-    message(FATAL_ERROR "python runtime not verified:\n${output}")
+# python runtime verdict: verified on POSIX; not-probed elsewhere. Any
+# other value (leaked:...) is a product defect.
+string(REGEX MATCH "python runtime: (verified|not-probed)" verdict "${output}")
+if(verdict STREQUAL "")
+    message(FATAL_ERROR "python runtime verdict missing:\n${output}")
 endif()
 message(STATUS "diagnostics report ok")
