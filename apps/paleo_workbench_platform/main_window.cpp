@@ -12,6 +12,19 @@
 #include <QStatusBar>
 #include <QToolBar>
 
+// BEGIN CONV-30 — product job runtime wiring (top-level: needed by the
+// ctor/dtor/closeEvent protocol and all migrated surfaces, independent of
+// CONV_01/SEISMIC_* guards)
+#ifdef PWB_WITH_CONV_30
+#include <QProgressDialog>
+#include <algorithm>
+#include <any>
+#include <utility>
+#include "job_center.hpp"
+#include <pwb/job_runtime/qt/job_bridge.hpp>
+#endif
+// END CONV-30
+
 #include <fstream>
 
 #ifdef PWB_WITH_CONV_16
@@ -57,14 +70,6 @@
 #include <QFormLayout>
 #include <QSpinBox>
 #include <QVBoxLayout>
-// BEGIN CONV-30 — product job runtime wiring
-#include <QProgressDialog>
-#include <algorithm>
-#include <any>
-#include <utility>
-#include "job_center.hpp"
-#include <pwb/job_runtime/qt/job_bridge.hpp>
-// END CONV-30
 
 #include <qgsjsonutils.h>
 #include <qgsproject.h>
@@ -1616,14 +1621,30 @@ void MainWindow::superviseAttributeRun(const std::string& request_id) {
     progress->setMinimumDuration(0);
     progress->setValue(1);
     auto& owner = job_center_->make_owner(this);
+    // Dialog cancel reaches the run from BOTH paths: the job token (when
+    // the supervision job is already running) and the runner directly
+    // (when the job is still QUEUED behind another lane and a queued
+    // cancel would drop it before it ever forwarded the cancel).
+    QObject::connect(
+        progress, &QProgressDialog::canceled, this,
+        [this, request_id] {
+            if (attribute_runner_ != nullptr) {
+                attribute_runner_->cancel(request_id);
+            }
+        });
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
                      &pwb::job::qtbridge::JobOwner::cancel);
+    const auto alive = job_center_->alive();
     pwb::job::JobSpec spec;
     spec.kind = "seismic.attribute";
     spec.title = "地震属性计算";
-    spec.run = [this, request_id](pwb::job::JobContext& ctx) -> std::any {
+    spec.run = [this, request_id, alive](pwb::job::JobContext& ctx)
+        -> std::any {
         bool cancel_sent = false;
         for (;;) {
+            // Teardown escape: alive clears before the runner member dies,
+            // so this loop can exit without touching `this` again.
+            if (!alive->load()) return {};
             // Cooperative cancel propagation: the supervision token flips
             // the underlying run's TaskHandle; the run then unwinds its
             // publication exactly like an explicit cancel.
@@ -1884,10 +1905,16 @@ void MainWindow::submitSegyJob(const QString& path) {
             const auto* result =
                 std::any_cast<SegyImportResult>(&outcome.result);
             if (result == nullptr || result->version_id.empty()) {
-                const std::string& detail =
-                    result != nullptr ? result->error : "unknown failure";
-                QMessageBox::warning(this, tr("导入 SEG-Y"),
-                                     QString::fromStdString(detail));
+                const std::string detail =
+                    result != nullptr && !result->error.empty()
+                        ? result->error
+                        : (result != nullptr ? result->error
+                                             : outcome.error);
+                QMessageBox::warning(
+                    this, tr("导入 SEG-Y"),
+                    QString::fromStdString(
+                        detail.empty() ? std::string("unknown failure")
+                                       : detail));
                 return;
             }
 #if defined(PWB_WITH_SEISMIC_VIEWER)

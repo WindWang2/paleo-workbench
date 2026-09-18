@@ -175,6 +175,9 @@ struct JobSnapshot {
 
 // ------------------------------------------------------------- context --
 
+struct JobCell;   // forward — JobContext carries its own cell for self_handle
+class JobHandle;  // forward — self_handle() returns one
+
 // Cooperative control handle passed to every job callable (parity of
 // TaskContext). Lives on the worker thread for the duration of the run.
 class JobContext {
@@ -201,11 +204,18 @@ public:
         token_.check_cancelled();
     }
 
+    // Handle to the running job itself. wait() from the job's own worker
+    // thread throws std::logic_error (self-wait deadlock detection) — a
+    // job CAN safely wait on itself once terminal (no-op) or use
+    // snapshot()/cancel() on it.
+    [[nodiscard]] JobHandle self_handle() const;
+
 private:
     friend class JobScheduler;
     std::string job_id_;
     CancellationToken token_;
     std::function<void(double, const std::string&)> progress_sink_;
+    std::shared_ptr<JobCell> self_cell_;
 };
 
 // ----------------------------------------------------------- job spec --
@@ -287,6 +297,7 @@ public:
 
 private:
     friend class JobScheduler;
+    friend class JobContext;  // self_handle() wraps the running job's cell
     explicit JobHandle(std::shared_ptr<JobCell> cell) : cell_(std::move(cell)) {}
     [[nodiscard]] JobState raw_state() const;
     std::shared_ptr<JobCell> cell_;

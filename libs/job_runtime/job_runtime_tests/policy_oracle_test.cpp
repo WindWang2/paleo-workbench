@@ -165,12 +165,11 @@ TEST(policy_oracle_replay) {
 
 TEST(supersede_decision_table) {
     // Frozen #1224 semantics replayed behaviorally against a live
-    // scheduler: queued → supersede, running/cancelling → reject with the
-    // Python message.
+    // scheduler: queued → supersede, running AND cancelling → reject with
+    // the exact Python message (key prefix included).
     const Json oracle = load_oracle();
     for (const auto& row : oracle["supersede"]) {
         const std::string state = row["active_state"].get<std::string>();
-        if (state != "queued" && state != "running") continue;  // cancelling covered by running path
         JobScheduler scheduler({.max_workers = 1});
         if (state == "queued") {
             // Stage: block the lane, queue key A, resubmit A.
@@ -192,17 +191,25 @@ TEST(supersede_decision_table) {
             g.open();
             scheduler.wait_idle();
         } else {
+            // Both running and cancelling park on a gate so the state is
+            // stable while the resubmit is attempted (a token-parked job
+            // would jump straight to cancelled, skipping the window).
             Gate started;
             Gate release;
-            JobSpec running_job;
-            running_job.task_key = "k";
-            running_job.run = [&started, &release](JobContext&) -> std::any {
+            JobSpec active_job;
+            active_job.task_key = "k";
+            active_job.run = [&started, &release](JobContext&) -> std::any {
                 started.open();
                 release.wait();
                 return {};
             };
-            (void)scheduler.submit(std::move(running_job));
+            JobHandle active_handle = scheduler.submit(std::move(active_job));
             started.wait();
+            if (state == "cancelling") {
+                PWB_CHECK(active_handle.cancel());
+                PWB_CHECK(active_handle.snapshot().state ==
+                          JobState::cancelling);
+            }
             bool rejected = false;
             try {
                 JobSpec dup;
@@ -215,7 +222,8 @@ TEST(supersede_decision_table) {
             }
             PWB_CHECK(rejected);
             release.open();
-            scheduler.wait_idle();
+            PWB_CHECK(active_handle.wait_for(5.0));
+            PWB_CHECK(active_handle.snapshot().is_terminal());
         }
     }
 }

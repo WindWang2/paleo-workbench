@@ -55,6 +55,11 @@ owned_worker_job.py / thread_keeper.py：released 旗标迟到投递抑制、que
 生命周期协议：closeEvent → `JobCenter::shutdown_workers(400)`（超时 detach 到 keeper）；
 aboutToQuit → 有界 drain；MainWindow dtor 先 shutdown_workers(1000) 再按原有序 teardown。
 
+**Python 侧归类**：自本分支起，`paleo_workbench/runtime/task_scheduler.py`、
+`task_categories.py`、`ui/owned_worker_job.py`、`ui/thread_keeper.py` 及其测试为
+**legacy/oracle 基准**——C++ 产品主链的 async/progress/cancel 一律走 libs/job_runtime，
+Python 侧不再作为产品运行时扩展（冻结语义仅作对账基准）。
+
 ## D6 — 共享文件最小化
 
 - `libs/application/algorithm_runner.{hpp,cpp}`：仅加法 `cancel()`（CONV-30 注释块包裹）。
@@ -69,7 +74,14 @@ aboutToQuit → 有界 drain；MainWindow dtor 先 shutdown_workers(1000) 再按
 - PLATFORM=OFF 闭包：configure + targeted build（≤ -j3）+ ctest 27/27 × 20 轮稳定
   （job_runtime.lifecycle/cancel/dedupe/shutdown/policy_oracle + job_qt.bridge +
   既有 mapping_kernel/data 全套）。
-- **限制**：本 Linux 主机无 vendored QGIS SDK（无 sibling main checkout），platform app
+- **限制 1**：本 Linux 主机无 vendored QGIS SDK（无 sibling main checkout），platform app
   （main_window/job_center）无法本地编译；job_center.cpp 已 Qt-only 语法编译验证；
-  main_window.cpp 改动以 review 补偿（守卫式追加、遵循原模式），Windows 侧构建即可
-  覆盖。在线 CI 不需要也不等待。
+  main_window.cpp 改动经两轮独立 review 逐行核verify（守卫配平/编译级检查/线程边界），
+  Windows 侧构建即可覆盖。在线 CI 不需要也不等待。
+- **限制 2（join 语义披露）**：C++ jthread 不可抛弃。`shutdown(true, timeout)` 的
+  timeout 只约束排空等待；超时后返回不 join，残余任务由后续 shutdown/析构 join——即
+  进程退出最终会等待"最顽固任务"的自然结束（Python daemon 线程则直接弃）。产品协议
+  （400ms 关窗 / 5s 退出 drain / 2s 析构）全部按此如实执行；GUI 冻结时长上限 = 当前
+  不可中断阶段（如 read_segy 大文件读取）。
+- **限制 3**：JobOwner 注册表随使用线性增长（小对象，窗口生命周期；Qt parent
+  链保证无泄漏），不做主动回收。

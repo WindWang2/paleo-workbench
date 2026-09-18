@@ -48,7 +48,10 @@ namespace pwb::job::qtbridge {
 struct JobOutcome {
     JobState state{JobState::cancelled};  // done / degraded / failed / cancelled
     std::string error;                    // failed only
-    std::any result;                      // done / degraded (the callable's return)
+    // done / degraded (the callable's return). Copied across the queued
+    // hop, so a job that reports through JobOwner must return a
+    // COPYABLE result type (move-only results cannot cross the GUI hop).
+    std::any result;
 };
 
 using FinishedFn = std::function<void(const JobOutcome&)>;

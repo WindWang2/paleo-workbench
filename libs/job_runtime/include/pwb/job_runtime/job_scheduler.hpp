@@ -98,11 +98,12 @@ public:
 
     // Cooperative cancel (see JobHandle::cancel). Returns false when the id
     // is unknown or already terminal.
-    bool cancel(const std::string& job_id);
+    [[nodiscard]] bool cancel(const std::string& job_id);
 
     // Promotes a queued job (user started browsing what it feeds). Without
     // an explicit priority: +10 (Python parity).
-    bool boost(const std::string& job_id, std::optional<int> priority = {});
+    [[nodiscard]] bool boost(const std::string& job_id,
+                             std::optional<int> priority = {});
     int boost_matching(const std::string& kind, std::optional<int> priority = {});
 
     [[nodiscard]] std::optional<JobSnapshot> snapshot(const std::string& job_id) const;
@@ -120,8 +121,12 @@ public:
     void set_interactive_predicate(InteractivePredicate predicate);
     void set_work_root(std::filesystem::path root);
 
-    // Stop accepting work; cancel queued jobs; arm running tokens; when
-    // wait, join workers (bounded by timeout when given). Idempotent.
+    // Stop accepting work; cancel queued jobs; arm running tokens. With
+    // wait=true: joins the workers. A timeout bounds the DRAIN WAIT only —
+    // if jobs are still running past it, shutdown returns without joining
+    // and the residue is joined by a later shutdown()/the destructor
+    // (jthreads cannot be abandoned — the documented C++ counterpart of
+    // Python's daemon threads). Idempotent.
     void shutdown(bool wait = true, std::optional<double> timeout_s = {});
     // Blocks until no job is running and the queue is empty.
     void wait_idle();

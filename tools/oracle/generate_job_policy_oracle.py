@@ -96,13 +96,20 @@ def main() -> int:
             )
 
     # #1224 supersede decision table (submit against an active task_key).
+    # Messages are the exact Python ValueError strings INCLUDING the
+    # key prefix (task_scheduler.py submit()); the Chinese variant is only
+    # for a RUNNING predecessor — cancelling falls to the generic text.
+    probe_key = "k"
     supersede = [
         {"active_state": "queued", "decision": "supersede",
-         "old_terminal": "cancelled", "unwinds_on_cancel": True},
+         "old_terminal": "cancelled", "unwinds_on_cancel": True,
+         "message": ""},
         {"active_state": "running", "decision": "reject",
-         "message": "任务正在运行且尚未退出（已请求取消的旧任务需先实际结束）"},
+         "message": "task with key '" + probe_key + "' "
+                    "正在运行且尚未退出（已请求取消的旧任务需先实际结束）"},
         {"active_state": "cancelling", "decision": "reject",
-         "message": "任务正在运行且尚未退出（已请求取消的旧任务需先实际结束）"},
+         "message": "task with key '" + probe_key + "' "
+                    "is already queued or running"},
     ]
 
     oracle = {

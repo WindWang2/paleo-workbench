@@ -97,19 +97,23 @@ public:
     // an attribute input and viewable in the seismic dock.
     std::string importSegy(const QString& path, std::string* error);
 #endif
-#ifdef PWB_WITH_CONV_30
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
-    // CONV-30 — the same import body running inside a job runtime task:
-    // cooperative cancellation at the phase safe points (read → payload →
-    // register → publish) plus coarse progress for the non-modal surface.
+    // CONV-30 — the import body with phase safe points (read → payload →
+    // register → publish): the sync entry passes inert callbacks, the job
+    // path (CONV_30) threads the token/progress through. Declared under
+    // the feature guard ONLY (not under CONV_30) so the CONV_30=OFF
+    // configuration — where importSegy delegates here — still compiles.
     std::string importSegyProgressed(
         const QString& path, std::string* error,
         const std::function<bool()>& cancelled,
         const std::function<void(double, const QString&)>& progress);
 #endif
+#ifdef PWB_WITH_CONV_30
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
     // Non-modal import: wires importSegyProgressed into the job runtime
     // with a cancellable progress dialog (window-close and app-quit safe).
     void submitSegyJob(const QString& path);
+#endif
 #endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;

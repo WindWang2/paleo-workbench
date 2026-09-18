@@ -408,17 +408,18 @@
       "active_state": "queued",
       "decision": "supersede",
       "old_terminal": "cancelled",
-      "unwinds_on_cancel": true
+      "unwinds_on_cancel": true,
+      "message": ""
     },
     {
       "active_state": "running",
       "decision": "reject",
-      "message": "任务正在运行且尚未退出（已请求取消的旧任务需先实际结束）"
+      "message": "task with key 'k' 正在运行且尚未退出（已请求取消的旧任务需先实际结束）"
     },
     {
       "active_state": "cancelling",
       "decision": "reject",
-      "message": "任务正在运行且尚未退出（已请求取消的旧任务需先实际结束）"
+      "message": "task with key 'k' is already queued or running"
     }
   ]
 }

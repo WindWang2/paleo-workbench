@@ -77,6 +77,29 @@ TEST(completion_delivered_on_main_thread) {
               JobState::degraded);
 }
 
+TEST(plain_success_delivers_done_not_degraded) {
+    // Python parity: degraded_when=None ⇒ a successful job is plain done —
+    // never degraded (regression guard for the empty-predicate trap).
+    auto scheduler = std::make_shared<JobScheduler>(
+        JobScheduler::Options{.max_workers = 1});
+    JobOwner owner;
+    std::atomic<bool> finished{false};
+    std::atomic<bool> done_seen{false};
+    JobSpec spec;
+    spec.run = [](JobContext&) -> std::any { return std::string("ok"); };
+    // NO degraded_when — the exact shape that once degraded everything.
+    JobHandle handle = owner.start(
+        *scheduler, std::move(spec),
+        [&](const JobOutcome& outcome) {
+            done_seen = outcome.state == JobState::done;
+            finished = true;
+        });
+    pump_events([&] { return finished.load(); });
+    PWB_CHECK(finished.load());
+    PWB_CHECK(done_seen.load());
+    PWB_CHECK(scheduler->snapshot(handle.job_id())->state == JobState::done);
+}
+
 TEST(owner_destroyed_mid_job_drops_delivery) {
     auto scheduler = std::make_shared<JobScheduler>(
         JobScheduler::Options{.max_workers = 1});

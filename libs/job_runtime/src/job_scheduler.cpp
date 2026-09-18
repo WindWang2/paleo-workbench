@@ -104,6 +104,12 @@ void JobContext::report_progress(double done, std::optional<double> total,
 
 // ----------------------------------------------------------- JobHandle --
 
+JobHandle JobContext::self_handle() const {
+    // Definition deferred here because JobHandle's constructor is private
+    // with JobScheduler as friend.
+    return JobHandle(self_cell_);
+}
+
 std::string JobHandle::job_id() const {
     if (cell_ == nullptr) return {};
     std::lock_guard<std::mutex> guard(cell_->mutex);
@@ -183,6 +189,10 @@ JobSnapshot JobHandle::snapshot() const {
 JobScheduler::JobScheduler(Options options, Clock clock)
     : options_(options),
       clock_(clock ? std::move(clock) : default_clock),
+      // Documented divergence from Python (task_scheduler.py uses
+      // ~/.paleo_workbench/heavy-tasks): the C++ runtime defaults to a
+      // temp-dir root so tests never touch the user profile; hosts set the
+      // product root via set_work_root.
       work_root_(std::filesystem::temp_directory_path() / "pwb-job-runtime") {
     if (options_.max_workers < 1) {
         throw std::invalid_argument(
@@ -195,8 +205,15 @@ JobScheduler::JobScheduler(Options options, Clock clock)
     // Bounded by construction: exactly worker_count() lanes exist for the
     // scheduler's lifetime; no other code path spawns threads.
     workers_.reserve(static_cast<std::size_t>(worker_count()));
-    for (int lane = 0; lane < worker_count(); ++lane) {
-        workers_.emplace_back([this, lane] { worker_loop(lane); });
+    try {
+        for (int lane = 0; lane < worker_count(); ++lane) {
+            workers_.emplace_back([this, lane] { worker_loop(lane); });
+        }
+    } catch (...) {
+        // Partial construction: stop and join the lanes already spawned so
+        // the jthread members never outlive the loop logic they capture.
+        shutdown(true, std::nullopt);
+        throw;
     }
 }
 
@@ -259,13 +276,18 @@ JobHandle JobScheduler::submit(JobSpec spec) {
                     existing->terminal_cv.notify_all();
                     superseded_cancel = existing->spec->on_cancel;
                 } else {
+                    // Python wording verbatim, including the key prefix:
+                    // running vs cancelling differ in the detail text
+                    // (task_scheduler.py:326-334 — the Chinese variant is
+                    // only for a RUNNING predecessor).
                     const bool running =
                         cell_state(existing) == JobState::running;
                     throw JobSubmitError(
                         "duplicate.task_key",
-                        running
-                            ? "任务正在运行且尚未退出（已请求取消的旧任务需先实际结束）"
-                            : "任务已在队列中或正在运行");
+                        "task with key '" + cell->snapshot.task_key + "' " +
+                            (running
+                                 ? "正在运行且尚未退出（已请求取消的旧任务需先实际结束）"
+                                 : "is already queued or running"));
                 }
             }
         }
@@ -531,6 +553,7 @@ void JobScheduler::worker_loop(int lane) {
     const bool interactive_lane = lane >= options_.max_workers;
     while (true) {
         std::vector<Candidate> candidates;  // priority order (pop order)
+        AdmissionHook admission_snapshot;
         {
             std::lock_guard<std::mutex> guard(mutex_);
             bool any_queued = false;
@@ -565,6 +588,10 @@ void JobScheduler::worker_loop(int lane) {
                 }
                 candidates.push_back({std::move(entry), it->second});
             }
+            // Snapshot the admission hook under the lock: set_admission may
+            // hot-swap the std::function mid-loop (Python contract allows
+            // swapping hooks while workers run).
+            admission_snapshot = admission_;
             for (QueueEntry& entry : skipped) {
                 heap_.push_back(std::move(entry));
             }
@@ -578,10 +605,10 @@ void JobScheduler::worker_loop(int lane) {
         bool claimed = false;
         for (const Candidate& candidate : candidates) {
             std::shared_ptr<AdmissionLease> lease;
-            if (admission_) {
+            if (admission_snapshot) {
                 try {
-                    lease = admission_(*candidate.cell->spec,
-                                       candidate.entry.job_id);
+                    lease = admission_snapshot(*candidate.cell->spec,
+                                               candidate.entry.job_id);
                 } catch (...) {
                     lease = nullptr;  // hook failure defers (Python parity)
                 }
@@ -642,6 +669,7 @@ void JobScheduler::worker_loop(int lane) {
 void JobScheduler::run_job(const std::shared_ptr<JobCell>& cell) {
     const JobSpec& spec = *cell->spec;
     JobContext ctx(cell->snapshot.job_id, cell->token);
+    ctx.self_cell_ = cell;
     ctx.progress_sink_ = [&spec, raw = cell.get()](double ratio,
                                                    const std::string& message) {
         {
@@ -771,13 +799,18 @@ void JobScheduler::shutdown(bool wait, std::optional<double> timeout_s) {
         }
     }
     if (!wait) return;
-    // Wait for the workers to drain (bounded by timeout when given), then
-    // join unconditionally — jthreads cannot be abandoned.
+    // Wait for the workers to drain. With a timeout, the call returns as
+    // soon as the deadline passes WITHOUT joining — the residue is joined
+    // by a later shutdown() or the destructor (jthreads cannot be
+    // abandoned, so SOME call eventually blocks for as long as the most
+    // stubborn job needs; this is the documented C++ counterpart of
+    // Python's daemon threads).
     if (timeout_s.has_value()) {
         const auto deadline = std::chrono::steady_clock::now() +
                               std::chrono::duration<double>(*timeout_s);
         std::unique_lock<std::mutex> lock(mutex_);
         idle_cv_.wait_until(lock, deadline, [&] { return running_ == 0; });
+        if (running_ != 0) return;  // deadline passed; residue joined later
     }
     for (std::jthread& worker : workers_) {
         if (worker.joinable()) worker.join();
@@ -785,14 +818,25 @@ void JobScheduler::shutdown(bool wait, std::optional<double> timeout_s) {
 }
 
 void JobScheduler::wait_idle() {
+    // Bounded-poll loop instead of a bare cv wait: a queued job cancelled
+    // through a JobHandle lands terminal outside the scheduler lock and
+    // notifies only the cell's terminal_cv, so an idle waiter could sleep
+    // past it forever on a pure cv wait. 50 ms matches the Python wakeup
+    // granularity.
     std::unique_lock<std::mutex> lock(mutex_);
-    idle_cv_.wait(lock, [&] {
-        if (running_ != 0) return false;
-        for (const auto& [id, cell] : cells_) {
-            if (cell_state(cell) == JobState::queued) return false;
+    while (true) {
+        bool queued_seen = false;
+        if (running_ == 0) {
+            for (const auto& [id, cell] : cells_) {
+                if (cell_state(cell) == JobState::queued) {
+                    queued_seen = true;
+                    break;
+                }
+            }
+            if (!queued_seen) return;
         }
-        return true;
-    });
+        idle_cv_.wait_for(lock, std::chrono::milliseconds(50));
+    }
 }
 
 // --------------------------------------------------------------- singleton --

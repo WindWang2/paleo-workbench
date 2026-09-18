@@ -64,9 +64,10 @@ TEST(duplicate_key_rejected_while_active) {
     } catch (const pwb::job::JobSubmitError& err) {
         rejected = true;
         PWB_CHECK(err.code() == "duplicate.task_key");
-        // Python wording verbatim (running case).
-        PWB_CHECK(std::string(err.what()).find("任务正在运行且尚未退出") !=
-                  std::string::npos);
+        // Python wording verbatim, key prefix included (running case).
+        PWB_CHECK(std::string(err.what()) ==
+                  "task with key 'transcode/version-1' "
+                  "正在运行且尚未退出（已请求取消的旧任务需先实际结束）");
     }
     PWB_CHECK(rejected);
     release.open();

@@ -29,12 +29,20 @@ public:
 };
 
 DeliveryPump& delivery_pump() {
-    // Heap-allocated and parented to the app: the app owns it, so there is
-    // no static-destruction ordering hazard at exit.
+    // Heap-allocated with NO parent at construction (first call may happen
+    // on a worker thread — parenting across threads is silently dropped),
+    // then moved to the GUI thread and adopted by the app FROM the GUI
+    // thread via a queued call: the app owns it, so there is no
+    // static-destruction ordering hazard at exit.
     static DeliveryPump* pump = [] {
-        QCoreApplication* app = QCoreApplication::instance();
-        auto* created = new DeliveryPump(app);
-        created->moveToThread(app->thread());
+        auto* created = new DeliveryPump();
+        created->moveToThread(QCoreApplication::instance()->thread());
+        QMetaObject::invokeMethod(
+            created,
+            [created] {
+                created->setParent(QCoreApplication::instance());
+            },
+            Qt::QueuedConnection);
         return created;
     }();
     return *pump;
@@ -80,7 +88,10 @@ JobHandle JobOwner::start(JobScheduler& scheduler, JobSpec spec,
         // (OwnedWorkerJob C17 parity).
         throw std::logic_error("worker job already owns a running job");
     }
-    released_->store(false);
+    // Fresh guard per start (OwnedWorkerJob state-dict parity): a delivery
+    // already queued for the PREVIOUS job keeps its own guard (true after
+    // its shutdown) and stays suppressed even after this reset.
+    released_ = std::make_shared<std::atomic<bool>>(false);
 
     auto guard = released_;
     if (on_finished) {
@@ -96,8 +107,13 @@ JobHandle JobOwner::start(JobScheduler& scheduler, JobSpec spec,
             std::atomic<int> state{0};  // 0 uncomputed, 1 computing,
                                         // 2 value, 3 threw
             bool value = false;
+            // Python parity: degraded_when=None ⇒ the job is never
+            // degraded. An empty inner short-circuits to false instead of
+            // throwing std::bad_function_call (which would degrade every
+            // plain-success job).
             bool evaluate(const std::function<bool(const std::any&)>& inner,
                           const std::any& result) {
+                if (!inner) return false;
                 int expected = 0;
                 if (state.compare_exchange_strong(expected, 1)) {
                     try {
