@@ -714,3 +714,10 @@ class MapDocument:
             "metadata": dict(self.metadata),
             "active_layer_id": self.active_layer_id,
         }
+
+
+# C++ migration (CONV-27): the document/layer mutation surface is
+# ported to libs/mapping_document map_document_session
+# (pwb::mapping_document) and oracle-frozen by
+# tools/oracle/generate_map_document_edit_fixtures.py. This module
+# remains the Python oracle / transitional UI implementation.

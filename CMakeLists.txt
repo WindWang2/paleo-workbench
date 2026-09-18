@@ -214,7 +214,7 @@ option(PWB_BUILD_CONV_27
 if(PWB_BUILD_CONV_27 AND NOT PWB_BUILD_CONV_02)
     set(PWB_BUILD_CONV_02 ON)
 endif()
-if(PWB_BUILD_CONV_27)
+if(PWB_BUILD_CONV_27 AND NOT TARGET pwb_mapping_document)
     add_subdirectory(libs/mapping_document)
 endif()
 # END CONV-27
