@@ -48,7 +48,8 @@ struct DocumentIoDiagnostics {
 
 // Host-injected id seam (geometry_schema.new_feature_id uses uuid4; D-27-04:
 // new ids are the host's responsibility). Default: deterministic
-// "<prefix>_%012x" counters.
+// "<prefix>_%012x" counters. Copyable: the counter lives behind a
+// shared_ptr so copies share one sequence (no dangling-lambda copies).
 class FeatureIdGenerator {
 public:
     FeatureIdGenerator();
@@ -57,7 +58,7 @@ public:
 
 private:
     std::function<std::string(const std::string& prefix)> generator_;
-    long long counter_ = 1;
+    std::shared_ptr<long long> counter_ = std::make_shared<long long>(1);
 };
 
 // normalize_facies over one raw record (holes and MultiPolygon parts kept).

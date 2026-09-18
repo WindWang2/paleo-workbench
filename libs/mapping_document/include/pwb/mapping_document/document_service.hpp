@@ -24,9 +24,16 @@
 
 namespace pwb::mapping_document {
 
+// Single-threaded by contract (UI/workflow hosts own the service on one
+// thread); non-movable — the owned session captures the owned document's
+// address.
 class MapDocumentService {
 public:
     MapDocumentService();
+    MapDocumentService(const MapDocumentService&) = delete;
+    MapDocumentService& operator=(const MapDocumentService&) = delete;
+    MapDocumentService(MapDocumentService&&) = delete;
+    MapDocumentService& operator=(MapDocumentService&&) = delete;
 
     MapDocument& document() { return document_; }
     const MapDocument& document() const { return document_; }
@@ -56,9 +63,15 @@ private:
     std::unique_ptr<DocumentStore> store_;
 };
 
+// Single-threaded by contract; non-movable (same reason as
+// MapDocumentService).
 class CompositionDocumentService {
 public:
     CompositionDocumentService();
+    CompositionDocumentService(const CompositionDocumentService&) = delete;
+    CompositionDocumentService& operator=(const CompositionDocumentService&) = delete;
+    CompositionDocumentService(CompositionDocumentService&&) = delete;
+    CompositionDocumentService& operator=(CompositionDocumentService&&) = delete;
 
     Composition& document() { return document_; }
     const Composition& document() const { return document_; }

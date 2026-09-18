@@ -555,9 +555,14 @@ def build_fixture() -> dict:
                                 "title": "Untouched"}},
                 {"op": "add_element", "element_type": "colorbar",
                  "properties": {"data_binding": {"key": "missing.key"}}},
+                {"op": "add_element", "element_type": "colorbar",
+                 "properties": {"data_binding": {"key": "factor.scale",
+                                                 "fields": []}}},
                 {"op": "bind_template",
                  "context": {"factor.colorbar": {"min": 0.0, "max": 1.0,
-                                                 "units": "m"}}},
+                                                 "units": "m"},
+                             "factor.scale": {"min": -1.0, "max": 2.0,
+                                              "units": "km", "extra": 7}}},
                 {"op": "undo"},
                 {"op": "bind_template", "context": {}},
             ],
@@ -703,6 +708,27 @@ def build_fixture() -> dict:
     ]
 
     io_feature_cases = [
+        io_feature_case({
+            "name": "malformed_geometry_skips",
+            "record": {
+                "facies_polygons": [
+                    {"id": "fp_bad", "name": "Bad ring",
+                     "geometry_type": "Polygon",
+                     "coordinates": [[0.0, 0.0], ["a", "b"], [2.0, 2.0]]},
+                ],
+                "well_overlays": [
+                    {"id": "w_empty", "name": "No coordinates",
+                     "coordinates": []},
+                ],
+                "line_features": [
+                    {"id": "l_scalar", "name": "Scalar point",
+                     "coordinates": [5, "ab"]},
+                    {"id": "l_string", "name": "Char expand",
+                     "coordinates": ["ab", [1.0, 2.0]]},
+                ],
+                "label_features": [],
+            },
+        }),
         io_feature_case({
             "name": "legacy_record_roundtrip",
             "record": {

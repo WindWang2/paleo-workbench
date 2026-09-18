@@ -53,7 +53,8 @@ ComposerElement& find_ref(Composition& doc, const std::string& element_id) {
 CompositionFactory::CompositionFactory(SpecProvider provider)
     : provider_(std::move(provider)) {}
 
-std::string CompositionFactory::default_element_id() const {
+std::string CompositionFactory::id_body() const {
+    if (id_generator_) return id_generator_();
     char buffer[32];
     std::snprintf(buffer, sizeof(buffer), "%010llx",
                   static_cast<unsigned long long>(next_id_++));
@@ -108,7 +109,7 @@ Composition CompositionFactory::create_document(const std::string& title,
                                                 const std::string& orientation,
                                                 double dpi) const {
     Composition doc;
-    doc.id = "comp_" + id_generator_();  // comp_<generated>
+    doc.id = "comp_" + id_body();
     doc.title = title;
     doc.dpi = dpi;
     set_paper(doc, paper_size, orientation);  // throws on unknown size
@@ -239,11 +240,12 @@ void CompositionEditSession::scale_element(const std::string& element_id,
 
 void CompositionEditSession::configure_element(const std::string& element_id,
                                                Json properties) {
+    // Python order: the locked refusal precedes the properties check.
+    require_mutable(element_id);
     if (!properties.is_object()) {
         throw std::invalid_argument(
             "configure: properties must be an object (Python Mapping)");
     }
-    require_mutable(element_id);
     const Json old_properties =
         find_ref(*document_, element_id).properties;  // full revert capture
     const Json updates = properties;
@@ -446,7 +448,10 @@ long long bind_template(Composition& document, const Json& binding_context) {
                 : (has_key ? binding.at("key").dump() : std::string());
         if (key.empty() || !binding_context.contains(key)) continue;
         Json updates = binding_context.at(key);
-        if (binding.contains("fields") && binding.at("fields").is_array()) {
+        // Python `if fields:` — an EMPTY fields list is falsy and does not
+        // filter; only a non-empty list restricts the update keys.
+        if (binding.contains("fields") && binding.at("fields").is_array()
+            && !binding.at("fields").empty()) {
             Json filtered = Json::object();
             for (const auto& field : binding.at("fields")) {
                 if (field.is_string()

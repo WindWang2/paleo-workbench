@@ -87,14 +87,12 @@ public:
                                 const std::string& orientation = "landscape",
                                 double dpi = 300.0) const;
 
-    std::string new_element_id() const {
-        // Deterministic "%010x" counter unless the host injected a generator.
-        return id_generator_ ? id_prefix_ + "_" + id_generator_()
-                             : default_element_id();
-    }
+    // Prefix + generated body: deterministic "%010x" counter unless the
+    // host injected a generator.
+    std::string new_element_id() const { return id_prefix_ + "_" + id_body(); }
 
 private:
-    std::string default_element_id() const;
+    std::string id_body() const;
 
     SpecProvider provider_;
     std::function<std::string()> id_generator_;
@@ -110,8 +108,10 @@ public:
 
     CompositionEditSession(const CompositionEditSession&) = delete;
     CompositionEditSession& operator=(const CompositionEditSession&) = delete;
-    // Movable so service facades can rebind a session onto a reloaded
-    // document (history resets on reload).
+    // Movable ONLY for the service-facade reload pattern: the moved-to
+    // session must get a fresh document (history is empty after a reload —
+    // commands in a moved history would keep pointers to the source
+    // session's document). Never move a session with live history.
     CompositionEditSession(CompositionEditSession&&) = default;
     CompositionEditSession& operator=(CompositionEditSession&&) = default;
 

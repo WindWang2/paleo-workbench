@@ -87,6 +87,11 @@ public:
     const std::string& label() const override { return label_; }
     RevisionKind revision_kind() const override { return kind_; }
     std::size_t size() const { return nested_.size(); }
+    // Exposed so the stack can notify the observer per nested command
+    // (a mixed-kind group invalidates every kind it touches).
+    const std::vector<std::unique_ptr<DocumentCommand>>& nested() const {
+        return nested_;
+    }
 
 private:
     std::string label_;
@@ -94,7 +99,12 @@ private:
     std::vector<std::unique_ptr<DocumentCommand>> nested_;
 };
 
-// Undo/redo history shared by both edit sessions.
+// Undo/redo history shared by both edit sessions. Single-threaded by
+// contract: the owning session serializes all access (no internal locks).
+//
+// The observer must not throw; it runs inside history transitions where a
+// throw would leave a half-applied state. A throwing observer is swallowed
+// by the stack to protect the invariant.
 //
 // Grouping protocol (the session-level analog of the gesture plan/mark
 // contract): begin_group → commands accumulate into the open group (the
@@ -102,7 +112,10 @@ private:
 // "new edit clears redo" rule) → end_group pushes one history entry, or
 // rollback_group reverts the partial edits in reverse and discards the
 // group. Rollback bumps the revision: the document changed and changed
-// back, so stale-cache consumers must still be notified.
+// back, so stale-cache consumers must still be notified. clear_history
+// with an open group discards the group record without reverting (the
+// session-level analog of the gesture history reset on commit) — the
+// partial edits stay in the document deliberately.
 class CommandStack {
 public:
     // Invoked after every successful apply (execute), undo and redo with the
@@ -134,6 +147,7 @@ public:
 private:
     void run(std::vector<std::unique_ptr<DocumentCommand>>& from,
              std::vector<std::unique_ptr<DocumentCommand>>& to, bool undo);
+    void notify(const DocumentCommand& command, bool undo);
 
     struct Group {
         std::string label;

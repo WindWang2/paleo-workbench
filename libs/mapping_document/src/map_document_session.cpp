@@ -29,8 +29,12 @@ inline void kernel_reorder_layers(MapDocument& doc,
 constexpr std::array<double, 4> kSentinel{0.0, 0.0, 1.0, 1.0};
 
 bool is_point_node(const Json& node) {
-    return node.is_array() && node.size() >= 2 && node[0].is_number()
-           && node[1].is_number();
+    // Python isinstance(node[0], (int, float)): bools are ints and count.
+    const auto numeric = [](const Json& value) {
+        return value.is_number() || value.is_boolean();
+    };
+    return node.is_array() && node.size() >= 2 && numeric(node[0])
+           && numeric(node[1]);
 }
 
 // geometry_planar._iter_positions: yield [x, y] pairs from arbitrarily
@@ -47,6 +51,7 @@ void iter_positions(const Json& node, std::vector<std::pair<double, double>>& ou
 // math.isclose(a, b) defaults: rel_tol = 1e-9, abs_tol = 0.0.
 bool py_isclose(double a, double b) {
     if (std::isnan(a) || std::isnan(b)) return false;
+    if (std::isinf(a) || std::isinf(b)) return a == b;
     if (a == b) return true;
     const double diff = std::fabs(a - b);
     return diff <= 1e-9 * std::max(std::fabs(a), std::fabs(b));

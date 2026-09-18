@@ -31,6 +31,17 @@ Python `min((e.z_index ...), default=0)` 的 default 仅对**空**集合生效�
 ## F-27-08 Python 侧标注
 `paleo_workbench/mapping/composer/components.py`、`layers.py`（文档行为面）、`document_io.py`、`geometry_schema.py` 的 normalize 族：C++ 主链 `libs/mapping_document` 已有完整对应物（oracle 冻结对账）。这些 Python 模块转 role=oracle-only/legacy-reference：C++ 产品链（service 门面）不再需要 Python 即可工作；Python 继续作为 oracle 与 UI 过渡期实现。无 Python-only 残留缺口。
 
-## F-27-09 与并行分支的交互
+## F-27-10 review A（parity）确认的偏差边界（全部非产品路径）
+- bind_template 的 binding key 非字符串标量（0/[]/True）：Python `or` falsy → ""，C++ dump 形态不同；key 输出形态仅影响消息级。context 值非 object：Python dict() 抛 TypeError 未捕获，C++ 跳过（C++ 更稳）。
+- normalize_well/features 的 id/name 为非字符串标量：Python `or` 链保留原始类型，C++ 统一 py_str 字符串化。fixture 仅用字符串 id。
+- apply_features 的 facies `style` 为真值非 dict：Python 原样保留，C++ dict_copy → {}；非 Mapping 的 feature：Python AttributeError，C++ 跳过（更稳，诚实记录）。
+- `quoted()` 的 repr：含引号/控制符 id 的消息形态与 Python repr 有差异（消息级，不影响对账断言）。
+- warn_unknown_fields 的 composition/map 判型是启发式（按 elements/paper_size 键）；误报只进诊断不进数据。
+- 核 `reorder_layers` 重复 id 输出序与 Python dict 首插序的差异为 CONV-02 既有行为（unique id 下无差异），本分支未改。
+
+## F-27-11 review B（架构）确认与修复
+- 已修（P0/P1/P2）：Python 标注改为注释（原 RST note 破坏 import 链）；apply_features 空 coordinates 数组的 UB（Python len==0 → MISSING，len==1 → INVALID+partial x）；GroupCommand undo/redo 按**嵌套命令逐个**通知 observer（混合 kind 组正确 bump 各计数器，与 rollback 对称）；create_document 默认 id 生成器缺失；bind_template 空 fields 列表不过滤（Python `if fields:` falsy）；configure 校验顺序（locked 先于 properties 检查）；coerce_ring 非数值标量 → throw（整条 feature 跳过，Python ValueError 路径——`_is_point` 只排除容器不验证数值，实测确认）；normalize_line 标量元素 throw、字符串元素按字符展开（Python list(p) 语义）；StdFileStore replace 失败无条件 bak→main 回滚 + tmp 清理；语义级损坏（JSON 合法但 kernel 契约失败）同样走隔离/还原（manager.py ValidationError 分支）；隔离文件名加进程内序号（秒级时间戳防碰撞）；FeatureIdGenerator 拷贝共享计数器（shared_ptr，无悬垂 lambda）；service 禁用拷贝/移动（session 持文档指针）；会话 move 契约文档化（仅限空历史 rebind）；observer 契约（不得抛出）+ 栈内吞异常保护；rollback 先 revert 后通知（与 run 一致）；GroupCommand 补 id；getpid POSIX 守卫；_is_point 布尔坐标（Python bool 是 int）；py_isclose inf 分支。
+- 文档化（P3）：clear_history 对 open group 不回滚（手势历史复位语义）；会话单线程契约（edit_command.hpp / document_service.hpp）。
+
 - 本分支只新增 libs/mapping_document 文件 + CMakeLists 的 CONV-27 块 + 顶层 CMakeLists 的 CONV-27 option 块 + tools/oracle 新生成器 + ledgers/27-*。与 open PR #1346（data/workspace）、#1348（workflow）、#1349（prediction）、#1347（build/packaging）无共享文件冲突。
 - 顶层 CMakeLists.txt 的插入点（# END CONV-02 之后）为机械追加块，冲突风险低。

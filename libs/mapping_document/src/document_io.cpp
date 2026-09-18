@@ -1,5 +1,6 @@
 #include <pwb/mapping_document/document_io.hpp>
 
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,10 @@
 #include "python_compat.hpp"
 
 namespace pwb::mapping_document {
+
+LoadResult recover_corrupt_main(DocumentStore& store, const std::string& path,
+                                const std::string& reason,
+                                DocumentIoDiagnostics* diagnostics);
 
 namespace {
 
@@ -55,23 +60,26 @@ std::string json_repr(const Json& value) {
 // ---------------------------------------------------------------------------
 
 bool is_point_value(const Json& value) {
-    // _is_point: list/tuple of >=2, [0]/[1] not containers, numbers only
-    // (Python bools are ints and count).
+    // geometry_schema._is_point: list/tuple of >=2 whose [0]/[1] are NOT
+    // containers — numeracy is NOT checked here (numeric strings coerce
+    // via float(), non-numeric scalars raise and skip the whole feature).
     if (!value.is_array() || value.size() < 2) return false;
     if (value[0].is_array() || value[0].is_object()) return false;
     if (value[1].is_array() || value[1].is_object()) return false;
-    return py_scalar_number(value[0]) && py_scalar_number(value[1]);
+    return true;
 }
 
-// _coerce_ring: a ring of [x, y] float pairs, closed; non-point entries
-// invalidate the whole ring (→ []).
+// _coerce_ring: a ring of [x, y] float pairs, closed. A non-point entry
+// invalidates the whole ring (→ []); a point with non-numeric scalars makes
+// float() raise (→ the caller skips the whole feature, like the Python
+// ValueError path).
 Json coerce_ring(const Json& value) {
     Json ring = Json::array();
     if (!value.is_array()) return ring;
     for (const Json& point : value) {
         if (!is_point_value(point)) return Json::array();
         Json pair = Json::array();
-        pair.push_back(point_coordinate(point[0]));
+        pair.push_back(point_coordinate(point[0]));  // throws on non-numeric
         pair.push_back(point_coordinate(point[1]));
         ring.push_back(pair);
     }
@@ -192,10 +200,10 @@ bool has_non_null(const Json& object, const char* key) {
 // ---------------------------------------------------------------------------
 
 FeatureIdGenerator::FeatureIdGenerator() {
-    generator_ = [this](const std::string& prefix) {
+    generator_ = [counter = counter_](const std::string& prefix) {
         char buffer[32];
         std::snprintf(buffer, sizeof(buffer), "%s_%012llx", prefix.c_str(),
-                      static_cast<unsigned long long>(counter_++));
+                      static_cast<unsigned long long>((*counter)++));
         return std::string(buffer);
     };
 }
@@ -383,13 +391,20 @@ Json normalize_line_record(const Json& raw, FeatureIdGenerator& ids) {
     Json coordinates = Json::array();
     if (has_non_null(raw, "coordinates") && is_py_list(raw.at("coordinates"))) {
         for (const Json& point : raw.at("coordinates")) {
-            // Python [list(p) for p in coords]: arrays copy, scalars wrap.
+            // Python [list(p) for p in coords]: arrays copy, strings expand
+            // to their characters, any other scalar raises TypeError and
+            // skips the whole feature.
             if (point.is_array()) {
                 coordinates.push_back(point);
+            } else if (point.is_string()) {
+                Json chars = Json::array();
+                for (char c : point.get<std::string>()) {
+                    chars.push_back(std::string(1, c));
+                }
+                coordinates.push_back(std::move(chars));
             } else {
-                Json single = Json::array();
-                single.push_back(point);
-                coordinates.push_back(std::move(single));
+                throw std::invalid_argument(
+                    "normalize_line: coordinate element is not a list");
             }
         }
     }
@@ -533,8 +548,13 @@ void apply_features_to_document(Json& paleo_doc, const Json& features,
                                           + "' has non-numeric coordinates; marked invalid");
                 }
             } else {
-                status = has_coordinates ? "invalid" : "missing";
-                if (has_coordinates) {
+                // Python: INVALID only for a 1-element payload (partial x is
+                // kept as evidence); an empty/absent payload is MISSING and
+                // nothing is read.
+                const std::size_t count =
+                    has_coordinates ? feature.at("coordinates").size() : 0;
+                status = count == 1 ? "invalid" : "missing";
+                if (count == 1) {
                     try {
                         x = py_float(feature.at("coordinates")[0]);
                     } catch (const std::exception&) {
@@ -617,6 +637,15 @@ std::string parent_directory(const std::string& path) {
     return path.substr(0, slash);
 }
 
+long long process_token() {
+#if defined(PWB_HAVE_POSIX)
+    return static_cast<long long>(::getpid());
+#else
+    static long long token = 0;
+    return ++token;
+#endif
+}
+
 void fsync_path(const std::string& path) {
 #if defined(PWB_HAVE_POSIX)
     const int fd = ::open(path.c_str(), O_RDONLY);
@@ -659,8 +688,8 @@ public:
         const std::string dir = parent_directory(path);
         const std::string name = path.substr(path.find_last_of('/') + 1);
         const std::string tmp = dir + "/.pwb-" + name + "-"
-                                + std::to_string(static_cast<long long>(::getpid()))
-                                + "-" + std::to_string(++sequence_) + ".tmp";
+                                + std::to_string(process_token()) + "-"
+                                + std::to_string(++sequence_) + ".tmp";
         const std::string bak = path + ".bak";
         std::FILE* file = std::fopen(tmp.c_str(), "wb");
         if (file == nullptr) {
@@ -689,8 +718,14 @@ public:
         }
         if (::rename(tmp.c_str(), path.c_str()) != 0) {
             error = std::string("replace failed: ") + std::strerror(errno);
-            // Roll the backup forward so the main file never disappears.
-            if (errno == ENOENT) ::rename(bak.c_str(), path.c_str());
+            ::remove(tmp.c_str());
+            // manager.py: when the main file is gone the backup is rolled
+            // forward unconditionally — a present .bak must never coexist
+            // with a missing main.
+            struct ::stat st{};
+            if (::stat(path.c_str(), &st) != 0 && errno == ENOENT) {
+                ::rename(bak.c_str(), path.c_str());
+            }
             return false;
         }
         fsync_path(dir);
@@ -782,40 +817,54 @@ LoadResult load_document_file(DocumentStore& store, const std::string& path,
         result.payload = Json::parse(bytes);
         return result;
     } catch (const std::exception& parse_error) {
-        std::string bak_bytes;
-        std::string bak_error;
-        if (!store.read(bak, bak_bytes, bak_error)) {
-            LoadResult result;
-            result.status = LoadStatus::kCorrupt;
-            result.error = parse_error.what();
-            return result;
-        }
-        Json recovered;
-        try {
-            recovered = Json::parse(bak_bytes);
-        } catch (const std::exception&) {
-            LoadResult result;
-            result.status = LoadStatus::kCorrupt;
-            result.error = parse_error.what();
-            return result;
-        }
-        // Quarantine the corrupt main for forensics, then restore the backup.
-        const std::string quarantined =
-            path + ".corrupt-" + std::to_string(static_cast<long long>(::time(nullptr)));
-        std::string move_error;
-        store.rename(path, quarantined, move_error);
-        store.rename(bak, path, move_error);
+        return recover_corrupt_main(store, path, parse_error.what(), diagnostics);
+    }
+}
+
+// manager.py _load_data corruption path: quarantine the unparsable main for
+// forensics, then restore the verified backup. Shared by the raw-JSON parse
+// failure and the typed kernels' schema failures (a document that parses as
+// JSON but violates the kernel contract is corruption all the same).
+LoadResult recover_corrupt_main(DocumentStore& store, const std::string& path,
+                                const std::string& reason,
+                                DocumentIoDiagnostics* diagnostics) {
+    const std::string bak = path + ".bak";
+    std::string bak_bytes;
+    std::string bak_error;
+    if (!store.read(bak, bak_bytes, bak_error)) {
         LoadResult result;
-        result.status = LoadStatus::kRecoveredCorrupt;
-        result.payload = std::move(recovered);
-        if (diagnostics != nullptr) {
-            diagnostics->recovery_source = "backup-corrupt-main";
-            diagnostics->last_recovery =
-                "main file was corrupt (" + std::string(parse_error.what())
-                + "); quarantined to " + quarantined + "; restored from " + bak;
-        }
+        result.status = LoadStatus::kCorrupt;
+        result.error = reason;
         return result;
     }
+    Json recovered;
+    try {
+        recovered = Json::parse(bak_bytes);
+    } catch (const std::exception&) {
+        LoadResult result;
+        result.status = LoadStatus::kCorrupt;
+        result.error = reason;
+        return result;
+    }
+    // Second-resolution timestamps collide; add a process-local counter so
+    // consecutive corruption events never overwrite each other's evidence.
+    static std::atomic<long long> quarantine_sequence{0};
+    const std::string quarantined =
+        path + ".corrupt-" + std::to_string(static_cast<long long>(::time(nullptr)))
+        + "-" + std::to_string(quarantine_sequence++);
+    std::string move_error;
+    store.rename(path, quarantined, move_error);
+    store.rename(bak, path, move_error);
+    LoadResult result;
+    result.status = LoadStatus::kRecoveredCorrupt;
+    result.payload = std::move(recovered);
+    if (diagnostics != nullptr) {
+        diagnostics->recovery_source = "backup-corrupt-main";
+        diagnostics->last_recovery = "main file was corrupt (" + reason
+                                     + "); quarantined to " + quarantined
+                                     + "; restored from " + bak;
+    }
+    return result;
 }
 
 bool save_document_file(DocumentStore& store, const std::string& path,
@@ -913,18 +962,39 @@ LoadResult load_composition_file(DocumentStore& store, const std::string& path,
                                  Composition& out,
                                  DocumentIoDiagnostics* diagnostics) {
     LoadResult raw = load_document_file(store, path, diagnostics);
-    if (raw.status == LoadStatus::kOk || raw.status == LoadStatus::kRecoveredFromBackup
-        || raw.status == LoadStatus::kRecoveredCorrupt) {
-        try {
-            out = parse_composition(raw.payload);
-            warn_unknown_fields(raw.payload, diagnostics);
-        } catch (const std::exception& error) {
+    if (raw.status != LoadStatus::kOk
+        && raw.status != LoadStatus::kRecoveredFromBackup
+        && raw.status != LoadStatus::kRecoveredCorrupt) {
+        return raw;
+    }
+    try {
+        out = parse_composition(raw.payload);
+        warn_unknown_fields(raw.payload, diagnostics);
+        return raw;
+    } catch (const std::exception& error) {
+        // A payload that parses as JSON but violates the kernel contract is
+        // corruption too (manager.py ValidationError branch) — recover only
+        // when the failed source was the trusted main file.
+        if (raw.status != LoadStatus::kOk) {
             raw.status = LoadStatus::kCorrupt;
             raw.error = error.what();
             raw.payload = Json();
+            return raw;
         }
+        LoadResult recovered =
+            recover_corrupt_main(store, path, error.what(), diagnostics);
+        if (recovered.status == LoadStatus::kRecoveredCorrupt) {
+            try {
+                out = parse_composition(recovered.payload);
+                warn_unknown_fields(recovered.payload, diagnostics);
+            } catch (const std::exception& error2) {
+                recovered.status = LoadStatus::kCorrupt;
+                recovered.error = error2.what();
+                recovered.payload = Json();
+            }
+        }
+        return recovered;
     }
-    return raw;
 }
 
 bool save_composition_file(DocumentStore& store, const std::string& path,
@@ -936,18 +1006,36 @@ LoadResult load_map_document_file(DocumentStore& store, const std::string& path,
                                   MapDocument& out,
                                   DocumentIoDiagnostics* diagnostics) {
     LoadResult raw = load_document_file(store, path, diagnostics);
-    if (raw.status == LoadStatus::kOk || raw.status == LoadStatus::kRecoveredFromBackup
-        || raw.status == LoadStatus::kRecoveredCorrupt) {
-        try {
-            out = parse_map_document(raw.payload);
-            warn_unknown_fields(raw.payload, diagnostics);
-        } catch (const std::exception& error) {
+    if (raw.status != LoadStatus::kOk
+        && raw.status != LoadStatus::kRecoveredFromBackup
+        && raw.status != LoadStatus::kRecoveredCorrupt) {
+        return raw;
+    }
+    try {
+        out = parse_map_document(raw.payload);
+        warn_unknown_fields(raw.payload, diagnostics);
+        return raw;
+    } catch (const std::exception& error) {
+        if (raw.status != LoadStatus::kOk) {
             raw.status = LoadStatus::kCorrupt;
             raw.error = error.what();
             raw.payload = Json();
+            return raw;
         }
+        LoadResult recovered =
+            recover_corrupt_main(store, path, error.what(), diagnostics);
+        if (recovered.status == LoadStatus::kRecoveredCorrupt) {
+            try {
+                out = parse_map_document(recovered.payload);
+                warn_unknown_fields(recovered.payload, diagnostics);
+            } catch (const std::exception& error2) {
+                recovered.status = LoadStatus::kCorrupt;
+                recovered.error = error2.what();
+                recovered.payload = Json();
+            }
+        }
+        return recovered;
     }
-    return raw;
 }
 
 bool save_map_document_file(DocumentStore& store, const std::string& path,

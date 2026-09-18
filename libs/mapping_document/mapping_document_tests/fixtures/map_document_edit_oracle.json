@@ -3432,12 +3432,28 @@
           }
         },
         {
+          "op": "add_element",
+          "element_type": "colorbar",
+          "properties": {
+            "data_binding": {
+              "key": "factor.scale",
+              "fields": []
+            }
+          }
+        },
+        {
           "op": "bind_template",
           "context": {
             "factor.colorbar": {
               "min": 0.0,
               "max": 1.0,
               "units": "m"
+            },
+            "factor.scale": {
+              "min": -1.0,
+              "max": 2.0,
+              "units": "km",
+              "extra": 7
             }
           }
         },
@@ -3610,10 +3626,11 @@
           "result": "el_0000000002"
         },
         {
-          "revision": 2,
+          "revision": 3,
           "can_undo": true,
           "can_redo": false,
           "undo_labels": [
+            "add colorbar",
             "add colorbar",
             "add colorbar"
           ],
@@ -3699,18 +3716,189 @@
                     "key": "missing.key"
                   }
                 }
+              },
+              {
+                "id": "el_0000000003",
+                "element_type": "colorbar",
+                "x_mm": 200.0,
+                "y_mm": 90.0,
+                "width_mm": 12.0,
+                "height_mm": 80.0,
+                "z_index": 0,
+                "visible": true,
+                "locked": false,
+                "properties": {
+                  "title": "数值",
+                  "min": 0.0,
+                  "max": 1.0,
+                  "stops": [
+                    [
+                      0.0,
+                      "#053061"
+                    ],
+                    [
+                      0.5,
+                      "#f7f7f7"
+                    ],
+                    [
+                      1.0,
+                      "#67001f"
+                    ]
+                  ],
+                  "discrete": false,
+                  "data_binding": {
+                    "key": "factor.scale",
+                    "fields": []
+                  }
+                }
               }
             ],
             "metadata": {}
           },
           "after_op": 2,
-          "result": 1
+          "result": "el_0000000003"
         },
         {
           "revision": 3,
           "can_undo": true,
+          "can_redo": false,
+          "undo_labels": [
+            "add colorbar",
+            "add colorbar",
+            "add colorbar"
+          ],
+          "redo_labels": [],
+          "document": {
+            "id": "comp_0000000007",
+            "title": "Case G",
+            "paper_size": "A4",
+            "orientation": "landscape",
+            "width_mm": 297.0,
+            "height_mm": 210.0,
+            "dpi": 300.0,
+            "schema_version": 2,
+            "elements": [
+              {
+                "id": "el_0000000001",
+                "element_type": "colorbar",
+                "x_mm": 200.0,
+                "y_mm": 90.0,
+                "width_mm": 12.0,
+                "height_mm": 80.0,
+                "z_index": 0,
+                "visible": true,
+                "locked": false,
+                "properties": {
+                  "title": "Untouched",
+                  "min": 0.0,
+                  "max": 1.0,
+                  "stops": [
+                    [
+                      0.0,
+                      "#053061"
+                    ],
+                    [
+                      0.5,
+                      "#f7f7f7"
+                    ],
+                    [
+                      1.0,
+                      "#67001f"
+                    ]
+                  ],
+                  "discrete": false,
+                  "data_binding": {
+                    "key": "factor.colorbar",
+                    "fields": [
+                      "min",
+                      "max"
+                    ]
+                  }
+                }
+              },
+              {
+                "id": "el_0000000002",
+                "element_type": "colorbar",
+                "x_mm": 200.0,
+                "y_mm": 90.0,
+                "width_mm": 12.0,
+                "height_mm": 80.0,
+                "z_index": 0,
+                "visible": true,
+                "locked": false,
+                "properties": {
+                  "title": "数值",
+                  "min": 0.0,
+                  "max": 1.0,
+                  "stops": [
+                    [
+                      0.0,
+                      "#053061"
+                    ],
+                    [
+                      0.5,
+                      "#f7f7f7"
+                    ],
+                    [
+                      1.0,
+                      "#67001f"
+                    ]
+                  ],
+                  "discrete": false,
+                  "data_binding": {
+                    "key": "missing.key"
+                  }
+                }
+              },
+              {
+                "id": "el_0000000003",
+                "element_type": "colorbar",
+                "x_mm": 200.0,
+                "y_mm": 90.0,
+                "width_mm": 12.0,
+                "height_mm": 80.0,
+                "z_index": 0,
+                "visible": true,
+                "locked": false,
+                "properties": {
+                  "title": "数值",
+                  "min": -1.0,
+                  "max": 2.0,
+                  "stops": [
+                    [
+                      0.0,
+                      "#053061"
+                    ],
+                    [
+                      0.5,
+                      "#f7f7f7"
+                    ],
+                    [
+                      1.0,
+                      "#67001f"
+                    ]
+                  ],
+                  "discrete": false,
+                  "data_binding": {
+                    "key": "factor.scale",
+                    "fields": []
+                  },
+                  "units": "km",
+                  "extra": 7
+                }
+              }
+            ],
+            "metadata": {}
+          },
+          "after_op": 3,
+          "result": 2
+        },
+        {
+          "revision": 4,
+          "can_undo": true,
           "can_redo": true,
           "undo_labels": [
+            "add colorbar",
             "add colorbar"
           ],
           "redo_labels": [
@@ -3763,35 +3951,9 @@
                     ]
                   }
                 }
-              }
-            ],
-            "metadata": {}
-          },
-          "after_op": 3,
-          "result": true
-        },
-        {
-          "revision": 3,
-          "can_undo": true,
-          "can_redo": true,
-          "undo_labels": [
-            "add colorbar"
-          ],
-          "redo_labels": [
-            "add colorbar"
-          ],
-          "document": {
-            "id": "comp_0000000007",
-            "title": "Case G",
-            "paper_size": "A4",
-            "orientation": "landscape",
-            "width_mm": 297.0,
-            "height_mm": 210.0,
-            "dpi": 300.0,
-            "schema_version": 2,
-            "elements": [
+              },
               {
-                "id": "el_0000000001",
+                "id": "el_0000000002",
                 "element_type": "colorbar",
                 "x_mm": 200.0,
                 "y_mm": 90.0,
@@ -3801,7 +3963,7 @@
                 "visible": true,
                 "locked": false,
                 "properties": {
-                  "title": "Untouched",
+                  "title": "数值",
                   "min": 0.0,
                   "max": 1.0,
                   "stops": [
@@ -3820,11 +3982,7 @@
                   ],
                   "discrete": false,
                   "data_binding": {
-                    "key": "factor.colorbar",
-                    "fields": [
-                      "min",
-                      "max"
-                    ]
+                    "key": "missing.key"
                   }
                 }
               }
@@ -3832,6 +3990,105 @@
             "metadata": {}
           },
           "after_op": 4,
+          "result": true
+        },
+        {
+          "revision": 4,
+          "can_undo": true,
+          "can_redo": true,
+          "undo_labels": [
+            "add colorbar",
+            "add colorbar"
+          ],
+          "redo_labels": [
+            "add colorbar"
+          ],
+          "document": {
+            "id": "comp_0000000007",
+            "title": "Case G",
+            "paper_size": "A4",
+            "orientation": "landscape",
+            "width_mm": 297.0,
+            "height_mm": 210.0,
+            "dpi": 300.0,
+            "schema_version": 2,
+            "elements": [
+              {
+                "id": "el_0000000001",
+                "element_type": "colorbar",
+                "x_mm": 200.0,
+                "y_mm": 90.0,
+                "width_mm": 12.0,
+                "height_mm": 80.0,
+                "z_index": 0,
+                "visible": true,
+                "locked": false,
+                "properties": {
+                  "title": "Untouched",
+                  "min": 0.0,
+                  "max": 1.0,
+                  "stops": [
+                    [
+                      0.0,
+                      "#053061"
+                    ],
+                    [
+                      0.5,
+                      "#f7f7f7"
+                    ],
+                    [
+                      1.0,
+                      "#67001f"
+                    ]
+                  ],
+                  "discrete": false,
+                  "data_binding": {
+                    "key": "factor.colorbar",
+                    "fields": [
+                      "min",
+                      "max"
+                    ]
+                  }
+                }
+              },
+              {
+                "id": "el_0000000002",
+                "element_type": "colorbar",
+                "x_mm": 200.0,
+                "y_mm": 90.0,
+                "width_mm": 12.0,
+                "height_mm": 80.0,
+                "z_index": 0,
+                "visible": true,
+                "locked": false,
+                "properties": {
+                  "title": "数值",
+                  "min": 0.0,
+                  "max": 1.0,
+                  "stops": [
+                    [
+                      0.0,
+                      "#053061"
+                    ],
+                    [
+                      0.5,
+                      "#f7f7f7"
+                    ],
+                    [
+                      1.0,
+                      "#67001f"
+                    ]
+                  ],
+                  "discrete": false,
+                  "data_binding": {
+                    "key": "missing.key"
+                  }
+                }
+              }
+            ],
+            "metadata": {}
+          },
+          "after_op": 5,
           "result": 0
         }
       ]
@@ -7095,6 +7352,120 @@
     }
   ],
   "io_feature_cases": [
+    {
+      "name": "malformed_geometry_skips",
+      "expectation_source": "python-product",
+      "record": {
+        "facies_polygons": [
+          {
+            "id": "fp_bad",
+            "name": "Bad ring",
+            "geometry_type": "Polygon",
+            "coordinates": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                "a",
+                "b"
+              ],
+              [
+                2.0,
+                2.0
+              ]
+            ]
+          }
+        ],
+        "well_overlays": [
+          {
+            "id": "w_empty",
+            "name": "No coordinates",
+            "coordinates": []
+          }
+        ],
+        "line_features": [
+          {
+            "id": "l_scalar",
+            "name": "Scalar point",
+            "coordinates": [
+              5,
+              "ab"
+            ]
+          },
+          {
+            "id": "l_string",
+            "name": "Char expand",
+            "coordinates": [
+              "ab",
+              [
+                1.0,
+                2.0
+              ]
+            ]
+          }
+        ],
+        "label_features": []
+      },
+      "features": [
+        {
+          "id": "w_empty",
+          "kind": "well",
+          "name": "No coordinates",
+          "coordinates": [
+            0.0,
+            0.0
+          ],
+          "coordinate_status": "invalid"
+        },
+        {
+          "id": "l_string",
+          "kind": "line",
+          "name": "Char expand",
+          "coordinates": [
+            [
+              "a",
+              "b"
+            ],
+            [
+              1.0,
+              2.0
+            ]
+          ]
+        }
+      ],
+      "reapplied_record": {
+        "facies_polygons": [],
+        "well_overlays": [
+          {
+            "id": "w_empty",
+            "name": "No coordinates",
+            "x": 0.0,
+            "y": 0.0,
+            "lng": 0.0,
+            "lat": 0.0,
+            "coordinate_status": "invalid"
+          }
+        ],
+        "line_features": [
+          {
+            "id": "l_string",
+            "name": "Char expand",
+            "coordinates": [
+              [
+                "a",
+                "b"
+              ],
+              [
+                1.0,
+                2.0
+              ]
+            ]
+          }
+        ],
+        "label_features": []
+      }
+    },
     {
       "name": "legacy_record_roundtrip",
       "expectation_source": "python-product",

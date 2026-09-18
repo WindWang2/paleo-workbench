@@ -39,6 +39,7 @@
 - **文件级**：composition/map document JSON 的保存走 tmp+fsync+main→bak+replace+dir fsync（复刻 project/manager.py `_write_payload` 三段式——Python composition 面板是非原子 write_text，C++ 是**升级**不是平移）；加载恢复表复刻 `_load_data` v6：main 缺失→bak（backup-interrupted-save）、main 损坏→先验 bak 可用才隔离 `*.corrupt-<ts>` 并还原（backup-corrupt-main）、不可读→**绝不**回退 bak（ProjectUnreadable 同姿态）。
 - **seam**：`DocumentStore` 抽象（read/write_atomic/rename/remove/exists），产品绑 `StdFileStore`，测试注入内存/故障实现；service 提供 set_store。
 - 文件层期望值标注 `cpp-io-contract`（C++ 契约，Python 无此行为），测试以真实临时目录验证。
+- **损坏判定包含语义级**：JSON 合法但 kernel parse 失败同样走隔离/还原（manager.py 把 ValidationError 视为 CORRUPTION）；仅当失败源是可信 main（kOk）才触发恢复，备份来源再失败则诚实 kCorrupt（主备皆坏姿态）。
 
 ## D-27-08 快照：值语义深拷贝 + 投影
 - `capture_map_document_snapshot(doc, revision)`：id/revision(宿主钉的 staleness key)/title/crs/extent/active layer/input_version_ids(核函数 verbatim)/provenance(metadata run_id + provenance 载荷)/每层全字段（style/metadata/features/annotations/extras 深拷贝）。捕获后文档再变不影响快照（测试冻结）。

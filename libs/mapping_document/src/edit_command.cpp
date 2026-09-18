@@ -38,7 +38,33 @@ void CommandStack::run(std::vector<std::unique_ptr<DocumentCommand>>& from,
     }
     to.push_back(std::move(command));
     ++revision_;
-    if (observer_) observer_(*to.back(), undo_move);
+    if (observer_) {
+        // A group touches every kind its nested commands touch: notify per
+        // nested command in travel order (reverse for undo).
+        if (auto* group = dynamic_cast<GroupCommand*>(to.back().get())) {
+            if (undo_move) {
+                for (auto it = group->nested().rbegin();
+                     it != group->nested().rend(); ++it) {
+                    notify(**it, true);
+                }
+            } else {
+                for (const auto& nested_command : group->nested()) {
+                    notify(*nested_command, false);
+                }
+            }
+        } else {
+            notify(*to.back(), undo_move);
+        }
+    }
+}
+
+void CommandStack::notify(const DocumentCommand& command, bool undo) {
+    try {
+        observer_(command, undo);
+    } catch (...) {
+        // Observer failures must never corrupt the history transition
+        // (see the contract in edit_command.hpp).
+    }
 }
 
 void CommandStack::clear_history() {
@@ -81,6 +107,7 @@ void CommandStack::end_group() {
     }
     auto group = std::make_unique<GroupCommand>(
         open_group_->label, RevisionKind::kLayout, std::move(open_group_->nested));
+    group->set_id(next_id_++);
     undo_.push_back(std::move(group));
     open_group_.reset();
     // Nested commands already bumped the revision and invalidated redo; the
@@ -93,8 +120,8 @@ void CommandStack::rollback_group() {
     }
     auto& nested = open_group_->nested;
     for (auto it = nested.rbegin(); it != nested.rend(); ++it) {
-        if (observer_) observer_(**it, true);
         (*it)->revert();
+        notify(**it, true);
     }
     nested.clear();
     open_group_.reset();

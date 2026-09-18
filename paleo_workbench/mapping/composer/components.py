@@ -430,9 +430,9 @@ def bind_map_documents(
                 rebound += 1
     return rebound
 
-.. note::
-   C++ migration: the session/factory/binding behavior is ported to
-   ``libs/mapping_document`` (pwb::mapping_document, CONV-27) and frozen
-   by ``tools/oracle/generate_map_document_edit_fixtures.py``. This
-   module remains the Python oracle / transitional UI implementation;
-   the C++ product chain does not depend on it.
+
+# C++ migration (CONV-27): session/factory/binding behavior is ported to
+# libs/mapping_document (pwb::mapping_document) and frozen by
+# tools/oracle/generate_map_document_edit_fixtures.py. This module remains
+# the Python oracle / transitional UI implementation; the C++ product
+# chain does not depend on it.
