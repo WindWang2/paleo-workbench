@@ -19,6 +19,7 @@
 #include <QMainWindow>
 
 #include <pwb/application/project_session.hpp>
+#include <pwb/domain/json.hpp>
 #include <pwb/ui/tool_actions.hpp>
 
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
@@ -43,7 +44,13 @@ class FactorStatsDock;
 namespace pwb::application {
 class AlgorithmRunner;
 class PwbDataStore;
+struct MapPipelineOutcome;
 }
+#ifdef PWB_WITH_CONV_30
+namespace pwb::app {
+class JobCenter;
+}
+#endif
 namespace pwb::seismic_viewer {
 class SeismicSliceWidget;
 }
@@ -89,6 +96,20 @@ public:
     // new version id or "" + *error. The version is immediately usable as
     // an attribute input and viewable in the seismic dock.
     std::string importSegy(const QString& path, std::string* error);
+#endif
+#ifdef PWB_WITH_CONV_30
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+    // CONV-30 — the same import body running inside a job runtime task:
+    // cooperative cancellation at the phase safe points (read → payload →
+    // register → publish) plus coarse progress for the non-modal surface.
+    std::string importSegyProgressed(
+        const QString& path, std::string* error,
+        const std::function<bool()>& cancelled,
+        const std::function<void(double, const QString&)>& progress);
+#endif
+    // Non-modal import: wires importSegyProgressed into the job runtime
+    // with a cancellable progress dialog (window-close and app-quit safe).
+    void submitSegyJob(const QString& path);
 #endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
@@ -148,6 +169,16 @@ public:
                                    const std::string& factor_name,
                                    const std::string& method, int grid_n,
                                    const std::string& target_horizon);
+    // CONV-30 split: collection (GUI thread, QgsVectorLayer iteration) and
+    // layer application (GUI thread) are separable from the Qt-free
+    // compute so the dialog can run the pipeline as a job.
+    QString collectFactorMapInputs(const QString& layer_id,
+                                   const std::string& factor_name,
+                                   pwb::domain::Json* records,
+                                   std::string* crs);
+    QString applyFactorMapOutcome(
+        const pwb::application::MapPipelineOutcome& outcome,
+        const std::string& factor_name, const std::string& crs);
 #endif
     enum class DirtyCloseDecision { Proceed, SaveAndClose, DiscardAndClose };
 
@@ -205,8 +236,24 @@ private:
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     void runAttributeDialog();
 #endif
+#if defined(PWB_WITH_CONV_30) && defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+    // CONV-30 — non-modal supervision of one attribute run: polls the
+    // runner outcome on a scheduler job, reports progress to the dialog
+    // and propagates cooperative cancel into the run.
+    void superviseAttributeRun(const std::string& request_id);
+#endif
 #ifdef PWB_WITH_CONV_01
     void geologicalFactorMapDialog();
+#endif
+#ifdef PWB_WITH_CONV_01
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — non-modal factor map: the kernel compute runs as a job on
+    // the scheduler; layer application stays on the GUI thread.
+    void submitFactorMapJob(
+        const QString& layer_id, const std::string& factor_name,
+        const std::string& method, int grid_n,
+        const std::string& target_horizon);
+#endif
 #endif
 
     std::unique_ptr<pwb::application::ProjectSession> session_;
@@ -241,6 +288,12 @@ private:
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;
     std::set<std::string> wired_action_ids_;
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — product job runtime: bounded scheduler + page ownership
+    // (close protocol) + app-quit drain. Declared last so it outlives the
+    // surfaces it supervises.
+    std::unique_ptr<JobCenter> job_center_;
+#endif
 };
 
 }  // namespace pwb::app

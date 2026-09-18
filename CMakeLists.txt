@@ -91,6 +91,28 @@ if(PWB_BUILD_CONV_25)
 endif()
 # END CONV-25
 
+# BEGIN CONV-30 — async jobs / threading / progress / cancellation runtime:
+# the bounded job scheduler (libs/job_runtime, Qt-free core + Qt queued
+# event bridge) replacing the Python TaskScheduler / OwnedWorkerJob /
+# DetachedJobKeeper surfaces. The core builds with no Qt; the Qt bridge and
+# the platform app wiring appear only when Qt6::Core is really there
+# (find below is QUIET — Qt-less configurations still get the core).
+option(PWB_BUILD_CONV_30 "Build the CONV-30 job runtime (libs/job_runtime)" ON)
+if(PWB_BUILD_CONV_30)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/job_runtime/CMakeLists.txt")
+        message(FATAL_ERROR "PWB_BUILD_CONV_30=ON but libs/job_runtime is not merged on this branch")
+    endif()
+    # The policy oracle test replays the frozen ladder through the domain
+    # JSON conventions (Pwb::Domain), same implication shape as CONV-18/23.
+    if(NOT PWB_BUILD_DATA)
+        set(PWB_BUILD_DATA ON)
+        message(STATUS "CONV-30: enabling PWB_BUILD_DATA for the domain JSON closure")
+    endif()
+    find_package(Qt6 6.8 QUIET COMPONENTS Core)
+    add_subdirectory(libs/job_runtime)
+endif()
+# END CONV-30
+
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
 # error, never a silent skip (protocol: independent validation).

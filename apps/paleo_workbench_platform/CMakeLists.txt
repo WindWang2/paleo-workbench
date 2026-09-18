@@ -1,6 +1,8 @@
 add_executable(pwb-platform
     main.cpp
     main_window.cpp
+    job_center.hpp
+    job_center.cpp
 )
 set_target_properties(pwb-platform PROPERTIES AUTOMOC ON)
 target_include_directories(pwb-platform PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -48,6 +50,19 @@ if(PWB_BUILD_CONV_01)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_01=1)
 endif()
 # END CONV-01
+# BEGIN CONV-30
+# CONV-30 async job runtime: the app hosts the bounded scheduler + Qt
+# bridge (job_center.*) and the migrated surfaces (SEG-Y import, attribute
+# supervision, factor-map compute) submit through it. Fail-closed: an ON
+# option without the JobQt target is a configure error.
+if(PWB_BUILD_CONV_30)
+    if(NOT TARGET Pwb::JobQt)
+        message(FATAL_ERROR "PWB_BUILD_CONV_30=ON requires Pwb::JobQt (libs/job_runtime)")
+    endif()
+    target_link_libraries(pwb-platform PRIVATE Pwb::JobQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_30=1)
+endif()
+# END CONV-30
 # BEGIN CONV-16
 # conv-16 factor statistics HUD: the dock reads pwb::mapping::GridStatistics
 # (FactorGrid.statistics), so the mapping kernel joins the link closure only

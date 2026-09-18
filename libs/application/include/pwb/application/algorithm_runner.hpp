@@ -62,6 +62,12 @@ public:
     // keep-alive is released once terminal.
     Outcome outcome(const std::string& request_id);
 
+    // BEGIN CONV-30 — cooperative cancellation of one pending run (the
+    // non-modal attribute dialog surfaces this through the job runtime).
+    // Additive API: false when the request is unknown or already terminal.
+    bool cancel(const std::string& request_id);
+    // END CONV-30
+
 private:
     struct Pending {
         pwb::workflow::TaskHandle handle;

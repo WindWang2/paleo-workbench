@@ -26,6 +26,19 @@ else()
     set(PWB_GDAL_DATA_ENV "")
 endif()
 
+# CONV-30 — MainWindow tests compile the real product configuration: the
+# job runtime closure joins every target that compiles main_window.cpp
+# (empty strings when CONV-30 is off, matching the guarded #ifdefs).
+set(PWB_JOB_CENTER_SOURCE "")
+set(PWB_JOB_QT_LINK "")
+set(PWB_JOB_CENTER_DEFINE "")
+if(PWB_BUILD_CONV_30 AND TARGET Pwb::JobQt)
+    set(PWB_JOB_CENTER_SOURCE
+        "${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/job_center.cpp")
+    set(PWB_JOB_QT_LINK "Pwb::JobQt")
+    set(PWB_JOB_CENTER_DEFINE "PWB_WITH_CONV_30=1")
+endif()
+
 function(pwb_add_platform_test name)
     add_executable(platform_${name} ${ARGN})
     target_compile_features(platform_${name} PRIVATE cxx_std_20)
@@ -51,14 +64,18 @@ pwb_add_platform_test(adapters_substitutes test_adapters.cpp)
 
 # UI wiring test compiles the real MainWindow (moc included) next to the app.
 add_executable(platform_ui_wiring test_ui_wiring.cpp
-    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp
+    ${PWB_JOB_CENTER_SOURCE})
 set_target_properties(platform_ui_wiring PROPERTIES AUTOMOC ON)
 target_compile_features(platform_ui_wiring PRIVATE cxx_std_20)
 target_include_directories(platform_ui_wiring PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
 target_link_libraries(platform_ui_wiring PRIVATE
-    Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy)
+    Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+    ${PWB_JOB_QT_LINK})
+target_compile_definitions(platform_ui_wiring PRIVATE
+    ${PWB_JOB_CENTER_DEFINE})
 add_test(NAME platform.ui_wiring COMMAND platform_ui_wiring)
 set_tests_properties(platform.ui_wiring PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
@@ -69,14 +86,18 @@ set_tests_properties(platform.ui_wiring PROPERTIES
 # recovery / working copies / save / reopen). Needs B in the build.
 if(PWB_BUILD_DATA)
     add_executable(platform_project_session test_project_session.cpp
-        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp
+        ${PWB_JOB_CENTER_SOURCE})
     set_target_properties(platform_project_session PROPERTIES AUTOMOC ON)
     target_compile_features(platform_project_session PRIVATE cxx_std_20)
     target_include_directories(platform_project_session PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
     target_link_libraries(platform_project_session PRIVATE
-        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data)
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data
+        ${PWB_JOB_QT_LINK})
+    target_compile_definitions(platform_project_session PRIVATE
+        ${PWB_JOB_CENTER_DEFINE})
     target_compile_definitions(platform_project_session PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME platform.project_session COMMAND platform_project_session)
@@ -92,7 +113,8 @@ endif()
 if(PWB_BUILD_DATA AND PWB_BUILD_SEISMIC_VIEWER
         AND PWB_BUILD_SEISMIC_ATTRIBUTES)
     add_executable(platform_attribute_ui test_attribute_ui.cpp
-        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp
+        ${PWB_JOB_CENTER_SOURCE})
     set_target_properties(platform_attribute_ui PROPERTIES AUTOMOC ON)
     target_compile_features(platform_attribute_ui PRIVATE cxx_std_20)
     target_include_directories(platform_attribute_ui PRIVATE
@@ -102,9 +124,11 @@ if(PWB_BUILD_DATA AND PWB_BUILD_SEISMIC_VIEWER
         Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data
         Pwb::SeismicViewer Pwb::SeismicAttributes Pwb::Visualization
         Pwb::Science Pwb::Workflow)
+    target_link_libraries(platform_attribute_ui PRIVATE ${PWB_JOB_QT_LINK})
     target_compile_definitions(platform_attribute_ui PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-        PWB_WITH_SEISMIC_VIEWER=1 PWB_WITH_SEISMIC_ATTRIBUTES=1)
+        PWB_WITH_SEISMIC_VIEWER=1 PWB_WITH_SEISMIC_ATTRIBUTES=1
+        ${PWB_JOB_CENTER_DEFINE})
     # M3: real SEG-Y import path (reader + B publication) when present.
     if(PWB_BUILD_SEISMIC_IO)
         target_link_libraries(platform_attribute_ui PRIVATE Pwb::SeismicIo)
@@ -136,17 +160,20 @@ set_tests_properties(platform.qgis_smoke_app PROPERTIES
 # compiles main_window.cpp like the other MainWindow tests).
 if(PWB_BUILD_CONV_01)
     add_executable(platform_map_pipeline map_pipeline_test.cpp
-        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp
+        ${PWB_JOB_CENTER_SOURCE})
     set_target_properties(platform_map_pipeline PROPERTIES AUTOMOC ON)
     target_compile_features(platform_map_pipeline PRIVATE cxx_std_20)
     target_include_directories(platform_map_pipeline PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
     target_link_libraries(platform_map_pipeline PRIVATE
-        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data)
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data
+        ${PWB_JOB_QT_LINK})
     target_compile_definitions(platform_map_pipeline PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-        PWB_WITH_CONV_01=1)
+        PWB_WITH_CONV_01=1
+        ${PWB_JOB_CENTER_DEFINE})
     add_test(NAME platform.map_pipeline COMMAND platform_map_pipeline)
     set_tests_properties(platform.map_pipeline PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"

@@ -57,6 +57,14 @@
 #include <QFormLayout>
 #include <QSpinBox>
 #include <QVBoxLayout>
+// BEGIN CONV-30 — product job runtime wiring
+#include <QProgressDialog>
+#include <algorithm>
+#include <any>
+#include <utility>
+#include "job_center.hpp"
+#include <pwb/job_runtime/qt/job_bridge.hpp>
+// END CONV-30
 
 #include <qgsjsonutils.h>
 #include <qgsproject.h>
@@ -208,6 +216,12 @@ private:
 
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — the job runtime owns every background task; create it
+    // first so the surfaces below can submit through it. The quit drain
+    // (aboutToQuit → bounded scheduler drain) is installed here.
+    job_center_ = std::make_unique<JobCenter>();
+#endif
     session_ = std::make_unique<pwb::application::ProjectSession>();
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     // The app is the composition root: E's contract has the host register
@@ -249,6 +263,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — stop job bodies at their next safe point and drain with a
+    // bounded wait so no job can touch members during teardown (the
+    // declared-last JobCenter member would otherwise die first anyway;
+    // doing it here keeps the ordering explicit and testable).
+    if (job_center_ != nullptr) job_center_->shutdown_workers(1000);
+#endif
     // Ordered teardown must run while every member the signal paths touch
     // (actions_, status label, canvas) is still alive: member destruction
     // order would otherwise kill the action set before the session, and
@@ -912,77 +933,73 @@ void removeLayerById(QgsProject* project, const std::string& layer_id) {
 }
 }  // namespace
 
-QString MainWindow::runGeologicalFactorMap(
+QString MainWindow::collectFactorMapInputs(
     const QString& layer_id, const std::string& factor_name,
-    const std::string& method, int grid_n,
-    const std::string& target_horizon) {
-    pwb::domain::Json records = pwb::domain::Json::array();
-    std::string crs;
+    pwb::domain::Json* records, std::string* crs) {
+    // GUI-thread only: reads the QgsVectorLayer feature stream.
     if (layer_id == QStringLiteral("builtin.sample_wells")) {
-        records = builtin_well_records();
-        crs = "EPSG:4326";
-    } else {
-        QgsVectorLayer* layer =
-            session_->map().vectorLayerById(layer_id.toStdString());
-        if (layer == nullptr) {
-            return QString::fromStdString("layer not found: "
-                                          + layer_id.toStdString());
-        }
-        if (layer->geometryType() != Qgis::GeometryType::Point) {
-            return QString::fromStdString("井点源必须是点图层："
-                                          + layer_id.toStdString());
-        }
-        const QgsFields fields = layer->fields();
-        int value_index = fields.indexOf(QString::fromStdString(factor_name));
-        if (value_index < 0) value_index = fields.indexOf(QStringLiteral("value"));
-        if (value_index < 0) {
-            return QString::fromStdString("图层缺少因子取值字段（需要 "
-                                          + factor_name
-                                          + " 或 value 字段）："
-                                          + layer_id.toStdString());
-        }
-        const int well_id_index = fields.indexOf(QStringLiteral("well_id"));
-        const int name_index = fields.indexOf(QStringLiteral("name"));
-        const int qc_index = fields.indexOf(QStringLiteral("qc_flag"));
-        QgsFeatureIterator it = layer->getFeatures();
-        QgsFeature feature;
-        while (it.nextFeature(feature)) {
-            if (!feature.hasGeometry()) continue;
-            const QgsPointXY pt = feature.geometry().asPoint();
-            pwb::domain::Json rec = pwb::domain::Json::object();
-            rec["x"] = pt.x();
-            rec["y"] = pt.y();
-            if (well_id_index >= 0) {
-                rec["well_id"] =
-                    feature.attribute(well_id_index).toString().toStdString();
-            }
-            if (name_index >= 0) {
-                rec["name"] =
-                    feature.attribute(name_index).toString().toStdString();
-            }
-            if (qc_index >= 0) {
-                rec["qc_flag"] =
-                    feature.attribute(qc_index).toString().toStdString();
-            }
-            bool numeric = false;
-            const double value = feature.attribute(value_index).toDouble(&numeric);
-            rec[factor_name] = numeric
-                ? pwb::domain::Json(value)
-                : pwb::domain::Json(
-                      feature.attribute(value_index).toString().toStdString());
-            records.push_back(std::move(rec));
-        }
-        crs = layer->crs().authid().toStdString();
+        *records = builtin_well_records();
+        *crs = "EPSG:4326";
+        return QString();
     }
+    QgsVectorLayer* layer =
+        session_->map().vectorLayerById(layer_id.toStdString());
+    if (layer == nullptr) {
+        return QString::fromStdString("layer not found: "
+                                      + layer_id.toStdString());
+    }
+    if (layer->geometryType() != Qgis::GeometryType::Point) {
+        return QString::fromStdString("井点源必须是点图层："
+                                      + layer_id.toStdString());
+    }
+    const QgsFields fields = layer->fields();
+    int value_index = fields.indexOf(QString::fromStdString(factor_name));
+    if (value_index < 0) value_index = fields.indexOf(QStringLiteral("value"));
+    if (value_index < 0) {
+        return QString::fromStdString("图层缺少因子取值字段（需要 "
+                                      + factor_name
+                                      + " 或 value 字段）："
+                                      + layer_id.toStdString());
+    }
+    const int well_id_index = fields.indexOf(QStringLiteral("well_id"));
+    const int name_index = fields.indexOf(QStringLiteral("name"));
+    const int qc_index = fields.indexOf(QStringLiteral("qc_flag"));
+    QgsFeatureIterator it = layer->getFeatures();
+    QgsFeature feature;
+    while (it.nextFeature(feature)) {
+        if (!feature.hasGeometry()) continue;
+        const QgsPointXY pt = feature.geometry().asPoint();
+        pwb::domain::Json rec = pwb::domain::Json::object();
+        rec["x"] = pt.x();
+        rec["y"] = pt.y();
+        if (well_id_index >= 0) {
+            rec["well_id"] =
+                feature.attribute(well_id_index).toString().toStdString();
+        }
+        if (name_index >= 0) {
+            rec["name"] =
+                feature.attribute(name_index).toString().toStdString();
+        }
+        if (qc_index >= 0) {
+            rec["qc_flag"] =
+                feature.attribute(qc_index).toString().toStdString();
+        }
+        bool numeric = false;
+        const double value = feature.attribute(value_index).toDouble(&numeric);
+        rec[factor_name] = numeric
+            ? pwb::domain::Json(value)
+            : pwb::domain::Json(
+                  feature.attribute(value_index).toString().toStdString());
+        records->push_back(std::move(rec));
+    }
+    *crs = layer->crs().authid().toStdString();
+    return QString();
+}
 
-    pwb::application::MapPipelineRequest request;
-    request.factor_name = factor_name;
-    request.target_horizon = target_horizon;
-    request.crs = crs;
-    request.method = method;
-    request.grid_n = grid_n;
-    const pwb::application::MapPipelineOutcome outcome =
-        pwb::application::run_map_pipeline(records, request);
+QString MainWindow::applyFactorMapOutcome(
+    const pwb::application::MapPipelineOutcome& outcome,
+    const std::string& factor_name, const std::string& crs) {
+    // GUI-thread only: layers / canvas / facts registry.
     if (!outcome.ok) {
         // The kernel's validate() message verbatim (Python ValueError
         // wording is part of the contract).
@@ -1094,6 +1111,96 @@ QString MainWindow::runGeologicalFactorMap(
     return QString();
 }
 
+QString MainWindow::runGeologicalFactorMap(
+    const QString& layer_id, const std::string& factor_name,
+    const std::string& method, int grid_n,
+    const std::string& target_horizon) {
+    // Sync path (tests / self-check): collect → compute → apply inline.
+    pwb::domain::Json records = pwb::domain::Json::array();
+    std::string crs;
+    const QString collect_error =
+        collectFactorMapInputs(layer_id, factor_name, &records, &crs);
+    if (!collect_error.isEmpty()) return collect_error;
+
+    pwb::application::MapPipelineRequest request;
+    request.factor_name = factor_name;
+    request.target_horizon = target_horizon;
+    request.crs = crs;
+    request.method = method;
+    request.grid_n = grid_n;
+    const pwb::application::MapPipelineOutcome outcome =
+        pwb::application::run_map_pipeline(records, request);
+    return applyFactorMapOutcome(outcome, factor_name, crs);
+}
+
+#ifdef PWB_WITH_CONV_30
+void MainWindow::submitFactorMapJob(
+    const QString& layer_id, const std::string& factor_name,
+    const std::string& method, int grid_n,
+    const std::string& target_horizon) {
+    // CONV-30 — the kernel compute runs as a job (Qt-free, plain data in /
+    // plain data out); collection stays on the GUI thread (QgsVectorLayer
+    // iteration is not thread-safe) and so does layer application.
+    pwb::domain::Json records = pwb::domain::Json::array();
+    std::string crs;
+    const QString collect_error =
+        collectFactorMapInputs(layer_id, factor_name, &records, &crs);
+    if (!collect_error.isEmpty()) {
+        QMessageBox::warning(this, tr("地质因子图"), collect_error);
+        return;
+    }
+    pwb::application::MapPipelineRequest request;
+    request.factor_name = factor_name;
+    request.target_horizon = target_horizon;
+    request.crs = crs;
+    request.method = method;
+    request.grid_n = grid_n;
+
+    auto* progress = new QProgressDialog(tr("地质因子图计算中…"), tr("取消"),
+                                         0, 0, this);  // busy indicator
+    progress->setWindowModality(Qt::NonModal);
+    progress->setMinimumDuration(0);
+    progress->setValue(1);
+
+    auto& owner = job_center_->make_owner(this);
+    QObject::connect(progress, &QProgressDialog::canceled, &owner,
+                     &pwb::job::qtbridge::JobOwner::cancel);
+    pwb::job::JobSpec spec;
+    spec.kind = "background.compute";
+    spec.title = "地质因子图";
+    spec.run = [records, request](pwb::job::JobContext& ctx) -> std::any {
+        // Cooperative cancel at the pipeline's own granularity: the kernel
+        // is a blocking call, so the safe point is before it starts and
+        // the sleep window around it.
+        ctx.check_cancelled();
+        return pwb::application::run_map_pipeline(records, request);
+    };
+    owner.start(
+        job_center_->scheduler(), std::move(spec),
+        [this, progress, factor_name,
+         crs](const pwb::job::qtbridge::JobOutcome& job_outcome) {
+            progress->deleteLater();
+            if (job_outcome.state == pwb::job::JobState::cancelled) {
+                statusBar()->showMessage(tr("地质因子图已取消。"), 8000);
+                return;
+            }
+            const auto* outcome =
+                std::any_cast<pwb::application::MapPipelineOutcome>(
+                    &job_outcome.result);
+            if (outcome == nullptr) {
+                QMessageBox::warning(this, tr("地质因子图"), tr("未知结果"));
+                return;
+            }
+            const QString apply_error =
+                applyFactorMapOutcome(*outcome, factor_name, crs);
+            if (!apply_error.isEmpty()) {
+                QMessageBox::warning(this, tr("地质因子图"),
+                                     tr("地质编图失败：%1").arg(apply_error));
+            }
+        });
+}
+#endif
+
 void MainWindow::geologicalFactorMapDialog() {
     QDialog dialog(this);
     dialog.setWindowTitle(tr("地质因子图"));
@@ -1144,6 +1251,16 @@ void MainWindow::geologicalFactorMapDialog() {
     layout->addWidget(buttons);
     if (dialog.exec() != QDialog::Accepted) return;
 
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — compute on the job runtime (non-modal + cancellable);
+    // collection stays on this (GUI) thread, layer application is applied
+    // from the completion delivery.
+    submitFactorMapJob(wells->currentData().toString(),
+                       factor->currentText().toStdString(),
+                       method->currentData().toString().toStdString(),
+                       grid_n->value(),
+                       horizon->currentText().toStdString());
+#else
     const QString result = runGeologicalFactorMap(
         wells->currentData().toString(), factor->currentText().toStdString(),
         method->currentData().toString().toStdString(), grid_n->value(),
@@ -1152,6 +1269,7 @@ void MainWindow::geologicalFactorMapDialog() {
         QMessageBox::warning(this, tr("地质因子图"),
                              tr("地质编图失败：%1").arg(result));
     }
+#endif
 }
 #endif
 
@@ -1218,6 +1336,13 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             if (active.has_value()) session_->edit().roll_back(active->layer_id);
         }
     }
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — window close while a task runs: bounded cancel+wait for
+    // every owned job (AppShell.shutdown_workers parity); a job that
+    // refuses to cancel detaches to the process-lifetime keeper and keeps
+    // running without the window (its GUI deliveries are dropped).
+    if (job_center_ != nullptr) job_center_->shutdown_workers(400);
+#endif
     // Contract teardown order: session (edit -> canvas detach -> layers ->
     // project) before widget children die with the window.
     session_->close();
@@ -1435,6 +1560,14 @@ void MainWindow::runAttributeDialog() {
         return;
     }
 
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — non-modal supervision on the job runtime: the compute
+    // itself stays on the TaskRuntime lane (publication semantics), while
+    // progress/cancel/close-quit lifecycle moves to the scheduler. Cancel
+    // propagates cooperatively into the run.
+    superviseAttributeRun(request_id);
+    return;
+#else
     // M1: modal progress for the (small) fixture-scale volumes; large
     // volumes get a non-modal progress surface later.
     QTimer timer(&dialog);
@@ -1472,11 +1605,103 @@ void MainWindow::runAttributeDialog() {
             .arg(QString::fromStdString(outcome.version_id))
             .arg(QString::fromStdString(outcome.run_id)),
         10000);
+#endif
+}
+
+#if defined(PWB_WITH_CONV_30) && defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+void MainWindow::superviseAttributeRun(const std::string& request_id) {
+    auto* progress = new QProgressDialog(tr("计算地震属性…"), tr("取消"),
+                                         0, 100, this);
+    progress->setWindowModality(Qt::NonModal);
+    progress->setMinimumDuration(0);
+    progress->setValue(1);
+    auto& owner = job_center_->make_owner(this);
+    QObject::connect(progress, &QProgressDialog::canceled, &owner,
+                     &pwb::job::qtbridge::JobOwner::cancel);
+    pwb::job::JobSpec spec;
+    spec.kind = "seismic.attribute";
+    spec.title = "地震属性计算";
+    spec.run = [this, request_id](pwb::job::JobContext& ctx) -> std::any {
+        bool cancel_sent = false;
+        for (;;) {
+            // Cooperative cancel propagation: the supervision token flips
+            // the underlying run's TaskHandle; the run then unwinds its
+            // publication exactly like an explicit cancel.
+            if (ctx.token().is_cancelled() && !cancel_sent) {
+                cancel_sent = true;
+                attribute_runner_->cancel(request_id);
+            }
+            const auto outcome = attributeOutcome(request_id);
+            if (outcome.status == "queued") {
+                ctx.report_progress(0.05, std::nullopt, "排队中");
+            } else if (outcome.status == "running") {
+                ctx.report_progress(0.5, std::nullopt, "计算中");
+            } else if (outcome.status == "publishing") {
+                ctx.report_progress(0.95, std::nullopt, "发布中");
+            } else {
+                break;  // terminal
+            }
+            ctx.sleep_interruptible(0.05);
+        }
+        return attributeOutcome(request_id);
+    };
+    owner.start(
+        job_center_->scheduler(), std::move(spec),
+        [this, progress](const pwb::job::qtbridge::JobOutcome& job_outcome) {
+            progress->deleteLater();
+            if (job_outcome.state == pwb::job::JobState::cancelled) {
+                statusBar()->showMessage(tr("属性计算已取消。"), 8000);
+                return;
+            }
+            const pwb::application::AlgorithmRunner::Outcome* outcome =
+                std::any_cast<pwb::application::AlgorithmRunner::Outcome>(
+                    &job_outcome.result);
+            if (outcome == nullptr || outcome->status != "succeeded") {
+                QMessageBox::warning(
+                    this, tr("计算属性"),
+                    tr("运行失败：%1\n%2")
+                        .arg(outcome != nullptr
+                                 ? QString::fromStdString(outcome->error_code)
+                                 : tr("未知"))
+                        .arg(outcome != nullptr
+                                 ? QString::fromStdString(outcome->error)
+                                 : QString()));
+                return;
+            }
+#if defined(PWB_WITH_SEISMIC_VIEWER)
+            const QString view_error =
+                openVolumeVersion(outcome->version_id);
+            if (!view_error.isEmpty()) {
+                QMessageBox::warning(this, tr("计算属性"), view_error);
+                return;
+            }
+#endif
+            statusBar()->showMessage(
+                tr("属性已发布：%1（运行 %2）")
+                    .arg(QString::fromStdString(outcome->version_id))
+                    .arg(QString::fromStdString(outcome->run_id)),
+                10000);
+        },
+        [progress](double ratio, const QString& message) {
+            progress->setLabelText(message);
+            progress->setValue(
+                std::max(1, static_cast<int>(ratio * 100.0)));
+        });
 }
 #endif
+#endif  // PWB_WITH_SEISMIC_ATTRIBUTES && PWB_WITH_DATA_INTEGRATION (attributes section)
 
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
 std::string MainWindow::importSegy(const QString& path, std::string* error) {
+    // Sync path (self-check / tests): no cancellation, no progress.
+    return importSegyProgressed(
+        path, error, [] { return false; }, [](double, const QString&) {});
+}
+
+std::string MainWindow::importSegyProgressed(
+    const QString& path, std::string* error,
+    const std::function<bool()>& cancelled,
+    const std::function<void(double, const QString&)>& progress) {
     if (project_store_ == nullptr) {
         if (error != nullptr) *error = "未打开工程（SEG-Y 导入需要工程目录）";
         return "";
@@ -1485,9 +1710,18 @@ std::string MainWindow::importSegy(const QString& path, std::string* error) {
     const std::string import_id =
         "segy-import-" + std::to_string(import_counter++);
 
+    // Phase safe points (CONV-30): cancellation is honoured BETWEEN the
+    // heavy phases — read_segy itself is a blocking native call, so the
+    // effective cancel granularity is the phase boundary (documented,
+    // Python-parity cooperative behaviour).
+    progress(0.05, tr("读取 SEG-Y…"));
+    if (cancelled()) return "";
+
     auto volume = pwb::seismic_io::read_segy(
         std::filesystem::path(path.toStdWString()), error);
     if (!volume.has_value()) return "";
+    if (cancelled()) return "";
+    progress(0.45, tr("写入 PWBVOL1 载荷…"));
 
     pwb::application::VolumePayload payload;
     payload.header.ni = static_cast<std::uint32_t>(volume->ni);
@@ -1514,12 +1748,15 @@ std::string MainWindow::importSegy(const QString& path, std::string* error) {
     std::filesystem::create_directories(staged_dir, ec);
     const std::filesystem::path staged_path =
         staged_dir / (import_id + ".pwbvol");
+    if (cancelled()) return "";
     const std::string write_error =
         pwb::application::write_volume_payload(payload, staged_path);
     if (!write_error.empty()) {
         if (error != nullptr) *error = write_error;
         return "";
     }
+    if (cancelled()) return "";
+    progress(0.7, tr("注册运行并发布…"));
 
     const pwb::domain::RunId run_id{std::string("run_") + import_id};
     pwb::data::RunRegistrationV1 registration;
@@ -1562,16 +1799,31 @@ std::string MainWindow::importSegy(const QString& path, std::string* error) {
         return "";
     }
     (void)project_store_->export_manifest();
+    progress(0.95, tr("完成"));
     return published.value().new_version_id.str();
 }
 #endif
 
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+namespace {
+// Type-erased job result of one SEG-Y import (carried in JobOutcome).
+struct SegyImportResult {
+    std::string version_id;
+    std::string error;
+};
+}  // namespace
+
 void MainWindow::importSegyDialog() {
     const QString path = QFileDialog::getOpenFileName(
         this, tr("导入 SEG-Y"), QString(),
         tr("SEG-Y 数据 (*.sgy *.segy);;所有文件 (*)"));
     if (path.isEmpty()) return;
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — the import runs as a job: non-modal progress, cooperative
+    // cancel, close/quit safe.
+    submitSegyJob(path);
+    return;
+#else
     std::string error;
     const std::string version_id = importSegy(path, &error);
     if (version_id.empty()) {
@@ -1589,7 +1841,75 @@ void MainWindow::importSegyDialog() {
     statusBar()->showMessage(
         tr("SEG-Y 已导入：%1").arg(QString::fromStdString(version_id)),
         10000);
+#endif
 }
+
+#ifdef PWB_WITH_CONV_30
+void MainWindow::submitSegyJob(const QString& path) {
+    auto* progress = new QProgressDialog(tr("导入 SEG-Y…"), tr("取消"),
+                                         0, 100, this);
+    progress->setWindowModality(Qt::NonModal);
+    progress->setMinimumDuration(0);
+    progress->setValue(1);  // visible immediately (indeterminate phases)
+    auto& owner = job_center_->make_owner(this);
+    // Dialog cancel and window/app teardown both land in the job token.
+    QObject::connect(progress, &QProgressDialog::canceled, &owner,
+                     &pwb::job::qtbridge::JobOwner::cancel);
+    const auto alive = job_center_->alive();
+    pwb::job::JobSpec spec;
+    spec.kind = "background.io";
+    spec.title = "SEG-Y 导入";
+    spec.run = [this, path, alive](pwb::job::JobContext& ctx) -> std::any {
+        std::string error;
+        const std::string version_id = importSegyProgressed(
+            path, &error,
+            [&ctx, alive] {
+                return ctx.token().is_cancelled() || !alive->load();
+            },
+            [&ctx](double ratio, const QString& message) {
+                ctx.report_progress(ratio, std::nullopt,
+                                    message.toStdString());
+            });
+        return SegyImportResult{version_id, error};
+    };
+    owner.start(
+        job_center_->scheduler(), std::move(spec),
+        [this, progress](const pwb::job::qtbridge::JobOutcome& outcome) {
+            progress->deleteLater();
+            if (outcome.state == pwb::job::JobState::cancelled) {
+                // Partial artifacts stay on disk (crash-safe contract).
+                statusBar()->showMessage(tr("SEG-Y 导入已取消。"), 8000);
+                return;
+            }
+            const auto* result =
+                std::any_cast<SegyImportResult>(&outcome.result);
+            if (result == nullptr || result->version_id.empty()) {
+                const std::string& detail =
+                    result != nullptr ? result->error : "unknown failure";
+                QMessageBox::warning(this, tr("导入 SEG-Y"),
+                                     QString::fromStdString(detail));
+                return;
+            }
+#if defined(PWB_WITH_SEISMIC_VIEWER)
+            const QString view_error =
+                openVolumeVersion(result->version_id);
+            if (!view_error.isEmpty()) {
+                QMessageBox::warning(this, tr("导入 SEG-Y"), view_error);
+                return;
+            }
+#endif
+            statusBar()->showMessage(
+                tr("SEG-Y 已导入：%1")
+                    .arg(QString::fromStdString(result->version_id)),
+                10000);
+        },
+        [progress](double ratio, const QString& message) {
+            progress->setLabelText(message);
+            progress->setValue(
+                std::max(1, static_cast<int>(ratio * 100.0)));
+        });
+}
+#endif
 #endif
 
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
