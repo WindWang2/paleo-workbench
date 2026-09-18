@@ -212,7 +212,9 @@ if(PWB_BUILD_CONV_11)
             "PWB_BUILD_CONV_11=ON but libs/well_science is not "
             "delivered on this branch")
     endif()
-    add_subdirectory(libs/well_science)
+    if(NOT TARGET pwb_well_science)
+        add_subdirectory(libs/well_science)
+    endif()
 endif()
 # END CONV-11
 # BEGIN CONV-12
