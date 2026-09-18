@@ -49,3 +49,12 @@ target_sources(pwb_catalog PRIVATE
     src/entity_view.cpp
 )
 # END CONV-15
+
+# BEGIN CONV-26
+# SQL-level paged asset reads (conv-26): serves deterministic pages straight
+# from catalog.sqlite without materializing the document (db.py
+# _search_assets_page / _count_assets parity). New TU only.
+target_sources(pwb_catalog PRIVATE
+    src/paged_sql.cpp
+)
+# END CONV-26
