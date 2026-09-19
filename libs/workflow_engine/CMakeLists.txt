@@ -13,7 +13,12 @@ add_library(pwb_workflow_engine STATIC
     src/reproduction.cpp
     src/receipt.cpp
     src/plan_view.cpp
-    src/run_engine.cpp)
+    src/run_engine.cpp
+    # CONV-33 — portable *.paleo-workflow.json recipes (workflow/recipe.py):
+    # security gates (forbidden keys / absolute paths), fail-closed migrate,
+    # atomic indent=1 save, load/clone/diff/inspect. Round-1 = contract
+    # freeze stubs (fail-loud).
+    src/recipe.cpp)
 add_library(Pwb::WorkflowEngine ALIAS pwb_workflow_engine)
 target_include_directories(pwb_workflow_engine PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)

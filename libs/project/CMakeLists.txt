@@ -29,3 +29,11 @@ install(DIRECTORY include/pwb DESTINATION include)
 # Save-As artifact relocation (staged copy/move + owned-path rebase).
 target_sources(pwb_project PRIVATE src/relocation.cpp)
 # END CONV-26
+
+# BEGIN CONV-33
+# Version lifecycle models (implemented, not stubs): VersionSet /
+# VersionSnapshot / ContourDraft / CompilationRun / WorkflowStep /
+# QualityReport DTOs + Json codecs, field-for-field against
+# project/models.py. Prerequisite for workflow/versioning.py (CONV-33).
+target_sources(pwb_project PRIVATE src/version_models.cpp)
+# END CONV-33
