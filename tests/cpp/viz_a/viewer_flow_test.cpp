@@ -103,12 +103,12 @@ int main(int argc, char** argv) {
         check(QFile::exists(QString::fromStdString(pdf)) &&
                   QFile(QString::fromStdString(pdf)).size() > 0,
               "pdf non-empty");
-        // PNG is a real image (magic bytes).
+        // PNG is a real image (magic bytes: 89 50 4E 47 ...).
         QFile png_file(QString::fromStdString(png));
         png_file.open(QIODevice::ReadOnly);
         const QByteArray magic = png_file.read(8);
-        check(magic.size() == 8 && (unsigned char)magic[1] == 0x89 &&
-                  magic[2] == 'P' && magic[3] == 'N' && magic[4] == 'G',
+        check(magic.size() == 8 && (unsigned char)magic[0] == 0x89 &&
+                  magic[1] == 'P' && magic[2] == 'N' && magic[3] == 'G',
               "png magic bytes");
 
         // Failure: rejected file keeps the previous document, reports error.

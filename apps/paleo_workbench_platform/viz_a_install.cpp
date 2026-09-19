@@ -25,7 +25,9 @@
 
 #include <algorithm>
 #include <any>
+#include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -92,18 +94,24 @@ bool install(QMainWindow* window, JobCenter* jobs) {
 
     QDockWidget* dock = window->findChild<QDockWidget*>("well-log-dock");
     auto* host = dock != nullptr
-                     ? static_cast<pwb::viz::WellLogHostWidget*>(dock->widget())
+                     ? qobject_cast<pwb::viz::WellLogHostWidget*>(dock->widget())
                      : nullptr;
     if (host == nullptr || jobs == nullptr) return false;
 
+    // Monotonic request generation: a late result from an earlier open must
+    // never overwrite the user's latest choice (the scheduler serializes
+    // jobs, but completion order of queued GUI hops is still observable).
+    const auto generation = std::make_shared<std::atomic<std::uint64_t>>(0);
+
     auto* menu = window->menuBar()->addMenu(QObject::tr("测井"));
     auto* open_action = menu->addAction(QObject::tr("打开 LAS…（后台）"));
-    QObject::connect(open_action, &QAction::triggered, window, [window, host, jobs] {
+    QObject::connect(open_action, &QAction::triggered, window, [window, host, jobs, generation] {
         const QString path = QFileDialog::getOpenFileName(
             window, QObject::tr("打开 LAS"),
             QString(), QObject::tr("LAS 文件 (*.las *.LAS);;所有文件 (*)"));
         if (path.isEmpty()) return;
 
+        const std::uint64_t request = generation->fetch_add(1) + 1;
         auto& owner = jobs->make_owner(window);
         auto phase = std::make_shared<pwb::ui_workers::WellLogLoadPhase>();
         pwb::ui_workers::WellLogLoadInput input;
@@ -126,7 +134,13 @@ bool install(QMainWindow* window, JobCenter* jobs) {
 
         owner.start(
             jobs->scheduler(), std::move(spec),
-            [window, host, path](const pwb::job::qtbridge::JobOutcome& outcome) {
+            [window, host, path, generation, request](const pwb::job::qtbridge::JobOutcome& outcome) {
+                // Stale delivery: a newer open superseded this request.
+                if (generation->load() != request) {
+                    window->statusBar()->showMessage(
+                        QObject::tr("已忽略过期的测井加载结果"), 2000);
+                    return;
+                }
                 if (outcome.state == pwb::job::JobState::cancelled) {
                     window->statusBar()->showMessage(
                         QObject::tr("测井曲线加载已取消"), 4000);
@@ -152,15 +166,19 @@ bool install(QMainWindow* window, JobCenter* jobs) {
                 const auto document =
                     std::any_cast<std::shared_ptr<const WellLogDocument>>(
                         result->payload.well_log);
-                pwb::viz::WellLogDocumentInput dto;
-                if (document == nullptr ||
-                    !to_document_input(*document,
-                                       result->payload.well_names.empty()
-                                           ? path.toStdString()
-                                           : result->payload.well_names.front(),
-                                       &dto)) {
+                if (document == nullptr) {
                     window->statusBar()->showMessage(
                         QObject::tr("LAS 文档为空"), 4000);
+                    return;
+                }
+                pwb::viz::WellLogDocumentInput dto;
+                const std::string well_name =
+                    result->payload.well_names.empty()
+                        ? path.toStdString()
+                        : result->payload.well_names.front();
+                if (!to_document_input(*document, well_name, &dto)) {
+                    window->statusBar()->showMessage(
+                        QObject::tr("LAS 文档无可显示曲线"), 4000);
                     return;
                 }
                 QString error;

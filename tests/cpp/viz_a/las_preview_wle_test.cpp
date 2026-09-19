@@ -124,13 +124,27 @@ int main() {
         }
 
         const std::string name = path.filename().string();
+        Json expected = case_json["wle_expected"];
+        // "<stem>" placeholders (empty WELL. fallback) resolve to the path
+        // stem with the same rule the core uses (Python Path.stem parity).
+        if (expected.contains("summary_rows") &&
+            expected["summary_rows"].is_array() &&
+            !expected["summary_rows"].empty() &&
+            expected["summary_rows"][0].is_array() &&
+            expected["summary_rows"][0].size() == 2 &&
+            expected["summary_rows"][0][1].get<std::string>() == "<stem>") {
+            std::string stem = name;
+            const auto dot = stem.find_last_of('.');
+            if (dot != std::string::npos && dot != 0) stem = stem.substr(0, dot);
+            expected["summary_rows"][0][1] = Json(stem);
+        }
         const PreviewResult result = preview_of(repo_root.string(), rel, name);
         Json actual = project(result);
-        auto diff = pwb::domain::json_semantic_diff(case_json["wle_expected"], actual);
+        auto diff = pwb::domain::json_semantic_diff(expected, actual);
         ++g_cases;
         if (!diff.equal) {
             fail(id + " @ " + diff.path + ": " + diff.reason +
-                 "\n  expected: " + case_json["wle_expected"].dump() +
+                 "\n  expected: " + expected.dump() +
                  "\n  actual:   " + actual.dump());
             continue;
         }

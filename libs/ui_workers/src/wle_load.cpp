@@ -37,9 +37,9 @@ std::string upper_ascii(std::string_view text) {
     return out;
 }
 
-// ~W "WELL." scan (Python well_log_load falls back to the file stem when the
-// header carries no well name). Stops at the ASCII section like the preview
-// bridge.
+// ~W "WELL." scan (Python inspect parity: last-wins including empty
+// overwrites, no inline '#' truncation — R15/R16). Stops at the ASCII
+// section like the preview bridge; falls back to the file stem.
 std::string scan_well_name(std::string_view text, const std::string& path) {
     enum class Section { none, version, well, curve };
     Section section = Section::none;
@@ -52,12 +52,8 @@ std::string scan_well_name(std::string_view text, const std::string& path) {
         text = line_end == std::string_view::npos
                    ? std::string_view{}
                    : text.substr(line_end + 1);
-        if (const auto comment = line.find('#');
-            comment != std::string_view::npos) {
-            line = line.substr(0, comment);
-        }
         line = trim(line);
-        if (line.empty()) continue;
+        if (line.empty() || line.front() == '#') continue;
         if (line.front() == '~') {
             const auto heading = upper_ascii(trim(line.substr(1)));
             if (heading.empty() || heading.front() == 'A') {
@@ -74,14 +70,14 @@ std::string scan_well_name(std::string_view text, const std::string& path) {
             }
             continue;
         }
-        if (section != Section::well || !found.empty()) continue;
+        if (section != Section::well) continue;
         const auto colon = line.find(':');
         std::string_view left =
             colon == std::string_view::npos ? line : line.substr(0, colon);
         const auto dot = left.find('.');
         if (dot == std::string_view::npos) continue;
         if (upper_ascii(trim(left.substr(0, dot))) != "WELL") continue;
-        found = std::string(trim(left.substr(dot + 1)));
+        found = std::string(trim(left.substr(dot + 1)));  // last wins
     }
     if (!found.empty()) return found;
     auto slash = path.find_last_of("/\\");

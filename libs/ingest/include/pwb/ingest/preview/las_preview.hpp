@@ -54,8 +54,10 @@ struct LasPreviewData {
 inline constexpr std::size_t kLasPreviewDataRows = 100;
 
 // Parse provider: turns raw LAS bytes + path into LasPreviewData. Installed
-// by the WLE bridge (production) or tests. Returns nullopt only when no
-// provider is installed (capability unavailable).
+// by the WLE bridge (production) or tests. A returned nullopt means the
+// provider declined (unparseable input class) — the result is the
+// parse-error message, uncached; "no provider installed" is handled
+// separately by las_preview_result's capability-unavailable branch.
 using LasPreviewProvider =
     std::function<std::optional<LasPreviewData>(const std::string& bytes,
                                                 const std::string& path)>;

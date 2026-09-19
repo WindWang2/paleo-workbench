@@ -70,8 +70,8 @@ PreviewResult las_preview_result(const ResourceRef& asset,
 
     std::optional<LasPreviewData> data = provider(bytes, asset.path);
     if (!data) {
-        // Provider present but declined (e.g. cancelled): treat as parse
-        // failure with the bridge-supplied class, defaulting to ValueError.
+        // Provider present but declined: parse-failure class, transient —
+        // never cached.
         PreviewResult r;
         r.mode = "message";
         r.title = asset.name;
@@ -82,6 +82,7 @@ PreviewResult las_preview_result(const ResourceRef& asset,
         r.message = "LAS \xE9\xA2\x84\xE8\xA7\x88\xE5\xA4\xB1\xE8\xB4\xA5: "
                     "ValueError";  // LAS 预览失败: ValueError
         r.warning = r.message;
+        r.cacheable = false;
         return r;
     }
 

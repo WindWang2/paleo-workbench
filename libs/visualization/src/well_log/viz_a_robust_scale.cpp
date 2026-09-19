@@ -1,14 +1,16 @@
 // VIZ-A — robust display-range port. Numeric-parity notes (frozen against
 // the Python oracle): np.percentile default linear interpolation;
 // math.isclose(p2, p98) uses rel_tol=1e-9; the null mask uses
-// np.isclose(rtol=1e-5, atol=1e-3); Python round() is half-to-even, which
-// matches IEEE nearbyint under the default rounding mode.
+// np.isclose(rtol=1e-5, atol=1e-3); Python round() is emulated via
+// printf correctly-rounded decimal conversion + strtod (see py_round).
 
 #include "pwb/viz/well_log_robust_scale.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace pwb::viz {
 
@@ -26,10 +28,16 @@ double percentile(std::vector<double> sorted, double q) {
     return sorted[lower] + fraction * (sorted[upper] - sorted[lower]);
 }
 
-// Python round(x, digits) — half-to-even via nearbyint.
+// Python round(x, digits) — correctly rounded at the decimal digit (CPython
+// uses exact decimal conversion; glibc printf has the same property, and
+// the strtod hop back keeps the double nearest to the decimal result). A
+// scale-multiply + nearbyint is NOT equivalent: e.g. round(2.675, 2) must
+// give 2.67 (the double is 2.67499...), while 2.675*100 rounds up to
+// exactly 267.5 and would produce 2.68 (review R1-P1).
 double py_round(double value, int digits) {
-    const double scale = std::pow(10.0, digits);
-    return std::nearbyint(value * scale) / scale;
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.*f", digits, value);
+    return std::strtod(buf, nullptr);
 }
 
 bool contains_any(const std::string& text, const char* const* keys) {

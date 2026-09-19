@@ -5038,6 +5038,495 @@
    "negative_self_check": true
   },
   {
+   "id": "18_inline_comment",
+   "file": "tests/cpp/viz_a/fixtures/las/18_inline_comment.las",
+   "sha256": "64abee30725a0751be9b2503e1e1bf9090344e3b6579cd0922afa17c5b7ab5ff",
+   "adjudication": "R15",
+   "wle_verdict": "accepted",
+   "python_result": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "Well-A # pilot"
+     ],
+     [
+      "曲线数",
+      "2"
+     ],
+     [
+      "采样点",
+      "3"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [
+     [
+      "DEPT",
+      "M",
+      "depth # measured"
+     ],
+     [
+      "GR",
+      "GAPI",
+      "gamma ray"
+     ]
+    ],
+    "data_headers": [
+     "DEPT",
+     "GR"
+    ],
+    "data_rows": [
+     [
+      "1000",
+      "45.2"
+     ],
+     [
+      "1000.25",
+      "46.1"
+     ],
+     [
+      "1000.5",
+      "47"
+     ]
+    ]
+   },
+   "wle_expected": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "Well-A # pilot"
+     ],
+     [
+      "曲线数",
+      "2"
+     ],
+     [
+      "采样点",
+      "3"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [
+     [
+      "DEPT",
+      "M",
+      "depth # measured"
+     ],
+     [
+      "GR",
+      "GAPI",
+      "gamma ray"
+     ]
+    ],
+    "data_headers": [
+     "DEPT",
+     "GR"
+    ],
+    "data_rows": [
+     [
+      "1000",
+      "45.2"
+     ],
+     [
+      "1000.25",
+      "46.1"
+     ],
+     [
+      "1000.5",
+      "47"
+     ]
+    ]
+   },
+   "references_agree": true,
+   "negative_self_check": true
+  },
+  {
+   "id": "19_well_last_wins",
+   "file": "tests/cpp/viz_a/fixtures/las/19_well_last_wins.las",
+   "sha256": "bf9dd2cab13d6da85d9737523d0e79daac22252712c725a4142f8fa1245e878f",
+   "adjudication": "",
+   "wle_verdict": "accepted",
+   "python_result": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "Second-Well"
+     ],
+     [
+      "曲线数",
+      "2"
+     ],
+     [
+      "采样点",
+      "2"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [
+     [
+      "DEPT",
+      "M",
+      "depth"
+     ],
+     [
+      "GR",
+      "GAPI",
+      "gamma"
+     ]
+    ],
+    "data_headers": [
+     "DEPT",
+     "GR"
+    ],
+    "data_rows": [
+     [
+      "1000",
+      "45.2"
+     ],
+     [
+      "1000.25",
+      "46.1"
+     ]
+    ]
+   },
+   "wle_expected": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "Second-Well"
+     ],
+     [
+      "曲线数",
+      "2"
+     ],
+     [
+      "采样点",
+      "2"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [
+     [
+      "DEPT",
+      "M",
+      "depth"
+     ],
+     [
+      "GR",
+      "GAPI",
+      "gamma"
+     ]
+    ],
+    "data_headers": [
+     "DEPT",
+     "GR"
+    ],
+    "data_rows": [
+     [
+      "1000",
+      "45.2"
+     ],
+     [
+      "1000.25",
+      "46.1"
+     ]
+    ]
+   },
+   "references_agree": true,
+   "negative_self_check": true
+  },
+  {
+   "id": "20_well_empty_last",
+   "file": "tests/cpp/viz_a/fixtures/las/20_well_empty_last.las",
+   "sha256": "eae4c2d23986d6bac1c86cf484682eeda11ad3b23e087bd3b1eb793820155459",
+   "adjudication": "",
+   "wle_verdict": "accepted",
+   "python_result": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "20_well_empty_last"
+     ],
+     [
+      "曲线数",
+      "2"
+     ],
+     [
+      "采样点",
+      "2"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [
+     [
+      "DEPT",
+      "M",
+      "depth"
+     ],
+     [
+      "GR",
+      "GAPI",
+      "gamma"
+     ]
+    ],
+    "data_headers": [
+     "DEPT",
+     "GR"
+    ],
+    "data_rows": [
+     [
+      "1000",
+      "45.2"
+     ],
+     [
+      "1000.25",
+      "46.1"
+     ]
+    ]
+   },
+   "wle_expected": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "<stem>"
+     ],
+     [
+      "曲线数",
+      "2"
+     ],
+     [
+      "采样点",
+      "2"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [
+     [
+      "DEPT",
+      "M",
+      "depth"
+     ],
+     [
+      "GR",
+      "GAPI",
+      "gamma"
+     ]
+    ],
+    "data_headers": [
+     "DEPT",
+     "GR"
+    ],
+    "data_rows": [
+     [
+      "1000",
+      "45.2"
+     ],
+     [
+      "1000.25",
+      "46.1"
+     ]
+    ]
+   },
+   "references_agree": false,
+   "negative_self_check": true
+  },
+  {
+   "id": "21_bad_curve_line_mixed",
+   "file": "tests/cpp/viz_a/fixtures/las/21_bad_curve_line_mixed.las",
+   "sha256": "3312981394f6f0bffd9d319217561c57837c8a50ddec4d8b7b756b9f8a3ecae9",
+   "adjudication": "R18",
+   "wle_verdict": "rejected",
+   "python_result": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "数据表列数（3）与曲线定义数（2）不一致",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "MIXED-CURVE-LINES"
+     ],
+     [
+      "曲线数",
+      "2"
+     ],
+     [
+      "采样点",
+      "2"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [
+     [
+      "DEPT",
+      "M",
+      "depth"
+     ],
+     [
+      "GR",
+      "GAPI",
+      "gamma"
+     ]
+    ],
+    "data_headers": [
+     "DEPT",
+     "GR"
+    ],
+    "data_rows": [
+     [
+      "1000",
+      "45.2",
+      "NaN"
+     ],
+     [
+      "1000.25",
+      "46.1",
+      "NaN"
+     ]
+    ]
+   },
+   "wle_expected": {
+    "mode": "message",
+    "type_label": "well_log",
+    "message": "LAS 预览失败: ValueError",
+    "warning": "LAS 预览失败: ValueError",
+    "truncated": false,
+    "summary_rows": [],
+    "table_headers": [],
+    "table_rows": [],
+    "data_headers": [],
+    "data_rows": []
+   },
+   "references_agree": false,
+   "negative_self_check": true
+  },
+  {
+   "id": "22_only_bad_curves",
+   "file": "tests/cpp/viz_a/fixtures/las/22_only_bad_curves.las",
+   "sha256": "b33ab683a29c8b8c82bd56c5f34f1e5903954ce2d97a1eeaa4a5b6230132c551",
+   "adjudication": "",
+   "wle_verdict": "no_curve_headers",
+   "python_result": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "LAS 文件缺少曲线定义",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "22_only_bad_curves"
+     ],
+     [
+      "曲线数",
+      "0"
+     ],
+     [
+      "采样点",
+      "0"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [],
+    "data_headers": [],
+    "data_rows": []
+   },
+   "wle_expected": {
+    "mode": "well_log",
+    "type_label": "well_log",
+    "message": "",
+    "warning": "LAS 文件缺少曲线定义",
+    "truncated": false,
+    "summary_rows": [
+     [
+      "井名",
+      "22_only_bad_curves"
+     ],
+     [
+      "曲线数",
+      "0"
+     ],
+     [
+      "采样点",
+      "0"
+     ]
+    ],
+    "table_headers": [
+     "曲线",
+     "单位",
+     "描述"
+    ],
+    "table_rows": [],
+    "data_headers": [],
+    "data_rows": []
+   },
+   "references_agree": true,
+   "negative_self_check": true
+  },
+  {
    "id": "a1_real",
    "file": "tests/fixtures/realdata/A1.Las",
    "sha256": "465bf8e4a151c2a2670b41058ab8b1d78cdae97e0389397a6b156002391e0114",

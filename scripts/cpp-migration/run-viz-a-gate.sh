@@ -7,76 +7,80 @@
 # geomodel) — builds the line-A closure and runs its tests TWICE (green x2),
 # plus a MALLOC audit subset and an OFF-configure check (the viewer switch
 # must stay optional: default builds configure and the LAS branch degrades
-# to the honest capability-unavailable message).
+# to the honest capability-unavailable message). Step 7 compile-covers the
+# app-side production wiring (PWB_WITH_VIZ_A) in a PLATFORM=ON configure
+# that reuses the shared vendored QGIS SDK read-only via PALEO_QGIS_* env
+# (skipped with SKIP_VIZ_A_PLATFORM=1 when no SDK is available — the skip
+# is then recorded honestly in the ledger, never silently).
 #
 # Coverage difference vs scripts/cpp-migration/run-integrated-gate.sh (the
 # default gate): the default gate builds PLATFORM+DATA+SCIENCE with the
 # viewer OFF — it covers ingest/ui_workers/science.* tests but NOT
-# science.viewer.* or viz_a.*'s WLE-dependent tests, and the app LAS
-# wiring (PWB_WITH_VIZ_A) is compile-covered only in this gate. Making the
-# external WLE SDK a hard dependency of every default build is a separate
-# decision this script intentionally does not take (see
+# science.viewer.* or viz_a.*'s WLE-dependent tests. Making the external
+# WLE SDK a hard dependency of every default build is a separate decision
+# this script intentionally does not take (see
 # docs/development/cpp-geoviz-completion-plan.md §1.2 P-B).
 #
 # Resource policy: every heavy step runs INSIDE the shared resource gate
 # (jobs pinned to 2, min 8 GiB free; exit 75 = busy/low memory → the
 # script backs off and retries; never bypasses the lock). This script does
 # NOT nest gate calls while a gate lock is already held by this process.
-set -euo pipefail
+set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 GATE="$HERE/invoke-resource-gate.sh"
 BUILD_DIR="$REPO_ROOT/build/viz-a"
 BUILD_DIR_OFF="$REPO_ROOT/build/viz-a-viewer-off"
+BUILD_DIR_PLATFORM="$REPO_ROOT/build/viz-a-platform"
 JOBS=2
 
-# The CMake switch set defining the VIZ-A closure.
 VIZ_A_ARGS="-DPWB_BUILD_PLATFORM=OFF;-DPWB_BUILD_SCIENCE=ON;-DPWB_SCIENCE_BUILD_VIEWER=ON;-DPWB_SCIENCE_VIEWER_TESTS=ON;-DPWB_BUILD_CONV_22=ON"
-
-# Test selection: line-A tests + the viewer suite + the affected regression
-# surfaces (ingest parsers, ui_workers oracle/lifecycle, science core).
 VIZ_A_REGEX='^(viz_a\.|science\.viewer\.|ingest\.|ui_workers\.)'
 
 gate() {
-    # Retry on exit 75 (slot busy / low memory) with a 30-60s backoff.
-    local attempt=0
+    # Run one gate action, retrying ONLY on exit 75 (slot busy / low
+    # memory) with a 30-60s backoff. Any other non-zero status propagates.
+    # NOTE: the status must be captured via `|| code=$?` — an `if cmd; then`
+    # compound swallows it (the exact false-green this script once had).
+    local attempt=0 code=0
     while true; do
-        if "$GATE" "$@" -j "$JOBS" -m 8; then
+        code=0
+        "$GATE" "$@" -j "$JOBS" -m 8 || code=$?
+        if [[ "$code" -eq 0 ]]; then
             return 0
         fi
-        local code=$?
-        if [[ "$code" == "75" ]]; then
+        if [[ "$code" -eq 75 ]]; then
             attempt=$((attempt + 1))
-            if [[ "$attempt" -gt 120 ]]; then
-                echo "run-viz-a-gate: resource gate stayed busy for ~2h; aborting" >&2
+            if [[ "$attempt" -gt 240 ]]; then
+                echo "run-viz-a-gate: resource gate stayed busy; aborting (75)" >&2
                 return 75
             fi
             sleep $((30 + RANDOM % 31))
             continue
         fi
-        echo "run-viz-a-gate: gate action failed (exit $code)" >&2
+        echo "run-viz-a-gate: gate action '$*' failed (exit $code)" >&2
         return "$code"
     done
 }
 
-echo "== [1/6] Configure build/viz-a (viewer ON, jobs=$JOBS) =="
+echo "== [1/7] Configure build/viz-a (viewer ON, jobs=$JOBS) =="
 gate Configure -s "$REPO_ROOT" -b "$BUILD_DIR" -c Release -a "$VIZ_A_ARGS"
 
-echo "== [2/6] Build the line-A closure =="
+echo "== [2/7] Build the line-A closure =="
 gate Build -b "$BUILD_DIR" -t "pwb_ingest;pwb_ingest_las_wle;pwb_ui_workers;pwb_ui_workers_wle_load;pwb_visualization_well_log;viz_a.las_preview_core;viz_a.las_preview_wle;viz_a.wle_load;viz_a.consistency;viz_a.viewer_flow;viz_a.patterns;ingest.parsers;ui_workers.oracle;ui_workers.lifecycle"
 
-echo "== [3/6] Tests, pass 1 of 2 (green x2 rule) =="
+echo "== [3/7] Tests, pass 1 of 2 (green x2 rule) =="
 gate Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
 
-echo "== [4/6] Tests, pass 2 of 2 =="
+echo "== [4/7] Tests, pass 2 of 2 =="
 gate Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
 
-echo "== [5/6] MALLOC audit subset (heap abuse on the line-A surface) =="
+echo "== [5/7] MALLOC audit subset (heap abuse on the line-A surface) =="
 gate Exec -m 8 -- env MALLOC_CHECK_=3 QT_QPA_PLATFORM=offscreen LIBGL_ALWAYS_SOFTWARE=1 \
     ctest --test-dir "$BUILD_DIR" -R '^viz_a\.' --output-on-failure --no-tests=error --timeout 300
 
-echo "== [6/6] OFF check: default (viewer OFF) still configures and the LAS branch degrades honestly =="
+echo "== [6/7] OFF check: default (viewer OFF) still configures and the LAS branch degrades honestly =="
 rm -rf "$BUILD_DIR_OFF"
 gate Configure -s "$REPO_ROOT" -b "$BUILD_DIR_OFF" -c Release \
     -a "-DPWB_BUILD_PLATFORM=OFF;-DPWB_BUILD_SCIENCE=ON;-DPWB_BUILD_CONV_22=ON"
@@ -86,6 +90,20 @@ gate Test -b "$BUILD_DIR_OFF" -r '^viz_a\.las_preview_core$'
 if grep -q "pwb_ingest_las_wle" "$BUILD_DIR_OFF/build.ninja" 2>/dev/null; then
     echo "run-viz-a-gate: OFF configure unexpectedly built the WLE bridge" >&2
     exit 1
+fi
+
+echo "== [7/7] App wiring compile cover (PLATFORM=ON + viewer; reuses the shared QGIS SDK read-only) =="
+if [[ "${SKIP_VIZ_A_PLATFORM:-0}" == "1" ]]; then
+    echo "run-viz-a-gate: SKIP_VIZ_A_PLATFORM=1 — app wiring compile cover SKIPPED (record in ledger)"
+elif [[ -z "${PALEO_QGIS_SDK_DIR:-}" ]]; then
+    echo "run-viz-a-gate: PALEO_QGIS_SDK_DIR not set — app wiring compile cover SKIPPED (no QGIS SDK; record in ledger)"
+else
+    rm -rf "$BUILD_DIR_PLATFORM"
+    gate Configure -s "$REPO_ROOT" -b "$BUILD_DIR_PLATFORM" -c Release \
+        -a "-DPWB_BUILD_PLATFORM=ON;-DPWB_BUILD_SCIENCE=ON;-DPWB_SCIENCE_BUILD_VIEWER=ON;-DPWB_BUILD_CONV_22=ON"
+    gate Build -b "$BUILD_DIR_PLATFORM" -t "pwb-platform"
+    grep -q "viz_a_install" "$BUILD_DIR_PLATFORM/build.ninja" \
+        || { echo "run-viz-a-gate: pwb-platform built WITHOUT viz_a_install (wiring dead)" >&2; exit 1; }
 fi
 
 echo "run-viz-a-gate: ALL GREEN"

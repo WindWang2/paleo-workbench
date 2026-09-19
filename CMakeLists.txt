@@ -754,9 +754,34 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-09
 
-# BEGIN VIZ-A — line-A acceptance tests (LAS/WLE convergence + well-log
-# drawing differentials). Mounted after science_suite/ingest/ui_workers so
-# the guarded WLE-bridge targets exist when this directory configures.
+# BEGIN VIZ-A — line-A (LAS/WLE convergence + well-log drawing
+# differentials). This block runs after science_suite (:327), the platform
+# app (:703) and ui_workers (:725), so every guard below sees the real
+# target set regardless of which earlier block added a library.
+#
+# (a) Bridge-ordering heal: when PWB_BUILD_DATA pulled libs/ingest in early
+#     (data_suite adds it at :322 BEFORE science_suite introduces
+#     WellLog::IO), the ingest VIZ-A bridge target could not exist yet.
+#     Re-enter the directory in bridge-only mode to build it now.
+if(TARGET pwb_ingest AND TARGET WellLog::IO AND NOT TARGET pwb_ingest_las_wle)
+    set(VIZ_A_LATE_BRIDGE ON)
+    add_subdirectory(libs/ingest ${CMAKE_CURRENT_BINARY_DIR}/ingest-late-bridge)
+    unset(VIZ_A_LATE_BRIDGE)
+endif()
+#
+# (b) App production wiring: preview provider + JobCenter-backed LAS loads
+#     (apps/paleo_workbench_platform/viz_a_install.* guarded by
+#     PWB_WITH_VIZ_A in main_window.cpp). The app target exists only under
+#     PWB_BUILD_PLATFORM; compile-covered by run-viz-a-gate.sh step 7.
+if(TARGET pwb-platform AND TARGET Pwb::IngestLasWle
+   AND TARGET Pwb::UiWorkersWleLoad AND TARGET Pwb::JobQt)
+    target_sources(pwb-platform PRIVATE apps/paleo_workbench_platform/viz_a_install.cpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::IngestLasWle Pwb::UiWorkersWleLoad Pwb::JobQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_A=1)
+endif()
+#
+# (c) Line-A acceptance tests.
 if(BUILD_TESTING AND TARGET Pwb::Ingest AND TARGET Pwb::UiWorkers)
     enable_testing()
     add_subdirectory(tests/cpp/viz_a)

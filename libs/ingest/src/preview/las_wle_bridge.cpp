@@ -92,7 +92,10 @@ LasPreviewData wle_las_preview_data(const std::string& bytes,
                                     const std::string& path) {
     LasPreviewData data;
 
-    // Header pre-scan: well name + curve table (~C order) + wrap flag.
+    // Header pre-scan (Python inspect parity): skip lines that START with
+    // '#' — no inline '#' truncation (the SDK applies its own inline rule
+    // to its parse; the preview table mirrors Python, R15). WELL. is
+    // last-wins including empty overwrites (Python inspect, R16).
     enum class Section { none, version, well, curve, ascii };
     Section section = Section::none;
     std::string_view text(bytes);
@@ -104,11 +107,8 @@ LasPreviewData wle_las_preview_data(const std::string& bytes,
         text = line_end == std::string_view::npos
                    ? std::string_view{}
                    : text.substr(line_end + 1);
-        if (const auto comment = line.find('#'); comment != std::string_view::npos) {
-            line = line.substr(0, comment);
-        }
         line = trim(line);
-        if (line.empty()) continue;
+        if (line.empty() || line.front() == '#') continue;
         if (line.front() == '~') {
             const auto heading = upper_ascii(trim(line.substr(1)));
             if (heading.empty()) {
@@ -129,8 +129,8 @@ LasPreviewData wle_las_preview_data(const std::string& bytes,
         }
         if (section == Section::well) {
             if (auto item = well_item(line)) {
-                if (item->first == "WELL" && data.well_name.empty()) {
-                    data.well_name = std::move(item->second);
+                if (item->first == "WELL") {
+                    data.well_name = std::move(item->second);  // last wins
                 }
             }
         } else if (section == Section::version) {

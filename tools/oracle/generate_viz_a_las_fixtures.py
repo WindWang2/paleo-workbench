@@ -74,7 +74,12 @@ ADJUDICATIONS = {
     "14_all_rows_invalid": "R9",  # WLE rejects zero-accepted-row files
     "15_wrap_y": "R10",           # WLE accepts only YES/NO for WRAP
     "16_dlm_comma": "R13",        # WLE has no comma DLM support
-    "17_null_tolerance": "R4",    # exact == vs abs_tol=1e-6 sentinel compare
+    "17_null_tolerance": "R4",     # (relisted below for order)
+    "18_inline_comment": "R15",    # inline '#': SDK truncates, Python keeps
+    "19_well_last_wins": "",       # both last-wins now (fixed to Python)
+    "20_well_empty_last": "",      # empty last WELL. -> stem (Python parity)
+    "21_bad_curve_line_mixed": "R18",  # SDK rejects whole doc; Python skips
+    "22_only_bad_curves": "",      # both take missing-curve-definition branch
     "a1_real": "",
 }
 
@@ -162,7 +167,8 @@ def run_python_preview(module, las_path: Path, tmp_dir: Path) -> dict:
 
 
 def _wle_tokens(line: str):
-    return line.split()  # las.cpp tokens_in: space/tab, ASCII
+    # las.cpp tokens_in (:84-97) splits on ASCII space/tab only.
+    return [t for t in re.split(r"[ \t]+", line) if t]
 
 
 def _wle_parse_number(text: str):
@@ -197,10 +203,15 @@ def wle_reference(text: str) -> dict:
     wrapped = False
     wrap_seen = False
     null_sentinel = None
-    definitions = []  # (mnemonic, unit, description)
+    definitions = []  # (mnemonic, unit, description) — WLE semantics
+    curve_malformed = False
     rows = []
 
     for raw in text.split("\n"):
+        # las.cpp:174-176 — the SDK truncates inline '#' comments in every
+        # section before parsing (this loop models the SDK's accept/reject
+        # layer; the preview TABLE comes from the bridge-scan helper below,
+        # which mirrors the C++ bridge's Python-parity header scan).
         line = raw.split("#", 1)[0].strip(" \t\r")
         if not line:
             continue
@@ -226,8 +237,10 @@ def wle_reference(text: str) -> dict:
             if dot < 0:
                 continue
             key = line[:dot].strip(" \t\r").upper()
-            value = line[dot + 1:].strip(" \t\r").split(" ")[:1]
-            value = value[0] if value else ""
+            # las.cpp first_token (:78-82): the token ends at the first
+            # space OR tab.
+            value = re.split(r"[ \t]", line[dot + 1:].strip(" \t\r"))[0] \
+                if line[dot + 1:].strip(" \t\r") else ""
             if key == "VERS" and section == "version":
                 parsed = _wle_parse_number(value)
                 if parsed is None or not parsed[1]:
@@ -248,14 +261,18 @@ def wle_reference(text: str) -> dict:
 
         if section == "curve":
             # parse_curve_definition las.cpp:132-151; a malformed line
-            # invalidates the whole document (:230-234).
+            # invalidates the whole document (:230-234) — BUT the bridge's
+            # pre-scan skips malformed lines and short-circuits to the
+            # no-curve-headers branch before ever calling the SDK. So:
+            # only-malformed ~C -> bridge no-curve-headers (== Python);
+            # mixed good+malformed -> the SDK rejects at its scan ->
+            # parse_error. Model both layers.
             definition, sep, description = line.partition(":")
             dot = definition.find(".")
-            if dot < 0:
-                return _wle_rejected()
-            mnemonic = definition[:dot].strip(" \t\r")
+            mnemonic = definition[:dot].strip(" \t\r") if dot >= 0 else ""
             if not mnemonic:
-                return _wle_rejected()
+                curve_malformed = True
+                continue
             unit = definition[dot + 1:].strip(" \t\r").split()[:1]
             unit = unit[0] if unit else ""
             definitions.append((mnemonic, unit, description.strip(" \t\r")))
@@ -288,6 +305,11 @@ def wle_reference(text: str) -> dict:
             "data_headers": [],
             "data_rows": [],
         }
+    # A malformed ~C line among good ones: the bridge's scan still finds
+    # curves, so it calls the SDK — which rejects the whole document at its
+    # own scan (las.cpp:230-234).
+    if curve_malformed:
+        return _wle_rejected()
     if version is None or not (2.0 <= version < 4.0) or len(definitions) < 2:
         return _wle_rejected()
     # las.cpp:254-264 — DEPT/DEPTH mnemonic required.
@@ -350,11 +372,12 @@ def wle_reference(text: str) -> dict:
     if direction_values and (min(direction_values) != max(direction_values)):
         return _wle_rejected()
 
-    # Preview projection (bridge semantics): Python parity over WLE facts.
-    # Unit column uses WLE semantics (first token after the dot) so the
-    # preview table can never disagree with the dock (R14).
-    well_name = _scan_well_name(text)
-    truncated = len(definitions) > 200
+    # Preview projection: the bridge's own header scan (Python parity for
+    # name/description, R14 first-token units) over the SDK's accepted rows.
+    well_name, table_curves = _scan_header_bridge(text)
+    if not well_name:
+        well_name = "<stem>"  # the C++ core falls back to the path stem
+    truncated = len(table_curves) > 200
     return {
         "verdict": "accepted",
         "mode": "well_log",
@@ -364,47 +387,61 @@ def wle_reference(text: str) -> dict:
         "truncated": truncated,
         "summary_rows": [
             ["井名", well_name],
-            ["曲线数", str(len(definitions))],
+            ["曲线数", str(len(table_curves))],
             ["采样点", str(len(accepted))],
         ],
         "table_headers": ["曲线", "单位", "描述"],
         "table_rows": [
-            [m, u, d] for m, u, d in definitions[:200]
+            [m, u, d] for m, u, d in table_curves[:200]
         ],
-        "data_headers": [m for m, _, _ in definitions],
+        "data_headers": [m for m, _, _ in table_curves],
         "data_rows": [
             [_format_value(v) for v in row] for row in accepted[:100]
         ],
     }
 
 
-def _scan_well_name(text: str) -> str:
-    """~W WELL. value between the first dot and the first colon (Python
-    las_preview._well_item parity; the SDK does not surface WELL.)."""
+def _scan_header_bridge(text: str):
+    """Mirror of the C++ bridge's header pre-scan (Python inspect parity):
+    skip lines that START with '#' (no inline truncation — R15), WELL.
+    last-wins including empty overwrites (R16), curve rows with
+    unit = first token (R14) and full description; malformed rows skipped.
+    Returns (well_name, [(mnemonic, unit, description), ...]).
+    """
     section = "none"
+    well_name = ""
+    curves = []
     for raw in text.split("\n"):
-        line = raw.split("#", 1)[0].strip(" \t\r")
-        if not line:
+        line = raw.strip(" \t\r")
+        if not line or line.startswith("#"):
             continue
         if line.startswith("~"):
             heading = line[1:].strip(" \t\r").upper()
             if not heading or heading[0] == "A":
                 break
             section = {"V": "version", "W": "well", "C": "curve"}.get(
-                heading[0] if heading else "", "none")
+                heading[0], "none")
             continue
-        if section != "well":
-            continue
-        left = line.split(":", 1)[0]
-        dot = left.find(".")
-        if dot < 0:
-            continue
-        if left[:dot].strip(" \t\r").upper() != "WELL":
-            continue
-        value = left[dot + 1:].strip(" \t\r")
-        if value:
-            return value
-    return ""
+        if section == "well":
+            left = line.split(":", 1)[0]
+            dot = left.find(".")
+            if dot < 0:
+                continue
+            if left[:dot].strip(" \t\r").upper() != "WELL":
+                continue
+            well_name = left[dot + 1:].strip(" \t\r")  # last wins (R16)
+        elif section == "curve":
+            definition, _, description = line.partition(":")
+            dot = definition.find(".")
+            if dot < 0:
+                continue
+            mnemonic = definition[:dot].strip(" \t\r")
+            if not mnemonic:
+                continue
+            unit_field = definition[dot + 1:].strip(" \t\r")
+            unit = re.split(r"[ \t]", unit_field)[0] if unit_field else ""
+            curves.append((mnemonic, unit, description.strip(" \t\r")))
+    return well_name, curves
 
 
 def _format_value(value: float) -> str:

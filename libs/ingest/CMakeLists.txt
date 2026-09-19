@@ -26,8 +26,28 @@ target_compile_features(pwb_ingest PUBLIC cxx_std_20)
 target_link_libraries(pwb_ingest PUBLIC Pwb::Domain)
 
 # BEGIN VIZ-A: WLE-backed LAS preview bridge. Only when the SDK participates
-# in the build (science_suite adds well-log-engine before this directory);
-# without it the registry LAS branch reports capability-unavailable.
+# in the build (science_suite adds well-log-engine before this directory —
+# or the root VIZ-A block re-enters this directory in VIZ_A_LATE_BRIDGE
+# mode when data_suite pulled ingest in before the SDK existed); without it
+# the registry LAS branch reports capability-unavailable.
+if(VIZ_A_LATE_BRIDGE)
+    # Bridge-only re-entry (see root CMakeLists VIZ-A block): everything
+    # else above already exists; do not redefine it.
+    if(NOT TARGET WellLog::IO)
+        message(FATAL_ERROR "VIZ-A late bridge requires WellLog::IO")
+    endif()
+    add_library(pwb_ingest_las_wle STATIC
+        src/preview/las_wle_bridge.cpp)
+    add_library(Pwb::IngestLasWle ALIAS pwb_ingest_las_wle)
+    target_include_directories(pwb_ingest_las_wle PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_compile_features(pwb_ingest_las_wle PUBLIC cxx_std_20)
+    target_link_libraries(pwb_ingest_las_wle
+        PUBLIC pwb_ingest
+        PRIVATE WellLog::IO)
+    return()
+endif()
+
 if(TARGET WellLog::IO)
     add_library(pwb_ingest_las_wle STATIC
         src/preview/las_wle_bridge.cpp)

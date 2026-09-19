@@ -111,7 +111,8 @@ int main() {
         }
         // Determinism: a second build is identical.
         auto again = make_pattern_definition(id);
-        if (again->primitives.size() != definition->primitives.size() ||
+        if (!again.has_value() ||
+            again->primitives.size() != definition->primitives.size() ||
             again->version != definition->version) {
             fail("pattern '" + id + "' not deterministic");
         }
