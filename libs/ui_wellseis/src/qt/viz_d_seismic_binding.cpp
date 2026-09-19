@@ -36,7 +36,7 @@ RealSeismicViewBinding::~RealSeismicViewBinding() {
 }
 
 QWidget* RealSeismicViewBinding::widget() const {
-    return widget_;
+    return widget_.data();
 }
 
 bool RealSeismicViewBinding::apply_display_mode(const std::string& mode) {

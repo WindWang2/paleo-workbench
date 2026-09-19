@@ -1,5 +1,8 @@
+#include <pwb/seismic_viewer/attribute_fusion_core.hpp>
 #include <pwb/seismic_viewer/color_maps.hpp>
 #include <pwb/seismic_viewer/seismic_slice_widget.hpp>
+#include <pwb/seismic_viewer/slice_export.hpp>
+#include <pwb/seismic_viewer/view_state.hpp>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -13,6 +16,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QSlider>
@@ -24,8 +28,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <utility>
+
+#include <pwb/domain/json.hpp>
 
 namespace pwb::seismic_viewer {
 namespace {
@@ -35,6 +43,36 @@ using pwb::viz::VolumeAxis;
 std::string next_viewer_origin() {
     static std::atomic<std::uint64_t> counter{0};
     return "seismic_viewer-" + std::to_string(counter.fetch_add(1));
+}
+
+// Canonical axis tokens for the view-state schema (horizon binding uses the
+// same vocabulary: "inline" | "crossline" | "sample").
+const char* axis_schema_name(VolumeAxis axis) {
+    switch (axis) {
+    case VolumeAxis::inline_:
+        return "inline";
+    case VolumeAxis::crossline:
+        return "crossline";
+    case VolumeAxis::sample:
+        return "sample";
+    }
+    return "?";
+}
+
+bool axis_from_schema_name(std::string_view name, VolumeAxis& out) {
+    if (name == "inline") {
+        out = VolumeAxis::inline_;
+        return true;
+    }
+    if (name == "crossline") {
+        out = VolumeAxis::crossline;
+        return true;
+    }
+    if (name == "sample") {
+        out = VolumeAxis::sample;
+        return true;
+    }
+    return false;
 }
 
 const char* axis_display_name(VolumeAxis axis) {
@@ -434,6 +472,46 @@ struct SeismicSliceWidget::Impl {
     double displayed_lo{0.0};
     double displayed_hi{0.0};
 
+    // --- VIZ-D attribute / fusion view (07 line) ---------------------------
+    // Pinned to the slice it was computed for: binding (axis/index/revision)
+    // is checked on every delivered plane, and any other slice drops the
+    // pinned view back to amplitude (a stale attribute is never painted).
+    bool attribute_active_flag{false};
+    std::string attribute_label;
+    VolumeAxis attribute_axis{VolumeAxis::inline_};
+    std::int64_t attribute_index{0};
+    std::uint64_t attribute_revision{0};
+    QImage attribute_image; // display-oriented RGB888 / Indexed8 render
+    double attribute_lo{0.0};
+    double attribute_hi{0.0};
+
+    void clear_attribute_view() {
+        if (!attribute_active_flag) {
+            return;
+        }
+        attribute_active_flag = false;
+        attribute_label.clear();
+        attribute_image = QImage();
+        refresh_overlay();
+        sync_colorbar();
+    }
+
+    // Common guard for the attribute setters: a plane is only accepted for
+    // the currently displayed slice (shape + axis + revision) — a stale or
+    // misshapen attribute must fail closed with a diagnostic, never paint.
+    bool attribute_view_shape_ok(std::int64_t rows, std::int64_t cols) {
+        if (plane.values.empty() || plane.rows <= 0 || plane.cols <= 0) {
+            diagnostic = "no displayed slice to pin the attribute to";
+            return false;
+        }
+        if (rows != plane.rows || cols != plane.cols) {
+            diagnostic = "attribute shape does not match the displayed slice";
+            return false;
+        }
+        return true;
+    }
+
+
     // widgets
     SliceCanvas* canvas{nullptr};
     QComboBox* axis_combo{nullptr};
@@ -564,7 +642,18 @@ struct SeismicSliceWidget::Impl {
             }
             break;
         }
-        canvas->set_image(image.isNull() ? nullptr : &image, overlay);
+        // The pinned attribute view replaces the amplitude raster on screen
+        // (same zoom/pan transform, own overlay note); anything else keeps
+        // the amplitude image.
+        const QImage* shown = &image;
+        if (attribute_active_flag && !attribute_image.isNull()) {
+            shown = &attribute_image;
+            if (!overlay.isEmpty()) {
+                overlay += QStringLiteral("  |  ");
+            }
+            overlay += QString::fromStdString(attribute_label);
+        }
+        canvas->set_image(shown->isNull() ? nullptr : shown, overlay);
         // VIZ-D overlay state follows every state change so the canvas never
         // paints stale wiggle geometry or pick markers.
         canvas->set_display_mode(display_mode);
@@ -886,6 +975,7 @@ void SeismicSliceWidget::set_volume(std::shared_ptr<pwb::viz::ISeismicVolume> vo
     impl_->geometry.reset();
     impl_->plane = SliceResult{};
     impl_->image = QImage();
+    impl_->clear_attribute_view(); // volume swap: pinned attribute is stale
     impl_->invalidate_clip_cache(); // volume swap: no inherited P(100-p)/P(p)
     impl_->wiggle_cache_valid = false;
     if (!volume) {
@@ -1247,6 +1337,14 @@ void SeismicSliceWidget::handle_result(const SliceResult& result) {
         return;
     }
     impl_->plane = result;
+    // Pinning contract: an attribute view computed for a different slice or
+    // volume revision is dropped when the new plane arrives — the widget
+    // never paints a stale attribute over a new slice.
+    if (impl_->attribute_active_flag &&
+        (result.axis != impl_->attribute_axis || result.index != impl_->attribute_index ||
+         impl_->volume_revision_value != impl_->attribute_revision)) {
+        impl_->clear_attribute_view();
+    }
     if (!impl_->geometry || result.indexed.empty() || result.rows <= 0 ||
         result.cols <= 0) {
         impl_->image = QImage();
@@ -1696,6 +1794,328 @@ void SeismicSliceWidget::rebuild_wiggle(int width, int height) {
 
 const display::WiggleGeometry* SeismicSliceWidget::wiggle_geometry() const {
     return impl_->wiggle_cache_valid ? &impl_->wiggle_cache : nullptr;
+}
+
+// --- VIZ-D attribute / RGB-fusion display (07 line) ---------------------------
+
+SeismicSliceWidget::RetainedPlane SeismicSliceWidget::retained_plane() const {
+    RetainedPlane out;
+    out.values = impl_->plane.values;
+    out.rows = impl_->plane.rows;
+    out.cols = impl_->plane.cols;
+    out.axis = impl_->plane.axis;
+    out.index = impl_->plane.index;
+    out.revision = impl_->volume_revision_value;
+    return out;
+}
+
+bool SeismicSliceWidget::set_attribute_plane(std::span<const float> plane,
+                                             std::int64_t rows, std::int64_t cols,
+                                             std::string_view color_map,
+                                             std::string_view label) {
+    if (!impl_->attribute_view_shape_ok(rows, cols)) {
+        return false;
+    }
+    if (color_lut(color_map).empty()) {
+        impl_->diagnostic = "unknown attribute colormap";
+        return false;
+    }
+    // Attribute rendering mirrors the amplitude VD path minus SEG polarity:
+    // percentile clip when enabled, the finite min/max stretch otherwise.
+    double lo = 0.0;
+    double hi = 0.0;
+    if (impl_->clip_pct_enabled) {
+        const display::ClipRange range =
+            display::percentile_clip_range(plane, impl_->clip_pct);
+        if (range.degenerate || !std::isfinite(range.lo) || !std::isfinite(range.hi)) {
+            impl_->diagnostic = "attribute plane has no usable value range";
+            return false;
+        }
+        lo = range.lo;
+        hi = range.hi;
+    } else {
+        bool have_finite = false;
+        double dmin = 0.0;
+        double dmax = 0.0;
+        for (const float value : plane) {
+            if (std::isfinite(value)) {
+                dmin = have_finite ? std::min(dmin, static_cast<double>(value))
+                                   : static_cast<double>(value);
+                dmax = have_finite ? std::max(dmax, static_cast<double>(value))
+                                   : static_cast<double>(value);
+                have_finite = true;
+            }
+        }
+        if (!have_finite || !(dmax > dmin)) {
+            impl_->diagnostic = "attribute plane has no usable value range";
+            return false;
+        }
+        lo = dmin;
+        hi = dmax;
+    }
+
+    // Display orientation (section views: time runs down the image), the
+    // same canonical->display mapping the amplitude raster uses.
+    const PlaneAxes axes = plane_axes(*impl_->geometry, impl_->plane.axis);
+    const int width = static_cast<int>(axes.col_count);
+    const int height = static_cast<int>(axes.row_count);
+    std::vector<std::uint8_t> display(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
+    const std::vector<std::uint8_t> indexed =
+        display::normalize_to_index(plane, lo, hi);
+    for (std::int64_t y = 0; y < axes.row_count; ++y) {
+        for (std::int64_t x = 0; x < axes.col_count; ++x) {
+            const std::int64_t flat =
+                plane_flat_index(impl_->plane.axis, impl_->plane.cols, x, y);
+            display[static_cast<std::size_t>(y * axes.col_count + x)] =
+                indexed[static_cast<std::size_t>(flat)];
+        }
+    }
+    QImage raw(display.data(), width, height, width, QImage::Format_Indexed8);
+    impl_->attribute_image = raw.copy();
+    // The attribute renders through its OWN colormap LUT, not the amplitude
+    // one: rebuild the color table on the copy.
+    const ColorLut attribute_lut = color_lut(color_map);
+    QVector<QRgb> table;
+    table.reserve(256);
+    for (const auto& rgb : attribute_lut) {
+        table.push_back(qRgb(rgb[0], rgb[1], rgb[2]));
+    }
+    impl_->attribute_image.setColorTable(table);
+
+    impl_->attribute_active_flag = true;
+    impl_->attribute_label = std::string(label);
+    impl_->attribute_axis = impl_->plane.axis;
+    impl_->attribute_index = impl_->plane.index;
+    impl_->attribute_revision = impl_->volume_revision_value;
+    impl_->attribute_lo = lo;
+    impl_->attribute_hi = hi;
+    impl_->refresh_overlay();
+    impl_->sync_colorbar();
+    return true;
+}
+
+bool SeismicSliceWidget::set_rgb_fusion(std::span<const float> channel_r,
+                                        std::span<const float> channel_g,
+                                        std::span<const float> channel_b,
+                                        std::int64_t rows, std::int64_t cols,
+                                        double clip_pct, std::string_view label) {
+    if (!impl_->attribute_view_shape_ok(rows, cols)) {
+        return false;
+    }
+    const std::vector<std::uint8_t> fused =
+        fusion::fuse_rgb(channel_r, channel_g, channel_b, rows, cols, clip_pct);
+    const PlaneAxes axes = plane_axes(*impl_->geometry, impl_->plane.axis);
+    const int width = static_cast<int>(axes.col_count);
+    const int height = static_cast<int>(axes.row_count);
+    std::vector<std::uint8_t> display(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3, 0);
+    for (std::int64_t y = 0; y < axes.row_count; ++y) {
+        for (std::int64_t x = 0; x < axes.col_count; ++x) {
+            const std::int64_t flat =
+                plane_flat_index(impl_->plane.axis, impl_->plane.cols, x, y);
+            const std::size_t src = static_cast<std::size_t>(flat) * 3;
+            const std::size_t dst =
+                (static_cast<std::size_t>(y * axes.col_count + x)) * 3;
+            display[dst] = fused[src];
+            display[dst + 1] = fused[src + 1];
+            display[dst + 2] = fused[src + 2];
+        }
+    }
+    QImage raw(display.data(), width, height, width * 3, QImage::Format_RGB888);
+    impl_->attribute_image = raw.copy();
+
+    impl_->attribute_active_flag = true;
+    impl_->attribute_label = std::string(label);
+    impl_->attribute_axis = impl_->plane.axis;
+    impl_->attribute_index = impl_->plane.index;
+    impl_->attribute_revision = impl_->volume_revision_value;
+    impl_->attribute_lo = 0.0;
+    impl_->attribute_hi = 255.0;
+    impl_->refresh_overlay();
+    impl_->sync_colorbar();
+    return true;
+}
+
+void SeismicSliceWidget::clear_attribute_view() { impl_->clear_attribute_view(); }
+
+bool SeismicSliceWidget::attribute_active() const { return impl_->attribute_active_flag; }
+
+// --- slice export (07 line) ----------------------------------------------------
+
+bool SeismicSliceWidget::export_slice(const std::string& path, SliceExportFormat format,
+                                      std::string& error) {
+    error.clear();
+    if (path.empty()) {
+        error = "empty export path";
+        return false;
+    }
+    if (impl_->plane.values.empty() || !impl_->geometry) {
+        error = "nothing displayed to export";
+        return false;
+    }
+    if (format == SliceExportFormat::png) {
+        // Real display render of the canvas (the plot area only — controls,
+        // sliders and status strips stay out), the widget.grab() parity of
+        // the frozen export. Whatever is on screen — amplitude or a pinned
+        // attribute/fusion view — is what the png contains.
+        const QPixmap shot = impl_->canvas->grab();
+        if (shot.isNull()) {
+            error = "canvas render failed";
+            return false;
+        }
+        if (!shot.save(QString::fromStdString(path))) {
+            error = "png write failed: " + path;
+            return false;
+        }
+        return true;
+    }
+    if (impl_->attribute_active_flag) {
+        // The displayed pixels are the pinned attribute/fusion view, but the
+        // retained float plane is the AMPLITUDE data — exporting it here
+        // would hand back different numbers than the screen shows. Refuse
+        // with the honest remedy instead (png above exports the real view).
+        error = "属性视图激活中：数据导出仅支持振幅数据面，请先清除属性视图";
+        return false;
+    }
+    // Data exports use DISPLAY orientation: rows = image vertical axis (the
+    // sample axis on section views), cols = horizontal — what was exported
+    // is what was on screen.
+    const PlaneAxes axes = plane_axes(*impl_->geometry, impl_->plane.axis);
+    std::vector<float> oriented(static_cast<std::size_t>(axes.row_count * axes.col_count));
+    for (std::int64_t y = 0; y < axes.row_count; ++y) {
+        for (std::int64_t x = 0; x < axes.col_count; ++x) {
+            const std::int64_t flat =
+                plane_flat_index(impl_->plane.axis, impl_->plane.cols, x, y);
+            oriented[static_cast<std::size_t>(y * axes.col_count + x)] =
+                impl_->plane.values[static_cast<std::size_t>(flat)];
+        }
+    }
+    if (format == SliceExportFormat::npy) {
+        return slice_export::write_npy(path, oriented, axes.row_count, axes.col_count,
+                                       error);
+    }
+    return slice_export::write_csv(path, oriented, axes.row_count, axes.col_count, error);
+}
+
+// --- view state persistence (07 line) ------------------------------------------
+
+bool SeismicSliceWidget::save_view_state(const std::string& path, std::string& error) {
+    SeismicViewState state;
+    state.volume_id = impl_->identity.volume_id;
+    state.volume_version = impl_->identity.version;
+    state.axis = axis_schema_name(impl_->axis);
+    state.slice_index = impl_->index;
+    state.color_map = impl_->color_map_name;
+    state.display_mode = impl_->display_mode == DisplayMode::wiggle ? "wiggle"
+                                                                    : "variable_density";
+    state.polarity_normal = impl_->polarity_normal;
+    state.clip_enabled = impl_->clip_pct_enabled;
+    state.clip_percentile = impl_->clip_pct;
+    state.wiggle_gain = impl_->wiggle_gain;
+    state.auto_range = !impl_->explicit_range;
+    state.range_min = impl_->range_min;
+    state.range_max = impl_->range_max;
+    state.view_scale = impl_->canvas->scale();
+    state.view_offset_x = impl_->canvas->offset_x();
+    state.view_offset_y = impl_->canvas->offset_y();
+    state.picking_enabled = impl_->picking;
+    // Embedded pick set (own binding block inside); an unparsable document
+    // is a programming error — the codec round-trips its own output.
+    const domain::Json picks = domain::Json::parse(horizon::to_json(impl_->picks));
+    state.picks = picks;
+
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        error = "cannot open file: " + path;
+        return false;
+    }
+    const std::string text = to_json_text(state);
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    out.close();
+    if (!out) {
+        error = "write failed: " + path;
+        return false;
+    }
+    return true;
+}
+
+SeismicSliceWidget::ViewStateLoadStatus SeismicSliceWidget::load_view_state(
+    const std::string& path, std::string& error) {
+    error.clear();
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        error = "cannot open file: " + path;
+        return ViewStateLoadStatus::error;
+    }
+    const std::string text((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    SeismicViewState state;
+    if (from_json_text(text, state, error) != ViewStateParse::ok) {
+        return ViewStateLoadStatus::error;
+    }
+    // Cross-volume restore is rejected wholesale: a saved view of another
+    // body must never reshape this one (anonymous bindings only match
+    // anonymous bindings — there is no identity to verify otherwise).
+    if (state.volume_id != impl_->identity.volume_id) {
+        error = "view state belongs to volume '" + state.volume_id +
+                "', current is '" + impl_->identity.volume_id + "'";
+        return ViewStateLoadStatus::mismatched_volume;
+    }
+    // Validate every token BEFORE mutating any state (fail closed).
+    VolumeAxis axis;
+    DisplayMode mode;
+    if (!axis_from_schema_name(state.axis, axis)) {
+        error = "unknown axis token: " + state.axis;
+        return ViewStateLoadStatus::error;
+    }
+    if (state.display_mode != "variable_density" && state.display_mode != "wiggle") {
+        error = "unknown display mode token: " + state.display_mode;
+        return ViewStateLoadStatus::error;
+    }
+    if (state.display_mode == "wiggle") {
+        mode = DisplayMode::wiggle;
+    } else {
+        mode = DisplayMode::variable_density;
+    }
+    if (color_lut(state.color_map).empty()) {
+        error = "unknown colormap: " + state.color_map;
+        return ViewStateLoadStatus::error;
+    }
+    const horizon::PickParseResult picks = horizon::from_json(state.picks.dump());
+    if (!picks.ok) {
+        error = "embedded picks invalid: " + picks.error;
+        return ViewStateLoadStatus::error;
+    }
+    // The embedded pick set carries its own volume binding; a non-empty set
+    // naming ANOTHER body makes the whole state a cross-body restore (the
+    // same rejection rule as the state-level volume_id above).
+    if (!picks.set.picks.empty() && !picks.set.volume_id.empty() &&
+        picks.set.volume_id != impl_->identity.volume_id) {
+        error = "embedded picks belong to volume '" + picks.set.volume_id + "'";
+        return ViewStateLoadStatus::mismatched_volume;
+    }
+
+    // Apply in dependency order: colormap/range -> mode -> polarity/clip/
+    // gain -> slice placement -> transform -> picking + picks. Clamps inside
+    // the setters keep out-of-extent indices on the same volume honest.
+    set_color_map(state.color_map);
+    if (state.auto_range) {
+        set_auto_range();
+    } else {
+        set_explicit_range(state.range_min, state.range_max);
+    }
+    set_display_mode(mode);
+    set_polarity(state.polarity_normal);
+    set_clip_percentile(state.clip_percentile);
+    set_clip_percentile_enabled(state.clip_enabled);
+    set_wiggle_gain(state.wiggle_gain);
+    set_axis(axis);
+    set_slice_index(state.slice_index);
+    set_view_transform(state.view_scale, state.view_offset_x, state.view_offset_y);
+    enable_picking(state.picking_enabled);
+    impl_->picks = picks.set;
+    impl_->refresh_pick_markers();
+    impl_->refresh_overlay();
+    return ViewStateLoadStatus::ok;
 }
 
 } // namespace pwb::seismic_viewer

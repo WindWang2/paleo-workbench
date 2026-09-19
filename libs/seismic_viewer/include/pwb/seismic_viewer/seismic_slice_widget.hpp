@@ -31,6 +31,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -200,6 +201,71 @@ public:
 
     // Unique per-widget identity used as SliceSelectionEvent::origin.
     [[nodiscard]] std::string viewer_origin() const;
+
+    // --- VIZ-D attribute / RGB-fusion display (07 line) --------------------
+    // The currently retained canonical plane for host-side attribute
+    // computation (empty values when nothing is displayed). Layout: canonical
+    // row-major value(row * cols + col) — plane dims, NOT display-oriented
+    // image dims. The host computes attribute planes from this snapshot and
+    // feeds them back through the setters below.
+    struct RetainedPlane {
+        std::span<const float> values;
+        std::int64_t rows{0};
+        std::int64_t cols{0};
+        pwb::viz::VolumeAxis axis{pwb::viz::VolumeAxis::inline_};
+        std::int64_t index{0};
+        std::uint64_t revision{0};
+    };
+    [[nodiscard]] RetainedPlane retained_plane() const;
+
+    // Pin a host-computed attribute plane onto the CURRENTLY displayed slice.
+    // `plane` must be canonical row-major with exactly the retained plane's
+    // rows/cols/axis/revision, `color_map` must be a known LUT name; anything
+    // else is a no-op returning false (stale attribute never painted).
+    // Rendering mirrors the amplitude VD path minus SEG polarity: percentile
+    // clip when enabled, finite min/max stretch otherwise, non-finite at the
+    // LUT centre. The view stays pinned until the displayed slice changes
+    // (axis/index/volume) or clear_attribute_view() — a stale attribute is
+    // dropped, never silently kept over a new slice.
+    bool set_attribute_plane(std::span<const float> plane, std::int64_t rows,
+                             std::int64_t cols, std::string_view color_map,
+                             std::string_view label);
+    // Fuse three channel planes of the same shape/axis/revision into an RGB
+    // image (attribute_fusion_core::fuse_rgb parity: per-channel percentile
+    // clip to uint8). Polarity/clip do not apply (fused channels are not
+    // amplitude). Same pinning contract as set_attribute_plane.
+    bool set_rgb_fusion(std::span<const float> channel_r, std::span<const float> channel_g,
+                        std::span<const float> channel_b, std::int64_t rows,
+                        std::int64_t cols, double clip_pct = 99.0,
+                        std::string_view label = {});
+    void clear_attribute_view();
+    [[nodiscard]] bool attribute_active() const;
+
+    // --- slice export (07 line) ---------------------------------------------
+    // npy (numpy 1.0 '<f4' C-order) and csv ("%.6f", no header) write the
+    // DISPLAYED amplitude plane in display orientation (rows = image vertical
+    // axis — the sample axis on section views — cols = horizontal). png saves
+    // a real render of the displayed canvas (widget grab), attribute view
+    // included. While an attribute/fusion view is pinned, npy/csv REFUSE
+    // (the retained float plane is amplitude — exporting it would disagree
+    // with the screen); the remedy is in the error text. Fails honestly
+    // (false + error) when nothing is displayed.
+    enum class SliceExportFormat : std::uint8_t { npy, csv, png };
+    [[nodiscard]] bool export_slice(const std::string& path, SliceExportFormat format,
+                                    std::string& error);
+
+    // --- view state persistence (07 line; schema in view_state.hpp) --------
+    // Save the full advanced-display state (mode/polarity/gain/clip/colormap/
+    // axis/index/range/zoom-pan/picking + picks) under the current volume
+    // binding. Loading restores it verbatim on the SAME volume (volume_id
+    // equality, anonymous == anonymous); a different volume_id is REJECTED
+    // (mismatched_volume) with nothing applied. Unknown enum/colormap tokens
+    // in a schema-valid file are an error (fail closed, nothing applied).
+    enum class ViewStateLoadStatus : std::uint8_t { ok, mismatched_volume, error };
+    [[nodiscard]] bool save_view_state(const std::string& path, std::string& error);
+    [[nodiscard]] ViewStateLoadStatus load_view_state(const std::string& path,
+                                                      std::string& error);
+
 
     // --- internal wiring (public for the canvas child; not for hosts) -----
     void report_cursor(const class QPointF& image_point);
