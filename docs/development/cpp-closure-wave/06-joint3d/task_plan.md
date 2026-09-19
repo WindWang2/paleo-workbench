@@ -2,6 +2,8 @@
 
 - line: 06 (cpp-close wave)
 - branch: `codex/cpp-close-06-joint3d-20260919`
+- PR: https://github.com/WindWang2/paleo-workbench/pull/1417
+- HEAD: 92868b3b（a719375a 主体 + 92868b3b 审查修复）
 - worktree: `/home/kevin/project/worktrees/cpp-close-06-joint3d`
 - base: origin/main `06211541ae1ccce22b0d5ba9258ce722170ca98b`（开工时 origin/main 即此 SHA，fetch 后确认）
 - 执行器: glm5.3-flash（ZCode 会话，无 /goal /goal-loop 平台技能——采用本四文件持久化循环，如实记录）
