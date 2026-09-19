@@ -29,6 +29,12 @@ struct StoreStatus {
 class CatalogRepository {
 public:
     explicit CatalogRepository(std::filesystem::path sqlite_path);
+    // Movable under both locks (mutex_ itself does not move): the live db_
+    // handle transfers while concurrent use of the source is serialized.
+    CatalogRepository(CatalogRepository&& other);
+    CatalogRepository& operator=(CatalogRepository&& other);
+    CatalogRepository(const CatalogRepository&) = delete;
+    CatalogRepository& operator=(const CatalogRepository&) = delete;
 
     // Read-only probe: sync_state strictly readable + index_schema_version
     // >= 5 → Canonical (db.py load_document floor semantics).

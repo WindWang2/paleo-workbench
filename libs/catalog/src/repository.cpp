@@ -996,6 +996,21 @@ void ensure_manifest_layout(const std::filesystem::path& manifest_path) {
 CatalogRepository::CatalogRepository(std::filesystem::path sqlite_path)
     : sqlite_path_(std::move(sqlite_path)) {}
 
+CatalogRepository::CatalogRepository(CatalogRepository&& other) {
+    const std::lock_guard<std::recursive_mutex> lock(other.mutex_);
+    sqlite_path_ = std::move(other.sqlite_path_);
+    db_ = std::move(other.db_);
+}
+
+CatalogRepository& CatalogRepository::operator=(CatalogRepository&& other) {
+    if (this != &other) {
+        const std::scoped_lock lock(mutex_, other.mutex_);
+        sqlite_path_ = std::move(other.sqlite_path_);
+        db_ = std::move(other.db_);
+    }
+    return *this;
+}
+
 StoreStatus CatalogRepository::status() const {
     const std::lock_guard<std::recursive_mutex> lock(mutex_);
     StoreStatus status;
