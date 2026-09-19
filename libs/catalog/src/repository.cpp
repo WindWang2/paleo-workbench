@@ -1,13 +1,28 @@
 #include "pwb/catalog/repository.hpp"
 
 #include "row_mapping.hpp"
+#include "pwb/catalog/apply_changes.hpp"
+#include "pwb/domain/sha256.hpp"
 #include "pwb/project/paths.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
 #include <fstream>
+#include <random>
 #include <set>
+#include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace pwb::catalog {
 
@@ -90,6 +105,9 @@ Json manifest_run(const DataRun& run) {
 }
 
 Json manifest_version(const DataVersion& version) {
+    // Key order = the pydantic declaration order (models.py DataVersion), so
+    // a compact dump reproduces Python's json.dumps(model_dump()) byte order
+    // (conv-31b; export_manifest and save_manifest share this serializer).
     Json j = Json::object();
     j["id"] = version.id.str();
     j["asset_id"] = version.asset_id.str();
@@ -105,18 +123,14 @@ Json manifest_version(const DataVersion& version) {
         : Json(nullptr);
     j["sha256"] = version.sha256.has_value() ? Json(*version.sha256)
                                              : Json(nullptr);
-    j["run_id"] = version.run_id.has_value() ? Json(version.run_id->str())
-                                             : Json(nullptr);
-    j["metadata"] = version.metadata;
-    j["created_at"] = version.created_at;
-    j["trashed"] = version.trashed;
-    j["trashed_at"] = version.trashed_at.has_value()
-        ? Json(*version.trashed_at)
-        : Json(nullptr);
     j["parent_version_ids"] = Json::array();
     for (const auto& parent : version.parent_version_ids) {
         j["parent_version_ids"].push_back(parent.str());
     }
+    j["run_id"] = version.run_id.has_value() ? Json(version.run_id->str())
+                                             : Json(nullptr);
+    j["metadata"] = version.metadata;
+    j["created_at"] = version.created_at;
     j["members"] = Json::array();
     for (const auto& member : version.members) {
         Json m = Json::object();
@@ -132,6 +146,10 @@ Json manifest_version(const DataVersion& version) {
             : Json(nullptr);
         j["members"].push_back(std::move(m));
     }
+    j["trashed"] = version.trashed;
+    j["trashed_at"] = version.trashed_at.has_value()
+        ? Json(*version.trashed_at)
+        : Json(nullptr);
     return j;
 }
 
@@ -215,6 +233,762 @@ std::string search_fold(const std::string& name) {
         }
     }
     return folded;
+}
+
+// ---- conv-31b helpers (db.py / store.py / service.py parity) ---------------
+
+// datetime.now().isoformat(timespec="seconds"): LOCAL time, no timezone
+// suffix, second precision. The lease TTL compares these strings lexically
+// (gc.hpp default_lease_cutoff reads the same shape), so any precision or
+// zone drift silently breaks the cutoff (R2 ⑥-7).
+std::string local_iso_seconds(std::time_t time) {
+    std::tm local{};
+#if !defined(_WIN32)
+    localtime_r(&time, &local);
+#else
+    localtime_s(&local, &time);
+#endif
+    char buffer[32];
+    const std::size_t written =
+        std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &local);
+    return std::string(buffer, written);
+}
+
+std::string local_now_iso_seconds() {
+    return local_iso_seconds(std::time(nullptr));
+}
+
+// random_device hex (B-11: uuid4 parity is shape-only — "wc-" + 12 hex for
+// working ids, 32 hex for lease ids).
+std::string random_hex(std::size_t characters) {
+    std::string out;
+    out.reserve(characters + 16);
+    std::random_device rd;
+    while (out.size() < characters) {
+        char buffer[17];
+        std::snprintf(buffer, sizeof(buffer), "%016llx",
+                      static_cast<unsigned long long>(
+                          (static_cast<std::uint64_t>(rd()) << 32) ^ rd()));
+        out += buffer;
+    }
+    out.resize(characters);
+    return out;
+}
+
+// st_mtime_ns parity (B-16): POSIX st_mtim at full nanosecond ticks — the
+// #1183 unchanged-skip and the manifest_mtime_ns accounting both compare
+// exact ticks, seconds-grade stat is forbidden. Windows maps the 100ns
+// file-time ticks (best-effort, same direction as Python's st_mtime_ns).
+std::optional<std::int64_t> disk_mtime_ns(const std::filesystem::path& path) {
+#if defined(_WIN32)
+    std::error_code ec;
+    const auto written = std::filesystem::last_write_time(path, ec);
+    if (ec) return std::nullopt;
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               written.time_since_epoch())
+        .count();
+#else
+    struct stat st {};
+    if (::stat(path.c_str(), &st) != 0) return std::nullopt;
+    return static_cast<std::int64_t>(st.st_mtim.tv_sec) * 1000000000LL
+         + static_cast<std::int64_t>(st.st_mtim.tv_nsec);
+#endif
+}
+
+// storage.py fsync_dir: best-effort so rename metadata survives a crash;
+// a no-op on Windows (storage.py itself returns early there — B-31).
+void fsync_dir_best_effort(const std::filesystem::path& directory) {
+#if !defined(_WIN32)
+    const int fd = ::open(directory.c_str(), O_RDONLY | O_DIRECTORY);
+    if (fd < 0) return;
+    ::fsync(fd);
+    ::close(fd);
+#else
+    (void)directory;
+#endif
+}
+
+// store.py save step 3: write + flush + fsync (POSIX; the fsync leg is
+// best-effort parity on Windows, B-31).
+bool write_file_fsynced(const std::filesystem::path& target,
+                        const std::string& payload) {
+#if !defined(_WIN32)
+    const int fd = ::open(target.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
+                          0644);
+    if (fd < 0) return false;
+    std::size_t written = 0;
+    while (written < payload.size()) {
+        const ssize_t chunk =
+            ::write(fd, payload.data() + written, payload.size() - written);
+        if (chunk <= 0) {
+            ::close(fd);
+            return false;
+        }
+        written += static_cast<std::size_t>(chunk);
+    }
+    if (::fsync(fd) != 0) {
+        ::close(fd);
+        return false;
+    }
+    ::close(fd);
+    return true;
+#else
+    std::ofstream out(target, std::ios::binary | std::ios::trunc);
+    if (!out.good()) return false;
+    out.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+    out.flush();
+    return out.good();
+#endif
+}
+
+// storage.py safe_unlink (the read-only-attribute dance is Windows NTFS
+// specific and unreachable here; missing files are already gone).
+void safe_unlink(const std::filesystem::path& path) {
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+// Column contract: working_id, source_version_id, path, state, display_name,
+// created_at, updated_at, payload_mtime_ns, source_size_bytes.
+WorkingCopy working_copy_from_row(Statement& rows) {
+    WorkingCopy copy;
+    copy.working_id = rows.text(0);
+    copy.source_version_id = domain::VersionId(rows.text(1));
+    copy.path = rows.text(2);
+    copy.state = rows.text(3);
+    copy.display_name = rows.text(4);
+    copy.created_at = rows.text(5);
+    copy.updated_at = rows.text(6);
+    copy.payload_mtime_ns = opt_int(rows, 7);
+    copy.source_size_bytes = opt_int(rows, 8);
+    return copy;
+}
+
+// Post-step sqlite failure probe (the Statement wrapper swallows step
+// errors): anything other than the OK/ROW/DONE family becomes a
+// CorruptDatabase carrying the sqlite code, mirroring sqlite.cpp's
+// make_error channel.
+std::optional<DataError> sqlite_step_error(Database& db, const char* what) {
+    const int rc = sqlite3_errcode(db.handle());
+    if (rc == SQLITE_OK || rc == SQLITE_ROW || rc == SQLITE_DONE) {
+        return std::nullopt;
+    }
+    const char* text = sqlite3_errmsg(db.handle());
+    return DataError(ErrorCode::CorruptDatabase,
+                     std::string(what) + ": " +
+                         (text != nullptr ? text : "unknown"),
+                     Json{{"sqlite_code", rc}});
+}
+
+// Fetch a connection for the bookkeeping write/read families: the resident
+// writable handle when open, otherwise a short-lived one opened like
+// db.py's _connect (READWRITE|CREATE, no schema seeding — the connect-time
+// DDL that would auto-create the registry tables is NOT mirrored; every
+// real flow opens the canonical store first).
+Database* bookkeeping_connection(std::optional<Database>& scratch,
+                                  Database& resident,
+                                  const std::filesystem::path& path,
+                                  SqliteOpenMode mode) {
+    if (resident.is_open()) return &resident;
+    auto opened = Database::open(path, mode);
+    if (!opened.is_ok()) return nullptr;
+    scratch = std::move(opened.value());
+    return &*scratch;
+}
+
+// db.py _MODEL_UPSERT_SQL verbatim (ON CONFLICT(id) DO UPDATE keeps the
+// rowid insertion order; INSERT OR REPLACE would float updated rows).
+DataError upsert_model_in_transaction(Database& db, const Model& model) {
+    Statement statement = db.prepare(
+        "INSERT INTO models (id, model_id, model_name, model_type,"
+        " capability, provider, status, metadata, created_at, provenance)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)"
+        " ON CONFLICT(id) DO UPDATE SET model_id=excluded.model_id,"
+        " model_name=excluded.model_name, model_type=excluded.model_type,"
+        " capability=excluded.capability, provider=excluded.provider,"
+        " status=excluded.status, metadata=excluded.metadata,"
+        " created_at=excluded.created_at, provenance=excluded.provenance");
+    statement.bind(1, model.id);
+    statement.bind(2, model.model_id);
+    statement.bind(3, model.model_name);
+    statement.bind(4, model.model_type);
+    statement.bind(5, model.capability);
+    statement.bind(6, model.provider);
+    statement.bind(7, model.status);
+    statement.bind(8, json_column(model.metadata, "{}"));
+    statement.bind(9, model.created_at);
+    statement.bind(10, json_column(model.provenance, "{}"));
+    statement.step_done();
+    if (auto failure = sqlite_step_error(db, "upsert model")) {
+        return *failure;
+    }
+    return DataError(ErrorCode::Ok, "");
+}
+
+// db.py _MODEL_VERSION_UPSERT_SQL verbatim.
+DataError upsert_model_version_in_transaction(Database& db,
+                                              const ModelVersion& version) {
+    Statement statement = db.prepare(
+        "INSERT INTO model_versions (id, model_id, model_version,"
+        " artifact_uri, checksum, input_schema, output_schema, "
+        "preprocessing_version, runtime, deterministic, demo_only, status,"
+        " metadata, created_at, provenance)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        " ON CONFLICT(id) DO UPDATE SET model_id=excluded.model_id,"
+        " model_version=excluded.model_version,"
+        " artifact_uri=excluded.artifact_uri, checksum=excluded.checksum,"
+        " input_schema=excluded.input_schema,"
+        " output_schema=excluded.output_schema,"
+        " preprocessing_version=excluded.preprocessing_version,"
+        " runtime=excluded.runtime, deterministic=excluded.deterministic,"
+        " demo_only=excluded.demo_only, status=excluded.status,"
+        " metadata=excluded.metadata, created_at=excluded.created_at,"
+        " provenance=excluded.provenance");
+    statement.bind(1, version.id);
+    statement.bind(2, version.model_id);
+    statement.bind(3, version.model_version);
+    statement.bind(4, version.artifact_uri);
+    if (version.checksum.has_value()) {
+        statement.bind(5, *version.checksum);
+    } else {
+        statement.bind_null(5);
+    }
+    statement.bind(6, json_column(version.input_schema, "{}"));
+    statement.bind(7, json_column(version.output_schema, "{}"));
+    statement.bind(8, version.preprocessing_version);
+    statement.bind(9, version.runtime);
+    statement.bind(10, static_cast<std::int64_t>(version.deterministic ? 1 : 0));
+    statement.bind(11, static_cast<std::int64_t>(version.demo_only ? 1 : 0));
+    statement.bind(12, version.status);
+    statement.bind(13, json_column(version.metadata, "{}"));
+    statement.bind(14, version.created_at);
+    statement.bind(15, json_column(version.provenance, "{}"));
+    statement.step_done();
+    if (auto failure = sqlite_step_error(db, "upsert model version")) {
+        return *failure;
+    }
+    return DataError(ErrorCode::Ok, "");
+}
+
+// ---- manifest parsing (store.py CatalogDocument.model_validate parity) -----
+// Strict-typed readers (B-15): absent → keep the pydantic default; present
+// but wrong-typed → error (load_manifest maps that to the corrupt branch).
+// Unknown keys are ignored, like pydantic's default extra behavior.
+
+bool manifest_field_string(const Json& data, const char* key,
+                           std::string& out, bool required,
+                           std::string* error) {
+    if (!data.contains(key)) {
+        if (required) {
+            *error = std::string("field '") + key + "' is required";
+            return false;
+        }
+        return true;
+    }
+    const Json& value = data.at(key);
+    if (!value.is_string()) {
+        *error = std::string("field '") + key + "' is not a string";
+        return false;
+    }
+    out = value.get<std::string>();
+    return true;
+}
+
+bool manifest_field_opt_string(const Json& data, const char* key,
+                               std::optional<std::string>& out,
+                               std::string* error) {
+    if (!data.contains(key)) return true;
+    const Json& value = data.at(key);
+    if (value.is_null()) {
+        out = std::nullopt;
+        return true;
+    }
+    if (!value.is_string()) {
+        *error = std::string("field '") + key + "' is not a string";
+        return false;
+    }
+    out = value.get<std::string>();
+    return true;
+}
+
+bool manifest_field_int(const Json& data, const char* key, long long& out,
+                        std::string* error) {
+    if (!data.contains(key)) return true;
+    const Json& value = data.at(key);
+    if (!value.is_number_integer()) {
+        *error = std::string("field '") + key + "' is not an integer";
+        return false;
+    }
+    out = value.get<long long>();
+    return true;
+}
+
+template <typename T>
+bool manifest_field_opt_int(const Json& data, const char* key,
+                            std::optional<T>& out, std::string* error) {
+    if (!data.contains(key)) return true;
+    const Json& value = data.at(key);
+    if (value.is_null()) {
+        out = std::nullopt;
+        return true;
+    }
+    if (!value.is_number_integer()) {
+        *error = std::string("field '") + key + "' is not an integer";
+        return false;
+    }
+    out = static_cast<T>(value.get<long long>());
+    return true;
+}
+
+bool manifest_field_bool(const Json& data, const char* key, bool& out,
+                         std::string* error) {
+    if (!data.contains(key)) return true;
+    const Json& value = data.at(key);
+    if (!value.is_boolean()) {
+        *error = std::string("field '") + key + "' is not a boolean";
+        return false;
+    }
+    out = value.get<bool>();
+    return true;
+}
+
+bool manifest_field_object(const Json& data, const char* key, Json& out,
+                           std::string* error) {
+    if (!data.contains(key)) return true;
+    const Json& value = data.at(key);
+    if (!value.is_object()) {
+        *error = std::string("field '") + key + "' is not an object";
+        return false;
+    }
+    out = value;
+    return true;
+}
+
+bool manifest_field_string_array(const Json& data, const char* key,
+                                 std::vector<std::string>& out,
+                                 std::string* error) {
+    if (!data.contains(key)) return true;
+    const Json& value = data.at(key);
+    if (!value.is_array()) {
+        *error = std::string("field '") + key + "' is not an array";
+        return false;
+    }
+    for (const auto& item : value) {
+        if (!item.is_string()) {
+            *error = std::string("field '") + key +
+                     "' contains a non-string item";
+            return false;
+        }
+        out.push_back(item.get<std::string>());
+    }
+    return true;
+}
+
+template <typename T, typename Parse>
+bool manifest_field_entities(const Json& data, const char* key,
+                             std::vector<T>& out, const char* entity,
+                             Parse parse, std::string* error) {
+    if (!data.contains(key)) return true;
+    const Json& value = data.at(key);
+    if (!value.is_array()) {
+        *error = std::string("field '") + key + "' is not an array";
+        return false;
+    }
+    for (const auto& item : value) {
+        out.push_back(T{});
+        if (!parse(item, out.back(), error)) {
+            *error = std::string(key) + "[" +
+                     std::to_string(out.size() - 1) + "]: " + *error;
+            out.pop_back();
+            return false;
+        }
+    }
+    (void)entity;
+    return true;
+}
+
+bool manifest_parse_member(const Json& data, VersionMember& member,
+                           std::string* error) {
+    if (!data.is_object()) {
+        *error = "entry is not an object";
+        return false;
+    }
+    long long ordinal = member.ordinal;
+    if (!manifest_field_string(data, "name", member.name, true, error) ||
+        !manifest_field_string(data, "rel_path", member.rel_path, true,
+                               error) ||
+        !manifest_field_string(data, "member_role", member.member_role,
+                               false, error) ||
+        !manifest_field_int(data, "ordinal", ordinal, error) ||
+        !manifest_field_bool(data, "required", member.required, error) ||
+        !manifest_field_opt_string(data, "sha256", member.sha256, error) ||
+        !manifest_field_opt_int(data, "size_bytes", member.size_bytes,
+                                error)) {
+        return false;
+    }
+    member.ordinal = static_cast<int>(ordinal);
+    return true;
+}
+
+bool manifest_parse_port(const Json& data, RunPort& port,
+                         std::string* error) {
+    if (!data.is_object()) {
+        *error = "entry is not an object";
+        return false;
+    }
+    long long ordinal = port.ordinal;
+    std::string version_id;
+    if (!manifest_field_string(data, "role", port.role, true, error) ||
+        !manifest_field_string(data, "version_id", version_id, true,
+                               error) ||
+        !manifest_field_int(data, "ordinal", ordinal, error) ||
+        !manifest_field_bool(data, "required", port.required, error) ||
+        !manifest_field_string(data, "entity_type", port.entity_type,
+                               false, error) ||
+        !manifest_field_string(data, "entity_id", port.entity_id, false,
+                               error) ||
+        !manifest_field_string(data, "note", port.note, false, error)) {
+        return false;
+    }
+    port.version_id = domain::VersionId(version_id);
+    port.ordinal = static_cast<int>(ordinal);
+    return true;
+}
+
+bool manifest_parse_asset(const Json& data, DataAsset& asset,
+                          std::string* error) {
+    if (!data.is_object()) {
+        *error = "entry is not an object";
+        return false;
+    }
+    std::string id;
+    std::optional<std::string> current_version_id;
+    if (!manifest_field_string(data, "name", asset.name, true, error) ||
+        !manifest_field_string(data, "id", id, false, error) ||
+        !manifest_field_string(data, "type", asset.type, false, error) ||
+        !manifest_field_string(data, "description", asset.description,
+                               false, error) ||
+        !manifest_field_opt_string(data, "current_version_id",
+                                   current_version_id, error) ||
+        !manifest_field_opt_string(data, "legacy_resource_id",
+                                   asset.legacy_resource_id, error) ||
+        !manifest_field_object(data, "metadata", asset.metadata, error) ||
+        !manifest_field_string(data, "created_at", asset.created_at,
+                               false, error) ||
+        !manifest_field_string(data, "updated_at", asset.updated_at,
+                               false, error) ||
+        !manifest_field_bool(data, "trashed", asset.trashed, error) ||
+        !manifest_field_opt_string(data, "trashed_at", asset.trashed_at,
+                                   error)) {
+        return false;
+    }
+    asset.id = domain::AssetId(id);
+    if (current_version_id.has_value()) {
+        asset.current_version_id = domain::VersionId(*current_version_id);
+    }
+    return true;
+}
+
+bool manifest_parse_version(const Json& data, DataVersion& version,
+                            std::string* error) {
+    if (!data.is_object()) {
+        *error = "entry is not an object";
+        return false;
+    }
+    long long number = version.version_number;
+    std::string id;
+    std::string asset_id;
+    std::optional<std::string> run_id;
+    std::vector<std::string> parents;
+    if (!manifest_field_string(data, "asset_id", asset_id, true, error) ||
+        !manifest_field_string(data, "id", id, false, error) ||
+        !manifest_field_int(data, "version_number", number, error)) {
+        return false;
+    }
+    if (!data.contains("stage")) {
+        *error = "field 'stage' is required";
+        return false;
+    }
+    const Json& stage = data.at("stage");
+    if (!stage.is_string()) {
+        *error = "field 'stage' is not a string";
+        return false;
+    }
+    const std::string stage_text = stage.get<std::string>();
+    if (auto parsed = domain::data_stage_from_string(stage_text)) {
+        version.stage = *parsed;
+    } else {
+        *error = "field 'stage' is not a valid DataStage";
+        return false;
+    }
+    if (!manifest_field_bool(data, "managed", version.managed, error) ||
+        !manifest_field_string(data, "path", version.path, false, error) ||
+        !manifest_field_opt_string(data, "source_uri", version.source_uri,
+                                   error) ||
+        !manifest_field_string(data, "format", version.format, false,
+                               error) ||
+        !manifest_field_opt_int(data, "size_bytes", version.size_bytes,
+                                error) ||
+        !manifest_field_opt_string(data, "sha256", version.sha256,
+                                   error) ||
+        !manifest_field_string_array(data, "parent_version_ids", parents,
+                                     error) ||
+        !manifest_field_opt_string(data, "run_id", run_id, error) ||
+        !manifest_field_object(data, "metadata", version.metadata,
+                               error) ||
+        !manifest_field_string(data, "created_at", version.created_at,
+                               false, error) ||
+        !manifest_field_entities(data, "members", version.members,
+                                 "member", manifest_parse_member, error) ||
+        !manifest_field_bool(data, "trashed", version.trashed, error) ||
+        !manifest_field_opt_string(data, "trashed_at", version.trashed_at,
+                                   error)) {
+        return false;
+    }
+    version.id = domain::VersionId(id);
+    version.asset_id = domain::AssetId(asset_id);
+    version.version_number = static_cast<int>(number);
+    if (run_id.has_value()) version.run_id = domain::RunId(*run_id);
+    for (const auto& parent : parents) {
+        version.parent_version_ids.emplace_back(parent);
+    }
+    return true;
+}
+
+bool manifest_parse_run(const Json& data, DataRun& run, std::string* error) {
+    if (!data.is_object()) {
+        *error = "entry is not an object";
+        return false;
+    }
+    std::vector<std::string> inputs;
+    std::vector<std::string> outputs;
+    std::string id;
+    const bool has_model_ref = data.contains("model_ref") &&
+                               !data.at("model_ref").is_null();
+    if (!manifest_field_string(data, "operation", run.operation, true,
+                               error) ||
+        !manifest_field_string(data, "id", id, false, error) ||
+        !manifest_field_string_array(data, "input_version_ids", inputs,
+                                     error) ||
+        !manifest_field_string_array(data, "output_version_ids", outputs,
+                                     error) ||
+        !manifest_field_entities(data, "input_ports", run.input_ports,
+                                 "port", manifest_parse_port, error) ||
+        !manifest_field_entities(data, "output_ports", run.output_ports,
+                                 "port", manifest_parse_port, error) ||
+        !manifest_field_object(data, "parameters", run.parameters,
+                               error) ||
+        !manifest_field_string(data, "generator", run.generator, false,
+                               error) ||
+        !manifest_field_string(data, "status", run.status, false,
+                               error) ||
+        !manifest_field_string(data, "created_at", run.created_at,
+                               false, error)) {
+        return false;
+    }
+    if (has_model_ref) {
+        if (!data.at("model_ref").is_object()) {
+            *error = "field 'model_ref' is not an object";
+            return false;
+        }
+        run.model_ref = data.at("model_ref");
+    }
+    run.id = domain::RunId(id);
+    for (const auto& input : inputs) {
+        run.input_version_ids.emplace_back(input);
+    }
+    for (const auto& output : outputs) {
+        run.output_version_ids.emplace_back(output);
+    }
+    return true;
+}
+
+bool manifest_parse_tag(const Json& data, Tag& tag, std::string* error) {
+    if (!data.is_object()) {
+        *error = "entry is not an object";
+        return false;
+    }
+    return manifest_field_string(data, "name", tag.name, true, error) &&
+           manifest_field_string(data, "id", tag.id, false, error) &&
+           manifest_field_opt_string(data, "display_name",
+                                     tag.display_name, error) &&
+           manifest_field_object(data, "metadata", tag.metadata, error);
+}
+
+// store.py json.loads + CatalogDocument.model_validate, folded into one
+// strict parse (B-15): any missing-required/wrong-typed field reports the
+// reason and load_manifest routes it to the corrupt branch.
+Result<CatalogDocument> parse_manifest_document(const Json& root) {
+    if (!root.is_object()) {
+        return DataError(ErrorCode::InvalidArgument,
+                         "document is not a JSON object");
+    }
+    CatalogDocument document;
+    std::string error;
+    long long schema_version = document.schema_version;
+    long long revision = document.catalog_revision;
+    if (!manifest_field_int(root, "schema_version", schema_version,
+                            &error) ||
+        !manifest_field_int(root, "catalog_revision", revision, &error) ||
+        !manifest_field_entities(root, "assets", document.assets, "asset",
+                                 manifest_parse_asset, &error) ||
+        !manifest_field_entities(root, "versions", document.versions,
+                                 "version", manifest_parse_version,
+                                 &error) ||
+        !manifest_field_entities(root, "runs", document.runs, "run",
+                                 manifest_parse_run, &error) ||
+        !manifest_field_entities(root, "tags", document.tags, "tag",
+                                 manifest_parse_tag, &error)) {
+        return DataError(ErrorCode::InvalidArgument, error);
+    }
+    document.schema_version = static_cast<int>(schema_version);
+    document.catalog_revision = static_cast<int>(revision);
+    if (root.contains("models")) {
+        if (!root.at("models").is_array()) {
+            return DataError(ErrorCode::InvalidArgument,
+                             "field 'models' is not an array");
+        }
+        for (const auto& item : root.at("models")) {
+            auto model = Model::from_dict(item);
+            if (!model.is_ok()) return model.error();
+            document.models.push_back(std::move(model.value()));
+        }
+    }
+    if (root.contains("model_versions")) {
+        if (!root.at("model_versions").is_array()) {
+            return DataError(ErrorCode::InvalidArgument,
+                             "field 'model_versions' is not an array");
+        }
+        for (const auto& item : root.at("model_versions")) {
+            auto version = ModelVersion::from_dict(item);
+            if (!version.is_ok()) return version.error();
+            document.model_versions.push_back(std::move(version.value()));
+        }
+    }
+    auto parse_map = [&root, &error](const char* key,
+                                     std::vector<std::pair<std::string,
+                                         std::string>>& out) -> bool {
+        if (!root.contains(key)) return true;
+        const Json& value = root.at(key);
+        if (!value.is_object()) {
+            error = std::string("field '") + key + "' is not an object";
+            return false;
+        }
+        for (auto it = value.begin(); it != value.end(); ++it) {
+            if (!it.value().is_array()) {
+                error = std::string("field '") + key +
+                        "' has a non-array value";
+                return false;
+            }
+            for (const auto& tag : it.value()) {
+                if (!tag.is_string()) {
+                    error = std::string("field '") + key +
+                            "' has a non-string tag id";
+                    return false;
+                }
+                out.emplace_back(it.key(), tag.get<std::string>());
+            }
+        }
+        return true;
+    };
+    if (!parse_map("asset_tags", document.asset_tags) ||
+        !parse_map("version_tags", document.version_tags)) {
+        return DataError(ErrorCode::InvalidArgument, error);
+    }
+    return document;
+}
+
+// store.py path.read_text + json.loads: the error text feeds the
+// parenthesized detail of the L2/L4 skeletons (parser-specific, B-14 — the
+// oracle masks it; the skeleton is the byte-identical part).
+Result<Json> read_manifest_json(const std::filesystem::path& file) {
+    std::ifstream stream(file, std::ios::binary);
+    if (!stream.good()) {
+        return DataError(ErrorCode::IoError,
+                         "cannot read file: " + file.generic_string());
+    }
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    const std::string text = buffer.str();
+    Json parsed = Json::parse(text, nullptr, false);
+    if (parsed.is_discarded()) {
+        return DataError(ErrorCode::CorruptJson, "invalid JSON document");
+    }
+    return parsed;
+}
+
+// CatalogDocument.model_dump: the 10-key portable manifest, key order =
+// pydantic declaration order (ordered_json round-trips it; models/model_
+// versions go through the typed to_dict codecs).
+Json manifest_document_json(const CatalogDocument& document) {
+    Json manifest = Json::object();
+    manifest["schema_version"] = document.schema_version;
+    manifest["catalog_revision"] = document.catalog_revision;
+    manifest["assets"] = Json::array();
+    for (const auto& asset : document.assets) {
+        manifest["assets"].push_back(manifest_asset(asset));
+    }
+    manifest["versions"] = Json::array();
+    for (const auto& version : document.versions) {
+        manifest["versions"].push_back(manifest_version(version));
+    }
+    manifest["runs"] = Json::array();
+    for (const auto& run : document.runs) {
+        manifest["runs"].push_back(manifest_run(run));
+    }
+    manifest["tags"] = Json::array();
+    for (const auto& tag : document.tags) {
+        Json j = Json::object();
+        j["id"] = tag.id;
+        j["name"] = tag.name;
+        j["display_name"] = tag.display_name.has_value()
+            ? Json(*tag.display_name)
+            : Json(nullptr);
+        j["metadata"] = tag.metadata;
+        manifest["tags"].push_back(std::move(j));
+    }
+    manifest["models"] = Json::array();
+    for (const auto& model : document.models) {
+        manifest["models"].push_back(model.to_dict());
+    }
+    manifest["model_versions"] = Json::array();
+    for (const auto& version : document.model_versions) {
+        manifest["model_versions"].push_back(version.to_dict());
+    }
+    manifest["asset_tags"] = Json::object();
+    for (const auto& [asset_id, tag_id] : document.asset_tags) {
+        manifest["asset_tags"][asset_id].push_back(tag_id);
+    }
+    manifest["version_tags"] = Json::object();
+    for (const auto& [version_id, tag_id] : document.version_tags) {
+        manifest["version_tags"][version_id].push_back(tag_id);
+    }
+    return manifest;
+}
+
+// storage.py ensure_catalog_layout: the artifacts-root stage/aux
+// directories. save_manifest only receives the manifest path, so the root
+// is derived for the standard `<name>.artifacts/metadata` layout; foreign
+// locations get just the manifest's own directory.
+void ensure_manifest_layout(const std::filesystem::path& manifest_path) {
+    std::error_code ec;
+    std::filesystem::create_directories(manifest_path.parent_path(), ec);
+    const std::filesystem::path metadata = manifest_path.parent_path();
+    if (metadata.filename() != "metadata") return;
+    const std::filesystem::path root = metadata.parent_path();
+    const std::string name = root.filename().string();
+    constexpr std::string_view suffix = ".artifacts";
+    if (name.size() < suffix.size() ||
+        name.compare(name.size() - suffix.size(), suffix.size(), suffix) !=
+            0) {
+        return;
+    }
+    for (const char* stage : kStageDirs) {
+        std::filesystem::create_directories(root / stage, ec);
+    }
+    for (const char* extra : {"working", "metadata", "trash"}) {
+        std::filesystem::create_directories(root / extra, ec);
+    }
 }
 
 }  // namespace
@@ -350,18 +1124,7 @@ Result<CatalogDocument> CatalogRepository::load_document_from(
             db.prepare("SELECT id, operation, parameters, generator, "
                        "status, model_ref, created_at FROM runs");
         while (rows.step()) {
-            DataRun run;
-            run.id = domain::RunId(rows.text(0));
-            run.operation = rows.text(1);
-            run.parameters = parse_json_column(rows.text(2), "{}");
-            run.generator = rows.text(3);
-            run.status = rows.text(4);
-            if (!rows.is_null(5)) {
-                run.model_ref = parse_json_column(rows.text(5), "{}");
-            } else {
-                run.model_ref = std::nullopt;
-            }
-            run.created_at = rows.text(6);
+            DataRun run = rows::run_from_row(rows);
             run_index[run.id.str()] = document.runs.size();
             document.runs.push_back(std::move(run));
         }
@@ -398,10 +1161,12 @@ Result<CatalogDocument> CatalogRepository::load_document_from(
                 port.entity_id = ports.text(7);
                 port.note = ports.text(8);
                 DataRun& run = document.runs[it->second];
-                if (ports.text(1) == "input") {
-                    run.input_ports.push_back(std::move(port));
-                } else {
+                // db.py _attach_run_ports (161): only "output" goes to the
+                // output bucket; any other direction value lands in input.
+                if (ports.text(1) == "output") {
                     run.output_ports.push_back(std::move(port));
+                } else {
+                    run.input_ports.push_back(std::move(port));
                 }
             }
         }
@@ -410,12 +1175,7 @@ Result<CatalogDocument> CatalogRepository::load_document_from(
         Statement rows =
             db.prepare("SELECT id, name, display_name, metadata FROM tags");
         while (rows.step()) {
-            Tag tag;
-            tag.id = rows.text(0);
-            tag.name = rows.text(1);
-            tag.display_name = opt_text(rows, 2);
-            tag.metadata = parse_json_column(rows.text(3), "{}");
-            document.tags.push_back(std::move(tag));
+            document.tags.push_back(rows::tag_from_row(rows));
         }
     }
     {
@@ -438,17 +1198,29 @@ Result<CatalogDocument> CatalogRepository::load_document_from(
             "display_name, created_at, updated_at, payload_mtime_ns, "
             "source_size_bytes FROM working_copies");
         while (rows.step()) {
-            WorkingCopy copy;
-            copy.working_id = rows.text(0);
-            copy.source_version_id = domain::VersionId(rows.text(1));
-            copy.path = rows.text(2);
-            copy.state = rows.text(3);
-            copy.display_name = rows.text(4);
-            copy.created_at = rows.text(5);
-            copy.updated_at = rows.text(6);
-            copy.payload_mtime_ns = opt_int(rows, 7);
-            copy.source_size_bytes = opt_int(rows, 8);
-            document.working_copies.push_back(std::move(copy));
+            document.working_copies.push_back(working_copy_from_row(rows));
+        }
+    }
+    // Model registry (conv-31b): document order = rowid order (db.py 1686/
+    // 1706), the invariant _ordered() and list_models rely on (R7 ⑥-1).
+    if (db.table_exists("models")) {
+        Statement rows = db.prepare(
+            "SELECT id, model_id, model_name, model_type, capability, "
+            "provider, status, metadata, created_at, provenance"
+            " FROM models ORDER BY rowid");
+        while (rows.step()) {
+            document.models.push_back(rows::model_from_row(rows));
+        }
+    }
+    if (db.table_exists("model_versions")) {
+        Statement rows = db.prepare(
+            "SELECT id, model_id, model_version, artifact_uri, checksum, "
+            "input_schema, output_schema, preprocessing_version, runtime, "
+            "deterministic, demo_only, status, metadata, created_at, "
+            "provenance FROM model_versions ORDER BY rowid");
+        while (rows.step()) {
+            document.model_versions.push_back(
+                rows::model_version_from_row(rows));
         }
     }
     if (db.table_exists("lineage")) {
@@ -586,10 +1358,27 @@ Result<CatalogDocument> CatalogRepository::open_read_write() {
     if (schema_error.code != ErrorCode::Ok) return schema_error;
     // A freshly created store has no sync_state rows yet — the status
     // probe (and therefore every subsequent open) would refuse it. Seed
-    // idempotently so create-then-reopen works (INSERT .. ON CONFLICT DO
-    // NOTHING; the revision row keeps its value on existing stores).
-    auto seeded = bump_revision();
-    if (seeded.code != ErrorCode::Ok) return seeded;
+    // idempotently so create-then-reopen works. CONV-31b Wave3 fix: ALL
+    // three keys seed with ON CONFLICT DO NOTHING — the previous call to
+    // bump_revision() here INCREMENTED an existing catalog_revision on
+    // every reopen (contradicting this very comment, db.py _connect —
+    // which touches only indexes/tables — and the #411 CAS baseline: a
+    // reopen bumped the store past the document and made the next save
+    // stale).
+    {
+        Statement seed = db_.prepare(
+            "INSERT INTO sync_state (key, value) VALUES"
+            " ('catalog_revision', '1') ON CONFLICT(key) DO NOTHING");
+        seed.step_done();
+        Statement stamp = db_.prepare(
+            "INSERT INTO sync_state (key, value) VALUES"
+            " ('schema_version', '1') ON CONFLICT(key) DO NOTHING");
+        stamp.step_done();
+        Statement index_stamp = db_.prepare(
+            "INSERT INTO sync_state (key, value) VALUES"
+            " ('index_schema_version', '5') ON CONFLICT(key) DO NOTHING");
+        index_stamp.step_done();
+    }
     return load_document_from(db_);
 }
 
@@ -888,9 +1677,25 @@ DataError CatalogRepository::set_current_version(
 }
 
 DataError CatalogRepository::insert_working_copy(const WorkingCopy& copy) {
+    // conv-31b (R2 fix ② + ③): a BARE insert — Python's register path
+    // never replaces, a UNIQUE path conflict surfaces as an error (the
+    // composition layer swallows it; service.py:2351 parity) — and the
+    // registry writes never touch sync_state, so catalog_revision stays
+    // put (a bookkeeping bump would poison the #411/#1220 CAS baseline
+    // and flip is_fresh false on every checkout).
     Transaction transaction(db_);
+    {
+        Statement existing =
+            db_.prepare("SELECT 1 FROM working_copies WHERE path = ?");
+        existing.bind(1, copy.path);
+        if (existing.is_valid() && existing.step()) {
+            return DataError(ErrorCode::DuplicateOperation,
+                             "UNIQUE constraint failed: working_copies.path",
+                             Json{{"working_copy_path", copy.path}});
+        }
+    }
     Statement statement = db_.prepare(
-        "INSERT OR REPLACE INTO working_copies (working_id, "
+        "INSERT INTO working_copies (working_id, "
         "source_version_id, path, state, display_name, created_at, "
         "updated_at, payload_mtime_ns, source_size_bytes) "
         "VALUES (?,?,?,?,?,?,?,?,?)");
@@ -912,32 +1717,38 @@ DataError CatalogRepository::insert_working_copy(const WorkingCopy& copy) {
         statement.bind_null(9);
     }
     statement.step_done();
-    bump_revision();
+    if (auto failure = sqlite_step_error(db_, "insert working copy")) {
+        return *failure;
+    }
     transaction.commit();
     return DataError(ErrorCode::Ok, "");
 }
 
 DataError CatalogRepository::remove_working_copy(
     const std::string& working_id) {
+    // conv-31b (R2 fix ③): no revision bump — db.py's working-copy writes
+    // never touch sync_state.
     Transaction transaction(db_);
     Statement statement = db_.prepare(
         "DELETE FROM working_copies WHERE working_id = ?");
     statement.bind(1, working_id);
     statement.step_done();
-    bump_revision();
     transaction.commit();
     return DataError(ErrorCode::Ok, "");
 }
 
 DataError CatalogRepository::set_working_copy_state(
     const std::string& working_id, const std::string& state) {
+    // conv-31b (R2 fix ② + ③): update_working_copy_state ALWAYS refreshes
+    // updated_at (db.py:1402) and never bumps the revision.
     Transaction transaction(db_);
     Statement statement = db_.prepare(
-        "UPDATE working_copies SET state = ? WHERE working_id = ?");
+        "UPDATE working_copies SET state = ?, updated_at = ? "
+        "WHERE working_id = ?");
     statement.bind(1, state);
-    statement.bind(2, working_id);
+    statement.bind(2, local_now_iso_seconds());
+    statement.bind(3, working_id);
     statement.step_done();
-    bump_revision();
     transaction.commit();
     return DataError(ErrorCode::Ok, "");
 }
@@ -1142,6 +1953,405 @@ DataError CatalogRepository::finish_run_transaction(
     return DataError(ErrorCode::Ok, "");
 }
 
+// ---- conv-31b: db.py module-level algorithm bridge + store surface ----------
+
+Database& CatalogRepository::writable_database() {
+    // The apply_changes / reconcile / queries_sql free-function families
+    // take Database& over one connection — exactly the Python index
+    // exposing its connection to those module-level methods (findings
+    // §C-6). Callers open_read_write() first.
+    //
+    // CONV-31b Wave4 fix (V1-P1-2): the schema-loss rebuild inside
+    // apply_changes/reconcile follows db.py's rebuild discipline — the
+    // reset sequence CLOSES every handle to the store, this resident one
+    // included (Python closes the whole pool; its connections then
+    // reconnect transparently on next use). Reconnect the same way:
+    // _connect parity — Create open + per-connection DDL. If the reopen
+    // itself fails the caller receives the closed handle and the next
+    // prepare reports it, exactly like a Python connection error.
+    if (!db_.is_open()) {
+        std::error_code ec;
+        std::filesystem::create_directories(sqlite_path_.parent_path(), ec);
+        auto opened = Database::open(sqlite_path_, SqliteOpenMode::Create);
+        if (opened.is_ok()) {
+            db_ = std::move(opened.value());
+            (void)db_.ensure_schema();
+        }
+    }
+    return db_;
+}
+
+DataError CatalogRepository::write_all(const CatalogDocument& document) {
+    // db.py write_all → rebuild: close first (the rebuild opens its own
+    // connection; a resident handle would keep the file alive across the
+    // reset between the two attempts), then the two-attempt orchestration
+    // lives in rebuild_store (findings §D-5 layering: A1 orchestration
+    // shell over A2's rebuild_once primitive).
+    close();
+    return rebuild_store(sqlite_path_, document);
+}
+
+void CatalogRepository::reset() {
+    // db.py reset (1042-1054): close + best-effort unlink of the db and
+    // its -journal/-wal/-shm siblings (a stale -wal would resurrect old
+    // pages in the rebuilt store).
+    close();
+    reset_store_files(sqlite_path_);
+}
+
+std::optional<std::int64_t> CatalogRepository::recorded_manifest_mtime_ns()
+    const {
+    // service.py _recorded_manifest_mtime_ns: read_sync_state parses;
+    // missing/unparsable/unreadable all collapse to nullopt (the single
+    // revision-read source, findings §C-6).
+    auto opened = Database::open(sqlite_path_, SqliteOpenMode::ReadOnly);
+    if (!opened.is_ok()) return std::nullopt;
+    return read_sync_state(opened.value(), "manifest_mtime_ns");
+}
+
+void CatalogRepository::record_manifest_mtime_ns(
+    const std::filesystem::path& manifest_path) {
+    // service.py _record_manifest_mtime_ns: INSERT OR REPLACE, everything
+    // swallowed — the accounting must never break a checkpoint. Note this
+    // is a plain sync_state write: no revision bump.
+    const auto mtime = disk_mtime_ns(manifest_path);
+    if (!mtime.has_value()) return;
+    std::optional<Database> scratch;
+    Database* db =
+        bookkeeping_connection(scratch, db_, sqlite_path_,
+                               SqliteOpenMode::ReadWrite);
+    if (db == nullptr) return;
+    Transaction transaction(*db);
+    Statement statement = db->prepare(
+        "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)");
+    statement.bind(1, "manifest_mtime_ns");
+    statement.bind(2, std::to_string(*mtime));
+    statement.step_done();
+    transaction.commit();
+}
+
+// ---- working-copy registry completion (db.py 1335-1425) ---------------------
+
+std::optional<WorkingCopy> CatalogRepository::get_working_copy_by_path(
+    const std::string& path) const {
+    // _read_rows semantics: missing file / no schema → miss (never throws).
+    auto opened = Database::open(sqlite_path_, SqliteOpenMode::ReadOnly);
+    if (!opened.is_ok()) return std::nullopt;
+    Database& db = opened.value();
+    if (!db.table_exists("sync_state") ||
+        !db.table_exists("working_copies")) {
+        return std::nullopt;
+    }
+    Statement rows = db.prepare(
+        "SELECT working_id, source_version_id, path, state, display_name, "
+        "created_at, updated_at, payload_mtime_ns, source_size_bytes"
+        " FROM working_copies WHERE path = ?");
+    if (!rows.is_valid()) return std::nullopt;
+    rows.bind(1, path);
+    if (!rows.step()) return std::nullopt;
+    return working_copy_from_row(rows);
+}
+
+std::optional<WorkingCopy>
+CatalogRepository::get_live_working_copy_for_source(
+    const domain::VersionId& source_version_id) const {
+    auto opened = Database::open(sqlite_path_, SqliteOpenMode::ReadOnly);
+    if (!opened.is_ok()) return std::nullopt;
+    Database& db = opened.value();
+    if (!db.table_exists("sync_state") ||
+        !db.table_exists("working_copies")) {
+        return std::nullopt;
+    }
+    Statement rows = db.prepare(
+        "SELECT working_id, source_version_id, path, state, display_name, "
+        "created_at, updated_at, payload_mtime_ns, source_size_bytes"
+        " FROM working_copies WHERE source_version_id = ?"
+        " AND state IN ('checked_out','dirty','committing')"
+        " ORDER BY created_at LIMIT 1");
+    if (!rows.is_valid()) return std::nullopt;
+    rows.bind(1, source_version_id.str());
+    if (!rows.step()) return std::nullopt;
+    return working_copy_from_row(rows);
+}
+
+std::vector<WorkingCopy> CatalogRepository::list_working_copies(
+    const std::vector<std::string>& states) const {
+    std::vector<WorkingCopy> copies;
+    auto opened = Database::open(sqlite_path_, SqliteOpenMode::ReadOnly);
+    if (!opened.is_ok()) return copies;
+    Database& db = opened.value();
+    if (!db.table_exists("sync_state") ||
+        !db.table_exists("working_copies")) {
+        return copies;
+    }
+    // db.py list_working_copies: an EMPTY state list means no filter (the
+    // `if states:` truthiness gate), not "match nothing".
+    Statement rows = [&]() {
+        if (states.empty()) {
+            return db.prepare(
+                "SELECT working_id, source_version_id, path, state, "
+                "display_name, created_at, updated_at, payload_mtime_ns, "
+                "source_size_bytes FROM working_copies ORDER BY created_at");
+        }
+        std::string marks;
+        for (std::size_t i = 0; i < states.size(); ++i) {
+            marks += i == 0 ? "?" : ",?";
+        }
+        return db.prepare(
+            "SELECT working_id, source_version_id, path, state, "
+            "display_name, created_at, updated_at, payload_mtime_ns, "
+            "source_size_bytes FROM working_copies WHERE state IN (" +
+            marks + ") ORDER BY created_at");
+    }();
+    if (!rows.is_valid()) return copies;
+    for (std::size_t i = 0; i < states.size(); ++i) {
+        rows.bind(static_cast<int>(i + 1), states[i]);
+    }
+    while (rows.step()) {
+        copies.push_back(working_copy_from_row(rows));
+    }
+    return copies;
+}
+
+Result<std::string> CatalogRepository::register_working_copy(
+    const domain::VersionId& source_version_id, const std::string& path,
+    const std::string& display_name,
+    std::optional<std::int64_t> payload_mtime_ns,
+    std::optional<std::int64_t> source_size_bytes) {
+    // db.py register_working_copy: generative id + local ISO-second twin
+    // timestamps + state='checked_out'; bare INSERT; sync_state untouched.
+    const std::string working_id = "wc-" + random_hex(12);
+    const std::string now = local_now_iso_seconds();
+    std::optional<Database> scratch;
+    Database* db = bookkeeping_connection(scratch, db_, sqlite_path_,
+                                          SqliteOpenMode::Create);
+    if (db == nullptr) {
+        return DataError(ErrorCode::CorruptDatabase,
+                         "cannot open working-copy registry");
+    }
+    Transaction transaction(*db);
+    {
+        Statement existing =
+            db->prepare("SELECT 1 FROM working_copies WHERE path = ?");
+        if (existing.is_valid()) {
+            existing.bind(1, path);
+            if (existing.step()) {
+                return DataError(ErrorCode::DuplicateOperation,
+                                 "UNIQUE constraint failed: "
+                                 "working_copies.path",
+                                 Json{{"working_copy_path", path}});
+            }
+        }
+    }
+    Statement statement = db->prepare(
+        "INSERT INTO working_copies (working_id, source_version_id, path,"
+        " state, display_name, created_at, updated_at, payload_mtime_ns,"
+        " source_size_bytes) VALUES (?,?,?,?,?,?,?,?,?)");
+    if (!statement.is_valid()) {
+        return DataError(ErrorCode::CorruptDatabase,
+                         "cannot prepare working-copy insert");
+    }
+    statement.bind(1, working_id);
+    statement.bind(2, source_version_id.str());
+    statement.bind(3, path);
+    statement.bind(4, "checked_out");
+    statement.bind(5, display_name);
+    statement.bind(6, now);
+    statement.bind(7, now);
+    if (payload_mtime_ns.has_value()) {
+        statement.bind(8, *payload_mtime_ns);
+    } else {
+        statement.bind_null(8);
+    }
+    if (source_size_bytes.has_value()) {
+        statement.bind(9, *source_size_bytes);
+    } else {
+        statement.bind_null(9);
+    }
+    statement.step_done();
+    if (auto failure = sqlite_step_error(*db, "register working copy")) {
+        return *failure;
+    }
+    transaction.commit();
+    return working_id;
+}
+
+// ---- payload staging leases, write side (db.py 1227-1331) -------------------
+
+std::optional<std::string> CatalogRepository::acquire_staging_lease(
+    const std::vector<std::string>& targets, const std::string& kind) {
+    // A lease is protection, not a gate: any failure → nullopt and the
+    // caller proceeds (pre-lease behavior). No sync_state (schema missing
+    // → nullopt, mirroring _schema_present) and no revision bump.
+    const std::string lease_id = random_hex(32);
+    const std::string now = local_now_iso_seconds();
+    std::optional<Database> scratch;
+    Database* db = bookkeeping_connection(scratch, db_, sqlite_path_,
+                                          SqliteOpenMode::Create);
+    if (db == nullptr) return std::nullopt;
+    if (!db->table_exists("sync_state")) return std::nullopt;
+    Transaction transaction(*db);
+    for (const auto& target : targets) {
+        Statement row = db->prepare(
+            "INSERT OR REPLACE INTO staging_leases"
+            " (lease_id, target, kind, acquired_at, heartbeat_at)"
+            " VALUES (?,?,?,?,?)");
+        if (!row.is_valid()) return std::nullopt;
+        row.bind(1, lease_id);
+        row.bind(2, target);
+        row.bind(3, kind);
+        row.bind(4, now);
+        row.bind(5, now);
+        row.step_done();
+        if (auto failure = sqlite_step_error(*db, "acquire staging lease")) {
+            return std::nullopt;  // RAII rolls the transaction back
+        }
+    }
+    transaction.commit();
+    return lease_id;
+}
+
+void CatalogRepository::release_staging_lease(const std::string& lease_id) {
+    std::optional<Database> scratch;
+    Database* db = bookkeeping_connection(scratch, db_, sqlite_path_,
+                                          SqliteOpenMode::Create);
+    if (db == nullptr) return;
+    Transaction transaction(*db);
+    Statement statement =
+        db->prepare("DELETE FROM staging_leases WHERE lease_id = ?");
+    if (!statement.is_valid()) return;
+    statement.bind(1, lease_id);
+    statement.step_done();
+    transaction.commit();
+}
+
+void CatalogRepository::heartbeat_staging_lease(
+    const std::string& lease_id) {
+    std::optional<Database> scratch;
+    Database* db = bookkeeping_connection(scratch, db_, sqlite_path_,
+                                          SqliteOpenMode::Create);
+    if (db == nullptr) return;
+    Transaction transaction(*db);
+    Statement statement = db->prepare(
+        "UPDATE staging_leases SET heartbeat_at = ? WHERE lease_id = ?");
+    if (!statement.is_valid()) return;
+    statement.bind(1, local_now_iso_seconds());
+    statement.bind(2, lease_id);
+    statement.step_done();
+    transaction.commit();
+}
+
+int CatalogRepository::prune_stale_staging_leases(
+    std::optional<double> ttl_seconds) {
+    // cutoff = (now - ttl) in the same local ISO-second format the
+    // heartbeat writes and gc.hpp compares lexically.
+    const double ttl = ttl_seconds.value_or(3600.0);
+    const std::time_t cutoff = static_cast<std::time_t>(
+        static_cast<double>(std::time(nullptr)) - ttl);
+    std::optional<Database> scratch;
+    Database* db = bookkeeping_connection(scratch, db_, sqlite_path_,
+                                          SqliteOpenMode::Create);
+    if (db == nullptr) return 0;
+    Transaction transaction(*db);
+    Statement statement = db->prepare(
+        "DELETE FROM staging_leases WHERE heartbeat_at <= ?");
+    if (!statement.is_valid()) return 0;
+    statement.bind(1, local_iso_seconds(cutoff));
+    statement.step_done();
+    const int removed = sqlite3_changes(db->handle());
+    transaction.commit();
+    return removed >= 0 ? removed : 0;
+}
+
+// ---- model-registry + promote transactions (R7) ------------------------------
+
+DataError CatalogRepository::upsert_model(const Model& model) {
+    Transaction transaction(db_);
+    auto error = upsert_model_in_transaction(db_, model);
+    if (error.code != ErrorCode::Ok) return error;
+    bump_revision();
+    transaction.commit();
+    return DataError(ErrorCode::Ok, "");
+}
+
+DataError CatalogRepository::upsert_model_version(
+    const ModelVersion& version) {
+    Transaction transaction(db_);
+    auto error = upsert_model_version_in_transaction(db_, version);
+    if (error.code != ErrorCode::Ok) return error;
+    bump_revision();
+    transaction.commit();
+    return DataError(ErrorCode::Ok, "");
+}
+
+DataError CatalogRepository::promote_model_transaction(
+    const Model& model, const ModelVersion& version) {
+    // service.py promote_model: BOTH rows flip in ONE transaction (both or
+    // neither), one revision bump.
+    Transaction transaction(db_);
+    auto error = upsert_model_in_transaction(db_, model);
+    if (error.code != ErrorCode::Ok) return error;
+    error = upsert_model_version_in_transaction(db_, version);
+    if (error.code != ErrorCode::Ok) return error;
+    bump_revision();
+    transaction.commit();
+    return DataError(ErrorCode::Ok, "");
+}
+
+DataError CatalogRepository::commit_promote_transaction(
+    const DataVersion& version, const DataRun& run) {
+    // promote_version landing: version rows + FULL run row (inputs/
+    // outputs/ports) + current pointer + one revision bump — the
+    // commit_version_transaction shape plus the run row.
+    Transaction transaction(db_);
+    auto error = upsert_version_rows(version);
+    if (error.code != ErrorCode::Ok) return error;
+    error = upsert_run_rows(run);
+    if (error.code != ErrorCode::Ok) return error;
+    Statement pointer = db_.prepare(
+        "UPDATE assets SET current_version_id = ?, updated_at = ? "
+        "WHERE id = ?");
+    pointer.bind(1, version.id.str());
+    pointer.bind(2, version.created_at);
+    pointer.bind(3, version.asset_id.str());
+    pointer.step_done();
+    bump_revision();
+    transaction.commit();
+    return DataError(ErrorCode::Ok, "");
+}
+
+DataError CatalogRepository::commit_working_copy_transaction(
+    const std::optional<DataAsset>& new_asset, const DataVersion& version,
+    const std::optional<domain::RunId>& run_id) {
+    // service.py 1821 parity: an optional NEW asset row lands in the SAME
+    // transaction as its first version — no zero-version asset window.
+    Transaction transaction(db_);
+    if (new_asset.has_value()) {
+        auto error = upsert_asset_in_transaction(*new_asset);
+        if (error.code != ErrorCode::Ok) return error;
+    }
+    auto error = upsert_version_rows(version);
+    if (error.code != ErrorCode::Ok) return error;
+    Statement pointer = db_.prepare(
+        "UPDATE assets SET current_version_id = ?, updated_at = ? "
+        "WHERE id = ?");
+    pointer.bind(1, version.id.str());
+    pointer.bind(2, version.created_at);
+    pointer.bind(3, version.asset_id.str());
+    pointer.step_done();
+    if (run_id.has_value()) {
+        Statement row = db_.prepare(
+            "INSERT OR IGNORE INTO run_outputs (run_id, version_id) "
+            "VALUES (?,?)");
+        row.bind(1, run_id->str());
+        row.bind(2, version.id.str());
+        row.step_done();
+    }
+    bump_revision();
+    transaction.commit();
+    return DataError(ErrorCode::Ok, "");
+}
+
 int CatalogRepository::current_revision() const {
     auto status_result = status();
     return status_result.catalog_revision;
@@ -1283,6 +2493,229 @@ std::vector<AuditFinding> audit_catalog(
         }
     }
     return findings;
+}
+
+// ---------------------------------------------------------------------------
+// store.py manifest surface (conv-31b; free functions over the file)
+// ---------------------------------------------------------------------------
+
+std::filesystem::path catalog_manifest_file(
+    const std::filesystem::path& project_path) {
+    // storage.py catalog_file_for = <proj>.artifacts/metadata/catalog.json.
+    // pwb::project::catalog_manifest_for is that derivation — one source.
+    return pwb::project::catalog_manifest_for(project_path);
+}
+
+std::filesystem::path catalog_manifest_bak_file(
+    const std::filesystem::path& project_path) {
+    const std::filesystem::path manifest =
+        pwb::project::catalog_manifest_for(project_path);
+    return manifest.parent_path() /
+           (manifest.filename().string() + ".bak");
+}
+
+std::filesystem::path isolate_corrupt_file(
+    const std::filesystem::path& file) {
+    // store.py _isolate_corrupt_file: rename to
+    // "<name>.corrupt-YYYYmmdd-HHMMSS-<6-digit microseconds>" (LOCAL time),
+    // fsync the directory, and on any failure return the input path so the
+    // corrupt bytes stay in place (best-effort forensics, never a gate).
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t seconds =
+        std::chrono::system_clock::to_time_t(now);
+    const auto fraction =
+        now - std::chrono::system_clock::from_time_t(seconds);
+    const int microseconds = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::microseconds>(fraction)
+            .count());
+    std::tm local{};
+#if !defined(_WIN32)
+    localtime_r(&seconds, &local);
+#else
+    localtime_s(&local, &seconds);
+#endif
+    char date[32];
+    const std::size_t written =
+        std::strftime(date, sizeof(date), "%Y%m%d-%H%M%S", &local);
+    char stamp[48];
+    std::snprintf(stamp, sizeof(stamp), "%.*s-%06d",
+                  static_cast<int>(written), date, microseconds);
+    const std::filesystem::path isolated =
+        file.parent_path() /
+        (file.filename().string() + ".corrupt-" + stamp);
+    std::error_code ec;
+    std::filesystem::rename(file, isolated, ec);
+    if (ec) return file;
+    fsync_dir_best_effort(file.parent_path());
+    return isolated;
+}
+
+Result<ManifestLoad> load_manifest(
+    const std::filesystem::path& manifest_path) {
+    // store.py CatalogStore.load — the L1-L5 ladder. The L2/L4 message
+    // skeletons are byte-identical to Python; the parenthesized detail is
+    // parser-specific (B-14, oracle-masked). The isolated/isolated_backup
+    // members are only meaningful on the success ladder — on L2/L4 the
+    // Result channel carries the error alone and the isolation targets
+    // are observable on disk.
+    ManifestLoad load;
+    const std::filesystem::path bak =
+        manifest_path.parent_path() /
+        (manifest_path.filename().string() + ".bak");
+    const std::string path_text = manifest_path.generic_string();
+    auto is_file = [](const std::filesystem::path& candidate) {
+        std::error_code ec;
+        return std::filesystem::is_regular_file(candidate, ec);
+    };
+    auto l2 = [&](const std::string& detail) -> DataError {
+        load.isolated = isolate_corrupt_file(manifest_path);
+        return DataError(ErrorCode::CorruptDatabase,
+                         "Catalog file is corrupt and no backup is "
+                         "available: " +
+                             path_text + " (" + detail + ")");
+    };
+
+    if (is_file(manifest_path)) {
+        auto json = read_manifest_json(manifest_path);
+        if (json.is_ok()) {
+            auto document = parse_manifest_document(json.value());
+            if (document.is_ok()) {
+                load.document = std::move(document.value());
+                return load;  // L1
+            }
+            if (!is_file(bak)) return l2(document.error().message);
+        } else if (!is_file(bak)) {
+            return l2(json.error().message);
+        }
+        // Corrupt canonical with a live backup: fall through to the bak
+        // ladder below.
+    }
+    if (is_file(bak)) {
+        auto json = read_manifest_json(bak);
+        if (json.is_ok()) {
+            auto document = parse_manifest_document(json.value());
+            if (document.is_ok()) {
+                // L3: re-promote the backup so subsequent saves start from
+                // a clean canonical state (rename failure is swallowed —
+                // the document still loads).
+                std::error_code ec;
+                std::filesystem::rename(bak, manifest_path, ec);
+                if (!ec) {
+                    fsync_dir_best_effort(manifest_path.parent_path());
+                    load.repromoted_backup = true;
+                }
+                load.from_backup = true;
+                load.document = std::move(document.value());
+                return load;
+            }
+            load.isolated = isolate_corrupt_file(manifest_path);
+            load.isolated_backup = isolate_corrupt_file(bak);
+            return DataError(
+                ErrorCode::CorruptDatabase,
+                "Catalog file and its backup are both corrupt: " +
+                    path_text + " (backup error: " +
+                    document.error().message + ")");
+        }
+        load.isolated = isolate_corrupt_file(manifest_path);
+        load.isolated_backup = isolate_corrupt_file(bak);
+        return DataError(ErrorCode::CorruptDatabase,
+                         "Catalog file and its backup are both corrupt: " +
+                             path_text + " (backup error: " +
+                             json.error().message + ")");
+    }
+    return load;  // L5: absent manifest and absent backup = empty document
+}
+
+DataError save_manifest(const std::filesystem::path& manifest_path,
+                        const CatalogDocument& document, bool pretty,
+                        ManifestCheckpointState* state) {
+    // store.py CatalogStore.save: serialize → #1183 unchanged-skip → tmp
+    // (fsync) → rotate/seed .bak → rename home → fsync dir, with the
+    // restore ladder (old revision goes back when the new one never
+    // landed).
+    const Json manifest = manifest_document_json(document);
+    const std::string payload =
+        pretty ? manifest.dump(2) : manifest.dump();
+    const std::string digest = domain::Sha256::of_bytes(payload);
+    if (state != nullptr && state->valid && state->digest == digest) {
+        // Skip only when the on-disk file still carries OUR last write's
+        // mtime — an externally replaced/deleted manifest defeats the skip.
+        const auto current = disk_mtime_ns(manifest_path);
+        if (current.has_value() && *current == state->mtime_ns) {
+            return DataError(ErrorCode::Ok, "");
+        }
+    }
+    ensure_manifest_layout(manifest_path);
+    const std::filesystem::path parent = manifest_path.parent_path();
+    const std::filesystem::path bak =
+        parent / (manifest_path.filename().string() + ".bak");
+    const std::filesystem::path tmp =
+        parent / ("." + manifest_path.filename().string() + "." +
+                  random_hex(8) + ".tmp");
+    bool old_moved = false;
+    std::error_code ec;
+    if (!write_file_fsynced(tmp, payload)) {
+        return DataError(ErrorCode::IoError,
+                         "manifest temp write failed: " +
+                             tmp.generic_string());
+    }
+    if (std::filesystem::exists(manifest_path, ec)) {
+        std::filesystem::rename(manifest_path, bak, ec);
+        if (ec) {
+            safe_unlink(tmp);
+            return DataError(ErrorCode::IoError,
+                             "manifest .bak rotation failed: " +
+                                 ec.message());
+        }
+        old_moved = true;
+    } else {
+        // First save: seed the .bak with the SAME revision so a once-saved
+        // catalog never sits in a no-backup window (#372/C14).
+        const std::filesystem::path seed_tmp =
+            parent / ("." + bak.filename().string() + "." +
+                      random_hex(8) + ".tmp");
+        if (!write_file_fsynced(seed_tmp, payload)) {
+            safe_unlink(tmp);
+            return DataError(ErrorCode::IoError,
+                             "manifest backup seed failed: " +
+                                 seed_tmp.generic_string());
+        }
+        std::filesystem::rename(seed_tmp, bak, ec);
+        if (ec) {
+            safe_unlink(seed_tmp);
+            safe_unlink(tmp);
+            return DataError(ErrorCode::IoError,
+                             "manifest backup seed rename failed: " +
+                                 ec.message());
+        }
+        fsync_dir_best_effort(parent);
+    }
+    std::filesystem::rename(tmp, manifest_path, ec);
+    if (ec) {
+        safe_unlink(tmp);
+        std::error_code probe;
+        if (old_moved && !std::filesystem::exists(manifest_path, probe) &&
+            std::filesystem::exists(bak, probe)) {
+            // The canonical file was moved aside but the new one never
+            // landed: put the previous revision back (best-effort).
+            std::error_code restore;
+            std::filesystem::rename(bak, manifest_path, restore);
+            fsync_dir_best_effort(parent);
+        }
+        return DataError(ErrorCode::IoError,
+                         "manifest rename failed: " + ec.message());
+    }
+    fsync_dir_best_effort(parent);
+    if (state != nullptr) {
+        // An unreadable post-write mtime leaves the previous pair in
+        // place, exactly like store.py's `if written_mtime is not None`.
+        if (const auto written = disk_mtime_ns(manifest_path)) {
+            state->digest = digest;
+            state->mtime_ns = *written;
+            state->valid = true;
+        }
+    }
+    return DataError(ErrorCode::Ok, "");
 }
 
 }  // namespace pwb::catalog

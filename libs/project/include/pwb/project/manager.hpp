@@ -28,6 +28,14 @@ struct SaveStats {
     std::uintmax_t bytes_written = 0;
 };
 
+// Detached, write-ready state captured by prepare_save (project/manager.py
+// PreparedSave parity): plain data copied out of the live document so
+// execute_save can run on a worker thread without racing user edits.
+struct PreparedSave {
+    std::string payload_text;  // serialized portable payload (write-ready)
+    std::string updated_at;    // the meta.updated_at stamp inside it
+};
+
 fs::path project_backup_path(const fs::path& project_path);
 
 class ProjectManager {
@@ -45,7 +53,27 @@ public:
 
     // Build the portable payload (path relativization for the 5 path-bearing
     // sections + meta overrides) and atomically replace the file.
+    // Composed of the three #1040 phases below (Python save() facade parity).
     domain::Result<SaveStats> save(ProjectDocument& document);
+
+    // Three-phase save (manager.py prepare/execute/commit parity) so the
+    // I/O half can run off the GUI thread:
+    //  * prepare_save (GUI thread): read-only + stale-write guards and the
+    //    detached write-ready payload. Touches the live document — never
+    //    call it from a worker thread.
+    //  * execute_save (worker thread): artifact layout + atomic write of
+    //    the detached payload only — safe to run behind a job owner.
+    //  * commit_save (GUI thread): publish post-save state (updated_at and
+    //    the disk-sha baseline) onto the live document.
+    // NOTE: the Python section-diff "clean document → skip" optimization is
+    // not ported yet (no persistence snapshot tracking on the C++ side);
+    // prepare_save therefore always produces a payload. The optional is in
+    // the signature so the skip lands without an API change when snapshots
+    // arrive.
+    domain::Result<PreparedSave> prepare_save(ProjectDocument& document);
+    domain::Result<SaveStats> execute_save(const PreparedSave& prepared);
+    void commit_save(ProjectDocument& document, const PreparedSave& prepared,
+                     const SaveStats& stats);
 
     // Save-side normalization only (no file IO) — exposed for tests and
     // pwb-migrate preflight.
@@ -54,6 +82,10 @@ public:
     const fs::path& path() const { return project_path_; }
     const std::optional<std::string>& last_disk_sha256() const {
         return disk_sha256_;
+    }
+    // manager.last_save_stats parity — populated by commit_save.
+    const std::optional<SaveStats>& last_save_stats() const {
+        return last_save_stats_;
     }
 
     // Raw hash helper (SHA-256 hex of file bytes; nullopt when unreadable).
@@ -69,6 +101,7 @@ private:
     fs::path project_path_;
     std::optional<std::string> fixed_clock_;
     std::optional<std::string> disk_sha256_;  // baseline at load/last save
+    std::optional<SaveStats> last_save_stats_;
 };
 
 // Relativizes the five path-bearing sections in `payload` in place

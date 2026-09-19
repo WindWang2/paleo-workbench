@@ -1,0 +1,4625 @@
+{
+ "cases": [
+  {
+   "id": "full_task",
+   "tasks": [
+    {
+     "id": "factor_e493f689f8c3",
+     "name": "砂岩厚度",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {
+      "constraint_pins": [
+       {
+        "group": "g",
+        "content_hash": "h1"
+       }
+      ],
+      "grid_n": 12
+     },
+     "quality_metrics": {
+      "r_squared": 0.8,
+      "n_points": 10,
+      "backend": "idw"
+     },
+     "grid_artifact_version_id": "gv_full_1",
+     "grid_metadata": {
+      "unit": "m",
+      "crs": "EPSG:32650",
+      "height": 50,
+      "width": 50,
+      "shape": [
+       50,
+       50
+      ]
+     },
+     "source_kind": "real",
+     "generator_version": "eng-1.2"
+    }
+   ],
+   "resolver": {
+    "versions": {
+     "gv_full_1": {
+      "run_id": "run_full"
+     }
+    },
+    "runs": {
+     "run_full": {
+      "input_version_ids": [
+       "vin_a",
+       "vin_b"
+      ]
+     }
+    },
+    "raise_versions": [],
+    "raise_runs": []
+   },
+   "workspace": {},
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_e493f689f8c3": {
+      "factor_id": "factor_e493f689f8c3",
+      "name": "砂岩厚度",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": true,
+      "crs": "EPSG:32650",
+      "crs_declared": true,
+      "grid_shape": [
+       50,
+       50
+      ],
+      "input_version_ids": [
+       "vin_a",
+       "vin_b"
+      ],
+      "grid_version_id": "gv_full_1",
+      "run_id": "run_full",
+      "source_kind": "real",
+      "generator_version": "eng-1.2",
+      "qc": {
+       "r_squared": 0.8,
+       "n_points": 10,
+       "backend": "idw"
+      },
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "gv_full_1",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       }
+      ],
+      "constraint_pins": [
+       {
+        "group": "g",
+        "content_hash": "h1"
+       }
+      ],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_e493f689f8c3": {
+      "kind": "factor",
+      "factor_id": "factor_e493f689f8c3",
+      "title": "砂岩厚度（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "IDW 反距离加权",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m",
+        "state": "ok"
+       },
+       {
+        "label": "CRS",
+        "value": "EPSG:32650",
+        "state": "ok"
+       },
+       {
+        "label": "输入版本",
+        "value": "2 项已钉住",
+        "state": "ok"
+       },
+       {
+        "label": "结果版本",
+        "value": "gv_full_1",
+        "state": "ok"
+       },
+       {
+        "label": "Run",
+        "value": "run_full",
+        "state": "ok"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       },
+       {
+        "label": "QC·r_squared",
+        "value": "0.8",
+        "state": "ok"
+       },
+       {
+        "label": "QC·n_points",
+        "value": "10",
+        "state": "ok"
+       },
+       {
+        "label": "QC·backend",
+        "value": "idw",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   },
+   "batch_freshness": {
+    "factor_e493f689f8c3": {
+     "status": "missing_input",
+     "detail": "输入版本缺失或已清理"
+    }
+   },
+   "batch_products": [
+    {
+     "factor_id": "factor_e493f689f8c3",
+     "name": "砂岩厚度",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "idw",
+     "method_label": "IDW",
+     "unit": "m",
+     "unit_declared": true,
+     "crs": "EPSG:32650",
+     "crs_declared": true,
+     "grid_shape": [
+      50,
+      50
+     ],
+     "input_version_ids": [
+      "vin_a",
+      "vin_b"
+     ],
+     "grid_version_id": "gv_full_1",
+     "run_id": "run_full",
+     "source_kind": "real",
+     "generator_version": "eng-1.2",
+     "qc": {
+      "r_squared": 0.8,
+      "n_points": 10,
+      "backend": "idw"
+     },
+     "maturity": "draft",
+     "freshness": "missing_input",
+     "freshness_detail": "输入版本缺失或已清理",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": true,
+       "version_id": "gv_full_1",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "contours",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      }
+     ],
+     "constraint_pins": [
+      {
+       "group": "g",
+       "content_hash": "h1"
+      }
+     ],
+     "created_at": ""
+    }
+   ]
+  },
+  {
+   "id": "missing_task",
+   "tasks": [
+    {
+     "id": "factor_e493f689f8c3",
+     "name": "砂岩厚度",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {
+      "constraint_pins": [
+       {
+        "group": "g",
+        "content_hash": "h1"
+       }
+      ],
+      "grid_n": 12
+     },
+     "quality_metrics": {
+      "r_squared": 0.8,
+      "n_points": 10,
+      "backend": "idw"
+     },
+     "grid_artifact_version_id": "gv_full_1",
+     "grid_metadata": {
+      "unit": "m",
+      "crs": "EPSG:32650",
+      "height": 50,
+      "width": 50,
+      "shape": [
+       50,
+       50
+      ]
+     },
+     "source_kind": "real",
+     "generator_version": "eng-1.2"
+    }
+   ],
+   "resolver": {
+    "versions": {
+     "gv_full_1": {
+      "run_id": "run_full"
+     }
+    },
+    "runs": {
+     "run_full": {
+      "input_version_ids": [
+       "vin_a",
+       "vin_b"
+      ]
+     }
+    },
+    "raise_versions": [],
+    "raise_runs": []
+   },
+   "workspace": {},
+   "freshness": null,
+   "checks": {
+    "products": {
+     "nope": null
+    },
+    "summaries": {
+     "nope": {
+      "kind": "factor",
+      "factor_id": "",
+      "title": "单因素（不存在）",
+      "rows": [
+       {
+        "label": "状态",
+        "value": "任务不存在",
+        "state": "missing"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "params_unit_declared",
+   "tasks": [
+    {
+     "id": "factor_f5c564d8f501",
+     "name": "地层厚度",
+     "target_horizon": "T1",
+     "factor_type": "地层厚度",
+     "method": "克里金",
+     "parameters": {
+      "unit": "ft"
+     },
+     "quality_metrics": {
+      "n_points": 7
+     },
+     "grid_artifact_version_id": "gv_params_unit",
+     "grid_metadata": {
+      "crs": "EPSG:4326",
+      "height": 30,
+      "width": 20
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": {
+    "versions": {
+     "gv_params_unit": {
+      "run_id": "run_pu"
+     }
+    },
+    "runs": {
+     "run_pu": {
+      "input_version_ids": []
+     }
+    },
+    "raise_versions": [],
+    "raise_runs": []
+   },
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_f5c564d8f501": {
+      "factor_id": "factor_f5c564d8f501",
+      "name": "地层厚度",
+      "factor_type": "地层厚度",
+      "factor_family": "formation_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "克里金",
+      "unit": "ft",
+      "unit_declared": true,
+      "crs": "EPSG:4326",
+      "crs_declared": true,
+      "grid_shape": [
+       30,
+       20
+      ],
+      "input_version_ids": [],
+      "grid_version_id": "gv_params_unit",
+      "run_id": "run_pu",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {
+       "n_points": 7
+      },
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "gv_params_unit",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+       },
+       {
+        "artifact": "qc",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_f5c564d8f501": {
+      "kind": "factor",
+      "factor_id": "factor_f5c564d8f501",
+      "title": "地层厚度（地层厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "克里金",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "ft",
+        "state": "ok"
+       },
+       {
+        "label": "CRS",
+        "value": "EPSG:4326",
+        "state": "ok"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "gv_params_unit",
+        "state": "ok"
+       },
+       {
+        "label": "Run",
+        "value": "run_pu",
+        "state": "ok"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       },
+       {
+        "label": "QC·n_points",
+        "value": "7",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "family_default_porosity",
+   "tasks": [
+    {
+     "id": "factor_80ef814662af",
+     "name": "孔隙度",
+     "target_horizon": "T1",
+     "factor_type": "孔隙度",
+     "method": "样条",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "height": 24,
+      "width": 24
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_80ef814662af": {
+      "factor_id": "factor_80ef814662af",
+      "name": "孔隙度",
+      "factor_type": "孔隙度",
+      "factor_family": "porosity",
+      "target_horizon": "T1",
+      "algorithm_id": "spline",
+      "method_label": "样条",
+      "unit": "%",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [
+       24,
+       24
+      ],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 样条 (CloughTocher) 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_80ef814662af": {
+      "kind": "factor",
+      "factor_id": "factor_80ef814662af",
+      "title": "孔隙度（孔隙度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "样条 (CloughTocher)",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "%（家族默认/未声明）",
+        "state": "unknown"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "unknown_everything",
+   "tasks": [
+    {
+     "id": "factor_70362ff5abfb",
+     "name": "伽马均值",
+     "target_horizon": "T1",
+     "factor_type": "伽马均值",
+     "method": "nearest",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "imported",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_70362ff5abfb": {
+      "factor_id": "factor_70362ff5abfb",
+      "name": "伽马均值",
+      "factor_type": "伽马均值",
+      "factor_family": "",
+      "target_horizon": "T1",
+      "algorithm_id": "nearest",
+      "method_label": "nearest",
+      "unit": "",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "imported",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 最近邻 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_70362ff5abfb": {
+      "kind": "factor",
+      "factor_id": "factor_70362ff5abfb",
+      "title": "伽马均值（伽马均值）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "最近邻",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "未声明",
+        "state": "missing"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "imported",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "unknown_method",
+   "tasks": [
+    {
+     "id": "factor_5ccf1ec53613",
+     "name": "未知法",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "神经网络 v2",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_5ccf1ec53613": {
+      "factor_id": "factor_5ccf1ec53613",
+      "name": "未知法",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "",
+      "method_label": "神经网络 v2",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_5ccf1ec53613": {
+      "kind": "factor",
+      "factor_id": "factor_5ccf1ec53613",
+      "title": "未知法（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "神经网络 v2（未注册方法）",
+        "state": "unknown"
+       },
+       {
+        "label": "单位",
+        "value": "m（家族默认/未声明）",
+        "state": "unknown"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "variance_present_kriging",
+   "tasks": [
+    {
+     "id": "factor_ab4d8669394a",
+     "name": "孔隙度",
+     "target_horizon": "T1",
+     "factor_type": "孔隙度",
+     "method": "克里金",
+     "parameters": {},
+     "quality_metrics": {
+      "variance_min": 0.1,
+      "variance_max": 0.5,
+      "n_points": 25,
+      "backend": "kriging"
+     },
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "unit": "%",
+      "height": 60,
+      "width": 40
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_ab4d8669394a": {
+      "factor_id": "factor_ab4d8669394a",
+      "name": "孔隙度",
+      "factor_type": "孔隙度",
+      "factor_family": "porosity",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "克里金",
+      "unit": "%",
+      "unit_declared": true,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [
+       60,
+       40
+      ],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {
+       "n_points": 25,
+       "backend": "kriging",
+       "variance_min": 0.1,
+       "variance_max": 0.5
+      },
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "qc",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_ab4d8669394a": {
+      "kind": "factor",
+      "factor_id": "factor_ab4d8669394a",
+      "title": "孔隙度（孔隙度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "克里金",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "%",
+        "state": "ok"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "方差面（kriging）",
+        "state": "ok"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       },
+       {
+        "label": "QC·n_points",
+        "value": "25",
+        "state": "ok"
+       },
+       {
+        "label": "QC·backend",
+        "value": "kriging",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "variance_min_zero_counts",
+   "tasks": [
+    {
+     "id": "factor_979b1341b553",
+     "name": "砂岩厚度",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "ordinary_kriging",
+     "parameters": {},
+     "quality_metrics": {
+      "variance_min": 0
+     },
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "unit": "m"
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_979b1341b553": {
+      "factor_id": "factor_979b1341b553",
+      "name": "砂岩厚度",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "ordinary_kriging",
+      "unit": "m",
+      "unit_declared": true,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {
+       "variance_min": 0
+      },
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "qc",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_979b1341b553": {
+      "kind": "factor",
+      "factor_id": "factor_979b1341b553",
+      "title": "砂岩厚度（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "克里金",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m",
+        "state": "ok"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "方差面（kriging）",
+        "state": "ok"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "variance_min_null_no_count",
+   "tasks": [
+    {
+     "id": "factor_7f6bb8c04f4b",
+     "name": "砂岩厚度",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "ok",
+     "parameters": {},
+     "quality_metrics": {
+      "variance_min": null,
+      "variance_max": 1.0
+     },
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "unit": "m",
+      "has_variance_grid": false,
+      "height": 16,
+      "width": 16
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_7f6bb8c04f4b": {
+      "factor_id": "factor_7f6bb8c04f4b",
+      "name": "砂岩厚度",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "ok",
+      "unit": "m",
+      "unit_declared": true,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [
+       16,
+       16
+      ],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {
+       "variance_min": null,
+       "variance_max": 1.0
+      },
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+       },
+       {
+        "artifact": "qc",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_7f6bb8c04f4b": {
+      "kind": "factor",
+      "factor_id": "factor_7f6bb8c04f4b",
+      "title": "砂岩厚度（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "克里金",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m",
+        "state": "ok"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "kriging_fallback_reason",
+   "tasks": [
+    {
+     "id": "factor_74fbbd9b3c37",
+     "name": "砂岩厚度",
+     "target_horizon": "T1",
+     "factor_type": "孔隙度",
+     "method": "克里金",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "algorithm_parameters": {
+       "method": "kriging_fallback",
+       "grid_n": 64
+      },
+      "unit": "%"
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_74fbbd9b3c37": {
+      "factor_id": "factor_74fbbd9b3c37",
+      "name": "砂岩厚度",
+      "factor_type": "孔隙度",
+      "factor_family": "porosity",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "克里金",
+      "unit": "%",
+      "unit_declared": true,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "numpy kriging fallback（不产生克里金方差面）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_74fbbd9b3c37": {
+      "kind": "factor",
+      "factor_id": "factor_74fbbd9b3c37",
+      "title": "砂岩厚度（孔隙度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "克里金",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "%",
+        "state": "ok"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "alias_canonicalization_batch",
+   "tasks": [
+    {
+     "id": "factor_0893f2bf7ca2",
+     "name": "克里金",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "克里金",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_679a9da20b84",
+     "name": "ordinary_kriging",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "ordinary_kriging",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_2a4b7909a202",
+     "name": "ok",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "ok",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_85eb1c7d54fa",
+     "name": "cubic",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "cubic",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_67a384e15063",
+     "name": "样条插值",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "样条插值",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_9a8f8d89cedb",
+     "name": "RBF 多二次",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "RBF 多二次",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_0893f2bf7ca2": {
+      "factor_id": "factor_0893f2bf7ca2",
+      "name": "克里金",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "克里金",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_679a9da20b84": {
+      "factor_id": "factor_679a9da20b84",
+      "name": "ordinary_kriging",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "ordinary_kriging",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_2a4b7909a202": {
+      "factor_id": "factor_2a4b7909a202",
+      "name": "ok",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "ok",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_85eb1c7d54fa": {
+      "factor_id": "factor_85eb1c7d54fa",
+      "name": "cubic",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "spline",
+      "method_label": "cubic",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 样条 (CloughTocher) 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_67a384e15063": {
+      "factor_id": "factor_67a384e15063",
+      "name": "样条插值",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "spline",
+      "method_label": "样条插值",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 样条 (CloughTocher) 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_9a8f8d89cedb": {
+      "factor_id": "factor_9a8f8d89cedb",
+      "name": "RBF 多二次",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "rbf",
+      "method_label": "RBF 多二次",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 RBF 多二次 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {}
+   },
+   "batch_freshness": {},
+   "batch_products": [
+    {
+     "factor_id": "factor_0893f2bf7ca2",
+     "name": "克里金",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "kriging",
+     "method_label": "克里金",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "尚无插值结果（任务未完成）"
+      },
+      {
+       "artifact": "contours",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_679a9da20b84",
+     "name": "ordinary_kriging",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "kriging",
+     "method_label": "ordinary_kriging",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "尚无插值结果（任务未完成）"
+      },
+      {
+       "artifact": "contours",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_2a4b7909a202",
+     "name": "ok",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "kriging",
+     "method_label": "ok",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "尚无插值结果（任务未完成）"
+      },
+      {
+       "artifact": "contours",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_85eb1c7d54fa",
+     "name": "cubic",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "spline",
+     "method_label": "cubic",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "尚无插值结果（任务未完成）"
+      },
+      {
+       "artifact": "contours",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 样条 (CloughTocher) 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_67a384e15063",
+     "name": "样条插值",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "spline",
+     "method_label": "样条插值",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "尚无插值结果（任务未完成）"
+      },
+      {
+       "artifact": "contours",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 样条 (CloughTocher) 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_9a8f8d89cedb",
+     "name": "RBF 多二次",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "rbf",
+     "method_label": "RBF 多二次",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "尚无插值结果（任务未完成）"
+      },
+      {
+       "artifact": "contours",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 RBF 多二次 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    }
+   ]
+  },
+  {
+   "id": "grid_shape_variants_batch",
+   "tasks": [
+    {
+     "id": "factor_331a279fe6b0",
+     "name": "both",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "height": 100,
+      "width": 80
+     },
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_27909c571914",
+     "name": "width_absent",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "height": 80
+     },
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_ae8a77a1b554",
+     "name": "width_null",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "height": 80,
+      "width": null
+     },
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_e22374e433aa",
+     "name": "non_int",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "height": 80.5,
+      "width": "90"
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_331a279fe6b0": {
+      "factor_id": "factor_331a279fe6b0",
+      "name": "both",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [
+       100,
+       80
+      ],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_27909c571914": {
+      "factor_id": "factor_27909c571914",
+      "name": "width_absent",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [
+       80
+      ],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_ae8a77a1b554": {
+      "factor_id": "factor_ae8a77a1b554",
+      "name": "width_null",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [
+       80
+      ],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_e22374e433aa": {
+      "factor_id": "factor_e22374e433aa",
+      "name": "non_int",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {}
+   },
+   "batch_freshness": {},
+   "batch_products": [
+    {
+     "factor_id": "factor_331a279fe6b0",
+     "name": "both",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "idw",
+     "method_label": "IDW",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [
+      100,
+      80
+     ],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "contours",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_27909c571914",
+     "name": "width_absent",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "idw",
+     "method_label": "IDW",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [
+      80
+     ],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "contours",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_ae8a77a1b554",
+     "name": "width_null",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "idw",
+     "method_label": "IDW",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [
+      80
+     ],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "contours",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_e22374e433aa",
+     "name": "non_int",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "idw",
+     "method_label": "IDW",
+     "unit": "m",
+     "unit_declared": false,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "contours",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    }
+   ]
+  },
+  {
+   "id": "catalog_seam_none_and_raise_batch",
+   "tasks": [
+    {
+     "id": "factor_0241349d6f18",
+     "name": "unknown_version",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": "gv_unknown",
+     "grid_metadata": {
+      "unit": "m"
+     },
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_b11027f2d3b5",
+     "name": "raise_version",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": "gv_raise",
+     "grid_metadata": {
+      "unit": "m"
+     },
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_600416265cc0",
+     "name": "raise_run",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": "gv_run_ok",
+     "grid_metadata": {
+      "unit": "m"
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": {
+    "versions": {
+     "gv_run_ok": {
+      "run_id": "run_boom"
+     }
+    },
+    "runs": {},
+    "raise_versions": [
+     "gv_raise"
+    ],
+    "raise_runs": [
+     "run_boom"
+    ]
+   },
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_0241349d6f18": {
+      "factor_id": "factor_0241349d6f18",
+      "name": "unknown_version",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": true,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "gv_unknown",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "gv_unknown",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_b11027f2d3b5": {
+      "factor_id": "factor_b11027f2d3b5",
+      "name": "raise_version",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": true,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "gv_raise",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "gv_raise",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_600416265cc0": {
+      "factor_id": "factor_600416265cc0",
+      "name": "raise_run",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": true,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "gv_run_ok",
+      "run_id": "run_boom",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "gv_run_ok",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_0241349d6f18": {
+      "kind": "factor",
+      "factor_id": "factor_0241349d6f18",
+      "title": "unknown_version（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "IDW 反距离加权",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m",
+        "state": "ok"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "gv_unknown",
+        "state": "ok"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   },
+   "batch_freshness": {},
+   "batch_products": [
+    {
+     "factor_id": "factor_0241349d6f18",
+     "name": "unknown_version",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "idw",
+     "method_label": "IDW",
+     "unit": "m",
+     "unit_declared": true,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "gv_unknown",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": true,
+       "version_id": "gv_unknown",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "contours",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_b11027f2d3b5",
+     "name": "raise_version",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "idw",
+     "method_label": "IDW",
+     "unit": "m",
+     "unit_declared": true,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "gv_raise",
+     "run_id": "",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": true,
+       "version_id": "gv_raise",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "contours",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    },
+    {
+     "factor_id": "factor_600416265cc0",
+     "name": "raise_run",
+     "factor_type": "砂岩厚度",
+     "factor_family": "sand_thickness",
+     "target_horizon": "T1",
+     "algorithm_id": "idw",
+     "method_label": "IDW",
+     "unit": "m",
+     "unit_declared": true,
+     "crs": "",
+     "crs_declared": false,
+     "grid_shape": [],
+     "input_version_ids": [],
+     "grid_version_id": "gv_run_ok",
+     "run_id": "run_boom",
+     "source_kind": "real",
+     "generator_version": "",
+     "qc": {},
+     "maturity": "draft",
+     "freshness": "",
+     "freshness_detail": "",
+     "artifacts": [
+      {
+       "artifact": "grid",
+       "present": true,
+       "version_id": "gv_run_ok",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "contours",
+       "present": true,
+       "version_id": "",
+       "absent_reason": ""
+      },
+      {
+       "artifact": "polygons",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+      },
+      {
+       "artifact": "uncertainty",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+      },
+      {
+       "artifact": "qc",
+       "present": false,
+       "version_id": "",
+       "absent_reason": "无质量指标记录"
+      }
+     ],
+     "constraint_pins": [],
+     "created_at": ""
+    }
+   ]
+  },
+  {
+   "id": "freshness_stale_and_current",
+   "tasks": [
+    {
+     "id": "factor_3c186b4aa211",
+     "name": "陈旧",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "克里金",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": "gv_fresh",
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_13735a4f23a7",
+     "name": "新鲜",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "idw",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": {
+    "versions": {
+     "gv_fresh": {
+      "run_id": "run_fresh"
+     }
+    },
+    "runs": {
+     "run_fresh": {
+      "input_version_ids": [
+       "vin_x"
+      ]
+     }
+    },
+    "raise_versions": [],
+    "raise_runs": []
+   },
+   "workspace": null,
+   "freshness": {
+    "factor_3c186b4aa211": {
+     "status": "stale",
+     "detail": "输入版本已被取代（v3 > v2）"
+    },
+    "factor_13735a4f23a7": {
+     "status": "current",
+     "detail": ""
+    }
+   },
+   "checks": {
+    "products": {
+     "factor_3c186b4aa211": {
+      "factor_id": "factor_3c186b4aa211",
+      "name": "陈旧",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "克里金",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [
+       "vin_x"
+      ],
+      "grid_version_id": "gv_fresh",
+      "run_id": "run_fresh",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "stale",
+      "freshness_detail": "输入版本已被取代（v3 > v2）",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "gv_fresh",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_13735a4f23a7": {
+      "factor_id": "factor_13735a4f23a7",
+      "name": "新鲜",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "idw",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "current",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_3c186b4aa211": {
+      "kind": "factor",
+      "factor_id": "factor_3c186b4aa211",
+      "title": "陈旧（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "克里金",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m（家族默认/未声明）",
+        "state": "unknown"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "1 项已钉住",
+        "state": "ok"
+       },
+       {
+        "label": "结果版本",
+        "value": "gv_fresh",
+        "state": "ok"
+       },
+       {
+        "label": "Run",
+        "value": "run_fresh",
+        "state": "ok"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "stale",
+        "state": "warn"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       },
+       {
+        "label": "说明",
+        "value": "输入版本已被取代（v3 > v2）",
+        "state": "ok"
+       }
+      ]
+     },
+     "factor_13735a4f23a7": {
+      "kind": "factor",
+      "factor_id": "factor_13735a4f23a7",
+      "title": "新鲜（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "IDW 反距离加权",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m（家族默认/未声明）",
+        "state": "unknown"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "current",
+        "state": "ok"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "source_kinds_mock_mixed_real",
+   "tasks": [
+    {
+     "id": "factor_608e46ceefaf",
+     "name": "模拟",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "mock",
+     "generator_version": null
+    },
+    {
+     "id": "factor_729514edf9e5",
+     "name": "混合",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "mixed",
+     "generator_version": null
+    },
+    {
+     "id": "factor_c71c558468f6",
+     "name": "实测",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_608e46ceefaf": {
+      "factor_id": "factor_608e46ceefaf",
+      "name": "模拟",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "mock",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_729514edf9e5": {
+      "factor_id": "factor_729514edf9e5",
+      "name": "混合",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "mixed",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_c71c558468f6": {
+      "factor_id": "factor_c71c558468f6",
+      "name": "实测",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_608e46ceefaf": {
+      "kind": "factor",
+      "factor_id": "factor_608e46ceefaf",
+      "title": "模拟（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "IDW 反距离加权",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m（家族默认/未声明）",
+        "state": "unknown"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "mock（含模拟数据）",
+        "state": "warn"
+       }
+      ]
+     },
+     "factor_729514edf9e5": {
+      "kind": "factor",
+      "factor_id": "factor_729514edf9e5",
+      "title": "混合（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "IDW 反距离加权",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m（家族默认/未声明）",
+        "state": "unknown"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "mixed（含模拟数据）",
+        "state": "warn"
+       }
+      ]
+     },
+     "factor_c71c558468f6": {
+      "kind": "factor",
+      "factor_id": "factor_c71c558468f6",
+      "title": "实测（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "IDW 反距离加权",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m（家族默认/未声明）",
+        "state": "unknown"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "maturity_reviewed_and_draft",
+   "tasks": [
+    {
+     "id": "factor_0f171846ea57",
+     "name": "已审",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    },
+    {
+     "id": "factor_a547cc04cc36",
+     "name": "草稿",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "IDW",
+     "parameters": {},
+     "quality_metrics": {},
+     "grid_artifact_version_id": null,
+     "grid_metadata": {},
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": {
+    "factor:factor_0f171846ea57": "reviewed"
+   },
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_0f171846ea57": {
+      "factor_id": "factor_0f171846ea57",
+      "name": "已审",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "reviewed",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     },
+     "factor_a547cc04cc36": {
+      "factor_id": "factor_a547cc04cc36",
+      "name": "草稿",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "idw",
+      "method_label": "IDW",
+      "unit": "m",
+      "unit_declared": false,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {},
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "尚无插值结果（任务未完成）"
+       },
+       {
+        "artifact": "contours",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "等值线由 grid 派生（渲染期生成，无独立版本）"
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "方法 IDW 反距离加权 不产生不确定度面（注册表能力声明）"
+       },
+       {
+        "artifact": "qc",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "无质量指标记录"
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_0f171846ea57": {
+      "kind": "factor",
+      "factor_id": "factor_0f171846ea57",
+      "title": "已审（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "IDW 反距离加权",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m（家族默认/未声明）",
+        "state": "unknown"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "reviewed",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "qc_str_semantics_subset_order",
+   "tasks": [
+    {
+     "id": "factor_821ba307b52d",
+     "name": "砂岩厚度",
+     "target_horizon": "T1",
+     "factor_type": "砂岩厚度",
+     "method": "克里金",
+     "parameters": {},
+     "quality_metrics": {
+      "backend": "kriging",
+      "synthesized_fallback": true,
+      "r2": 0.91,
+      "r_squared": 0.123456789,
+      "n_points": 10,
+      "variance_min": null,
+      "mean": 3.25,
+      "range": [
+       0.5,
+       9.5
+      ],
+      "distance_policy": true,
+      "duplicate_wells_dropped": 2
+     },
+     "grid_artifact_version_id": null,
+     "grid_metadata": {
+      "unit": "m",
+      "height": 32,
+      "width": 32
+     },
+     "source_kind": "real",
+     "generator_version": null
+    }
+   ],
+   "resolver": null,
+   "workspace": null,
+   "freshness": null,
+   "checks": {
+    "products": {
+     "factor_821ba307b52d": {
+      "factor_id": "factor_821ba307b52d",
+      "name": "砂岩厚度",
+      "factor_type": "砂岩厚度",
+      "factor_family": "sand_thickness",
+      "target_horizon": "T1",
+      "algorithm_id": "kriging",
+      "method_label": "克里金",
+      "unit": "m",
+      "unit_declared": true,
+      "crs": "",
+      "crs_declared": false,
+      "grid_shape": [
+       32,
+       32
+      ],
+      "input_version_ids": [],
+      "grid_version_id": "",
+      "run_id": "",
+      "source_kind": "real",
+      "generator_version": "",
+      "qc": {
+       "r_squared": 0.123456789,
+       "r2": 0.91,
+       "n_points": 10,
+       "backend": "kriging",
+       "mean": 3.25,
+       "range": [
+        0.5,
+        9.5
+       ],
+       "variance_min": null,
+       "distance_policy": true,
+       "duplicate_wells_dropped": 2,
+       "synthesized_fallback": true
+      },
+      "maturity": "draft",
+      "freshness": "",
+      "freshness_detail": "",
+      "artifacts": [
+       {
+        "artifact": "grid",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "contours",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       },
+       {
+        "artifact": "polygons",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "分类多边形由 grid 派生（按阈值请求生成，无独立版本）"
+       },
+       {
+        "artifact": "uncertainty",
+        "present": false,
+        "version_id": "",
+        "absent_reason": "任务无方差记录（方法声明产方差但本次运行未产出）"
+       },
+       {
+        "artifact": "qc",
+        "present": true,
+        "version_id": "",
+        "absent_reason": ""
+       }
+      ],
+      "constraint_pins": [],
+      "created_at": ""
+     }
+    },
+    "summaries": {
+     "factor_821ba307b52d": {
+      "kind": "factor",
+      "factor_id": "factor_821ba307b52d",
+      "title": "砂岩厚度（砂岩厚度）",
+      "rows": [
+       {
+        "label": "方法",
+        "value": "克里金",
+        "state": "ok"
+       },
+       {
+        "label": "单位",
+        "value": "m",
+        "state": "ok"
+       },
+       {
+        "label": "CRS",
+        "value": "未声明",
+        "state": "unknown"
+       },
+       {
+        "label": "输入版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "结果版本",
+        "value": "未登记（保存后登记）",
+        "state": "unknown"
+       },
+       {
+        "label": "Run",
+        "value": "无",
+        "state": "unknown"
+       },
+       {
+        "label": "成熟度",
+        "value": "draft",
+        "state": "ok"
+       },
+       {
+        "label": "新鲜度",
+        "value": "未评估",
+        "state": "unknown"
+       },
+       {
+        "label": "不确定度",
+        "value": "无（方法不产生/任务无方差记录）",
+        "state": "unknown"
+       },
+       {
+        "label": "数据来源",
+        "value": "real",
+        "state": "ok"
+       },
+       {
+        "label": "QC·r_squared",
+        "value": "0.123456789",
+        "state": "ok"
+       },
+       {
+        "label": "QC·n_points",
+        "value": "10",
+        "state": "ok"
+       },
+       {
+        "label": "QC·backend",
+        "value": "kriging",
+        "state": "ok"
+       },
+       {
+        "label": "QC·distance_policy",
+        "value": "True",
+        "state": "ok"
+       }
+      ]
+     }
+    }
+   }
+  }
+ ],
+ "interpretation_cases": [
+  {
+   "id": "no_record",
+   "interpretation": null,
+   "revision": null,
+   "expect": {
+    "kind": "integrated_interpretation",
+    "interpretation_id": "",
+    "title": "综合解释（无记录）",
+    "rows": [
+     {
+      "label": "状态",
+      "value": "无综合解释记录（旧工程或未创建）",
+      "state": "missing"
+     }
+    ]
+   }
+  },
+  {
+   "id": "with_revision",
+   "interpretation": {
+    "interpretation_id": "iint_abc123def456",
+    "name": "T1 综合解释",
+    "input_set_id": "cis_001",
+    "layer_id": "layer_int_1",
+    "fusion_version_id": "ver_fusion_seed_0001",
+    "committed_version_id": "ver_committed_777",
+    "class_schema": [
+     "三角洲",
+     "河道",
+     "河口湾"
+    ],
+    "conflicts": {
+     "mean_conflict_fraction": 0.123456789,
+     "agreement_fraction": 0.7,
+     "low_confidence_fraction": 0.25,
+     "low_margin_fraction": 3.25,
+     "high_conflict_fraction": 1e-05
+    },
+    "revision_ids": [
+     "irev_aaa",
+     "irev_bbb"
+    ],
+    "last_committed_revision_id": "irev_aaa",
+    "maturity": "reviewed"
+   },
+   "revision": {
+    "revision_id": "irev_bbb",
+    "target_kind": "integrated_boundary",
+    "target_layer_id": "layer_int_1",
+    "actor": "地质师A",
+    "created_at": "2026-09-19T10:30:00",
+    "base_kind": "fusion",
+    "base_version_id": "deadbeefcafe0123feed",
+    "evidence_refs": [
+     "factor:task_1",
+     "factor:task_2",
+     "constraint:poly_9"
+    ]
+   },
+   "expect": {
+    "kind": "integrated_interpretation",
+    "interpretation_id": "iint_abc123def456",
+    "title": "T1 综合解释（layer_int_1）",
+    "rows": [
+     {
+      "label": "输入集",
+      "value": "cis_001",
+      "state": "ok"
+     },
+     {
+      "label": "算法种子",
+      "value": "ver_fusion_seed_0001",
+      "state": "ok"
+     },
+     {
+      "label": "提交版本",
+      "value": "ver_committed_777",
+      "state": "ok"
+     },
+     {
+      "label": "成熟度",
+      "value": "reviewed",
+      "state": "ok"
+     },
+     {
+      "label": "分类",
+      "value": "三角洲、河道、河口湾",
+      "state": "ok"
+     },
+     {
+      "label": "未提交编辑",
+      "value": "有",
+      "state": "warn"
+     },
+     {
+      "label": "修订",
+      "value": "2 条",
+      "state": "ok"
+     },
+     {
+      "label": "最近修订",
+      "value": "地质师A @ 2026-09-19T10:30:00（base=fusion:deadbeefcafe）",
+      "state": "ok"
+     },
+     {
+      "label": "依据证据",
+      "value": "factor:task_1；factor:task_2；constraint:poly_9",
+      "state": "ok"
+     },
+     {
+      "label": "冲突·low_confidence_fraction",
+      "value": "0.25",
+      "state": "ok"
+     },
+     {
+      "label": "冲突·mean_conflict_fraction",
+      "value": "0.123456789",
+      "state": "ok"
+     },
+     {
+      "label": "冲突·high_conflict_fraction",
+      "value": "1e-05",
+      "state": "ok"
+     },
+     {
+      "label": "冲突·low_margin_fraction",
+      "value": "3.25",
+      "state": "ok"
+     }
+    ]
+   }
+  }
+ ]
+}

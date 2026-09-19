@@ -422,6 +422,54 @@ if(PWB_BUILD_CONV_01)
     endif()
 endif()
 # END CONV-01
+# BEGIN UI-10-IMPLY — the UI-10 sequence/factor/visualization pages cluster
+# (libs/ui_seqviz) binds the composition document/session kernels
+# (CONV-02 mapping_document), the composition template cartography
+# (CONV-27C), the layout-export kernel (CONV-29) and the well-curve
+# operation kernels (CONV-11 well_science). UI slices carry no per-slice
+# option — they gate under PWB_BUILD_PLATFORM (taskbook §2: no new
+# option(), no flag preemption) — so a platform+data configure implies the
+# kernel closure the pages need, exactly like the UI-04 block implies
+# CONV-22 for libs/ui_workers.
+if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
+    foreach(_ui10_kernel CONV_02 CONV_27C CONV_29 CONV_11)
+        if(NOT PWB_BUILD_${_ui10_kernel})
+            set(PWB_BUILD_${_ui10_kernel} ON)
+            message(STATUS
+                "UI-10: implying PWB_BUILD_${_ui10_kernel}=ON — "
+                "libs/ui_seqviz binds the seqviz page kernels")
+        endif()
+    endforeach()
+endif()
+# END UI-10-IMPLY
+
+# BEGIN UI-14-IMPLY — the UI-14 root controllers (libs/ui_controllers) bind
+# the workflow-runtime closure (CONV-26B recompute planner) and the
+# prediction contract cores (CONV-21 → CONV-13/14/19). UI slices carry no
+# per-slice option (taskbook §2), so a platform+data configure implies the
+# kernel closure the controllers need — the UI-04/UI-10 precedent.
+if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
+    foreach(_ui14_kernel CONV_26B CONV_21)
+        if(NOT PWB_BUILD_${_ui14_kernel})
+            set(PWB_BUILD_${_ui14_kernel} ON)
+            message(STATUS
+                "UI-14: implying PWB_BUILD_${_ui14_kernel}=ON — "
+                "libs/ui_controllers binds the controller kernels")
+        endif()
+    endforeach()
+    # CONV-26B's own imply-if ran earlier (its option block sits above
+    # this point), so land the downstream switches it would have set.
+    # CONV-06/07/08 option blocks still lie ahead — normal-variable sets
+    # shadow them (CMP0077) and their subdirectory adds run on time.
+    # CONV-25's add_subdirectory already passed, so mount it directly.
+    set(PWB_BUILD_CONV_06 ON)
+    set(PWB_BUILD_CONV_07 ON)
+    set(PWB_BUILD_CONV_08 ON)
+    set(PWB_BUILD_CONV_25 ON)
+    pwb_add_subdirectory_once(libs/workflow_graph)
+endif()
+# END UI-14-IMPLY
+
 # BEGIN CONV-02
 # Qt-free MapDocument / MapCompositionDocument JSON kernel (swarm
 # cpp-conv-02): data-contract port of mapping/layers.py +
@@ -494,6 +542,11 @@ if(PWB_BUILD_CONV_07)
             "PWB_BUILD_CONV_07=ON requires PWB_BUILD_MAPPING_KERNEL=ON "
             "(node ops wrap the mapping kernels)")
     endif()
+    if(NOT PWB_BUILD_CONV_06)
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_07=ON requires PWB_BUILD_CONV_06=ON "
+            "(CONV-32 store/run_engine persist the workflow_spec DTOs)")
+    endif()
     add_subdirectory(libs/workflow_engine)
 endif()
 # END CONV-07
@@ -511,6 +564,24 @@ endif()
 if(PWB_BUILD_CONV_26B)
     add_subdirectory(libs/workflow_runtime)
 endif()
+# BEGIN CONV-32
+# Workflow interpretation domain spine (Qt-free, M7 interpretation core):
+# constraint capabilities + algorithm registry, factor products +
+# summaries, constraint products + interpretation revisions, integrated
+# interpretation + compilation input sets. Requires the graph / runtime /
+# fusion cores from CONV-25/26B/24.
+option(PWB_BUILD_CONV_32
+    "Build the CONV-32 workflow interpretation core (libs/workflow_interpretation; implies PWB_BUILD_CONV_25 + CONV_26B + CONV_24)" OFF)
+if(PWB_BUILD_CONV_32)
+    foreach(_conv32_req CONV_25 CONV_26B CONV_24)
+        if(NOT PWB_BUILD_${_conv32_req})
+            message(FATAL_ERROR
+                "PWB_BUILD_CONV_32=ON requires PWB_BUILD_${_conv32_req}=ON")
+        endif()
+    endforeach()
+    add_subdirectory(libs/workflow_interpretation)
+endif()
+# END CONV-32
 # BEGIN CONV-09
 # M8 first slice: DTW well-log matcher kernel (viz/dtw_log_matcher.py port),
 # Qt-free, frozen against the Python oracle. Tests need Pwb::Domain
@@ -700,6 +771,13 @@ if(PWB_BUILD_PLATFORM)
     # attribute/topology/reference/boundary panels, factor shelf, inspector)
     # over the ui_data_core edit stack.
     add_subdirectory(libs/ui_pages_mapedit)
+    # UI-12 — workstation shell slice: dock composition frame + panel
+    # widgets over the UI-01 shell substrate (pages stay injected).
+    add_subdirectory(libs/ui_workstation)
+    # UI-13 — workstation-composite slice: Qt-free composite-editor
+    # cores (vector layers/edit sessions, topology, merge, CRS gate,
+    # snapping, map tools, controller) + Qt/QGIS shells as they land.
+    add_subdirectory(libs/ui_composite)
     add_subdirectory(apps/paleo_workbench_platform)
     if(BUILD_TESTING)
         enable_testing()
@@ -754,6 +832,137 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-09
 
+# BEGIN UI-11 — qt-review-gov slice (libs/ui_review): Qt-free semantic
+# cores + thin Qt Widgets shells for the review/governance cluster
+# (review export page, governance metadata, catalog health, lineage
+# explorer, impact preview, version workbench, ingest plan, relink,
+# AI-check advisor, QC issue table, workflow contract panel) plus the
+# non-production composite prototype on the _qgis target. Same gating
+# model as UI-09: no per-slice option; the library joins platform
+# configures that already resolved the data closure (Pwb::Data —
+# PWB_BUILD_DATA, which also supplies Pwb::Catalog via libs/data_suite)
+# and the CONV-30 job runtime's Qt bridge (Pwb::JobQt — worker-backed
+# dialogs). CONV-23's workflow_contracts leaf is pulled in when the
+# kernel slices left it out (UI-09 well_science precedent).
+# task_panel_base / prediction_evidence / prediction_task panels are NOT
+# re-ported — hosts reuse UI-09's pwb::ui_wellseis::qt widgets.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::Data AND TARGET Pwb::JobQt
+   AND TARGET Qt6::Widgets)
+    if(NOT TARGET Pwb::WorkflowContracts)
+        pwb_add_subdirectory_once(libs/workflow_contracts)
+    endif()
+    add_subdirectory(libs/ui_review)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-11: libs/ui_review skipped — needs Pwb::Data "
+        "(PWB_BUILD_DATA) + Pwb::JobQt (PWB_BUILD_CONV_30) + "
+        "Qt6::Widgets; the Python pages remain the production path")
+endif()
+# END UI-11
+
+# BEGIN UI-10 — sequence/factor/visualization pages cluster
+# (libs/ui_seqviz): Qt-free page state/view models + Qt Widgets shells for
+# the 16 taskbook pages. Binds the UI-04 worker contracts (libs/ui_workers)
+# plus the UI-03 preview/data core, the CONV-30 job runtime, the
+# mapping-document composition session and the well-science curve kernels.
+# Joins every configuration that resolves those targets; configs without
+# them keep the Python pages as the production path.
+if(TARGET Pwb::UiWorkers AND TARGET Pwb::UiDataCore
+   AND TARGET Pwb::MappingDocument AND TARGET Pwb::WellScience
+   AND TARGET Pwb::JobRuntime AND TARGET Pwb::Domain)
+    add_subdirectory(libs/ui_seqviz)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-10: libs/ui_seqviz skipped — enable PWB_BUILD_CONV_22 "
+        "(worker ports) plus the platform/data/mapping/well slices for "
+        "the seqviz pages; the Python pages remain the production path")
+endif()
+# END UI-10
+
+# BEGIN UI-14 — root-controllers slice (libs/ui_controllers): Qt-free
+# cores of the six paleo_workbench/ui root controllers (selection bus +
+# view coordination, map actions, data lifecycle, project lifecycle +
+# three-phase save worker, cross-page workflow) plus thin Qt Widgets
+# shells (JobOwner-backed workers, stock-dialog binds). Same gating
+# model as UI-09/10/11: no per-slice option; the library joins platform
+# configures that already resolved the data catalog (Pwb::Catalog via
+# libs/data_suite or libs/catalog), the project document stack
+# (Pwb::Project), the UI-04 worker contracts (Pwb::UiWorkers), the UI-01
+# shell substrate + UI-03 data core (Pwb::UiShell + Pwb::UiDataCore),
+# the recompute planner (Pwb::WorkflowRuntime), the spatial-result gate
+# (Pwb::Prediction) and the tool registries (Pwb::ToolPolicy +
+# Pwb::UiWorkstation). Application-shell wiring stays a later
+# integration slice — these targets only expose the seams it binds.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::UiWorkers AND TARGET Pwb::UiDataCore
+   AND TARGET Pwb::UiShell AND TARGET Pwb::UiWorkstation
+   AND TARGET Pwb::Catalog AND TARGET Pwb::Project
+   AND TARGET Pwb::WorkflowRuntime AND TARGET Pwb::Prediction
+   AND TARGET Pwb::ToolPolicy)
+    add_subdirectory(libs/ui_controllers)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-14: libs/ui_controllers skipped — needs Pwb::UiWorkers + "
+        "Pwb::UiDataCore + Pwb::UiShell + Pwb::UiWorkstation + "
+        "Pwb::Catalog + Pwb::Project + Pwb::WorkflowRuntime + "
+        "Pwb::Prediction + Pwb::ToolPolicy; the Python controllers "
+        "remain the production path")
+endif()
+# END UI-14
+
+# BEGIN UI-16 — visual-QA slice (libs/ui_visualqa): Qt-free check/state/
+# snapshot cores + thin Qt Widgets shells for the visual_qa_v{6..11}.py
+# harness semantics + the non-production dual-volume overlay prototype.
+# Same gating model as UI-09..14: no per-slice option; the library joins
+# platform configures that already resolved the widget libraries the V11
+# builders reuse (Pwb::UiShellQt command palette, Pwb::UiWellseisQt task/
+# seismic panels, Pwb::UiWorkstationQt inspector/task center,
+# Pwb::UiWidgets state surfaces, Pwb::PlatformServices theme service) —
+# the Python harness remains the production path without them. Heavy
+# host surfaces (AppShell / DataPage / MappingStageBar+Panel) stay
+# injected seams — the slice never fakes them.
+if(PWB_BUILD_PLATFORM AND TARGET Qt6::Widgets
+   AND TARGET Pwb::UiShellQt AND TARGET Pwb::UiWellseisQt
+   AND TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiWidgets
+   AND TARGET Pwb::PlatformServices AND TARGET Pwb::ToolPolicy
+   AND TARGET Pwb::Domain)
+    add_subdirectory(libs/ui_visualqa)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-16: libs/ui_visualqa skipped — needs Qt6::Widgets + "
+        "Pwb::UiShellQt + Pwb::UiWellseisQt + Pwb::UiWorkstationQt + "
+        "Pwb::UiWidgets + Pwb::PlatformServices + Pwb::ToolPolicy + "
+        "Pwb::Domain; the Python visual-QA harness remains the "
+        "production path")
+endif()
+# END UI-16
+
+# BEGIN UI-15 — root-canvas slice (libs/ui_canvas): Qt-free semantic
+# cores (render-backend contract/helpers, layer scene, layer tree,
+# properties payload, symbology request/result, export spec, snapshot
+# encoder) + Qt Widgets shells (UnifiedMapCanvas, NativeMapCanvas +
+# raster controller, NativeLayerTree, properties dialog, export worker,
+# preview dialog) + the QGIS-coupled surfaces (snapshot codec,
+# QgisSnapshotRenderBackend, symbology bridge over the vendored bridge
+# TUs). Same gating model as UI-09/10/11/14: no per-slice option; the
+# library joins platform configures that already resolved the map/
+# widgets/preview/job closures. The CONV-27C cartography leaf is pulled
+# in when the kernel slices left it out (UI-09 well_science precedent).
+# The application shell stays unwired — the targets only expose the
+# seams it binds.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::UiMap AND TARGET Pwb::UiWidgets
+   AND TARGET Pwb::UiPagesPreviewQt AND TARGET Pwb::JobQt)
+    if(NOT TARGET Pwb::Cartography)
+        pwb_add_subdirectory_once(libs/cartography)
+    endif()
+    add_subdirectory(libs/ui_canvas)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-15: libs/ui_canvas skipped — needs Pwb::UiMap + "
+        "Pwb::UiWidgets + Pwb::UiPagesPreviewQt + Pwb::JobQt "
+        "(PWB_BUILD_CONV_30); the Python canvases remain the "
+        "production path")
+endif()
+# END UI-15
 # BEGIN VIZ-B
 # Cross-well correlation / well-tie viz cores (completion-plan §V3):
 # Qt-free tops/picks models, auto-section planner, seismic tie tables,

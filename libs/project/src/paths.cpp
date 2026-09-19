@@ -69,6 +69,16 @@ fs::path artifact_dir_for(const fs::path& project_path) {
     return base / (name + ".artifacts");
 }
 
+fs::path ensure_artifact_layout(const fs::path& project_path) {
+    const fs::path root = artifact_dir_for(project_path);
+    for (const char* name : {"cache", "factor_maps", "predictions",
+                             "paleomaps", "qc", "exports", "thumbnails"}) {
+        std::error_code ec;
+        fs::create_directories(root / name, ec);
+    }
+    return root;
+}
+
 fs::path project_dir_for(const fs::path& project_path) {
     std::error_code ec;
     fs::path resolved = fs::weakly_canonical(project_path, ec);

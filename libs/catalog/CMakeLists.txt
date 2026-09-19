@@ -85,3 +85,28 @@ target_sources(pwb_catalog PRIVATE
     src/trash.cpp
 )
 # END CONV-31
+
+# BEGIN CONV-31B
+# Catalog service/db deep core (conv-31b): the DirtySet write channel
+# (apply_changes/reconcile/rebuild/sync/is_fresh), the SQL read side
+# (14 lazy reads + the query surface), the service orchestration core
+# (open health matrix / _save / _BatchSave / _CatalogMaps), the
+# working-copy state machine, the resolve_path ladder, the service-level
+# trash/restore/purge orchestration, the model registry, the governance
+# metadata pipeline, the #849-1 promote shapes and the V11 bundle
+# orchestration. New TUs only — dedup.cpp/gc.cpp/repository.cpp/models.cpp
+# were EXTENDED in place and stay in their existing lists above
+# (row_mapping.hpp is a private header, not a TU).
+target_sources(pwb_catalog PRIVATE
+    src/apply_changes.cpp
+    src/queries_sql.cpp
+    src/service_core.cpp
+    src/working_copy.cpp
+    src/resolve.cpp
+    src/trash_service.cpp
+    src/model_registry.cpp
+    src/asset_metadata.cpp
+    src/version_promote.cpp
+    src/v11_bundle.cpp
+)
+# END CONV-31B

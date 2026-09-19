@@ -16,6 +16,7 @@
 #pragma once
 
 #include "pwb/catalog/models.hpp"
+#include "pwb/catalog/sqlite.hpp"  // CONV-31b: live lease read (Database&)
 
 #include <filesystem>
 #include <optional>
@@ -59,8 +60,25 @@ struct GcContext {
 // string compares greater than *cutoff_iso* (ISO-8601 lexicographic = time
 // order). Callers derive the cutoff from now − STAGING_LEASE_TTL (3600s);
 // `default_lease_cutoff` formats that value.
+//
+// CONV-31b (A5, findings §F-2): this snapshot read can no longer see a
+// lease acquired after the document was loaded — the R-leak that let an
+// explicit sweep delete in-flight bytes (#1222). plan/sweep now use the
+// LIVE sqlite read below (db.py 1289-1308 parity: Python queries the table
+// directly). This document-snapshot form stays exported for connection-less
+// callers (backward compatible).
 std::set<std::string> active_staging_targets(const CatalogDocument& document,
                                              const std::string& cutoff_iso);
+// The live read: `SELECT DISTINCT target FROM staging_leases WHERE
+// heartbeat_at > ?` over an open database. Missing table / failed prepare →
+// empty set (db.py _read_rows failure → set(), swallow parity).
+std::set<std::string> active_staging_targets_live(Database& database,
+                                                  const std::string& cutoff_iso);
+// Convenience overload: opens catalog.sqlite read-only from the project
+// file (metadata/catalog.sqlite); missing or unreadable store → empty set.
+std::set<std::string> active_staging_targets_live(
+    const std::filesystem::path& project_path,
+    const std::string& cutoff_iso);
 std::string default_lease_cutoff();  // local now − 3600s, ISO seconds
 
 GcReport plan_gc(const GcContext& context, bool explicit_plan = true);

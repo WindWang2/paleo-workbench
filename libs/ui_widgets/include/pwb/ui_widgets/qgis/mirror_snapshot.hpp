@@ -60,7 +60,7 @@ struct MirrorLayerSpec {
     // Declared layer extent [xmin,ymin,xmax,ymax] for the CRS-domain
     // check; empty -> feature bounds fallback (R5).
     std::vector<double> extent;
-    int data_revision = 0;  // 0 = unknown -> ledger disabled
+    qint64 data_revision = 0;  // 0 = unknown -> ledger disabled
     double min_scale = 0.0; // scale_range token (0 = unset)
     double max_scale = 0.0;
     QString source_path;    // raster_source only
@@ -98,7 +98,7 @@ struct MirrorOptions {
 class MirrorLedger {
 public:
     struct Tokens {
-        int data_revision = 0;
+        qint64 data_revision = 0;
         std::string style_sig;
         bool visible = false;
         double opacity = 0.0;

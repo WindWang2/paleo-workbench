@@ -22,6 +22,11 @@ std::string path_to_u8(const fs::path& path);  // generic (forward-slash) UTF-8
 // `<name>.artifacts` sibling of the project file (artifact_dir_for).
 fs::path artifact_dir_for(const fs::path& project_path);
 
+// paths.py ensure_artifact_layout parity: create the durable artifact
+// layout (cache/factor_maps/predictions/paleomaps/qc/exports/thumbnails)
+// a new project's portable metadata may reference. Idempotent.
+fs::path ensure_artifact_layout(const fs::path& project_path);
+
 // Resolved parent directory of the project file (project_dir_for).
 fs::path project_dir_for(const fs::path& project_path);
 

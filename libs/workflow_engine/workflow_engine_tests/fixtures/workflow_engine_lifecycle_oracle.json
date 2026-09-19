@@ -1,0 +1,2508 @@
+{
+ "meta": {
+  "environment": {
+   "python": "3.11.8",
+   "platform": "Linux-oracle",
+   "workbench": "oracle-1.0"
+  },
+  "tick_start": 1000.0,
+  "tick_step": 0.5,
+  "determinism": "uuid4 + time.time globally patched; wait recorded; sequential drive only; real WorkflowRunStore per case"
+ },
+ "cases": {
+  "run_complete_chain": {
+   "run": {
+    "run_id": "r000000000000101",
+    "state": "completed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "a08cbc3289e25cc35710c3b89da4d7c7e99ec14040dc7751cf5f5692871da6b6",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1006.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000000101",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "up": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+      "output_version_ids": [
+       "v-b-1"
+      ],
+      "outputs": {
+       "report": "done",
+       "version_ids": [
+        "v-b-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "b",
+       "workflow_run_id": "r000000000000101",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "up": "porosity"
+       },
+       "input_version_ids": [
+        "v-a-1"
+       ],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1004.5,
+       "finished_at": 1005.0,
+       "duration_ms": 7.25,
+       "output_version_ids": [
+        "v-b-1"
+       ],
+       "outputs_summary": {
+        "report": "done",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1004.0,
+      "finished_at": 1005.5
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {
+      "factor": "porosity"
+     }
+    },
+    {
+     "action": "t.compute",
+     "params": {
+      "up": "porosity"
+     }
+    }
+   ]
+  },
+  "static_validation_unknown_action": {
+   "error": {
+    "type": "WorkflowValidationError",
+    "message": "workflow 'wf.bad' invalid: node 'a': unknown action 'ghost.op'",
+    "problems": [
+     "node 'a': unknown action 'ghost.op'"
+    ]
+   },
+   "calls": []
+  },
+  "slot_schema_missing_required": {
+   "error": {
+    "type": "WorkflowValidationError",
+    "message": "workflow 'wf.chain' invalid: required slot 'factor' has no value",
+    "problems": [
+     "required slot 'factor' has no value"
+    ]
+   }
+  },
+  "crash_resume_completes": {
+   "run": {
+    "run_id": "r000000000000401",
+    "state": "completed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "a08cbc3289e25cc35710c3b89da4d7c7e99ec14040dc7751cf5f5692871da6b6",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1006.0,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.0,
+      "finished_at": 1001.5
+     },
+     "b": {
+      "state": "succeeded",
+      "attempt": 2,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "up": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+      "output_version_ids": [
+       "v-b-1"
+      ],
+      "outputs": {
+       "report": "done",
+       "version_ids": [
+        "v-b-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "b",
+       "workflow_run_id": "r000000000000401",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "up": "porosity"
+       },
+       "input_version_ids": [
+        "v-a-1"
+       ],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1004.0,
+       "finished_at": 1004.5,
+       "duration_ms": 7.25,
+       "output_version_ids": [
+        "v-b-1"
+       ],
+       "outputs_summary": {
+        "report": "done",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+       "from_cache": false,
+       "attempt": 2,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1003.5,
+      "finished_at": 1005.0
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {
+      "up": "porosity"
+     }
+    }
+   ]
+  },
+  "failure_no_resume_revival": {
+   "after_failure": {
+    "run_id": "r000000000000501",
+    "state": "failed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "9f6142a8a05178519e01870ead369ecc960d364c72c35337539e2c4fd9a50dbd",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1006.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000000501",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "failed",
+      "attempt": 1,
+      "action_status": "failed",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "df2fd3555f1ba93914eda710f9f8dde8b490e90ba06ae4ed7c195cdc8a6a42dd",
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "engine exploded",
+      "started_at": 1004.0,
+      "finished_at": 1005.0
+     },
+     "c": {
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": "upstream b failed",
+      "error": null,
+      "started_at": null,
+      "finished_at": 1005.5
+     }
+    }
+   },
+   "after_resume": {
+    "run_id": "r000000000000501",
+    "state": "failed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "9f6142a8a05178519e01870ead369ecc960d364c72c35337539e2c4fd9a50dbd",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1007.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000000501",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "failed",
+      "attempt": 1,
+      "action_status": "failed",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "df2fd3555f1ba93914eda710f9f8dde8b490e90ba06ae4ed7c195cdc8a6a42dd",
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "engine exploded",
+      "started_at": 1004.0,
+      "finished_at": 1005.0
+     },
+     "c": {
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": "upstream b failed",
+      "error": null,
+      "started_at": null,
+      "finished_at": 1005.5
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {
+      "factor": "porosity"
+     }
+    },
+    {
+     "action": "t.fail",
+     "params": {}
+    }
+   ]
+  },
+  "rerun_carry_all": {
+   "run": {
+    "run_id": "r000000000000602",
+    "state": "completed",
+    "parent_run_id": "r000000000000601",
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "a08cbc3289e25cc35710c3b89da4d7c7e99ec14040dc7751cf5f5692871da6b6",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1007.0,
+    "updated_at": 1008.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": true,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000000602",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": true,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     "b": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": true,
+      "parameters": {
+       "up": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+      "output_version_ids": [
+       "v-b-1"
+      ],
+      "outputs": {
+       "report": "done",
+       "version_ids": [
+        "v-b-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "b",
+       "workflow_run_id": "r000000000000602",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "up": "porosity"
+       },
+       "input_version_ids": [
+        "v-a-1"
+       ],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1004.5,
+       "finished_at": 1005.0,
+       "duration_ms": 7.25,
+       "output_version_ids": [
+        "v-b-1"
+       ],
+       "outputs_summary": {
+        "report": "done",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+       "from_cache": true,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     }
+    }
+   },
+   "calls": [],
+   "first_run_id": "r000000000000601"
+  },
+  "rerun_slot_override_miss": {
+   "run": {
+    "run_id": "r000000000000702",
+    "state": "completed",
+    "parent_run_id": "r000000000000701",
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "a08cbc3289e25cc35710c3b89da4d7c7e99ec14040dc7751cf5f5692871da6b6",
+    "slot_values": {
+     "factor": "silt"
+    },
+    "created_at": 1007.0,
+    "updated_at": 1013.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "silt"
+      },
+      "input_version_ids": [],
+      "cache_identity": "35b6002bc1439bc981b551d24f3dc375f5aa1e147df6afb7f0dc8aa47eb3290e",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "silt",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000000702",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "silt"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1009.0,
+       "finished_at": 1009.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "silt",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "35b6002bc1439bc981b551d24f3dc375f5aa1e147df6afb7f0dc8aa47eb3290e",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1008.5,
+      "finished_at": 1010.0
+     },
+     "b": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "up": "silt"
+      },
+      "input_version_ids": [],
+      "cache_identity": "d3b17e39507228b8ed468f9c18a1446f9b4990704f7a03092b8d2c1c4c3c9f3d",
+      "output_version_ids": [
+       "v-b-1"
+      ],
+      "outputs": {
+       "report": "done",
+       "version_ids": [
+        "v-b-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "b",
+       "workflow_run_id": "r000000000000702",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "up": "silt"
+       },
+       "input_version_ids": [
+        "v-a-1"
+       ],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1011.5,
+       "finished_at": 1012.0,
+       "duration_ms": 7.25,
+       "output_version_ids": [
+        "v-b-1"
+       ],
+       "outputs_summary": {
+        "report": "done",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "d3b17e39507228b8ed468f9c18a1446f9b4990704f7a03092b8d2c1c4c3c9f3d",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1011.0,
+      "finished_at": 1012.5
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {
+      "factor": "silt"
+     }
+    },
+    {
+     "action": "t.compute",
+     "params": {
+      "up": "silt"
+     }
+    }
+   ]
+  },
+  "rerun_from_b": {
+   "run": {
+    "run_id": "r000000000000802",
+    "state": "completed",
+    "parent_run_id": "r000000000000801",
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "a08cbc3289e25cc35710c3b89da4d7c7e99ec14040dc7751cf5f5692871da6b6",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1007.0,
+    "updated_at": 1011.0,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": true,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000000802",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": true,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     },
+     "b": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "up": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+      "output_version_ids": [
+       "v-b-1"
+      ],
+      "outputs": {
+       "report": "done",
+       "version_ids": [
+        "v-b-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "b",
+       "workflow_run_id": "r000000000000802",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "up": "porosity"
+       },
+       "input_version_ids": [
+        "v-a-1"
+       ],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1009.0,
+       "finished_at": 1009.5,
+       "duration_ms": 7.25,
+       "output_version_ids": [
+        "v-b-1"
+       ],
+       "outputs_summary": {
+        "report": "done",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1008.5,
+      "finished_at": 1010.0
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {
+      "up": "porosity"
+     }
+    }
+   ]
+  },
+  "conditions": {
+   "condition_false": {
+    "run_id": "r000000000000901",
+    "state": "completed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "f2cfe5a287bcf086e2f78e584541a117d3b0e274dc14d8b80f6562e65aeddc46",
+    "slot_values": {},
+    "created_at": 1000.0,
+    "updated_at": 1004.5,
+    "node_runs": {
+     "c": {
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": "condition false",
+      "error": null,
+      "started_at": null,
+      "finished_at": 1004.0
+     },
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+      "output_version_ids": [
+       "v-a-9"
+      ],
+      "outputs": {
+       "flag": 42,
+       "version_ids": [
+        "v-a-9"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000000901",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {},
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-9"
+       ],
+       "outputs_summary": {
+        "flag": 42,
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     }
+    }
+   },
+   "condition_true": {
+    "run_id": "r000000000000911",
+    "state": "completed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "d0b37f5bfa9b677833c22d33e8fa92dae44a8088cbf376e3bc075c4ffb02df39",
+    "slot_values": {},
+    "created_at": 1000.0,
+    "updated_at": 1006.5,
+    "node_runs": {
+     "c": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+      "output_version_ids": [],
+      "outputs": {
+       "ran": true
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "c",
+       "workflow_run_id": "r000000000000911",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {},
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1004.5,
+       "finished_at": 1005.0,
+       "duration_ms": 2.0,
+       "output_version_ids": [],
+       "outputs_summary": {
+        "ran": true
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1004.0,
+      "finished_at": 1005.5
+     },
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+      "output_version_ids": [
+       "v-a-9"
+      ],
+      "outputs": {
+       "flag": 42,
+       "version_ids": [
+        "v-a-9"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000000911",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {},
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-9"
+       ],
+       "outputs_summary": {
+        "flag": 42,
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     }
+    }
+   }
+  },
+  "retry_resource_shed": {
+   "run": {
+    "run_id": "r000000000001001",
+    "state": "failed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "74d6884dd1475cd7986fcf109390fde84581b6c99c3da75f88cc42487fd2ac71",
+    "slot_values": {},
+    "created_at": 1000.0,
+    "updated_at": 1003.5,
+    "node_runs": {
+     "r": {
+      "state": "failed",
+      "attempt": 3,
+      "action_status": "rejected",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "ResourceExhausted: cpu: busy",
+      "started_at": 1001.5,
+      "finished_at": 1002.5
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {}
+    },
+    {
+     "action": "t.compute",
+     "params": {}
+    },
+    {
+     "action": "t.compute",
+     "params": {}
+    }
+   ],
+   "waits": [
+    0.05,
+    0.05
+   ]
+  },
+  "plain_rejection": {
+   "run": {
+    "run_id": "r000000000001101",
+    "state": "failed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "706edbd47729ee1bd0a069069b3eb8c1af046c2a8b2170535a799740ea4f3d72",
+    "slot_values": {},
+    "created_at": 1000.0,
+    "updated_at": 1003.5,
+    "node_runs": {
+     "r": {
+      "state": "failed",
+      "attempt": 1,
+      "action_status": "rejected",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "invalid context: session expired",
+      "started_at": 1001.5,
+      "finished_at": 1002.5
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {}
+    }
+   ],
+   "waits": []
+  },
+  "unavailable": {
+   "run": {
+    "run_id": "r000000000001201",
+    "state": "failed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "b9898265648f9ad137b645c243c6e3c29edb58d28576672e34b9cd73d399d5dc",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1006.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000001201",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "unavailable",
+      "attempt": 1,
+      "action_status": "unavailable",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "e62936b3e8437a03dd11c3a7e2a0437197cb2e44604dcf01c707d4bf2ad8bbc6",
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "backend not installed",
+      "started_at": 1004.0,
+      "finished_at": 1005.0
+     },
+     "c": {
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": "upstream b unavailable",
+      "error": null,
+      "started_at": null,
+      "finished_at": 1005.5
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {
+      "factor": "porosity"
+     }
+    },
+    {
+     "action": "t.unavail",
+     "params": {}
+    }
+   ]
+  },
+  "cancel_mid_run": {
+   "first": {
+    "run_id": "r000000000001301",
+    "state": "cancelled",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "94e4f9eb2e8490d23d7925c225e7cef6361d7dc614ea164657d330139bf35a27",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1006.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000001301",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "cancelled",
+      "attempt": 1,
+      "action_status": "cancelled",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "cb589c2a2bb8bca76590e3a04dbeaf03c42ef4df7ffd854c020af13d57743efe",
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "user pressed stop",
+      "started_at": 1004.0,
+      "finished_at": 1005.0
+     },
+     "c": {
+      "state": "cancelled",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "cancelled at b",
+      "started_at": null,
+      "finished_at": 1005.5
+     }
+    }
+   },
+   "second": {
+    "run_id": "r000000000001301",
+    "state": "cancelled",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "94e4f9eb2e8490d23d7925c225e7cef6361d7dc614ea164657d330139bf35a27",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1006.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000001301",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "cancelled",
+      "attempt": 1,
+      "action_status": "cancelled",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "cb589c2a2bb8bca76590e3a04dbeaf03c42ef4df7ffd854c020af13d57743efe",
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "user pressed stop",
+      "started_at": 1004.0,
+      "finished_at": 1005.0
+     },
+     "c": {
+      "state": "cancelled",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "cancelled at b",
+      "started_at": null,
+      "finished_at": 1005.5
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {
+      "factor": "porosity"
+     }
+    },
+    {
+     "action": "t.stop",
+     "params": {}
+    }
+   ]
+  },
+  "cancel_no_active": {
+   "cancel_unknown": false,
+   "cancel_finished": false
+  },
+  "checkpoint_failure": {
+   "exception": "CheckpointFailed",
+   "after_failure": {
+    "run_id": "r000000000001501",
+    "state": "running",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "a08cbc3289e25cc35710c3b89da4d7c7e99ec14040dc7751cf5f5692871da6b6",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1003.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000001501",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "pending",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": null,
+      "started_at": null,
+      "finished_at": null
+     }
+    }
+   },
+   "after_resume": {
+    "run_id": "r000000000001501",
+    "state": "completed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "a08cbc3289e25cc35710c3b89da4d7c7e99ec14040dc7751cf5f5692871da6b6",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1010.0,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000001501",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "up": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+      "output_version_ids": [
+       "v-b-1"
+      ],
+      "outputs": {
+       "report": "done",
+       "version_ids": [
+        "v-b-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "b",
+       "workflow_run_id": "r000000000001501",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "up": "porosity"
+       },
+       "input_version_ids": [
+        "v-a-1"
+       ],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1008.0,
+       "finished_at": 1008.5,
+       "duration_ms": 7.25,
+       "output_version_ids": [
+        "v-b-1"
+       ],
+       "outputs_summary": {
+        "report": "done",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1007.5,
+      "finished_at": 1009.0
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {
+      "factor": "porosity"
+     }
+    },
+    {
+     "action": "t.compute",
+     "params": {
+      "up": "porosity"
+     }
+    },
+    {
+     "action": "t.compute",
+     "params": {
+      "up": "porosity"
+     }
+    }
+   ]
+  },
+  "project_guard": {
+   "run_mismatch": {
+    "type": "WorkflowValidationError",
+    "message": "workflow 'wf.guard' invalid: run r000000000001601 belongs to project '/proj/one', not the current project '/proj/two' — resume/rerun refused",
+    "problems": [
+     "run r000000000001601 belongs to project '/proj/one', not the current project '/proj/two' — resume/rerun refused"
+    ]
+   },
+   "rerun_mismatch": {
+    "type": "WorkflowValidationError",
+    "message": "workflow 'wf.guard' invalid: run r000000000001601 belongs to project '/proj/one', not the current project '/proj/two' — resume/rerun refused",
+    "problems": [
+     "run r000000000001601 belongs to project '/proj/one', not the current project '/proj/two' — resume/rerun refused"
+    ]
+   },
+   "probe_switch": {
+    "run_id": "r000000000001601",
+    "state": "interrupted",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "266f59538129159887adc99af1a4bfad73b56625bf17bc6448f832f0744b10c4",
+    "slot_values": {},
+    "created_at": 1000.0,
+    "updated_at": 1001.5,
+    "node_runs": {
+     "a": {
+      "state": "pending",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "project switched during run; re-run pending",
+      "started_at": null,
+      "finished_at": null
+     },
+     "b": {
+      "state": "pending",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "project switched during run; re-run pending",
+      "started_at": null,
+      "finished_at": null
+     }
+    }
+   },
+   "probe_raise": {
+    "run_id": "r000000000001601",
+    "state": "cancelled",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "266f59538129159887adc99af1a4bfad73b56625bf17bc6448f832f0744b10c4",
+    "slot_values": {},
+    "created_at": 1000.0,
+    "updated_at": 1003.5,
+    "node_runs": {
+     "a": {
+      "state": "cancelled",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "project identity probe failed",
+      "started_at": null,
+      "finished_at": 1002.5
+     },
+     "b": {
+      "state": "cancelled",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "project identity probe failed",
+      "started_at": null,
+      "finished_at": 1003.0
+     }
+    }
+   }
+  },
+  "degraded": {
+   "run": {
+    "run_id": "r000000000001701",
+    "state": "completed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "369595d8c25e5615d482102780cabfc1c10712f3b4f3148ca7614945369e25a7",
+    "slot_values": {},
+    "created_at": 1000.0,
+    "updated_at": 1004.0,
+    "node_runs": {
+     "d": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "degraded",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+      "output_version_ids": [
+       "v-d-1"
+      ],
+      "outputs": {
+       "grid": "ok",
+       "version_ids": [
+        "v-d-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "d",
+       "workflow_run_id": "r000000000001701",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {},
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "degraded",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-d-1"
+       ],
+       "outputs_summary": {
+        "grid": "ok",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [
+        "low coverage",
+        "sparse wells"
+       ],
+       "degraded_reason": "low coverage; sparse wells",
+       "error": null,
+       "cache_identity": "3a1230da403f772f8c606ae2d2c6016088a9cab88e1cf101b877650904f78d39",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {}
+    }
+   ]
+  },
+  "context_unavailable": {
+   "run": {
+    "run_id": "r000000000001801",
+    "state": "failed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "51eae4870d9c890b835e5967cd9cc37f3dd3bfbfa73fea88a210a9202c24d88a",
+    "slot_values": {},
+    "created_at": 1000.0,
+    "updated_at": 1003.5,
+    "node_runs": {
+     "n": {
+      "state": "failed",
+      "attempt": 1,
+      "action_status": "rejected",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": null,
+      "error": "context binding 'active_well_id' is not available in this session",
+      "started_at": 1001.5,
+      "finished_at": 1002.0
+     },
+     "d": {
+      "state": "skipped",
+      "attempt": 0,
+      "action_status": null,
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": null,
+      "output_version_ids": [],
+      "outputs": {},
+      "receipt": null,
+      "skip_reason": "upstream n failed: context binding 'active_well_id' is not available in this session",
+      "error": null,
+      "started_at": null,
+      "finished_at": 1002.5
+     }
+    }
+   },
+   "calls": []
+  },
+  "double_run_guard": {
+   "nested_error": {
+    "type": "WorkflowValidationError",
+    "message": "workflow 'wf.chain' invalid: run r000000000001901 is already executing in this process (concurrent run/resume would double-execute nodes)",
+    "problems": [
+     "run r000000000001901 is already executing in this process (concurrent run/resume would double-execute nodes)"
+    ]
+   },
+   "run": {
+    "run_id": "r000000000001901",
+    "state": "completed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "a08cbc3289e25cc35710c3b89da4d7c7e99ec14040dc7751cf5f5692871da6b6",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1000.0,
+    "updated_at": 1006.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000001901",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "b889b2e95ad4f07c7a40f461a11f99c0cf8a3ed43a49b945eb12b3197d945f28",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1001.5,
+      "finished_at": 1003.0
+     },
+     "b": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {
+       "up": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+      "output_version_ids": [
+       "v-b-1"
+      ],
+      "outputs": {
+       "report": "done",
+       "version_ids": [
+        "v-b-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "b",
+       "workflow_run_id": "r000000000001901",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {
+        "up": "porosity"
+       },
+       "input_version_ids": [
+        "v-a-1"
+       ],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1004.5,
+       "finished_at": 1005.0,
+       "duration_ms": 7.25,
+       "output_version_ids": [
+        "v-b-1"
+       ],
+       "outputs_summary": {
+        "report": "done",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "05c1333aee433c215f696f122eb6b6ec3dcb4362113942cb9a7dbd98cf10f339",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1004.0,
+      "finished_at": 1005.5
+     }
+    }
+   }
+  },
+  "cache_reuse_new_run": {
+   "run": {
+    "run_id": "r000000000002002",
+    "state": "completed",
+    "parent_run_id": null,
+    "project_name": "ws-1",
+    "project_path": "/proj/one",
+    "spec_hash": "6e5f2d68bda97754fca6d3e296e43a4bdf3e174429fb64266cd6dfc01347f463",
+    "slot_values": {
+     "factor": "porosity"
+    },
+    "created_at": 1007.0,
+    "updated_at": 1012.5,
+    "node_runs": {
+     "a": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": true,
+      "parameters": {
+       "factor": "porosity"
+      },
+      "input_version_ids": [],
+      "cache_identity": "6566a3047898a055be4284eebb60aabf8d314eed1940341e716e95ac312338fb",
+      "output_version_ids": [
+       "v-a-1"
+      ],
+      "outputs": {
+       "factor": "porosity",
+       "version_ids": [
+        "v-a-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "a",
+       "workflow_run_id": "r000000000002002",
+       "action_id": "t.cacheable",
+       "action_version": "1.0",
+       "description": "t.cacheable action",
+       "parameters": {
+        "factor": "porosity"
+       },
+       "input_version_ids": [],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1002.0,
+       "finished_at": 1002.5,
+       "duration_ms": 12.5,
+       "output_version_ids": [
+        "v-a-1"
+       ],
+       "outputs_summary": {
+        "factor": "porosity",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "6566a3047898a055be4284eebb60aabf8d314eed1940341e716e95ac312338fb",
+       "from_cache": true,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1008.5,
+      "finished_at": 1009.0
+     },
+     "b": {
+      "state": "succeeded",
+      "attempt": 1,
+      "action_status": "success",
+      "from_cache": false,
+      "parameters": {},
+      "input_version_ids": [],
+      "cache_identity": "21a5257ab967115d11ab9ef8f26e139f6d319123c067bafcb31e381f81be3740",
+      "output_version_ids": [
+       "v-b-1"
+      ],
+      "outputs": {
+       "report": "done",
+       "version_ids": [
+        "v-b-1"
+       ]
+      },
+      "receipt": {
+       "schema_version": "1.0",
+       "node_id": "b",
+       "workflow_run_id": "r000000000002002",
+       "action_id": "t.compute",
+       "action_version": "1.0",
+       "description": "t.compute action",
+       "parameters": {},
+       "input_version_ids": [
+        "v-a-1"
+       ],
+       "provider_id": null,
+       "provider_version": null,
+       "resource_category": null,
+       "estimated_resources": {},
+       "status": "success",
+       "started_at": 1010.5,
+       "finished_at": 1011.0,
+       "duration_ms": 7.25,
+       "output_version_ids": [
+        "v-b-1"
+       ],
+       "outputs_summary": {
+        "report": "done",
+        "version_ids": "<1 items>"
+       },
+       "catalog_run_id": null,
+       "verification": {},
+       "qc_metrics": {},
+       "warnings": [],
+       "degraded_reason": null,
+       "error": null,
+       "cache_identity": "21a5257ab967115d11ab9ef8f26e139f6d319123c067bafcb31e381f81be3740",
+       "from_cache": false,
+       "attempt": 1,
+       "environment": {
+        "python": "3.11.8",
+        "platform": "Linux-oracle",
+        "workbench": "oracle-1.0"
+       }
+      },
+      "skip_reason": null,
+      "error": null,
+      "started_at": 1010.0,
+      "finished_at": 1011.5
+     }
+    }
+   },
+   "calls": [
+    {
+     "action": "t.compute",
+     "params": {}
+    }
+   ]
+  }
+ }
+}

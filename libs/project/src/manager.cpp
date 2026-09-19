@@ -335,7 +335,7 @@ Result<SaveStats> ProjectManager::write_payload(const std::string& payload) {
     return stats;
 }
 
-Result<SaveStats> ProjectManager::save(ProjectDocument& document) {
+Result<PreparedSave> ProjectManager::prepare_save(ProjectDocument& document) {
     if (document.read_only()) {
         return DataError(ErrorCode::FutureSchema,
                          "document is read-only (future schema) — save refused");
@@ -350,19 +350,42 @@ Result<SaveStats> ProjectManager::save(ProjectDocument& document) {
                 "(stale write refused)");
         }
     }
-
-    const std::string updated_at = now_or_fixed(fixed_clock_);
+    PreparedSave prepared;
+    prepared.updated_at = now_or_fixed(fixed_clock_);
     Json payload = build_portable_payload(document);
-    payload["meta"]["updated_at"] = updated_at;
+    payload["meta"]["updated_at"] = prepared.updated_at;
     payload["meta"]["project_root"] = ".";
-    const std::string text =
-        pwb::domain::dump_json_compact_header(payload);
+    prepared.payload_text = pwb::domain::dump_json_compact_header(payload);
+    return prepared;
+}
 
-    auto stats = write_payload(text);
+Result<SaveStats> ProjectManager::execute_save(const PreparedSave& prepared) {
+    // Worker phase: durable artifact layout first so a new project's
+    // portable metadata never references a missing tree, then the atomic
+    // write. Touches only the detached payload + the file itself.
+    ensure_artifact_layout(project_path_);
+    auto stats = write_payload(prepared.payload_text);
     if (!stats.is_ok()) return stats;
-    stats.value().updated_at = updated_at;
-    document.touch_updated_at(updated_at);
-    disk_sha256_ = domain::Sha256::of_bytes(text);
+    stats.value().updated_at = prepared.updated_at;
+    return stats;
+}
+
+void ProjectManager::commit_save(ProjectDocument& document,
+                                 const PreparedSave& prepared,
+                                 const SaveStats& stats) {
+    document.touch_updated_at(prepared.updated_at);
+    disk_sha256_ = domain::Sha256::of_bytes(prepared.payload_text);
+    last_save_stats_ = stats;
+}
+
+Result<SaveStats> ProjectManager::save(ProjectDocument& document) {
+    auto prepared = prepare_save(document);
+    if (!prepared.is_ok()) {
+        return DataError(prepared.error().code, prepared.error().message);
+    }
+    auto stats = execute_save(prepared.value());
+    if (!stats.is_ok()) return stats;
+    commit_save(document, prepared.value(), stats.value());
     return stats;
 }
 

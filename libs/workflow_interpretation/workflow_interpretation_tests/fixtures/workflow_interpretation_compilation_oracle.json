@@ -1,0 +1,1759 @@
+{
+ "cases": [
+  {
+   "id": "create_honest_snapshots",
+   "fn": "create_input_set",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000001",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000002",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "factor:factor_000000000001:ver_f1",
+     "constraints:current",
+     "prediction:pred_000000000002"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0001",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1"
+     }
+    }
+   },
+   "expect": {
+    "result": {
+     "id": "ciset_fixed0001",
+     "name": "综合编图输入集（3 项证据）",
+     "entries": [
+      {
+       "selector": "factor:factor_000000000001:ver_f1",
+       "label": "砂厚",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "asset_f1",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "",
+       "status_at_add": "resolved"
+      },
+      {
+       "selector": "constraints:current",
+       "label": "地质约束（当前内容）",
+       "evidence_kind": "constraint_group",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "no constraints",
+       "status_at_add": "unknown"
+      },
+      {
+       "selector": "prediction:pred_000000000002",
+       "label": "地震相预测",
+       "evidence_kind": "prediction",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "预测结果为 run 级溯源（无文件版本可钉）",
+       "status_at_add": "unpinned"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    }
+   }
+  },
+  {
+   "id": "create_malformed_selector",
+   "fn": "create_input_set",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000003",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000004",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "bogus-selector"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0002",
+    "now": "2026-09-10T00:00:00",
+    "catalog": null
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ValueError",
+     "message": "unrecognized evidence selector: 'bogus-selector'"
+    }
+   }
+  },
+  {
+   "id": "validate_blocked_factor_missing",
+   "fn": "create_and_validate",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000005",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000006",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "factor:nope:ver_x"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0003",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1"
+     }
+    }
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0003",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "factor:nope:ver_x",
+       "label": "nope",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "单因素任务不存在：nope",
+       "status_at_add": "missing"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "validation": {
+     "input_set_id": "ciset_fixed0003",
+     "verdict": "blocked",
+     "detail": "存在不可用证据（缺失/未知）：factor:nope:ver_x",
+     "entries": [
+      {
+       "selector": "factor:nope:ver_x",
+       "kind": "factor",
+       "ref_id": "nope",
+       "version_id": "ver_x",
+       "status": "missing",
+       "pinned_version_id": "",
+       "asset_id": "",
+       "display": "nope",
+       "detail": "单因素任务不存在：nope",
+       "quality": {}
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "validate_blocked_constraints_unknown",
+   "fn": "create_and_validate",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000005",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000006",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "constraints:current"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0004",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1"
+     }
+    }
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0004",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "constraints:current",
+       "label": "地质约束（当前内容）",
+       "evidence_kind": "constraint_group",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "no constraints",
+       "status_at_add": "unknown"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "validation": {
+     "input_set_id": "ciset_fixed0004",
+     "verdict": "blocked",
+     "detail": "存在不可用证据（缺失/未知）：constraints:current",
+     "entries": [
+      {
+       "selector": "constraints:current",
+       "kind": "constraint_group",
+       "ref_id": "",
+       "version_id": "",
+       "status": "unknown",
+       "pinned_version_id": "",
+       "asset_id": "",
+       "display": "地质约束（当前内容）",
+       "detail": "no constraints",
+       "quality": {}
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "validate_degraded_prediction_unpinned",
+   "fn": "create_and_validate",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000005",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000006",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "prediction:pred_000000000006"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0005",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1"
+     }
+    }
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0005",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "prediction:pred_000000000006",
+       "label": "地震相预测",
+       "evidence_kind": "prediction",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "预测结果为 run 级溯源（无文件版本可钉）",
+       "status_at_add": "unpinned"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "validation": {
+     "input_set_id": "ciset_fixed0005",
+     "verdict": "degraded",
+     "detail": "存在未钉版本的证据（保存/提交后可冻结）：prediction:pred_000000000006",
+     "entries": [
+      {
+       "selector": "prediction:pred_000000000006",
+       "kind": "prediction",
+       "ref_id": "pred_000000000006",
+       "version_id": "",
+       "status": "unpinned",
+       "pinned_version_id": "",
+       "asset_id": "",
+       "display": "地震相预测",
+       "detail": "预测结果为 run 级溯源（无文件版本可钉）",
+       "quality": {
+        "mock_data": true
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "validate_ready",
+   "fn": "create_and_validate",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000005",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000006",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "factor:factor_000000000005:ver_f1"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0006",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1"
+     }
+    }
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0006",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "factor:factor_000000000005:ver_f1",
+       "label": "砂厚",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "asset_f1",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "",
+       "status_at_add": "resolved"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "validation": {
+     "input_set_id": "ciset_fixed0006",
+     "verdict": "ready",
+     "detail": "",
+     "entries": [
+      {
+       "selector": "factor:factor_000000000005:ver_f1",
+       "kind": "factor",
+       "ref_id": "factor_000000000005",
+       "version_id": "ver_f1",
+       "status": "resolved",
+       "pinned_version_id": "ver_f1",
+       "asset_id": "asset_f1",
+       "display": "砂厚",
+       "detail": "",
+       "quality": {}
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "freeze_factor_pin_rewrite",
+   "fn": "freeze",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000007",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000008",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "factor:factor_000000000007"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0007",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1"
+     }
+    },
+    "repo_setup": null,
+    "freeze_now": "t0",
+    "second_freeze": false
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0007",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "factor:factor_000000000007",
+       "label": "砂厚",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "asset_f1",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "",
+       "status_at_add": "resolved"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "outcome": {
+     "result": {
+      "id": "ciset_fixed0007",
+      "name": "综合编图输入集（1 项证据）",
+      "entries": [
+       {
+        "selector": "factor:factor_000000000007:ver_f1",
+        "label": "砂厚",
+        "evidence_kind": "factor",
+        "pinned_version_id": "ver_f1",
+        "resolved_asset_id": "asset_f1",
+        "added_at": "2026-09-10T00:00:00",
+        "added_by": "tester",
+        "note": "",
+        "status_at_add": "resolved"
+       }
+      ],
+      "created_at": "2026-09-10T00:00:00",
+      "created_by": "tester",
+      "recommendation": {},
+      "manual_overrides": {},
+      "configuration": {},
+      "frozen": true,
+      "frozen_at": "t0",
+      "schema_version": 1
+     }
+    },
+    "post": {
+     "frozen": true,
+     "selectors": [
+      "factor:factor_000000000007:ver_f1"
+     ],
+     "pins": [
+      "ver_f1"
+     ]
+    },
+    "second": null
+   }
+  },
+  {
+   "id": "freeze_refusal_full_rollback",
+   "fn": "freeze",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000009",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_00000000000a",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "factor:factor_000000000009:ver_f1",
+     "factor:missing_task:v"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0008",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1"
+     }
+    },
+    "repo_setup": null,
+    "freeze_now": "",
+    "second_freeze": false
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0008",
+     "name": "综合编图输入集（2 项证据）",
+     "entries": [
+      {
+       "selector": "factor:factor_000000000009:ver_f1",
+       "label": "砂厚",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "asset_f1",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "",
+       "status_at_add": "resolved"
+      },
+      {
+       "selector": "factor:missing_task:v",
+       "label": "missing_task",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "单因素任务不存在：missing_task",
+       "status_at_add": "missing"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "outcome": {
+     "raise": {
+      "python_class": "ValueError",
+      "message": "输入集冻结被拒绝——以下证据无法钉住版本：missing_task：missing（单因素任务不存在：missing_task）"
+     }
+    },
+    "post": {
+     "frozen": false,
+     "selectors": [
+      "factor:factor_000000000009:ver_f1",
+      "factor:missing_task:v"
+     ],
+     "pins": [
+      "",
+      ""
+     ]
+    },
+    "second": null
+   }
+  },
+  {
+   "id": "freeze_floating_refusal_message",
+   "fn": "freeze",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_00000000000b",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_00000000000c",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "constraints:current"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0009",
+    "now": "2026-09-10T00:00:00",
+    "catalog": null,
+    "repo_setup": null,
+    "freeze_now": "",
+    "second_freeze": false
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0009",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "constraints:current",
+       "label": "地质约束（当前内容）",
+       "evidence_kind": "constraint_group",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "no constraints",
+       "status_at_add": "unknown"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "outcome": {
+     "raise": {
+      "python_class": "ValueError",
+      "message": "输入集冻结被拒绝——以下证据无法钉住版本：地质约束（当前内容）：unknown（no constraints）"
+     }
+    },
+    "post": {
+     "frozen": false,
+     "selectors": [
+      "constraints:current"
+     ],
+     "pins": [
+      ""
+     ]
+    },
+    "second": null
+   }
+  },
+  {
+   "id": "freeze_floating_multi_group_refusal",
+   "fn": "freeze",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_00000000000d",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_00000000000e",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "g1",
+       "name": "断层约束A",
+       "target_horizon": "T1",
+       "lines": [
+        {
+         "id": "l1",
+         "name": "F1",
+         "role": "break",
+         "coordinates": [
+          [
+           0.0,
+           0.0
+          ],
+          [
+           10.0,
+           0.0
+          ]
+         ],
+         "azimuth_deg": null,
+         "semi_major": null,
+         "semi_minor": null,
+         "active": true,
+         "target_horizon": "T1",
+         "properties": {}
+        },
+        {
+         "id": "l2",
+         "name": "D1",
+         "role": "direction",
+         "coordinates": [
+          [
+           0.0,
+           0.0
+          ],
+          [
+           0.0,
+           8.0
+          ]
+         ],
+         "azimuth_deg": null,
+         "semi_major": null,
+         "semi_minor": null,
+         "active": true,
+         "target_horizon": "T1",
+         "properties": {}
+        }
+       ],
+       "linked_factor_task_ids": [],
+       "crs": null
+      },
+      {
+       "id": "g2",
+       "name": "边界约束B",
+       "target_horizon": "T1",
+       "lines": [
+        {
+         "id": "l3",
+         "name": "B1",
+         "role": "break",
+         "coordinates": [
+          [
+           5.0,
+           5.0
+          ],
+          [
+           6.0,
+           6.0
+          ]
+         ],
+         "azimuth_deg": null,
+         "semi_major": null,
+         "semi_minor": null,
+         "active": true,
+         "target_horizon": "T1",
+         "properties": {}
+        }
+       ],
+       "linked_factor_task_ids": [],
+       "crs": null
+      }
+     ]
+    },
+    "selectors": [
+     "constraints:current"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0010",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {}
+    },
+    "repo_setup": [
+     {
+      "id": "g1",
+      "name": "断层约束A",
+      "target_horizon": "T1",
+      "lines": [
+       {
+        "id": "l1",
+        "name": "F1",
+        "role": "break",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          10.0,
+          0.0
+         ]
+        ],
+        "azimuth_deg": null,
+        "semi_major": null,
+        "semi_minor": null,
+        "active": true,
+        "target_horizon": "T1",
+        "properties": {}
+       },
+       {
+        "id": "l2",
+        "name": "D1",
+        "role": "direction",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          0.0,
+          8.0
+         ]
+        ],
+        "azimuth_deg": null,
+        "semi_major": null,
+        "semi_minor": null,
+        "active": true,
+        "target_horizon": "T1",
+        "properties": {}
+       }
+      ],
+      "linked_factor_task_ids": [],
+      "crs": null
+     },
+     {
+      "id": "g2",
+      "name": "边界约束B",
+      "target_horizon": "T1",
+      "lines": [
+       {
+        "id": "l3",
+        "name": "B1",
+        "role": "break",
+        "coordinates": [
+         [
+          5.0,
+          5.0
+         ],
+         [
+          6.0,
+          6.0
+         ]
+        ],
+        "azimuth_deg": null,
+        "semi_major": null,
+        "semi_minor": null,
+        "active": true,
+        "target_horizon": "T1",
+        "properties": {}
+       }
+      ],
+      "linked_factor_task_ids": [],
+      "crs": null
+     }
+    ],
+    "freeze_now": "",
+    "second_freeze": false
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0010",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "constraints:current",
+       "label": "地质约束（当前内容）",
+       "evidence_kind": "constraint_group",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "断层约束A: matches latest commit; 边界约束B: matches latest commit",
+       "status_at_add": "floating"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "outcome": {
+     "raise": {
+      "python_class": "ValueError",
+      "message": "输入集冻结被拒绝——以下证据无法钉住版本：地质约束（当前内容）：constraints:current 无法安全钉住——无目录/无提交，或多个约束组各有提交（请改用显式 constraints:<组>:<版本> 条目逐组钉住）"
+     }
+    },
+    "post": {
+     "frozen": false,
+     "selectors": [
+      "constraints:current"
+     ],
+     "pins": [
+      ""
+     ]
+    },
+    "second": null
+   }
+  },
+  {
+   "id": "freeze_floating_single_group_success",
+   "fn": "freeze",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_00000000000f",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000010",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": [
+      {
+       "id": "g1",
+       "name": "断层约束A",
+       "target_horizon": "T1",
+       "lines": [
+        {
+         "id": "l1",
+         "name": "F1",
+         "role": "break",
+         "coordinates": [
+          [
+           0.0,
+           0.0
+          ],
+          [
+           10.0,
+           0.0
+          ]
+         ],
+         "azimuth_deg": null,
+         "semi_major": null,
+         "semi_minor": null,
+         "active": true,
+         "target_horizon": "T1",
+         "properties": {}
+        },
+        {
+         "id": "l2",
+         "name": "D1",
+         "role": "direction",
+         "coordinates": [
+          [
+           0.0,
+           0.0
+          ],
+          [
+           0.0,
+           8.0
+          ]
+         ],
+         "azimuth_deg": null,
+         "semi_major": null,
+         "semi_minor": null,
+         "active": true,
+         "target_horizon": "T1",
+         "properties": {}
+        }
+       ],
+       "linked_factor_task_ids": [],
+       "crs": null
+      }
+     ]
+    },
+    "selectors": [
+     "constraints:current"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0011",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {}
+    },
+    "repo_setup": [
+     {
+      "id": "g1",
+      "name": "断层约束A",
+      "target_horizon": "T1",
+      "lines": [
+       {
+        "id": "l1",
+        "name": "F1",
+        "role": "break",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          10.0,
+          0.0
+         ]
+        ],
+        "azimuth_deg": null,
+        "semi_major": null,
+        "semi_minor": null,
+        "active": true,
+        "target_horizon": "T1",
+        "properties": {}
+       },
+       {
+        "id": "l2",
+        "name": "D1",
+        "role": "direction",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          0.0,
+          8.0
+         ]
+        ],
+        "azimuth_deg": null,
+        "semi_major": null,
+        "semi_minor": null,
+        "active": true,
+        "target_horizon": "T1",
+        "properties": {}
+       }
+      ],
+      "linked_factor_task_ids": [],
+      "crs": null
+     }
+    ],
+    "freeze_now": "t1",
+    "second_freeze": false
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0011",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "constraints:current",
+       "label": "地质约束（当前内容）",
+       "evidence_kind": "constraint_group",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "断层约束A: matches latest commit",
+       "status_at_add": "floating"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "outcome": {
+     "result": {
+      "id": "ciset_fixed0011",
+      "name": "综合编图输入集（1 项证据）",
+      "entries": [
+       {
+        "selector": "constraints:g1:ver_000001",
+        "label": "地质约束（当前内容）",
+        "evidence_kind": "constraint_group",
+        "pinned_version_id": "ver_000001",
+        "resolved_asset_id": "",
+        "added_at": "2026-09-10T00:00:00",
+        "added_by": "tester",
+        "note": "断层约束A: matches latest commit",
+        "status_at_add": "floating"
+       }
+      ],
+      "created_at": "2026-09-10T00:00:00",
+      "created_by": "tester",
+      "recommendation": {},
+      "manual_overrides": {},
+      "configuration": {},
+      "frozen": true,
+      "frozen_at": "t1",
+      "schema_version": 1
+     }
+    },
+    "post": {
+     "frozen": true,
+     "selectors": [
+      "constraints:g1:ver_000001"
+     ],
+     "pins": [
+      "ver_000001"
+     ]
+    },
+    "second": null
+   }
+  },
+  {
+   "id": "freeze_double_freeze_message",
+   "fn": "freeze",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000011",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000012",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "factor:factor_000000000011:ver_f1"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0012",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1"
+     }
+    },
+    "repo_setup": null,
+    "freeze_now": "t0",
+    "second_freeze": true
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0012",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "factor:factor_000000000011:ver_f1",
+       "label": "砂厚",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "asset_f1",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "",
+       "status_at_add": "resolved"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "outcome": {
+     "result": {
+      "id": "ciset_fixed0012",
+      "name": "综合编图输入集（1 项证据）",
+      "entries": [
+       {
+        "selector": "factor:factor_000000000011:ver_f1",
+        "label": "砂厚",
+        "evidence_kind": "factor",
+        "pinned_version_id": "ver_f1",
+        "resolved_asset_id": "asset_f1",
+        "added_at": "2026-09-10T00:00:00",
+        "added_by": "tester",
+        "note": "",
+        "status_at_add": "resolved"
+       }
+      ],
+      "created_at": "2026-09-10T00:00:00",
+      "created_by": "tester",
+      "recommendation": {},
+      "manual_overrides": {},
+      "configuration": {},
+      "frozen": true,
+      "frozen_at": "t0",
+      "schema_version": 1
+     }
+    },
+    "post": {
+     "frozen": true,
+     "selectors": [
+      "factor:factor_000000000011:ver_f1"
+     ],
+     "pins": [
+      "ver_f1"
+     ]
+    },
+    "second": {
+     "raise": {
+      "python_class": "ValueError",
+      "message": "输入集已冻结（不可重复冻结——新建输入集替代）"
+     }
+    }
+   }
+  },
+  {
+   "id": "persist_active_flip_and_legacy",
+   "fn": "persist_and_query",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_000000000013",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f1",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_000000000014",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "first": {
+     "selectors": [
+      "factor:factor_000000000013:ver_f1"
+     ],
+     "set_id": "ciset_fixed0013",
+     "now": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "catalog": {
+      "versions": {
+       "ver_f1": "asset_f1"
+      }
+     }
+    },
+    "second": {
+     "id": "ciset_2",
+     "name": "v2"
+    }
+   },
+   "expect": {
+    "document_sets": [
+     {
+      "id": "ciset_fixed0013",
+      "name": "综合编图输入集（1 项证据）",
+      "entries": [
+       {
+        "selector": "factor:factor_000000000013:ver_f1",
+        "label": "砂厚",
+        "evidence_kind": "factor",
+        "pinned_version_id": "",
+        "resolved_asset_id": "asset_f1",
+        "added_at": "2026-09-10T00:00:00",
+        "added_by": "tester",
+        "note": "",
+        "status_at_add": "resolved"
+       }
+      ],
+      "created_at": "2026-09-10T00:00:00",
+      "created_by": "tester",
+      "recommendation": {},
+      "manual_overrides": {},
+      "configuration": {},
+      "frozen": false,
+      "frozen_at": "",
+      "schema_version": 1,
+      "active": false
+     },
+     {
+      "id": "ciset_2",
+      "name": "v2",
+      "entries": [],
+      "created_at": "",
+      "created_by": "",
+      "recommendation": {},
+      "manual_overrides": {},
+      "configuration": {},
+      "frozen": false,
+      "frozen_at": "",
+      "schema_version": 1,
+      "active": true
+     }
+    ],
+    "active": {
+     "id": "ciset_2",
+     "name": "v2",
+     "entries": [],
+     "created_at": "",
+     "created_by": "",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "all_ids": [
+     "ciset_fixed0013",
+     "ciset_2"
+    ],
+    "legacy_active": null
+   }
+  },
+  {
+   "id": "evidence_view_structured_legacy_shell",
+   "fn": "evidence_view_and_shell",
+   "input": {
+    "structured": {
+     "document": {
+      "factor_map_tasks": [
+       {
+        "id": "factor_000000000015",
+        "name": "砂厚",
+        "status": "complete",
+        "grid_artifact_version_id": "ver_f1",
+        "quality_metrics": {},
+        "source_kind": "real"
+       }
+      ],
+      "prediction_tasks": [
+       {
+        "id": "pred_000000000016",
+        "name": "地震相预测",
+        "status": "complete",
+        "adapter_kind": "mock",
+        "probability_summary": {}
+       }
+      ],
+      "constraint_layers": []
+     },
+     "selectors": [
+      "factor:factor_000000000015:ver_f1",
+      "constraints:current"
+     ],
+     "set_id": "ciset_fixed0014",
+     "now": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "catalog": {
+      "versions": {
+       "ver_f1": "asset_f1"
+      }
+     }
+    },
+    "fallback": {
+     "document": {
+      "factor_map_tasks": [
+       {
+        "id": "factor_000000000019",
+        "name": "砂厚",
+        "status": "complete",
+        "grid_artifact_version_id": "ver_f1",
+        "quality_metrics": {},
+        "source_kind": "real"
+       }
+      ],
+      "prediction_tasks": [
+       {
+        "id": "pred_00000000001a",
+        "name": "地震相预测",
+        "status": "complete",
+        "adapter_kind": "mock",
+        "probability_summary": {}
+       }
+      ],
+      "constraint_layers": []
+     },
+     "workspace_state": {
+      "compilation_input_set": {
+       "单因素：砂厚": "factor:factor_000000000015:ver_f1",
+       "地质约束": "constraints:current"
+      }
+     }
+    },
+    "shell": {
+     "document": {
+      "factor_map_tasks": [
+       {
+        "id": "factor_000000000017",
+        "name": "砂厚",
+        "status": "complete",
+        "grid_artifact_version_id": "ver_f1",
+        "quality_metrics": {},
+        "source_kind": "real"
+       }
+      ],
+      "prediction_tasks": [
+       {
+        "id": "pred_000000000018",
+        "name": "地震相预测",
+        "status": "complete",
+        "adapter_kind": "mock",
+        "probability_summary": {}
+       }
+      ],
+      "constraint_layers": []
+     },
+     "workspace_state": {
+      "compilation_input_set": {
+       "旧标签A": "factor:factor_000000000015:ver_f1",
+       "坏的": "bogus-selector",
+       "地质约束": "constraints:current"
+      }
+     },
+     "created_by": "migrator",
+     "id_suffix": "dead00000001"
+    }
+   },
+   "expect": {
+    "structured": [
+     [
+      "砂厚",
+      "factor:factor_000000000015:ver_f1"
+     ],
+     [
+      "地质约束（当前内容）",
+      "constraints:current"
+     ]
+    ],
+    "fallback": [
+     [
+      "单因素：砂厚",
+      "factor:factor_000000000015:ver_f1"
+     ],
+     [
+      "地质约束",
+      "constraints:current"
+     ]
+    ],
+    "empty": [],
+    "shell": {
+     "id": "ciset_dead00000001",
+     "name": "综合编图输入集",
+     "entries": [
+      {
+       "selector": "factor:factor_000000000015:ver_f1",
+       "label": "旧标签A",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "",
+       "added_by": "migrator",
+       "note": "",
+       "status_at_add": ""
+      },
+      {
+       "selector": "constraints:current",
+       "label": "地质约束",
+       "evidence_kind": "constraint_group",
+       "pinned_version_id": "",
+       "resolved_asset_id": "",
+       "added_at": "",
+       "added_by": "migrator",
+       "note": "",
+       "status_at_add": ""
+      }
+     ],
+     "created_at": "",
+     "created_by": "migrator",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "shell_document_sets": [
+     {
+      "id": "ciset_dead00000001",
+      "name": "综合编图输入集",
+      "entries": [
+       {
+        "selector": "factor:factor_000000000015:ver_f1",
+        "label": "旧标签A",
+        "evidence_kind": "factor",
+        "pinned_version_id": "",
+        "resolved_asset_id": "",
+        "added_at": "",
+        "added_by": "migrator",
+        "note": "",
+        "status_at_add": ""
+       },
+       {
+        "selector": "constraints:current",
+        "label": "地质约束",
+        "evidence_kind": "constraint_group",
+        "pinned_version_id": "",
+        "resolved_asset_id": "",
+        "added_at": "",
+        "added_by": "migrator",
+        "note": "",
+        "status_at_add": ""
+       }
+      ],
+      "created_at": "",
+      "created_by": "migrator",
+      "recommendation": {},
+      "manual_overrides": {},
+      "configuration": {},
+      "frozen": false,
+      "frozen_at": "",
+      "schema_version": 1,
+      "active": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "freeze_stale_freeze_through",
+   "fn": "freeze",
+   "input": {
+    "document": {
+     "factor_map_tasks": [
+      {
+       "id": "factor_00000000001b",
+       "name": "砂厚",
+       "status": "complete",
+       "grid_artifact_version_id": "ver_f2",
+       "quality_metrics": {},
+       "source_kind": "real"
+      }
+     ],
+     "prediction_tasks": [
+      {
+       "id": "pred_00000000001c",
+       "name": "地震相预测",
+       "status": "complete",
+       "adapter_kind": "mock",
+       "probability_summary": {}
+      }
+     ],
+     "constraint_layers": []
+    },
+    "selectors": [
+     "factor:factor_00000000001b:ver_f1"
+    ],
+    "name": "",
+    "created_by": "tester",
+    "set_id": "ciset_fixed0015",
+    "now": "2026-09-10T00:00:00",
+    "catalog": {
+     "versions": {
+      "ver_f1": "asset_f1",
+      "ver_f2": "asset_f2"
+     }
+    },
+    "repo_setup": null,
+    "freeze_now": "t2",
+    "second_freeze": false
+   },
+   "expect": {
+    "created": {
+     "id": "ciset_fixed0015",
+     "name": "综合编图输入集（1 项证据）",
+     "entries": [
+      {
+       "selector": "factor:factor_00000000001b:ver_f1",
+       "label": "砂厚",
+       "evidence_kind": "factor",
+       "pinned_version_id": "",
+       "resolved_asset_id": "asset_f1",
+       "added_at": "2026-09-10T00:00:00",
+       "added_by": "tester",
+       "note": "钉住 ver_f1，任务当前结果版本为 ver_f2",
+       "status_at_add": "stale"
+      }
+     ],
+     "created_at": "2026-09-10T00:00:00",
+     "created_by": "tester",
+     "recommendation": {},
+     "manual_overrides": {},
+     "configuration": {},
+     "frozen": false,
+     "frozen_at": "",
+     "schema_version": 1
+    },
+    "outcome": {
+     "result": {
+      "id": "ciset_fixed0015",
+      "name": "综合编图输入集（1 项证据）",
+      "entries": [
+       {
+        "selector": "factor:factor_00000000001b:ver_f1",
+        "label": "砂厚",
+        "evidence_kind": "factor",
+        "pinned_version_id": "ver_f1",
+        "resolved_asset_id": "asset_f1",
+        "added_at": "2026-09-10T00:00:00",
+        "added_by": "tester",
+        "note": "钉住 ver_f1，任务当前结果版本为 ver_f2",
+        "status_at_add": "stale"
+       }
+      ],
+      "created_at": "2026-09-10T00:00:00",
+      "created_by": "tester",
+      "recommendation": {},
+      "manual_overrides": {},
+      "configuration": {},
+      "frozen": true,
+      "frozen_at": "t2",
+      "schema_version": 1
+     }
+    },
+    "post": {
+     "frozen": true,
+     "selectors": [
+      "factor:factor_00000000001b:ver_f1"
+     ],
+     "pins": [
+      "ver_f1"
+     ]
+    },
+    "second": null
+   }
+  }
+ ]
+}
