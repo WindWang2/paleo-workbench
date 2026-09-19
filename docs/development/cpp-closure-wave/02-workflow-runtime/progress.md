@@ -55,3 +55,13 @@ base = origin/main 06211541（PR #1410 + #1411 已核）。分支 codex/cpp-clos
 ## 下一步
 
 轮4 运行中（exec_be7170d0）。全绿后 ×2 复验 → 更新 acceptance → 提交 PR。
+
+
+## 终态（goal-loop 收口）
+
+- **PR**: https://github.com/WindWang2/paleo-workbench/pull/1415
+- **提交**: acf10f63（base 06211541，42 files，+14187/-2）
+- **测试 ×2 全绿（资源门 Exec 内）**: resolve 31 / map_product 24 / fusion 14 / e2e 49 checks，0 failures。
+- 独立审查子代理 NEEDS-FIX 的 P1×7 + P2 全部落实；复验通过。
+- goal-loop 关闭条件核对本线验收：必需能力已实现、生产调用链有真实证据（catalog 落盘 + 引擎状态机 + freshness 判定）、受影响测试通过 ×2、PR 已创建且与 base 关系明确。
+- 剩余限制（非本线阻塞，移交后续）：全工作区依赖图（mapping-workspace 域）、引擎内节点级并行（CONV-32 冻结延后）、SQLite 目录宿主绑定（01 线落地后可替换 FileCatalogRepository）。
