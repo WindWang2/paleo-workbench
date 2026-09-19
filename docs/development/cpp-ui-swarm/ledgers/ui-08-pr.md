@@ -81,6 +81,9 @@ cd build/mapedit && QT_QPA_PLATFORM=offscreen ctest -R ui_pages_mapedit \
 
 ## 提交面
 
-- commit: （见下回填）
-- push: `git push -u origin feat/cpp-qt-mapedit`
-- PR: **`gh pr create` 权威输出 →（回填）**
+- commit: `b7eca653`（feat(ui): UI-08 — qt-mapedit 编图编辑页簇 C++
+  port；43 files，+9021）
+- push: `git push -u origin feat/cpp-qt-mapedit`（new branch）
+- PR: **`gh pr create` 权威输出 → https://github.com/WindWang2/
+  paleo-workbench/pull/1379 → PR #1379**（`gh pr view` 权威：
+  state=OPEN，base=main，head=feat/cpp-qt-mapedit）
