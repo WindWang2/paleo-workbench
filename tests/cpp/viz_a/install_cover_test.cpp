@@ -8,6 +8,7 @@
 // lifecycle contract; the menu interaction itself needs the platform app.
 
 #include <QApplication>
+#include <QMainWindow>
 
 #include "job_center.hpp"
 
