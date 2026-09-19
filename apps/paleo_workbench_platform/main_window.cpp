@@ -2512,7 +2512,6 @@ void MainWindow::importSegyDialog() {
     statusBar()->showMessage(
         tr("SEG-Y 已导入：%1").arg(QString::fromStdString(version_id)),
         10000);
-#endif
 }
 
 #ifdef PWB_WITH_CONV_30
