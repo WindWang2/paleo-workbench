@@ -104,8 +104,8 @@ cd build/native-product && ctest -R ui_widgets --output-on-failure
 
 ## 提交面
 
-- commit: `fe2b3a0f`（feat(ui): UI-02 — components + modelview + qgis_stack
-  C++ port；75 files，+12813）
+- commit: `d4cc33c9`（feat(ui): UI-02 — components + modelview + qgis_stack
+  C++ port；75 files，+12813；本行随 PR 号回填一并提交）
 - push: `git push -u origin feat/cpp-ui-components`（new branch）
 - PR: **`gh pr create` 权威输出 → https://github.com/WindWang2/
   paleo-workbench/pull/1371 → PR #1371**（2026-09-20 创建；
