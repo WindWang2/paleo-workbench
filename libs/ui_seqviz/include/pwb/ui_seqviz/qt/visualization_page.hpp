@@ -81,8 +81,8 @@ class VisualizationPage : public QWidget {
     Q_OBJECT
 public:
     explicit VisualizationPage(
-        QWidget* parent = nullptr,
-        ui_data_core::PreviewProvider preview_provider = {},
+        QWidget* parent,
+        ui_data_core::PreviewProvider preview_provider,
         ui_shell::LayoutPersistence* persistence = nullptr);
     ~VisualizationPage() override;
 

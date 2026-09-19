@@ -964,6 +964,72 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-15
 
+# BEGIN UI-17 — W5 application-shell wiring
+# (apps/paleo_workbench_platform/app_shell.*): the page-navigation
+# composition root — WorkstationFrame + CompositeDocument hosting the
+# session canvas + the hub page stack + palette/status bar — joins the
+# platform binary only when every UI slice target it consumes is in the
+# build closure. Evaluated HERE (after all libs/ui_* add_subdirectory
+# blocks) because apps/paleo_workbench_platform is added before the
+# wellseis/review/seqviz slices. Without them the window keeps the direct
+# session-canvas central widget — an honest reduced shell, never a
+# partially-faked AppShell.
+if(TARGET pwb-platform
+   AND TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt
+   AND TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt
+   AND TARGET Pwb::UiMapQgis AND TARGET Pwb::UiReviewQt
+   AND TARGET Pwb::UiSeqvizQt AND TARGET Pwb::UiWellseisQt)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/app_shell.cpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt Pwb::UiSeqvizQt
+        Pwb::UiWellseisQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_APP_SHELL=1)
+    if(BUILD_TESTING)
+        # App-shell wiring battery: the full shell path compiles the real
+        # MainWindow + AppShell with the same define the app gets — the
+        # reduced direct-canvas fallback stays covered by the other
+        # MainWindow tests (they compile without PWB_WITH_APP_SHELL).
+        add_executable(platform_app_shell
+            tests/cpp/platform/test_app_shell.cpp
+            apps/paleo_workbench_platform/main_window.cpp
+            apps/paleo_workbench_platform/app_context.cpp
+            apps/paleo_workbench_platform/diagnostics.cpp
+            apps/paleo_workbench_platform/app_shell.cpp)
+        if(COMMAND pwb_link_job_runtime)
+            pwb_link_job_runtime(platform_app_shell)
+        endif()
+        set_target_properties(platform_app_shell PROPERTIES AUTOMOC ON)
+        target_compile_features(platform_app_shell PRIVATE cxx_std_20)
+        target_include_directories(platform_app_shell PRIVATE
+            tests/cpp/platform
+            apps/paleo_workbench_platform
+            ${CMAKE_BINARY_DIR}/generated)
+        target_link_libraries(platform_app_shell PRIVATE
+            Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+            Pwb::PlatformServices
+            Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+            Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+            Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+        target_compile_definitions(platform_app_shell PRIVATE
+            PWB_WITH_APP_SHELL=1
+            PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+        add_test(NAME platform.app_shell COMMAND platform_app_shell)
+        set_tests_properties(platform.app_shell PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+            TIMEOUT 300)
+    endif()
+elseif(PWB_BUILD_PLATFORM AND TARGET pwb-platform)
+    message(STATUS
+        "UI-17: app_shell skipped — needs Pwb::UiWorkstationQt + "
+        "Pwb::UiCompositeQt + Pwb::UiShellQt + Pwb::UiPagesDataQt + "
+        "Pwb::UiMapQgis + Pwb::UiReviewQt + Pwb::UiSeqvizQt + "
+        "Pwb::UiWellseisQt; the direct-canvas shell remains")
+endif()
+# END UI-17
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared
