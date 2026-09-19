@@ -447,8 +447,9 @@ private:
     QAction* density_action_ = nullptr;
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — product job runtime: bounded scheduler + page ownership
-    // (close protocol) + app-quit drain. Declared last so it outlives the
-    // surfaces it supervises.
+    // (close protocol) + app-quit drain. Declared last so it is
+    // DESTROYED FIRST (reverse member order): its owner vector frees the
+    // QObject-child JobOwners while the surfaces above are still alive.
     std::unique_ptr<JobCenter> job_center_;
 #endif
 

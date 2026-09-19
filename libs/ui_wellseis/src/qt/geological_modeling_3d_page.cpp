@@ -1443,11 +1443,13 @@ void GeologicalModeling3DPage::apply_pending_slice_numbers() {
     if (!pending_slice_numbers_.has_value() || host_ == nullptr) {
         return;
     }
-    // Consumed exactly once the registration exists — the physical line
-    // numbers are stable across sessions and LOD refinements.
-    if (host_->apply_slice_line_numbers(pending_slice_numbers_->first,
-                                        pending_slice_numbers_->second)) {
-        pending_slice_numbers_.reset();
+    // Consume BEFORE applying: apply_slice_line_numbers emits
+    // scene_updated synchronously (real host), which re-enters this
+    // handler — the pending value must already be gone or the recursion
+    // never terminates.
+    const auto numbers = *pending_slice_numbers_;
+    pending_slice_numbers_.reset();
+    if (host_->apply_slice_line_numbers(numbers.first, numbers.second)) {
         refresh_joint_slice_card();
     }
 }

@@ -52,8 +52,9 @@ public:
 #ifdef PWB_WITH_UI_WELLSEIS
     // VIZ-C: the joint well-seismic host (WellSeismicScene + JobCenter
     // volume loading + the SceneTransform seam). Lazily created once per
-    // dock; the JobCenter must outlive the dock (it does — see
-    // MainWindow member ordering).
+    // dock; at teardown the JobCenter is destroyed BEFORE this dock's
+    // host (MainWindow declares the JobCenter member last → reverse
+    // member order destroys it first — see main_window.hpp).
     pwb::app::viz_c::VizCJointHost* joint_host();
 #endif
 

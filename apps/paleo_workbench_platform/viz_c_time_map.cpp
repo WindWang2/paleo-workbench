@@ -53,6 +53,10 @@ void VizCTimeSliceMap::refresh() {
     }
     if (scene_->vertical_domain() != VerticalDomain::Time) {
         caption_ = tr("Time 平面仅在 Time 域可用");
+        delete image_;
+        image_ = nullptr;
+        image_sample_ = -1;
+        image_pending_ = false;
         update();
         return;
     }

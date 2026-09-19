@@ -166,6 +166,11 @@ public:
     // time map (empty while the async read is in flight or unavailable).
     [[nodiscard]] JointPrepData prepared_data() const { return prepared_; }
     [[nodiscard]] bool prep_in_flight() const { return prep_running_; }
+    // True when the pipeline holds an applied-key state (false right
+    // after an identity switch invalidates it).
+    [[nodiscard]] bool prep_applied_state() const {
+        return prep_applied_.has_value();
+    }
 
 signals:
     void prep_applied();
@@ -200,6 +205,7 @@ private:
     // frees the owner slot so the next request reuses make_owner once.
     pwb::job::qtbridge::JobOwner* prep_owner_ = nullptr;
     bool prep_running_ = false;
+    bool shutdown_done_ = false;  // request_prep() is a no-op after it
     std::optional<JointPrepRequest> prep_in_flight_;
     // The request the applied payload was produced for (diff target).
     std::optional<JointPrepRequest> prep_applied_;

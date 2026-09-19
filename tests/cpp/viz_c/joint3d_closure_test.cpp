@@ -184,11 +184,13 @@ PWB_TEST(rapid_slice_changes_converge_without_blocking) {
         rig.host->add_time_slice(t0 + step * i);
         rig.host->set_active_time_slice(t0 + step * i);
         const auto elapsed = std::chrono::steady_clock::now() - started;
-        // The scrubbing calls must return immediately (no cold read on
-        // the GUI thread — the worker converges in the background).
+        // The scrubbing calls must return promptly (no cold read on the
+        // GUI thread — the worker converges in the background; the wait
+        // below is the behavioural check). Generous bound: it only
+        // catches a synchronous volume read, never scheduler jitter.
         const double elapsed_ms =
             std::chrono::duration<double, std::milli>(elapsed).count();
-        PWB_CHECK(elapsed_ms < 100.0);
+        PWB_CHECK(elapsed_ms < 250.0);
     }
     // Final state wins regardless of how the worker coalesced the run.
     const double target = t0 + step * 6;
@@ -262,6 +264,9 @@ PWB_TEST(project_identity_scopes_persisted_state) {
     // fence must not leak across the identity boundary.
     rig.host->set_project_identity("project-B");
     PWB_CHECK(rig.host->scene_snapshot().fences.empty());
+    PWB_CHECK(rig.host->prepared_data().strips.empty());
+    PWB_CHECK(rig.host->prepared_data().slice_rgba.empty());
+    PWB_CHECK(rig.host->prep_applied_state() == false);
 
     // Back to the first identity: the persisted fence returns.
     rig.host->set_project_identity("project-A");
@@ -288,14 +293,27 @@ PWB_TEST(teardown_with_inflight_job_is_safe) {
     PWB_CHECK((host->open_volume(make_service(),
                                  fs::path(JOINT3D_FIXTURE_VOLUME), &error)));
     QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    // Open has landed (registration exists): put a PREP-lane read in
+    // flight too, so the teardown covers both lanes with live jobs.
+    QDeadlineTimer open_wait(8000);
+    while (host->scene_snapshot().n_inline == 0 &&
+           !open_wait.hasExpired()) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(10);
+    }
+    if (host->scene_snapshot().n_inline > 0) {
+        host->add_time_slice(host->scene_snapshot().time_max_ms / 2.0);
+    }
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
     job_center->shutdown_workers(2000);
     for (int i = 0; i < 50; ++i) {
         QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
         QThread::msleep(5);
     }
     // Member order (host first, center second) destroys the CENTER
-    // first — the safe order. No explicit resets here.
-    PWB_CHECK(true);
+    // first — the safe order. Reaching the end of this test without a
+    // crash IS the assertion (MALLOC_CHECK_=3 audits the teardown,
+    // including the dropped in-flight payloads).
 }
 
 PWB_TEST(binder_binds_real_wells_td_and_volume) {

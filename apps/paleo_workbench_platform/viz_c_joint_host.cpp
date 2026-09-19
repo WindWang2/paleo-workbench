@@ -79,6 +79,16 @@ bool prep_requests_equal(const JointPrepRequest& a, const JointPrepRequest& b) {
         a.fences.size() != b.fences.size()) {
         return false;
     }
+    if (a.registration.has_value()) {
+        const auto& ra = *a.registration;
+        const auto& rb = *b.registration;
+        if (ra.strides() != rb.strides() ||
+            ra.n_inline() != rb.n_inline() ||
+            ra.n_crossline() != rb.n_crossline() ||
+            ra.n_sample() != rb.n_sample()) {
+            return false;
+        }
+    }
     for (std::size_t i = 0; i < a.fences.size(); ++i) {
         const auto& fa = a.fences[i];
         const auto& fb = b.fences[i];
@@ -229,27 +239,39 @@ void VizCJointHost::set_project_identity(const std::string& identity) {
     // rebind), then the new project's state becomes authoritative.
     save_state();
     project_identity_ = identity;
+    // Invalidate the async pipeline for the old project FIRST: the
+    // generation bump makes any in-flight or queued prep payload drop on
+    // arrival (a finished job can never re-apply the old project's
+    // plane/strips), and the applied/applied-key state is cleared so
+    // request_prep() re-reads for the new project from scratch.
+    ++volume_generation_;
+    prepared_ = JointPrepData{};
+    prep_applied_.reset();
+    if (time_map_ != nullptr) {
+        time_map_->set_prepared_slice({}, 0, 0, -1);
+    }
+    // The persisted joint state carries fences/slices/domain only —
+    // wells, the volume access and the loaded-path hints belong to the
+    // old project and are dropped in BOTH branches (Python set_project
+    // parity: the binder re-populates the new project's assets right
+    // after the switch).
+    scene_.clear_fences();
+    try {
+        scene_.restore_orthogonal_slice_state(OrthogonalSliceState{});
+    } catch (const std::invalid_argument&) {
+        // Degraded slice state: leave the cleared fences in place.
+    }
+    scene_.set_wells({}, {});
+    scene_.set_volume_access(nullptr);
+    loaded_paths_.clear();
     QSettings settings;
-    if (settings.value(scoped_state_key(identity)).toString().isEmpty()) {
-        // No stored state for this project: reset the scene honestly —
-        // the previous project's fences/slices/wells/volume must never
-        // leak into it (Python set_project parity). The product binder
-        // re-populates right after the switch.
-        scene_.clear_fences();
-        try {
-            scene_.restore_orthogonal_slice_state(OrthogonalSliceState{});
-        } catch (const std::invalid_argument&) {
-            // Degraded slice state: leave the cleared fences in place.
-        }
-        scene_.set_wells({}, {});
-        scene_.set_volume_access(nullptr);
-        loaded_paths_.clear();
-        assemble_joint_objects();
-        push_scene_to_widget();
-        emit scene_updated();
+    if (!settings.value(scoped_state_key(identity)).toString().isEmpty()) {
+        restore_state();
         return;
     }
-    restore_state();
+    assemble_joint_objects();
+    push_scene_to_widget();
+    emit scene_updated();
 }
 
 void VizCJointHost::save_state() {
@@ -308,6 +330,7 @@ void VizCJointHost::add_fence_vertices(
 
 bool VizCJointHost::shutdown(int wait_ms) {
     bool drained = true;
+    shutdown_done_ = true;
     if (volume_owner_ != nullptr) {
         drained = volume_owner_->shutdown(wait_ms) && drained;
         volume_owner_ = nullptr;
@@ -747,6 +770,7 @@ JointPrepRequest VizCJointHost::current_prep_request() const {
 }
 
 void VizCJointHost::request_prep() {
+    if (shutdown_done_) return;  // no post-shutdown resurrection
     if (scene_.volume_access() == nullptr) return;  // nothing to read yet
     JointPrepRequest current = current_prep_request();
     if (prep_running_ && prep_in_flight_.has_value()) {
@@ -821,6 +845,11 @@ void VizCJointHost::request_prep() {
             const auto data =
                 std::any_cast<std::shared_ptr<JointPrepData>>(&outcome.result);
             if (data == nullptr || *data == nullptr) {
+                // Framework-level failure (empty any): record the
+                // request as served so a deterministic failure cannot
+                // resubmit in a tight loop; the next scene change
+                // re-issues normally.
+                prep_applied_ = *request;
                 request_prep();
                 return;
             }

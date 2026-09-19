@@ -25,7 +25,7 @@
 5. 无 GPU/无数据：诚实占位路径测试不断言崩溃/假成功。
 6. MALLOC_CHECK_=3 跑 viz_c+platform 受影响面。
 
-## 验证证据（2026-09-20 收口）
+## 验证证据（2026-09-20 收口，含审查修复后复验）
 
 - 构建：native-product 全闭包（PLATFORM+DATA+SCIENCE+GEO3D_VIZ+SEISMIC_IO+
   SEISMIC_SERVICE+SEISMIC_VIEWER+INTEGRATION_TESTS），0 error。
@@ -42,3 +42,9 @@
 - 工程身份：project_identity_scopes_persisted_state（A→B 清场、B→A 恢复）。
 - 预存失败对账：integration.attribute_chain（tests/cpp/integration/
   test_attribute_chain.cpp:249，与 viz-c ledger 第 3 轮记录同一断言，非本线引入）。
+
+- 独立审查（单 subagent，只读）：P0×1（持久切片号经 apply_pending_slice_numbers
+  的无界递归——消费后应用修复）+ P1×2（身份切换未失效 prep 管线/未清旧工程体井
+  ——generation 失效 + 双分支清场修复）+ P2×7 全部采纳；复验：闭包 6/6 ×6、
+  受影响面 66/67 ×2（唯一失败=预存 attribute_chain）、xcb GL 截图 800×600、
+  offscreen 降级 6/6。
