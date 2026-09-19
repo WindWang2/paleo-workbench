@@ -160,6 +160,12 @@ public:
 
     [[nodiscard]] const Config& config() const { return config_; }
     [[nodiscard]] AdmissionGate& admission() { return admission_; }
+    // cpp-close-02: the composition root reads the one provenance store
+    // directly (reopen recovery, cache-run rails, catalog OUTPUT flows).
+    [[nodiscard]] CatalogRepository& repository() { return repository_; }
+    [[nodiscard]] const CatalogRepository& repository() const {
+        return repository_;
+    }
 
 private:
     CatalogRepository& repository_;

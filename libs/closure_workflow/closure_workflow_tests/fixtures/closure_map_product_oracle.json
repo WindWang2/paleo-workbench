@@ -1,0 +1,2651 @@
+{
+ "cases": [
+  {
+   "expected": {
+    "scientific_fingerprint": "55e6af04ef5727f6b71ede86d988590cfa98dff04dbefdf9c4f483aa395d5dcc"
+   },
+   "id": "fingerprint",
+   "input": {
+    "assembly": {
+     "adjustments_note": "",
+     "composition_ref": "comp-1",
+     "factor_task_ids": [
+      "factor_1",
+      "factor_2"
+     ],
+     "fusion_version_id": "ver_fusion1",
+     "input_set_id": "set_1",
+     "integrated_interpretation_id": "ii_1",
+     "interpretation_refs": [
+      "b-interp",
+      "a-interp"
+     ],
+     "manual_adjustments": [
+      {
+       "author": "张",
+       "what": "调整边界",
+       "why": "专家判读"
+      },
+      {
+       "author": "李",
+       "what": "补充标注",
+       "why": "专家判读"
+      }
+     ],
+     "notes": "",
+     "product_name": "古地理图 A"
+    },
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "catalog": {
+     "assets": [
+      {
+       "asset_metadata": {
+        "factor_task_ids": [
+         "factor_1",
+         "factor_2"
+        ],
+        "product_name": "古地理图 A",
+        "scientific_fingerprint": "79cc998bb26f8a69be909771b9d43fadc9c6d97619fda094e26bf930185d5691"
+       },
+       "format": "json",
+       "id": "asset_000002",
+       "name": "古地理图 A",
+       "type": "map_product"
+      }
+     ],
+     "runs": [
+      {
+       "generator": "map-product-v1",
+       "id": "run_000001",
+       "input_version_ids": [
+        "ver_grid1",
+        "ver_grid2"
+       ],
+       "operation": "map_product_assembly",
+       "parameters": {
+        "composition_ref": null,
+        "factor_snapshot": [
+         {
+          "grid_version_id": "ver_grid1",
+          "method": "idw",
+          "parameters": {
+           "power": 2,
+           "unit": "ratio"
+          },
+          "quality_metrics": {
+           "unit": "ratio",
+           "variance_min": 0.01
+          },
+          "task_id": "factor_1"
+         },
+         {
+          "grid_version_id": "ver_grid2",
+          "method": "kriging",
+          "parameters": {
+           "unit": "deg"
+          },
+          "quality_metrics": {
+           "unit": "deg"
+          },
+          "task_id": "factor_2"
+         }
+        ],
+        "factor_task_ids": [
+         "factor_1",
+         "factor_2"
+        ],
+        "fusion_version_id": "",
+        "input_set_id": "",
+        "integrated_interpretation_id": "",
+        "interpretation_refs": [
+         "interp_1"
+        ],
+        "manual_adjustments": [
+         {
+          "author": "张",
+          "what": "调整边界"
+         }
+        ],
+        "notes": "",
+        "product_name": "古地理图 A",
+        "scientific_fingerprint": "79cc998bb26f8a69be909771b9d43fadc9c6d97619fda094e26bf930185d5691"
+       },
+       "status": "complete"
+      }
+     ],
+     "versions": [
+      {
+       "asset_id": "asset_000002",
+       "id": "ver_000002",
+       "name": "古地理图 A",
+       "run_id": "run_000001",
+       "sha256": "ca0fa20c4fc29f50b487581cbb4c0a912ff43941a5cb87560989928b1ce3d0b2",
+       "stage": "output",
+       "version_metadata": {
+        "generator": "map-product-v1",
+        "product_name": "古地理图 A"
+       }
+      }
+     ]
+    },
+    "map_products": [
+     {
+      "cloned_from": null,
+      "composition_ref": null,
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "factor_task_ids": [
+       "factor_1",
+       "factor_2"
+      ],
+      "frozen": false,
+      "fusion_version_id": "",
+      "id": "mapprod_frozen001",
+      "input_set_id": "",
+      "integrated_interpretation_id": "",
+      "interpretation_refs": [
+       "interp_1"
+      ],
+      "lifecycle": "draft",
+      "manual_adjustments": [
+       {
+        "author": "张",
+        "what": "调整边界"
+       }
+      ],
+      "notes": "",
+      "output_version_id": "ver_000002",
+      "product_name": "古地理图 A",
+      "product_qa": {},
+      "run_id": "run_000001",
+      "scientific_fingerprint": "79cc998bb26f8a69be909771b9d43fadc9c6d97619fda094e26bf930185d5691",
+      "status": "final",
+      "superseded_by": null
+     }
+    ],
+    "result": {
+     "output_version_id": "ver_000002",
+     "product_name": "古地理图 A",
+     "record_id": "mapprod_frozen001",
+     "run_id": "run_000001",
+     "scientific_fingerprint": "79cc998bb26f8a69be909771b9d43fadc9c6d97619fda094e26bf930185d5691",
+     "superseded_record_id": null
+    }
+   },
+   "id": "assemble",
+   "input": {
+    "assembly": {
+     "adjustments_note": "",
+     "composition_ref": null,
+     "factor_task_ids": [
+      "factor_1",
+      "factor_2"
+     ],
+     "fusion_version_id": "",
+     "input_set_id": "",
+     "integrated_interpretation_id": "",
+     "interpretation_refs": [
+      "interp_1"
+     ],
+     "manual_adjustments": [
+      {
+       "author": "张",
+       "what": "调整边界"
+      }
+     ],
+     "notes": "",
+     "product_name": "古地理图 A"
+    },
+    "payload": "{\"manifest\": true, \"product\": \"古地理图 A\"}",
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "map product needs at least one factor task",
+     "type": "ValueError"
+    }
+   },
+   "id": "refuse_no_factors",
+   "input": {
+    "assembly": {
+     "factor_task_ids": [],
+     "product_name": "X"
+    },
+    "payload": "/tmp/pwb-closure-oracle-refuse_no_factors.json",
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "unknown factor task 'nope'",
+     "type": "ValueError"
+    }
+   },
+   "id": "refuse_unknown_task",
+   "input": {
+    "assembly": {
+     "factor_task_ids": [
+      "nope"
+     ],
+     "product_name": "X"
+    },
+    "payload": "/tmp/pwb-closure-oracle-refuse_unknown_task.json",
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "factor task 'factor_mock' is mock; synthetic factors cannot enter a product",
+     "type": "ValueError"
+    }
+   },
+   "id": "refuse_mock_source",
+   "input": {
+    "assembly": {
+     "factor_task_ids": [
+      "factor_mock"
+     ],
+     "product_name": "X"
+    },
+    "payload": "/tmp/pwb-closure-oracle-refuse_mock_source.json",
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "factor task 'factor_nogrid' has no persisted grid version; re-run its interpolation before assembling a product",
+     "type": "ValueError"
+    }
+   },
+   "id": "refuse_no_grid",
+   "input": {
+    "assembly": {
+     "factor_task_ids": [
+      "factor_nogrid"
+     ],
+     "product_name": "X"
+    },
+    "payload": "/tmp/pwb-closure-oracle-refuse_no_grid.json",
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "map product assembly requires the data catalog",
+     "type": "ValueError"
+    }
+   },
+   "id": "refuse_no_catalog",
+   "input": {
+    "assembly": {
+     "factor_task_ids": [
+      "factor_1"
+     ],
+     "product_name": "X"
+    },
+    "payload": "/tmp/pwb-closure-oracle-refuse_no_catalog.json",
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "map product assembly needs a staged payload file",
+     "type": "ValueError"
+    }
+   },
+   "id": "refuse_no_payload",
+   "input": {
+    "assembly": {
+     "factor_task_ids": [
+      "factor_1"
+     ],
+     "product_name": "X"
+    },
+    "payload": null,
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "catalog": {
+     "assets": [],
+     "runs": [
+      {
+       "extra_parameters": {
+        "error": "output registration failed"
+       },
+       "generator": "map-product-v1",
+       "id": "run_000001",
+       "input_version_ids": [
+        "ver_grid1"
+       ],
+       "operation": "map_product_assembly",
+       "parameters": {
+        "composition_ref": null,
+        "factor_snapshot": [
+         {
+          "grid_version_id": "ver_grid1",
+          "method": "idw",
+          "parameters": {
+           "power": 2,
+           "unit": "ratio"
+          },
+          "quality_metrics": {
+           "unit": "ratio",
+           "variance_min": 0.01
+          },
+          "task_id": "factor_1"
+         }
+        ],
+        "factor_task_ids": [
+         "factor_1"
+        ],
+        "fusion_version_id": "",
+        "input_set_id": "",
+        "integrated_interpretation_id": "",
+        "interpretation_refs": [],
+        "manual_adjustments": [],
+        "notes": "",
+        "product_name": "X",
+        "scientific_fingerprint": "9fc603e663ced36094ec9aee53a44f68322d103ae3261f3015e9950e2671b57d"
+       },
+       "status": "failed"
+      }
+     ],
+     "versions": []
+    },
+    "error": "RuntimeError: catalog write refused",
+    "map_products": []
+   },
+   "id": "failed_output_registration",
+   "input": {
+    "assembly": {
+     "adjustments_note": "",
+     "composition_ref": null,
+     "factor_task_ids": [
+      "factor_1"
+     ],
+     "fusion_version_id": "",
+     "input_set_id": "",
+     "integrated_interpretation_id": "",
+     "interpretation_refs": [],
+     "manual_adjustments": [],
+     "notes": "",
+     "product_name": "X"
+    },
+    "payload": "{}",
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "compare": {
+     "composition_ref_equal": true,
+     "factor_source": {
+      "a": "live_fallback",
+      "b": "live_fallback"
+     },
+     "factor_tasks": {
+      "changed": {},
+      "only_in_a": [],
+      "only_in_b": []
+     },
+     "fingerprint_a": "821d1224eafc13e82f4ef72188637c24ab7bd0bda917825dd6e7ff365ded84cb",
+     "fingerprint_b": "821d1224eafc13e82f4ef72188637c24ab7bd0bda917825dd6e7ff365ded84cb",
+     "interpretation_refs": {
+      "only_in_a": [],
+      "only_in_b": []
+     },
+     "output": {
+      "checksum_a": null,
+      "checksum_b": null,
+      "version_a": "ver_000006",
+      "version_b": "ver_000006"
+     },
+     "scientific_fingerprint_equal": true
+    },
+    "lifecycle": {
+     "clone": "draft",
+     "record": "frozen"
+    },
+    "map_products": [
+     {
+      "cloned_from": null,
+      "composition_ref": null,
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "factor_task_ids": [
+       "factor_1",
+       "factor_2"
+      ],
+      "frozen": true,
+      "fusion_version_id": "",
+      "id": "mapprod_frozen002",
+      "input_set_id": "",
+      "integrated_interpretation_id": "",
+      "interpretation_refs": [],
+      "lifecycle": "frozen",
+      "manual_adjustments": [],
+      "notes": "",
+      "output_version_id": "ver_000006",
+      "product_name": "X",
+      "product_qa": {
+       "counts": {
+        "blocker": 0,
+        "error": 0,
+        "info": 0,
+        "warning": 2
+       },
+       "findings": [
+        {
+         "message": "单因素 古流向：无不确定度面",
+         "severity": "warning",
+         "stage": "result"
+        },
+        {
+         "message": "产品新鲜度未知（产品未登记完整溯源 run）——不可证明为最新",
+         "severity": "warning",
+         "stage": "input"
+        }
+       ],
+       "has_blocker": false,
+       "has_error": false,
+       "product_id": "mapprod_frozen002",
+       "schema": 1,
+       "status": "warning"
+      },
+      "run_id": "run_000005",
+      "scientific_fingerprint": "821d1224eafc13e82f4ef72188637c24ab7bd0bda917825dd6e7ff365ded84cb",
+      "status": "final",
+      "superseded_by": null
+     },
+     {
+      "cloned_from": "mapprod_frozen002",
+      "composition_ref": null,
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "factor_task_ids": [
+       "factor_1",
+       "factor_2"
+      ],
+      "frozen": false,
+      "fusion_version_id": "",
+      "id": "mapprod_frozen003",
+      "input_set_id": "",
+      "integrated_interpretation_id": "",
+      "interpretation_refs": [],
+      "lifecycle": "draft",
+      "manual_adjustments": [],
+      "notes": "",
+      "output_version_id": "ver_000006",
+      "product_name": "X (副本)",
+      "product_qa": {},
+      "run_id": "run_000005",
+      "scientific_fingerprint": "821d1224eafc13e82f4ef72188637c24ab7bd0bda917825dd6e7ff365ded84cb",
+      "status": "final",
+      "superseded_by": null
+     }
+    ],
+    "stale_after": {
+     "current_fingerprint": "7fbaef225ee009a6ba7a6dead5a55c433f90b222ba4f80498438c12ba1d5e2c6",
+     "reason": "inputs changed since assembly",
+     "record_fingerprint": "821d1224eafc13e82f4ef72188637c24ab7bd0bda917825dd6e7ff365ded84cb",
+     "stale": true
+    },
+    "stale_before": {
+     "current_fingerprint": "821d1224eafc13e82f4ef72188637c24ab7bd0bda917825dd6e7ff365ded84cb",
+     "reason": "inputs unchanged",
+     "record_fingerprint": "821d1224eafc13e82f4ef72188637c24ab7bd0bda917825dd6e7ff365ded84cb",
+     "stale": false
+    },
+    "supersede_error_on_frozen": "product mapprod_frozen002 is frozen; unfreeze before superseding"
+   },
+   "id": "lifecycle",
+   "input": {
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "catalog": {
+     "assets": [
+      {
+       "asset_metadata": {
+        "factor_task_ids": [
+         "factor_1"
+        ],
+        "product_name": "X",
+        "scientific_fingerprint": "9fc603e663ced36094ec9aee53a44f68322d103ae3261f3015e9950e2671b57d"
+       },
+       "format": "json",
+       "id": "asset_000002",
+       "name": "X",
+       "type": "map_product"
+      },
+      {
+       "asset_metadata": {
+        "factor_task_ids": [
+         "factor_1"
+        ],
+        "product_name": "X",
+        "scientific_fingerprint": "9fc603e663ced36094ec9aee53a44f68322d103ae3261f3015e9950e2671b57d"
+       },
+       "format": "json",
+       "id": "asset_000004",
+       "name": "X",
+       "type": "map_product"
+      }
+     ],
+     "runs": [
+      {
+       "generator": "map-product-v1",
+       "id": "run_000001",
+       "input_version_ids": [
+        "ver_grid1"
+       ],
+       "operation": "map_product_assembly",
+       "parameters": {
+        "composition_ref": null,
+        "factor_snapshot": [
+         {
+          "grid_version_id": "ver_grid1",
+          "method": "idw",
+          "parameters": {
+           "power": 2,
+           "unit": "ratio"
+          },
+          "quality_metrics": {
+           "unit": "ratio",
+           "variance_min": 0.01
+          },
+          "task_id": "factor_1"
+         }
+        ],
+        "factor_task_ids": [
+         "factor_1"
+        ],
+        "fusion_version_id": "",
+        "input_set_id": "",
+        "integrated_interpretation_id": "",
+        "interpretation_refs": [],
+        "manual_adjustments": [],
+        "notes": "",
+        "product_name": "X",
+        "scientific_fingerprint": "9fc603e663ced36094ec9aee53a44f68322d103ae3261f3015e9950e2671b57d"
+       },
+       "status": "complete"
+      },
+      {
+       "generator": "map-product-v1",
+       "id": "run_000003",
+       "input_version_ids": [
+        "ver_grid1"
+       ],
+       "operation": "map_product_assembly",
+       "parameters": {
+        "composition_ref": null,
+        "factor_snapshot": [
+         {
+          "grid_version_id": "ver_grid1",
+          "method": "idw",
+          "parameters": {
+           "power": 2,
+           "unit": "ratio"
+          },
+          "quality_metrics": {
+           "unit": "ratio",
+           "variance_min": 0.01
+          },
+          "task_id": "factor_1"
+         }
+        ],
+        "factor_task_ids": [
+         "factor_1"
+        ],
+        "fusion_version_id": "",
+        "input_set_id": "",
+        "integrated_interpretation_id": "",
+        "interpretation_refs": [],
+        "manual_adjustments": [],
+        "notes": "",
+        "product_name": "X",
+        "scientific_fingerprint": "9fc603e663ced36094ec9aee53a44f68322d103ae3261f3015e9950e2671b57d"
+       },
+       "status": "complete"
+      }
+     ],
+     "versions": [
+      {
+       "asset_id": "asset_000002",
+       "id": "ver_000002",
+       "name": "X",
+       "run_id": "run_000001",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+       "stage": "output",
+       "version_metadata": {
+        "generator": "map-product-v1",
+        "product_name": "X"
+       }
+      },
+      {
+       "asset_id": "asset_000004",
+       "id": "ver_000004",
+       "name": "X",
+       "run_id": "run_000003",
+       "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+       "stage": "output",
+       "version_metadata": {
+        "generator": "map-product-v1",
+        "product_name": "X"
+       }
+      }
+     ]
+    },
+    "map_products": [
+     {
+      "cloned_from": null,
+      "composition_ref": null,
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "factor_task_ids": [
+       "factor_1"
+      ],
+      "frozen": false,
+      "fusion_version_id": "",
+      "id": "mapprod_frozen004",
+      "input_set_id": "",
+      "integrated_interpretation_id": "",
+      "interpretation_refs": [],
+      "lifecycle": "superseded",
+      "manual_adjustments": [],
+      "notes": "",
+      "output_version_id": "ver_000002",
+      "product_name": "X",
+      "product_qa": {},
+      "run_id": "run_000001",
+      "scientific_fingerprint": "9fc603e663ced36094ec9aee53a44f68322d103ae3261f3015e9950e2671b57d",
+      "status": "superseded",
+      "superseded_by": "mapprod_frozen005"
+     },
+     {
+      "cloned_from": "mapprod_frozen004",
+      "composition_ref": null,
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "factor_task_ids": [
+       "factor_1"
+      ],
+      "frozen": false,
+      "fusion_version_id": "",
+      "id": "mapprod_frozen005",
+      "input_set_id": "",
+      "integrated_interpretation_id": "",
+      "interpretation_refs": [],
+      "lifecycle": "draft",
+      "manual_adjustments": [],
+      "notes": "",
+      "output_version_id": "ver_000004",
+      "product_name": "X",
+      "product_qa": {},
+      "run_id": "run_000003",
+      "scientific_fingerprint": "9fc603e663ced36094ec9aee53a44f68322d103ae3261f3015e9950e2671b57d",
+      "status": "final",
+      "superseded_by": null
+     }
+    ],
+    "result": {
+     "record_id": "mapprod_frozen005",
+     "superseded_record_id": "mapprod_frozen004"
+    }
+   },
+   "id": "rerun",
+   "input": {
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {
+        "power": 2,
+        "unit": "ratio"
+       },
+       "quality_metrics": {
+        "unit": "ratio",
+        "variance_min": 0.01
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {
+        "unit": "deg"
+       },
+       "quality_metrics": {
+        "unit": "deg"
+       },
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "mock",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_mock",
+       "grid_metadata": {},
+       "id": "factor_mock",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "模拟因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "mock",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "x",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": null,
+       "grid_metadata": {},
+       "id": "factor_nogrid",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "无网格因子",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  }
+ ],
+ "frozen_from": "paleo_workbench.workflow.map_product",
+ "generator": "tools/oracle/generate_closure_map_product_fixtures.py"
+}

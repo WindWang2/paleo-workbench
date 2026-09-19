@@ -205,7 +205,8 @@ bool evaluate_condition(const workflow_spec::NodeCondition& condition,
 RunEngine::RunEngine(const IActionCatalog& catalog, RunFunctionMap functions,
                      WorkflowRunStore& store, Clock clock,
                      BackoffWaiter waiter, EnvironmentProvider env,
-                     const CatalogLike* artifact_catalog, RunIdGenerator id_gen)
+                     const CatalogLike* artifact_catalog, RunIdGenerator id_gen,
+                     CacheRunRail* cache_run_rail)
     : catalog_(catalog),
       functions_(std::move(functions)),
       store_(store),
@@ -213,6 +214,7 @@ RunEngine::RunEngine(const IActionCatalog& catalog, RunFunctionMap functions,
       waiter_(std::move(waiter)),
       env_(std::move(env)),
       artifact_catalog_(artifact_catalog),
+      cache_run_rail_(cache_run_rail),
       id_gen_(std::move(id_gen)) {
     if (!clock_) {
         clock_ = [] {
@@ -696,6 +698,32 @@ void RunEngine::execute_node(workflow_spec::WorkflowRun& run, const std::string&
             node_run->finished_at = domain::Json(now());
             node_run->state = workflow_spec::NodeState::succeeded;
             node_run->action_status = result.status;
+            if (!identity.empty() && cache_run_rail_ != nullptr) {
+                // engine.py _register_cache_run (L735): the cacheable node
+                // execution rides the catalog provenance rail so reuse is
+                // traceable. Best-effort — a rail failure never invalidates
+                // the execution (reuse for it stays store-limited).
+                try {
+                    Json rail_params = Json::object();
+                    rail_params["workflow_id"] = run.workflow.workflow_id;
+                    rail_params["run_id"] = run.run_id;
+                    rail_params["node_id"] = node.node_id;
+                    rail_params["cache_identity"] = identity;
+                    const std::string rail_run_id =
+                        cache_run_rail_->register_cache_run(
+                            "workflow.node." + node.action_id,
+                            receipt.input_version_ids, rail_params,
+                            "workflow-dag/" + run.workflow.schema_version);
+                    if (!rail_run_id.empty() &&
+                        !receipt.catalog_run_id.has_value()) {
+                        (*node_run->receipt)["catalog_run_id"] =
+                            rail_run_id;
+                    }
+                } catch (...) {
+                    // logged in Python; this library has no log sink and a
+                    // rail failure must not fail the node.
+                }
+            }
             if (context != nullptr && context->session != nullptr) {
                 context->session->merge_session_pointers();
             }

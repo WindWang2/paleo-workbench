@@ -1,0 +1,2929 @@
+{
+ "cases": [
+  {
+   "expected": {
+    "fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+    "model": {
+     "class_names": [
+      "低",
+      "中",
+      "高"
+     ],
+     "class_thresholds": [
+      0.3333333333333333,
+      0.6666666666666666
+     ],
+     "default_class": "未定",
+     "evidences": [
+      {
+       "algorithm_id": "idw",
+       "factor_name": "物源综合",
+       "normalization": {
+        "high": 1.0,
+        "kind": "minmax",
+        "low": 0.10000000149011612
+       },
+       "source_version_ids": [
+        "ver_src_g1"
+       ],
+       "weight": 1.0
+      },
+      {
+       "algorithm_id": "kriging",
+       "factor_name": "古流向",
+       "normalization": {
+        "high": 0.8999999761581421,
+        "kind": "minmax",
+        "low": 0.20000000298023224
+       },
+       "source_version_ids": [
+        "ver_src_g2"
+       ],
+       "weight": 1.0
+      }
+     ],
+     "generator_version": "factor-fusion-v1",
+     "kind": "weighted_evidence",
+     "name": "综合证据融合",
+     "rules": []
+    }
+   },
+   "id": "model_default",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "古流向",
+      "factor:factor_2:ver_grid2"
+     ]
+    ],
+    "grids": {
+     "factor_1": {
+      "algorithm_id": "idw",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "物源综合",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.10000000149011612,
+       0.4000000059604645,
+       0.699999988079071,
+       1.0
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g1"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     },
+     "factor_2": {
+      "algorithm_id": "kriging",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "古流向",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.20000000298023224,
+       0.5,
+       0.30000001192092896,
+       0.8999999761581421
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g2"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     }
+    },
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "fingerprint": "71a8fd740e7a838a91c7cd6edfa5656cba1e1fc4da28cad75929347729da4c6b",
+    "model": {
+     "class_names": [
+      "低",
+      "中",
+      "高"
+     ],
+     "class_thresholds": [
+      0.4,
+      0.8
+     ],
+     "default_class": "未定",
+     "evidences": [
+      {
+       "algorithm_id": "idw",
+       "factor_name": "物源综合",
+       "normalization": {
+        "high": 1.0,
+        "kind": "minmax",
+        "low": 0.10000000149011612
+       },
+       "source_version_ids": [
+        "ver_src_g1"
+       ],
+       "weight": 0.75
+      },
+      {
+       "algorithm_id": "kriging",
+       "factor_name": "古流向",
+       "normalization": {
+        "high": 0.8999999761581421,
+        "kind": "minmax",
+        "low": 0.20000000298023224
+       },
+       "source_version_ids": [
+        "ver_src_g2"
+       ],
+       "weight": 0.25
+      }
+     ],
+     "generator_version": "factor-fusion-v1",
+     "kind": "weighted_evidence",
+     "name": "综合证据融合",
+     "rules": [],
+     "weight_provenance": {
+      "decided_by": "专家评审"
+     }
+    }
+   },
+   "id": "model_explicit",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "古流向",
+      "factor:factor_2:ver_grid2"
+     ]
+    ],
+    "grids": {
+     "factor_1": {
+      "algorithm_id": "idw",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "物源综合",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.10000000149011612,
+       0.4000000059604645,
+       0.699999988079071,
+       1.0
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g1"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     },
+     "factor_2": {
+      "algorithm_id": "kriging",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "古流向",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.20000000298023224,
+       0.5,
+       0.30000001192092896,
+       0.8999999761581421
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g2"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     }
+    },
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "summary": {
+     "catalog_version_id": "",
+     "class_names": [
+      "低",
+      "中",
+      "高"
+     ],
+     "classification_features": [
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.0,
+           0.0
+          ],
+          [
+           0.5,
+           0.0
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.0,
+           0.5
+          ],
+          [
+           0.0,
+           0.0
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#b0bec5",
+        "facies": "低",
+        "facies_id": 1,
+        "facies_name": "低",
+        "mean_value": 0.0
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.5,
+           0.0
+          ],
+          [
+           1.0,
+           0.0
+          ],
+          [
+           1.0,
+           0.5
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.5,
+           0.0
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#ffe082",
+        "facies": "中",
+        "facies_id": 2,
+        "facies_name": "中",
+        "mean_value": 0.3929
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.0,
+           0.5
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.5,
+           1.0
+          ],
+          [
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           0.5
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#ffe082",
+        "facies": "中",
+        "facies_id": 2,
+        "facies_name": "中",
+        "mean_value": 0.3929
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.5,
+           0.5
+          ],
+          [
+           1.0,
+           0.5
+          ],
+          [
+           1.0,
+           1.0
+          ],
+          [
+           0.5,
+           1.0
+          ],
+          [
+           0.5,
+           0.5
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#d73027",
+        "facies": "高",
+        "facies_id": 3,
+        "facies_name": "高",
+        "mean_value": 1.0
+       }
+      ]
+     ],
+     "confidence_descriptor": {
+      "geometry_kind": "raster",
+      "layer_id": "fusion_confidence:6778fe534916",
+      "metadata": {
+       "algorithm_id": "factor_fusion",
+       "artifact_version_id": "",
+       "crs": null,
+       "extent": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "fusion": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "evidence_count": 2,
+        "evidences": [
+         "物源综合",
+         "古流向"
+        ],
+        "fusion_kind": "weighted_evidence",
+        "model_fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+        "model_name": "综合证据融合"
+       },
+       "height": 2,
+       "layer_type": "scalar_grid",
+       "quantity": "fusion_confidence",
+       "run_ref": null,
+       "source": "factor_fusion",
+       "statistics": {
+        "max": 1.0,
+        "mean": 0.9226190596818924,
+        "min": 0.7380952835083008,
+        "std": 0.10829406060395061,
+        "total_count": 4,
+        "valid_count": 4
+       },
+       "unit": "1",
+       "width": 2
+      },
+      "payload": {
+       "descriptor": {
+        "algorithm_id": "factor_fusion",
+        "algorithm_parameters": {
+         "fusion_kind": "weighted_evidence",
+         "fusion_name": "综合证据融合"
+        },
+        "created_at": null,
+        "crs": null,
+        "crs_is_known": false,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "factor_name": "综合证据融合 融合置信度",
+        "generator_version": "factor-fusion-v1",
+        "has_boundary": false,
+        "has_variance_grid": false,
+        "height": 2,
+        "input_version_ids": [
+         "ver_src_g1",
+         "ver_src_g2"
+        ],
+        "run_id": null,
+        "run_ref": null,
+        "source_refs": [
+         "ver_src_g1",
+         "ver_src_g2"
+        ],
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.9226190596818924,
+         "min": 0.7380952835083008,
+         "std": 0.10829406060395061,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "factor_task_id": "",
+       "layer_type": "scalar_grid",
+       "metadata": {
+        "algorithm_id": "factor_fusion",
+        "artifact_version_id": "",
+        "crs": null,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "fusion": {
+         "class_names": [
+          "低",
+          "中",
+          "高"
+         ],
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "evidence_count": 2,
+         "evidences": [
+          "物源综合",
+          "古流向"
+         ],
+         "fusion_kind": "weighted_evidence",
+         "model_fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+         "model_name": "综合证据融合"
+        },
+        "height": 2,
+        "layer_type": "scalar_grid",
+        "quantity": "fusion_confidence",
+        "run_ref": null,
+        "source": "factor_fusion",
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.9226190596818924,
+         "min": 0.7380952835083008,
+         "std": 0.10829406060395061,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "quantity": "fusion_confidence",
+       "source": "factor_fusion"
+      },
+      "role": "analysis_aid",
+      "title": "综合证据融合·融合置信度"
+     },
+     "likelihood_descriptor": {
+      "geometry_kind": "raster",
+      "layer_id": "fusion_likelihood:6778fe534916",
+      "metadata": {
+       "algorithm_id": "factor_fusion",
+       "artifact_version_id": "",
+       "crs": null,
+       "extent": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "fusion": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "evidence_count": 2,
+        "evidences": [
+         "物源综合",
+         "古流向"
+        ],
+        "fusion_kind": "weighted_evidence",
+        "model_fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+        "model_name": "综合证据融合"
+       },
+       "height": 2,
+       "layer_type": "scalar_grid",
+       "quantity": "fusion_likelihood",
+       "run_ref": null,
+       "source": "factor_fusion",
+       "statistics": {
+        "max": 1.0,
+        "mean": 0.4464285746216774,
+        "min": 0.0,
+        "std": 0.3576880754045658,
+        "total_count": 4,
+        "valid_count": 4
+       },
+       "unit": "1",
+       "width": 2
+      },
+      "payload": {
+       "descriptor": {
+        "algorithm_id": "factor_fusion",
+        "algorithm_parameters": {
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "fusion_kind": "weighted_evidence",
+         "fusion_name": "综合证据融合"
+        },
+        "created_at": null,
+        "crs": null,
+        "crs_is_known": false,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "factor_name": "综合证据融合 融合似然",
+        "generator_version": "factor-fusion-v1",
+        "has_boundary": false,
+        "has_variance_grid": false,
+        "height": 2,
+        "input_version_ids": [
+         "ver_src_g1",
+         "ver_src_g2"
+        ],
+        "run_id": null,
+        "run_ref": null,
+        "source_refs": [
+         "ver_src_g1",
+         "ver_src_g2"
+        ],
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.4464285746216774,
+         "min": 0.0,
+         "std": 0.3576880754045658,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "factor_task_id": "",
+       "layer_type": "scalar_grid",
+       "metadata": {
+        "algorithm_id": "factor_fusion",
+        "artifact_version_id": "",
+        "crs": null,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "fusion": {
+         "class_names": [
+          "低",
+          "中",
+          "高"
+         ],
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "evidence_count": 2,
+         "evidences": [
+          "物源综合",
+          "古流向"
+         ],
+         "fusion_kind": "weighted_evidence",
+         "model_fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+         "model_name": "综合证据融合"
+        },
+        "height": 2,
+        "layer_type": "scalar_grid",
+        "quantity": "fusion_likelihood",
+        "run_ref": null,
+        "source": "factor_fusion",
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.4464285746216774,
+         "min": 0.0,
+         "std": 0.3576880754045658,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "quantity": "fusion_likelihood",
+       "source": "factor_fusion"
+      },
+      "role": "analysis_aid",
+      "title": "综合证据融合·融合似然"
+     },
+     "model_name": "综合证据融合",
+     "n_factors": 2,
+     "qc": {
+      "class_counts": {
+       "中": 2,
+       "低": 1,
+       "高": 1
+      },
+      "classification": {
+       "feature_count": 4,
+       "polygon_qc": {
+        "area_unit": "unknown-unit²",
+        "area_warnings": [
+         "CRS undeclared: area unit unknown (not metres)",
+         "CRS undeclared: area unit is unknown (not metres)"
+        ],
+        "clipped_to_domain": 0,
+        "empty_after_clip": 0,
+        "holes_promoted_to_exterior": 0,
+        "nodata_cells": 0,
+        "small_polygon_threshold": null,
+        "small_polygons_dropped": 0,
+        "thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "thresholds_source": "explicit",
+        "total_cells": 4
+       }
+      },
+      "classified_cells": 4,
+      "confidence_coverage": {
+       "finite_fraction": 1.0,
+       "mean": 0.9226190596818924
+      },
+      "crs_undeclared": true,
+      "defaults": {
+       "classes": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "policy": "default_equal_thirds"
+       },
+       "normalization": {
+        "bounds": {
+         "factor_1": {
+          "high": 1.0,
+          "kind": "minmax",
+          "low": 0.10000000149011612
+         },
+         "factor_2": {
+          "high": 0.8999999761581421,
+          "kind": "minmax",
+          "low": 0.20000000298023224
+         }
+        },
+        "policy": "per_factor_finite_range"
+       },
+       "weights": {
+        "policy": "equal",
+        "value": 1.0
+       }
+      },
+      "fusion_kind": "weighted_evidence",
+      "high_conflict_fraction": 0.0,
+      "low_confidence_fraction": 0.0,
+      "low_margin_fraction": 0.25,
+      "mean_conflict_fraction": 0.125,
+      "n_factors": 2,
+      "nan_policy": "renormalize",
+      "registration": {
+       "reason": "register=False",
+       "registered": false,
+       "requested": false
+      },
+      "unclassified_cells": 0,
+      "unit_warnings": []
+     },
+     "registered": false,
+     "sensitivity": {
+      "factors": {
+       "古流向": {
+        "changed_cells": 0,
+        "class_change_fraction": 0.0,
+        "comparable_cells": 4,
+        "weight": 1.0
+       },
+       "物源综合": {
+        "changed_cells": 1,
+        "class_change_fraction": 0.25,
+        "comparable_cells": 4,
+        "weight": 1.0
+       }
+      },
+      "kind": "leave_one_out",
+      "supported": true
+     },
+     "variance_available": false,
+     "variance_descriptor": null
+    }
+   },
+   "id": "run_degraded",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "古流向",
+      "factor:factor_2:ver_grid2"
+     ]
+    ],
+    "grids": {
+     "factor_1": {
+      "algorithm_id": "idw",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "物源综合",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.10000000149011612,
+       0.4000000059604645,
+       0.699999988079071,
+       1.0
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g1"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     },
+     "factor_2": {
+      "algorithm_id": "kriging",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "古流向",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.20000000298023224,
+       0.5,
+       0.30000001192092896,
+       0.8999999761581421
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g2"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     }
+    },
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "mismatches": [
+     "物源：钉住版本 ver_grid1 ≠ 任务当前版本 ver_grid9——融合使用钉住网格"
+    ],
+    "summary": {
+     "catalog_version_id": "",
+     "class_names": [
+      "低",
+      "中",
+      "高"
+     ],
+     "classification_features": [
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.0,
+           0.0
+          ],
+          [
+           0.5,
+           0.0
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.0,
+           0.5
+          ],
+          [
+           0.0,
+           0.0
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#b0bec5",
+        "facies": "低",
+        "facies_id": 1,
+        "facies_name": "低",
+        "mean_value": 0.0
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.5,
+           0.0
+          ],
+          [
+           1.0,
+           0.0
+          ],
+          [
+           1.0,
+           0.5
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.5,
+           0.0
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#ffe082",
+        "facies": "中",
+        "facies_id": 2,
+        "facies_name": "中",
+        "mean_value": 0.3616
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.0,
+           0.5
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.5,
+           1.0
+          ],
+          [
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           0.5
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#ffe082",
+        "facies": "中",
+        "facies_id": 2,
+        "facies_name": "中",
+        "mean_value": 0.3616
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.5,
+           0.5
+          ],
+          [
+           1.0,
+           0.5
+          ],
+          [
+           1.0,
+           1.0
+          ],
+          [
+           0.5,
+           1.0
+          ],
+          [
+           0.5,
+           0.5
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#d73027",
+        "facies": "高",
+        "facies_id": 3,
+        "facies_name": "高",
+        "mean_value": 1.0
+       }
+      ]
+     ],
+     "confidence_descriptor": {
+      "geometry_kind": "raster",
+      "layer_id": "fusion_confidence:79db3dd30d5d",
+      "metadata": {
+       "algorithm_id": "factor_fusion",
+       "artifact_version_id": "",
+       "crs": null,
+       "extent": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "fusion": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "evidence_count": 2,
+        "evidences": [
+         "物源综合",
+         "古流向"
+        ],
+        "fusion_kind": "weighted_evidence",
+        "model_fingerprint": "79db3dd30d5de8a4c375bca9530d2c474d557c70ca56ad14f8881fd8c81ac8b9",
+        "model_name": "综合证据融合"
+       },
+       "height": 2,
+       "layer_type": "scalar_grid",
+       "quantity": "fusion_confidence",
+       "run_ref": null,
+       "source": "factor_fusion",
+       "statistics": {
+        "max": 1.0,
+        "mean": 0.9174107164144516,
+        "min": 0.7589285969734192,
+        "std": 0.0984928983747958,
+        "total_count": 4,
+        "valid_count": 4
+       },
+       "unit": "1",
+       "width": 2
+      },
+      "payload": {
+       "descriptor": {
+        "algorithm_id": "factor_fusion",
+        "algorithm_parameters": {
+         "fusion_kind": "weighted_evidence",
+         "fusion_name": "综合证据融合"
+        },
+        "created_at": null,
+        "crs": null,
+        "crs_is_known": false,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "factor_name": "综合证据融合 融合置信度",
+        "generator_version": "factor-fusion-v1",
+        "has_boundary": false,
+        "has_variance_grid": false,
+        "height": 2,
+        "input_version_ids": [
+         "ver_src_g1p",
+         "ver_src_g2"
+        ],
+        "run_id": null,
+        "run_ref": null,
+        "source_refs": [
+         "ver_src_g1p",
+         "ver_src_g2"
+        ],
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.9174107164144516,
+         "min": 0.7589285969734192,
+         "std": 0.0984928983747958,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "factor_task_id": "",
+       "layer_type": "scalar_grid",
+       "metadata": {
+        "algorithm_id": "factor_fusion",
+        "artifact_version_id": "",
+        "crs": null,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "fusion": {
+         "class_names": [
+          "低",
+          "中",
+          "高"
+         ],
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "evidence_count": 2,
+         "evidences": [
+          "物源综合",
+          "古流向"
+         ],
+         "fusion_kind": "weighted_evidence",
+         "model_fingerprint": "79db3dd30d5de8a4c375bca9530d2c474d557c70ca56ad14f8881fd8c81ac8b9",
+         "model_name": "综合证据融合"
+        },
+        "height": 2,
+        "layer_type": "scalar_grid",
+        "quantity": "fusion_confidence",
+        "run_ref": null,
+        "source": "factor_fusion",
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.9174107164144516,
+         "min": 0.7589285969734192,
+         "std": 0.0984928983747958,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "quantity": "fusion_confidence",
+       "source": "factor_fusion"
+      },
+      "role": "analysis_aid",
+      "title": "综合证据融合·融合置信度"
+     },
+     "likelihood_descriptor": {
+      "geometry_kind": "raster",
+      "layer_id": "fusion_likelihood:79db3dd30d5d",
+      "metadata": {
+       "algorithm_id": "factor_fusion",
+       "artifact_version_id": "",
+       "crs": null,
+       "extent": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "fusion": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "evidence_count": 2,
+        "evidences": [
+         "物源综合",
+         "古流向"
+        ],
+        "fusion_kind": "weighted_evidence",
+        "model_fingerprint": "79db3dd30d5de8a4c375bca9530d2c474d557c70ca56ad14f8881fd8c81ac8b9",
+        "model_name": "综合证据融合"
+       },
+       "height": 2,
+       "layer_type": "scalar_grid",
+       "quantity": "fusion_likelihood",
+       "run_ref": null,
+       "source": "factor_fusion",
+       "statistics": {
+        "max": 1.0,
+        "mean": 0.4308035671710968,
+        "min": 0.0,
+        "std": 0.36060680733731654,
+        "total_count": 4,
+        "valid_count": 4
+       },
+       "unit": "1",
+       "width": 2
+      },
+      "payload": {
+       "descriptor": {
+        "algorithm_id": "factor_fusion",
+        "algorithm_parameters": {
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "fusion_kind": "weighted_evidence",
+         "fusion_name": "综合证据融合"
+        },
+        "created_at": null,
+        "crs": null,
+        "crs_is_known": false,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "factor_name": "综合证据融合 融合似然",
+        "generator_version": "factor-fusion-v1",
+        "has_boundary": false,
+        "has_variance_grid": false,
+        "height": 2,
+        "input_version_ids": [
+         "ver_src_g1p",
+         "ver_src_g2"
+        ],
+        "run_id": null,
+        "run_ref": null,
+        "source_refs": [
+         "ver_src_g1p",
+         "ver_src_g2"
+        ],
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.4308035671710968,
+         "min": 0.0,
+         "std": 0.36060680733731654,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "factor_task_id": "",
+       "layer_type": "scalar_grid",
+       "metadata": {
+        "algorithm_id": "factor_fusion",
+        "artifact_version_id": "",
+        "crs": null,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "fusion": {
+         "class_names": [
+          "低",
+          "中",
+          "高"
+         ],
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "evidence_count": 2,
+         "evidences": [
+          "物源综合",
+          "古流向"
+         ],
+         "fusion_kind": "weighted_evidence",
+         "model_fingerprint": "79db3dd30d5de8a4c375bca9530d2c474d557c70ca56ad14f8881fd8c81ac8b9",
+         "model_name": "综合证据融合"
+        },
+        "height": 2,
+        "layer_type": "scalar_grid",
+        "quantity": "fusion_likelihood",
+        "run_ref": null,
+        "source": "factor_fusion",
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.4308035671710968,
+         "min": 0.0,
+         "std": 0.36060680733731654,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "quantity": "fusion_likelihood",
+       "source": "factor_fusion"
+      },
+      "role": "analysis_aid",
+      "title": "综合证据融合·融合似然"
+     },
+     "model_name": "综合证据融合",
+     "n_factors": 2,
+     "qc": {
+      "class_counts": {
+       "中": 2,
+       "低": 1,
+       "高": 1
+      },
+      "classification": {
+       "feature_count": 4,
+       "polygon_qc": {
+        "area_unit": "unknown-unit²",
+        "area_warnings": [
+         "CRS undeclared: area unit unknown (not metres)",
+         "CRS undeclared: area unit is unknown (not metres)"
+        ],
+        "clipped_to_domain": 0,
+        "empty_after_clip": 0,
+        "holes_promoted_to_exterior": 0,
+        "nodata_cells": 0,
+        "small_polygon_threshold": null,
+        "small_polygons_dropped": 0,
+        "thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "thresholds_source": "explicit",
+        "total_cells": 4
+       }
+      },
+      "classified_cells": 4,
+      "confidence_coverage": {
+       "finite_fraction": 1.0,
+       "mean": 0.9174107164144516
+      },
+      "crs_undeclared": true,
+      "defaults": {
+       "classes": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "policy": "default_equal_thirds"
+       },
+       "normalization": {
+        "bounds": {
+         "factor_1": {
+          "high": 0.949999988079071,
+          "kind": "minmax",
+          "low": 0.15000000596046448
+         },
+         "factor_2": {
+          "high": 0.8999999761581421,
+          "kind": "minmax",
+          "low": 0.20000000298023224
+         }
+        },
+        "policy": "per_factor_finite_range"
+       },
+       "weights": {
+        "policy": "equal",
+        "value": 1.0
+       }
+      },
+      "fusion_kind": "weighted_evidence",
+      "high_conflict_fraction": 0.0,
+      "low_confidence_fraction": 0.0,
+      "low_margin_fraction": 0.25,
+      "mean_conflict_fraction": 0.25,
+      "n_factors": 2,
+      "nan_policy": "renormalize",
+      "pinned_version_mismatches": [
+       "物源：钉住版本 ver_grid1 ≠ 任务当前版本 ver_grid9——融合使用钉住网格"
+      ],
+      "registration": {
+       "reason": "register=False",
+       "registered": false,
+       "requested": false
+      },
+      "unclassified_cells": 0,
+      "unit_warnings": []
+     },
+     "registered": false,
+     "sensitivity": {
+      "factors": {
+       "古流向": {
+        "changed_cells": 1,
+        "class_change_fraction": 0.25,
+        "comparable_cells": 4,
+        "weight": 1.0
+       },
+       "物源综合": {
+        "changed_cells": 1,
+        "class_change_fraction": 0.25,
+        "comparable_cells": 4,
+        "weight": 1.0
+       }
+      },
+      "kind": "leave_one_out",
+      "supported": true
+     },
+     "variance_available": false,
+     "variance_descriptor": null
+    }
+   },
+   "id": "pin_mismatch",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "古流向",
+      "factor:factor_2:ver_grid2"
+     ]
+    ],
+    "grids": {
+     "factor_1": {
+      "algorithm_id": "idw",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "物源综合",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.15000000596046448,
+       0.3499999940395355,
+       0.6499999761581421,
+       0.949999988079071
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g1p"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     },
+     "factor_2": {
+      "algorithm_id": "kriging",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "古流向",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.20000000298023224,
+       0.5,
+       0.30000001192092896,
+       0.8999999761581421
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g2"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     }
+    },
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid9",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "derived": [
+     {
+      "format": "npz",
+      "generator": "factor-fusion-v1",
+      "name": "综合证据融合 融合成果",
+      "operation": "factor_fusion",
+      "parent_version_ids": [
+       "ver_src_g1",
+       "ver_src_g2"
+      ],
+      "type": "factor_map"
+     },
+     {
+      "format": "npz",
+      "generator": "factor-fusion-v1",
+      "name": "综合证据融合 融合置信度",
+      "operation": "factor_fusion:confidence",
+      "parent_version_ids": [
+       "ver_fusion_1"
+      ],
+      "type": "factor_map"
+     }
+    ],
+    "summary": {
+     "catalog_version_id": "ver_fusion_1",
+     "class_names": [
+      "低",
+      "中",
+      "高"
+     ],
+     "classification_features": [
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.0,
+           0.0
+          ],
+          [
+           0.5,
+           0.0
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.0,
+           0.5
+          ],
+          [
+           0.0,
+           0.0
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#b0bec5",
+        "facies": "低",
+        "facies_id": 1,
+        "facies_name": "低",
+        "mean_value": 0.0
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.5,
+           0.0
+          ],
+          [
+           1.0,
+           0.0
+          ],
+          [
+           1.0,
+           0.5
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.5,
+           0.0
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#ffe082",
+        "facies": "中",
+        "facies_id": 2,
+        "facies_name": "中",
+        "mean_value": 0.3929
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.0,
+           0.5
+          ],
+          [
+           0.5,
+           0.5
+          ],
+          [
+           0.5,
+           1.0
+          ],
+          [
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           0.5
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#ffe082",
+        "facies": "中",
+        "facies_id": 2,
+        "facies_name": "中",
+        "mean_value": 0.3929
+       }
+      ],
+      [
+       {
+        "coordinates": [
+         [
+          [
+           0.5,
+           0.5
+          ],
+          [
+           1.0,
+           0.5
+          ],
+          [
+           1.0,
+           1.0
+          ],
+          [
+           0.5,
+           1.0
+          ],
+          [
+           0.5,
+           0.5
+          ]
+         ]
+        ],
+        "type": "Polygon"
+       },
+       {
+        "area": 0.25,
+        "area_percent": 25.0,
+        "area_unit": "unknown-unit²",
+        "color": "#d73027",
+        "facies": "高",
+        "facies_id": 3,
+        "facies_name": "高",
+        "mean_value": 1.0
+       }
+      ]
+     ],
+     "confidence_descriptor": {
+      "geometry_kind": "raster",
+      "layer_id": "fusion_confidence:6778fe534916",
+      "metadata": {
+       "algorithm_id": "factor_fusion",
+       "artifact_version_id": "ver_fusion_1",
+       "crs": null,
+       "extent": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "fusion": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "evidence_count": 2,
+        "evidences": [
+         "物源综合",
+         "古流向"
+        ],
+        "fusion_kind": "weighted_evidence",
+        "model_fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+        "model_name": "综合证据融合"
+       },
+       "height": 2,
+       "layer_type": "scalar_grid",
+       "quantity": "fusion_confidence",
+       "run_ref": null,
+       "source": "factor_fusion",
+       "statistics": {
+        "max": 1.0,
+        "mean": 0.9226190596818924,
+        "min": 0.7380952835083008,
+        "std": 0.10829406060395061,
+        "total_count": 4,
+        "valid_count": 4
+       },
+       "unit": "1",
+       "width": 2
+      },
+      "payload": {
+       "descriptor": {
+        "algorithm_id": "factor_fusion",
+        "algorithm_parameters": {
+         "fusion_kind": "weighted_evidence",
+         "fusion_name": "综合证据融合"
+        },
+        "created_at": null,
+        "crs": null,
+        "crs_is_known": false,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "factor_name": "综合证据融合 融合置信度",
+        "generator_version": "factor-fusion-v1",
+        "has_boundary": false,
+        "has_variance_grid": false,
+        "height": 2,
+        "input_version_ids": [
+         "ver_src_g1",
+         "ver_src_g2"
+        ],
+        "run_id": null,
+        "run_ref": null,
+        "source_refs": [
+         "ver_src_g1",
+         "ver_src_g2"
+        ],
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.9226190596818924,
+         "min": 0.7380952835083008,
+         "std": 0.10829406060395061,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "factor_task_id": "",
+       "layer_type": "scalar_grid",
+       "metadata": {
+        "algorithm_id": "factor_fusion",
+        "artifact_version_id": "ver_fusion_1",
+        "crs": null,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "fusion": {
+         "class_names": [
+          "低",
+          "中",
+          "高"
+         ],
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "evidence_count": 2,
+         "evidences": [
+          "物源综合",
+          "古流向"
+         ],
+         "fusion_kind": "weighted_evidence",
+         "model_fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+         "model_name": "综合证据融合"
+        },
+        "height": 2,
+        "layer_type": "scalar_grid",
+        "quantity": "fusion_confidence",
+        "run_ref": null,
+        "source": "factor_fusion",
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.9226190596818924,
+         "min": 0.7380952835083008,
+         "std": 0.10829406060395061,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "quantity": "fusion_confidence",
+       "source": "factor_fusion"
+      },
+      "role": "analysis_aid",
+      "title": "综合证据融合·融合置信度"
+     },
+     "likelihood_descriptor": {
+      "geometry_kind": "raster",
+      "layer_id": "fusion_likelihood:6778fe534916",
+      "metadata": {
+       "algorithm_id": "factor_fusion",
+       "artifact_version_id": "ver_fusion_1",
+       "crs": null,
+       "extent": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "fusion": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "evidence_count": 2,
+        "evidences": [
+         "物源综合",
+         "古流向"
+        ],
+        "fusion_kind": "weighted_evidence",
+        "model_fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+        "model_name": "综合证据融合"
+       },
+       "height": 2,
+       "layer_type": "scalar_grid",
+       "quantity": "fusion_likelihood",
+       "run_ref": "ver_fusion_1",
+       "source": "factor_fusion",
+       "statistics": {
+        "max": 1.0,
+        "mean": 0.4464285746216774,
+        "min": 0.0,
+        "std": 0.3576880754045658,
+        "total_count": 4,
+        "valid_count": 4
+       },
+       "unit": "1",
+       "width": 2
+      },
+      "payload": {
+       "descriptor": {
+        "algorithm_id": "factor_fusion",
+        "algorithm_parameters": {
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "fusion_kind": "weighted_evidence",
+         "fusion_name": "综合证据融合"
+        },
+        "created_at": null,
+        "crs": null,
+        "crs_is_known": false,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "factor_name": "综合证据融合 融合似然",
+        "generator_version": "factor-fusion-v1",
+        "has_boundary": false,
+        "has_variance_grid": false,
+        "height": 2,
+        "input_version_ids": [
+         "ver_src_g1",
+         "ver_src_g2"
+        ],
+        "run_id": "ver_fusion_1",
+        "run_ref": "ver_fusion_1",
+        "source_refs": [
+         "ver_src_g1",
+         "ver_src_g2"
+        ],
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.4464285746216774,
+         "min": 0.0,
+         "std": 0.3576880754045658,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "factor_task_id": "",
+       "layer_type": "scalar_grid",
+       "metadata": {
+        "algorithm_id": "factor_fusion",
+        "artifact_version_id": "ver_fusion_1",
+        "crs": null,
+        "extent": [
+         0.0,
+         0.0,
+         1.0,
+         1.0
+        ],
+        "fusion": {
+         "class_names": [
+          "低",
+          "中",
+          "高"
+         ],
+         "class_thresholds": [
+          0.3333333333333333,
+          0.6666666666666666
+         ],
+         "evidence_count": 2,
+         "evidences": [
+          "物源综合",
+          "古流向"
+         ],
+         "fusion_kind": "weighted_evidence",
+         "model_fingerprint": "6778fe534916ef3e8be5ba9e4610039dba613e6e76036066d470d01e1373bc76",
+         "model_name": "综合证据融合"
+        },
+        "height": 2,
+        "layer_type": "scalar_grid",
+        "quantity": "fusion_likelihood",
+        "run_ref": "ver_fusion_1",
+        "source": "factor_fusion",
+        "statistics": {
+         "max": 1.0,
+         "mean": 0.4464285746216774,
+         "min": 0.0,
+         "std": 0.3576880754045658,
+         "total_count": 4,
+         "valid_count": 4
+        },
+        "unit": "1",
+        "width": 2
+       },
+       "quantity": "fusion_likelihood",
+       "source": "factor_fusion"
+      },
+      "role": "analysis_aid",
+      "title": "综合证据融合·融合似然"
+     },
+     "model_name": "综合证据融合",
+     "n_factors": 2,
+     "qc": {
+      "catalog_version_id": "ver_fusion_1",
+      "class_counts": {
+       "中": 2,
+       "低": 1,
+       "高": 1
+      },
+      "classification": {
+       "feature_count": 4,
+       "polygon_qc": {
+        "area_unit": "unknown-unit²",
+        "area_warnings": [
+         "CRS undeclared: area unit unknown (not metres)",
+         "CRS undeclared: area unit is unknown (not metres)"
+        ],
+        "clipped_to_domain": 0,
+        "empty_after_clip": 0,
+        "holes_promoted_to_exterior": 0,
+        "nodata_cells": 0,
+        "small_polygon_threshold": null,
+        "small_polygons_dropped": 0,
+        "thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "thresholds_source": "explicit",
+        "total_cells": 4
+       }
+      },
+      "classified_cells": 4,
+      "confidence_coverage": {
+       "finite_fraction": 1.0,
+       "mean": 0.9226190596818924
+      },
+      "confidence_version_id": "ver_fusion_1",
+      "crs_undeclared": true,
+      "defaults": {
+       "classes": {
+        "class_names": [
+         "低",
+         "中",
+         "高"
+        ],
+        "class_thresholds": [
+         0.3333333333333333,
+         0.6666666666666666
+        ],
+        "policy": "default_equal_thirds"
+       },
+       "normalization": {
+        "bounds": {
+         "factor_1": {
+          "high": 1.0,
+          "kind": "minmax",
+          "low": 0.10000000149011612
+         },
+         "factor_2": {
+          "high": 0.8999999761581421,
+          "kind": "minmax",
+          "low": 0.20000000298023224
+         }
+        },
+        "policy": "per_factor_finite_range"
+       },
+       "weights": {
+        "policy": "equal",
+        "value": 1.0
+       }
+      },
+      "fusion_kind": "weighted_evidence",
+      "high_conflict_fraction": 0.0,
+      "low_confidence_fraction": 0.0,
+      "low_margin_fraction": 0.25,
+      "mean_conflict_fraction": 0.125,
+      "n_factors": 2,
+      "nan_policy": "renormalize",
+      "registration": {
+       "catalog_version_id": "ver_fusion_1",
+       "confidence_version_id": "ver_fusion_1",
+       "registered": true,
+       "requested": true,
+       "variance_version_id": ""
+      },
+      "unclassified_cells": 0,
+      "unit_warnings": []
+     },
+     "registered": true,
+     "sensitivity": {
+      "factors": {
+       "古流向": {
+        "changed_cells": 0,
+        "class_change_fraction": 0.0,
+        "comparable_cells": 4,
+        "weight": 1.0
+       },
+       "物源综合": {
+        "changed_cells": 1,
+        "class_change_fraction": 0.25,
+        "comparable_cells": 4,
+        "weight": 1.0
+       }
+      },
+      "kind": "leave_one_out",
+      "supported": true
+     },
+     "variance_available": false,
+     "variance_descriptor": null
+    }
+   },
+   "id": "register",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "古流向",
+      "factor:factor_2:ver_grid2"
+     ]
+    ],
+    "grids": {
+     "factor_1": {
+      "algorithm_id": "idw",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "物源综合",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.10000000149011612,
+       0.4000000059604645,
+       0.699999988079071,
+       1.0
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g1"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     },
+     "factor_2": {
+      "algorithm_id": "kriging",
+      "algorithm_parameters": {
+       "power": 2
+      },
+      "crs": null,
+      "factor_name": "古流向",
+      "grid_x": [
+       0.0,
+       1.0
+      ],
+      "grid_y": [
+       0.0,
+       1.0
+      ],
+      "grid_z": [
+       0.20000000298023224,
+       0.5,
+       0.30000001192092896,
+       0.8999999761581421
+      ],
+      "height": 2,
+      "run_ref": null,
+      "source_refs": [
+       "ver_src_g2"
+      ],
+      "unit": "ratio",
+      "variance_grid": null,
+      "width": 2
+     }
+    },
+    "project": {
+     "auxiliary_entities": [],
+     "compilation_input_sets": [],
+     "compilation_runs": [],
+     "constraint_layers": [],
+     "contour_drafts": [],
+     "coordinate": {
+      "crs_locked": false,
+      "display_crs": "EPSG:4326 / WGS84",
+      "project_crs": "",
+      "target_crs": null,
+      "transform_history": []
+     },
+     "correlation_interpretations": [],
+     "entity_asset_links": [],
+     "export_artifacts": [],
+     "facies_taxonomy": null,
+     "factor_map_tasks": [
+      {
+       "factor_type": "重矿物ZTR",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid1",
+       "grid_metadata": {},
+       "id": "factor_1",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "idw",
+       "name": "物源综合",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      },
+      {
+       "factor_type": "古流向",
+       "generator_version": null,
+       "grid_artifact_path": null,
+       "grid_artifact_version_id": "ver_grid2",
+       "grid_metadata": {},
+       "id": "factor_2",
+       "input_resource_ids": [],
+       "input_snapshot_hash": "",
+       "method": "kriging",
+       "name": "古流向",
+       "output_resource_ids": [],
+       "parameters": {},
+       "quality_metrics": {},
+       "seed": null,
+       "source_kind": "real",
+       "status": "pending",
+       "target_horizon": "H1",
+       "well_table_id": null
+      }
+     ],
+     "fault_interpretations": [],
+     "geo3d_workspace": {
+      "camera": {},
+      "clip": {},
+      "display": {},
+      "measurements": [],
+      "objects": [],
+      "selected": "",
+      "views": []
+     },
+     "geological_entities": [],
+     "horizon_interpretations": [],
+     "integrated_interpretations": [],
+     "interpretation_revisions": [],
+     "joint_analysis": {
+      "active_fence_name": null,
+      "active_fence_wells": [],
+      "active_time_slice_ms": null,
+      "gr_color_scale": "viridis",
+      "orthogonal_crossline_index": null,
+      "orthogonal_crossline_number": null,
+      "orthogonal_inline_index": null,
+      "orthogonal_inline_number": null,
+      "path_hints": {},
+      "seismic_color_scale": "blue-white-red",
+      "time_slice_opacity": 80,
+      "time_slices": [],
+      "tree_checks": {},
+      "vertical_domain": "Time",
+      "well_identity_asset_id": null,
+      "well_identity_map": {},
+      "well_visibility": {},
+      "well_width_px": 5
+     },
+     "map_products": [],
+     "map_qgis_project_xml": "",
+     "mapping_workspace": {},
+     "meta": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "last_recovery": null,
+      "name": "P",
+      "project_root": ".",
+      "region": "R",
+      "updated_at": "2026-01-01T00:00:00+00:00",
+      "version": "0.2.17a0"
+     },
+     "onboarding_report": {},
+     "paleomap_documents": [],
+     "prediction_tasks": [],
+     "quality_reports": [],
+     "resources": [],
+     "schema_version": 1,
+     "seismic_surveys": [],
+     "stratigraphy": {
+      "applicable_seismic_ranges": [],
+      "applicable_wells": [],
+      "interpretation_version": "v1",
+      "sequence_boundaries": [],
+      "systems_tract_scheme": "LST/TST/HST",
+      "target_horizon": ""
+     },
+     "user_vector_layers": [],
+     "version_sets": [],
+     "well_tables": [],
+     "wells": [],
+     "workarea": null,
+     "workstation_reference_layers": []
+    }
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "请先冻结 Compilation Input Set 再运行融合",
+     "type": "ValueError"
+    }
+   },
+   "id": "unfrozen_input_set",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "古流向",
+      "factor:factor_2:ver_grid2"
+     ]
+    ]
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "以下证据因子无法解析为网格成果（pin 目录工件 → live 缓存 → npz 工件 → 内联参数均失败），拒绝在残缺证据集上融合：缺失（factor:factor_x:ver_x）：工程中没有该单因素任务",
+     "type": "ValueError"
+    }
+   },
+   "id": "unresolvable_factor",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "缺失",
+      "factor:factor_x:ver_x"
+     ]
+    ]
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "weights 引用了未知任务 ['nope']；可用任务 id：['factor_1', 'factor_2']",
+     "type": "ValueError"
+    }
+   },
+   "id": "unknown_weight",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "古流向",
+      "factor:factor_2:ver_grid2"
+     ]
+    ]
+   }
+  },
+  {
+   "expected": {
+    "error": {
+     "message": "因子 '物源综合'（任务 factor_1）是常数网格（min == max == 0.5）——归一化需要 high > low；请显式提供 normalizations",
+     "type": "ValueError"
+    }
+   },
+   "id": "constant_grid_normalization",
+   "input": {
+    "evidence": [
+     [
+      "物源",
+      "factor:factor_1:ver_grid1"
+     ],
+     [
+      "古流向",
+      "factor:factor_2:ver_grid2"
+     ]
+    ]
+   }
+  }
+ ],
+ "frozen_from": "paleo_workbench.workflow.integrated_compilation",
+ "generator": "tools/oracle/generate_closure_fusion_fixtures.py"
+}
