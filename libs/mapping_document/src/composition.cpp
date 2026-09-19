@@ -304,4 +304,12 @@ std::pair<long long, long long> composition_page_pixels(
     return {width_px, height_px};
 }
 
+bool known_paper_size(const std::string& paper_size, std::string& canonical,
+                      std::pair<double, double>& short_long_mm) {
+    const std::pair<double, double>* size = paper_size_lookup(paper_size, &canonical);
+    if (size == nullptr) return false;
+    short_long_mm = *size;
+    return true;
+}
+
 }  // namespace pwb::mapping_document

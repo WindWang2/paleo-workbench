@@ -349,6 +349,27 @@ if(PWB_BUILD_CONV_29)
     add_subdirectory(libs/layout_export)
 endif()
 # END CONV-29
+
+# BEGIN CONV-27B
+# Map document / composition behavior layer over the CONV-02 data kernel
+# (swarm cpp-map-document-edit-session): CompositionEditSession +
+# MapDocumentEditSession undo/redo, unified data/style/layout revisions and
+# dirty state, immutable document snapshots, document_io feature
+# normalization and atomic file IO with recovery. Qt-free, QGIS-free;
+# frozen against the Python oracle.
+# Flag renamed from the branch's PWB_BUILD_CONV_27: that option is already
+# claimed by the qgis-ui-workbench slice (Pwb::UiWorkbench), and sharing it
+# would force PWB_BUILD_PLATFORM onto this Qt-free layer's standalone
+# configure.
+option(PWB_BUILD_CONV_27B
+    "Build the CONV-27b mapping_document edit-session/snapshot/IO behavior layer" OFF)
+if(PWB_BUILD_CONV_27B AND NOT PWB_BUILD_CONV_02)
+    set(PWB_BUILD_CONV_02 ON)
+endif()
+if(PWB_BUILD_CONV_27B AND NOT TARGET pwb_mapping_document)
+    add_subdirectory(libs/mapping_document)
+endif()
+# END CONV-27B
 # BEGIN CONV-06
 # WorkflowSpec DAG pure model + validator (M7 leaf; Qt-free, QGIS-free).
 # Requires Pwb::Domain (ordered JSON + sha256) from PWB_BUILD_DATA=ON.

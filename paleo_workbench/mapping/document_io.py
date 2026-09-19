@@ -165,3 +165,9 @@ def apply_features_to_document(doc: PaleoMapDocument, features: list[dict[str, A
     doc.well_overlays = wells
     doc.line_features = lines
     doc.label_features = labels
+
+
+# C++ migration (CONV-27): feature normalization is ported to
+# libs/mapping_document document_io (pwb::mapping_document) together with
+# an atomic file-level IO/recovery seam. Oracle-frozen; the C++ product
+# chain does not depend on Python.

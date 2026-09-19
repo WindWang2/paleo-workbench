@@ -85,6 +85,13 @@ ComposerElement* find_element(Composition& doc,
 void set_paper(Composition& doc, const std::string& paper_size,
                const std::string& orientation);
 
+// The PAPER_SIZES_MM lookup behind set_paper, exposed for edit sessions that
+// must validate before building an undoable command. On a hit returns true,
+// stores the canonical upper-case name handling and the (short, long)
+// portrait edges in mm; unknown sizes return false.
+bool known_paper_size(const std::string& paper_size, std::string& canonical,
+                      std::pair<double, double>& short_long_mm);
+
 // Physical page size in device pixels (the single DPI fold): max(1, round(w
 // / 25.4 * dpi)) with Python's banker's rounding, evaluated in the same
 // IEEE754 order as the Python expression.

@@ -2,9 +2,20 @@
 # from paleo_workbench/mapping/layers.py + mapping/composer/models.py
 # (full-conversion plan M6: pipeline MapDocument leaf). Frozen against the
 # Python oracle via tools/oracle/generate_map_document_fixtures.py.
+#
+# CONV-27 — the behavior layer on top of that kernel: CompositionEditSession,
+# MapDocumentEditSession (undo/redo), revisions/dirty state, immutable
+# snapshots, document_io feature normalization and atomic file IO with
+# recovery. Frozen via tools/oracle/generate_map_document_edit_fixtures.py.
 add_library(pwb_mapping_document STATIC
     src/map_document.cpp
-    src/composition.cpp)
+    src/composition.cpp
+    src/edit_command.cpp
+    src/composition_session.cpp
+    src/map_document_session.cpp
+    src/map_document_snapshot.cpp
+    src/document_io.cpp
+    src/document_service.cpp)
 add_library(Pwb::MappingDocument ALIAS pwb_mapping_document)
 target_include_directories(pwb_mapping_document PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)

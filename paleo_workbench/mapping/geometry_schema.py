@@ -228,3 +228,9 @@ def normalize_label(raw: dict[str, Any]) -> dict[str, Any]:
         "coordinates": [ax, ay],
         "text": raw.get("text") or raw.get("name") or "",
     }
+
+
+# C++ migration (CONV-27): the normalize_facies/well/line/label
+# contracts are ported to libs/mapping_document document_io
+# (pwb::mapping_document) and oracle-frozen. This module remains the
+# Python oracle / transitional implementation.
