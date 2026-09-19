@@ -101,7 +101,7 @@ Replay：`ui_pages_preview.oracle_replay`；widget 面 `ui_pages_preview.qt_widg
 - `ui_pages_preview.oracle_replay`：**24/24 PASS**（含 negative self-check —
   对 settings-fingerprint/media/table-truncation/json_tree-depth_cap/lazy_tabs
   5 个代表面各篡改一处期望值，replay 均检出失配）。
-- `ui_pages_preview.qt_widgets_smoke`：**56 checks ALL PASS**，`QT_QPA_PLATFORM=offscreen`，
+- `ui_pages_preview.qt_widgets_smoke`：**60 checks ALL PASS**，`QT_QPA_PLATFORM=offscreen`，
   含 teardown 父子/延迟删除安全、真 `QPdfDocument` 单页加载（嵌入 xref 正确的小 PDF）、
   真 `ISeismicVolume` 切片轴切换、QSettings 注入 store 往返、panel mode→category
   13 项映射、chip 粘滞、lazy-tab latch/emit/host 注入/engine-guard。
