@@ -15,8 +15,9 @@
 // BEGIN CONV-30 — product job runtime wiring (top-level: needed by the
 // ctor/dtor/closeEvent protocol and all migrated surfaces, independent of
 // CONV_01/SEISMIC_* guards)
-#ifdef PWB_WITH_CONV_30
 #include <QProgressDialog>
+#include <chrono>
+#ifdef PWB_WITH_CONV_30
 #include <algorithm>
 #include <any>
 #include <utility>
@@ -113,6 +114,16 @@
 
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/seismic_io/segy_reader.hpp>
+#endif
+#if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <QCoreApplication>
+#include <QProgressDialog>
+
+#include <atomic>
+#include <optional>
+#include <thread>
+
+#include <pwb/seismic_io/segy_layout.hpp>
 #endif
 
 #ifdef PWB_WITH_WELL_LOG
@@ -276,6 +287,12 @@ void MainWindow::init_shell(QSettings* services_settings) {
     // first so the surfaces below can submit through it. The quit drain
     // (aboutToQuit → bounded scheduler drain) is installed here.
     job_center_ = std::make_unique<JobCenter>();
+#endif
+#if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
+    // Native tiled volume service: PWBVOL1 versions open lazily through the
+    // tile cache; the budget honours PWB_SEISMIC_TILE_CACHE_BYTES.
+    seismic_volume_service_ =
+        std::make_unique<pwb::seismic_service::SeismicVolumeService>();
 #endif
     dirty_close_responder_ = [this]() {
         return QMessageBox::question(
@@ -1941,9 +1958,36 @@ QString MainWindow::openVolumeVersion(const std::string& version_id) {
         if (version.id.str() != version_id || version.format != "PWBVOL1") {
             continue;
         }
+        const std::filesystem::path payload_path =
+            project_dir / version.path;
+#if defined(PWB_WITH_SEISMIC_SERVICE)
+        // Native tiled service: metadata-only inspect, samples stream in
+        // through the tile cache — no full-volume copy.
+        if (seismic_volume_service_ != nullptr) {
+            std::string open_error;
+            auto opened = seismic_volume_service_->open_pwbvol(
+                payload_path, &open_error);
+            if (opened.volume == nullptr) {
+                return QString::fromStdString(open_error);
+            }
+            slice_widget_->set_volume(
+                opened.volume, pwb::seismic_viewer::VolumeIdentity{version_id, 0},
+                ++slice_revision_);
+            seismic_dock_->show();
+            seismic_dock_->raise();
+            statusBar()->showMessage(
+                opened.descriptor.bin_grid.has_value()
+                    ? tr("体版本已载入：%1（空间已标定；CRS 未绑定）")
+                          .arg(QString::fromStdString(version_id))
+                    : tr("体版本已载入：%1（无 bin-grid 标定）")
+                          .arg(QString::fromStdString(version_id)),
+                8000);
+            return QString();
+        }
+#endif
         pwb::application::VolumePayload payload;
-        const std::string read_error = pwb::application::read_volume_payload(
-            project_dir / version.path, &payload);
+        const std::string read_error =
+            pwb::application::read_volume_payload(payload_path, &payload);
         if (!read_error.empty()) {
             return QString::fromStdString(read_error);
         }
@@ -2025,12 +2069,24 @@ void MainWindow::runAttributeDialog() {
     sample_interval->setMinimum(0.000001);
     sample_interval->setValue(0.002);
     sample_interval->setSuffix(tr(" s"));
+    auto* spacing = new QDoubleSpinBox(&dialog);
+    spacing->setDecimals(3);
+    spacing->setMinimum(0.001);
+    spacing->setValue(1.0);
+    spacing->setSuffix(tr(" m"));
+    auto* curvature_window = new QSpinBox(&dialog);
+    curvature_window->setRange(0, 4096);
+    curvature_window->setValue(3);  // production KERNELS default
+    curvature_window->setPrefix(tr("半窗 "));
 
     auto* form = new QFormLayout;
     form->addRow(tr("算法"), algorithm);
     form->addRow(tr("输入体版本"), input);
     form->addRow(tr("窗口（RMS）"), window);
-    form->addRow(tr("采样间隔（瞬时频率）"), sample_interval);
+    form->addRow(tr("采样间隔（瞬时频率 / 倾角 dt / 甜度）"),
+                 sample_interval);
+    form->addRow(tr("道间距（倾角 dx）"), spacing);
+    form->addRow(tr("平滑半窗（曲率）"), curvature_window);
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -2047,9 +2103,19 @@ void MainWindow::runAttributeDialog() {
     std::map<std::string, std::string> params;
     if (algorithm_id == "seismic.rms_amplitude") {
         params["window"] = std::to_string(window->value());
-    } else if (algorithm_id == "seismic.instantaneous_frequency") {
-        params["sample_interval"] = std::to_string(
-            sample_interval->value());
+    } else if (algorithm_id == "seismic.instantaneous_frequency"
+               || algorithm_id == "seismic.sweetness") {
+        params["sample_interval"] = std::to_string(sample_interval->value());
+    } else if (algorithm_id == "seismic.dip_il"
+               || algorithm_id == "seismic.dip_xl"
+               || algorithm_id == "seismic.dip_azimuth") {
+        params["dt"] = std::to_string(sample_interval->value());
+        params["dx_il"] = std::to_string(spacing->value());
+        params["dx_xl"] = std::to_string(spacing->value());
+    } else if (algorithm_id == "seismic.curvature_mean") {
+        params["win_il"] = std::to_string(curvature_window->value());
+        params["win_xl"] = std::to_string(curvature_window->value());
+        params["win_t"] = std::to_string(curvature_window->value());
     }
 
     std::string error;
@@ -2124,9 +2190,7 @@ void MainWindow::superviseAttributeRun(const std::string& request_id) {
     QObject::connect(
         progress, &QProgressDialog::canceled, this,
         [this, request_id] {
-            if (attribute_runner_ != nullptr) {
-                attribute_runner_->cancel(request_id);
-            }
+            context_.attributeRunner().cancel(request_id);
         });
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
                      &pwb::job::qtbridge::JobOwner::cancel);
@@ -2146,7 +2210,7 @@ void MainWindow::superviseAttributeRun(const std::string& request_id) {
             // publication exactly like an explicit cancel.
             if (ctx.token().is_cancelled() && !cancel_sent) {
                 cancel_sent = true;
-                attribute_runner_->cancel(request_id);
+                context_.attributeRunner().cancel(request_id);
             }
             const auto outcome = attributeOutcome(request_id);
             if (outcome.status == "queued") {
@@ -2209,71 +2273,55 @@ void MainWindow::superviseAttributeRun(const std::string& request_id) {
 #endif  // PWB_WITH_SEISMIC_ATTRIBUTES && PWB_WITH_DATA_INTEGRATION (attributes section)
 
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
-std::string MainWindow::importSegy(const QString& path, std::string* error) {
-    // Sync path (self-check / tests): no cancellation, no progress.
-    return importSegyProgressed(
-        path, error, [] { return false; }, [](double, const QString&) {});
+namespace {
+// ONE process-level import id sequence for every entry point (public API
+// and dialog): staged file names, run ids and operation ids share the
+// namespace, so two independent counters could silently reuse the same
+// staged path and overwrite a published version's payload.
+std::string next_segy_import_id() {
+    static std::uint64_t counter = 0;
+    return "segy-import-" + std::to_string(counter++);
 }
 
-std::string MainWindow::importSegyProgressed(
-    const QString& path, std::string* error,
-    const std::function<bool()>& cancelled,
-    const std::function<void(double, const QString&)>& progress) {
-    if (context_.projectStore() == nullptr) {
-        if (error != nullptr) *error = "未打开工程（SEG-Y 导入需要工程目录）";
-        return "";
-    }
-    static std::uint64_t import_counter = 0;
-    const std::string import_id =
-        "segy-import-" + std::to_string(import_counter++);
-
-    // Phase safe points (CONV-30): cancellation is honoured BETWEEN the
-    // heavy phases — read_segy itself is a blocking native call, so the
-    // effective cancel granularity is the phase boundary (documented,
-    // Python-parity cooperative behaviour).
-    progress(0.05, tr("读取 SEG-Y…"));
-    if (cancelled()) return "";
-
-    auto volume = pwb::seismic_io::read_segy(
-        std::filesystem::path(path.toStdWString()), error);
-    if (!volume.has_value()) return "";
-    if (cancelled()) return "";
-    progress(0.45, tr("写入 PWBVOL1 载荷…"));
-
+// Stages the imported volume into the project and publishes it through B's
+// run lifecycle (register -> payload -> publish -> manifest). Called on the
+// GUI thread only (the catalog store has no documented cross-thread lease).
+std::string publish_segy_import(pwb::application::PwbDataStore& store,
+                                const QString& path,
+                                const std::string& import_id,
+                                pwb::seismic_io::SegyVolume volume,
+                                std::string* error) {
     pwb::application::VolumePayload payload;
-    payload.header.ni = static_cast<std::uint32_t>(volume->ni);
-    payload.header.nc = static_cast<std::uint32_t>(volume->nc);
-    payload.header.ns = static_cast<std::uint32_t>(volume->ns);
-    payload.header.inline_start = volume->iline_start;
-    payload.header.crossline_start = volume->xline_start;
+    payload.header.ni = static_cast<std::uint32_t>(volume.ni);
+    payload.header.nc = static_cast<std::uint32_t>(volume.nc);
+    payload.header.ns = static_cast<std::uint32_t>(volume.ns);
+    payload.header.inline_start = volume.iline_start;
+    payload.header.crossline_start = volume.xline_start;
     payload.header.sample_start = 0.0;
-    payload.header.inline_step = volume->iline_step;
-    payload.header.crossline_step = volume->xline_step;
-    payload.header.sample_step = volume->dt_ms;
-    payload.header.sample_unit = volume->unit;
+    payload.header.inline_step = volume.iline_step;
+    payload.header.crossline_step = volume.xline_step;
+    payload.header.sample_step = volume.dt_ms;
+    payload.header.sample_unit = volume.unit;
     payload.header.value_unit = "amplitude";
     payload.header.algorithm_id = "import.segy";
     payload.header.algorithm_version = "1.0.0";
     payload.header.build_identity = "pwb-platform";
     payload.header.request_id = import_id;
-    payload.samples = std::move(volume->samples);
+    payload.samples = std::move(volume.samples);
 
     const std::filesystem::path project_dir =
-        context_.projectStore()->project_file().parent_path();
+        store.project_file().parent_path();
     const std::filesystem::path staged_dir = project_dir / ".pwb-imports";
     std::error_code ec;
     std::filesystem::create_directories(staged_dir, ec);
     const std::filesystem::path staged_path =
         staged_dir / (import_id + ".pwbvol");
-    if (cancelled()) return "";
     const std::string write_error =
         pwb::application::write_volume_payload(payload, staged_path);
     if (!write_error.empty()) {
         if (error != nullptr) *error = write_error;
         return "";
     }
-    if (cancelled()) return "";
-    progress(0.7, tr("注册运行并发布…"));
 
     const pwb::domain::RunId run_id{std::string("run_") + import_id};
     pwb::data::RunRegistrationV1 registration;
@@ -2282,8 +2330,7 @@ std::string MainWindow::importSegyProgressed(
     registration.generator = "pwb-platform";
     registration.parameters = pwb::domain::Json::object();
     registration.parameters["source_file"] = path.toStdString();
-    auto registered =
-        context_.projectStore()->coordinator().register_run(registration);
+    auto registered = store.coordinator().register_run(registration);
     if (!registered.is_ok()) {
         if (error != nullptr) {
             *error = "register_run failed: " + registered.error().message;
@@ -2307,17 +2354,72 @@ std::string MainWindow::importSegyProgressed(
     publish.result_metadata = pwb::domain::Json::object();
     publish.result_metadata["payload_format"] = "PWBVOL1";
     publish.result_metadata["source_format"] = "SEG-Y";
-    auto published = context_.projectStore()->coordinator().publish_run_result(
-        publish, context_.projectStore()->document());
+    auto published =
+        store.coordinator().publish_run_result(publish, store.document());
     if (!published.is_ok()) {
         if (error != nullptr) {
             *error = "publish failed: " + published.error().message;
         }
         return "";
     }
-    (void)context_.projectStore()->export_manifest();
-    progress(0.95, tr("完成"));
+    (void)store.export_manifest();
     return published.value().new_version_id.str();
+}
+}  // namespace
+
+std::string MainWindow::importSegy(const QString& path, std::string* error) {
+    // Sync path (self-check / tests): no cancellation, no progress.
+    return importSegyProgressed(
+        path, error, [] { return false; }, [](double, const QString&) {});
+}
+
+std::string MainWindow::importSegy(const QString& path, std::string* error,
+                                   pwb::seismic_io::CancelFlag cancel) {
+    // Cancellable sync path (threaded import): the flag reaches the
+    // intra-read safe points through importSegyProgressed's bridge.
+    return importSegyProgressed(
+        path, error, [cancel] { return cancel.cancelled(); },
+        [](double, const QString&) {});
+}
+
+std::string MainWindow::importSegyProgressed(
+    const QString& path, std::string* error,
+    const std::function<bool()>& cancelled,
+    const std::function<void(double, const QString&)>& progress) {
+    if (context_.projectStore() == nullptr) {
+        if (error != nullptr) *error = "未打开工程（SEG-Y 导入需要工程目录）";
+        return "";
+    }
+    const std::string import_id = next_segy_import_id();
+
+    progress(0.05, tr("读取 SEG-Y…"));
+    if (cancelled()) return "";
+    // CONV-30 + CONV-SEISMIC: the reader honours a CancelFlag between
+    // traces; bridge the caller's poll-based cancellation into it so both
+    // paths cancel inside the read, not just at phase boundaries.
+    pwb::seismic_io::CancelFlag flag;
+    std::atomic<bool> read_done{false};
+    std::thread bridge([&flag, &read_done, &cancelled] {
+        while (!read_done.load(std::memory_order_relaxed)) {
+            if (cancelled()) {
+                flag.cancel();
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
+    auto volume = pwb::seismic_io::read_segy(
+        std::filesystem::path(path.toStdWString()), error, flag);
+    read_done.store(true, std::memory_order_relaxed);
+    bridge.join();
+    if (!volume.has_value()) return "";
+    if (cancelled()) return "";
+    progress(0.45, tr("写入 PWBVOL1 载荷…"));
+    const std::string version = publish_segy_import(
+        *context_.projectStore(), path, import_id,
+        std::move(volume.value()), error);
+    if (!version.empty()) progress(0.95, tr("完成"));
+    return version;
 }
 #endif
 
@@ -2335,11 +2437,61 @@ void MainWindow::importSegyDialog() {
         this, tr("导入 SEG-Y"), QString(),
         tr("SEG-Y 数据 (*.sgy *.segy);;所有文件 (*)"));
     if (path.isEmpty()) return;
+    if (context_.projectStore() == nullptr) {
+        QMessageBox::warning(this, tr("导入 SEG-Y"),
+                             tr("未打开工程（SEG-Y 导入需要工程目录）。"));
+        return;
+    }
+
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — the import runs as a job: non-modal progress, cooperative
     // cancel, close/quit safe.
     submitSegyJob(path);
     return;
+#elif defined(PWB_WITH_SEISMIC_SERVICE)
+    // Threaded import: the heavy SEG-Y read runs on a worker thread with a
+    // cooperative cancel flag; staging + catalog publication stay on the
+    // GUI thread.
+    auto cancel = pwb::seismic_io::CancelFlag();
+    QProgressDialog progress(tr("正在读取 SEG-Y…"), tr("取消"), 0, 0, this);
+    progress.setWindowTitle(tr("导入 SEG-Y"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    std::optional<pwb::seismic_io::SegyVolume> volume;
+    std::string read_error;
+    std::atomic<bool> done{false};
+    std::thread worker([&]() {
+        volume = pwb::seismic_io::read_segy(
+            std::filesystem::path(path.toStdWString()), &read_error, cancel);
+        done.store(true);
+    });
+    while (!done.load()) {
+        QCoreApplication::processEvents(QEventLoop::WaitForMoreEvents, 50);
+        if (progress.wasCanceled()) {
+            cancel.cancel();
+        }
+    }
+    worker.join();
+    progress.reset();
+    if (!volume.has_value()) {
+        // Cancellation is a normal cooperative outcome, not an error: the
+        // user pressed the button, so return silently.
+        if (read_error != "cancelled") {
+            QMessageBox::warning(this, tr("导入 SEG-Y"),
+                                 QString::fromStdString(read_error));
+        }
+        return;
+    }
+    const std::string import_id = next_segy_import_id();
+    std::string publish_error;
+    const std::string version_id = publish_segy_import(
+        *context_.projectStore(), path, import_id,
+        std::move(volume.value()), &publish_error);
+    if (version_id.empty()) {
+        QMessageBox::warning(this, tr("导入 SEG-Y"),
+                             QString::fromStdString(publish_error));
+        return;
+    }
 #else
     std::string error;
     const std::string version_id = importSegy(path, &error);
@@ -2348,6 +2500,7 @@ void MainWindow::importSegyDialog() {
                              QString::fromStdString(error));
         return;
     }
+#endif
 #if defined(PWB_WITH_SEISMIC_VIEWER)
     const QString view_error = openVolumeVersion(version_id);
     if (!view_error.isEmpty()) {

@@ -31,3 +31,7 @@ target_link_libraries(seismic_attributes.runtime PRIVATE
 
 pwb_seismic_attributes_test(seismic_attributes.perf attribute_perf_test.cpp)
 target_link_libraries(seismic_attributes.perf PRIVATE Pwb::SeismicAttributes)
+
+# S line: volume-structural kernels vs the frozen sl_* oracle fixtures.
+pwb_seismic_attributes_test(seismic_attributes.sline attribute_sline_test.cpp)
+target_link_libraries(seismic_attributes.sline PRIVATE Pwb::SeismicAttributes)

@@ -1,0 +1,109 @@
+{
+ "case": "sl_constant",
+ "dtype": "float32",
+ "files": {
+  "expected_curvature_mean.f32": {
+   "elements": 256,
+   "kernel": "curvature_mean",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "kind": "mean",
+    "win_il": 3,
+    "win_t": 3,
+    "win_xl": 3
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_dip_azimuth.f32": {
+   "elements": 256,
+   "kernel": "dip_azimuth",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_dip_il.f32": {
+   "elements": 256,
+   "kernel": "dip_il",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_dip_xl.f32": {
+   "elements": 256,
+   "kernel": "dip_xl",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_relative_impedance.f32": {
+   "elements": 256,
+   "kernel": "relative_impedance",
+   "max": 8.0,
+   "mean": 4.25,
+   "min": 0.5,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {},
+   "sha256": "b1abc57fec6363cfa8e3a12700923fb17177dc36b0bee0600e9e13cadd880240"
+  },
+  "expected_sweetness.f32": {
+   "elements": 256,
+   "kernel": "sweetness",
+   "max": 499.9999694824219,
+   "mean": 499.9999694824219,
+   "min": 499.9999694824219,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "sample_interval": 1.0
+   },
+   "sha256": "96fcfe9cf8e803dbfa7ccc46a176d3d03fcd404305b27e6b341be9caeb29ee64"
+  },
+  "input.f32": {
+   "elements": 256,
+   "max": 0.5,
+   "mean": 0.5,
+   "min": 0.5,
+   "n_inf": 0,
+   "n_nan": 0,
+   "role": "input",
+   "sha256": "f6266df512f071ac505eed191ae133d690a7755f1f079e31cd24da47ac98e3ae"
+  }
+ },
+ "meta": {
+  "note": "constant 0.5: |freq| ~ 0 exercises the sweetness clamp"
+ },
+ "shape": [
+  4,
+  4,
+  16
+ ]
+}

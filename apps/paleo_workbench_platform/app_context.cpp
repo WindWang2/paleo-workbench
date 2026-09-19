@@ -49,6 +49,19 @@ void AppContext::registerProductKernels() {
             pwb::seismic_attributes::make_instantaneous_frequency("pwb-platform")),
         impl_->attribute_runner->register_kernel(
             pwb::seismic_attributes::make_rms_amplitude("pwb-platform")),
+        // S line: the volume-structural production kernels.
+        impl_->attribute_runner->register_kernel(
+            pwb::seismic_attributes::make_sweetness("pwb-platform")),
+        impl_->attribute_runner->register_kernel(
+            pwb::seismic_attributes::make_relative_impedance("pwb-platform")),
+        impl_->attribute_runner->register_kernel(
+            pwb::seismic_attributes::make_dip_inline("pwb-platform")),
+        impl_->attribute_runner->register_kernel(
+            pwb::seismic_attributes::make_dip_crossline("pwb-platform")),
+        impl_->attribute_runner->register_kernel(
+            pwb::seismic_attributes::make_dip_azimuth("pwb-platform")),
+        impl_->attribute_runner->register_kernel(
+            pwb::seismic_attributes::make_curvature_mean("pwb-platform")),
     };
     for (const std::string& rejection : rejections) {
         if (!rejection.empty()) {

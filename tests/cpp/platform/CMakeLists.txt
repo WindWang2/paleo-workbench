@@ -185,6 +185,13 @@ if(PWB_BUILD_DATA AND PWB_BUILD_SEISMIC_VIEWER
             PWB_REALDATA_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/realdata"
             PWB_ATTRIBUTE_FIXTURES="${CMAKE_SOURCE_DIR}/tests/cpp/seismic_attributes/fixtures")
     endif()
+    # S line: the service is part of the app's seismic closure; the test
+    # compiles main_window.cpp itself, so it needs the same define + link.
+    if(PWB_BUILD_SEISMIC_SERVICE)
+        target_link_libraries(platform_attribute_ui PRIVATE Pwb::SeismicService)
+        target_compile_definitions(platform_attribute_ui PRIVATE
+            PWB_WITH_SEISMIC_SERVICE=1)
+    endif()
     add_test(NAME platform.attribute_ui COMMAND platform_attribute_ui)
     set_tests_properties(platform.attribute_ui PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"

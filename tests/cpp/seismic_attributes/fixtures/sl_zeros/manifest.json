@@ -1,0 +1,109 @@
+{
+ "case": "sl_zeros",
+ "dtype": "float32",
+ "files": {
+  "expected_curvature_mean.f32": {
+   "elements": 256,
+   "kernel": "curvature_mean",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "kind": "mean",
+    "win_il": 3,
+    "win_t": 3,
+    "win_xl": 3
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_dip_azimuth.f32": {
+   "elements": 256,
+   "kernel": "dip_azimuth",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_dip_il.f32": {
+   "elements": 256,
+   "kernel": "dip_il",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_dip_xl.f32": {
+   "elements": 256,
+   "kernel": "dip_xl",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_relative_impedance.f32": {
+   "elements": 256,
+   "kernel": "relative_impedance",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {},
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "expected_sweetness.f32": {
+   "elements": 256,
+   "kernel": "sweetness",
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "sample_interval": 1.0
+   },
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  },
+  "input.f32": {
+   "elements": 256,
+   "max": 0.0,
+   "mean": 0.0,
+   "min": 0.0,
+   "n_inf": 0,
+   "n_nan": 0,
+   "role": "input",
+   "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+  }
+ },
+ "meta": {
+  "note": "all zeros: dip clamps grad_t to 1e-10, curvature 0"
+ },
+ "shape": [
+  4,
+  4,
+  16
+ ]
+}

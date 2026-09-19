@@ -1,0 +1,109 @@
+{
+ "case": "sl_synth_32",
+ "dtype": "float32",
+ "files": {
+  "expected_curvature_mean.f32": {
+   "elements": 1536,
+   "kernel": "curvature_mean",
+   "max": 2.779656410217285,
+   "mean": 0.04110215604305267,
+   "min": -3.786660671234131,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "kind": "mean",
+    "win_il": 3,
+    "win_t": 3,
+    "win_xl": 3
+   },
+   "sha256": "f4e54b601fa0957b1cb80ff6b9feda255ceae5aad24c21ae16ba2bafb08f3c77"
+  },
+  "expected_dip_azimuth.f32": {
+   "elements": 1536,
+   "kernel": "dip_azimuth",
+   "max": 6.2793192863464355,
+   "mean": 3.1701629161834717,
+   "min": 0.017384324222803116,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "8b1b53f347728d2fda5652a3077d594eb97677f0de6cefe40b32d30a5a3c9cd9"
+  },
+  "expected_dip_il.f32": {
+   "elements": 1536,
+   "kernel": "dip_il",
+   "max": 1.5699454545974731,
+   "mean": 0.004888862371444702,
+   "min": -1.5698559284210205,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "027ca4c5e0cb2a6b6955e71c34879999724b93ccccb98de5c78609742451ac1f"
+  },
+  "expected_dip_xl.f32": {
+   "elements": 1536,
+   "kernel": "dip_xl",
+   "max": 1.567033290863037,
+   "mean": 0.013847497291862965,
+   "min": -1.570326805114746,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "ea45d99a3f218336bf6b2c2da4137e78a61dad267bbbb93cbab2ea05548f8ca1"
+  },
+  "expected_relative_impedance.f32": {
+   "elements": 1536,
+   "kernel": "relative_impedance",
+   "max": 6.346599578857422,
+   "mean": 0.22416476905345917,
+   "min": -7.96132755279541,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {},
+   "sha256": "66c9cd43757fa0c6ef7a05d966a9d646bd85be8dcccec0a14c32d5e6000371ae"
+  },
+  "expected_sweetness.f32": {
+   "elements": 1536,
+   "kernel": "sweetness",
+   "max": 78.12098693847656,
+   "mean": 2.4495599269866943,
+   "min": 0.057273030281066895,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "sample_interval": 1.0
+   },
+   "sha256": "76114c846b588cb928f742ed642851a98ecaca276c232b8a899244b2203d708b"
+  },
+  "input.f32": {
+   "elements": 1536,
+   "max": 0.9983698725700378,
+   "mean": 0.01004749070852995,
+   "min": -0.998293936252594,
+   "n_inf": 0,
+   "n_nan": 0,
+   "role": "input",
+   "sha256": "4b27570558b37332f8dbcf925f40d9c5deebc177b6d970bf22c5f6188e10f614"
+  }
+ },
+ "meta": {
+  "note": "normal 8x6x32 uniform noise, seed 20260919"
+ },
+ "shape": [
+  8,
+  6,
+  32
+ ]
+}

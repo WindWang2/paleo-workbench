@@ -1,0 +1,109 @@
+{
+ "case": "sl_tiny_sgy_real",
+ "dtype": "float32",
+ "files": {
+  "expected_curvature_mean.f32": {
+   "elements": 2048,
+   "kernel": "curvature_mean",
+   "max": 1.7567096948623657,
+   "mean": -0.14248400926589966,
+   "min": -2.6038906574249268,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "kind": "mean",
+    "win_il": 3,
+    "win_t": 3,
+    "win_xl": 3
+   },
+   "sha256": "88f62475173b5628ff37acf06bb2e2c6ac63c228eb6f32b61613a53cfc7d0b6c"
+  },
+  "expected_dip_azimuth.f32": {
+   "elements": 2048,
+   "kernel": "dip_azimuth",
+   "max": 6.2814764976501465,
+   "mean": 3.2238941192626953,
+   "min": 9.564577339915559e-05,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "6e66870c068e0a47a9eb3dacc531c04df9e68ac622394dfd2f17f7f7d3fbea75"
+  },
+  "expected_dip_il.f32": {
+   "elements": 2048,
+   "kernel": "dip_il",
+   "max": 1.5695204734802246,
+   "mean": 0.01392966415733099,
+   "min": -1.5691019296646118,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "f02fb6beb5efd0ea663ccbef9b4ae2cbb1ab3ae69642da3b979b12f48090123f"
+  },
+  "expected_dip_xl.f32": {
+   "elements": 2048,
+   "kernel": "dip_xl",
+   "max": 1.5696173906326294,
+   "mean": -0.041503846645355225,
+   "min": -1.569867730140686,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "dt": 1.0,
+    "dx_il": 1.0,
+    "dx_xl": 1.0
+   },
+   "sha256": "b1f9ffd5fbc898166a3f31249515fded3ad19a541b51d988fb248283c3e45ae9"
+  },
+  "expected_relative_impedance.f32": {
+   "elements": 2048,
+   "kernel": "relative_impedance",
+   "max": 13.170198440551758,
+   "mean": 1.0036063194274902,
+   "min": -15.815391540527344,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {},
+   "sha256": "d1fb2f85d7f62ce1fbad78022080ed8158f0a888e785dbe0a3c9cfc355245ca4"
+  },
+  "expected_sweetness.f32": {
+   "elements": 2048,
+   "kernel": "sweetness",
+   "max": 28.92460060119629,
+   "mean": 3.4908485412597656,
+   "min": 0.09893878549337387,
+   "n_inf": 0,
+   "n_nan": 0,
+   "params": {
+    "sample_interval": 1.0
+   },
+   "sha256": "08b089d29eb01cd794f2adeabd615173827934e2d46f16946926599905dd3e01"
+  },
+  "input.f32": {
+   "elements": 2048,
+   "max": 3.8467206954956055,
+   "mean": 0.02854030579328537,
+   "min": -2.85935378074646,
+   "n_inf": 0,
+   "n_nan": 0,
+   "role": "input",
+   "sha256": "31fe826622dd9e50da56d46d38bc991597724c8c01d8ab7d42aeaf9bb59a0570"
+  }
+ },
+ "meta": {
+  "note": "real tiny.sgy volume (frozen E-line input), inline-major C-order"
+ },
+ "shape": [
+  8,
+  8,
+  32
+ ]
+}
