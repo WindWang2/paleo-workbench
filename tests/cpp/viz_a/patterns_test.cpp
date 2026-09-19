@@ -30,6 +30,18 @@ void fail(const std::string& what) {
     ++g_failures;
 }
 
+// Tagged-string decode for non-finite doubles ("NaN"/"Infinity"/
+// "-Infinity") — the oracle's JSON-safe encoding.
+double decode_value(const Json& v) {
+    if (v.is_string()) {
+        const std::string text = v.get<std::string>();
+        if (text == "NaN") return std::nan("");
+        if (text == "Infinity") return HUGE_VAL;
+        if (text == "-Infinity") return -HUGE_VAL;
+    }
+    return v.get<double>();
+}
+
 }  // namespace
 
 int main() {
@@ -148,15 +160,15 @@ int main() {
         ++g_cases;
         const std::string name = case_json["curve_name"].get<std::string>();
         std::vector<double> values;
-        for (const auto& v : case_json["values"]) values.push_back(v.get<double>());
+        for (const auto& v : case_json["values"]) values.push_back(decode_value(v));
         const bool has_null = !case_json["null_value"].is_null();
         const double null_value =
-            has_null ? case_json["null_value"].get<double>() : 0.0;
+            has_null ? decode_value(case_json["null_value"]) : 0.0;
         const auto range = compute_robust_display_range(
             values, name, has_null ? std::optional<double>(null_value)
                                    : std::nullopt);
-        const double evmin = case_json["expected"][0].get<double>();
-        const double evmax = case_json["expected"][1].get<double>();
+        const double evmin = decode_value(case_json["expected"][0]);
+        const double evmax = decode_value(case_json["expected"][1]);
         if (std::fabs(range.vmin - evmin) > 1e-9 ||
             std::fabs(range.vmax - evmax) > 1e-9) {
             char buf[256];

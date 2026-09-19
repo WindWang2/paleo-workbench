@@ -91,7 +91,7 @@ int main() {
     check(r.mode == "message" && r.message.find("ValueError") != std::string::npos,
           "declined provider message");
 
-    // Truncation + stem fallback + data formatting through the core.
+    // Truncation + stem fallback through the core (no data rows needed).
     set_las_preview_provider([](const std::string&,
                                 const std::string&) -> std::optional<LasPreviewData> {
         LasPreviewData data;
@@ -100,8 +100,6 @@ int main() {
         for (int i = 0; i < 205; ++i) {
             data.curves.push_back({"C" + std::to_string(i), "U", "d" + std::to_string(i)});
         }
-        // two rows, three columns, one NaN
-        data.values = {1.0, 2.5, 0.0 / 0.0 * 0.0, 3.25, -0.0, 100.0};
         return data;
     });
     PreviewSettings settings;
@@ -112,11 +110,32 @@ int main() {
     check_eq("w", r.summary_rows[0].second, "stem fallback (w.las -> w)");
     check_eq("205", r.summary_rows[1].second, "curve count");
     check_eq("3", r.summary_rows[2].second, "sample count");
-    check(r.data_headers.size() == 205 && r.data_rows.size() == 2,
-          "data table shape");
-    check_eq("NaN", r.data_rows[0][2], "data NaN cell");
-    check_eq("3.25", r.data_rows[1][0], "data value cell");
+    check(r.data_headers.size() == 205 && r.data_rows.empty(),
+          "empty data table keeps headers");
     check(!r.warning.empty(), "truncation warning set");
+
+    // Data table formatting (3 columns x 2 rows, one NaN cell).
+    set_las_preview_provider([](const std::string&,
+                                const std::string&) -> std::optional<LasPreviewData> {
+        LasPreviewData data;
+        data.well_name = "W1";
+        data.row_count = 2;
+        data.curves = {{"DEPT", "M", "d"}, {"GR", "GAPI", "g"}, {"RD", "", "r"}};
+        data.values = {1.0, 2.5, 0.0 / 0.0 * 0.0, 3.25, -0.0, 100.0};
+        return data;
+    });
+    r = las_preview_result(asset, "", settings);
+    check(!r.truncated, "no truncation below the cap");
+    check(r.data_headers.size() == 3 && r.data_rows.size() == 2,
+          "data table shape");
+    check(r.data_rows.size() > 0 && r.data_rows[0].size() == 3,
+          "data row width");
+    if (r.data_rows.size() == 2 && r.data_rows[0].size() == 3) {
+        check_eq("NaN", r.data_rows[0][2], "data NaN cell");
+        check_eq("3.25", r.data_rows[1][0], "data value cell");
+        check_eq("100", r.data_rows[1][2], "data integer cell");
+    }
+    check(r.warning.empty(), "no truncation warning below the cap");
 
     // Unicode path stem (path_stem parity with Python Path.stem on
     // non-ASCII names).

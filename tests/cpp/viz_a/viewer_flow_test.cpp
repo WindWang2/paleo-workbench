@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QtGlobal>
 
 #include <pwb/viz/well_log_host_widget.hpp>
 
@@ -31,6 +32,10 @@ void check(bool ok, const std::string& what) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Deterministic rendering environment regardless of how ctest was
+    // invoked (mirrors the science viewer tests' ENVIRONMENT contract).
+    qputenv("QT_QPA_PLATFORM", "offscreen");
+    qputenv("LIBGL_ALWAYS_SOFTWARE", "1");
     QApplication app(argc, argv);
     const fs::path root = PWB_VIZ_A_FIXTURE_ROOT;
     const std::string good1 = (root / "las/01_normal_multisection.las").string();
@@ -43,13 +48,15 @@ int main(int argc, char** argv) {
     {
         pwb::viz::WellLogHostWidget host;
         host.resize(900, 600);
-        host.show();
 
-        // Load a real file -> real tracks.
+        // Load a real file -> real tracks; show only after the document is
+        // in (an empty GL widget paints nothing and some GL stacks reject
+        // a context created before any content exists).
         QString error;
         check(host.load_las(QString::fromStdString(good1), &error),
               "load 01: " + error.toStdString());
         check(host.has_document(), "document present");
+        host.show();
         check(host.last_track_count() >= 3, "real track count (>= 3 curves)");
         check(host.axis_unit_text().toStdString() == "M", "axis unit M");
 

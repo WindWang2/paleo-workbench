@@ -112,6 +112,25 @@ COLOR_PROBES = [
 ]
 
 
+def encode_float(value):
+    """JSON has no NaN/Inf literals (nlohmann rejects them): encode
+    non-finite doubles as tagged strings, the same convention as the
+    welllog adapter oracle."""
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "NaN"
+        if math.isinf(value):
+            return "Infinity" if value > 0 else "-Infinity"
+    return value
+
+
+def encode_case(case):
+    out = dict(case)
+    out["values"] = [encode_float(v) for v in case["values"]]
+    out["expected"] = [encode_float(v) for v in case["expected"]]
+    return out
+
+
 def main() -> int:
     robust, pattern_map, pattern_engine = load_references()
     engine = pattern_engine.PatternEngine()
@@ -143,7 +162,7 @@ def main() -> int:
                 entry["negative_self_check"] = True  # static by design
         else:
             entry["negative_self_check"] = True
-        scale_cases.append(entry)
+        scale_cases.append(encode_case(entry))
 
     pattern_cases = []
     for probe in PATTERN_PROBES:
