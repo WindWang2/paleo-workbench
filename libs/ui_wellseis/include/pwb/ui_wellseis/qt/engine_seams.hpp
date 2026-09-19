@@ -65,8 +65,13 @@ struct JointSceneSnapshot {
     std::string slice_state_warning; // scene.slice_state_warning ("")
     std::vector<std::string> fence_well_ids;
     std::string active_fence_id;
-    // (fence id, display name) in scene order.
-    std::vector<std::pair<std::string, std::string>> fences;
+    // Scene-order fence entries (06: + visibility for multi-fence UI).
+    struct JointFenceEntry {
+        std::string id;
+        std::string name;
+        bool visible = true;
+    };
+    std::vector<JointFenceEntry> fences;
     // (well presentation id, display name, visible) in scene order.
     struct WellPresentation {
         std::string id;
@@ -112,6 +117,17 @@ public:
                                         const std::string& well_b,
                                         const std::string& name = {}) = 0;
     virtual void delete_active_fence() = 0;
+    // Multi-fence management (06): activate an existing fence for the 2D
+    // profile view; toggle one fence's curtain visibility. No-ops on
+    // hosts without a scene (default impl keeps simple fakes honest).
+    virtual void activate_fence(const std::string& fence_id) {
+        (void)fence_id;
+    }
+    virtual void set_fence_visible(const std::string& fence_id,
+                                   bool visible) {
+        (void)fence_id;
+        (void)visible;
+    }
     // scene.set_orthogonal_slice_indices / restore_orthogonal_slice_state
     virtual void set_orthogonal_slice_indices(
         std::optional<int> inline_index,

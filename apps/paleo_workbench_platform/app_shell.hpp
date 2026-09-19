@@ -70,7 +70,13 @@ namespace pwb::app {
 class AppShell : public QWidget {
     Q_OBJECT
 public:
-    explicit AppShell(QWidget* parent = nullptr);
+    // joint_host (06 closure): the real joint 3D host injected by the
+    // window (owned by the Geo3D dock). Null keeps the honest deferred
+    // backend stub — the joint page then renders its Python-parity
+    // placeholder instead of a fabricated scene.
+    explicit AppShell(
+        QWidget* parent = nullptr,
+        pwb::ui_wellseis::qt::JointHostController* joint_host = nullptr);
     ~AppShell() override;
 
     // Host assembly (call once, before show): the session map canvas becomes
@@ -164,10 +170,15 @@ private:
     pwb::ui_shell::CommandPalette* palette_ = nullptr;
     pwb::ui_shell::DeferredPageBindings deferred_;
 
-    // Joint-host seam: a real engine host is still deferred — the stub
-    // reports has_scene=false so GeologicalModeling3DPage renders its
-    // honest engine-unavailable surface (Python parity, never fabricated).
+    // Joint-host seam (06): the window injects the real host (owned by
+    // the Geo3D dock); without one the fallback stub reports
+    // has_scene=false so GeologicalModeling3DPage renders its honest
+    // engine-unavailable surface (never fabricated).
     pwb::ui_wellseis::qt::JointHostController* joint_host_ = nullptr;
+    // Owns the fallback stub only when no real host was injected (the
+    // real host is owned by the Geo3D dock — never double-owned here).
+    std::unique_ptr<pwb::ui_wellseis::qt::JointHostController>
+        fallback_joint_host_;
 
     pwb::ui_pages_data::qt::HubPage* hub_data_ = nullptr;
     pwb::ui_pages_data::qt::HubPage* hub_well_ = nullptr;

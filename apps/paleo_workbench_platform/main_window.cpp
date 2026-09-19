@@ -62,6 +62,10 @@
 #endif
 #ifdef PWB_WITH_GEO3D_VIZ
 #include "geo3d_dock.hpp"
+#include "closure_joint3d_install.hpp"
+#ifdef PWB_WITH_UI_WELLSEIS
+#include "viz_c_joint_host.hpp"
+#endif
 #endif
 
 // BEGIN VIZ-B
@@ -397,11 +401,30 @@ MainWindow::~MainWindow() {
 
 void MainWindow::buildUi() {
     canvas_ = context_.session().map().createCanvas(this);
+#ifdef PWB_WITH_GEO3D_VIZ
+    // 06 closure: the Geo3D dock (and its joint host) must exist BEFORE
+    // the AppShell builds its pages — the joint page receives the real
+    // host at construction (widget vs placeholder is a ctor decision).
+    // The JobCenter property lives on the DOCK because that is where
+    // Geo3DDock::joint_host() reads it (previously set on the window,
+    // which the dock never saw — the product host could not be created).
+    geo3d_dock_ = new Geo3DDock(this);
+  #ifdef PWB_WITH_CONV_30
+    geo3d_dock_->setProperty(
+        "pwb_job_center",
+        QVariant::fromValue(static_cast<pwb::app::JobCenter*>(
+            job_center_.get())));
+  #endif
+#endif
 #ifdef PWB_WITH_APP_SHELL
     // W5/UI-17 — the page-navigation shell hosts the composite document;
     // the session canvas is its central canvas (same widget, reparented —
     // the session's attachCanvas pointer stays valid).
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+    app_shell_ = new AppShell(this, geo3d_dock_->joint_host());
+#else
     app_shell_ = new AppShell(this);
+#endif
     app_shell_->install_canvas(canvas_);
     setCentralWidget(app_shell_);
 #else
@@ -446,20 +469,14 @@ void MainWindow::buildUi() {
 
 // BEGIN CONV-GEO3D
 #ifdef PWB_WITH_GEO3D_VIZ
-    // Native 3D geomodel viewer dock: Qt6 viewport + workspace controller
-    // (no Python in the product chain). Well selections re-broadcast to
-    // the 2D map seam via Geo3DDock::well_selected.
-    geo3d_dock_ = new Geo3DDock(this);
+    // The dock itself was created at the top of buildUi (06 closure: it
+    // must precede the AppShell so the joint page receives the real
+    // host). Only the dock placement and its 2D-map seam stay here.
     addDockWidget(Qt::RightDockWidgetArea, geo3d_dock_);
     connect(geo3d_dock_, &Geo3DDock::well_selected, this,
             [this](const QString& well) {
                 statusBar()->showMessage(tr("3D 选中井: %1").arg(well), 5000);
             });
-    // VIZ-C: expose the JobCenter so the dock's joint host (created
-    // lazily on first use) can submit volume-load jobs.
-    setProperty("pwb_job_center",
-                QVariant::fromValue(static_cast<pwb::app::JobCenter*>(
-                    job_center_.get())));
 #endif
 // END CONV-GEO3D
 
@@ -1174,6 +1191,27 @@ QString MainWindow::openProject(const QString& project_file) {
     }
 #endif
 // END VIZ-B
+// BEGIN CLOSURE-JOINT3D
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS) && \
+    defined(PWB_WITH_SEISMIC_SERVICE)
+    if (geo3d_dock_ != nullptr && geo3d_dock_->joint_host() != nullptr &&
+        seismic_volume_service_ != nullptr) {
+        // 06 closure: the joint 3D host binds THIS project's real assets
+        // (volume through the JobCenter; wells/TD parsed from catalog
+        // entries). State (fences/slices) is project-scoped, so a switch
+        // restores the new project's own scene.
+        const pwb::app::closure_joint3d::BindOutcome bound =
+            pwb::app::closure_joint3d::bind_project_assets(
+                *geo3d_dock_->joint_host(), snapshot.value(), project_dir,
+                project_file.toStdString());
+        if (!bound.message.empty()) {
+            statusBar()->showMessage(
+                tr("联合3D：%1").arg(QString::fromStdString(bound.message)),
+                8000);
+        }
+    }
+#endif
+// END CLOSURE-JOINT3D
     return QString();
 }
 #endif  // PWB_WITH_DATA_INTEGRATION
@@ -2149,6 +2187,22 @@ QString MainWindow::openVolumeVersion(const std::string& version_id) {
                     : tr("体版本已载入：%1（无 bin-grid 标定）")
                           .arg(QString::fromStdString(version_id)),
                 8000);
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+            // 06 closure: the same published volume feeds the joint 3D
+            // host (its own JobCenter-backed open; survey + registration
+            // rewire on arrival). The joint open captures its own fresh
+            // service instance — the queued job then owns its lifetime
+            // outright, independent of this window's member service.
+            if (geo3d_dock_ != nullptr &&
+                geo3d_dock_->joint_host() != nullptr) {
+                auto joint_service =
+                    std::make_shared<
+                        pwb::seismic_service::SeismicVolumeService>();
+                QString joint_error;
+                geo3d_dock_->joint_host()->open_volume(
+                    joint_service, payload_path, &joint_error);
+            }
+#endif
             return QString();
         }
 #endif
@@ -3007,29 +3061,26 @@ pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {
     // CRS straight from the map authority.
     in.project_crs = context_.session().map().project()->crs().authid().toStdString();
     // Horizon: the store document's stratigraphy section when open.
-    // NOTE (#1380 audit, review B): this GUI-side document() read is
-    // unsynchronized against worker publishes that carry rebind_layer
-    // (they mutate the document under the coordinator lock). No current
-    // publish path sets rebind_layer, so today the GUI is the sole
-    // writer; adding one requires routing this read through a locked
-    // projection first.
+    // 06 closure: this read goes through the CommitCoordinator's
+    // serialization mutex (document_section) — a worker publish that
+    // mutates the document can no longer tear the GUI's view (#1380
+    // audit boundary; previously an unsynchronized document() read).
 #ifdef PWB_WITH_DATA_INTEGRATION
     if (context_.projectStore() != nullptr) {
-        const pwb::project::ProjectDocument& document =
-            context_.projectStore()->document();
-        const pwb::domain::Json* stratigraphy =
-            document.find_section("stratigraphy");
-        if (stratigraphy != nullptr && stratigraphy->contains("target_horizon")) {
-            const pwb::domain::Json& horizon =
-                (*stratigraphy)["target_horizon"];
+        const pwb::domain::Json stratigraphy =
+            context_.projectStore()->coordinator().document_section(
+                "stratigraphy", context_.projectStore()->document());
+        if (stratigraphy.contains("target_horizon")) {
+            const pwb::domain::Json& horizon = stratigraphy["target_horizon"];
             if (horizon.is_string()) {
                 in.target_horizon = horizon.get<std::string>();
             }
         }
-        const pwb::domain::Json* workarea =
-            document.find_section("workarea");
-        if (workarea != nullptr && workarea->contains("boundary")) {
-            const pwb::domain::Json& boundary = (*workarea)["boundary"];
+        const pwb::domain::Json workarea =
+            context_.projectStore()->coordinator().document_section(
+                "workarea", context_.projectStore()->document());
+        if (workarea.contains("boundary")) {
+            const pwb::domain::Json& boundary = workarea["boundary"];
             if (boundary.is_array()) {
                 for (const auto& vertex : boundary) {
                     if (vertex.is_array() && vertex.size() >= 2

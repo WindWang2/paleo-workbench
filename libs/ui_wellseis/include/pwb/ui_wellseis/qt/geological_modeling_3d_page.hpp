@@ -117,6 +117,8 @@ private:
     QTreeWidgetItem* add_checkable_child(QTreeWidgetItem* parent,
                                        const QString& name);
     void refresh_joint_well_tree();
+    void refresh_joint_fence_tree();
+    void update_coordinate_note();
     void on_scene_updated();
     void fill_joint_well_combos();
     void rebuild_joint_well_combos(const QString& preferred_a,
@@ -152,6 +154,7 @@ private:
     QTreeWidget* model_tree_ = nullptr;
     QTreeWidgetItem* joint_root_ = nullptr;
     QTreeWidgetItem* joint_wells_item_ = nullptr;
+    QTreeWidgetItem* joint_fence_item_ = nullptr;
     QTreeWidgetItem* stratal_item_ = nullptr;
     QTreeWidgetItem* geo3d_root_ = nullptr;
     bool joint_well_visibility_restored_ = false;
@@ -179,6 +182,7 @@ private:
     QFrame* joint_color_card_ = nullptr;
     QWidget* joint_2d_host_ = nullptr;
     QLabel* time_chip_ = nullptr;
+    QLabel* coord_note_ = nullptr;  // 坐标/单位说明 (06)
     QLabel* joint_2d_placeholder_ = nullptr;
     bool depth_domain_2d_ = false;
     QComboBox* seismic_color_combo_ = nullptr;

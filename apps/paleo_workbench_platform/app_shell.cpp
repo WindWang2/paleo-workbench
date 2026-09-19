@@ -42,10 +42,11 @@ namespace pwb::app {
 
 namespace {
 
-// Joint-host seam: the well/seismic joint engine host is still deferred
-// (its engine is not migrated). This stub reports the honest unavailable
-// state — GeologicalModeling3DPage renders its Python-parity placeholder
-// path (has_scene() == false) instead of a fabricated scene.
+// Joint-host seam fallback (06 closure): used only when the window has
+// no real host to inject (no Geo3D dock — e.g. GEO3D_VIZ disabled). It
+// reports the honest unavailable state — GeologicalModeling3DPage
+// renders its Python-parity placeholder path (has_scene() == false)
+// instead of a fabricated scene.
 class UnavailableJointHost : public ui_wellseis::qt::JointHostController {
 public:
     using ui_wellseis::qt::JointHostController::JointHostController;
@@ -103,7 +104,9 @@ public:
 
 }  // namespace
 
-AppShell::AppShell(QWidget* parent) : QWidget(parent) {
+AppShell::AppShell(QWidget* parent,
+                   ui_wellseis::qt::JointHostController* joint_host)
+    : QWidget(parent), joint_host_(joint_host) {
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -174,10 +177,15 @@ void AppShell::build_pages() {
     hub_well_->finish();
     page_stack_->addWidget(hub_well_);
 
-    // hub 2 地震: 地震预测 + 井震联合 3D (joint engine host deferred →
-    // the page renders its honest unavailable placeholder).
+    // hub 2 地震: 地震预测 + 井震联合 3D. 06 closure: the window injects
+    // the REAL joint host (Geo3D dock's VizCJointHost — shared viewport,
+    // JobCenter-backed volume/pipe reads); without it the page keeps the
+    // honest deferred-backend placeholder.
     seismic_page_ = new ui_wellseis::qt::SeismicPredictionPage(page_stack_);
-    joint_host_ = new UnavailableJointHost();
+    if (joint_host_ == nullptr) {
+        fallback_joint_host_ = std::make_unique<UnavailableJointHost>();
+        joint_host_ = fallback_joint_host_.get();
+    }
     geomodel_page_ = new ui_wellseis::qt::GeologicalModeling3DPage(
         page_stack_, joint_host_);
     hub_seismic_ = new HubPage(ui_shell::kPageIndexSeismic, page_stack_);

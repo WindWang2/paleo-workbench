@@ -4,6 +4,10 @@
 // amplitude slice + pierce points + the well-order polyline. Click a
 // well point to append it to the fence (well_clicked carries the
 // JointWellId). Honest empty state when the scene/volume is not ready.
+// 06 closure: the amplitude plane is never read here — the joint host
+// reads it on the job worker and injects the colorized image via
+// set_prepared_slice; a sample-stale image shows an honest pending note
+// instead of blocking the GUI on a cold tile.
 #include <QWidget>
 
 #include <pwb/geo3d_viz/joint/joint_scene.hpp>
@@ -19,14 +23,18 @@ public:
     explicit VizCTimeSliceMap(QWidget* parent = nullptr);
 
     void set_scene(pwb::geo3d_viz::joint::WellSeismicScene* scene);
-    // Rebuild the cached image/hits from the scene (cheap; the amplitude
-    // slice itself is prepared off the GUI thread and injected).
+    // Rebuild the cached hits/caption from the scene (cheap, read-free).
+    // The amplitude image stays from the last applied prepared slice; a
+    // different active sample shows the pending note until the worker
+    // payload for the new sample arrives.
     void refresh();
     // Inject a colorized slice prepared by the job runtime (RGBA bytes +
-    // shape); empty resets to the honest placeholder.
+    // shape + the sample index it was read at); empty resets to the
+    // honest placeholder.
     void set_prepared_slice(const std::vector<unsigned char>& rgba,
                             std::int64_t n_inline,
-                            std::int64_t n_crossline);
+                            std::int64_t n_crossline,
+                            std::int64_t sample_index);
 
 signals:
     void well_clicked(const QString& well_id);
@@ -41,6 +49,8 @@ private:
 
     pwb::geo3d_viz::joint::WellSeismicScene* scene_ = nullptr;
     QImage* image_ = nullptr;
+    std::int64_t image_sample_ = -1;
+    bool image_pending_ = false;
     std::vector<pwb::geo3d_viz::joint::WellPierce> pierces_;
     std::vector<std::array<double, 2>> hits_;  // widget px per pierce
     std::vector<QString> path_ids_;

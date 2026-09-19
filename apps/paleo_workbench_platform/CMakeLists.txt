@@ -225,7 +225,8 @@ endif()
 if(TARGET Pwb::Geo3DViz AND TARGET Pwb::SeismicService)
     target_sources(pwb-platform PRIVATE
         viz_c_joint_volume.cpp
-        viz_c_time_map.cpp)
+        viz_c_time_map.cpp
+        closure_joint3d_install.cpp)
     target_link_libraries(pwb-platform PRIVATE Pwb::SeismicService)
     # viz_c_joint_host.cpp + PWB_WITH_UI_WELLSEIS are wired from the root
     # VIZ-C block: libs/ui_wellseis joins the build AFTER this app

@@ -1101,6 +1101,20 @@ const FenceSection* WellSeismicScene::active_fence() const {
 std::optional<FenceExtraction> WellSeismicScene::extract_active_fence(
     std::int64_t n_along, std::optional<VerticalDomain> domain) const {
     const FenceSection* fence = active_fence();
+    if (fence == nullptr) return std::nullopt;
+    return extract_fence(fence->id, n_along, domain);
+}
+
+std::optional<FenceExtraction> WellSeismicScene::extract_fence(
+    const std::string& fence_id, std::int64_t n_along,
+    std::optional<VerticalDomain> domain) const {
+    const FenceSection* fence = nullptr;
+    for (const FenceSection& candidate : fences_) {
+        if (candidate.id == fence_id) {
+            fence = &candidate;
+            break;
+        }
+    }
     if (fence == nullptr || volume_ == nullptr || !survey_.has_value()) {
         return std::nullopt;
     }

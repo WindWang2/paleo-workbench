@@ -12,6 +12,7 @@
 #include <QTreeWidget>
 #include <QWidget>
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -64,8 +65,21 @@ public:
         return true;
     }
     void reload() override { reload_count += 1; }
-    JointSceneSnapshot scene_snapshot() const override { return {}; }
-    bool has_scene() const override { return false; }
+    // 06: settable snapshot (default stays the honest no-scene state) so
+    // the page's multi-fence tree sync can be exercised without an
+    // engine.
+    JointSceneSnapshot scene_snapshot() const override { return snapshot_; }
+    bool has_scene() const override { return snapshot_.has_scene; }
+    void activate_fence(const std::string& fence_id) override {
+        activated_fence = fence_id;
+    }
+    void set_fence_visible(const std::string& fence_id, bool visible)
+        override {
+        fence_visibility[fence_id] = visible;
+    }
+    JointSceneSnapshot snapshot_;
+    std::string activated_fence;
+    std::map<std::string, bool> fence_visibility;
     std::string engine_error() const override { return engine_error_; }
     std::vector<std::pair<std::string, std::string>> well_options()
         const override {
@@ -522,6 +536,61 @@ PWB_TEST(geo3d_page) {
           collected.vertical_domain == "Time");
     CHECK(page.shutdown_workers(50));
     CHECK(host.shutdown_called);
+}
+
+PWB_TEST(geo3d_page_multi_fence_management) {
+    FakeJointHost host;
+    GeologicalModeling3DPage page(nullptr, &host);
+    page.resize(900, 600);
+
+    JointSceneSnapshot snap;
+    snap.has_scene = true;
+    snap.n_inline = 8;
+    snap.n_crossline = 6;
+    snap.time_min_ms = 0.0;
+    snap.time_max_ms = 100.0;
+    snap.active_fence_id = "f2";
+    snap.fences = {{"f1", "Fence A", true}, {"f2", "Fence B", true}};
+    host.snapshot_ = snap;
+
+    // The page syncs its tree from the host's scene_updated signal.
+    emit host.scene_updated();
+
+    QTreeWidget* tree = page.model_tree();
+    CHECK(tree != nullptr);
+    // Locate the fence group by its persisted key text.
+    QTreeWidgetItem* fence_group = nullptr;
+    QTreeWidget* top = tree;
+    for (int i = 0; i < top->topLevelItemCount() && fence_group == nullptr;
+         ++i) {
+        QTreeWidgetItem* root = top->topLevelItem(i);
+        for (int j = 0; j < root->childCount(); ++j) {
+            QTreeWidgetItem* child = root->child(j);
+            if (child->text(0).contains(QStringLiteral("fence (geoviz)"))) {
+                fence_group = child;
+                break;
+            }
+        }
+    }
+    CHECK(fence_group != nullptr);
+    if (fence_group != nullptr) {
+        CHECK_EQ(fence_group->childCount(), 2);
+        if (fence_group->childCount() == 2) {
+            // Hide the first fence through the tree check state.
+            fence_group->child(0)->setCheckState(0, Qt::Unchecked);
+            CHECK_EQ(host.fence_visibility.at("f1"), false);
+            // The active fence child carries the arrow marker (text
+            // unchanged; identity via UserRole data).
+            CHECK_EQ(fence_group->child(1)
+                         ->data(0, Qt::UserRole)
+                         .toString()
+                         .toStdString(),
+                     "f2");
+        }
+    }
+    // The page stays coherent after the multi-fence sync (no crash on
+    // the coordinate/unit note update with a populated scene).
+    CHECK(page.shutdown_workers(50));
 }
 
 PWB_TEST(string_table_model) {
