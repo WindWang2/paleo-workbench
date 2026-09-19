@@ -50,6 +50,17 @@ Qt 面：`ui_shell.qt_widgets_smoke` — 20 checks / 全过
 - `ctest -R ui_shell` → 2/2 pass。
 - 全部 21 个源文件 `-fsyntax-only` 单独验证过。
 
+## Review round 1 corrections (e9d28f2c)
+
+- `command_palette`：`MENU_BAR_HEIGHT` 40（原误 28；tokens.MENU_BAR_HEIGHT）。
+- `screen_inventory`：移入 Qt-free `pwb_ui_shell`（纯 navigation 派生，
+  无 Qt 依赖）。
+- `operation_registry`：补 `operation_registry()` 全局访问器 +
+  `bind_registry_to_shell` 的**替换**语义（Python 全局引用被 shell
+  实例接管；Qt 桥在 shell 销毁时回退 lazy fallback）。
+- `style_registry`：删死代码 `refresh_min_heights`（bind_metrics 回调
+  已经 repolish_all 重跑）。
+
 ## Known deviations / limitations
 
 1. **`_coordinate_decimals` 的 pyproj 路径**：Python 用 pyproj 判
