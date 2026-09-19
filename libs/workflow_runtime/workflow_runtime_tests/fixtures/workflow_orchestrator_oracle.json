@@ -1,0 +1,1185 @@
+{
+  "cases": [
+    {
+      "id": "initial_context_empty_project",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "export_artifacts": []
+        },
+        "calls": [
+          "ctx"
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "step_id": "data_check",
+            "step_name": "数据校验",
+            "index": 0,
+            "total_steps": 6,
+            "is_valid": false,
+            "prerequisites": [],
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "id": "default_project_context",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": null,
+        "calls": [
+          "ctx"
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "step_id": "data_check",
+            "step_name": "数据校验",
+            "index": 0,
+            "total_steps": 6,
+            "is_valid": false,
+            "prerequisites": [],
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "id": "successful_advancement",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [
+            {
+              "id": "res_000000000001",
+              "name": "Well-01",
+              "path": "/tmp/well.las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "export_artifacts": []
+        },
+        "calls": [
+          "next",
+          "ctx"
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "success": true,
+            "message": "已成功切换至第 2 步 [单因素图编制]",
+            "step_context": {
+              "step_id": "factor_map",
+              "step_name": "单因素图编制",
+              "index": 1,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 1
+          },
+          {
+            "step_id": "factor_map",
+            "step_name": "单因素图编制",
+            "index": 1,
+            "total_steps": 6,
+            "is_valid": false,
+            "prerequisites": [],
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "id": "empty_project_never_advances",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "export_artifacts": []
+        },
+        "calls": [
+          "next",
+          "next",
+          "next",
+          "next",
+          "next",
+          "next",
+          "next",
+          "next"
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "success": false,
+            "message": "当前步骤 [数据校验] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "data_check",
+              "step_name": "数据校验",
+              "index": 0,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 0
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [数据校验] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "data_check",
+              "step_name": "数据校验",
+              "index": 0,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 0
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [数据校验] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "data_check",
+              "step_name": "数据校验",
+              "index": 0,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 0
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [数据校验] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "data_check",
+              "step_name": "数据校验",
+              "index": 0,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 0
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [数据校验] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "data_check",
+              "step_name": "数据校验",
+              "index": 0,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 0
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [数据校验] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "data_check",
+              "step_name": "数据校验",
+              "index": 0,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 0
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [数据校验] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "data_check",
+              "step_name": "数据校验",
+              "index": 0,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 0
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [数据校验] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "data_check",
+              "step_name": "数据校验",
+              "index": 0,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "refused_when_current_step_lacks_evidence",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [
+            {
+              "id": "res_000000000002",
+              "name": "A1.las",
+              "path": "a.las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "export_artifacts": []
+        },
+        "calls": [
+          "next",
+          "ctx",
+          "next",
+          "ctx"
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "success": true,
+            "message": "已成功切换至第 2 步 [单因素图编制]",
+            "step_context": {
+              "step_id": "factor_map",
+              "step_name": "单因素图编制",
+              "index": 1,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 1
+          },
+          {
+            "step_id": "factor_map",
+            "step_name": "单因素图编制",
+            "index": 1,
+            "total_steps": 6,
+            "is_valid": false,
+            "prerequisites": [],
+            "status": "pending"
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [单因素图编制] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "factor_map",
+              "step_name": "单因素图编制",
+              "index": 1,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 1
+          },
+          {
+            "step_id": "factor_map",
+            "step_name": "单因素图编制",
+            "index": 1,
+            "total_steps": 6,
+            "is_valid": false,
+            "prerequisites": [],
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "id": "advances_when_step_evidence_complete",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [
+            {
+              "id": "res_000000000003",
+              "name": "A1.Las",
+              "path": "a.las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000004",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [
+            {
+              "id": "pred_000000000005",
+              "name": "p1",
+              "adapter_kind": "mock",
+              "input_factor_map_ids": [],
+              "input_refs": {},
+              "model_metadata": {},
+              "result_summary": {},
+              "probability_summary": {},
+              "evidence_contribution": [],
+              "review_areas": [],
+              "status": "complete",
+              "adapter_schema_version": "1.0",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null
+            }
+          ],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000006",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [
+            {
+              "id": "qc_000000000007",
+              "linked_map_document_id": "map_000000000006",
+              "rules": [],
+              "issues": [],
+              "status": "pass",
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "provenance_registered": true,
+              "rule_status": {},
+              "coverage": {}
+            }
+          ],
+          "export_artifacts": [
+            {
+              "id": "artifact_000000000008",
+              "linked_id": "map_000000000006",
+              "format": "geojson",
+              "output_path": "exports/map.geojson",
+              "options": {},
+              "included_map_elements": [],
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "source_task_ids": [],
+              "catalog_version_id": null
+            }
+          ]
+        },
+        "calls": [
+          "next",
+          "next"
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "success": true,
+            "message": "已成功切换至第 2 步 [单因素图编制]",
+            "step_context": {
+              "step_id": "factor_map",
+              "step_name": "单因素图编制",
+              "index": 1,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 1
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 3 步 [地震相预测]",
+            "step_context": {
+              "step_id": "prediction",
+              "step_name": "地震相预测",
+              "index": 2,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "full_walk_to_completion",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [
+            {
+              "id": "res_000000000009",
+              "name": "A1.Las",
+              "path": "a.las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000010",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [
+            {
+              "id": "pred_000000000011",
+              "name": "p1",
+              "adapter_kind": "mock",
+              "input_factor_map_ids": [],
+              "input_refs": {},
+              "model_metadata": {},
+              "result_summary": {},
+              "probability_summary": {},
+              "evidence_contribution": [],
+              "review_areas": [],
+              "status": "complete",
+              "adapter_schema_version": "1.0",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null
+            }
+          ],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000012",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [
+            {
+              "id": "qc_000000000013",
+              "linked_map_document_id": "map_000000000012",
+              "rules": [],
+              "issues": [],
+              "status": "pass",
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "provenance_registered": true,
+              "rule_status": {},
+              "coverage": {}
+            }
+          ],
+          "export_artifacts": [
+            {
+              "id": "artifact_000000000014",
+              "linked_id": "map_000000000012",
+              "format": "geojson",
+              "output_path": "exports/map.geojson",
+              "options": {},
+              "included_map_elements": [],
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "source_task_ids": [],
+              "catalog_version_id": null
+            }
+          ]
+        },
+        "calls": [
+          "ctx",
+          "next",
+          "ctx",
+          "next",
+          "ctx",
+          "next",
+          "ctx",
+          "next",
+          "ctx",
+          "next",
+          "ctx",
+          "next"
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "step_id": "data_check",
+            "step_name": "数据校验",
+            "index": 0,
+            "total_steps": 6,
+            "is_valid": true,
+            "prerequisites": [],
+            "status": "complete"
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 2 步 [单因素图编制]",
+            "step_context": {
+              "step_id": "factor_map",
+              "step_name": "单因素图编制",
+              "index": 1,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 1
+          },
+          {
+            "step_id": "factor_map",
+            "step_name": "单因素图编制",
+            "index": 1,
+            "total_steps": 6,
+            "is_valid": true,
+            "prerequisites": [],
+            "status": "complete"
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 3 步 [地震相预测]",
+            "step_context": {
+              "step_id": "prediction",
+              "step_name": "地震相预测",
+              "index": 2,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 2
+          },
+          {
+            "step_id": "prediction",
+            "step_name": "地震相预测",
+            "index": 2,
+            "total_steps": 6,
+            "is_valid": true,
+            "prerequisites": [],
+            "status": "complete"
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 4 步 [古地理图编绘]",
+            "step_context": {
+              "step_id": "map_compile",
+              "step_name": "古地理图编绘",
+              "index": 3,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 3
+          },
+          {
+            "step_id": "map_compile",
+            "step_name": "古地理图编绘",
+            "index": 3,
+            "total_steps": 6,
+            "is_valid": true,
+            "prerequisites": [],
+            "status": "complete"
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 5 步 [质量检查]",
+            "step_context": {
+              "step_id": "qc",
+              "step_name": "质量检查",
+              "index": 4,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 4
+          },
+          {
+            "step_id": "qc",
+            "step_name": "质量检查",
+            "index": 4,
+            "total_steps": 6,
+            "is_valid": true,
+            "prerequisites": [],
+            "status": "complete"
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 6 步 [成果导出]",
+            "step_context": {
+              "step_id": "export",
+              "step_name": "成果导出",
+              "index": 5,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 5
+          },
+          {
+            "step_id": "export",
+            "step_name": "成果导出",
+            "index": 5,
+            "total_steps": 6,
+            "is_valid": true,
+            "prerequisites": [],
+            "status": "complete"
+          },
+          {
+            "success": true,
+            "message": "工作流已全部完成",
+            "step_context": {
+              "step_id": "export",
+              "step_name": "成果导出",
+              "index": 5,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 5
+          }
+        ]
+      }
+    },
+    {
+      "id": "warning_step_is_valid_gate",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [
+            {
+              "id": "res_000000000015",
+              "name": "A1.Las",
+              "path": "a.las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000016",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [
+            {
+              "id": "pred_000000000017",
+              "name": "p1",
+              "adapter_kind": "mock",
+              "input_factor_map_ids": [],
+              "input_refs": {},
+              "model_metadata": {},
+              "result_summary": {},
+              "probability_summary": {},
+              "evidence_contribution": [],
+              "review_areas": [],
+              "status": "complete",
+              "adapter_schema_version": "1.0",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null
+            }
+          ],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000018",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [
+            {
+              "id": "qc_000000000019",
+              "linked_map_document_id": "map_000000000018",
+              "rules": [],
+              "issues": [
+                {
+                  "rule": "facies_polygons_present",
+                  "severity": "warning",
+                  "message": "无相带多边形"
+                }
+              ],
+              "status": "warning",
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "provenance_registered": true,
+              "rule_status": {},
+              "coverage": {}
+            }
+          ],
+          "export_artifacts": []
+        },
+        "calls": [
+          "next",
+          "next",
+          "next",
+          "next",
+          "ctx",
+          "next",
+          "ctx",
+          "next"
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "success": true,
+            "message": "已成功切换至第 2 步 [单因素图编制]",
+            "step_context": {
+              "step_id": "factor_map",
+              "step_name": "单因素图编制",
+              "index": 1,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 1
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 3 步 [地震相预测]",
+            "step_context": {
+              "step_id": "prediction",
+              "step_name": "地震相预测",
+              "index": 2,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 2
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 4 步 [古地理图编绘]",
+            "step_context": {
+              "step_id": "map_compile",
+              "step_name": "古地理图编绘",
+              "index": 3,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 3
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 5 步 [质量检查]",
+            "step_context": {
+              "step_id": "qc",
+              "step_name": "质量检查",
+              "index": 4,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "warning"
+            },
+            "index_after": 4
+          },
+          {
+            "step_id": "qc",
+            "step_name": "质量检查",
+            "index": 4,
+            "total_steps": 6,
+            "is_valid": true,
+            "prerequisites": [],
+            "status": "warning"
+          },
+          {
+            "success": true,
+            "message": "已成功切换至第 6 步 [成果导出]",
+            "step_context": {
+              "step_id": "export",
+              "step_name": "成果导出",
+              "index": 5,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 5
+          },
+          {
+            "step_id": "export",
+            "step_name": "成果导出",
+            "index": 5,
+            "total_steps": 6,
+            "is_valid": false,
+            "prerequisites": [],
+            "status": "pending"
+          },
+          {
+            "success": false,
+            "message": "当前步骤 [成果导出] 尚未完成，不能进入下一步",
+            "step_context": {
+              "step_id": "export",
+              "step_name": "成果导出",
+              "index": 5,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [],
+              "status": "pending"
+            },
+            "index_after": 5
+          }
+        ]
+      }
+    },
+    {
+      "id": "payload_parameter_ignored",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [
+            {
+              "id": "res_000000000020",
+              "name": "A1.Las",
+              "path": "a.las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000021",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [
+            {
+              "id": "pred_000000000022",
+              "name": "p1",
+              "adapter_kind": "mock",
+              "input_factor_map_ids": [],
+              "input_refs": {},
+              "model_metadata": {},
+              "result_summary": {},
+              "probability_summary": {},
+              "evidence_contribution": [],
+              "review_areas": [],
+              "status": "complete",
+              "adapter_schema_version": "1.0",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null
+            }
+          ],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000023",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [
+            {
+              "id": "qc_000000000024",
+              "linked_map_document_id": "map_000000000023",
+              "rules": [],
+              "issues": [],
+              "status": "pass",
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "provenance_registered": true,
+              "rule_status": {},
+              "coverage": {}
+            }
+          ],
+          "export_artifacts": [
+            {
+              "id": "artifact_000000000025",
+              "linked_id": "map_000000000023",
+              "format": "geojson",
+              "output_path": "exports/map.geojson",
+              "options": {},
+              "included_map_elements": [],
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "source_task_ids": [],
+              "catalog_version_id": null
+            }
+          ]
+        },
+        "calls": [
+          {
+            "next_payload": {
+              "anything": [
+                1,
+                2,
+                3
+              ],
+              "note": "ignored"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "success": true,
+            "message": "已成功切换至第 2 步 [单因素图编制]",
+            "step_context": {
+              "step_id": "factor_map",
+              "step_name": "单因素图编制",
+              "index": 1,
+              "total_steps": 6,
+              "is_valid": true,
+              "prerequisites": [],
+              "status": "complete"
+            },
+            "index_after": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "prerequisite_rejection_no_resources",
+      "fn": "orchestrator.sequence",
+      "input": {
+        "project": {
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "export_artifacts": []
+        },
+        "calls": [
+          {
+            "set_index": 1
+          },
+          "ctx",
+          "next"
+        ],
+        "cpp_replay": false,
+        "cpp_boundary": "frozen header has no cursor setter and holds the project by value (D8); branch verified on the Python side only"
+      },
+      "expect": {
+        "result": [
+          {
+            "set_index": 1
+          },
+          {
+            "step_id": "factor_map",
+            "step_name": "单因素图编制",
+            "index": 1,
+            "total_steps": 6,
+            "is_valid": false,
+            "prerequisites": [
+              "数据资产清单不能为空"
+            ],
+            "status": "pending"
+          },
+          {
+            "success": false,
+            "message": "无法进入下一步: 数据资产清单不能为空",
+            "step_context": {
+              "step_id": "factor_map",
+              "step_name": "单因素图编制",
+              "index": 1,
+              "total_steps": 6,
+              "is_valid": false,
+              "prerequisites": [
+                "数据资产清单不能为空"
+              ],
+              "status": "pending"
+            },
+            "index_after": 1
+          }
+        ]
+      }
+    }
+  ]
+}
