@@ -98,4 +98,34 @@ domain::Result<PlacedFile> place_managed_file(
     const std::string& version_id,
     const PlaceManagedOptions& options = {});
 
+// ---- place_managed_tree (storage.py 542-615; conv-31b) ----------------------
+// V11 bundle placement: every regular file under *source_dir* lands under
+// `{stage_dir}/{asset_id}/{version_id}/`, each member atomic (mkstemp
+// ".place-" → streaming copy+hash → fsync → rename → dir fsync →
+// read-only). All-members-or-nothing: any mid-loop failure rmtree's the
+// target and re-raises. Branch ladder (order is contract): safe-id gate
+// BEFORE any directory exists → ensure layout → a NON-EMPTY existing
+// target is refused ("Managed payload already exists: <dir>", the
+// place_managed_file code) while an empty one is tolerated → source-not-
+// a-directory (bare-call shape; the orchestrator pre-checks it) →
+// per-member placement → an empty result set ("Bundle source directory
+// is empty: <dir>") → keep_source=false rmtree's the source only after
+// every member landed (copy-then-delete, P1-2).
+//
+// Divergences from place_managed_file: bundle members NEVER enter the
+// CAS blob store, and there is no caller-digest fast path. Member order
+// = Python's Path-component-tuple sort (findings B-30: implement the
+// component-vector comparison, do not fall back to native string order).
+// CONV-31b: implemented in Wave2-A8.
+struct PlacedTreeMember {
+    std::string rel_path;  // project-dir-relative POSIX, version-dir prefix
+                           // included
+    std::int64_t size_bytes = 0;
+    std::string sha256;
+};
+domain::Result<std::vector<PlacedTreeMember>> place_managed_tree(
+    const fs::path& source_dir, const fs::path& project_path,
+    domain::DataStage stage, const std::string& asset_id,
+    const std::string& version_id, bool keep_source = true);
+
 }  // namespace pwb::catalog

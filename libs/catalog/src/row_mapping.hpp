@@ -1,7 +1,9 @@
-// Canonical SQLite row → model mappers for the assets/versions tables
-// (internal to pwb_catalog; conv-26). Both the document loader
-// (repository.cpp) and the SQL paging path (paged_sql.cpp) decode rows
-// through these — a schema column change lands in exactly one place.
+// Canonical SQLite row → model mappers (internal to pwb_catalog; conv-26,
+// extended in conv-31b per findings §C-10: run/tag/model/model_version
+// decoding joins assets/versions here as the single fact source shared by
+// the document loader (repository.cpp), the SQL paging path (paged_sql.cpp)
+// and the lazy reads (queries_sql.cpp) — a schema column change lands in
+// exactly one place.
 //
 // Column contracts (the SELECTs must list columns in these orders):
 //   assets:  id, name, type, description, current_version_id,
@@ -10,6 +12,16 @@
 //   versions: id, asset_id, version_number, stage, managed, path,
 //             source_uri, format, size_bytes, sha256, run_id, metadata,
 //             created_at, trashed, trashed_at, parent_ids
+//   runs:    id, operation, parameters, generator, status, model_ref,
+//            created_at (io lists / ports are attached by the caller from
+//            the link tables, db.py _run_model_from_row shape)
+//   tags:    id, name, display_name, metadata
+//   models:  id, model_id, model_name, model_type, capability, provider,
+//            status, metadata, created_at, provenance
+//   model_versions: id, model_id, model_version, artifact_uri, checksum,
+//            input_schema, output_schema, preprocessing_version, runtime,
+//            deterministic, demo_only, status, metadata, created_at,
+//            provenance
 #pragma once
 
 #include "pwb/catalog/models.hpp"
@@ -77,6 +89,70 @@ inline DataVersion version_from_row(Statement& rows) {
             }
         }
     }
+    return version;
+}
+
+// db.py _run_model_from_row base columns; input/output ids and ports are
+// attached separately (their table order is the document order).
+inline DataRun run_from_row(Statement& rows) {
+    DataRun run;
+    run.id = domain::RunId(rows.text(0));
+    run.operation = rows.text(1);
+    run.parameters = parse_json_column(rows.text(2), "{}");
+    run.generator = rows.text(3);
+    run.status = rows.text(4);
+    // db.py (88): `json.loads(...) if row["model_ref"] else None` — both
+    // NULL and empty string decode to nullopt.
+    if (!rows.is_null(5) && !rows.text(5).empty()) {
+        run.model_ref = parse_json_column(rows.text(5), "{}");
+    } else {
+        run.model_ref = std::nullopt;
+    }
+    run.created_at = rows.text(6);
+    return run;
+}
+
+inline Tag tag_from_row(Statement& rows) {
+    Tag tag;
+    tag.id = rows.text(0);
+    tag.name = rows.text(1);
+    if (!rows.is_null(2)) tag.display_name = rows.text(2);
+    tag.metadata = parse_json_column(rows.text(3), "{}");
+    return tag;
+}
+
+inline Model model_from_row(Statement& rows) {
+    Model model;
+    model.id = rows.text(0);
+    model.model_id = rows.text(1);
+    model.model_name = rows.text(2);
+    model.model_type = rows.text(3);
+    model.capability = rows.text(4);
+    model.provider = rows.text(5);
+    model.status = rows.text(6);
+    model.metadata = parse_json_column(rows.text(7), "{}");
+    model.created_at = rows.text(8);
+    model.provenance = parse_json_column(rows.text(9), "{}");
+    return model;
+}
+
+inline ModelVersion model_version_from_row(Statement& rows) {
+    ModelVersion version;
+    version.id = rows.text(0);
+    version.model_id = rows.text(1);
+    version.model_version = rows.text(2);
+    version.artifact_uri = rows.text(3);
+    if (!rows.is_null(4)) version.checksum = rows.text(4);
+    version.input_schema = parse_json_column(rows.text(5), "{}");
+    version.output_schema = parse_json_column(rows.text(6), "{}");
+    version.preprocessing_version = rows.text(7);
+    version.runtime = rows.text(8);
+    version.deterministic = rows.int64(9) != 0;
+    version.demo_only = rows.int64(10) != 0;
+    version.status = rows.text(11);
+    version.metadata = parse_json_column(rows.text(12), "{}");
+    version.created_at = rows.text(13);
+    version.provenance = parse_json_column(rows.text(14), "{}");
     return version;
 }
 

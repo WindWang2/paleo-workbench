@@ -5,7 +5,15 @@
 # Python-free; frozen against tools/oracle/generate_workflow_engine_fixtures.py.
 add_library(pwb_workflow_engine STATIC
     src/engine.cpp
-    src/ops.cpp)
+    src/ops.cpp
+    # CONV-32 — run store / reproduction / receipts / plan views /
+    # store-driven lifecycle engine (dag/store.py + reproduction.py +
+    # receipt.py + plan_view.py + the engine.py full surface).
+    src/store.cpp
+    src/reproduction.cpp
+    src/receipt.cpp
+    src/plan_view.cpp
+    src/run_engine.cpp)
 add_library(Pwb::WorkflowEngine ALIAS pwb_workflow_engine)
 target_include_directories(pwb_workflow_engine PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -15,7 +23,14 @@ if(NOT TARGET Pwb::Domain)
         "pwb_workflow_engine requires Pwb::Domain "
         "(configure with -DPWB_BUILD_DATA=ON)")
 endif()
-target_link_libraries(pwb_workflow_engine PUBLIC Pwb::Domain)
+# CONV-32: store/reproduction/run_engine persist and drive the
+# workflow_spec DTOs (CONV-06).
+if(NOT TARGET Pwb::WorkflowSpec)
+    message(FATAL_ERROR
+        "pwb_workflow_engine requires Pwb::WorkflowSpec "
+        "(configure with -DPWB_BUILD_CONV_06=ON)")
+endif()
+target_link_libraries(pwb_workflow_engine PUBLIC Pwb::Domain Pwb::WorkflowSpec)
 target_link_libraries(pwb_workflow_engine PRIVATE Pwb::MappingKernel)
 
 if(BUILD_TESTING)

@@ -1,0 +1,589 @@
+{
+ "frozen_environment": {
+  "python": "3.11.9",
+  "platform": "Linux-6.9.0-x86_64",
+  "workbench": "8.0.0"
+ },
+ "succeeded_to_dict": {
+  "schema_version": "1.0",
+  "node_id": "interp",
+  "workflow_run_id": "run-42",
+  "action_id": "map.interpolate_idw",
+  "action_version": "1.2.0",
+  "description": "克里金插值",
+  "parameters": {
+   "method": "idw",
+   "power": 2.0
+  },
+  "input_version_ids": [
+   "dv-a",
+   "dv-b"
+  ],
+  "provider_id": "contour",
+  "provider_version": "2.1",
+  "resource_category": "compute",
+  "estimated_resources": {
+   "cpu_seconds": 1.5
+  },
+  "status": "success",
+  "started_at": 1699999999.5,
+  "finished_at": 1700000000.0,
+  "duration_ms": 1234.568,
+  "output_version_ids": [],
+  "outputs_summary": {
+   "count": 3,
+   "path": "/tmp/x",
+   "flag": true,
+   "none": null
+  },
+  "catalog_run_id": "cat-7",
+  "verification": {
+   "checks": 2,
+   "passed": 2
+  },
+  "qc_metrics": {
+   "rows": 42
+  },
+  "warnings": [],
+  "degraded_reason": null,
+  "error": null,
+  "cache_identity": null,
+  "from_cache": false,
+  "attempt": 1,
+  "environment": {
+   "python": "3.11.9",
+   "platform": "Linux-6.9.0-x86_64",
+   "workbench": "8.0.0"
+  }
+ },
+ "degraded": {
+  "with_warnings": {
+   "schema_version": "1.0",
+   "node_id": "n2",
+   "workflow_run_id": null,
+   "action_id": "qc.check",
+   "action_version": "0.3",
+   "description": "质检",
+   "parameters": {},
+   "input_version_ids": [],
+   "provider_id": null,
+   "provider_version": null,
+   "resource_category": null,
+   "estimated_resources": {},
+   "status": "degraded",
+   "started_at": null,
+   "finished_at": 1700000000.0,
+   "duration_ms": 10.0,
+   "output_version_ids": [],
+   "outputs_summary": {},
+   "catalog_run_id": null,
+   "verification": {},
+   "qc_metrics": {},
+   "warnings": [
+    "低精度插值",
+    "边缘裁剪"
+   ],
+   "degraded_reason": "低精度插值; 边缘裁剪",
+   "error": null,
+   "cache_identity": null,
+   "from_cache": false,
+   "attempt": 1,
+   "environment": {
+    "python": "3.11.9",
+    "platform": "Linux-6.9.0-x86_64",
+    "workbench": "8.0.0"
+   }
+  },
+  "empty_warnings": {
+   "degraded_reason": "verification warnings",
+   "status": "degraded"
+  }
+ },
+ "empty_outputs": {
+  "outputs_summary": {},
+  "output_version_ids": []
+ },
+ "version_ids_dedupe": [
+  "v1",
+  "v2",
+  "v3",
+  "v4"
+ ],
+ "summarize": {
+  "redaction": {
+   "artifact_count": 5,
+   "rows": "<2 keys>",
+   "flag": true
+  },
+  "in_process_handles": {
+   "values": "<in-process handle>",
+   "map_document": "<in-process handle>",
+   "document": "<in-process handle>",
+   "composition": "<in-process handle>"
+  },
+  "arrays_and_scalars": {
+   "stops": "<3 items>",
+   "ratio": 0.25,
+   "empty": "",
+   "zero": 0,
+   "none": null,
+   "txt": "ok"
+  }
+ },
+ "from_dict": {
+  "roundtrip": {
+   "schema_version": "1.0",
+   "node_id": "interp",
+   "workflow_run_id": "run-42",
+   "action_id": "map.interpolate_idw",
+   "action_version": "1.2.0",
+   "description": "克里金插值",
+   "parameters": {
+    "method": "idw",
+    "power": 2.0
+   },
+   "input_version_ids": [
+    "dv-a",
+    "dv-b"
+   ],
+   "provider_id": "contour",
+   "provider_version": "2.1",
+   "resource_category": "compute",
+   "estimated_resources": {
+    "cpu_seconds": 1.5
+   },
+   "status": "success",
+   "started_at": 1699999999.5,
+   "finished_at": 1700000000.0,
+   "duration_ms": 1234.568,
+   "output_version_ids": [],
+   "outputs_summary": {
+    "count": 3,
+    "path": "/tmp/x",
+    "flag": true,
+    "none": null
+   },
+   "catalog_run_id": "cat-7",
+   "verification": {
+    "checks": 2,
+    "passed": 2
+   },
+   "qc_metrics": {
+    "rows": 42
+   },
+   "warnings": [],
+   "degraded_reason": null,
+   "error": null,
+   "cache_identity": null,
+   "from_cache": false,
+   "attempt": 1,
+   "environment": {
+    "python": "3.11.9",
+    "platform": "Linux-6.9.0-x86_64",
+    "workbench": "8.0.0"
+   }
+  },
+  "defaults": {
+   "schema_version": "1.0",
+   "node_id": null,
+   "workflow_run_id": null,
+   "action_id": "",
+   "action_version": "",
+   "description": "",
+   "parameters": {},
+   "input_version_ids": [],
+   "provider_id": null,
+   "provider_version": null,
+   "resource_category": null,
+   "estimated_resources": {},
+   "status": "success",
+   "started_at": null,
+   "finished_at": null,
+   "duration_ms": 0.0,
+   "output_version_ids": [],
+   "outputs_summary": {},
+   "catalog_run_id": null,
+   "verification": {},
+   "qc_metrics": {},
+   "warnings": [],
+   "degraded_reason": null,
+   "error": null,
+   "cache_identity": null,
+   "from_cache": false,
+   "attempt": 1,
+   "environment": {}
+  },
+  "null_tolerance": {
+   "schema_version": "1.0",
+   "node_id": null,
+   "workflow_run_id": null,
+   "action_id": "None",
+   "action_version": "",
+   "description": "",
+   "parameters": {},
+   "input_version_ids": [],
+   "provider_id": null,
+   "provider_version": null,
+   "resource_category": null,
+   "estimated_resources": {},
+   "status": "None",
+   "started_at": null,
+   "finished_at": null,
+   "duration_ms": 0.0,
+   "output_version_ids": [],
+   "outputs_summary": {},
+   "catalog_run_id": null,
+   "verification": {},
+   "qc_metrics": {},
+   "warnings": [],
+   "degraded_reason": null,
+   "error": null,
+   "cache_identity": null,
+   "from_cache": false,
+   "attempt": 1,
+   "environment": {}
+  }
+ },
+ "plan_mixed_run": {
+  "from_run": {
+   "workflow_id": "wf.litho",
+   "name": "岩性制图",
+   "state": "running",
+   "state_label": "运行中",
+   "progress": 0.333,
+   "current_node": "插值",
+   "items": [
+    {
+     "node_id": "a",
+     "label": "输入检查",
+     "state": "succeeded",
+     "detail": "",
+     "from_cache": false,
+     "receipt_status": "degraded",
+     "error": null,
+     "symbol": "✓"
+    },
+    {
+     "node_id": "b",
+     "label": "插值",
+     "state": "running",
+     "detail": "33%",
+     "from_cache": false,
+     "receipt_status": null,
+     "error": null,
+     "symbol": "●",
+     "current": true
+    },
+    {
+     "node_id": "c",
+     "label": "编图",
+     "state": "pending",
+     "detail": "",
+     "from_cache": false,
+     "receipt_status": null,
+     "error": null,
+     "symbol": "○"
+    }
+   ]
+  },
+  "from_spec": {
+   "workflow_id": "wf.litho",
+   "name": "岩性制图",
+   "state": "running",
+   "state_label": "运行中",
+   "progress": 0.0,
+   "current_node": null,
+   "items": [
+    {
+     "node_id": "a",
+     "label": "输入检查",
+     "state": "pending",
+     "detail": "",
+     "from_cache": false,
+     "receipt_status": null,
+     "error": null,
+     "symbol": "○"
+    },
+    {
+     "node_id": "b",
+     "label": "插值",
+     "state": "pending",
+     "detail": "",
+     "from_cache": false,
+     "receipt_status": null,
+     "error": null,
+     "symbol": "○"
+    },
+    {
+     "node_id": "c",
+     "label": "编图",
+     "state": "pending",
+     "detail": "",
+     "from_cache": false,
+     "receipt_status": null,
+     "error": null,
+     "symbol": "○"
+    }
+   ]
+  }
+ },
+ "checklist_edges": {
+  "workflow_id": "wf.litho8",
+  "name": "岩性制图",
+  "state": "failed",
+  "state_label": "失败",
+  "progress": 1.0,
+  "current_node": null,
+  "items": [
+   {
+    "node_id": "a",
+    "label": "输入检查",
+    "state": "succeeded",
+    "detail": "",
+    "from_cache": true,
+    "receipt_status": "success",
+    "error": null,
+    "symbol": "✓"
+   },
+   {
+    "node_id": "b",
+    "label": "插值",
+    "state": "failed",
+    "detail": "插值失败",
+    "from_cache": false,
+    "receipt_status": null,
+    "error": "插值失败",
+    "symbol": "✗"
+   },
+   {
+    "node_id": "c",
+    "label": "质检",
+    "state": "skipped",
+    "detail": "条件未满足",
+    "from_cache": false,
+    "receipt_status": null,
+    "error": null,
+    "symbol": "↷"
+   },
+   {
+    "node_id": "d",
+    "label": "导出",
+    "state": "skipped",
+    "detail": "upstream b failed",
+    "from_cache": false,
+    "receipt_status": null,
+    "error": null,
+    "symbol": "↷"
+   }
+  ]
+ },
+ "from_summary": {
+  "with_spec": {
+   "workflow_id": "wf.litho",
+   "name": "岩性制图",
+   "state": "interrupted",
+   "state_label": "已中断（可恢复）",
+   "progress": 0.5,
+   "current_node": "插值",
+   "items": [
+    {
+     "node_id": "a",
+     "label": "输入检查",
+     "state": "succeeded",
+     "detail": "",
+     "from_cache": true,
+     "receipt_status": "success",
+     "error": null,
+     "symbol": "✓"
+    },
+    {
+     "node_id": "b",
+     "label": "插值",
+     "state": "running",
+     "detail": "50%",
+     "from_cache": false,
+     "receipt_status": null,
+     "error": null,
+     "symbol": "●",
+     "current": true
+    }
+   ]
+  },
+  "without_spec": {
+   "workflow_id": "wf.litho",
+   "name": "岩性制图",
+   "state": "interrupted",
+   "state_label": "已中断（可恢复）",
+   "progress": 0.5,
+   "current_node": "自定义标签",
+   "items": [
+    {
+     "node_id": "a",
+     "label": "a",
+     "state": "succeeded",
+     "detail": "",
+     "from_cache": true,
+     "receipt_status": "success",
+     "error": null,
+     "symbol": "✓"
+    },
+    {
+     "node_id": "b",
+     "label": "自定义标签",
+     "state": "running",
+     "detail": "50%",
+     "from_cache": false,
+     "receipt_status": null,
+     "error": null,
+     "symbol": "●",
+     "current": true
+    },
+    {
+     "node_id": "x",
+     "label": "幽灵节点",
+     "state": "pending",
+     "detail": "",
+     "from_cache": false,
+     "receipt_status": null,
+     "error": null,
+     "symbol": "○"
+    }
+   ]
+  }
+ },
+ "ordering_restore": {
+  "workflow_id": "wf.litho",
+  "name": "岩性制图",
+  "state": "running",
+  "state_label": "运行中",
+  "progress": 0.667,
+  "current_node": "插值",
+  "items": [
+   {
+    "node_id": "a",
+    "label": "输入检查",
+    "state": "succeeded",
+    "detail": "",
+    "from_cache": false,
+    "receipt_status": null,
+    "error": null,
+    "symbol": "✓"
+   },
+   {
+    "node_id": "b",
+    "label": "插值",
+    "state": "running",
+    "detail": "66%",
+    "from_cache": false,
+    "receipt_status": null,
+    "error": null,
+    "symbol": "●",
+    "current": true
+   },
+   {
+    "node_id": "c",
+    "label": "编图",
+    "state": "succeeded",
+    "detail": "",
+    "from_cache": false,
+    "receipt_status": null,
+    "error": null,
+    "symbol": "✓"
+   }
+  ]
+ },
+ "empty_spec": {
+  "workflow_id": "wf.empty",
+  "name": "空工作流",
+  "state": "running",
+  "state_label": "运行中",
+  "progress": 0.0,
+  "current_node": null,
+  "items": []
+ },
+ "state_labels": {
+  "labels": {
+   "running": "运行中",
+   "completed": "已完成",
+   "failed": "失败",
+   "cancelled": "已取消",
+   "interrupted": "已中断（可恢复）"
+  },
+  "unknown_state": {
+   "python_raises": "ValueError: 'paused' is not a valid RunState",
+   "graceful": "paused"
+  }
+ },
+ "symbols": {
+  "pending": {
+   "node_id": "n",
+   "label": "行",
+   "state": "pending",
+   "detail": "",
+   "from_cache": false,
+   "receipt_status": null,
+   "error": null,
+   "symbol": "○"
+  },
+  "running": {
+   "node_id": "n",
+   "label": "行",
+   "state": "running",
+   "detail": "",
+   "from_cache": false,
+   "receipt_status": null,
+   "error": null,
+   "symbol": "●"
+  },
+  "succeeded": {
+   "node_id": "n",
+   "label": "行",
+   "state": "succeeded",
+   "detail": "",
+   "from_cache": false,
+   "receipt_status": null,
+   "error": null,
+   "symbol": "✓"
+  },
+  "failed": {
+   "node_id": "n",
+   "label": "行",
+   "state": "failed",
+   "detail": "",
+   "from_cache": false,
+   "receipt_status": null,
+   "error": null,
+   "symbol": "✗"
+  },
+  "cancelled": {
+   "node_id": "n",
+   "label": "行",
+   "state": "cancelled",
+   "detail": "",
+   "from_cache": false,
+   "receipt_status": null,
+   "error": null,
+   "symbol": "⊗"
+  },
+  "skipped": {
+   "node_id": "n",
+   "label": "行",
+   "state": "skipped",
+   "detail": "",
+   "from_cache": false,
+   "receipt_status": null,
+   "error": null,
+   "symbol": "↷"
+  },
+  "unavailable": {
+   "node_id": "n",
+   "label": "行",
+   "state": "unavailable",
+   "detail": "",
+   "from_cache": false,
+   "receipt_status": null,
+   "error": null,
+   "symbol": "⊘"
+  }
+ }
+}

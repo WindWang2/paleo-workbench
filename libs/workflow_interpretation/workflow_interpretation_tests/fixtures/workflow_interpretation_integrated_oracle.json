@@ -1,0 +1,1691 @@
+{
+ "roundtrip": {
+  "id": "roundtrip_and_uncommitted_edits",
+  "input": {
+   "interpretation_id": "iint_round0001",
+   "name": null,
+   "input_set_id": 0,
+   "layer_id": "L2",
+   "fusion_version_id": "ver_fusion_7",
+   "latest_fusion_version_id": "ver_fusion_8",
+   "run_id": false,
+   "committed_version_id": "ver_committed_c1",
+   "class_schema": [
+    "三角洲",
+    3,
+    null,
+    true,
+    2.5
+   ],
+   "confidence_summary": {
+    "low_confidence_fraction": 0.25
+   },
+   "uncertainty_summary": {},
+   "conflicts": {
+    "high_conflict_fraction": 0.02,
+    "mean_conflict_fraction": 1e-05
+   },
+   "revision_ids": [
+    "irev_r1",
+    "irev_r2"
+   ],
+   "last_committed_revision_id": "irev_r1",
+   "qa_report_ref": "",
+   "maturity": "",
+   "created_at": "2026-09-01T00:00:00",
+   "created_by": "geologist-a",
+   "committed_at": "",
+   "active": false,
+   "unknown_extra": {
+    "k": [
+     1,
+     2
+    ]
+   }
+  },
+  "to_dict": {
+   "interpretation_id": "iint_round0001",
+   "name": "",
+   "input_set_id": "",
+   "layer_id": "L2",
+   "fusion_version_id": "ver_fusion_7",
+   "latest_fusion_version_id": "ver_fusion_8",
+   "run_id": "",
+   "committed_version_id": "ver_committed_c1",
+   "class_schema": [
+    "三角洲",
+    "3",
+    "None",
+    "True",
+    "2.5"
+   ],
+   "confidence_summary": {
+    "low_confidence_fraction": 0.25
+   },
+   "uncertainty_summary": {},
+   "conflicts": {
+    "high_conflict_fraction": 0.02,
+    "mean_conflict_fraction": 1e-05
+   },
+   "revision_ids": [
+    "irev_r1",
+    "irev_r2"
+   ],
+   "last_committed_revision_id": "irev_r1",
+   "qa_report_ref": "",
+   "maturity": "draft",
+   "created_at": "2026-09-01T00:00:00",
+   "created_by": "geologist-a",
+   "committed_at": "",
+   "active": true
+  },
+  "transitions": [
+   {
+    "input": {
+     "interpretation_id": "iint_round0001",
+     "name": null,
+     "input_set_id": 0,
+     "layer_id": "L2",
+     "fusion_version_id": "ver_fusion_7",
+     "latest_fusion_version_id": "ver_fusion_8",
+     "run_id": false,
+     "committed_version_id": "ver_committed_c1",
+     "class_schema": [
+      "三角洲",
+      3,
+      null,
+      true,
+      2.5
+     ],
+     "confidence_summary": {
+      "low_confidence_fraction": 0.25
+     },
+     "uncertainty_summary": {},
+     "conflicts": {
+      "high_conflict_fraction": 0.02,
+      "mean_conflict_fraction": 1e-05
+     },
+     "revision_ids": [
+      "irev_r1",
+      "irev_r2"
+     ],
+     "last_committed_revision_id": "irev_r1",
+     "qa_report_ref": "",
+     "maturity": "",
+     "created_at": "2026-09-01T00:00:00",
+     "created_by": "geologist-a",
+     "committed_at": "",
+     "active": false,
+     "unknown_extra": {
+      "k": [
+       1,
+       2
+      ]
+     }
+    },
+    "has_uncommitted_edits": true
+   },
+   {
+    "input": {
+     "interpretation_id": "iint_round0001",
+     "name": null,
+     "input_set_id": 0,
+     "layer_id": "L2",
+     "fusion_version_id": "ver_fusion_7",
+     "latest_fusion_version_id": "ver_fusion_8",
+     "run_id": false,
+     "committed_version_id": null,
+     "class_schema": [
+      "三角洲",
+      3,
+      null,
+      true,
+      2.5
+     ],
+     "confidence_summary": {
+      "low_confidence_fraction": 0.25
+     },
+     "uncertainty_summary": {},
+     "conflicts": {
+      "high_conflict_fraction": 0.02,
+      "mean_conflict_fraction": 1e-05
+     },
+     "revision_ids": [
+      "irev_r1",
+      "irev_r2"
+     ],
+     "last_committed_revision_id": "irev_r1",
+     "qa_report_ref": "",
+     "maturity": "",
+     "created_at": "2026-09-01T00:00:00",
+     "created_by": "geologist-a",
+     "committed_at": "",
+     "active": false,
+     "unknown_extra": {
+      "k": [
+       1,
+       2
+      ]
+     }
+    },
+    "has_uncommitted_edits": false
+   },
+   {
+    "input": {
+     "interpretation_id": "iint_round0001",
+     "name": null,
+     "input_set_id": 0,
+     "layer_id": "L2",
+     "fusion_version_id": "ver_fusion_7",
+     "latest_fusion_version_id": "ver_fusion_8",
+     "run_id": false,
+     "committed_version_id": "ver_committed_c1",
+     "class_schema": [
+      "三角洲",
+      3,
+      null,
+      true,
+      2.5
+     ],
+     "confidence_summary": {
+      "low_confidence_fraction": 0.25
+     },
+     "uncertainty_summary": {},
+     "conflicts": {
+      "high_conflict_fraction": 0.02,
+      "mean_conflict_fraction": 1e-05
+     },
+     "revision_ids": [
+      "irev_r1",
+      "irev_r2"
+     ],
+     "last_committed_revision_id": "irev_r2",
+     "qa_report_ref": "",
+     "maturity": "",
+     "created_at": "2026-09-01T00:00:00",
+     "created_by": "geologist-a",
+     "committed_at": "",
+     "active": false,
+     "unknown_extra": {
+      "k": [
+       1,
+       2
+      ]
+     }
+    },
+    "has_uncommitted_edits": false
+   },
+   {
+    "input": {
+     "interpretation_id": "iint_round0001",
+     "name": null,
+     "input_set_id": 0,
+     "layer_id": "L2",
+     "fusion_version_id": "ver_fusion_7",
+     "latest_fusion_version_id": "ver_fusion_8",
+     "run_id": false,
+     "committed_version_id": "ver_committed_c1",
+     "class_schema": [
+      "三角洲",
+      3,
+      null,
+      true,
+      2.5
+     ],
+     "confidence_summary": {
+      "low_confidence_fraction": 0.25
+     },
+     "uncertainty_summary": {},
+     "conflicts": {
+      "high_conflict_fraction": 0.02,
+      "mean_conflict_fraction": 1e-05
+     },
+     "revision_ids": [],
+     "last_committed_revision_id": "irev_r1",
+     "qa_report_ref": "",
+     "maturity": "",
+     "created_at": "2026-09-01T00:00:00",
+     "created_by": "geologist-a",
+     "committed_at": "",
+     "active": false,
+     "unknown_extra": {
+      "k": [
+       1,
+       2
+      ]
+     }
+    },
+    "has_uncommitted_edits": false
+   }
+  ]
+ },
+ "duplicate_create": {
+  "id": "duplicate_create",
+  "create": {
+   "name": "综合解释 v1",
+   "layer_id": "L9",
+   "input_set_id": "ciset_1",
+   "fusion_version_id": "ver_f1",
+   "class_schema": [
+    "低",
+    "中",
+    "高"
+   ],
+   "confidence_summary": {},
+   "conflicts": {
+    "high_conflict_fraction": 0.12
+   },
+   "created_by": "expert",
+   "created_at": "2026-09-10T08:00:00"
+  },
+  "ids": [
+   "000000000001"
+  ],
+  "record": {
+   "interpretation_id": "iint_000000000001",
+   "name": "综合解释 v1",
+   "input_set_id": "ciset_1",
+   "layer_id": "L9",
+   "fusion_version_id": "ver_f1",
+   "latest_fusion_version_id": "",
+   "run_id": "",
+   "committed_version_id": "",
+   "class_schema": [
+    "低",
+    "中",
+    "高"
+   ],
+   "confidence_summary": {},
+   "uncertainty_summary": {},
+   "conflicts": {
+    "high_conflict_fraction": 0.12
+   },
+   "revision_ids": [],
+   "last_committed_revision_id": "",
+   "qa_report_ref": "",
+   "maturity": "draft",
+   "created_at": "2026-09-10T08:00:00",
+   "created_by": "expert",
+   "committed_at": "",
+   "active": true
+  },
+  "duplicate_error": {
+   "python_class": "ValueError",
+   "message": "层 L9 已有综合解释记录（不可重复创建）"
+  },
+  "records": [
+   {
+    "interpretation_id": "iint_000000000001",
+    "name": "综合解释 v1",
+    "input_set_id": "ciset_1",
+    "layer_id": "L9",
+    "fusion_version_id": "ver_f1",
+    "latest_fusion_version_id": "",
+    "run_id": "",
+    "committed_version_id": "",
+    "class_schema": [
+     "低",
+     "中",
+     "高"
+    ],
+    "confidence_summary": {},
+    "uncertainty_summary": {},
+    "conflicts": {
+     "high_conflict_fraction": 0.12
+    },
+    "revision_ids": [],
+    "last_committed_revision_id": "",
+    "qa_report_ref": "",
+    "maturity": "draft",
+    "created_at": "2026-09-10T08:00:00",
+    "created_by": "expert",
+    "committed_at": "",
+    "active": true
+   }
+  ]
+ },
+ "guardrails": {
+  "id": "commit_guardrails",
+  "create": {
+   "name": "空解释",
+   "layer_id": "L0",
+   "input_set_id": "",
+   "fusion_version_id": "",
+   "class_schema": [],
+   "confidence_summary": {},
+   "conflicts": {},
+   "created_by": "",
+   "created_at": ""
+  },
+  "ids": [
+   "000000000001"
+  ],
+  "null_catalog_error": {
+   "python_class": "ValueError",
+   "message": "目录服务不可用——综合解释提交需要 catalog（不伪称已提交）"
+  },
+  "empty_features_error": {
+   "python_class": "ValueError",
+   "message": "解释层没有要素——拒绝提交空几何"
+  },
+  "missing_features_error": {
+   "python_class": "ValueError",
+   "message": "解释层没有要素——拒绝提交空几何"
+  },
+  "records": [
+   {
+    "interpretation_id": "iint_000000000001",
+    "name": "空解释",
+    "input_set_id": "",
+    "layer_id": "L0",
+    "fusion_version_id": "",
+    "latest_fusion_version_id": "",
+    "run_id": "",
+    "committed_version_id": "",
+    "class_schema": [],
+    "confidence_summary": {},
+    "uncertainty_summary": {},
+    "conflicts": {},
+    "revision_ids": [],
+    "last_committed_revision_id": "",
+    "qa_report_ref": "",
+    "maturity": "draft",
+    "created_at": "",
+    "created_by": "",
+    "committed_at": "",
+    "active": true
+   }
+  ],
+  "revisions": []
+ },
+ "commit_cases": [
+  {
+   "id": "commit_first",
+   "create": {
+    "name": "综合解释",
+    "layer_id": "L5",
+    "input_set_id": "ciset_1",
+    "fusion_version_id": "ver_seed",
+    "class_schema": [
+     "低",
+     "中",
+     "高"
+    ],
+    "confidence_summary": {
+     "low_confidence_fraction": 0.18
+    },
+    "conflicts": {
+     "high_conflict_fraction": 0.12
+    },
+    "created_by": "expert",
+    "created_at": "2026-09-10T11:00:00"
+   },
+   "commits": [
+    {
+     "layer": {
+      "features": [
+       {
+        "id": "f0",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0.0,
+            0.0
+           ],
+           [
+            1.0,
+            0.0
+           ],
+           [
+            1.0,
+            1.0
+           ],
+           [
+            0.0,
+            0.0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "class": "三角洲",
+         "rank": 2,
+         "ratio": 0.25
+        }
+       },
+       {
+        "feature_id": "pf1",
+        "id": "f1",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            2.0,
+            2.0
+           ],
+           [
+            3.0,
+            2.0
+           ],
+           [
+            3.0,
+            3.0
+           ],
+           [
+            2.0,
+            2.0
+           ]
+          ]
+         ]
+        },
+        "attributes": {
+         "class": "湖泊"
+        },
+        "properties": {
+         "class": "河道"
+        }
+       },
+       {
+        "id": "f2",
+        "properties": {
+         "note": "无几何要素"
+        }
+       }
+      ]
+     },
+     "actor": "expert",
+     "now": "2026-09-10T12:00:00",
+     "evidence_refs": [
+      "factor:t:ver_1"
+     ]
+    }
+   ],
+   "fail_at": null,
+   "pre_append_revision": false,
+   "ids": [
+    "000000000001",
+    "000000000002"
+   ],
+   "expect": {
+    "log": [
+     {
+      "method": "list_assets"
+     },
+     {
+      "method": "register_run",
+      "operation": "integrated_interpretation",
+      "input_version_ids": [
+       "ver_seed"
+      ],
+      "parameters": {
+       "interpretation_id": "iint_000000000001",
+       "layer_id": "L5",
+       "input_set_id": "ciset_1",
+       "n_features": 3,
+       "actor": "expert"
+      },
+      "generator": "interpretation-v9",
+      "status": "running"
+     },
+     {
+      "method": "register_result_asset",
+      "name": "interpretation:综合解释",
+      "type": "integrated_interpretation",
+      "format": "json",
+      "asset_metadata": {
+       "interpretation_id": "iint_000000000001"
+      },
+      "payload_text": "{\"class_schema\": [\"低\", \"中\", \"高\"], \"features\": [{\"geometry\": {\"coordinates\": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]], \"type\": \"Polygon\"}, \"id\": \"f0\", \"properties\": {\"class\": \"三角洲\", \"rank\": 2, \"ratio\": 0.25}}, {\"geometry\": {\"coordinates\": [[[2.0, 2.0], [3.0, 2.0], [3.0, 3.0], [2.0, 2.0]]], \"type\": \"Polygon\"}, \"id\": \"pf1\", \"properties\": {\"class\": \"湖泊\"}}, {\"geometry\": {}, \"id\": \"f2\", \"properties\": {\"note\": \"无几何要素\"}}], \"fusion_version_id\": \"ver_seed\", \"input_set_id\": \"ciset_1\", \"interpretation_id\": \"iint_000000000001\", \"layer_id\": \"L5\", \"schema\": 1}",
+      "stage": "derived",
+      "run_id": "run_000001",
+      "version_metadata": {
+       "interpretation_id": "iint_000000000001",
+       "actor": "expert"
+      },
+      "version_id": "version_000001"
+     },
+     {
+      "method": "update_run_status",
+      "run_id": "run_000001",
+      "status": "complete"
+     }
+    ],
+    "final_interpretations": [
+     {
+      "interpretation_id": "iint_000000000001",
+      "name": "综合解释",
+      "input_set_id": "ciset_1",
+      "layer_id": "L5",
+      "fusion_version_id": "ver_seed",
+      "latest_fusion_version_id": "",
+      "run_id": "run_000001",
+      "committed_version_id": "version_000001",
+      "class_schema": [
+       "低",
+       "中",
+       "高"
+      ],
+      "confidence_summary": {
+       "low_confidence_fraction": 0.18
+      },
+      "uncertainty_summary": {},
+      "conflicts": {
+       "high_conflict_fraction": 0.12
+      },
+      "revision_ids": [
+       "irev_000000000002"
+      ],
+      "last_committed_revision_id": "irev_000000000002",
+      "qa_report_ref": "",
+      "maturity": "draft",
+      "created_at": "2026-09-10T11:00:00",
+      "created_by": "expert",
+      "committed_at": "2026-09-10T12:00:00",
+      "active": true
+     }
+    ],
+    "final_revisions": [
+     {
+      "revision_id": "irev_000000000002",
+      "target_kind": "integrated_facies",
+      "target_layer_id": "L5",
+      "interpretation_id": "iint_000000000001",
+      "parent_revision_id": "",
+      "base_kind": "commit",
+      "base_version_id": "version_000001",
+      "evidence_refs": [
+       "factor:t:ver_1"
+      ],
+      "actor": "expert",
+      "created_at": "2026-09-10T12:00:00",
+      "content_fingerprint": "6f73d6fa95d3d65856d0260163a89b7411b26b25059d8dd130e63289c020d6a6",
+      "delta": {
+       "features": 3,
+       "vertices": 8
+      },
+      "note": "综合解释提交（commit → DERIVED 版本）"
+     }
+    ],
+    "last_version_id": "version_000001",
+    "raise": null,
+    "final_summary": {
+     "layer_id": "L5",
+     "status": "ok",
+     "interpretation_id": "iint_000000000001",
+     "name": "综合解释",
+     "input_set_id": "ciset_1",
+     "fusion_version_id": "ver_seed",
+     "committed_version_id": "version_000001",
+     "maturity": "draft",
+     "class_schema": [
+      "低",
+      "中",
+      "高"
+     ],
+     "confidence_summary": {
+      "low_confidence_fraction": 0.18
+     },
+     "conflicts": {
+      "high_conflict_fraction": 0.12
+     },
+     "has_uncommitted_edits": false,
+     "revisions": {
+      "layer_id": "L5",
+      "revisions": 1,
+      "first_revision_id": "irev_000000000002",
+      "latest_revision_id": "irev_000000000002",
+      "latest_actor": "expert",
+      "latest_created_at": "2026-09-10T12:00:00",
+      "base_kind": "commit",
+      "base_version_id": "version_000001",
+      "evidence_refs": [
+       "factor:t:ver_1"
+      ],
+      "delta": {
+       "features": 3,
+       "vertices": 8
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "commit_second",
+   "create": {
+    "name": "综合解释",
+    "layer_id": "L5",
+    "input_set_id": "ciset_1",
+    "fusion_version_id": "ver_seed",
+    "class_schema": [
+     "低",
+     "中",
+     "高"
+    ],
+    "confidence_summary": {
+     "low_confidence_fraction": 0.18
+    },
+    "conflicts": {
+     "high_conflict_fraction": 0.12
+    },
+    "created_by": "expert",
+    "created_at": "2026-09-10T11:00:00"
+   },
+   "commits": [
+    {
+     "layer": {
+      "features": [
+       {
+        "id": "f0",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0.0,
+            0.0
+           ],
+           [
+            1.0,
+            0.0
+           ],
+           [
+            1.0,
+            1.0
+           ],
+           [
+            0.0,
+            0.0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "class": "三角洲",
+         "rank": 2,
+         "ratio": 0.25
+        }
+       },
+       {
+        "feature_id": "pf1",
+        "id": "f1",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            2.0,
+            2.0
+           ],
+           [
+            3.0,
+            2.0
+           ],
+           [
+            3.0,
+            3.0
+           ],
+           [
+            2.0,
+            2.0
+           ]
+          ]
+         ]
+        },
+        "attributes": {
+         "class": "湖泊"
+        },
+        "properties": {
+         "class": "河道"
+        }
+       },
+       {
+        "id": "f2",
+        "properties": {
+         "note": "无几何要素"
+        }
+       }
+      ]
+     },
+     "actor": "expert",
+     "now": "2026-09-10T12:00:00",
+     "evidence_refs": [
+      "factor:t:ver_1"
+     ]
+    },
+    {
+     "layer": {
+      "features": [
+       {
+        "id": "f0",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0.0,
+            0.0
+           ],
+           [
+            1.0,
+            0.0
+           ],
+           [
+            1.0,
+            1.0
+           ],
+           [
+            0.0,
+            0.0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "class": "三角洲",
+         "rank": 2,
+         "ratio": 0.25
+        }
+       },
+       {
+        "feature_id": "pf1",
+        "id": "f1",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            2.0,
+            2.0
+           ],
+           [
+            3.0,
+            2.0
+           ],
+           [
+            3.0,
+            3.0
+           ],
+           [
+            2.0,
+            2.0
+           ]
+          ]
+         ]
+        },
+        "attributes": {
+         "class": "湖泊"
+        },
+        "properties": {
+         "class": "河道"
+        }
+       },
+       {
+        "id": "f2",
+        "properties": {
+         "note": "无几何要素"
+        }
+       },
+       {
+        "id": "fx",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            5.0,
+            5.0
+           ],
+           [
+            6.0,
+            5.0
+           ],
+           [
+            6.0,
+            6.0
+           ],
+           [
+            5.0,
+            5.0
+           ]
+          ]
+         ]
+        },
+        "properties": {}
+       }
+      ]
+     },
+     "actor": "expert-li",
+     "now": "t2"
+    }
+   ],
+   "fail_at": null,
+   "pre_append_revision": false,
+   "ids": [
+    "000000000001",
+    "000000000002",
+    "000000000003"
+   ],
+   "expect": {
+    "log": [
+     {
+      "method": "list_assets"
+     },
+     {
+      "method": "register_run",
+      "operation": "integrated_interpretation",
+      "input_version_ids": [
+       "ver_seed"
+      ],
+      "parameters": {
+       "interpretation_id": "iint_000000000001",
+       "layer_id": "L5",
+       "input_set_id": "ciset_1",
+       "n_features": 3,
+       "actor": "expert"
+      },
+      "generator": "interpretation-v9",
+      "status": "running"
+     },
+     {
+      "method": "register_result_asset",
+      "name": "interpretation:综合解释",
+      "type": "integrated_interpretation",
+      "format": "json",
+      "asset_metadata": {
+       "interpretation_id": "iint_000000000001"
+      },
+      "payload_text": "{\"class_schema\": [\"低\", \"中\", \"高\"], \"features\": [{\"geometry\": {\"coordinates\": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]], \"type\": \"Polygon\"}, \"id\": \"f0\", \"properties\": {\"class\": \"三角洲\", \"rank\": 2, \"ratio\": 0.25}}, {\"geometry\": {\"coordinates\": [[[2.0, 2.0], [3.0, 2.0], [3.0, 3.0], [2.0, 2.0]]], \"type\": \"Polygon\"}, \"id\": \"pf1\", \"properties\": {\"class\": \"湖泊\"}}, {\"geometry\": {}, \"id\": \"f2\", \"properties\": {\"note\": \"无几何要素\"}}], \"fusion_version_id\": \"ver_seed\", \"input_set_id\": \"ciset_1\", \"interpretation_id\": \"iint_000000000001\", \"layer_id\": \"L5\", \"schema\": 1}",
+      "stage": "derived",
+      "run_id": "run_000001",
+      "version_metadata": {
+       "interpretation_id": "iint_000000000001",
+       "actor": "expert"
+      },
+      "version_id": "version_000001"
+     },
+     {
+      "method": "update_run_status",
+      "run_id": "run_000001",
+      "status": "complete"
+     },
+     {
+      "method": "list_assets"
+     },
+     {
+      "method": "register_run",
+      "operation": "integrated_interpretation",
+      "input_version_ids": [
+       "ver_seed",
+       "version_000001"
+      ],
+      "parameters": {
+       "interpretation_id": "iint_000000000001",
+       "layer_id": "L5",
+       "input_set_id": "ciset_1",
+       "n_features": 4,
+       "actor": "expert-li"
+      },
+      "generator": "interpretation-v9",
+      "status": "running"
+     },
+     {
+      "method": "register_version",
+      "asset_id": "asset_000001",
+      "payload_text": "{\"class_schema\": [\"低\", \"中\", \"高\"], \"features\": [{\"geometry\": {\"coordinates\": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]], \"type\": \"Polygon\"}, \"id\": \"f0\", \"properties\": {\"class\": \"三角洲\", \"rank\": 2, \"ratio\": 0.25}}, {\"geometry\": {\"coordinates\": [[[2.0, 2.0], [3.0, 2.0], [3.0, 3.0], [2.0, 2.0]]], \"type\": \"Polygon\"}, \"id\": \"pf1\", \"properties\": {\"class\": \"湖泊\"}}, {\"geometry\": {}, \"id\": \"f2\", \"properties\": {\"note\": \"无几何要素\"}}, {\"geometry\": {\"coordinates\": [[[5.0, 5.0], [6.0, 5.0], [6.0, 6.0], [5.0, 5.0]]], \"type\": \"Polygon\"}, \"id\": \"fx\", \"properties\": {}}], \"fusion_version_id\": \"ver_seed\", \"input_set_id\": \"ciset_1\", \"interpretation_id\": \"iint_000000000001\", \"layer_id\": \"L5\", \"schema\": 1}",
+      "stage": "derived",
+      "parent_version_ids": [
+       "version_000001"
+      ],
+      "run_id": "run_000002",
+      "metadata": {
+       "interpretation_id": "iint_000000000001",
+       "actor": "expert-li"
+      },
+      "version_id": "version_000002"
+     },
+     {
+      "method": "update_run_status",
+      "run_id": "run_000002",
+      "status": "complete"
+     }
+    ],
+    "final_interpretations": [
+     {
+      "interpretation_id": "iint_000000000001",
+      "name": "综合解释",
+      "input_set_id": "ciset_1",
+      "layer_id": "L5",
+      "fusion_version_id": "ver_seed",
+      "latest_fusion_version_id": "",
+      "run_id": "run_000002",
+      "committed_version_id": "version_000002",
+      "class_schema": [
+       "低",
+       "中",
+       "高"
+      ],
+      "confidence_summary": {
+       "low_confidence_fraction": 0.18
+      },
+      "uncertainty_summary": {},
+      "conflicts": {
+       "high_conflict_fraction": 0.12
+      },
+      "revision_ids": [
+       "irev_000000000002",
+       "irev_000000000003"
+      ],
+      "last_committed_revision_id": "irev_000000000003",
+      "qa_report_ref": "",
+      "maturity": "draft",
+      "created_at": "2026-09-10T11:00:00",
+      "created_by": "expert",
+      "committed_at": "t2",
+      "active": true
+     }
+    ],
+    "final_revisions": [
+     {
+      "revision_id": "irev_000000000002",
+      "target_kind": "integrated_facies",
+      "target_layer_id": "L5",
+      "interpretation_id": "iint_000000000001",
+      "parent_revision_id": "",
+      "base_kind": "commit",
+      "base_version_id": "version_000001",
+      "evidence_refs": [
+       "factor:t:ver_1"
+      ],
+      "actor": "expert",
+      "created_at": "2026-09-10T12:00:00",
+      "content_fingerprint": "6f73d6fa95d3d65856d0260163a89b7411b26b25059d8dd130e63289c020d6a6",
+      "delta": {
+       "features": 3,
+       "vertices": 8
+      },
+      "note": "综合解释提交（commit → DERIVED 版本）"
+     },
+     {
+      "revision_id": "irev_000000000003",
+      "target_kind": "integrated_facies",
+      "target_layer_id": "L5",
+      "interpretation_id": "iint_000000000001",
+      "parent_revision_id": "irev_000000000002",
+      "base_kind": "commit",
+      "base_version_id": "version_000002",
+      "evidence_refs": [],
+      "actor": "expert-li",
+      "created_at": "t2",
+      "content_fingerprint": "486aa957649d415c82ea04806498bf66c22834c0b841869fafbd6d02fedaeeaf",
+      "delta": {
+       "features": 1,
+       "vertices": 4
+      },
+      "note": "综合解释提交（commit → DERIVED 版本）"
+     }
+    ],
+    "last_version_id": "version_000002",
+    "raise": null,
+    "final_summary": {
+     "layer_id": "L5",
+     "status": "ok",
+     "interpretation_id": "iint_000000000001",
+     "name": "综合解释",
+     "input_set_id": "ciset_1",
+     "fusion_version_id": "ver_seed",
+     "committed_version_id": "version_000002",
+     "maturity": "draft",
+     "class_schema": [
+      "低",
+      "中",
+      "高"
+     ],
+     "confidence_summary": {
+      "low_confidence_fraction": 0.18
+     },
+     "conflicts": {
+      "high_conflict_fraction": 0.12
+     },
+     "has_uncommitted_edits": false,
+     "revisions": {
+      "layer_id": "L5",
+      "revisions": 2,
+      "first_revision_id": "irev_000000000002",
+      "latest_revision_id": "irev_000000000003",
+      "latest_actor": "expert-li",
+      "latest_created_at": "t2",
+      "base_kind": "commit",
+      "base_version_id": "version_000002",
+      "evidence_refs": [],
+      "delta": {
+       "features": 1,
+       "vertices": 4
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "commit_fail_register_run",
+   "create": {
+    "name": "综合解释",
+    "layer_id": "L5",
+    "input_set_id": "ciset_1",
+    "fusion_version_id": "ver_seed",
+    "class_schema": [
+     "低",
+     "中",
+     "高"
+    ],
+    "confidence_summary": {
+     "low_confidence_fraction": 0.18
+    },
+    "conflicts": {
+     "high_conflict_fraction": 0.12
+    },
+    "created_by": "expert",
+    "created_at": "2026-09-10T11:00:00"
+   },
+   "commits": [
+    {
+     "layer": {
+      "features": [
+       {
+        "id": "f0",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0.0,
+            0.0
+           ],
+           [
+            1.0,
+            0.0
+           ],
+           [
+            1.0,
+            1.0
+           ],
+           [
+            0.0,
+            0.0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "class": "三角洲",
+         "rank": 2,
+         "ratio": 0.25
+        }
+       },
+       {
+        "feature_id": "pf1",
+        "id": "f1",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            2.0,
+            2.0
+           ],
+           [
+            3.0,
+            2.0
+           ],
+           [
+            3.0,
+            3.0
+           ],
+           [
+            2.0,
+            2.0
+           ]
+          ]
+         ]
+        },
+        "attributes": {
+         "class": "湖泊"
+        },
+        "properties": {
+         "class": "河道"
+        }
+       },
+       {
+        "id": "f2",
+        "properties": {
+         "note": "无几何要素"
+        }
+       }
+      ]
+     },
+     "actor": "expert",
+     "now": "t0"
+    }
+   ],
+   "fail_at": "register_run",
+   "pre_append_revision": false,
+   "ids": [
+    "000000000001"
+   ],
+   "expect": {
+    "log": [
+     {
+      "method": "list_assets"
+     },
+     {
+      "method": "register_run",
+      "operation": "integrated_interpretation",
+      "input_version_ids": [
+       "ver_seed"
+      ],
+      "parameters": {
+       "interpretation_id": "iint_000000000001",
+       "layer_id": "L5",
+       "input_set_id": "ciset_1",
+       "n_features": 3,
+       "actor": "expert"
+      },
+      "generator": "interpretation-v9",
+      "status": "running"
+     }
+    ],
+    "final_interpretations": [
+     {
+      "interpretation_id": "iint_000000000001",
+      "name": "综合解释",
+      "input_set_id": "ciset_1",
+      "layer_id": "L5",
+      "fusion_version_id": "ver_seed",
+      "latest_fusion_version_id": "",
+      "run_id": "",
+      "committed_version_id": "",
+      "class_schema": [
+       "低",
+       "中",
+       "高"
+      ],
+      "confidence_summary": {
+       "low_confidence_fraction": 0.18
+      },
+      "uncertainty_summary": {},
+      "conflicts": {
+       "high_conflict_fraction": 0.12
+      },
+      "revision_ids": [],
+      "last_committed_revision_id": "",
+      "qa_report_ref": "",
+      "maturity": "draft",
+      "created_at": "2026-09-10T11:00:00",
+      "created_by": "expert",
+      "committed_at": "",
+      "active": true
+     }
+    ],
+    "final_revisions": [],
+    "last_version_id": "",
+    "raise": {
+     "python_class": "RuntimeError",
+     "message": "catalog down"
+    }
+   }
+  },
+  {
+   "id": "commit_fail_after_run",
+   "create": {
+    "name": "综合解释",
+    "layer_id": "L5",
+    "input_set_id": "ciset_1",
+    "fusion_version_id": "ver_seed",
+    "class_schema": [
+     "低",
+     "中",
+     "高"
+    ],
+    "confidence_summary": {
+     "low_confidence_fraction": 0.18
+    },
+    "conflicts": {
+     "high_conflict_fraction": 0.12
+    },
+    "created_by": "expert",
+    "created_at": "2026-09-10T11:00:00"
+   },
+   "commits": [
+    {
+     "layer": {
+      "features": [
+       {
+        "id": "f0",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0.0,
+            0.0
+           ],
+           [
+            1.0,
+            0.0
+           ],
+           [
+            1.0,
+            1.0
+           ],
+           [
+            0.0,
+            0.0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "class": "三角洲",
+         "rank": 2,
+         "ratio": 0.25
+        }
+       },
+       {
+        "feature_id": "pf1",
+        "id": "f1",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            2.0,
+            2.0
+           ],
+           [
+            3.0,
+            2.0
+           ],
+           [
+            3.0,
+            3.0
+           ],
+           [
+            2.0,
+            2.0
+           ]
+          ]
+         ]
+        },
+        "attributes": {
+         "class": "湖泊"
+        },
+        "properties": {
+         "class": "河道"
+        }
+       },
+       {
+        "id": "f2",
+        "properties": {
+         "note": "无几何要素"
+        }
+       }
+      ]
+     },
+     "actor": "expert",
+     "now": "t0"
+    }
+   ],
+   "fail_at": "register_result_asset",
+   "pre_append_revision": false,
+   "ids": [
+    "000000000001"
+   ],
+   "expect": {
+    "log": [
+     {
+      "method": "list_assets"
+     },
+     {
+      "method": "register_run",
+      "operation": "integrated_interpretation",
+      "input_version_ids": [
+       "ver_seed"
+      ],
+      "parameters": {
+       "interpretation_id": "iint_000000000001",
+       "layer_id": "L5",
+       "input_set_id": "ciset_1",
+       "n_features": 3,
+       "actor": "expert"
+      },
+      "generator": "interpretation-v9",
+      "status": "running"
+     },
+     {
+      "method": "register_result_asset",
+      "name": "interpretation:综合解释",
+      "type": "integrated_interpretation",
+      "format": "json",
+      "asset_metadata": {
+       "interpretation_id": "iint_000000000001"
+      },
+      "payload_text": "{\"class_schema\": [\"低\", \"中\", \"高\"], \"features\": [{\"geometry\": {\"coordinates\": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]], \"type\": \"Polygon\"}, \"id\": \"f0\", \"properties\": {\"class\": \"三角洲\", \"rank\": 2, \"ratio\": 0.25}}, {\"geometry\": {\"coordinates\": [[[2.0, 2.0], [3.0, 2.0], [3.0, 3.0], [2.0, 2.0]]], \"type\": \"Polygon\"}, \"id\": \"pf1\", \"properties\": {\"class\": \"湖泊\"}}, {\"geometry\": {}, \"id\": \"f2\", \"properties\": {\"note\": \"无几何要素\"}}], \"fusion_version_id\": \"ver_seed\", \"input_set_id\": \"ciset_1\", \"interpretation_id\": \"iint_000000000001\", \"layer_id\": \"L5\", \"schema\": 1}",
+      "stage": "derived",
+      "run_id": "run_000001",
+      "version_metadata": {
+       "interpretation_id": "iint_000000000001",
+       "actor": "expert"
+      }
+     },
+     {
+      "method": "update_run_status",
+      "run_id": "run_000001",
+      "status": "failed"
+     }
+    ],
+    "final_interpretations": [
+     {
+      "interpretation_id": "iint_000000000001",
+      "name": "综合解释",
+      "input_set_id": "ciset_1",
+      "layer_id": "L5",
+      "fusion_version_id": "ver_seed",
+      "latest_fusion_version_id": "",
+      "run_id": "",
+      "committed_version_id": "",
+      "class_schema": [
+       "低",
+       "中",
+       "高"
+      ],
+      "confidence_summary": {
+       "low_confidence_fraction": 0.18
+      },
+      "uncertainty_summary": {},
+      "conflicts": {
+       "high_conflict_fraction": 0.12
+      },
+      "revision_ids": [],
+      "last_committed_revision_id": "",
+      "qa_report_ref": "",
+      "maturity": "draft",
+      "created_at": "2026-09-10T11:00:00",
+      "created_by": "expert",
+      "committed_at": "",
+      "active": true
+     }
+    ],
+    "final_revisions": [],
+    "last_version_id": "",
+    "raise": {
+     "python_class": "RuntimeError",
+     "message": "catalog down"
+    }
+   }
+  },
+  {
+   "id": "revision_link_double_append_guard",
+   "create": {
+    "name": "综合解释",
+    "layer_id": "L5",
+    "input_set_id": "ciset_1",
+    "fusion_version_id": "ver_seed",
+    "class_schema": [
+     "低",
+     "中",
+     "高"
+    ],
+    "confidence_summary": {
+     "low_confidence_fraction": 0.18
+    },
+    "conflicts": {
+     "high_conflict_fraction": 0.12
+    },
+    "created_by": "expert",
+    "created_at": "2026-09-10T11:00:00"
+   },
+   "commits": [
+    {
+     "layer": {
+      "features": [
+       {
+        "id": "f0",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            0.0,
+            0.0
+           ],
+           [
+            1.0,
+            0.0
+           ],
+           [
+            1.0,
+            1.0
+           ],
+           [
+            0.0,
+            0.0
+           ]
+          ]
+         ]
+        },
+        "properties": {
+         "class": "三角洲",
+         "rank": 2,
+         "ratio": 0.25
+        }
+       },
+       {
+        "feature_id": "pf1",
+        "id": "f1",
+        "geometry": {
+         "type": "Polygon",
+         "coordinates": [
+          [
+           [
+            2.0,
+            2.0
+           ],
+           [
+            3.0,
+            2.0
+           ],
+           [
+            3.0,
+            3.0
+           ],
+           [
+            2.0,
+            2.0
+           ]
+          ]
+         ]
+        },
+        "attributes": {
+         "class": "湖泊"
+        },
+        "properties": {
+         "class": "河道"
+        }
+       },
+       {
+        "id": "f2",
+        "properties": {
+         "note": "无几何要素"
+        }
+       }
+      ]
+     },
+     "actor": "expert",
+     "now": "t1",
+     "evidence_refs": [
+      "factor:t1:ver_2"
+     ]
+    }
+   ],
+   "fail_at": null,
+   "pre_append_revision": true,
+   "ids": [
+    "000000000001",
+    "000000000002"
+   ],
+   "expect": {
+    "log": [
+     {
+      "method": "list_assets"
+     },
+     {
+      "method": "register_run",
+      "operation": "integrated_interpretation",
+      "input_version_ids": [
+       "ver_seed"
+      ],
+      "parameters": {
+       "interpretation_id": "iint_000000000001",
+       "layer_id": "L5",
+       "input_set_id": "ciset_1",
+       "n_features": 3,
+       "actor": "expert"
+      },
+      "generator": "interpretation-v9",
+      "status": "running"
+     },
+     {
+      "method": "register_result_asset",
+      "name": "interpretation:综合解释",
+      "type": "integrated_interpretation",
+      "format": "json",
+      "asset_metadata": {
+       "interpretation_id": "iint_000000000001"
+      },
+      "payload_text": "{\"class_schema\": [\"低\", \"中\", \"高\"], \"features\": [{\"geometry\": {\"coordinates\": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]], \"type\": \"Polygon\"}, \"id\": \"f0\", \"properties\": {\"class\": \"三角洲\", \"rank\": 2, \"ratio\": 0.25}}, {\"geometry\": {\"coordinates\": [[[2.0, 2.0], [3.0, 2.0], [3.0, 3.0], [2.0, 2.0]]], \"type\": \"Polygon\"}, \"id\": \"pf1\", \"properties\": {\"class\": \"湖泊\"}}, {\"geometry\": {}, \"id\": \"f2\", \"properties\": {\"note\": \"无几何要素\"}}], \"fusion_version_id\": \"ver_seed\", \"input_set_id\": \"ciset_1\", \"interpretation_id\": \"iint_000000000001\", \"layer_id\": \"L5\", \"schema\": 1}",
+      "stage": "derived",
+      "run_id": "run_000001",
+      "version_metadata": {
+       "interpretation_id": "iint_000000000001",
+       "actor": "expert"
+      },
+      "version_id": "version_000001"
+     },
+     {
+      "method": "update_run_status",
+      "run_id": "run_000001",
+      "status": "complete"
+     }
+    ],
+    "final_interpretations": [
+     {
+      "interpretation_id": "iint_000000000001",
+      "name": "综合解释",
+      "input_set_id": "ciset_1",
+      "layer_id": "L5",
+      "fusion_version_id": "ver_seed",
+      "latest_fusion_version_id": "",
+      "run_id": "run_000001",
+      "committed_version_id": "version_000001",
+      "class_schema": [
+       "低",
+       "中",
+       "高"
+      ],
+      "confidence_summary": {
+       "low_confidence_fraction": 0.18
+      },
+      "uncertainty_summary": {},
+      "conflicts": {
+       "high_conflict_fraction": 0.12
+      },
+      "revision_ids": [
+       "irev_000000000002"
+      ],
+      "last_committed_revision_id": "irev_000000000002",
+      "qa_report_ref": "",
+      "maturity": "draft",
+      "created_at": "2026-09-10T11:00:00",
+      "created_by": "expert",
+      "committed_at": "t1",
+      "active": true
+     }
+    ],
+    "final_revisions": [
+     {
+      "revision_id": "irev_000000000002",
+      "target_kind": "integrated_facies",
+      "target_layer_id": "L5",
+      "interpretation_id": "iint_000000000001",
+      "parent_revision_id": "",
+      "base_kind": "commit",
+      "base_version_id": "version_000001",
+      "evidence_refs": [
+       "factor:t1:ver_2"
+      ],
+      "actor": "expert",
+      "created_at": "t1",
+      "content_fingerprint": "6f73d6fa95d3d65856d0260163a89b7411b26b25059d8dd130e63289c020d6a6",
+      "delta": {
+       "features": 3,
+       "vertices": 8
+      },
+      "note": "综合解释提交（commit → DERIVED 版本）"
+     }
+    ],
+    "last_version_id": "version_000001",
+    "raise": null,
+    "final_summary": {
+     "layer_id": "L5",
+     "status": "ok",
+     "interpretation_id": "iint_000000000001",
+     "name": "综合解释",
+     "input_set_id": "ciset_1",
+     "fusion_version_id": "ver_seed",
+     "committed_version_id": "version_000001",
+     "maturity": "draft",
+     "class_schema": [
+      "低",
+      "中",
+      "高"
+     ],
+     "confidence_summary": {
+      "low_confidence_fraction": 0.18
+     },
+     "conflicts": {
+      "high_conflict_fraction": 0.12
+     },
+     "has_uncommitted_edits": false,
+     "revisions": {
+      "layer_id": "L5",
+      "revisions": 1,
+      "first_revision_id": "irev_000000000002",
+      "latest_revision_id": "irev_000000000002",
+      "latest_actor": "expert",
+      "latest_created_at": "t1",
+      "base_kind": "commit",
+      "base_version_id": "version_000001",
+      "evidence_refs": [
+       "factor:t1:ver_2"
+      ],
+      "delta": {
+       "features": 3,
+       "vertices": 8
+      }
+     }
+    }
+   }
+  }
+ ],
+ "summary_missing": {
+  "id": "summary_missing",
+  "layer_id": "nope",
+  "expect": {
+   "layer_id": "nope",
+   "status": "missing",
+   "detail": "无综合解释记录（旧工程或未创建）"
+  }
+ }
+}

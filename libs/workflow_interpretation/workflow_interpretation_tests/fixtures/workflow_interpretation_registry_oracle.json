@@ -1,0 +1,1068 @@
+{
+ "cases": [
+  {
+   "id": "case01_label_alias_resolution",
+   "fn": "capabilities_resolve",
+   "input": {
+    "methods": [
+     " IDW ",
+     "反距离加权",
+     "克里金(mvp·线性)"
+    ]
+   },
+   "expect": {
+    "results": [
+     {
+      "method": "idw",
+      "label": "IDW 反距离加权"
+     },
+     {
+      "method": "idw",
+      "label": "IDW 反距离加权"
+     },
+     {
+      "method": "kriging",
+      "label": "普通克里金"
+     }
+    ]
+   }
+  },
+  {
+   "id": "case02_keyerror_message",
+   "fn": "capabilities_for",
+   "input": {
+    "method": "nope"
+   },
+   "expect": {
+    "raise": {
+     "python_class": "KeyError",
+     "message": "unknown interpolation method 'nope'; known: ['constrained_idw', 'directional', 'idw', 'kriging', 'linear', 'nearest', 'rbf', 'spline']",
+     "str": "\"unknown interpolation method 'nope'; known: ['constrained_idw', 'directional', 'idw', 'kriging', 'linear', 'nearest', 'rbf', 'spline']\""
+    }
+   }
+  },
+  {
+   "id": "case03_default_cell_and_rbf_prereq",
+   "fn": "capabilities_for",
+   "input": {
+    "method": "rbf"
+   },
+   "expect": {
+    "result": {
+     "method": "rbf",
+     "label": "RBF 多二次",
+     "prerequisites": [
+      "g",
+      "l",
+      "o",
+      "b",
+      "a",
+      "l",
+      " ",
+      "s",
+      "o",
+      "l",
+      "v",
+      "e",
+      ";",
+      " ",
+      "n",
+      "o",
+      "t",
+      " ",
+      "r",
+      "e",
+      "a",
+      "c",
+      "h",
+      "a",
+      "b",
+      "l",
+      "e",
+      " ",
+      "f",
+      "r",
+      "o",
+      "m",
+      " ",
+      "t",
+      "h",
+      "e",
+      " ",
+      "U",
+      "I",
+      " ",
+      "m",
+      "e",
+      "t",
+      "h",
+      "o",
+      "d",
+      " ",
+      "l",
+      "i",
+      "s",
+      "t"
+     ],
+     "for_kind": {
+      "boundary_mask": [
+       "partial",
+       "clips to the samples' convex hull; a user-drawn boundary ring is not honored"
+      ],
+      "barrier": [
+       "unsupported",
+       "not consumed by this method"
+      ],
+      "direction": [
+       "unsupported",
+       "not consumed by this method"
+      ],
+      "anisotropy": [
+       "unsupported",
+       "not consumed by this method"
+      ],
+      "trend": [
+       "unsupported",
+       "not consumed by this method"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "case04_kriging_unsupported_diagnostics",
+   "fn": "evaluate_request",
+   "input": {
+    "method": "kriging",
+    "requested": [
+     "barrier",
+     "trend"
+    ],
+    "strict": false
+   },
+   "expect": {
+    "result": {
+     "method": "kriging",
+     "requested_constraints": [
+      "barrier",
+      "trend"
+     ],
+     "applied_constraints": [],
+     "partial_constraints": [],
+     "ignored_constraints": [],
+     "unsupported_constraints": [
+      "barrier",
+      "trend"
+     ],
+     "constraint_diagnostics": [
+      "barrier:unsupported:普通克里金 ignores barrier — the surface will NOT reflect this constraint",
+      "trend:unsupported:普通克里金 ignores trend — the surface will NOT reflect this constraint"
+     ]
+    },
+    "honest": true,
+    "diagnostics_labels": [
+     "barrier",
+     "trend"
+    ]
+   }
+  },
+  {
+   "id": "case05_strict_violation",
+   "fn": "evaluate_request",
+   "input": {
+    "method": "kriging",
+    "requested": [
+     "barrier",
+     "trend"
+    ],
+    "strict": true
+   },
+   "expect": {
+    "raise": {
+     "python_class": "ConstraintViolationError",
+     "message": "method 'kriging' cannot honor the requested constraints:; unsupported: barrier, trend",
+     "str": "method 'kriging' cannot honor the requested constraints:; unsupported: barrier, trend",
+     "method": "kriging",
+     "unsupported": [
+      "barrier",
+      "trend"
+     ],
+     "ignored": []
+    }
+   }
+  },
+  {
+   "id": "case06_constrained_idw_all_kinds",
+   "fn": "evaluate_request",
+   "input": {
+    "method": "constrained_idw",
+    "requested": [
+     "boundary_mask",
+     "barrier",
+     "direction",
+     "anisotropy",
+     "trend"
+    ],
+    "strict": false
+   },
+   "expect": {
+    "result": {
+     "method": "constrained_idw",
+     "requested_constraints": [
+      "boundary_mask",
+      "barrier",
+      "direction",
+      "anisotropy",
+      "trend"
+     ],
+     "applied_constraints": [
+      "boundary_mask",
+      "barrier",
+      "direction",
+      "trend"
+     ],
+     "partial_constraints": [
+      "anisotropy"
+     ],
+     "ignored_constraints": [],
+     "unsupported_constraints": [],
+     "constraint_diagnostics": [
+      "anisotropy:partial:anisotropy ratio floored at 16 by the host adapter (documented)"
+     ]
+    },
+    "honest": true,
+    "diagnostics_labels": [
+     "anisotropy"
+    ]
+   }
+  },
+  {
+   "id": "case07_spline_partial",
+   "fn": "evaluate_request",
+   "input": {
+    "method": "spline",
+    "requested": [
+     "boundary_mask",
+     "barrier"
+    ],
+    "strict": false
+   },
+   "expect": {
+    "result": {
+     "method": "spline",
+     "requested_constraints": [
+      "boundary_mask",
+      "barrier"
+     ],
+     "applied_constraints": [],
+     "partial_constraints": [
+      "boundary_mask"
+     ],
+     "ignored_constraints": [],
+     "unsupported_constraints": [
+      "barrier"
+     ],
+     "constraint_diagnostics": [
+      "boundary_mask:partial:clips to the samples' convex hull; a user-drawn boundary ring is not honored",
+      "barrier:unsupported:样条 (CloughTocher) ignores barrier — the surface will NOT reflect this constraint"
+     ]
+    },
+    "honest": true,
+    "diagnostics_labels": [
+     "barrier",
+     "boundary_mask"
+    ]
+   }
+  },
+  {
+   "id": "case08_dedupe_requested",
+   "fn": "evaluate_request",
+   "input": {
+    "method": "idw",
+    "requested": [
+     "barrier",
+     "barrier",
+     "trend",
+     "barrier"
+    ],
+    "strict": false
+   },
+   "expect": {
+    "result": {
+     "method": "idw",
+     "requested_constraints": [
+      "barrier",
+      "trend"
+     ],
+     "applied_constraints": [
+      "barrier"
+     ],
+     "partial_constraints": [],
+     "ignored_constraints": [],
+     "unsupported_constraints": [
+      "trend"
+     ],
+     "constraint_diagnostics": [
+      "trend:unsupported:IDW 反距离加权 ignores trend — the surface will NOT reflect this constraint"
+     ]
+    },
+    "honest": true,
+    "diagnostics_labels": [
+     "trend"
+    ]
+   }
+  },
+  {
+   "id": "case09_empty_requested_strict",
+   "fn": "evaluate_request",
+   "input": {
+    "method": "kriging",
+    "requested": [],
+    "strict": true
+   },
+   "expect": {
+    "result": {
+     "method": "kriging",
+     "requested_constraints": [],
+     "applied_constraints": [],
+     "partial_constraints": [],
+     "ignored_constraints": [],
+     "unsupported_constraints": [],
+     "constraint_diagnostics": []
+    },
+    "honest": true,
+    "diagnostics_labels": []
+   }
+  },
+  {
+   "id": "case10_alias_method_and_invalid_kind",
+   "fn": "evaluate_request_two",
+   "input": {
+    "ok": {
+     "method": "样条",
+     "requested": [
+      "boundary_mask"
+     ],
+     "strict": false
+    },
+    "invalid": {
+     "method": "idw",
+     "requested": [
+      "bogus"
+     ],
+     "strict": false
+    }
+   },
+   "expect": {
+    "ok": {
+     "result": {
+      "method": "spline",
+      "requested_constraints": [
+       "boundary_mask"
+      ],
+      "applied_constraints": [],
+      "partial_constraints": [
+       "boundary_mask"
+      ],
+      "ignored_constraints": [],
+      "unsupported_constraints": [],
+      "constraint_diagnostics": [
+       "boundary_mask:partial:clips to the samples' convex hull; a user-drawn boundary ring is not honored"
+      ]
+     },
+     "honest": true,
+     "diagnostics_labels": [
+      "boundary_mask"
+     ]
+    },
+    "invalid": {
+     "raise": {
+      "python_class": "ValueError",
+      "message": "'bogus' is not a valid ConstraintKind",
+      "str": "'bogus' is not a valid ConstraintKind"
+     }
+    }
+   }
+  },
+  {
+   "id": "case11_unknown_method_propagates",
+   "fn": "evaluate_request",
+   "input": {
+    "method": "nope",
+    "requested": [],
+    "strict": false
+   },
+   "expect": {
+    "raise": {
+     "python_class": "KeyError",
+     "message": "unknown interpolation method 'nope'; known: ['constrained_idw', 'directional', 'idw', 'kriging', 'linear', 'nearest', 'rbf', 'spline']",
+     "str": "\"unknown interpolation method 'nope'; known: ['constrained_idw', 'directional', 'idw', 'kriging', 'linear', 'nearest', 'rbf', 'spline']\""
+    }
+   }
+  },
+  {
+   "id": "case12_to_dict_kriging",
+   "fn": "algorithm_to_dict",
+   "input": {
+    "algorithm_id": "kriging"
+   },
+   "expect": {
+    "result": {
+     "algorithm_id": "kriging",
+     "family": "interpolation",
+     "display_label": "克里金",
+     "ui_label": "克里金",
+     "aliases": [
+      "克里金",
+      "克里金(MVP·线性)",
+      "ordinary_kriging",
+      "ok"
+     ],
+     "parameter_schema": {
+      "type": "object",
+      "properties": {
+       "grid_n": {
+        "type": "integer",
+        "minimum": 8,
+        "maximum": 2000
+       },
+       "variogram_model": {
+        "type": "string",
+        "enum": [
+         "spherical",
+         "exponential",
+         "gaussian"
+        ]
+       }
+      }
+     },
+     "supported_constraints": {
+      "anisotropy": [
+       "supported",
+       "geometric anisotropy: azimuth + major/minor ratio via the anisotropic variogram transform (V6 §11)"
+      ]
+     },
+     "supports_cancel": true,
+     "requires_crs": true,
+     "requires_unit": false,
+     "produces_uncertainty": true,
+     "backend": "kriging",
+     "prerequisites": [
+      "≥3 non-collocated samples"
+     ]
+    }
+   }
+  },
+  {
+   "id": "case13_to_dict_linear",
+   "fn": "algorithm_to_dict",
+   "input": {
+    "algorithm_id": "linear"
+   },
+   "expect": {
+    "result": {
+     "algorithm_id": "linear",
+     "family": "interpolation",
+     "display_label": "线性插值",
+     "ui_label": "线性插值",
+     "aliases": [
+      "线性插值",
+      "linear"
+     ],
+     "parameter_schema": {},
+     "supported_constraints": {
+      "boundary_mask": [
+       "partial",
+       "clips to the samples' convex hull; a user-drawn boundary ring is not honored"
+      ]
+     },
+     "supports_cancel": true,
+     "requires_crs": true,
+     "requires_unit": false,
+     "produces_uncertainty": false,
+     "backend": "",
+     "prerequisites": []
+    }
+   }
+  },
+  {
+   "id": "case14_to_dict_factor_fusion",
+   "fn": "algorithm_to_dict",
+   "input": {
+    "algorithm_id": "factor_fusion"
+   },
+   "expect": {
+    "result": {
+     "algorithm_id": "factor_fusion",
+     "family": "fusion",
+     "display_label": "多因素证据融合",
+     "ui_label": "多因素证据融合",
+     "aliases": [
+      "factor_fusion",
+      "融合",
+      "多因素融合",
+      "weighted_evidence"
+     ],
+     "parameter_schema": {
+      "type": "object",
+      "properties": {
+       "kind": {
+        "type": "string",
+        "enum": [
+         "weighted_evidence",
+         "rule_based"
+        ]
+       },
+       "class_thresholds": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        }
+       }
+      }
+     },
+     "supported_constraints": {},
+     "supports_cancel": true,
+     "requires_crs": true,
+     "requires_unit": false,
+     "produces_uncertainty": true,
+     "backend": "factor_fusion",
+     "prerequisites": []
+    }
+   }
+  },
+  {
+   "id": "case15_constraint_support_projection",
+   "fn": "algorithm_constraint_support",
+   "input": {
+    "algorithm_id": "idw",
+    "kinds": [
+     "barrier",
+     "trend",
+     "boundary_mask"
+    ]
+   },
+   "expect": {
+    "result": {
+     "barrier": [
+      "supported",
+      "break lines zero node→sample weights across the barrier segment"
+     ],
+     "trend": [
+      "unsupported",
+      "not consumed by this method"
+     ],
+     "boundary_mask": [
+      "unsupported",
+      "not consumed by this method"
+     ]
+    }
+   }
+  },
+  {
+   "id": "case16_alias_canonicalization",
+   "fn": "canonical_algorithm_id",
+   "input": {
+    "refs": [
+     "OK",
+     "Constrained IDW",
+     "样条插值",
+     "克里金(MVP·线性)",
+     "factor_fusion",
+     " RBF "
+    ]
+   },
+   "expect": {
+    "outcomes": [
+     {
+      "ok": "kriging"
+     },
+     {
+      "ok": "constrained_idw"
+     },
+     {
+      "ok": "spline"
+     },
+     {
+      "ok": "kriging"
+     },
+     {
+      "ok": "factor_fusion"
+     },
+     {
+      "ok": "rbf"
+     }
+    ]
+   }
+  },
+  {
+   "id": "case17_empty_ref",
+   "fn": "canonical_algorithm_id",
+   "input": {
+    "refs": [
+     ""
+    ]
+   },
+   "expect": {
+    "outcomes": [
+     {
+      "raise": {
+       "python_class": "ValueError",
+       "message": "empty algorithm reference",
+       "str": "empty algorithm reference"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "case18_unknown_ref_repr",
+   "fn": "canonical_algorithm_id",
+   "input": {
+    "refs": [
+     " nope "
+    ]
+   },
+   "expect": {
+    "outcomes": [
+     {
+      "raise": {
+       "python_class": "ValueError",
+       "message": "unknown algorithm: ' nope '",
+       "str": "unknown algorithm: ' nope '"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "case19_get_algorithm_strip_only",
+   "fn": "get_algorithm",
+   "input": {
+    "refs": [
+     " kriging ",
+     "克里金",
+     "",
+     "factor_fusion"
+    ]
+   },
+   "expect": {
+    "results": [
+     {
+      "algorithm_id": "kriging",
+      "family": "interpolation"
+     },
+     null,
+     null,
+     {
+      "algorithm_id": "factor_fusion",
+      "family": "fusion"
+     }
+    ]
+   }
+  },
+  {
+   "id": "case20_ui_lists",
+   "fn": "ui_lists",
+   "input": {},
+   "expect": {
+    "methods": [
+     "克里金",
+     "IDW",
+     "约束IDW",
+     "样条",
+     "方向趋势"
+    ],
+    "labels": {
+     "克里金": "kriging",
+     "IDW": "idw",
+     "约束IDW": "constrained_idw",
+     "样条": "spline",
+     "方向趋势": "directional"
+    },
+    "algorithm_ids": [
+     "kriging",
+     "idw",
+     "constrained_idw",
+     "spline",
+     "directional",
+     "linear",
+     "nearest",
+     "rbf",
+     "factor_fusion"
+    ]
+   }
+  },
+  {
+   "id": "case21_display_label",
+   "fn": "display_label",
+   "input": {
+    "refs": [
+     "ok",
+     "RBF 多二次"
+    ]
+   },
+   "expect": {
+    "results": [
+     "克里金",
+     "RBF 多二次"
+    ]
+   }
+  },
+  {
+   "id": "case22_register_replace_semantics",
+   "fn": "register_semantics",
+   "input": {},
+   "expect": {
+    "steps": [
+     "size_before=9",
+     "canonical[Custom Thing]=test.custom",
+     "canonical[替换前]=test.custom",
+     "size_after_register=10",
+     "canonical[custom thing]=ValueError:unknown algorithm: 'custom thing'",
+     "canonical[替换后]=test.custom",
+     "size_after_replace=10"
+    ]
+   }
+  },
+  {
+   "id": "case23_capability_matrix",
+   "fn": "capability_matrix",
+   "input": {},
+   "expect": {
+    "matrix": {
+     "idw": {
+      "label": "IDW 反距离加权",
+      "prerequisites": [],
+      "constraints": {
+       "boundary_mask": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "barrier": {
+        "support": "supported",
+        "notes": "break lines zero node→sample weights across the barrier segment"
+       },
+       "direction": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "anisotropy": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "trend": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       }
+      }
+     },
+     "constrained_idw": {
+      "label": "约束IDW",
+      "prerequisites": [
+       "scipy"
+      ],
+      "constraints": {
+       "boundary_mask": {
+        "support": "supported",
+        "notes": "rasterized domain = boundary rings − holes ∩ coverage ∩ hull"
+       },
+       "barrier": {
+        "support": "supported",
+        "notes": "hard line-of-sight barrier + region partitioning + blank corridor"
+       },
+       "direction": {
+        "support": "supported",
+        "notes": "curve-coordinate corridor anisotropy along direction lines"
+       },
+       "anisotropy": {
+        "support": "partial",
+        "notes": "anisotropy ratio floored at 16 by the host adapter (documented)"
+       },
+       "trend": {
+        "support": "supported",
+        "notes": "declustering weights (q honored via corridor; b_i not consumed)"
+       }
+      }
+     },
+     "kriging": {
+      "label": "普通克里金",
+      "prerequisites": [
+       "≥3 non-collocated samples"
+      ],
+      "constraints": {
+       "boundary_mask": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "barrier": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "direction": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "anisotropy": {
+        "support": "supported",
+        "notes": "geometric anisotropy: azimuth + major/minor ratio via the anisotropic variogram transform (V6 §11)"
+       },
+       "trend": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       }
+      }
+     },
+     "spline": {
+      "label": "样条 (CloughTocher)",
+      "prerequisites": [
+       "scipy"
+      ],
+      "constraints": {
+       "boundary_mask": {
+        "support": "partial",
+        "notes": "clips to the samples' convex hull; a user-drawn boundary ring is not honored"
+       },
+       "barrier": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "direction": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "anisotropy": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "trend": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       }
+      }
+     },
+     "linear": {
+      "label": "线性插值",
+      "prerequisites": [],
+      "constraints": {
+       "boundary_mask": {
+        "support": "partial",
+        "notes": "clips to the samples' convex hull; a user-drawn boundary ring is not honored"
+       },
+       "barrier": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "direction": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "anisotropy": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "trend": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       }
+      }
+     },
+     "nearest": {
+      "label": "最近邻",
+      "prerequisites": [],
+      "constraints": {
+       "boundary_mask": {
+        "support": "partial",
+        "notes": "clips to the samples' convex hull; a user-drawn boundary ring is not honored"
+       },
+       "barrier": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "direction": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "anisotropy": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "trend": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       }
+      }
+     },
+     "rbf": {
+      "label": "RBF 多二次",
+      "prerequisites": [
+       "g",
+       "l",
+       "o",
+       "b",
+       "a",
+       "l",
+       " ",
+       "s",
+       "o",
+       "l",
+       "v",
+       "e",
+       ";",
+       " ",
+       "n",
+       "o",
+       "t",
+       " ",
+       "r",
+       "e",
+       "a",
+       "c",
+       "h",
+       "a",
+       "b",
+       "l",
+       "e",
+       " ",
+       "f",
+       "r",
+       "o",
+       "m",
+       " ",
+       "t",
+       "h",
+       "e",
+       " ",
+       "U",
+       "I",
+       " ",
+       "m",
+       "e",
+       "t",
+       "h",
+       "o",
+       "d",
+       " ",
+       "l",
+       "i",
+       "s",
+       "t"
+      ],
+      "constraints": {
+       "boundary_mask": {
+        "support": "partial",
+        "notes": "clips to the samples' convex hull; a user-drawn boundary ring is not honored"
+       },
+       "barrier": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "direction": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "anisotropy": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "trend": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       }
+      }
+     },
+     "directional": {
+      "label": "方向趋势",
+      "prerequisites": [],
+      "constraints": {
+       "boundary_mask": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "barrier": {
+        "support": "unsupported",
+        "notes": "not consumed by this method"
+       },
+       "direction": {
+        "support": "partial",
+        "notes": "multi-line anisotropy averaged into one global azimuth"
+       },
+       "anisotropy": {
+        "support": "partial",
+        "notes": "azimuth + semi-axes honored; global single corridor"
+       },
+       "trend": {
+        "support": "supported",
+        "notes": "per-sample q/b_i weights multiply the Gaussian kernel"
+       }
+      }
+     }
+    },
+    "key_order": [
+     "idw",
+     "constrained_idw",
+     "kriging",
+     "spline",
+     "linear",
+     "nearest",
+     "rbf",
+     "directional"
+    ],
+    "idw_constraints_order": [
+     "boundary_mask",
+     "barrier",
+     "direction",
+     "anisotropy",
+     "trend"
+    ]
+   }
+  },
+  {
+   "id": "case24_honest_and_diagnostics_labels",
+   "fn": "evaluate_request",
+   "input": {
+    "method": "directional",
+    "requested": [
+     "direction",
+     "anisotropy",
+     "trend",
+     "barrier"
+    ],
+    "strict": false
+   },
+   "expect": {
+    "result": {
+     "method": "directional",
+     "requested_constraints": [
+      "direction",
+      "anisotropy",
+      "trend",
+      "barrier"
+     ],
+     "applied_constraints": [
+      "trend"
+     ],
+     "partial_constraints": [
+      "direction",
+      "anisotropy"
+     ],
+     "ignored_constraints": [],
+     "unsupported_constraints": [
+      "barrier"
+     ],
+     "constraint_diagnostics": [
+      "direction:partial:multi-line anisotropy averaged into one global azimuth",
+      "anisotropy:partial:azimuth + semi-axes honored; global single corridor",
+      "barrier:unsupported:方向趋势 ignores barrier — the surface will NOT reflect this constraint"
+     ]
+    },
+    "honest": true,
+    "diagnostics_labels": [
+     "anisotropy",
+     "barrier",
+     "direction"
+    ]
+   }
+  }
+ ]
+}

@@ -142,8 +142,14 @@ std::vector<std::string> search_assets_scan(const CatalogDocument& document,
     if (!tag_list.empty()) {
         std::vector<std::set<std::string>> per_tag;
         for (const auto& tag : tag_list) {
-            std::set<std::string> ids(find_assets_by_tag(document, tag).begin(),
-                                      find_assets_by_tag(document, tag).end());
+            // CONV-31b Wave3 fix: the two-iterator range constructor must
+            // span ONE object — calling find_assets_by_tag twice handed
+            // begin/end from two DIFFERENT temporaries (the first died
+            // mid-construction; UB, crashed on the first tag-filtered
+            // scan). Materialize once, then build the set.
+            const std::vector<std::string> owned =
+                find_assets_by_tag(document, tag);
+            std::set<std::string> ids(owned.begin(), owned.end());
             per_tag.push_back(std::move(ids));
         }
         std::set<std::string> tagged;
