@@ -1,7 +1,7 @@
 # 14 — acceptance ledger
 
-Status: EVIDENCE COMPLETE pending commit/PR. Numbers below are final for
-this branch; the PR URL lands after push.
+Status: DELIVERED. Commit e00ff1a6 on base 06211541 (origin/main verified
+unchanged at push time). PR: https://github.com/WindWang2/paleo-workbench/pull/1413
 
 ## Acceptance criteria (from task text)
 
@@ -31,7 +31,10 @@ this branch; the PR URL lands after push.
       gitignored, LOWs fixed (comment hardening, MSVC block removal,
       vestigial include) or accepted (unconditional version lookup —
       matches old behavior).
-- [ ] Branch pushed; PR against current main — pending.
+- [x] Branch pushed (`codex/cpp-close-14-performance-audit-20260919`,
+      head e00ff1a6); PR #1413 opened against main@06211541 with workflow
+      deltas, scope, dependencies, test commands/results, resource limits,
+      and the real limitations listed.
 
 ## Evidence index
 
