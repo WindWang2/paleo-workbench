@@ -2,9 +2,11 @@
 
 #include <QList>
 
+#include <qgscoordinatetransform.h>
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
+#include <qgsrectangle.h>
 #include <qgsvectorlayer.h>
 #include <qgslayertree.h>
 #include <qgslayertreemapcanvasbridge.h>
@@ -12,8 +14,10 @@
 #include <qgslayertreemodel.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsmaplayer.h>
+#include <qgsexception.h>
 #include <qgserror.h>
 
+#include <pwb/domain/json.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 
 namespace pwb::qgis {
@@ -106,12 +110,81 @@ QgsVectorLayer* MapSession::vectorLayerById(const std::string& layer_id) const {
 
 std::vector<std::string> MapSession::layerIdsTopFirst() const {
     std::vector<std::string> order;
+    if (project_ == nullptr) return order;   // closed session
     const QList<QgsMapLayer*> layers = project_->layerTreeRoot()->layerOrder();
     for (QgsMapLayer* layer : layers) {
         if (layer == nullptr || !layer->isSpatial()) continue;
         order.push_back(layer_adapter::layer_id_of(layer));
     }
     return order;
+}
+
+std::string MapSession::canvas_state_json() const {
+    pwb::domain::Json state = pwb::domain::Json::object();
+    if (project_ == nullptr) return state.dump();
+
+    const QgsCoordinateReferenceSystem project_crs = project_->crs();
+    state["crs"] = project_crs.authid().toStdString();
+
+    // Extent: first live canvas, else the visible spatial-layer union
+    // transformed into the project CRS; null when neither exists.
+    QgsRectangle extent;
+    bool has_extent = false;
+    for (const QPointer<QgsMapCanvas>& canvas : canvases_) {
+        if (canvas == nullptr) continue;
+        extent = canvas->extent();
+        has_extent = !extent.isEmpty();
+        break;
+    }
+    if (!has_extent) {
+        for (QgsMapLayer* layer : project_->layerTreeRoot()->layerOrder()) {
+            if (layer == nullptr || !layer->isSpatial()) continue;
+            QgsLayerTreeLayer* node =
+                project_->layerTreeRoot()->findLayer(layer);
+            if (node == nullptr || !node->isVisible()) continue;
+            QgsRectangle box = layer->extent();
+            if (box.isEmpty()) continue;
+            if (layer->crs() != project_crs && layer->crs().isValid()
+                && project_crs.isValid()) {
+                QgsCoordinateTransform transform(
+                    layer->crs(), project_crs, project_->transformContext());
+                try {
+                    box = transform.transformBoundingBox(box);
+                } catch (const QgsCsException&) {
+                    continue;  // untransformable layer: honest extent gap
+                }
+            }
+            if (has_extent) {
+                extent.combineExtentWith(box);
+            } else {
+                extent = box;
+                has_extent = true;
+            }
+        }
+    }
+    if (has_extent) {
+        state["extent"] = pwb::domain::Json::array(
+            {extent.xMinimum(), extent.yMinimum(), extent.xMaximum(),
+             extent.yMaximum()});
+    } else {
+        state["extent"] = nullptr;
+    }
+
+    pwb::domain::Json layers = pwb::domain::Json::array();
+    for (QgsMapLayer* layer : project_->layerTreeRoot()->layerOrder()) {
+        if (layer == nullptr || !layer->isSpatial()) continue;
+        QgsLayerTreeLayer* node = project_->layerTreeRoot()->findLayer(layer);
+        const std::string id = layer_adapter::layer_id_of(layer);
+        layers.push_back(pwb::domain::Json::object(
+            {{"id", id.empty() ? layer->id().toStdString() : id},
+             {"visible", node != nullptr && node->isVisible()}}));
+    }
+    state["layers"] = layers;
+    // The plain QgsMapCanvas draws no grid overlay; the layer tree panel is
+    // the on-screen legend equivalent.
+    state["grid"] = false;
+    state["legend"] = !trees_.empty();
+    return state.dump();
 }
 
 void MapSession::setDestinationCrs(const std::string& auth_id, std::string* error) {

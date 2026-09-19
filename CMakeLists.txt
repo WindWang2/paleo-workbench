@@ -189,6 +189,32 @@ if(PWB_BUILD_PREDICTION_RUNTIME)
 endif()
 # END PREDICTION-RUNTIME
 
+# BEGIN CONV-29 — composer/layout/export C++ closure: the Qt-free
+# layout-export behavior kernel (build_layout_spec, hybrid classification,
+# legend mirror gates, pixel budget, report, screen/export parity) in
+# libs/layout_export, the composition export service + shared wire-spec
+# executor wired into libs/qgis, and the platform export dialog upgrade.
+# Requires the CONV-02 composition document kernel and Pwb::Domain, so the
+# implied switches land BEFORE the CONV-02 and PWB_BUILD_DATA blocks below.
+option(PWB_BUILD_CONV_29
+    "Build the CONV-29 composer/layout/export C++ chain (libs/layout_export + libs/qgis service + app wiring; implies PWB_BUILD_CONV_02 + PWB_BUILD_DATA + PWB_BUILD_PLATFORM)" OFF)
+if(PWB_BUILD_CONV_29)
+    if(NOT PWB_BUILD_DATA)
+        message(STATUS "CONV-29: enabling PWB_BUILD_DATA (Pwb::Domain closure)")
+        set(PWB_BUILD_DATA ON)
+    endif()
+    if(NOT PWB_BUILD_CONV_02)
+        message(STATUS "CONV-29: enabling PWB_BUILD_CONV_02 (composition document kernel)")
+        set(PWB_BUILD_CONV_02 ON)
+    endif()
+    if(NOT PWB_BUILD_PLATFORM)
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_29=ON requires PWB_BUILD_PLATFORM=ON "
+            "(the slice wires CompositionLayoutService into the platform)")
+    endif()
+endif()
+# END CONV-29
+
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
 # error, never a silent skip (protocol: independent validation).
@@ -316,6 +342,13 @@ if(PWB_BUILD_CONV_02)
     add_subdirectory(libs/mapping_document)
 endif()
 # END CONV-02
+# BEGIN CONV-29
+# The layout-export behavior kernel consumes Pwb::MappingDocument, so the
+# subdirectory lands right after the CONV-02 one.
+if(PWB_BUILD_CONV_29)
+    add_subdirectory(libs/layout_export)
+endif()
+# END CONV-29
 # BEGIN CONV-06
 # WorkflowSpec DAG pure model + validator (M7 leaf; Qt-free, QGIS-free).
 # Requires Pwb::Domain (ordered JSON + sha256) from PWB_BUILD_DATA=ON.

@@ -15,7 +15,8 @@ if(PALEO_WITH_QGIS_RENDERER)
         message(FATAL_ERROR "PALEO_WITH_QGIS_RENDERER requires the vendored QGIS source at ${PALEO_QGIS_SOURCE_DIR}")
     endif()
 
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml Svg)
+    # PrintSupport: qgslayoutexporter.h (layout_spec_exec) pulls QPrinter.
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml Svg PrintSupport)
 
     set(PALEO_QGIS_OUTPUT_DIR "${PALEO_QGIS_BUILD_DIR}/output")
     set(PALEO_QGIS_LIBRARY_DIR "${PALEO_QGIS_OUTPUT_DIR}/lib")
@@ -91,6 +92,7 @@ if(PALEO_WITH_QGIS_RENDERER)
 
     add_library(qgis_render_bridge_core STATIC
         src/qgis_render_bridge.cpp
+        src/layout_spec_exec.cpp
         src/style_codec.cpp
         src/gui_service.cpp
         src/geometry_service.cpp
@@ -106,6 +108,42 @@ if(PALEO_WITH_QGIS_RENDERER)
         "${PALEO_QGIS_BUILD_DIR}"
         "${PALEO_QGIS_BUILD_DIR}/src/core"
     )
+    # QGIS headers include their bundled/external dependencies unqualified
+    # (nlohmann/json_fwd.hpp, qwt, spatialindex) plus gui/analysis headers
+    # (map tools, layout gui) — the same set the vendor build used. (Same
+    # fix as the PwbQgisSdk platform path; keep content identical.)
+    # gui/analysis headers live in component subdirectories (maptools,
+    # symbology, ...) and include each other unqualified — mirror the full
+    # source-header search path, like the PwbQgisSdk platform target does.
+    if(NOT PWB_BRIDGE_DEPS_PREFIX)
+        set(PWB_BRIDGE_DEPS_PREFIX "/home/kevin/pwb-sdks/root/usr" CACHE PATH
+            "Deps prefix holding the geos/gdal headers the vendored QGIS headers pull in unqualified")
+    endif()
+    foreach(_bridge_component gui analysis)
+        file(GLOB_RECURSE _bridge_${_bridge_component}_headers CONFIGURE_DEPENDS
+            "${PALEO_QGIS_SOURCE_DIR}/src/${_bridge_component}/*.h"
+            "${PALEO_QGIS_SOURCE_DIR}/src/${_bridge_component}/*.hpp")
+        foreach(_bridge_header IN LISTS _bridge_${_bridge_component}_headers)
+            get_filename_component(_bridge_dir "${_bridge_header}" DIRECTORY)
+            target_include_directories(qgis_render_bridge_core SYSTEM PUBLIC
+                "${_bridge_dir}")
+        endforeach()
+    endforeach()
+    target_include_directories(qgis_render_bridge_core SYSTEM PUBLIC
+        "${PALEO_QGIS_SOURCE_DIR}/external/nlohmann"
+        "${PALEO_QGIS_SOURCE_DIR}/external/spatialindex/include"
+        "${PALEO_QGIS_BUILD_DIR}/src/gui"
+        "${PALEO_QGIS_BUILD_DIR}/src/analysis"
+        "${PALEO_QGIS_BUILD_DIR}/src/ui"   # uic-generated ui_*.h (dock widgets)
+        "${PWB_BRIDGE_DEPS_PREFIX}/include"
+        "${PWB_BRIDGE_DEPS_PREFIX}/include/qt6"  # Qsci etc. alongside Qt6
+    )
+    file(GLOB _bridge_qwt_dir "${PALEO_QGIS_SOURCE_DIR}/external/qwt-*")
+    if(_bridge_qwt_dir)
+        list(GET _bridge_qwt_dir 0 _bridge_qwt_first)
+        target_include_directories(qgis_render_bridge_core SYSTEM PUBLIC
+            "${_bridge_qwt_first}")
+    endif()
     target_include_directories(qgis_render_bridge_core PUBLIC src)
     target_compile_features(qgis_render_bridge_core PUBLIC cxx_std_20)
     target_compile_definitions(qgis_render_bridge_core PRIVATE
@@ -120,6 +158,7 @@ if(PALEO_WITH_QGIS_RENDERER)
         Qt6::Widgets
         Qt6::Xml
         Qt6::Svg
+        Qt6::PrintSupport
     )
     set_target_properties(qgis_render_bridge_core PROPERTIES
         BUILD_RPATH "${PALEO_QGIS_LIBRARY_DIR}"

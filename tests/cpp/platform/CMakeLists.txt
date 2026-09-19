@@ -74,6 +74,11 @@ pwb_add_platform_test(qgis_smoke test_qgis_smoke.cpp)
 pwb_add_platform_test(edit_cycle test_edit_cycle.cpp)
 pwb_add_platform_test(lifecycle_cycles test_lifecycle.cpp)
 pwb_add_platform_test(export_layout test_export.cpp)
+# BEGIN CONV-29
+if(PWB_BUILD_CONV_29)
+    pwb_add_platform_test(composition_export test_composition_export.cpp)
+endif()
+# END CONV-29
 pwb_add_platform_test(adapters_substitutes test_adapters.cpp)
 
 # Composition-root unit battery (native-product closure): service audit +

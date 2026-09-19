@@ -57,6 +57,15 @@ public:
     QgsVectorLayer* vectorLayerById(const std::string& layer_id) const;
     std::vector<std::string> layerIdsTopFirst() const;
 
+    // CONV-29: screen-state snapshot for export parity. Shape:
+    // {"extent":[xmin,ymin,xmax,ymax]|null, "crs": authid,
+    //  "layers":[{"id","visible"}...] (top-first), "grid": false,
+    //  "legend": <has an on-screen layer tree>}.
+    // Extent comes from the first live canvas, else the visible spatial
+    // layer union transformed into the project CRS; null when neither
+    // exists. "grid": false — the plain QgsMapCanvas draws no grid overlay.
+    std::string canvas_state_json() const;
+
     // Canvas helpers.
     void setDestinationCrs(const std::string& auth_id, std::string* error);
     void refreshCanvases();

@@ -58,8 +58,9 @@
   Ordinary Kriging 核，19 冻结案例全过）→ polygonization
   （✅ 第三片已落地：栅格描边 + 洞归属 + 分类，24 冻结案例，
   坐标 diff 0；shapely repair / clip 未移植）→ pipeline.py 编排
-  （✅ extract_factors 已落地，22 冻结案例；MapDocument/composer 仍
-  Python）→ factor_layer_products/well_prediction_surface
+  （✅ extract_factors 已落地，22 冻结案例；MapDocument 已移植
+  （CONV-02）；composer 行为层已移植（CONV-29：build_layout_spec/导出
+  报告/parity/fail-closed，renderer/export.py 归 oracle-only））→ factor_layer_products/well_prediction_surface
   （✅ nearest_neighbor_class_grid 已落地，10 冻结案例，含 inclusive
   PIP 与 even-odd 边界分歧；factor_layer_products 仍是描述符胶水）。
 - **M7 工作流引擎核**（workflow/ 2.8 万行中引擎部分：定义/执行器/
@@ -147,5 +148,7 @@
   相等、增量均值、worst-flag、well_id 拼接）。oracle 8 + 14 案例。
   测试 `mapping_kernel.grid_stats` / `mapping_kernel.sample_norm`。
   门禁 56/56 ×2。
-- 待办：pipeline MapDocument/composer 仍 Python；M7 DAG 定义（非
+- 待办：pipeline MapDocument 数据核已闭（CONV-02）；composer 行为层已闭
+  （CONV-29，composer/renderer+export 为 legacy/oracle）；构图编辑器
+  UI（registry/templates/components）仍 Python。M7 DAG 定义（非
   TaskRuntime）；其后 M8-M12。
