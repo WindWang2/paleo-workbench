@@ -31,6 +31,7 @@ CommitCoordinator::CommitCoordinator(
 
 std::vector<CommitCoordinator::JournalRecord>
 CommitCoordinator::load_journals() const {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::vector<JournalRecord> records;
     std::error_code ec;
     if (!fs::is_directory(journal_dir_, ec)) return records;
@@ -130,6 +131,7 @@ CommitCoordinator::load_journals() const {
 
 std::optional<CommitCoordinator::JournalRecord>
 CommitCoordinator::find_journal(const domain::OperationId& operation_id) const {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     for (const auto& record : load_journals()) {
         if (record.operation_id == operation_id.str()) return record;
     }
@@ -192,6 +194,7 @@ domain::DataError CommitCoordinator::write_journal(const Json& journal) {
 
 Result<CommitReceiptV1> CommitCoordinator::commit(
     const CommitRequestV1& request, project::ProjectDocument& document) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     // ---- Idempotency: same operation id → replay the recorded receipt.
     if (auto existing = find_journal(request.operation_id)) {
         if (existing->kind == JournalKind::RunPublish) {
@@ -660,6 +663,7 @@ std::optional<Diagnostic> CommitCoordinator::pending_conflict(
 
 RecoveryReportV1 CommitCoordinator::recover(
     project::ProjectDocument& document) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     RecoveryReportV1 report;
     for (auto& record : load_journals()) {
         if (record.phase == JournalPhase::Completed ||

@@ -146,6 +146,12 @@
 #include "viz_a_install.hpp"
 #endif
 
+#ifdef PWB_WITH_GEO3D_VIZ
+// VIZ-C: JobCenter* travels through a dynamic property; QVariant needs
+// the metatype declared at global scope (outside namespace pwb::app).
+Q_DECLARE_METATYPE(pwb::app::JobCenter*)
+#endif
+
 namespace pwb::app {
 
 pwb::application::ProjectSession* MainWindow::session() const {
@@ -438,6 +444,11 @@ void MainWindow::buildUi() {
             [this](const QString& well) {
                 statusBar()->showMessage(tr("3D 选中井: %1").arg(well), 5000);
             });
+    // VIZ-C: expose the JobCenter so the dock's joint host (created
+    // lazily on first use) can submit volume-load jobs.
+    setProperty("pwb_job_center",
+                QVariant::fromValue(static_cast<pwb::app::JobCenter*>(
+                    job_center_.get())));
 #endif
 // END CONV-GEO3D
 
@@ -2403,14 +2414,12 @@ std::string next_segy_import_id() {
     return "segy-import-" + std::to_string(counter++);
 }
 
-// Stages the imported volume into the project and publishes it through B's
-// run lifecycle (register -> payload -> publish -> manifest). Called on the
-// GUI thread only (the catalog store has no documented cross-thread lease).
-std::string publish_segy_import(pwb::application::PwbDataStore& store,
-                                const QString& path,
-                                const std::string& import_id,
-                                pwb::seismic_io::SegyVolume volume,
-                                std::string* error) {
+// Stages the imported volume as a PWBVOL1 payload file. Pure file I/O —
+// safe on any thread (#1380: the job's worker runs this half).
+std::filesystem::path stage_segy_import_payload(
+    const std::filesystem::path& project_dir, const QString& path,
+    const std::string& import_id, pwb::seismic_io::SegyVolume volume,
+    std::string* error) {
     pwb::application::VolumePayload payload;
     payload.header.ni = static_cast<std::uint32_t>(volume.ni);
     payload.header.nc = static_cast<std::uint32_t>(volume.nc);
@@ -2429,8 +2438,6 @@ std::string publish_segy_import(pwb::application::PwbDataStore& store,
     payload.header.request_id = import_id;
     payload.samples = std::move(volume.samples);
 
-    const std::filesystem::path project_dir =
-        store.project_file().parent_path();
     const std::filesystem::path staged_dir = project_dir / ".pwb-imports";
     std::error_code ec;
     std::filesystem::create_directories(staged_dir, ec);
@@ -2440,9 +2447,19 @@ std::string publish_segy_import(pwb::application::PwbDataStore& store,
         pwb::application::write_volume_payload(payload, staged_path);
     if (!write_error.empty()) {
         if (error != nullptr) *error = write_error;
-        return "";
+        return {};
     }
+    return staged_path;
+}
 
+// Publishes an already-staged import through B's run lifecycle (register ->
+// publish -> manifest). GUI thread only since #1380: the store is now
+// serialized internally, but publishing on the GUI thread keeps the
+// documented lease and avoids racing window teardown from a detached job.
+std::string publish_staged_segy_import(
+    pwb::application::PwbDataStore& store, const QString& path,
+    const std::string& import_id, const std::filesystem::path& staged_path,
+    std::string* error) {
     const pwb::domain::RunId run_id{std::string("run_") + import_id};
     pwb::data::RunRegistrationV1 registration;
     registration.run_id = run_id;
@@ -2535,22 +2552,19 @@ std::string MainWindow::importSegyProgressed(
     if (!volume.has_value()) return "";
     if (cancelled()) return "";
     progress(0.45, tr("写入 PWBVOL1 载荷…"));
-    const std::string version = publish_segy_import(
-        *context_.projectStore(), path, import_id,
-        std::move(volume.value()), error);
+    const std::filesystem::path staged_path = stage_segy_import_payload(
+        context_.projectStore()->project_file().parent_path(), path,
+        import_id, std::move(volume.value()), error);
+    if (staged_path.empty()) return "";
+    progress(0.7, tr("发布到工程目录…"));
+    const std::string version = publish_staged_segy_import(
+        *context_.projectStore(), path, import_id, staged_path, error);
     if (!version.empty()) progress(0.95, tr("完成"));
     return version;
 }
 #endif
 
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
-namespace {
-// Type-erased job result of one SEG-Y import (carried in JobOutcome).
-struct SegyImportResult {
-    std::string version_id;
-    std::string error;
-};
-}  // namespace
 
 void MainWindow::importSegyDialog() {
     const QString path = QFileDialog::getOpenFileName(
@@ -2563,6 +2577,11 @@ void MainWindow::importSegyDialog() {
         return;
     }
 
+    // Declared ahead of the branch macros: the CONV-30 job path returns
+    // early (it opens the viewer in its finished callback), while the
+    // service/sync branches assign it here — the trailing viewer/status
+    // block must compile in every configuration.
+    std::string version_id;
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — the import runs as a job: non-modal progress, cooperative
     // cancel, close/quit safe.
@@ -2604,9 +2623,14 @@ void MainWindow::importSegyDialog() {
     }
     const std::string import_id = next_segy_import_id();
     std::string publish_error;
-    const std::string version_id = publish_segy_import(
-        *context_.projectStore(), path, import_id,
-        std::move(volume.value()), &publish_error);
+    const std::filesystem::path staged_path = stage_segy_import_payload(
+        context_.projectStore()->project_file().parent_path(), path,
+        import_id, std::move(volume.value()), &publish_error);
+    if (!staged_path.empty()) {
+        version_id = publish_staged_segy_import(
+            *context_.projectStore(), path, import_id, staged_path,
+            &publish_error);
+    }
     if (version_id.empty()) {
         QMessageBox::warning(this, tr("导入 SEG-Y"),
                              QString::fromStdString(publish_error));
@@ -2614,7 +2638,7 @@ void MainWindow::importSegyDialog() {
     }
 #else
     std::string error;
-    const std::string version_id = importSegy(path, &error);
+    version_id = importSegy(path, &error);
     if (version_id.empty()) {
         QMessageBox::warning(this, tr("导入 SEG-Y"),
                              QString::fromStdString(error));
@@ -2634,6 +2658,17 @@ void MainWindow::importSegyDialog() {
 }
 
 #ifdef PWB_WITH_CONV_30
+// Type-erased job result of one SEG-Y import (carried in JobOutcome).
+struct SegyImportResult {
+    std::string version_id;
+    std::string error;
+    // Worker half output (#1380): the staged payload file is fully written
+    // off the GUI thread; only catalog publication remains for the GUI
+    // finished callback.
+    std::string import_id;
+    std::string staged_path;
+};
+
 void MainWindow::submitSegyJob(const QString& path) {
     auto* progress = new QProgressDialog(tr("导入 SEG-Y…"), tr("取消"),
                                          0, 100, this);
@@ -2645,25 +2680,63 @@ void MainWindow::submitSegyJob(const QString& path) {
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
                      &pwb::job::qtbridge::JobOwner::cancel);
     const auto alive = job_center_->alive();
+    // #1380: capture the store the import belongs to (never resolve it on
+    // the worker after a project switch — that would publish into the wrong
+    // project). The shared_ptr also keeps the store alive if the project is
+    // closed while the job runs.
+    const std::shared_ptr<pwb::application::PwbDataStore> store =
+        context_.projectStore();
+    const std::string import_id = next_segy_import_id();
+    const std::filesystem::path source_path(path.toStdWString());
+    const std::filesystem::path project_dir =
+        store != nullptr ? store->project_file().parent_path()
+                         : std::filesystem::path{};
     pwb::job::JobSpec spec;
     spec.kind = "background.io";
     spec.title = "SEG-Y 导入";
-    spec.run = [this, path, alive](pwb::job::JobContext& ctx) -> std::any {
-        std::string error;
-        const std::string version_id = importSegyProgressed(
-            path, &error,
-            [&ctx, alive] {
-                return ctx.token().is_cancelled() || !alive->load();
-            },
-            [&ctx](double ratio, const QString& message) {
-                ctx.report_progress(ratio, std::nullopt,
-                                    message.toStdString());
-            });
-        return SegyImportResult{version_id, error};
+    // collect(GUI) happened above; compute(worker) is read + stage only —
+    // no MainWindow members, no store calls (#1380: catalog writes stay on
+    // the GUI thread); apply(GUI) publishes in the finished callback.
+    spec.run = [store, project_dir, source_path, import_id, alive, path](
+                   pwb::job::JobContext& ctx) -> std::any {
+        SegyImportResult result;
+        result.import_id = import_id;
+        if (store == nullptr) {
+            result.error = "未打开工程（SEG-Y 导入需要工程目录）";
+            return result;
+        }
+        ctx.report_progress(0.05, std::nullopt, "读取 SEG-Y…");
+        pwb::seismic_io::CancelFlag flag;
+        std::atomic<bool> read_done{false};
+        const auto cancelled = [&ctx, alive] {
+            return ctx.token().is_cancelled() || !alive->load();
+        };
+        std::thread bridge([&flag, &read_done, &cancelled] {
+            while (!read_done.load(std::memory_order_relaxed)) {
+                if (cancelled()) {
+                    flag.cancel();
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        });
+        auto volume = pwb::seismic_io::read_segy(source_path, &result.error,
+                                                 flag);
+        read_done.store(true, std::memory_order_relaxed);
+        bridge.join();
+        if (!volume.has_value() || cancelled()) return result;
+        ctx.report_progress(0.45, std::nullopt, "写入 PWBVOL1 载荷…");
+        const std::filesystem::path staged = stage_segy_import_payload(
+            project_dir, path, import_id, std::move(volume.value()),
+            &result.error);
+        if (staged.empty()) return result;
+        result.staged_path = staged.generic_string();
+        return result;
     };
     owner.start(
         job_center_->scheduler(), std::move(spec),
-        [this, progress](const pwb::job::qtbridge::JobOutcome& outcome) {
+        [this, progress, store, path](
+            const pwb::job::qtbridge::JobOutcome& outcome) {
             progress->deleteLater();
             if (outcome.state == pwb::job::JobState::cancelled) {
                 // Partial artifacts stay on disk (crash-safe contract).
@@ -2672,12 +2745,11 @@ void MainWindow::submitSegyJob(const QString& path) {
             }
             const auto* result =
                 std::any_cast<SegyImportResult>(&outcome.result);
-            if (result == nullptr || result->version_id.empty()) {
+            if (result == nullptr || result->staged_path.empty()) {
                 const std::string detail =
                     result != nullptr && !result->error.empty()
                         ? result->error
-                        : (result != nullptr ? result->error
-                                             : outcome.error);
+                        : outcome.error;
                 QMessageBox::warning(
                     this, tr("导入 SEG-Y"),
                     QString::fromStdString(
@@ -2685,9 +2757,29 @@ void MainWindow::submitSegyJob(const QString& path) {
                                        : detail));
                 return;
             }
+            // apply(GUI): catalog publication on the GUI thread, into the
+            // project the import was submitted for.
+            std::string publish_error;
+            std::string version_id;
+            if (store != nullptr) {
+                version_id = publish_staged_segy_import(
+                    *store, path, result->import_id,
+                    std::filesystem::path(result->staged_path),
+                    &publish_error);
+            } else {
+                publish_error = "工程已关闭，无法发布导入结果";
+            }
+            if (version_id.empty()) {
+                QMessageBox::warning(
+                    this, tr("导入 SEG-Y"),
+                    QString::fromStdString(
+                        publish_error.empty()
+                            ? std::string("unknown failure")
+                            : publish_error));
+                return;
+            }
 #if defined(PWB_WITH_SEISMIC_VIEWER)
-            const QString view_error =
-                openVolumeVersion(result->version_id);
+            const QString view_error = openVolumeVersion(version_id);
             if (!view_error.isEmpty()) {
                 QMessageBox::warning(this, tr("导入 SEG-Y"), view_error);
                 return;
@@ -2695,7 +2787,7 @@ void MainWindow::submitSegyJob(const QString& path) {
 #endif
             statusBar()->showMessage(
                 tr("SEG-Y 已导入：%1")
-                    .arg(QString::fromStdString(result->version_id)),
+                    .arg(QString::fromStdString(version_id)),
                 10000);
         },
         [progress](double ratio, const QString& message) {
@@ -2869,6 +2961,12 @@ pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {
     // CRS straight from the map authority.
     in.project_crs = context_.session().map().project()->crs().authid().toStdString();
     // Horizon: the store document's stratigraphy section when open.
+    // NOTE (#1380 audit, review B): this GUI-side document() read is
+    // unsynchronized against worker publishes that carry rebind_layer
+    // (they mutate the document under the coordinator lock). No current
+    // publish path sets rebind_layer, so today the GUI is the sole
+    // writer; adding one requires routing this read through a locked
+    // projection first.
 #ifdef PWB_WITH_DATA_INTEGRATION
     if (context_.projectStore() != nullptr) {
         const pwb::project::ProjectDocument& document =

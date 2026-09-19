@@ -13,7 +13,10 @@
 // the input geometry (axis units/origin/step — ProducedVolume carries only
 // data+shape) and the input catalog version ids BEFORE submit. publish()
 // is called on the worker thread by C's runtime; it touches no GUI. The
-// WritableSession is used from the publishing worker only (single-writer).
+// store it publishes through (PwbDataStore -> CommitCoordinator /
+// CatalogRepository) serializes every write internally since #1380/#1381,
+// so worker-thread publication is safe against concurrent GUI commits on
+// the same store.
 
 #include <map>
 #include <mutex>

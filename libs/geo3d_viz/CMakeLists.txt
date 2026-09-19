@@ -46,6 +46,14 @@ if(NOT TARGET Pwb::GeoModel)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../geomodel
                      ${CMAKE_CURRENT_BINARY_DIR}/geomodel)
 endif()
+# BEGIN VIZ-C — joint well-seismic scene (plan V4): the survey layer
+# reuses seismic_io's oracle-frozen BinGridGeometry/VolumeDescriptor
+# instead of re-deriving bin-grid math.
+if(NOT TARGET Pwb::SeismicIo)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../seismic_io
+                     ${CMAKE_CURRENT_BINARY_DIR}/seismic_io)
+endif()
+# END VIZ-C
 
 add_library(pwb_geo3d_viz STATIC
     src/scene_object_manager.cpp
@@ -57,6 +65,18 @@ add_library(pwb_geo3d_viz STATIC
     # live in include/, not next to the sources).
     include/pwb/geo3d_viz/workspace_controller.hpp
     include/pwb/geo3d_viz/geo3d_viewport_widget.hpp
+    # VIZ-C joint well-seismic scene (Qt-free cores).
+    src/joint/joint_types.cpp
+    src/joint/depth_transform.cpp
+    src/joint/survey.cpp
+    src/joint/registration.cpp
+    src/joint/well_geometry.cpp
+    src/joint/volume_access.cpp
+    src/joint/fence.cpp
+    src/joint/probe.cpp
+    src/joint/color_scales.cpp
+    src/joint/joint_scene.cpp
+    src/joint/segy_survey.cpp
 )
 add_library(Pwb::Geo3DViz ALIAS pwb_geo3d_viz)
 set_target_properties(pwb_geo3d_viz PROPERTIES
@@ -75,6 +95,7 @@ target_link_libraries(pwb_geo3d_viz
     PUBLIC
         Pwb::GeoModel
         Pwb::Domain
+        Pwb::SeismicIo
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets

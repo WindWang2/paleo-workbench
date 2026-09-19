@@ -61,6 +61,10 @@ namespace pwb::app {
 class FactorStatsDock;
 }
 #endif
+#ifdef PWB_WITH_GEO3D_VIZ
+// Defined at global scope in geo3d_dock.hpp (CONV-GEO3D wiring).
+class Geo3DDock;
+#endif
 
 namespace pwb::application {
 class AlgorithmRunner;
@@ -85,9 +89,6 @@ class AppShell;
 #endif
 #ifdef PWB_WITH_CONV_16
 class FactorStatsDock;
-#endif
-#ifdef PWB_WITH_GEO3D_VIZ
-class Geo3DDock;
 #endif
 
 // BEGIN VIZ-B
@@ -171,8 +172,11 @@ public:
 #endif
 #ifdef PWB_WITH_CONV_30
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
-    // Non-modal import: wires importSegyProgressed into the job runtime
-    // with a cancellable progress dialog (window-close and app-quit safe).
+    // Non-modal import (collect/compute/apply, #1380): the job reads and
+    // stages the PWBVOL1 payload off the GUI thread; catalog publication
+    // runs in the GUI finished callback against the store captured at
+    // submit (window-close and app-quit safe; cancel keeps partial
+    // artifacts on disk).
     void submitSegyJob(const QString& path);
 #endif
 #endif

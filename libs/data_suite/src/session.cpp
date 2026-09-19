@@ -16,12 +16,13 @@ domain::Result<WritableSession> WritableSession::open(
             "project is read-only (future schema) — a writable session "
             "refuses to open it");
     }
-    catalog::CatalogRepository repository(
+    catalog::CatalogRepository probe(
         pwb::project::catalog_sqlite_for(project_file));
-    auto writable = repository.open_read_write();
+    auto writable = probe.open_read_write();
     if (!writable.is_ok()) return writable.error();
     auto impl = std::make_unique<Impl>(std::move(manager),
-                                       std::move(repository),
+                                       pwb::project::catalog_sqlite_for(
+                                           project_file),
                                        std::move(loaded.value().document));
     return WritableSession(std::move(impl));
 }

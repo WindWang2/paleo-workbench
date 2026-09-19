@@ -789,6 +789,14 @@ if(PWB_BUILD_PLATFORM)
     endif()
 endif()
 
+# BEGIN VIZ-C — store concurrency regression (#1380/#1381). Tests
+# degrade out when the store closure is absent (kernel-only configure);
+# never a hard dependency.
+if(BUILD_TESTING AND TARGET Pwb::Application)
+    add_subdirectory(tests/cpp/viz_c)
+endif()
+# END VIZ-C
+
 # BEGIN UI-04 — core page-worker ports (libs/ui_workers): the Qt-free C++
 # halves of the seven PySide6 worker modules in paleo_workbench/ui/pages.
 # No new switch: the library joins every configuration that resolves the
@@ -1084,6 +1092,62 @@ if(BUILD_TESTING AND TARGET Pwb::Ingest AND TARGET Pwb::UiWorkers)
     add_subdirectory(tests/cpp/viz_a)
 endif()
 # END VIZ-A
+
+# BEGIN VIZ-C-host — joint well-seismic host wiring (plan V4). Runs AFTER
+# UI-09: the host implements the #1394 JointHostController seam from
+# Pwb::UiWellseisQt, which joins the build later than
+# apps/paleo_workbench_platform — an existence check inside the app
+# directory would silently skip the host (never a fake seam).
+if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
+   AND TARGET Pwb::SeismicService AND TARGET Pwb::UiWellseisQt)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/viz_c_joint_host.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::UiWellseisQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_UI_WELLSEIS=1)
+
+    # Runnable production seam: real PWBVOL1 through the tiled service
+    # into the joint scene (frozen seismic_io oracle fixture; override by
+    # passing a volume path).
+    set(VIZ_C_EXAMPLE_VOLUME
+        "${CMAKE_CURRENT_SOURCE_DIR}/libs/seismic_io/seismic_io_tests/fixtures/io_oracle_bins.sgy")
+    if(EXISTS "${VIZ_C_EXAMPLE_VOLUME}")
+        message(STATUS "VIZ-C: joint example volume fixture found")
+        add_executable(viz_c_joint_example
+            apps/paleo_workbench_platform/examples/viz_c_joint_example.cpp
+            apps/paleo_workbench_platform/viz_c_joint_host.cpp
+            apps/paleo_workbench_platform/job_center.cpp
+            apps/paleo_workbench_platform/viz_c_joint_volume.cpp
+            apps/paleo_workbench_platform/viz_c_time_map.cpp)
+        if(UNIX AND NOT APPLE)
+            # Soft X11 probe (broken-GLX hosts install an X error guard);
+            # a missing SDK only drops that guard, never the build.
+            find_package(X11)
+            if(X11_FOUND)
+                target_link_libraries(viz_c_joint_example PRIVATE X11::X11)
+                target_compile_definitions(viz_c_joint_example PRIVATE
+                    VIZ_C_HAVE_X11=1)
+            endif()
+        endif()
+        set_target_properties(viz_c_joint_example PROPERTIES AUTOMOC ON)
+        target_compile_features(viz_c_joint_example PRIVATE cxx_std_20)
+        target_link_libraries(viz_c_joint_example PRIVATE
+            Pwb::Geo3DViz Pwb::SeismicService Pwb::UiWellseisQt
+            Pwb::JobQt Pwb::Visualization Pwb::SeismicIo
+            Qt6::Widgets)
+        target_include_directories(viz_c_joint_example PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/apps/paleo_workbench_platform)
+        target_compile_definitions(viz_c_joint_example PRIVATE
+            VIZ_C_EXAMPLE_VOLUME="${VIZ_C_EXAMPLE_VOLUME}"
+            PWB_WITH_UI_WELLSEIS=1)
+        if(MSVC)
+            target_compile_options(viz_c_joint_example PRIVATE /utf-8 /W3)
+        else()
+            target_compile_options(viz_c_joint_example PRIVATE
+                -Wall -Wextra)
+        endif()
+    endif()
+endif()
+# END VIZ-C-host
 
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
