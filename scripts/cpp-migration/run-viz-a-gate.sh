@@ -46,14 +46,15 @@ VIZ_A_ARGS="-DPWB_BUILD_PLATFORM=OFF;-DPWB_BUILD_SCIENCE=ON;-DPWB_SCIENCE_BUILD_
 VIZ_A_REGEX='^(viz_a\.|science\.viewer\.|ingest\.|ui_workers\.)'
 
 gate() {
-    # Run one gate action, retrying ONLY on exit 75 (slot busy / low
-    # memory) with a 30-60s backoff. Any other non-zero status propagates.
-    # The status must be captured via `|| code=$?` — an `if cmd; then`
-    # compound swallows it.
+    # Run one gate action VERBATIM (callers pass their own -j/-m BEFORE any
+    # `--` payload; the gate appends nothing — for Exec, appended flags
+    # would land inside the wrapped command). Retry ONLY on exit 75 (slot
+    # busy / low memory) with a 30-60s backoff; any other non-zero status
+    # propagates via `|| code=$?` (an `if cmd; then` compound swallows it).
     local attempt=0 code=0
     while true; do
         code=0
-        "$GATE" "$@" -j "$JOBS" -m 8 || code=$?
+        "$GATE" "$@" || code=$?
         if [[ "$code" -eq 0 ]]; then
             return 0
         fi
@@ -76,30 +77,30 @@ must() {
 }
 
 echo "== [1/7] Configure build/viz-a (viewer ON, jobs=$JOBS) =="
-must Configure -s "$REPO_ROOT" -b "$BUILD_DIR" -c Release -a "$VIZ_A_ARGS"
+must Configure -s "$REPO_ROOT" -b "$BUILD_DIR" -c Release -j "$JOBS" -m 8 -a "$VIZ_A_ARGS"
 
 echo "== [2/7] Build the line-A closure =="
-must Build -b "$BUILD_DIR" -t "pwb_ingest;pwb_ingest_las_wle;pwb_ui_workers;pwb_ui_workers_wle_load;pwb_visualization_well_log;viz_a.las_preview_core;viz_a.las_preview_wle;viz_a.wle_load;viz_a.consistency;viz_a.viewer_flow;viz_a.patterns;ingest.parsers;ui_workers.oracle;ui_workers.lifecycle;science.viewer.well_log_plan;science.viewer.well_log_native_host;science.viewer.well_log"
+must Build -b "$BUILD_DIR" -j "$JOBS" -m 8 -t "pwb_ingest;pwb_ingest_las_wle;pwb_ui_workers;pwb_ui_workers_wle_load;pwb_visualization_well_log;viz_a.las_preview_core;viz_a.las_preview_wle;viz_a.wle_load;viz_a.consistency;viz_a.viewer_flow;viz_a.patterns;ingest.parsers;ui_workers.oracle;ui_workers.lifecycle;science.viewer.well_log_plan;science.viewer.well_log_native_host;science.viewer.well_log"
 
 echo "== [3/7] Tests, pass 1 of 2 (green x2 rule) =="
-must Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
+must Test -b "$BUILD_DIR" -j "$JOBS" -m 8 -r "$VIZ_A_REGEX"
 
 echo "== [4/7] Tests, pass 2 of 2 =="
-must Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
+must Test -b "$BUILD_DIR" -j "$JOBS" -m 8 -r "$VIZ_A_REGEX"
 
 echo "== [5/7] MALLOC audit subset (heap abuse on the line-A surface) =="
 # No QT_QPA_PLATFORM forcing: the offscreen plugin's GLX path cannot create
 # contexts on real-display hosts (see the test ENVIRONMENT note); headless
 # shells inherit offscreen from the environment as usual.
-must Exec -m 8 -- env MALLOC_CHECK_=3 LIBGL_ALWAYS_SOFTWARE=1 \
+must Exec -j "$JOBS" -m 8 -- env MALLOC_CHECK_=3 LIBGL_ALWAYS_SOFTWARE=1 \
     ctest --test-dir "$BUILD_DIR" -R '^viz_a\.' --output-on-failure --no-tests=error --timeout 300
 
 echo "== [6/7] OFF check: default (viewer OFF) still configures and the LAS branch degrades honestly =="
 rm -rf "$BUILD_DIR_OFF"
-must Configure -s "$REPO_ROOT" -b "$BUILD_DIR_OFF" -c Release \
+must Configure -s "$REPO_ROOT" -b "$BUILD_DIR_OFF" -c Release -j "$JOBS" -m 8 \
     -a "-DPWB_BUILD_PLATFORM=OFF;-DPWB_BUILD_SCIENCE=ON;-DPWB_BUILD_CONV_22=ON"
-must Build -b "$BUILD_DIR_OFF" -t "pwb_ingest;viz_a.las_preview_core"
-must Test -b "$BUILD_DIR_OFF" -r '^viz_a\.las_preview_core$'
+must Build -b "$BUILD_DIR_OFF" -j "$JOBS" -m 8 -t "pwb_ingest;viz_a.las_preview_core"
+must Test -b "$BUILD_DIR_OFF" -j "$JOBS" -m 8 -r '^viz_a\.las_preview_core$'
 # No WLE bridge target may exist in the OFF tree.
 if grep -q "pwb_ingest_las_wle" "$BUILD_DIR_OFF/build.ninja" 2>/dev/null; then
     echo "run-viz-a-gate: OFF configure unexpectedly built the WLE bridge" >&2
@@ -122,9 +123,9 @@ elif [[ -z "${PALEO_QGIS_SDK_DIR:-}" ]]; then
     echo "run-viz-a-gate: PALEO_QGIS_SDK_DIR not set — app wiring compile cover SKIPPED (no QGIS SDK; record in ledger)"
 else
     rm -rf "$BUILD_DIR_PLATFORM"
-    must Configure -s "$REPO_ROOT" -b "$BUILD_DIR_PLATFORM" -c Release \
+    must Configure -s "$REPO_ROOT" -b "$BUILD_DIR_PLATFORM" -c Release -j "$JOBS" -m 8 \
         -a "-DPWB_BUILD_PLATFORM=ON;-DPWB_BUILD_SCIENCE=ON;-DPWB_SCIENCE_BUILD_VIEWER=ON;-DPWB_BUILD_CONV_22=ON"
-    must Build -b "$BUILD_DIR_PLATFORM" -t "pwb-platform"
+    must Build -b "$BUILD_DIR_PLATFORM" -j "$JOBS" -m 8 -t "pwb-platform"
     grep -q "viz_a_install" "$BUILD_DIR_PLATFORM/build.ninja" \
         || { echo "run-viz-a-gate: pwb-platform built WITHOUT viz_a_install (wiring dead)" >&2; exit 1; }
 fi
