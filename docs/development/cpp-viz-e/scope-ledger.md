@@ -76,3 +76,11 @@
 - **凸包**：与 SciPy CCW 顶点环按"旋转等价"比较——qhull 起始顶点无稳定文档约定（三点实验证实起始点不定）；消费方（point_in_polygon）旋转无关。
 - **等值线（线）**：与 contourpy serial 相同的 QUAD 拓扑（边上插值公式逐边定向一致、鞍点中心均值配对、角点恰等于层值时弦端点落在角上）；NaN 角格元按 contourpy 实测语义处理（3 有效角→有效角三角形；≤2 有效角→无贡献）。计数 ±1、总长 2% 容差。鞍点 mini-grid 实测总长精确一致（4.472）。
 - **带填充**：三角剖分（双线性中心）+ 半平面裁剪（z 插值修复后）；面积 2% 容差、颜色/label 精确。study_area_clip 仅实现 Python 的无 shapely 回退（不裁剪），已在头文件声明。
+| 4 | Qt widget 层（Plot/CrossPlot/Colorbar/Surface + series model + SVG/PDF 导出） | qt_widgets_smoke offscreen：grab/断线/往返/异常/lasso 信号/带色/SVG 读回/析构 全过 ×2 + MALLOC；ctest viz_charts.* 2/2 | 通过 | 提交本轮；contour/factor 接入呈现 |
+
+## Qt 层与 Python 冻结源的对齐记录（@0885195）
+
+- 渲染顺序、主题色（PlotWidget 暗色 / SurfaceWidget 浅色 slate）、边距 65/25/25/50、Heckbert 刻度、NaN 断线（QPolygonF flush>1）、LTTB>2000 触发、hover 15px 捕获、拖拽≥4px 判定、滚轮 1.15、双击空白 reset、等比扩界（max units/pixel）——逐条照抄。
+- **文档化等价替换**：scipy cKDTree → 像素空间线性扫描（= Python 无 scipy 回退分支语义）；surface 提取缓存键以（数据指针+尺寸+levels+colormap）替代 id()+内容哈希（失效面等价）；`f"{v:.1f}"` → snprintf。
+- **以冻结源为准的行为裁定**（任务文本与 Python 冲突处）：SurfaceWidget autofit 无 5% pad；控制点/断层线只存不画；CrossPlot 无 hover 十字线；deprecated `point_selected` 信号不存在（Python 从不发射）。
+- 导出：export_svg（QSvgGenerator，标题 "GeoViz Plot - …"）/export_pdf（QPrinter A4 HighResolution 全页）与 Python 同构；Python 无 PNG 导出，C++ 同样不提供（页面级导出走主程序导出服务）。

@@ -24,6 +24,29 @@ target_include_directories(pwb_viz_charts PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pwb_viz_charts PUBLIC cxx_std_20)
 
+# Qt 层：4 个 QPainter widget（PlotWidget/CrossPlotWidget/ColorbarWidget/
+# SurfaceWidget），行为冻结源 @0885195。
+if(TARGET Qt6::Widgets)
+    add_library(pwb_viz_charts_qt STATIC
+        qt/src/colorbar_widget.cpp
+        qt/src/cross_plot_widget.cpp
+        qt/src/plot_widget.cpp
+        qt/src/surface_widget.cpp
+        qt/include/pwb/viz_charts/qt/colorbar_widget.hpp
+        qt/include/pwb/viz_charts/qt/cross_plot_widget.hpp
+        qt/include/pwb/viz_charts/qt/plot_widget.hpp
+        qt/include/pwb/viz_charts/qt/series.hpp
+        qt/include/pwb/viz_charts/qt/surface_widget.hpp
+    )
+    add_library(Pwb::VizChartsQt ALIAS pwb_viz_charts_qt)
+    target_include_directories(pwb_viz_charts_qt PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/qt/include>)
+    target_compile_features(pwb_viz_charts_qt PUBLIC cxx_std_20)
+    target_link_libraries(pwb_viz_charts_qt PUBLIC
+        Pwb::VizCharts Qt6::Widgets Qt6::Svg Qt6::PrintSupport)
+    set_target_properties(pwb_viz_charts_qt PROPERTIES AUTOMOC ON)
+endif()
+
 if(BUILD_TESTING)
     add_subdirectory(viz_charts_tests)
 endif()
