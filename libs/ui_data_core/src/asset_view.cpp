@@ -708,8 +708,19 @@ AssetView asset_view_from_generic(const GenericAsset& asset,
 AssetView asset_view_from_object(const AssetHandle& handle,
                                  const std::filesystem::path* project_root,
                                  FsProbeCache* fs_probe) {
+    if (handle == nullptr) {
+        // A null AssetHandle is a wiring bug, not a payload variant —
+        // degrade instead of dereferencing (#1383 guard extended to the
+        // handle itself; Python's isinstance chain simply falls through).
+        return AssetView{};
+    }
     const AssetObjectData& data = *handle;
     if (const auto* view = std::get_if<std::shared_ptr<AssetView>>(&data)) {
+        // #1383: make_asset_handle never validates non-null — a null
+        // shared_ptr must degrade, not dereference (snapshot_asset parity).
+        if (*view == nullptr) {
+            return AssetView{};
+        }
         return **view;
     }
     if (const auto* resource = std::get_if<ResourceItem>(&data)) {
@@ -740,8 +751,29 @@ AssetView asset_view_from_object(const AssetHandle& handle,
         AssetView view = asset_view_from_generic(generic, handle);
         return view;
     }
-    const auto& generic = std::get<GenericAsset>(data);
-    return asset_view_from_generic(generic, handle);
+    // #1383: the catalog-row alternative previously fell through to
+    // std::get<GenericAsset> and threw std::bad_variant_access. Python's
+    // duck-typing fallback reads getattr(asset, ...) — a DataAsset carries
+    // id/name/type; absent attributes take the defaults.
+    if (const auto* cat =
+            std::get_if<std::shared_ptr<const catalog::DataAsset>>(&data)) {
+        if (*cat == nullptr) {
+            return AssetView{};
+        }
+        GenericAsset generic;
+        generic.attrs = {
+            {"id", (*cat)->id.str()},
+            {"name", (*cat)->name},
+            {"type", (*cat)->type},
+        };
+        return asset_view_from_generic(generic, handle);
+    }
+    const auto* generic = std::get_if<GenericAsset>(&data);
+    if (generic == nullptr) {
+        // Unreachable with the closed variant; degrade instead of throwing.
+        return AssetView{};
+    }
+    return asset_view_from_generic(*generic, handle);
 }
 
 AssetHandle make_asset_handle(ResourceItem resource) {
@@ -763,6 +795,10 @@ AssetHandle make_asset_handle(const catalog::DataAsset* asset) {
     // Non-owning alias shared_ptr — identity matches the underlying object.
     std::shared_ptr<const catalog::DataAsset> alias(asset, [](const catalog::DataAsset*) {});
     return std::make_shared<AssetObjectData>(std::move(alias));
+}
+AssetHandle make_asset_handle(std::shared_ptr<const catalog::DataAsset> asset) {
+    // Owning form (#1382): keeps the catalog row alive with the handle.
+    return std::make_shared<AssetObjectData>(std::move(asset));
 }
 
 const void* asset_handle_identity(const AssetHandle& handle) {
@@ -1059,7 +1095,10 @@ std::unordered_map<std::string, CatalogRowOverview> compute_catalog_row_overview
             overview.created_at = current != nullptr ? current->created_at : "";
             overview.managed = current != nullptr ? current->managed : true;
             overview.trashed = asset.trashed;
-            overview.asset = &asset;
+            // #1382: `assets` is the by-value list_assets copy and dies at
+            // return — take shared ownership of a copy instead of &asset.
+            overview.asset =
+                std::make_shared<const catalog::DataAsset>(asset);
             if (current != nullptr) {
                 overview.integrity_state =
                     integrity_from_version(service, *current, &fs_probe);
@@ -1213,7 +1252,7 @@ AssetView CatalogEnricher::enrich(AssetView view) const {
 AssetView asset_view_from_catalog_overview(
     const CatalogRowOverview& overview,
     const std::filesystem::path* project_root) {
-    const catalog::DataAsset* asset = overview.asset;
+    const catalog::DataAsset* asset = overview.asset.get();
     // getattr(asset, "name", overview.asset_id) — the fallback fires only
     // when the attribute is absent (asset==nullptr), not when "".
     const std::string name =
@@ -1296,9 +1335,10 @@ AssetView asset_view_from_catalog_overview(
                                                         : domain::Json::object();
     view.status = "catalog";
     view.trashed = overview.trashed;
-    // raw_asset = asset — the catalog DataAsset (non-owning; document-owned).
-    if (asset != nullptr) {
-        view.raw_asset = make_asset_handle(asset);
+    // raw_asset = asset — the catalog DataAsset, sharing the overview's
+    // ownership so the handle keeps the row alive (#1382).
+    if (overview.asset != nullptr) {
+        view.raw_asset = make_asset_handle(overview.asset);
     }
     view.finalize_normalized_tags();
     return view;

@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -28,6 +29,12 @@ struct StoreStatus {
 class CatalogRepository {
 public:
     explicit CatalogRepository(std::filesystem::path sqlite_path);
+    // Movable under both locks (mutex_ itself does not move): the live db_
+    // handle transfers while concurrent use of the source is serialized.
+    CatalogRepository(CatalogRepository&& other);
+    CatalogRepository& operator=(CatalogRepository&& other);
+    CatalogRepository(const CatalogRepository&) = delete;
+    CatalogRepository& operator=(const CatalogRepository&) = delete;
 
     // Read-only probe: sync_state strictly readable + index_schema_version
     // >= 5 → Canonical (db.py load_document floor semantics).
@@ -43,7 +50,7 @@ public:
 
     // Releases the writable sqlite handle early (save-as deletes the old
     // artifacts tree after relocation; the handle must not outlive it).
-    void close() { db_.close(); }
+    void close();
 
     // Writes the catalog.json manifest (Python ADR 0056 checkpoint/export
     // contract, schema 1): full table dump + catalog_revision, atomic
@@ -200,6 +207,16 @@ private:
 
     std::filesystem::path sqlite_path_;
     Database db_;
+    // Cross-thread write discipline (#1380/#1381): every public method takes
+    // mutex_ for its whole body. The shared db_ handle is reassigned by
+    // open_read_write() (db_ = std::move(...)) and used by every write
+    // transaction, so unsynchronized calls from two threads are a use-after-
+    // free on the sqlite handle even with WAL enabled. Recursive because
+    // public methods call each other (open_read_write -> status,
+    // current_revision -> status). Lock order: a caller may hold a
+    // CommitCoordinator lock while calling into the repository, never the
+    // reverse.
+    mutable std::recursive_mutex mutex_;
 };
 
 // ---- consistency audit (queries/audit parity subset) --------------------

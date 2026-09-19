@@ -49,9 +49,13 @@ public:
 
 private:
     struct Impl {
-        Impl(project::ProjectManager m, catalog::CatalogRepository r,
+        // The repository is constructed in place from its sqlite path —
+        // CatalogRepository is not movable since #1380/#1381 (it owns a
+        // serialization mutex). The caller pre-validates writability with
+        // a throwaway probe before constructing.
+        Impl(project::ProjectManager m, fs::path sqlite_path,
              project::ProjectDocument d)
-            : manager(std::move(m)), repository(std::move(r)),
+            : manager(std::move(m)), repository(std::move(sqlite_path)),
               document(std::move(d)),
               coordinator(manager, repository,
                           DataFacade::journal_dir_for(manager.path())) {}

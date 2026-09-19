@@ -1,0 +1,270 @@
+{
+ "generator": "tools/oracle/generate_viz_d_wellhead_fixtures.py",
+ "engine": "geo-viz-engine@08851951",
+ "marker": "#WellHead File From SMI",
+ "cases": {
+  "basic": {
+   "text": "#WellHead File From SMI\n#Name X Y\n\"Alpha One\" 100.0 500.0\nBeta 130.0 480.0\nGamma 120.0 470.0\n",
+   "kwargs": {},
+   "ok": true,
+   "payload": {
+    "names": [
+     "Alpha One",
+     "Beta",
+     "Gamma"
+    ],
+    "x": [
+     100.0,
+     130.0,
+     120.0
+    ],
+    "y": [
+     500.0,
+     480.0,
+     470.0
+    ],
+    "resource_id": "",
+    "record_ids": [
+     0,
+     1,
+     2
+    ],
+    "source_rows": [
+     3,
+     4,
+     5
+    ],
+    "source_version": "",
+    "source_crs": "",
+    "coordinate_units": "",
+    "coordinate_status": {
+     "source_crs_provenance": "undeclared",
+     "coordinate_units_provenance": "unknown",
+     "comparison_crs": "",
+     "comparison_matches_source": null
+    },
+    "diagnostics": {
+     "total_records": 3,
+     "valid_records": 3,
+     "omitted_issue_count": 0,
+     "issues": []
+    },
+    "uwis": []
+   },
+   "warnings": [
+    "SourceCRS 未声明",
+    "坐标单位未知"
+   ]
+  },
+  "alias_extras_uwi": {
+   "text": "#WellHead File From SMI\n#Well BottomX BottomY UWI TD\n#WellName X Y\nA 1 2 UWI-1 30.0\nB 3 4 UWI-2 31.0\n",
+   "kwargs": {},
+   "ok": false,
+   "error": "_DatSchemaError: ambiguous well-head column width"
+  },
+  "crs_units": {
+   "text": "#WellHead File From SMI\n#Name X Y\n#SourceCRS: EPSG:32650\n#X .m\n#Y .m\nA 1.5 2.5\nB 3.5 4.5\n",
+   "kwargs": {
+    "source_crs": "EPSG:4326",
+    "coordinate_units": "m",
+    "comparison_crs": "epsg:32650"
+   },
+   "ok": false,
+   "error": "_DatSchemaError: conflicting SourceCRS declarations"
+  },
+  "bad_rows": {
+   "text": "#WellHead File From SMI\n#Name X Y\nA 1 2\n 2 3\nC x 4\nD 5\nE 6 7\n",
+   "kwargs": {},
+   "ok": true,
+   "payload": {
+    "names": [
+     "A",
+     "E"
+    ],
+    "x": [
+     1.0,
+     6.0
+    ],
+    "y": [
+     2.0,
+     7.0
+    ],
+    "resource_id": "",
+    "record_ids": [
+     0,
+     4
+    ],
+    "source_rows": [
+     3,
+     7
+    ],
+    "source_version": "",
+    "source_crs": "",
+    "coordinate_units": "",
+    "coordinate_status": {
+     "source_crs_provenance": "undeclared",
+     "coordinate_units_provenance": "unknown",
+     "comparison_crs": "",
+     "comparison_matches_source": null
+    },
+    "diagnostics": {
+     "total_records": 5,
+     "valid_records": 2,
+     "omitted_issue_count": 0,
+     "issues": [
+      {
+       "source_row": 4,
+       "reason": "列数与声明不一致"
+      },
+      {
+       "source_row": 5,
+       "reason": "X 坐标不是有限数值"
+      },
+      {
+       "source_row": 6,
+       "reason": "列数与声明不一致"
+      }
+     ]
+    },
+    "uwis": []
+   },
+   "warnings": [
+    "3 行已跳过；有效 2/5",
+    "SourceCRS 未声明",
+    "坐标单位未知"
+   ]
+  },
+  "unit_conflict": {
+   "text": "#WellHead File From SMI\n#Name X Y\n#X .m\n#Y .ft\nA 1 2\n",
+   "kwargs": {},
+   "ok": false,
+   "error": "_DatSchemaError: conflicting X/Y coordinate units"
+  },
+  "crs_conflict": {
+   "text": "#WellHead File From SMI\n#Name X Y\n#SourceCRS: EPSG:32650\nA 1 2\n",
+   "kwargs": {
+    "source_crs": "EPSG:4326"
+   },
+   "ok": false,
+   "error": "_DatSchemaError: conflicting SourceCRS declarations"
+  },
+  "no_marker": {
+   "text": "#Name X Y\nA 1 2\n",
+   "kwargs": {},
+   "ok": false,
+   "error": "_DatSchemaError: missing well-head marker"
+  },
+  "no_data_rows": {
+   "text": "#WellHead File From SMI\n#Name X Y\n",
+   "kwargs": {},
+   "ok": false,
+   "error": "_DatSchemaError: no data rows"
+  },
+  "all_invalid": {
+   "text": "#WellHead File From SMI\n#Name X Y\n1 2\n3 4\n",
+   "kwargs": {},
+   "ok": false,
+   "error": "_DatSchemaError: no renderable well locations; source row 3: 列数与声明不一致; source row 4: 列数与声明不一致"
+  },
+  "bom_crlf": {
+   "text": "﻿#WellHead File From SMI\r\n#Name X Y\r\n\"Quoted Well\" 10 20\r\n",
+   "kwargs": {},
+   "ok": true,
+   "payload": {
+    "names": [
+     "Quoted Well"
+    ],
+    "x": [
+     10.0
+    ],
+    "y": [
+     20.0
+    ],
+    "resource_id": "",
+    "record_ids": [
+     0
+    ],
+    "source_rows": [
+     3
+    ],
+    "source_version": "",
+    "source_crs": "",
+    "coordinate_units": "",
+    "coordinate_status": {
+     "source_crs_provenance": "undeclared",
+     "coordinate_units_provenance": "unknown",
+     "comparison_crs": "",
+     "comparison_matches_source": null
+    },
+    "diagnostics": {
+     "total_records": 1,
+     "valid_records": 1,
+     "omitted_issue_count": 0,
+     "issues": []
+    },
+    "uwis": []
+   },
+   "warnings": [
+    "SourceCRS 未声明",
+    "坐标单位未知"
+   ]
+  },
+  "uwi_conflict": {
+   "text": "#WellHead File From SMI\n#Name X Y UWI\n#Name X Y Other\nA 1 2 x\nB 3 4 y\n",
+   "kwargs": {},
+   "ok": true,
+   "payload": {
+    "names": [
+     "A",
+     "B"
+    ],
+    "x": [
+     1.0,
+     3.0
+    ],
+    "y": [
+     2.0,
+     4.0
+    ],
+    "resource_id": "",
+    "record_ids": [
+     0,
+     1
+    ],
+    "source_rows": [
+     4,
+     5
+    ],
+    "source_version": "",
+    "source_crs": "",
+    "coordinate_units": "",
+    "coordinate_status": {
+     "source_crs_provenance": "undeclared",
+     "coordinate_units_provenance": "unknown",
+     "comparison_crs": "",
+     "comparison_matches_source": null
+    },
+    "diagnostics": {
+     "total_records": 2,
+     "valid_records": 2,
+     "omitted_issue_count": 0,
+     "issues": []
+    },
+    "uwis": [
+     "x",
+     "y"
+    ]
+   },
+   "warnings": [
+    "SourceCRS 未声明",
+    "坐标单位未知"
+   ]
+  },
+  "unclosed_quote": {
+   "text": "#WellHead File From SMI\n#Name \"X Y\nA 1 2\n",
+   "kwargs": {},
+   "ok": false,
+   "error": "_DatSchemaError: unclosed double quote in header"
+  }
+ }
+}

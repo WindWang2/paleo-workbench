@@ -282,12 +282,12 @@ jobs:
           # "path.py: N" lines yields 0 on modern runners — the nightly
           # assert then fails before any slow test runs.
           count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | python -c '
-import re, sys
-text = sys.stdin.read()
-# Prefer selected count from "77/10025 tests collected" or "15 tests collected"
-m = re.search(r"(?m)^(\d+)(?:/\d+)? tests? collected", text)
-print(int(m.group(1)) if m else 0)
-')"
+          import re, sys
+          text = sys.stdin.read()
+          # Prefer selected count from "77/10025 tests collected" or "15 tests collected"
+          m = re.search(r"(?m)^(\d+)(?:/\d+)? tests? collected", text)
+          print(int(m.group(1)) if m else 0)
+          ')"
           echo "slow tests collected: ${count} (baseline 15)"
           test -n "${count}" && test "${count}" -ge 15
 
@@ -300,11 +300,11 @@ print(int(m.group(1)) if m else 0)
         # cannot silently vanish; execution happens where the binding is built.
         run: |
           count="$(python -m pytest --collect-only -q -m welllog_binding tests/ 2>&1 | python -c '
-import re, sys
-text = sys.stdin.read()
-m = re.search(r"(?m)^(\d+)(?:/\d+)? tests? collected", text)
-print(int(m.group(1)) if m else 0)
-')"
+          import re, sys
+          text = sys.stdin.read()
+          m = re.search(r"(?m)^(\d+)(?:/\d+)? tests? collected", text)
+          print(int(m.group(1)) if m else 0)
+          ')"
           echo "welllog_binding tests collected: ${count} (baseline 2)"
           test -n "${count}" && test "${count}" -ge 2
 

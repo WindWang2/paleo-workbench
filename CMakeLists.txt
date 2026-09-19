@@ -121,6 +121,22 @@ if(PWB_BUILD_CONV_24)
     set(PWB_BUILD_CONV_08 ON)
 endif()
 # END CONV-24
+# BEGIN CONV-33 (option block — declared BEFORE the CONV-26B block so the
+# runtime closure's own implied switches (DATA / MAPPING_KERNEL / CONV-07/
+# 08/25) cascade from it; the slice adds no new subdirectory: its TUs are
+# appended to the EXISTING libs/workflow_engine + libs/workflow_runtime +
+# libs/project targets — CONV-32 incremental-TU precedent).
+# Workflow top-level orchestration slice: recipe (portable
+# *.paleo-workflow.json), service/orchestrator (home step-status authority
+# + headless cursor), qc + map_qa_rules (basic & extended QA), versioning
+# (expert finalize) + the project version-lifecycle models it builds on.
+option(PWB_BUILD_CONV_33
+    "Build the CONV-33 workflow orchestration surfaces (increments libs/workflow_engine + libs/workflow_runtime + libs/project; implies CONV-26B + CONV-06)" OFF)
+if(PWB_BUILD_CONV_33)
+    set(PWB_BUILD_CONV_06 ON)
+    set(PWB_BUILD_CONV_26B ON)
+endif()
+# END CONV-33
 # BEGIN CONV-26 — workflow runtime closure (M7 tail): freshness /
 # current-context, recompute planning + executor, constraint version
 # lifecycle, provenance graph, node adapter bridge + resource model, and
@@ -330,6 +346,13 @@ endif()
 # ---------------------------------------------------- D/E fail-closed gates --
 # D (libs/seismic_viewer) and E (libs/seismic_attributes) are separate
 # lines; until their owners deliver, the switches exist but cannot be ON.
+# BEGIN VIZ-D — the viewer's crossplot core reuses the frozen single-trace
+# attribute kernels, so the viewer line now implies the attributes line
+# (same pattern as PWB_BUILD_SEISMIC_SERVICE implying seismic_io below).
+if(PWB_BUILD_SEISMIC_VIEWER)
+    set(PWB_BUILD_SEISMIC_ATTRIBUTES ON)
+endif()
+# END VIZ-D
 if(PWB_BUILD_SEISMIC_VIEWER)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/seismic_viewer/CMakeLists.txt")
         message(FATAL_ERROR
@@ -789,6 +812,24 @@ if(PWB_BUILD_PLATFORM)
     endif()
 endif()
 
+# BEGIN VIZ-C — store concurrency regression (#1380/#1381). Tests
+# degrade out when the store closure is absent (kernel-only configure);
+# never a hard dependency.
+if(BUILD_TESTING AND TARGET Pwb::Application)
+    add_subdirectory(tests/cpp/viz_c)
+endif()
+# END VIZ-C
+
+# BEGIN VIZ-D — advanced seismic display tests (CONV-VIZ V5 D-line):
+# frozen-Python replay (display/horizon/crossplot/isosurface/wellhead
+# oracles), Qt widget integration and the preview presenter replay. Only
+# the viewer library is required; the preview replay additionally needs
+# Pwb::UiPagesPreview (PLATFORM family) and registers only when present.
+if(BUILD_TESTING AND TARGET Pwb::SeismicViewer)
+    add_subdirectory(tests/cpp/viz_d)
+endif()
+# END VIZ-D
+
 # BEGIN UI-04 — core page-worker ports (libs/ui_workers): the Qt-free C++
 # halves of the seven PySide6 worker modules in paleo_workbench/ui/pages.
 # No new switch: the library joins every configuration that resolves the
@@ -963,6 +1004,27 @@ elseif(PWB_BUILD_PLATFORM)
         "production path")
 endif()
 # END UI-15
+# BEGIN VIZ-B
+# Cross-well correlation / well-tie viz cores (completion-plan §V3):
+# Qt-free tops/picks models, auto-section planner, seismic tie tables,
+# wavelet/synthetic/calibration/auto-tie numeric kernels in
+# libs/visualization/src/{cross_well,well_tie} + their Qt Widgets halves
+# where Qt6::Widgets already resolved. The option is a plain switch so an
+# OFF configuration works everywhere (ON/OFF configure parity is part of
+# this line's acceptance); the app-side wiring additionally requires
+# Pwb::UiWorkers + Pwb::UiWellseisQt (apps/.../CMakeLists.txt VIZ-B
+# block, PWB_WITH_VIZ_B).
+option(PWB_BUILD_VIZ_B
+    "Build the cross-well correlation & well-tie viz cores (line B)" ON)
+if(PWB_BUILD_VIZ_B)
+    if(NOT TARGET Pwb::Domain)
+        pwb_add_subdirectory_once(libs/domain)
+    endif()
+    # well_tie first: the cross-well core links Pwb::VisualizationWellTie.
+    add_subdirectory(libs/visualization/src/well_tie)
+    add_subdirectory(libs/visualization/src/cross_well)
+endif()
+# END VIZ-B
 
 # BEGIN UI-17 — W5 application-shell wiring
 # (apps/paleo_workbench_platform/app_shell.*): the page-navigation
@@ -1029,6 +1091,134 @@ elseif(PWB_BUILD_PLATFORM AND TARGET pwb-platform)
         "Pwb::UiWellseisQt; the direct-canvas shell remains")
 endif()
 # END UI-17
+
+# BEGIN VIZ-A — line-A (LAS/WLE convergence + well-log drawing
+# differentials). This block runs after science_suite (:327), the platform
+# app (:703) and ui_workers (:725), so every guard below sees the real
+# target set regardless of which earlier block added a library.
+#
+# (a) Bridge-ordering heal: when PWB_BUILD_DATA pulled libs/ingest in early
+#     (data_suite adds it at :322 BEFORE science_suite introduces
+#     WellLog::IO), the ingest VIZ-A bridge target could not exist yet.
+#     Re-enter the directory in bridge-only mode to build it now.
+if(TARGET pwb_ingest AND TARGET WellLog::IO AND NOT TARGET pwb_ingest_las_wle)
+    set(VIZ_A_LATE_BRIDGE ON)
+    add_subdirectory(libs/ingest ${CMAKE_CURRENT_BINARY_DIR}/ingest-late-bridge)
+    unset(VIZ_A_LATE_BRIDGE)
+endif()
+#
+# (b) App production wiring: preview provider + JobCenter-backed LAS loads
+#     (apps/paleo_workbench_platform/viz_a_install.* guarded by
+#     PWB_WITH_VIZ_A in main_window.cpp). The app target exists only under
+#     PWB_BUILD_PLATFORM; compile-covered by run-viz-a-gate.sh step 7.
+if(TARGET pwb-platform AND TARGET Pwb::IngestLasWle
+   AND TARGET Pwb::UiWorkersWleLoad AND TARGET Pwb::JobQt)
+    target_sources(pwb-platform PRIVATE apps/paleo_workbench_platform/viz_a_install.cpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::IngestLasWle Pwb::UiWorkersWleLoad Pwb::JobQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_A=1)
+endif()
+#
+# (c) Line-A acceptance tests.
+if(BUILD_TESTING AND TARGET Pwb::Ingest AND TARGET Pwb::UiWorkers)
+    enable_testing()
+    add_subdirectory(tests/cpp/viz_a)
+endif()
+# END VIZ-A
+
+# BEGIN VIZ-C-host — joint well-seismic host wiring (plan V4). Runs AFTER
+# UI-09: the host implements the #1394 JointHostController seam from
+# Pwb::UiWellseisQt, which joins the build later than
+# apps/paleo_workbench_platform — an existence check inside the app
+# directory would silently skip the host (never a fake seam).
+if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
+   AND TARGET Pwb::SeismicService AND TARGET Pwb::UiWellseisQt)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/viz_c_joint_host.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::UiWellseisQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_UI_WELLSEIS=1)
+
+    # Runnable production seam: real PWBVOL1 through the tiled service
+    # into the joint scene (frozen seismic_io oracle fixture; override by
+    # passing a volume path).
+    set(VIZ_C_EXAMPLE_VOLUME
+        "${CMAKE_CURRENT_SOURCE_DIR}/libs/seismic_io/seismic_io_tests/fixtures/io_oracle_bins.sgy")
+    if(EXISTS "${VIZ_C_EXAMPLE_VOLUME}")
+        message(STATUS "VIZ-C: joint example volume fixture found")
+        add_executable(viz_c_joint_example
+            apps/paleo_workbench_platform/examples/viz_c_joint_example.cpp
+            apps/paleo_workbench_platform/viz_c_joint_host.cpp
+            apps/paleo_workbench_platform/job_center.cpp
+            apps/paleo_workbench_platform/viz_c_joint_volume.cpp
+            apps/paleo_workbench_platform/viz_c_time_map.cpp)
+        if(UNIX AND NOT APPLE)
+            # Soft X11 probe (broken-GLX hosts install an X error guard);
+            # a missing SDK only drops that guard, never the build.
+            find_package(X11)
+            if(X11_FOUND)
+                target_link_libraries(viz_c_joint_example PRIVATE X11::X11)
+                target_compile_definitions(viz_c_joint_example PRIVATE
+                    VIZ_C_HAVE_X11=1)
+            endif()
+        endif()
+        set_target_properties(viz_c_joint_example PROPERTIES AUTOMOC ON)
+        target_compile_features(viz_c_joint_example PRIVATE cxx_std_20)
+        target_link_libraries(viz_c_joint_example PRIVATE
+            Pwb::Geo3DViz Pwb::SeismicService Pwb::UiWellseisQt
+            Pwb::JobQt Pwb::Visualization Pwb::SeismicIo
+            Qt6::Widgets)
+        target_include_directories(viz_c_joint_example PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/apps/paleo_workbench_platform)
+        target_compile_definitions(viz_c_joint_example PRIVATE
+            VIZ_C_EXAMPLE_VOLUME="${VIZ_C_EXAMPLE_VOLUME}"
+            PWB_WITH_UI_WELLSEIS=1)
+        if(MSVC)
+            target_compile_options(viz_c_joint_example PRIVATE /utf-8 /W3)
+        else()
+            target_compile_options(viz_c_joint_example PRIVATE
+                -Wall -Wextra)
+        endif()
+    endif()
+endif()
+# END VIZ-C-host
+
+# BEGIN VIZ-E — charts drawing kernel + Qt widgets (libs/viz_charts), plan
+# V6 of docs/development/cpp-geoviz-completion-plan.md: the geoviz_plots
+# drawing half (chart/surface/fence/analytics/factor presentation) with a
+# Qt-free core and QPainter widget layer. Joins platform configures (Qt6
+# comes from the platform block's find_package); the Qt-free core carries
+# its own oracle replay test.
+if(PWB_BUILD_PLATFORM)
+    add_subdirectory(libs/viz_charts)
+endif()
+
+# VIZ-E app wiring (plan P-A): the data/preview page assembly mounts into
+# the platform app when the full closure is present — viz_charts Qt layer,
+# UI-06 data pages, and the CONV-30 job runtime (surface previews compute
+# through the product JobCenter). Configures without one of those keep the
+# Python pages as the production path (guard stays off, main_window hook
+# compiles out).
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
+   AND TARGET Pwb::UiPagesDataQt AND TARGET Pwb::UiWorkers
+   AND TARGET Pwb::MappingKernel AND TARGET Pwb::JobQt
+   AND PWB_BUILD_CONV_30)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/viz_e_dat_preview.cpp
+        apps/paleo_workbench_platform/viz_e_factor_preview.cpp
+        apps/paleo_workbench_platform/viz_e_hosts.cpp
+        apps/paleo_workbench_platform/viz_e_install.cpp
+        apps/paleo_workbench_platform/viz_e_dat_preview.hpp
+        apps/paleo_workbench_platform/viz_e_factor_preview.hpp
+        apps/paleo_workbench_platform/viz_e_hosts.hpp
+        apps/paleo_workbench_platform/viz_e_install.hpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::MappingKernel)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_E=1)
+    if(BUILD_TESTING)
+        add_subdirectory(tests/cpp/viz_e)
+    endif()
+endif()
+# END VIZ-E
 
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and

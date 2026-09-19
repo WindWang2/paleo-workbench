@@ -17,6 +17,10 @@ inline constexpr const char* kPreviewModes[] = {
     "empty",       "message", "text",   "table",  "well_log",
     "seismic",     "image",   "pdf",    "rich_text",
     "web_document","json_tree","geotiff","media",
+    // BEGIN VIZ-E — chart/surface preview modes (plan V6; targets are the
+    // viz_charts hosts registered by the viz_e assembly).
+    "xy_scatter",  "surface",
+    // END VIZ-E
 };
 // "geoviz" is handled OUTSIDE the dispatch table (LazyVisualizationTabs
 // seam); "loading" is a panel-local mode. Both map to no widget here.

@@ -115,11 +115,15 @@ TEST(slice_latency_p50_p95_and_memory_high_water) {
     std::mutex mutex;
     std::vector<TimedResult> delivered;
 
+    // BEGIN VIZ-D — prefetch warms neighbour planes; the frozen latency/
+    // storm numbers measure COLD read paths, so disable it here.
     SliceController controller(std::move(volume), 4, [&](const SliceResult& r) {
         const double delivered_at = now_ms();
         std::lock_guard<std::mutex> lock(mutex);
         delivered.push_back(TimedResult{r, 0.0, delivered_at});
     });
+    controller.set_prefetch_enabled(false);
+    // END VIZ-D
 
     // 60 distinct inline planes: submit, remember the timestamp, wait for the
     // delivery that carries this generation. In-memory backend => timings
@@ -185,12 +189,15 @@ TEST(fast_interaction_storm_coalesces_and_stays_plane_bounded) {
 
     std::mutex mutex;
     std::int64_t last_delivered_index = -1;
+    // BEGIN VIZ-D — same cold-read measurement contract as above.
     SliceController controller(observing, 4, [&](const SliceResult& r) {
         std::lock_guard<std::mutex> lock(mutex);
         if (r.ok) {
             last_delivered_index = r.index;
         }
     });
+    controller.set_prefetch_enabled(false);
+    // END VIZ-D
 
     // 150 rapid index moves (a fast slider drag on a big volume).
     const auto drag_start = std::chrono::steady_clock::now();

@@ -44,6 +44,11 @@ endif()
 
 add_library(pwb_seismic_viewer
     src/color_maps.cpp
+    src/colorbar_widget.cpp
+    src/crossplot_core.cpp
+    src/display_core.cpp
+    src/horizon_core.cpp
+    src/isosurface_core.cpp
     src/slice_controller.cpp
     src/seismic_slice_widget.cpp
 )
@@ -59,8 +64,19 @@ target_include_directories(pwb_seismic_viewer
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
+# VIZ-D: the crossplot core reuses the frozen single-trace attribute kernels
+# (seismic.envelope / seismic.instantaneous_frequency) through the science
+# SDK. The dependency is PRIVATE (only crossplot_core.cpp consumes it) and
+# uses the plain target name so the root build's later
+# add_subdirectory(libs/seismic_attributes) resolves it at generate time;
+# the standalone entry pulls the sibling directory in itself.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR AND NOT TARGET pwb_seismic_attributes)
+    set(PWB_SEISMIC_ATTRIBUTES_BUILD_TESTS OFF) # standalone: only the viewer's own tests
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../seismic_attributes seismic_attributes)
+endif()
 target_link_libraries(pwb_seismic_viewer
     PUBLIC Pwb::Visualization Qt6::Widgets
+    PRIVATE pwb_seismic_attributes
 )
 if(MSVC)
     target_compile_options(pwb_seismic_viewer PRIVATE /utf-8 /W4 /permissive- /wd4251 /wd4275)

@@ -13,6 +13,17 @@
 #include <cmath>
 #include <cstdio>
 
+#if defined(Q_OS_UNIX) && defined(PWB_GEO3D_HAVE_X11)
+#include <X11/Xlib.h>
+// Xlib defines these as macros; Qt's QEvent::Type enumerators use the
+// same names.
+#undef KeyPress
+#undef KeyRelease
+#undef FocusIn
+#undef FocusOut
+#undef None  // Xlib's None macro collides with enum names in pwb headers
+#endif
+
 #include <pwb/geo3d_viz/geo3d_viewport_widget.hpp>
 #include <pwb/geo3d_viz/workspace_controller.hpp>
 
@@ -72,6 +83,16 @@ int main(int argc, char** argv) {
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
         qputenv("QT_QPA_PLATFORM", "offscreen");
     }
+#if defined(Q_OS_UNIX) && defined(PWB_GEO3D_HAVE_X11)
+    // VIZ-C: hosts with a broken/absent GLX extension kill the process
+    // with a fatal X error inside QOpenGLContext creation — before Qt can
+    // report the failure and the test can exercise the honest GL-less
+    // degradation path. Ignore X protocol errors for the lifetime of the
+    // test so context creation fails softly; hosts with a working GL
+    // (including software GL via QT_QPA_PLATFORM=wayland + llvmpipe)
+    // still take the real GL path.
+    XSetErrorHandler([](Display*, XErrorEvent*) -> int { return 0; });
+#endif
     QApplication app(argc, argv);
 
     // ------------------------------------------------------------------

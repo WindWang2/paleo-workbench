@@ -61,6 +61,10 @@ namespace pwb::app {
 class FactorStatsDock;
 }
 #endif
+#ifdef PWB_WITH_GEO3D_VIZ
+// Defined at global scope in geo3d_dock.hpp (CONV-GEO3D wiring).
+class Geo3DDock;
+#endif
 
 namespace pwb::application {
 class AlgorithmRunner;
@@ -86,9 +90,14 @@ class AppShell;
 #ifdef PWB_WITH_CONV_16
 class FactorStatsDock;
 #endif
-#ifdef PWB_WITH_GEO3D_VIZ
-class Geo3DDock;
+
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+namespace pwb::app {
+class VizBCrossWellDock;
+}  // namespace pwb::app
 #endif
+// END VIZ-B
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -163,8 +172,11 @@ public:
 #endif
 #ifdef PWB_WITH_CONV_30
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
-    // Non-modal import: wires importSegyProgressed into the job runtime
-    // with a cancellable progress dialog (window-close and app-quit safe).
+    // Non-modal import (collect/compute/apply, #1380): the job reads and
+    // stages the PWBVOL1 payload off the GUI thread; catalog publication
+    // runs in the GUI finished callback against the store captured at
+    // submit (window-close and app-quit safe; cancel keeps partial
+    // artifacts on disk).
     void submitSegyJob(const QString& path);
 #endif
 #endif
@@ -392,10 +404,18 @@ private:
 #ifdef PWB_WITH_GEO3D_VIZ
     Geo3DDock* geo3d_dock_ = nullptr;
 #endif
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+    VizBCrossWellDock* viz_b_dock_ = nullptr;
+#endif
+// END VIZ-B
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     QDockWidget* seismic_dock_ = nullptr;
     pwb::seismic_viewer::SeismicSliceWidget* slice_widget_ = nullptr;
     std::uint64_t slice_revision_ = 0;
+    // BEGIN VIZ-D — advanced-display host alias for the menu install.
+    pwb::seismic_viewer::SeismicSliceWidget* viz_d_seismic_host_ = nullptr;
+    // END VIZ-D
 #endif
 #if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
     // Native tiled volume service: catalog PWBVOL1 versions open through
@@ -431,6 +451,12 @@ private:
     // surfaces it supervises.
     std::unique_ptr<JobCenter> job_center_;
 #endif
+
+    // BEGIN VIZ-E — the mounted data-page dock (plan P-A).
+#if defined(PWB_WITH_VIZ_E) && defined(PWB_WITH_CONV_30)
+    QDockWidget* viz_e_data_dock_ = nullptr;
+#endif
+    // END VIZ-E
 };
 
 }  // namespace pwb::app

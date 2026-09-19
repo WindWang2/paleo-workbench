@@ -1,0 +1,15 @@
+~VERSION INFORMATION
+VERS.                  2.0 :
+WRAP.                  NO  :
+~WELL INFORMATION
+WELL.                 BAD-ROWS :
+NULL.               -999.25 :
+~CURVE INFORMATION
+DEPT.M : depth
+GR.GAPI : gamma
+~ASCII LOG DATA
+1000.00 45.20
+1000.25
+1000.50 46.10 12.5
+1000.75 abc
+1001.00 46.90

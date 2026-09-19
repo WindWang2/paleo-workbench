@@ -147,3 +147,22 @@ endif()
 if(BUILD_TESTING)
     add_subdirectory(ui_wellseis_tests)
 endif()
+
+# BEGIN VIZ-D — real seismic engine binding (viz_d_seismic_binding).
+# Compiles the D-line adapter into the Qt shells target (the target that
+# hosts the other qt widgets) and links the real viewer. Plain target
+# name like the Pwb::VisualizationWellLog branch above: the root build
+# defines pwb_seismic_viewer (PWB_BUILD_SEISMIC_VIEWER) BEFORE this
+# directory is added, so the conditional-existence guard follows the
+# same style as the Pwb::Qgis surface block — the block quietly stays
+# out when either side is absent.
+if(TARGET pwb_ui_wellseis_qt AND TARGET pwb_seismic_viewer)
+    target_sources(pwb_ui_wellseis_qt PRIVATE
+        src/qt/viz_d_seismic_binding.cpp
+        include/pwb/ui_wellseis/qt/viz_d_seismic_binding.hpp
+    )
+    # PUBLIC: viz_d_seismic_binding.hpp exposes
+    # <pwb/seismic_viewer/seismic_slice_widget.hpp> to consumers.
+    target_link_libraries(pwb_ui_wellseis_qt PUBLIC pwb_seismic_viewer)
+endif()
+# END VIZ-D

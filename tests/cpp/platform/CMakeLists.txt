@@ -162,7 +162,12 @@ endif()
 if(PWB_BUILD_DATA AND PWB_BUILD_SEISMIC_VIEWER
         AND PWB_BUILD_SEISMIC_ATTRIBUTES)
     add_executable(platform_attribute_ui test_attribute_ui.cpp
-        ${PWB_APP_SERVICE_SOURCES})
+        ${PWB_APP_SERVICE_SOURCES}
+        # BEGIN VIZ-D — advanced seismic display install (this target links
+        # Pwb::SeismicViewer and defines PWB_WITH_SEISMIC_VIEWER).
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/viz_d_seismic_install.cpp
+        # END VIZ-D
+    )
     pwb_link_job_runtime(platform_attribute_ui)
     set_target_properties(platform_attribute_ui PROPERTIES AUTOMOC ON)
     target_compile_features(platform_attribute_ui PRIVATE cxx_std_20)

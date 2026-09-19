@@ -140,6 +140,7 @@ Json run_state_to_json(const RunStateV1& state) {
 
 Result<RunStateV1> CommitCoordinator::register_run(
     const RunRegistrationV1& registration) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (registration.run_id.empty()) {
         return DataError(ErrorCode::InvalidArgument, "run_id is required");
     }
@@ -195,6 +196,7 @@ Result<RunStateV1> CommitCoordinator::register_run(
 
 std::optional<RunStateV1> CommitCoordinator::run_state(
     const domain::RunId& run_id) const {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto catalog = repository_.open_read_only();
     if (!catalog.is_ok()) return std::nullopt;
     const DataRun* run = catalog.value().find_run(run_id);
@@ -205,6 +207,7 @@ std::optional<RunStateV1> CommitCoordinator::run_state(
 Result<RunStateV1> CommitCoordinator::finish_run(
     const domain::RunId& run_id, RunTerminalStatus terminal,
     Json extra_parameters) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto current = run_state(run_id);
     if (!current.has_value()) {
         return DataError(ErrorCode::NotFound, "run not found: " + run_id.str());
@@ -316,6 +319,7 @@ PublishReceiptV1 publish_receipt_from_journal(
 
 Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
     const PublishRequestV1& request, project::ProjectDocument& document) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     // ---- Validation gate: NOTHING is written before every check passes.
     PublishReceiptV1 receipt;
     receipt.operation_id = request.operation_id;

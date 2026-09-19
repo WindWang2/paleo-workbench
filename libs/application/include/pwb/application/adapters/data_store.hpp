@@ -27,6 +27,10 @@
 namespace pwb::application {
 
 class PwbDataStore : public IProjectStore {
+    // Threading: coordinator()/repository() methods are serialized
+    // internally (see CommitCoordinator/CatalogRepository, #1380/#1381),
+    // but commit()/load_bindings()/open() also touch snapshot_cache_,
+    // which is GUI-thread-only — hosts must call them from one thread.
 public:
     // Opens read-write (a store that cannot write must not exist): refuses
     // unreadable projects, corrupt stores and read-only (future schema)
@@ -69,8 +73,11 @@ public:
 
 private:
     struct Impl {
-        Impl(pwb::project::ProjectManager m,
-             pwb::catalog::CatalogRepository r,
+        // The repository is constructed in place from its sqlite path —
+        // CatalogRepository is not movable since #1380/#1381 (it owns a
+        // serialization mutex). PwbDataStore::open pre-validates
+        // writability on a throwaway probe before constructing.
+        Impl(pwb::project::ProjectManager m, std::filesystem::path sqlite_path,
              pwb::project::ProjectDocument d);
         pwb::project::ProjectManager manager;
         pwb::catalog::CatalogRepository repository;

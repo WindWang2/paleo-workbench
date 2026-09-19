@@ -6,10 +6,10 @@
 namespace pwb::application {
 
 PwbDataStore::Impl::Impl(pwb::project::ProjectManager m,
-                         pwb::catalog::CatalogRepository r,
+                         std::filesystem::path sqlite_path,
                          pwb::project::ProjectDocument d)
     : manager(std::move(m)),
-      repository(std::move(r)),
+      repository(std::move(sqlite_path)),
       document(std::move(d)),
       coordinator(manager, repository,
                   pwb::data::DataFacade::journal_dir_for(manager.path())) {}
@@ -31,9 +31,9 @@ std::shared_ptr<PwbDataStore> PwbDataStore::open(
         }
         return nullptr;
     }
-    pwb::catalog::CatalogRepository repository(
+    pwb::catalog::CatalogRepository probe(
         pwb::project::catalog_sqlite_for(project_file));
-    auto writable = repository.open_read_write();
+    auto writable = probe.open_read_write();
     if (!writable.is_ok()) {
         if (error != nullptr) {
             *error = "catalog open read-write refused: "
@@ -49,7 +49,7 @@ std::shared_ptr<PwbDataStore> PwbDataStore::open(
         return nullptr;
     }
     auto impl = std::make_unique<Impl>(
-        std::move(manager), std::move(repository),
+        std::move(manager), pwb::project::catalog_sqlite_for(project_file),
         std::move(loaded.value().document));
     return std::shared_ptr<PwbDataStore>(new PwbDataStore(
         std::move(impl), std::move(snapshot).value()));

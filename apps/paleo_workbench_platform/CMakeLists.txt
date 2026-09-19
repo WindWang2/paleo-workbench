@@ -54,6 +54,9 @@ endif()
 if(TARGET Pwb::SeismicViewer)
     target_link_libraries(pwb-platform PRIVATE Pwb::SeismicViewer)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_VIEWER=1)
+    # BEGIN VIZ-D — advanced seismic display install (menu affordances).
+    target_sources(pwb-platform PRIVATE viz_d_seismic_install.cpp)
+    # END VIZ-D
 endif()
 if(TARGET Pwb::SeismicAttributes AND TARGET Pwb::Data
         AND TARGET Pwb::Science AND TARGET Pwb::Workflow)
@@ -187,6 +190,20 @@ if(TARGET Pwb::Providers)
 endif()
 # END CONV-PROVIDERS
 
+# BEGIN VIZ-B
+# Cross-well correlation & well-tie dock (line B): joins the platform
+# when the viz-B cores + the UI-04 workers (DTW job) + the UI-09 link
+# editor/export dialog all resolved in this configure.
+if(TARGET Pwb::VisualizationCrossWellQt AND TARGET Pwb::VisualizationWellTieQt
+   AND TARGET Pwb::UiWorkers AND TARGET Pwb::UiWellseisQt)
+    target_sources(pwb-platform PRIVATE viz_b_cross_well_dock.cpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::VisualizationCrossWellQt Pwb::VisualizationWellTieQt
+        Pwb::UiWorkers Pwb::UiWellseisQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_B=1)
+endif()
+# END VIZ-B
+
 # BEGIN CONV-GEO3D
 # Native 3D geomodel viewer dock (Qt6 viewport + workspace controller, no
 # Python). Joins the link closure only when the PWB_BUILD_GEO3D_VIZ slice
@@ -197,3 +214,22 @@ if(TARGET Pwb::Geo3DViz)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_GEO3D_VIZ=1)
 endif()
 # END CONV-GEO3D
+
+# BEGIN VIZ-C
+# Joint well-seismic 3D (plan V4): the WellSeismicScene core lives in
+# Pwb::Geo3DViz (joint/ subtree); these are the platform bridges — the
+# tiled-volume adapter + mesh builders, the 2D time map and the REAL
+# #1394 JointHostController host. The host needs the ui_wellseis seam
+# types; both slices degrade out independently (fail-closed configure,
+# never a fake host).
+if(TARGET Pwb::Geo3DViz AND TARGET Pwb::SeismicService)
+    target_sources(pwb-platform PRIVATE
+        viz_c_joint_volume.cpp
+        viz_c_time_map.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicService)
+    # viz_c_joint_host.cpp + PWB_WITH_UI_WELLSEIS are wired from the root
+    # VIZ-C block: libs/ui_wellseis joins the build AFTER this app
+    # subdirectory, so a target-existence check here would silently skip
+    # the host (never a fake seam).
+endif()
+# END VIZ-C

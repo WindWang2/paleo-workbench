@@ -1,0 +1,4358 @@
+{
+  "cases": [
+    {
+      "id": "create_run_empty_project",
+      "fn": "service.create_compilation_run",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "name": "ZJ2 编图",
+        "target_horizon": "ZJ2",
+        "sequence_scheme": "三级层序格架",
+        "id_counter_start": 0
+      },
+      "expect": {
+        "run": {
+          "id": "run_000000000007",
+          "name": "ZJ2 编图",
+          "target_horizon": "ZJ2",
+          "sequence_scheme_ref": "三级层序格架",
+          "status": "draft",
+          "workflow_steps": [
+            {
+              "id": "step_000000000001",
+              "step_type": "data_check",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000002",
+              "step_type": "factor_map",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000003",
+              "step_type": "prediction",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000004",
+              "step_type": "map_compile",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000005",
+              "step_type": "qc",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000006",
+              "step_type": "export",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            }
+          ],
+          "active_factor_map_task_ids": [],
+          "active_prediction_task_id": null,
+          "active_paleomap_document_id": null,
+          "active_quality_report_id": null,
+          "export_artifact_ids": [],
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "updated_at": "2026-01-01T00:00:00+00:00"
+        },
+        "stratigraphy_after": {
+          "target_horizon": "ZJ2",
+          "sequence_boundaries": [],
+          "systems_tract_scheme": "三级层序格架",
+          "interpretation_version": "v1",
+          "applicable_wells": [],
+          "applicable_seismic_ranges": []
+        },
+        "compilation_runs_after": [
+          {
+            "id": "run_000000000007",
+            "name": "ZJ2 编图",
+            "target_horizon": "ZJ2",
+            "sequence_scheme_ref": "三级层序格架",
+            "status": "draft",
+            "workflow_steps": [
+              {
+                "id": "step_000000000001",
+                "step_type": "data_check",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000002",
+                "step_type": "factor_map",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000003",
+                "step_type": "prediction",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000004",
+                "step_type": "map_compile",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000005",
+                "step_type": "qc",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000006",
+                "step_type": "export",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              }
+            ],
+            "active_factor_map_task_ids": [],
+            "active_prediction_task_id": null,
+            "active_paleomap_document_id": null,
+            "active_quality_report_id": null,
+            "export_artifact_ids": [],
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_run_second_appends_and_overwrites",
+      "fn": "service.create_compilation_run",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "H1-old",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "旧格架",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [
+            {
+              "id": "run_000000000009",
+              "name": "旧 Run",
+              "target_horizon": "H1-old",
+              "sequence_scheme_ref": "旧格架",
+              "status": "draft",
+              "workflow_steps": [
+                {
+                  "id": "step_000000000008",
+                  "step_type": "data_check",
+                  "status": "complete",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                }
+              ],
+              "active_factor_map_task_ids": [],
+              "active_prediction_task_id": null,
+              "active_paleomap_document_id": null,
+              "active_quality_report_id": null,
+              "export_artifact_ids": [],
+              "created_at": "2026-01-01T00:00:00+00:00",
+              "updated_at": "2026-01-01T00:00:00+00:00"
+            }
+          ],
+          "export_artifacts": []
+        },
+        "name": "第二轮",
+        "target_horizon": "SB3",
+        "sequence_scheme": "LST/TST/HST",
+        "id_counter_start": 9
+      },
+      "expect": {
+        "run": {
+          "id": "run_000000000016",
+          "name": "第二轮",
+          "target_horizon": "SB3",
+          "sequence_scheme_ref": "LST/TST/HST",
+          "status": "draft",
+          "workflow_steps": [
+            {
+              "id": "step_000000000010",
+              "step_type": "data_check",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000011",
+              "step_type": "factor_map",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000012",
+              "step_type": "prediction",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000013",
+              "step_type": "map_compile",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000014",
+              "step_type": "qc",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000015",
+              "step_type": "export",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            }
+          ],
+          "active_factor_map_task_ids": [],
+          "active_prediction_task_id": null,
+          "active_paleomap_document_id": null,
+          "active_quality_report_id": null,
+          "export_artifact_ids": [],
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "updated_at": "2026-01-01T00:00:00+00:00"
+        },
+        "stratigraphy_after": {
+          "target_horizon": "SB3",
+          "sequence_boundaries": [],
+          "systems_tract_scheme": "LST/TST/HST",
+          "interpretation_version": "v1",
+          "applicable_wells": [],
+          "applicable_seismic_ranges": []
+        },
+        "compilation_runs_after": [
+          {
+            "id": "run_000000000009",
+            "name": "旧 Run",
+            "target_horizon": "H1-old",
+            "sequence_scheme_ref": "旧格架",
+            "status": "draft",
+            "workflow_steps": [
+              {
+                "id": "step_000000000008",
+                "step_type": "data_check",
+                "status": "complete",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              }
+            ],
+            "active_factor_map_task_ids": [],
+            "active_prediction_task_id": null,
+            "active_paleomap_document_id": null,
+            "active_quality_report_id": null,
+            "export_artifact_ids": [],
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00"
+          },
+          {
+            "id": "run_000000000016",
+            "name": "第二轮",
+            "target_horizon": "SB3",
+            "sequence_scheme_ref": "LST/TST/HST",
+            "status": "draft",
+            "workflow_steps": [
+              {
+                "id": "step_000000000010",
+                "step_type": "data_check",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000011",
+                "step_type": "factor_map",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000012",
+                "step_type": "prediction",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000013",
+                "step_type": "map_compile",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000014",
+                "step_type": "qc",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              },
+              {
+                "id": "step_000000000015",
+                "step_type": "export",
+                "status": "pending",
+                "required_input_resource_ids": [],
+                "produced_ids": [],
+                "blocking_issue_summary": "",
+                "provenance_summary": ""
+              }
+            ],
+            "active_factor_map_task_ids": [],
+            "active_prediction_task_id": null,
+            "active_paleomap_document_id": null,
+            "active_quality_report_id": null,
+            "export_artifact_ids": [],
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "infer_empty_project_all_pending",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "steps": [
+          "data_check",
+          "factor_map",
+          "prediction",
+          "map_compile",
+          "qc",
+          "export"
+        ]
+      },
+      "expect": {
+        "result": {
+          "data_check": "pending",
+          "factor_map": "pending",
+          "prediction": "pending",
+          "map_compile": "pending",
+          "qc": "pending",
+          "export": "pending"
+        }
+      }
+    },
+    {
+      "id": "infer_resources_only",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [
+            {
+              "id": "res_000000000017",
+              "name": "A1.Las",
+              "path": "data/A1.Las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            },
+            {
+              "id": "res_000000000018",
+              "name": "200P.sgy",
+              "path": "data/200P.sgy",
+              "type": "seismic",
+              "format": "sgy",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            },
+            {
+              "id": "res_000000000019",
+              "name": "H1.grd",
+              "path": "data/H1.grd",
+              "type": "horizon",
+              "format": "grd",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "steps": [
+          "data_check",
+          "factor_map",
+          "prediction",
+          "map_compile",
+          "qc",
+          "export"
+        ]
+      },
+      "expect": {
+        "result": {
+          "data_check": "complete",
+          "factor_map": "pending",
+          "prediction": "pending",
+          "map_compile": "pending",
+          "qc": "pending",
+          "export": "pending"
+        }
+      }
+    },
+    {
+      "id": "infer_factor_map_status_matrix",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "step": "factor_map",
+        "matrix": [
+          [],
+          [
+            "running"
+          ],
+          [
+            "pending"
+          ],
+          [
+            "complete"
+          ],
+          [
+            "failed",
+            "failed"
+          ],
+          [
+            "complete",
+            "failed"
+          ],
+          [
+            "error"
+          ],
+          [
+            "complete",
+            "running"
+          ]
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "factor_map": "pending"
+          },
+          {
+            "factor_map": "running"
+          },
+          {
+            "factor_map": "running"
+          },
+          {
+            "factor_map": "complete"
+          },
+          {
+            "factor_map": "failed"
+          },
+          {
+            "factor_map": "failed"
+          },
+          {
+            "factor_map": "failed"
+          },
+          {
+            "factor_map": "complete"
+          }
+        ]
+      }
+    },
+    {
+      "id": "infer_prediction_status_matrix",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "step": "prediction",
+        "matrix": [
+          [],
+          [
+            "running"
+          ],
+          [
+            "complete"
+          ],
+          [
+            "failed"
+          ],
+          [
+            "error"
+          ],
+          [
+            "complete",
+            "failed"
+          ]
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "prediction": "pending"
+          },
+          {
+            "prediction": "running"
+          },
+          {
+            "prediction": "complete"
+          },
+          {
+            "prediction": "failed"
+          },
+          {
+            "prediction": "failed"
+          },
+          {
+            "prediction": "failed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "infer_product_steps",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project_empty": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "project_with_products": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000036",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": [
+            {
+              "id": "artifact_000000000037",
+              "linked_id": "map_1",
+              "format": "geojson",
+              "output_path": "exports/map.geojson",
+              "options": {},
+              "included_map_elements": [],
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "source_task_ids": [],
+              "catalog_version_id": null
+            }
+          ]
+        },
+        "steps": [
+          "map_compile",
+          "export"
+        ]
+      },
+      "expect": {
+        "result": {
+          "empty": {
+            "map_compile": "pending",
+            "export": "pending"
+          },
+          "with_products": {
+            "map_compile": "complete",
+            "export": "complete"
+          }
+        }
+      }
+    },
+    {
+      "id": "infer_qc_evidence_matrix",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "cases": [
+          {
+            "id": "no_reports",
+            "project": {
+              "meta": {
+                "name": "Demo",
+                "region": "",
+                "version": "0.2.17a0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "project_root": ".",
+                "last_recovery": null
+              },
+              "stratigraphy": {
+                "target_horizon": "",
+                "sequence_boundaries": [],
+                "systems_tract_scheme": "LST/TST/HST",
+                "interpretation_version": "v1",
+                "applicable_wells": [],
+                "applicable_seismic_ranges": []
+              },
+              "resources": [],
+              "factor_map_tasks": [],
+              "prediction_tasks": [],
+              "paleomap_documents": [
+                {
+                  "id": "map_000000000038",
+                  "name": "M1",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                },
+                {
+                  "id": "map_000000000039",
+                  "name": "M2",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                }
+              ],
+              "quality_reports": [],
+              "compilation_runs": [],
+              "export_artifacts": []
+            }
+          },
+          {
+            "id": "raw_pass",
+            "project": {
+              "meta": {
+                "name": "Demo",
+                "region": "",
+                "version": "0.2.17a0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "project_root": ".",
+                "last_recovery": null
+              },
+              "stratigraphy": {
+                "target_horizon": "",
+                "sequence_boundaries": [],
+                "systems_tract_scheme": "LST/TST/HST",
+                "interpretation_version": "v1",
+                "applicable_wells": [],
+                "applicable_seismic_ranges": []
+              },
+              "resources": [],
+              "factor_map_tasks": [],
+              "prediction_tasks": [],
+              "paleomap_documents": [
+                {
+                  "id": "map_000000000040",
+                  "name": "M1",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                },
+                {
+                  "id": "map_000000000041",
+                  "name": "M2",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                }
+              ],
+              "quality_reports": [
+                {
+                  "id": "qc_000000000042",
+                  "linked_map_document_id": "map_000000000040",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [],
+                  "status": "pass",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                }
+              ],
+              "compilation_runs": [],
+              "export_artifacts": []
+            }
+          },
+          {
+            "id": "raw_warning",
+            "project": {
+              "meta": {
+                "name": "Demo",
+                "region": "",
+                "version": "0.2.17a0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "project_root": ".",
+                "last_recovery": null
+              },
+              "stratigraphy": {
+                "target_horizon": "",
+                "sequence_boundaries": [],
+                "systems_tract_scheme": "LST/TST/HST",
+                "interpretation_version": "v1",
+                "applicable_wells": [],
+                "applicable_seismic_ranges": []
+              },
+              "resources": [],
+              "factor_map_tasks": [],
+              "prediction_tasks": [],
+              "paleomap_documents": [
+                {
+                  "id": "map_000000000043",
+                  "name": "M1",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                },
+                {
+                  "id": "map_000000000044",
+                  "name": "M2",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                }
+              ],
+              "quality_reports": [
+                {
+                  "id": "qc_000000000045",
+                  "linked_map_document_id": "map_000000000043",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [
+                    {
+                      "rule": "facies_polygons_present",
+                      "severity": "warning",
+                      "message": "无相带多边形"
+                    }
+                  ],
+                  "status": "warning",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                }
+              ],
+              "compilation_runs": [],
+              "export_artifacts": []
+            }
+          },
+          {
+            "id": "raw_error_severity",
+            "project": {
+              "meta": {
+                "name": "Demo",
+                "region": "",
+                "version": "0.2.17a0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "project_root": ".",
+                "last_recovery": null
+              },
+              "stratigraphy": {
+                "target_horizon": "",
+                "sequence_boundaries": [],
+                "systems_tract_scheme": "LST/TST/HST",
+                "interpretation_version": "v1",
+                "applicable_wells": [],
+                "applicable_seismic_ranges": []
+              },
+              "resources": [],
+              "factor_map_tasks": [],
+              "prediction_tasks": [],
+              "paleomap_documents": [
+                {
+                  "id": "map_000000000046",
+                  "name": "M1",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                },
+                {
+                  "id": "map_000000000047",
+                  "name": "M2",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                }
+              ],
+              "quality_reports": [
+                {
+                  "id": "qc_000000000048",
+                  "linked_map_document_id": "map_000000000046",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [
+                    {
+                      "rule": "r",
+                      "severity": "error",
+                      "message": "x"
+                    }
+                  ],
+                  "status": "error",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                }
+              ],
+              "compilation_runs": [],
+              "export_artifacts": []
+            }
+          },
+          {
+            "id": "raw_failed",
+            "project": {
+              "meta": {
+                "name": "Demo",
+                "region": "",
+                "version": "0.2.17a0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "project_root": ".",
+                "last_recovery": null
+              },
+              "stratigraphy": {
+                "target_horizon": "",
+                "sequence_boundaries": [],
+                "systems_tract_scheme": "LST/TST/HST",
+                "interpretation_version": "v1",
+                "applicable_wells": [],
+                "applicable_seismic_ranges": []
+              },
+              "resources": [],
+              "factor_map_tasks": [],
+              "prediction_tasks": [],
+              "paleomap_documents": [
+                {
+                  "id": "map_000000000049",
+                  "name": "M1",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                },
+                {
+                  "id": "map_000000000050",
+                  "name": "M2",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                }
+              ],
+              "quality_reports": [
+                {
+                  "id": "qc_000000000051",
+                  "linked_map_document_id": "map_000000000049",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [
+                    {
+                      "rule": "r",
+                      "severity": "failed",
+                      "message": "x"
+                    }
+                  ],
+                  "status": "failed",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                }
+              ],
+              "compilation_runs": [],
+              "export_artifacts": []
+            }
+          },
+          {
+            "id": "two_maps_dedup",
+            "project": {
+              "meta": {
+                "name": "Demo",
+                "region": "",
+                "version": "0.2.17a0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "project_root": ".",
+                "last_recovery": null
+              },
+              "stratigraphy": {
+                "target_horizon": "",
+                "sequence_boundaries": [],
+                "systems_tract_scheme": "LST/TST/HST",
+                "interpretation_version": "v1",
+                "applicable_wells": [],
+                "applicable_seismic_ranges": []
+              },
+              "resources": [],
+              "factor_map_tasks": [],
+              "prediction_tasks": [],
+              "paleomap_documents": [
+                {
+                  "id": "map_000000000052",
+                  "name": "M1",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                },
+                {
+                  "id": "map_000000000053",
+                  "name": "M2",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                }
+              ],
+              "quality_reports": [
+                {
+                  "id": "qc_000000000054",
+                  "linked_map_document_id": "map_000000000052",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [],
+                  "status": "pass",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                },
+                {
+                  "id": "qc_000000000055",
+                  "linked_map_document_id": "map_000000000053",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [
+                    {
+                      "rule": "facies_polygons_present",
+                      "severity": "warning",
+                      "message": "无相带多边形"
+                    }
+                  ],
+                  "status": "warning",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                }
+              ],
+              "compilation_runs": [],
+              "export_artifacts": []
+            }
+          },
+          {
+            "id": "active_error_wins",
+            "project": {
+              "meta": {
+                "name": "Demo",
+                "region": "",
+                "version": "0.2.17a0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "project_root": ".",
+                "last_recovery": null
+              },
+              "stratigraphy": {
+                "target_horizon": "",
+                "sequence_boundaries": [],
+                "systems_tract_scheme": "LST/TST/HST",
+                "interpretation_version": "v1",
+                "applicable_wells": [],
+                "applicable_seismic_ranges": []
+              },
+              "resources": [],
+              "factor_map_tasks": [],
+              "prediction_tasks": [],
+              "paleomap_documents": [
+                {
+                  "id": "map_000000000056",
+                  "name": "M1",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                },
+                {
+                  "id": "map_000000000057",
+                  "name": "M2",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                }
+              ],
+              "quality_reports": [
+                {
+                  "id": "qc_000000000058",
+                  "linked_map_document_id": "map_000000000056",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [],
+                  "status": "pass",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                },
+                {
+                  "id": "qc_000000000059",
+                  "linked_map_document_id": "map_000000000057",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [
+                    {
+                      "rule": "r",
+                      "severity": "error",
+                      "message": "x"
+                    }
+                  ],
+                  "status": "error",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                }
+              ],
+              "compilation_runs": [
+                {
+                  "id": "run_000000000060",
+                  "name": "R",
+                  "target_horizon": "H1",
+                  "sequence_scheme_ref": "s",
+                  "status": "draft",
+                  "workflow_steps": [],
+                  "active_factor_map_task_ids": [],
+                  "active_prediction_task_id": null,
+                  "active_paleomap_document_id": null,
+                  "active_quality_report_id": "qc_000000000059",
+                  "export_artifact_ids": [],
+                  "created_at": "2026-01-01T00:00:00+00:00",
+                  "updated_at": "2026-01-01T00:00:00+00:00"
+                }
+              ],
+              "export_artifacts": []
+            }
+          },
+          {
+            "id": "active_dangling_falls_back",
+            "project": {
+              "meta": {
+                "name": "Demo",
+                "region": "",
+                "version": "0.2.17a0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "project_root": ".",
+                "last_recovery": null
+              },
+              "stratigraphy": {
+                "target_horizon": "",
+                "sequence_boundaries": [],
+                "systems_tract_scheme": "LST/TST/HST",
+                "interpretation_version": "v1",
+                "applicable_wells": [],
+                "applicable_seismic_ranges": []
+              },
+              "resources": [],
+              "factor_map_tasks": [],
+              "prediction_tasks": [],
+              "paleomap_documents": [
+                {
+                  "id": "map_000000000061",
+                  "name": "M1",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                },
+                {
+                  "id": "map_000000000062",
+                  "name": "M2",
+                  "linked_target_horizon": "H1",
+                  "linked_prediction_task_id": null,
+                  "linked_contour_draft_id": null,
+                  "linked_factor_task_id": null,
+                  "facies_polygons": [],
+                  "facies_style": {},
+                  "well_overlays": [],
+                  "line_features": [],
+                  "label_features": [],
+                  "reference_layers": [],
+                  "map_chrome": {},
+                  "map_crs": null,
+                  "layer_state": {},
+                  "view_state": {},
+                  "edit_history": []
+                }
+              ],
+              "quality_reports": [
+                {
+                  "id": "qc_000000000063",
+                  "linked_map_document_id": "map_000000000061",
+                  "rules": [
+                    "target_horizon_present"
+                  ],
+                  "issues": [],
+                  "status": "pass",
+                  "generated_at": "2026-01-01T00:00:00+00:00",
+                  "provenance_registered": true,
+                  "rule_status": {},
+                  "coverage": {}
+                }
+              ],
+              "compilation_runs": [
+                {
+                  "id": "run_000000000064",
+                  "name": "R",
+                  "target_horizon": "H1",
+                  "sequence_scheme_ref": "s",
+                  "status": "draft",
+                  "workflow_steps": [],
+                  "active_factor_map_task_ids": [],
+                  "active_prediction_task_id": null,
+                  "active_paleomap_document_id": null,
+                  "active_quality_report_id": "qc_missing",
+                  "export_artifact_ids": [],
+                  "created_at": "2026-01-01T00:00:00+00:00",
+                  "updated_at": "2026-01-01T00:00:00+00:00"
+                }
+              ],
+              "export_artifacts": []
+            }
+          }
+        ]
+      },
+      "expect": {
+        "result": [
+          {
+            "id": "no_reports",
+            "qc": "pending"
+          },
+          {
+            "id": "raw_pass",
+            "qc": "complete"
+          },
+          {
+            "id": "raw_warning",
+            "qc": "warning"
+          },
+          {
+            "id": "raw_error_severity",
+            "qc": "failed"
+          },
+          {
+            "id": "raw_failed",
+            "qc": "failed"
+          },
+          {
+            "id": "two_maps_dedup",
+            "qc": "warning"
+          },
+          {
+            "id": "active_error_wins",
+            "qc": "failed"
+          },
+          {
+            "id": "active_dangling_falls_back",
+            "qc": "complete"
+          }
+        ]
+      }
+    },
+    {
+      "id": "overlay_factor_map_stale",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000065",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "step": "factor_map",
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1 旧",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:01"
+            },
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v2",
+              "name": "H1 新",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:02"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:05"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": "stale"
+      }
+    },
+    {
+      "id": "overlay_prediction_fresh_keeps_complete",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [
+            {
+              "id": "pred_000000000066",
+              "name": "p1",
+              "adapter_kind": "mock",
+              "input_factor_map_ids": [],
+              "input_refs": {},
+              "model_metadata": {},
+              "result_summary": {},
+              "probability_summary": {},
+              "evidence_contribution": [],
+              "review_areas": [],
+              "status": "complete",
+              "adapter_schema_version": "1.0",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null
+            }
+          ],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "step": "prediction",
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_p1",
+              "started_at": "2026-01-01T00:00:06"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": "complete"
+      }
+    },
+    {
+      "id": "overlay_map_compile_failed_run",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000067",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "step": "map_compile",
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "status": "failed",
+              "domain_task_id": "task_m1",
+              "started_at": "2026-01-01T00:00:07"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": "failed"
+      }
+    },
+    {
+      "id": "overlay_qc_running_run",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000068",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [
+            {
+              "id": "qc_000000000069",
+              "linked_map_document_id": "map_000000000068",
+              "rules": [
+                "target_horizon_present"
+              ],
+              "issues": [],
+              "status": "pass",
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "provenance_registered": true,
+              "rule_status": {},
+              "coverage": {}
+            }
+          ],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "step": "qc",
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            },
+            {
+              "asset_id": "asset_q1",
+              "version_id": "ver_q1_v1",
+              "name": "Q1",
+              "producing_run_id": "run_q1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_q1",
+              "operation": "qc",
+              "input_version_ids": [
+                "ver_m1_v1"
+              ],
+              "output_version_ids": [
+                "ver_q1_v1"
+              ],
+              "status": "running",
+              "domain_task_id": "task_q1",
+              "started_at": "2026-01-01T00:00:08"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": "running"
+      }
+    },
+    {
+      "id": "overlay_export_missing_payload",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": [
+            {
+              "id": "artifact_000000000070",
+              "linked_id": "map_1",
+              "format": "geojson",
+              "output_path": "exports/map.geojson",
+              "options": {},
+              "included_map_elements": [],
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "source_task_ids": [],
+              "catalog_version_id": null
+            }
+          ]
+        },
+        "step": "export",
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            },
+            {
+              "asset_id": "asset_e1",
+              "version_id": "ver_e1_v1",
+              "name": "E1",
+              "producing_run_id": "run_e1",
+              "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "path": "/tmp/pwb-a4-absent.payload"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_e1",
+              "operation": "export",
+              "input_version_ids": [
+                "ver_m1_v1"
+              ],
+              "output_version_ids": [
+                "ver_e1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_e1",
+              "started_at": "2026-01-01T00:00:09"
+            }
+          ],
+          "check_integrity": true
+        },
+        "freshness_service": "check_integrity"
+      },
+      "expect": {
+        "result": "warning"
+      }
+    },
+    {
+      "id": "overlay_probe_raises_keeps_evidence",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000071",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "step": "factor_map",
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_MISSING"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:10"
+            }
+          ],
+          "resolve_boom": true
+        }
+      },
+      "expect": {
+        "result": "complete"
+      }
+    },
+    {
+      "id": "overlay_service_param_boom",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000072",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "step": "factor_map",
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_MISSING"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:10"
+            }
+          ],
+          "resolve_boom": true
+        },
+        "freshness_service": "boom"
+      },
+      "expect": {
+        "result": "complete"
+      }
+    },
+    {
+      "id": "overlay_short_circuit_apply_freshness_false",
+      "fn": "service.infer_workflow_step_status",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000073",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "step": "factor_map",
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1 旧",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:01"
+            },
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v2",
+              "name": "H1 新",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:02"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:12"
+            }
+          ]
+        },
+        "apply_freshness": false
+      },
+      "expect": {
+        "result": "complete"
+      }
+    },
+    {
+      "id": "home_ephemeral_no_run",
+      "fn": "service.home_workflow_steps",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [
+            {
+              "id": "res_000000000074",
+              "name": "A1.Las",
+              "path": "data/A1.Las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000075",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [
+            {
+              "id": "pred_000000000076",
+              "name": "p1",
+              "adapter_kind": "mock",
+              "input_factor_map_ids": [],
+              "input_refs": {},
+              "model_metadata": {},
+              "result_summary": {},
+              "probability_summary": {},
+              "evidence_contribution": [],
+              "review_areas": [],
+              "status": "running",
+              "adapter_schema_version": "1.0",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null
+            }
+          ],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000077",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": [
+            {
+              "id": "artifact_000000000078",
+              "linked_id": "map_1",
+              "format": "geojson",
+              "output_path": "exports/map.geojson",
+              "options": {},
+              "included_map_elements": [],
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "source_task_ids": [],
+              "catalog_version_id": null
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": {
+          "steps": [
+            {
+              "step_type": "data_check",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "factor_map",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "prediction",
+              "status": "running",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "map_compile",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "qc",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "export",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            }
+          ],
+          "compilation_runs_after": []
+        }
+      }
+    },
+    {
+      "id": "home_roundtrip_no_catalog",
+      "fn": "service.home_workflow_steps",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [
+            {
+              "id": "res_000000000090",
+              "name": "A1.Las",
+              "path": "data/A1.Las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000091",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "failed",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000092",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [],
+          "compilation_runs": [
+            {
+              "id": "run_000000000089",
+              "name": "Run",
+              "target_horizon": "ZJ2",
+              "sequence_scheme_ref": "scheme",
+              "status": "draft",
+              "workflow_steps": [
+                {
+                  "id": "step_000000000085",
+                  "step_type": "data_check",
+                  "status": "warning",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000086",
+                  "step_type": "prediction",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000087",
+                  "step_type": "map_compile",
+                  "status": "warning",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000088",
+                  "step_type": "export",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                }
+              ],
+              "active_factor_map_task_ids": [],
+              "active_prediction_task_id": null,
+              "active_paleomap_document_id": null,
+              "active_quality_report_id": null,
+              "export_artifact_ids": [],
+              "created_at": "2026-01-01T00:00:00+00:00",
+              "updated_at": "2026-01-01T00:00:00+00:00"
+            }
+          ],
+          "export_artifacts": []
+        }
+      },
+      "expect": {
+        "result": {
+          "steps": [
+            {
+              "id": "step_000000000085",
+              "step_type": "data_check",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "factor_map",
+              "status": "failed",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000086",
+              "step_type": "prediction",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000087",
+              "step_type": "map_compile",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "qc",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000088",
+              "step_type": "export",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            }
+          ],
+          "compilation_runs_after": [
+            {
+              "id": "run_000000000089",
+              "name": "Run",
+              "target_horizon": "ZJ2",
+              "sequence_scheme_ref": "scheme",
+              "status": "draft",
+              "workflow_steps": [
+                {
+                  "id": "step_000000000085",
+                  "step_type": "data_check",
+                  "status": "complete",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000086",
+                  "step_type": "prediction",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000087",
+                  "step_type": "map_compile",
+                  "status": "complete",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000088",
+                  "step_type": "export",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "step_type": "factor_map",
+                  "status": "failed",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "step_type": "qc",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                }
+              ],
+              "active_factor_map_task_ids": [],
+              "active_prediction_task_id": null,
+              "active_paleomap_document_id": null,
+              "active_quality_report_id": null,
+              "export_artifact_ids": [],
+              "created_at": "2026-01-01T00:00:00+00:00",
+              "updated_at": "2026-01-01T00:00:00+00:00"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "home_sticky_vs_stale_overlay",
+      "fn": "service.home_workflow_steps",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [
+            {
+              "id": "res_000000000101",
+              "name": "A1.Las",
+              "path": "data/A1.Las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000102",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [
+            {
+              "id": "pred_000000000103",
+              "name": "p1",
+              "adapter_kind": "mock",
+              "input_factor_map_ids": [],
+              "input_refs": {},
+              "model_metadata": {},
+              "result_summary": {},
+              "probability_summary": {},
+              "evidence_contribution": [],
+              "review_areas": [],
+              "status": "complete",
+              "adapter_schema_version": "1.0",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null
+            }
+          ],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000104",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [],
+          "compilation_runs": [
+            {
+              "id": "run_000000000100",
+              "name": "Run",
+              "target_horizon": "ZJ2",
+              "sequence_scheme_ref": "scheme",
+              "status": "draft",
+              "workflow_steps": [
+                {
+                  "id": "step_000000000095",
+                  "step_type": "data_check",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000096",
+                  "step_type": "factor_map",
+                  "status": "warning",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000097",
+                  "step_type": "prediction",
+                  "status": "warning",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000098",
+                  "step_type": "map_compile",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000099",
+                  "step_type": "export",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                }
+              ],
+              "active_factor_map_task_ids": [],
+              "active_prediction_task_id": null,
+              "active_paleomap_document_id": null,
+              "active_quality_report_id": null,
+              "export_artifact_ids": [],
+              "created_at": "2026-01-01T00:00:00+00:00",
+              "updated_at": "2026-01-01T00:00:00+00:00"
+            }
+          ],
+          "export_artifacts": [
+            {
+              "id": "artifact_000000000105",
+              "linked_id": "map_1",
+              "format": "geojson",
+              "output_path": "exports/map.geojson",
+              "options": {},
+              "included_map_elements": [],
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "source_task_ids": [],
+              "catalog_version_id": null
+            }
+          ]
+        },
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1 旧",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:01"
+            },
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v2",
+              "name": "H1 新",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:02"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            },
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:13"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_h1_v2"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_p1",
+              "started_at": "2026-01-01T00:00:14"
+            },
+            {
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_m1",
+              "started_at": "2026-01-01T00:00:15"
+            },
+            {
+              "run_id": "run_e1",
+              "operation": "export",
+              "input_version_ids": [
+                "ver_m1_v1"
+              ],
+              "output_version_ids": [
+                "ver_e1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_e1",
+              "started_at": "2026-01-01T00:00:16"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": {
+          "steps": [
+            {
+              "id": "step_000000000095",
+              "step_type": "data_check",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000096",
+              "step_type": "factor_map",
+              "status": "warning",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000097",
+              "step_type": "prediction",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000098",
+              "step_type": "map_compile",
+              "status": "stale",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "qc",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "id": "step_000000000099",
+              "step_type": "export",
+              "status": "stale",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            }
+          ],
+          "compilation_runs_after": [
+            {
+              "id": "run_000000000100",
+              "name": "Run",
+              "target_horizon": "ZJ2",
+              "sequence_scheme_ref": "scheme",
+              "status": "draft",
+              "workflow_steps": [
+                {
+                  "id": "step_000000000095",
+                  "step_type": "data_check",
+                  "status": "complete",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000096",
+                  "step_type": "factor_map",
+                  "status": "warning",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000097",
+                  "step_type": "prediction",
+                  "status": "complete",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000098",
+                  "step_type": "map_compile",
+                  "status": "stale",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "id": "step_000000000099",
+                  "step_type": "export",
+                  "status": "stale",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                },
+                {
+                  "step_type": "qc",
+                  "status": "pending",
+                  "required_input_resource_ids": [],
+                  "produced_ids": [],
+                  "blocking_issue_summary": "",
+                  "provenance_summary": ""
+                }
+              ],
+              "active_factor_map_task_ids": [],
+              "active_prediction_task_id": null,
+              "active_paleomap_document_id": null,
+              "active_quality_report_id": null,
+              "export_artifact_ids": [],
+              "created_at": "2026-01-01T00:00:00+00:00",
+              "updated_at": "2026-01-01T00:00:00+00:00"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "home_composition_failure_evidence_only",
+      "fn": "service.home_workflow_steps",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000107",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "catalog": {
+          "versions": [],
+          "runs": [],
+          "fail_listing": true
+        }
+      },
+      "expect": {
+        "result": {
+          "steps": [
+            {
+              "step_type": "data_check",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "factor_map",
+              "status": "complete",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "prediction",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "map_compile",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "qc",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            },
+            {
+              "step_type": "export",
+              "status": "pending",
+              "required_input_resource_ids": [],
+              "produced_ids": [],
+              "blocking_issue_summary": "",
+              "provenance_summary": ""
+            }
+          ],
+          "compilation_runs_after": []
+        }
+      }
+    },
+    {
+      "id": "plan_all_stale_no_roots",
+      "fn": "service.build_affected_products_plan",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1 旧",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:01"
+            },
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v2",
+              "name": "H1 新",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:02"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            },
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:20"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_p1",
+              "started_at": "2026-01-01T00:00:21"
+            },
+            {
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_m1",
+              "started_at": "2026-01-01T00:00:22"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": {
+          "steps": [
+            {
+              "order": 1,
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "domain_task_id": "task_f1",
+              "action": "requires_compute",
+              "reason": {
+                "type": "UPSTREAM_VERSION_CHANGED",
+                "upstream_version_id": "ver_h1_v1",
+                "current_version_id": "ver_h1_v2",
+                "operation": "factor_map",
+                "detail": "run used ver_h1_v1; current is ver_h1_v2",
+                "asset_id": "asset_h1"
+              },
+              "reuse_run_id": null,
+              "reuse_output_version_ids": [],
+              "input_version_ids": [
+                "ver_h1_v2"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "label": "单因素图 (task_f1)",
+              "can_reuse_existing": false,
+              "requires_compute": true
+            },
+            {
+              "order": 2,
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "domain_task_id": "task_p1",
+              "action": "requires_compute",
+              "reason": {
+                "type": "UPSTREAM_VERSION_CHANGED",
+                "upstream_version_id": "ver_h1_v1",
+                "current_version_id": "ver_h1_v2",
+                "operation": "prediction",
+                "detail": "run used ver_h1_v1; current is ver_h1_v2",
+                "asset_id": "asset_h1"
+              },
+              "reuse_run_id": null,
+              "reuse_output_version_ids": [],
+              "input_version_ids": [
+                "ver_h1_v2"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "label": "地震相预测 (task_p1)",
+              "can_reuse_existing": false,
+              "requires_compute": true
+            },
+            {
+              "order": 3,
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "domain_task_id": "task_m1",
+              "action": "requires_compute",
+              "reason": {
+                "type": "TRANSITIVE_UPSTREAM_STALE",
+                "upstream_version_id": "ver_f1_v1",
+                "current_version_id": null,
+                "operation": "map_compile",
+                "detail": "upstream run run_f1 is STALE",
+                "asset_id": null
+              },
+              "reuse_run_id": null,
+              "reuse_output_version_ids": [],
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "label": "古地理图编绘 (task_m1)",
+              "can_reuse_existing": false,
+              "requires_compute": true
+            }
+          ],
+          "changed_version_ids": [],
+          "cycle_error": null,
+          "completed_run_ids": [],
+          "failed_run_ids": [],
+          "skipped_run_ids": []
+        }
+      }
+    },
+    {
+      "id": "plan_changed_roots_factor_output",
+      "fn": "service.build_affected_products_plan",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1 旧",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:01"
+            },
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v2",
+              "name": "H1 新",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:02"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            },
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:20"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_p1",
+              "started_at": "2026-01-01T00:00:21"
+            },
+            {
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_m1",
+              "started_at": "2026-01-01T00:00:22"
+            }
+          ]
+        },
+        "changed_version_ids": [
+          "ver_f1_v1"
+        ]
+      },
+      "expect": {
+        "result": {
+          "steps": [
+            {
+              "order": 1,
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "domain_task_id": "task_m1",
+              "action": "requires_compute",
+              "reason": {
+                "type": "TRANSITIVE_UPSTREAM_STALE",
+                "upstream_version_id": "ver_f1_v1",
+                "current_version_id": null,
+                "operation": "map_compile",
+                "detail": "upstream run run_f1 is STALE",
+                "asset_id": null
+              },
+              "reuse_run_id": null,
+              "reuse_output_version_ids": [],
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "label": "古地理图编绘 (task_m1)",
+              "can_reuse_existing": false,
+              "requires_compute": true
+            }
+          ],
+          "changed_version_ids": [
+            "ver_f1_v1"
+          ],
+          "cycle_error": null,
+          "completed_run_ids": [],
+          "failed_run_ids": [],
+          "skipped_run_ids": []
+        }
+      }
+    },
+    {
+      "id": "downstream_rows_root_expansion",
+      "fn": "service.downstream_impact_for_version",
+      "input": {
+        "version_id": "ver_h1_v2",
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1 旧",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:01"
+            },
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v2",
+              "name": "H1 新",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:02"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_p1",
+              "version_id": "ver_p1_v1",
+              "name": "P1",
+              "producing_run_id": "run_p1"
+            },
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:20"
+            },
+            {
+              "run_id": "run_p1",
+              "operation": "prediction",
+              "input_version_ids": [
+                "ver_h1_v1"
+              ],
+              "output_version_ids": [
+                "ver_p1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_p1",
+              "started_at": "2026-01-01T00:00:21"
+            },
+            {
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_m1",
+              "started_at": "2026-01-01T00:00:22"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": [
+          {
+            "run_id": "run_f1",
+            "operation": "factor_map",
+            "label": "单因素图",
+            "domain_task_id": "task_f1",
+            "state": "STALE",
+            "state_label": "需更新",
+            "reasons": [
+              {
+                "type": "UPSTREAM_VERSION_CHANGED",
+                "upstream_version_id": "ver_h1_v1",
+                "current_version_id": "ver_h1_v2",
+                "operation": "factor_map",
+                "detail": "run used ver_h1_v1; current is ver_h1_v2",
+                "asset_id": "asset_h1"
+              }
+            ]
+          },
+          {
+            "run_id": "run_p1",
+            "operation": "prediction",
+            "label": "地震相预测",
+            "domain_task_id": "task_p1",
+            "state": "STALE",
+            "state_label": "需更新",
+            "reasons": [
+              {
+                "type": "UPSTREAM_VERSION_CHANGED",
+                "upstream_version_id": "ver_h1_v1",
+                "current_version_id": "ver_h1_v2",
+                "operation": "prediction",
+                "detail": "run used ver_h1_v1; current is ver_h1_v2",
+                "asset_id": "asset_h1"
+              }
+            ]
+          },
+          {
+            "run_id": "run_m1",
+            "operation": "map_compile",
+            "label": "古地理图编绘",
+            "domain_task_id": "task_m1",
+            "state": "STALE",
+            "state_label": "需更新",
+            "reasons": [
+              {
+                "type": "TRANSITIVE_UPSTREAM_STALE",
+                "upstream_version_id": "ver_f1_v1",
+                "current_version_id": null,
+                "operation": "map_compile",
+                "detail": "upstream run run_f1 is STALE",
+                "asset_id": null
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "downstream_rows_domain_sibling_expansion",
+      "fn": "service.downstream_impact_for_version",
+      "input": {
+        "version_id": "ver_f1_v1",
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v2",
+              "name": "H1 新",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:02"
+            },
+            {
+              "asset_id": "asset_f1",
+              "version_id": "ver_f1_v1",
+              "name": "F1",
+              "producing_run_id": "run_f1"
+            },
+            {
+              "asset_id": "asset_f2",
+              "version_id": "ver_f2_v1",
+              "name": "F2",
+              "producing_run_id": "run_f1b"
+            },
+            {
+              "asset_id": "asset_m1",
+              "version_id": "ver_m1_v1",
+              "name": "M1",
+              "producing_run_id": "run_m1"
+            },
+            {
+              "asset_id": "asset_m2",
+              "version_id": "ver_m2_v1",
+              "name": "M2",
+              "producing_run_id": "run_m1b"
+            }
+          ],
+          "runs": [
+            {
+              "run_id": "run_f1",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v2"
+              ],
+              "output_version_ids": [
+                "ver_f1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:30"
+            },
+            {
+              "run_id": "run_f1b",
+              "operation": "factor_map",
+              "input_version_ids": [
+                "ver_h1_v2"
+              ],
+              "output_version_ids": [
+                "ver_f2_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_f1",
+              "started_at": "2026-01-01T00:00:31"
+            },
+            {
+              "run_id": "run_m1",
+              "operation": "map_compile",
+              "input_version_ids": [
+                "ver_f1_v1"
+              ],
+              "output_version_ids": [
+                "ver_m1_v1"
+              ],
+              "status": "complete",
+              "domain_task_id": "task_m1",
+              "started_at": "2026-01-01T00:00:32"
+            },
+            {
+              "run_id": "run_m1b",
+              "operation": "map_compile",
+              "input_version_ids": [
+                "ver_f2_v1"
+              ],
+              "output_version_ids": [
+                "ver_m2_v1"
+              ],
+              "status": "failed",
+              "domain_task_id": "task_m1b",
+              "started_at": "2026-01-01T00:00:33"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": [
+          {
+            "run_id": "run_m1",
+            "operation": "map_compile",
+            "label": "古地理图编绘",
+            "domain_task_id": "task_m1",
+            "state": "STALE",
+            "state_label": "需更新",
+            "reasons": [
+              {
+                "type": "UPSTREAM_VERSION_CHANGED",
+                "upstream_version_id": "ver_f1_v1",
+                "current_version_id": "ver_f2_v1",
+                "operation": "map_compile",
+                "detail": "run used ver_f1_v1; current is ver_f2_v1",
+                "asset_id": "asset_f2"
+              }
+            ]
+          },
+          {
+            "run_id": "run_m1b",
+            "operation": "map_compile",
+            "label": "古地理图编绘",
+            "domain_task_id": "task_m1b",
+            "state": "FAILED",
+            "state_label": "异常",
+            "reasons": [
+              {
+                "type": "RUN_FAILED",
+                "upstream_version_id": null,
+                "current_version_id": null,
+                "operation": "map_compile",
+                "detail": "",
+                "asset_id": null
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "downstream_rows_empty",
+      "fn": "service.downstream_impact_for_version",
+      "input": {
+        "version_id": "ver_h1_v1",
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        },
+        "catalog": {
+          "versions": [
+            {
+              "asset_id": "asset_h1",
+              "version_id": "ver_h1_v1",
+              "name": "H1 旧",
+              "producing_run_id": null,
+              "created_at": "2026-01-01T00:00:01"
+            }
+          ],
+          "runs": []
+        }
+      },
+      "expect": {
+        "result": []
+      }
+    },
+    {
+      "id": "dashboard_full_shape",
+      "fn": "service.dashboard_state",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [
+            {
+              "id": "res_000000000114",
+              "name": "A1.Las",
+              "path": "data/A1.Las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            },
+            {
+              "id": "res_000000000115",
+              "name": "A2.Las",
+              "path": "data/A2.Las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            },
+            {
+              "id": "res_000000000116",
+              "name": "200P.sgy",
+              "path": "data/200P.sgy",
+              "type": "seismic",
+              "format": "sgy",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [
+            {
+              "id": "factor_000000000117",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "complete",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            },
+            {
+              "id": "factor_000000000118",
+              "name": "sand",
+              "target_horizon": "H1",
+              "factor_type": "sand",
+              "input_resource_ids": [],
+              "well_table_id": null,
+              "method": "IDW",
+              "parameters": {},
+              "output_resource_ids": [],
+              "quality_metrics": {},
+              "status": "running",
+              "source_kind": "mock",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null,
+              "grid_artifact_path": null,
+              "grid_artifact_version_id": null,
+              "grid_metadata": {}
+            }
+          ],
+          "prediction_tasks": [
+            {
+              "id": "pred_000000000119",
+              "name": "p1",
+              "adapter_kind": "mock",
+              "input_factor_map_ids": [],
+              "input_refs": {},
+              "model_metadata": {},
+              "result_summary": {},
+              "probability_summary": {},
+              "evidence_contribution": [],
+              "review_areas": [],
+              "status": "complete",
+              "adapter_schema_version": "1.0",
+              "input_snapshot_hash": "",
+              "generator_version": null,
+              "seed": null
+            }
+          ],
+          "paleomap_documents": [
+            {
+              "id": "map_000000000120",
+              "name": "M1",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            },
+            {
+              "id": "map_000000000121",
+              "name": "M2",
+              "linked_target_horizon": "H1",
+              "linked_prediction_task_id": null,
+              "linked_contour_draft_id": null,
+              "linked_factor_task_id": null,
+              "facies_polygons": [],
+              "facies_style": {},
+              "well_overlays": [],
+              "line_features": [],
+              "label_features": [],
+              "reference_layers": [],
+              "map_chrome": {},
+              "map_crs": null,
+              "layer_state": {},
+              "view_state": {},
+              "edit_history": []
+            }
+          ],
+          "quality_reports": [
+            {
+              "id": "qc_000000000122",
+              "linked_map_document_id": "map_000000000120",
+              "rules": [
+                "target_horizon_present"
+              ],
+              "issues": [
+                {
+                  "rule": "r",
+                  "severity": "warning"
+                }
+              ],
+              "status": "warning",
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "provenance_registered": true,
+              "rule_status": {},
+              "coverage": {}
+            },
+            {
+              "id": "qc_000000000123",
+              "linked_map_document_id": "map_000000000121",
+              "rules": [
+                "target_horizon_present"
+              ],
+              "issues": [
+                {
+                  "rule": "a"
+                },
+                {
+                  "rule": "b"
+                }
+              ],
+              "status": "pass",
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "provenance_registered": true,
+              "rule_status": {},
+              "coverage": {}
+            }
+          ],
+          "compilation_runs": [
+            {
+              "id": "run_000000000125",
+              "name": "编图 Run",
+              "target_horizon": "ZJ2-Advanced",
+              "sequence_scheme_ref": "四级层序",
+              "status": "running",
+              "workflow_steps": [],
+              "active_factor_map_task_ids": [],
+              "active_prediction_task_id": null,
+              "active_paleomap_document_id": null,
+              "active_quality_report_id": "qc_000000000122",
+              "export_artifact_ids": [],
+              "created_at": "2026-01-01T00:00:00+00:00",
+              "updated_at": "2026-01-01T00:00:00+00:00"
+            }
+          ],
+          "export_artifacts": [
+            {
+              "id": "artifact_000000000124",
+              "linked_id": "map_000000000120",
+              "format": "geojson",
+              "output_path": "exports/map.geojson",
+              "options": {},
+              "included_map_elements": [],
+              "generated_at": "2026-01-01T00:00:00+00:00",
+              "source_task_ids": [],
+              "catalog_version_id": null
+            }
+          ]
+        }
+      },
+      "expect": {
+        "result": {
+          "project_name": "Demo",
+          "active_target_horizon": "ZJ2-Advanced",
+          "sequence_scheme": "四级层序",
+          "workflow_status": "running",
+          "resource_counts": {
+            "well_log": 2,
+            "seismic": 1
+          },
+          "resource_readiness": {
+            "required_types": [
+              "well_log",
+              "seismic",
+              "horizon"
+            ],
+            "available_counts": {
+              "well_log": 2,
+              "seismic": 1,
+              "horizon": 0
+            },
+            "missing_types": [
+              "horizon"
+            ],
+            "ready": false
+          },
+          "factor_map_count": 2,
+          "prediction_count": 1,
+          "map_document_count": 2,
+          "qc_issue_count": 1,
+          "export_count": 1,
+          "workflow_complete_count": 5,
+          "workflow_step_count": 6
+        }
+      }
+    },
+    {
+      "id": "dashboard_no_run_fallbacks",
+      "fn": "service.dashboard_state",
+      "input": {
+        "project": {
+          "meta": {
+            "name": "Demo",
+            "region": "",
+            "version": "0.2.17a0",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "project_root": ".",
+            "last_recovery": null
+          },
+          "stratigraphy": {
+            "target_horizon": "H3",
+            "sequence_boundaries": [],
+            "systems_tract_scheme": "LST/TST/HST",
+            "interpretation_version": "v1",
+            "applicable_wells": [],
+            "applicable_seismic_ranges": []
+          },
+          "resources": [
+            {
+              "id": "res_000000000132",
+              "name": "w.las",
+              "path": "data/w.las",
+              "type": "well_log",
+              "format": "las",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            },
+            {
+              "id": "res_000000000133",
+              "name": "s.sgy",
+              "path": "data/s.sgy",
+              "type": "seismic",
+              "format": "sgy",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            },
+            {
+              "id": "res_000000000134",
+              "name": "h.grd",
+              "path": "data/h.grd",
+              "type": "horizon",
+              "format": "grd",
+              "crs": null,
+              "status": "indexed",
+              "tags": [],
+              "source": "local",
+              "parsed_summary": {},
+              "checksum": null,
+              "external": false,
+              "artifact_role": null
+            }
+          ],
+          "factor_map_tasks": [],
+          "prediction_tasks": [],
+          "paleomap_documents": [],
+          "quality_reports": [],
+          "compilation_runs": [],
+          "export_artifacts": []
+        }
+      },
+      "expect": {
+        "result": {
+          "project_name": "Demo",
+          "active_target_horizon": "H3",
+          "sequence_scheme": "LST/TST/HST",
+          "workflow_status": "draft",
+          "resource_counts": {
+            "well_log": 1,
+            "seismic": 1,
+            "horizon": 1
+          },
+          "resource_readiness": {
+            "required_types": [
+              "well_log",
+              "seismic",
+              "horizon"
+            ],
+            "available_counts": {
+              "well_log": 1,
+              "seismic": 1,
+              "horizon": 1
+            },
+            "missing_types": [],
+            "ready": true
+          },
+          "factor_map_count": 0,
+          "prediction_count": 0,
+          "map_document_count": 0,
+          "qc_issue_count": 0,
+          "export_count": 0,
+          "workflow_complete_count": 1,
+          "workflow_step_count": 6
+        }
+      }
+    }
+  ]
+}
