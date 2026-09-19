@@ -1,6 +1,11 @@
 """Scene adapter: the single bridge between the domain model and the
 engine's named scene objects (G2).
 
+LEGACY REFERENCE (CONV-GEO3D): the product chain for this surface now lives
+in C++ — ``libs/geo3d_viz`` (``pwb::geo3d_viz::GeologicalSceneAdapter``).
+This module stays as the behavior oracle/frozen reference for the port; new
+product code must not import it.
+
 Layering contract::
 
     ModelAssembly (authority, this repo)

@@ -64,6 +64,9 @@ class AppContext;
 #ifdef PWB_WITH_CONV_16
 class FactorStatsDock;
 #endif
+#ifdef PWB_WITH_GEO3D_VIZ
+class Geo3DDock;
+#endif
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -284,6 +287,12 @@ private:
 #ifdef PWB_WITH_CONV_16
     FactorStatsDock* factor_dock_ = nullptr;
 #endif
+#ifdef PWB_WITH_GEO3D_VIZ
+    Geo3DDock* geo3d_dock_ = nullptr;
+#endif
+    // The B store opened by openProject (null in module-only mode); the
+    // attribute runner and volume viewer resolve catalog versions here.
+    std::shared_ptr<pwb::application::PwbDataStore> project_store_;
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     QDockWidget* seismic_dock_ = nullptr;
     pwb::seismic_viewer::SeismicSliceWidget* slice_widget_ = nullptr;
