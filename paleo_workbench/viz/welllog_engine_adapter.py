@@ -1,5 +1,12 @@
 """Revision-aware Workbench → retained WellLogEngine document adapter.
 
+[C++ migration status — replaced/oracle] The C++ product chain ports this
+module 1:1 to libs/visualization (pwb::viz well_log_document_plan),
+parity-frozen through tests/cpp/science/fixtures/welllog/ (generate via
+generate_oracle.py). This Python module stays as the behavioural oracle
+and serves the legacy Python entry point only; the C++ platform never
+imports it.
+
 The Workbench project model remains authoritative.  This module only prepares
 immutable typed buffers and maps them into the native session in one complete
 document transaction.  It deliberately has no Python renderer, LOD pyramid, or

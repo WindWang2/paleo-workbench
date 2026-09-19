@@ -44,6 +44,50 @@ if(PWB_SCIENCE_VIEWER_TESTS)
             "PWB_SCIENCE_VIEWER_TESTS=ON but Pwb::VisualizationWellLog is "
             "missing — tests must be added after the viewer adapter")
     endif()
+    # Qt-free adapter/layout parity tests (Python oracle replay). No GL, no
+    # QApplication — the plan layer is engine- and Qt-free by design.
+    add_executable(science.viewer.well_log_plan viewer/well_log_plan_test.cpp)
+    target_compile_features(science.viewer.well_log_plan PRIVATE cxx_std_20)
+    target_include_directories(science.viewer.well_log_plan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    if(MSVC)
+        target_compile_options(science.viewer.well_log_plan PRIVATE /utf-8 /W4 /permissive- /wd4251)
+    else()
+        target_compile_options(science.viewer.well_log_plan PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    target_link_libraries(science.viewer.well_log_plan PRIVATE
+        Pwb::VisualizationWellLog
+        Pwb::Domain # nlohmann include path for the fixture comparison
+    )
+    add_test(NAME science.viewer.well_log_plan
+        COMMAND science.viewer.well_log_plan)
+    set_tests_properties(science.viewer.well_log_plan PROPERTIES
+        TIMEOUT 300
+        ENVIRONMENT "PWB_SCIENCE_FIXTURE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
+    # Offscreen native host integration: real GL view, in-memory DTOs,
+    # depth sync/selection/interpretation/export/boundary coverage.
+    add_executable(science.viewer.well_log_native_host viewer/well_log_native_host_test.cpp)
+    target_compile_features(science.viewer.well_log_native_host PRIVATE cxx_std_20)
+    target_include_directories(science.viewer.well_log_native_host PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    if(MSVC)
+        target_compile_options(science.viewer.well_log_native_host PRIVATE /utf-8 /W4 /permissive- /wd4251)
+    else()
+        target_compile_options(science.viewer.well_log_native_host PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    target_link_libraries(science.viewer.well_log_native_host PRIVATE
+        Pwb::VisualizationWellLog
+        Qt6::Widgets
+    )
+    add_test(NAME science.viewer.well_log_native_host
+        COMMAND science.viewer.well_log_native_host)
+    set_tests_properties(science.viewer.well_log_native_host PROPERTIES
+        TIMEOUT 300
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1")
+
     add_executable(science.viewer.well_log viewer/well_log_viewer_test.cpp)
     target_compile_features(science.viewer.well_log PRIVATE cxx_std_20)
     target_include_directories(science.viewer.well_log PRIVATE

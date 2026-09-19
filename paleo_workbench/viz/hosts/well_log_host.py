@@ -1,4 +1,8 @@
 from __future__ import annotations
+# [C++ migration status — legacy] Native replacement: the C++ platform
+# embeds libs/visualization pwb::viz::WellLogHostWidget (well-log-engine
+# SDK, no Python) — see apps/paleo_workbench_platform main_window 测井
+# dock. This PySide6 host serves the Python entry point only.
 
 import logging
 

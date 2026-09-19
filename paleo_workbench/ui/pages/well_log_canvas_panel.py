@@ -1,4 +1,9 @@
 from __future__ import annotations
+# [C++ migration status — legacy] Native replacement: the platform 测井
+# dock (WellLogHostWidget) plus the 测井轨道 settings panel
+# (apps/paleo_workbench_platform well_log_track_panel) cover track
+# config, depth-cursor linkage, interpretation events and export.
+# This PySide6 panel serves the Python entry point only.
 
 import time
 from typing import Any, Literal

@@ -1,5 +1,11 @@
 """Session-local curve display and merge layout for the Legacy well-log canvas.
 
+[C++ migration status — replaced/oracle] Ported to libs/visualization
+(pwb::viz well_log_track_layout) with the same index-based identities,
+three-curve merge cap and GR-guaranteed default; template JSON is the
+native host's config surface. This module remains for the Legacy
+(QPainter) Python canvas; the C++ platform never imports it.
+
 The GeoViz renderer accepts a ``CurveTrack`` containing one or more curves.
 This module keeps the user-facing layout separate from raw LAS data: curve
 identities are index-based (so duplicate mnemonics remain distinct), and every

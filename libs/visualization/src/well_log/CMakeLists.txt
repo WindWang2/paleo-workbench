@@ -6,6 +6,8 @@
 
 add_library(pwb_visualization_well_log STATIC
     well_log_host_widget.cpp
+    well_log_track_layout.cpp
+    well_log_document_plan.cpp
 )
 add_library(Pwb::VisualizationWellLog ALIAS pwb_visualization_well_log)
 set_target_properties(pwb_visualization_well_log PROPERTIES
@@ -25,6 +27,8 @@ target_link_libraries(pwb_visualization_well_log
         Qt6::Widgets
     PRIVATE
         WellLog::IO # LasSourceAdapter (parse only; not exposed in headers)
+        Pwb::Domain # template/parity JSON (nlohmann) — private detail
+        Pwb::WellScience # classify_depth_unit (V6 §2-3 vocabulary reuse)
 )
 if(MSVC)
     target_compile_options(pwb_visualization_well_log PRIVATE /utf-8 /W4 /permissive- /wd4251 /wd4275)

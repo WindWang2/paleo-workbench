@@ -40,6 +40,8 @@ target_compile_definitions(pwb-platform PRIVATE
 if(TARGET Pwb::VisualizationWellLog)
     target_link_libraries(pwb-platform PRIVATE Pwb::VisualizationWellLog)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_WELL_LOG=1)
+    # Native track settings panel (layout/template/export) over the host.
+    target_sources(pwb-platform PRIVATE well_log_track_panel.cpp)
 endif()
 
 # D seismic viewer dock + E attribute kernels: the context is the composition

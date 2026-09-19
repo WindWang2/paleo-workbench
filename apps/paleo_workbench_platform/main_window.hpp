@@ -277,6 +277,10 @@ private:
     // actually survives into the next launch (defaults restore).
     bool layout_reset_pending_ = false;
 #endif
+#ifdef PWB_WITH_WELL_LOG
+    // Live depth readout from the well-log view crosshair (cursor linkage).
+    QLabel* cursor_label_ = nullptr;
+#endif
 #ifdef PWB_WITH_CONV_16
     FactorStatsDock* factor_dock_ = nullptr;
 #endif
