@@ -40,3 +40,9 @@
 - 复验：invoke-resource-gate.sh Test -r "providers\.|interchange\." ×2 → 两次 **exit 0，100% tests passed out of 13**（含 providers.plugins 0.46s 全矩阵、interchange.archive oracle 复放）。受影响既有测试零回归。
 - 预算消耗：根代理 + 2 个子代理（盘点 ~2.23M、审查 ~2.18M tokens），远低于 360M 上限。
 
+
+## R4（2026-09-20）提交与 PR
+
+- 提交: a0ff838c（27 文件，+4537/-1）于 codex/cpp-close-10-interchange-providers-20260920，已推送 origin。
+- PR: https://github.com/WindWang2/paleo-workbench/pull/1424 → main（base 06211541 之后的 main 演进与本线无文件交叠：本线只动 libs/interchange、libs/providers 与本线 ledger 目录）。
+- 协调登记已同步 PR URL/head SHA/状态。完成定义对照：本线必需能力实现、生产调用链有真实证据（测试 + 库端口供 01/09/12 接入）、受影响测试 13/13 ×2 通过、PR 已创建且 base 关系明确；全项目完成判定权在 12。
