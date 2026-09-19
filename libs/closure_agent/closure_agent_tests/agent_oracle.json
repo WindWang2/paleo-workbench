@@ -1,0 +1,659 @@
+{
+ "schema_version": "1.0",
+ "source": "frozen paleo_workbench Python tree (see line-11 ledger for SHA)",
+ "intents": [
+  {
+   "query": "对比XX井和YY井的砂组顶面分层并拉平GR曲线",
+   "raw_query": "对比XX井和YY井的砂组顶面分层并拉平GR曲线",
+   "primary_domain": "well",
+   "secondary_domains": [],
+   "target_horizon": "对比XX井和YY井的砂组",
+   "factor_type": "",
+   "suggested_skills": [
+    "skill.well_correlation_pipeline"
+   ],
+   "requires_data": true,
+   "confidence": 0.95
+  },
+  {
+   "query": "对长东区块做砂地比单因素编图，目标层位长8段",
+   "raw_query": "对长东区块做砂地比单因素编图，目标层位长8段",
+   "primary_domain": "cartography",
+   "secondary_domains": [
+    "seismic",
+    "compilation"
+   ],
+   "target_horizon": "目标层位长8段",
+   "factor_type": "sand_ratio",
+   "suggested_skills": [
+    "skill.single_factor_mapping_pipeline",
+    "skill.comprehensive_paleomap_pipeline"
+   ],
+   "requires_data": true,
+   "confidence": 0.95
+  },
+  {
+   "query": "编制鄂尔多斯盆地长8段古地理图，输出出版级排版",
+   "raw_query": "编制鄂尔多斯盆地长8段古地理图，输出出版级排版",
+   "primary_domain": "compilation",
+   "secondary_domains": [],
+   "target_horizon": "编制鄂尔多斯盆地长8段",
+   "factor_type": "",
+   "suggested_skills": [
+    "skill.comprehensive_paleomap_pipeline"
+   ],
+   "requires_data": true,
+   "confidence": 0.95
+  },
+  {
+   "query": "检查地震工区inline 500切片的相干属性异常",
+   "raw_query": "检查地震工区inline 500切片的相干属性异常",
+   "primary_domain": "seismic",
+   "secondary_domains": [
+    "qa"
+   ],
+   "target_horizon": "",
+   "factor_type": "",
+   "suggested_skills": [],
+   "requires_data": true,
+   "confidence": 0.95
+  },
+  {
+   "query": "把图层导出为高精SVG和PDF截图",
+   "raw_query": "把图层导出为高精SVG和PDF截图",
+   "primary_domain": "visualization",
+   "secondary_domains": [
+    "gis"
+   ],
+   "target_horizon": "SVG和PDF截图",
+   "factor_type": "",
+   "suggested_skills": [],
+   "requires_data": true,
+   "confidence": 0.95
+  },
+  {
+   "query": "清理目录中的孤立点并对资产版本做质检QC",
+   "raw_query": "清理目录中的孤立点并对资产版本做质检QC",
+   "primary_domain": "qa",
+   "secondary_domains": [
+    "data"
+   ],
+   "target_horizon": "",
+   "factor_type": "",
+   "suggested_skills": [],
+   "requires_data": true,
+   "confidence": 0.95
+  },
+  {
+   "query": "导入新井的LAS测井曲线到数据资产catalog",
+   "raw_query": "导入新井的LAS测井曲线到数据资产catalog",
+   "primary_domain": "well",
+   "secondary_domains": [
+    "data"
+   ],
+   "target_horizon": "S测井曲线到数据资产catalog",
+   "factor_type": "",
+   "suggested_skills": [
+    "skill.well_correlation_pipeline"
+   ],
+   "requires_data": true,
+   "confidence": 0.95
+  },
+  {
+   "query": "今天天气怎么样",
+   "raw_query": "今天天气怎么样",
+   "primary_domain": "general",
+   "secondary_domains": [],
+   "target_horizon": "",
+   "factor_type": "",
+   "suggested_skills": [],
+   "requires_data": true,
+   "confidence": 0.5
+  }
+ ],
+ "plans": [
+  {
+   "query": "对比XX井和YY井的砂组顶面分层并拉平GR曲线",
+   "primary_domain": "well",
+   "nodes": [
+    {
+     "id": "task_data_discover",
+     "agent_name": "data_agent",
+     "action": "discover_and_validate",
+     "dependencies": []
+    },
+    {
+     "id": "task_well_process",
+     "agent_name": "well_agent",
+     "action": "process_well_tops_and_curves",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_gis_spatial",
+     "agent_name": "gis_agent",
+     "action": "analyze_spatial_constraints",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_carto_generate",
+     "agent_name": "carto_agent",
+     "action": "generate_factor_surface",
+     "dependencies": [
+      "task_gis_spatial",
+      "task_well_process"
+     ]
+    },
+    {
+     "id": "task_viz_compose",
+     "agent_name": "viz_agent",
+     "action": "compose_map_layout",
+     "dependencies": [
+      "task_carto_generate"
+     ]
+    },
+    {
+     "id": "task_qa_audit",
+     "agent_name": "qa_agent",
+     "action": "audit_and_verify",
+     "dependencies": [
+      "task_viz_compose"
+     ]
+    },
+    {
+     "id": "task_result_delivery",
+     "agent_name": "result_agent",
+     "action": "package_and_report",
+     "dependencies": [
+      "task_qa_audit"
+     ]
+    }
+   ]
+  },
+  {
+   "query": "对长东区块做砂地比单因素编图，目标层位长8段",
+   "primary_domain": "cartography",
+   "nodes": [
+    {
+     "id": "task_data_discover",
+     "agent_name": "data_agent",
+     "action": "discover_and_validate",
+     "dependencies": []
+    },
+    {
+     "id": "task_well_process",
+     "agent_name": "well_agent",
+     "action": "process_well_tops_and_curves",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_gis_spatial",
+     "agent_name": "gis_agent",
+     "action": "analyze_spatial_constraints",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_carto_generate",
+     "agent_name": "carto_agent",
+     "action": "generate_factor_surface",
+     "dependencies": [
+      "task_gis_spatial",
+      "task_well_process"
+     ]
+    },
+    {
+     "id": "task_viz_compose",
+     "agent_name": "viz_agent",
+     "action": "compose_map_layout",
+     "dependencies": [
+      "task_carto_generate"
+     ]
+    },
+    {
+     "id": "task_qa_audit",
+     "agent_name": "qa_agent",
+     "action": "audit_and_verify",
+     "dependencies": [
+      "task_viz_compose"
+     ]
+    },
+    {
+     "id": "task_result_delivery",
+     "agent_name": "result_agent",
+     "action": "package_and_report",
+     "dependencies": [
+      "task_qa_audit"
+     ]
+    }
+   ]
+  },
+  {
+   "query": "编制鄂尔多斯盆地长8段古地理图，输出出版级排版",
+   "primary_domain": "compilation",
+   "nodes": [
+    {
+     "id": "task_data_discover",
+     "agent_name": "data_agent",
+     "action": "discover_and_validate",
+     "dependencies": []
+    },
+    {
+     "id": "task_well_process",
+     "agent_name": "well_agent",
+     "action": "process_well_tops_and_curves",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_seismic_process",
+     "agent_name": "seismic_agent",
+     "action": "extract_slices_and_attributes",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_gis_spatial",
+     "agent_name": "gis_agent",
+     "action": "analyze_spatial_constraints",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_carto_generate",
+     "agent_name": "carto_agent",
+     "action": "generate_factor_surface",
+     "dependencies": [
+      "task_gis_spatial",
+      "task_well_process",
+      "task_seismic_process"
+     ]
+    },
+    {
+     "id": "task_viz_compose",
+     "agent_name": "viz_agent",
+     "action": "compose_map_layout",
+     "dependencies": [
+      "task_carto_generate"
+     ]
+    },
+    {
+     "id": "task_qa_audit",
+     "agent_name": "qa_agent",
+     "action": "audit_and_verify",
+     "dependencies": [
+      "task_viz_compose"
+     ]
+    },
+    {
+     "id": "task_result_delivery",
+     "agent_name": "result_agent",
+     "action": "package_and_report",
+     "dependencies": [
+      "task_qa_audit"
+     ]
+    }
+   ]
+  },
+  {
+   "query": "检查地震工区inline 500切片的相干属性异常",
+   "primary_domain": "seismic",
+   "nodes": [
+    {
+     "id": "task_data_discover",
+     "agent_name": "data_agent",
+     "action": "discover_and_validate",
+     "dependencies": []
+    },
+    {
+     "id": "task_seismic_process",
+     "agent_name": "seismic_agent",
+     "action": "extract_slices_and_attributes",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_gis_spatial",
+     "agent_name": "gis_agent",
+     "action": "analyze_spatial_constraints",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_carto_generate",
+     "agent_name": "carto_agent",
+     "action": "generate_factor_surface",
+     "dependencies": [
+      "task_gis_spatial",
+      "task_seismic_process"
+     ]
+    },
+    {
+     "id": "task_viz_compose",
+     "agent_name": "viz_agent",
+     "action": "compose_map_layout",
+     "dependencies": [
+      "task_carto_generate"
+     ]
+    },
+    {
+     "id": "task_qa_audit",
+     "agent_name": "qa_agent",
+     "action": "audit_and_verify",
+     "dependencies": [
+      "task_viz_compose"
+     ]
+    },
+    {
+     "id": "task_result_delivery",
+     "agent_name": "result_agent",
+     "action": "package_and_report",
+     "dependencies": [
+      "task_qa_audit"
+     ]
+    }
+   ]
+  },
+  {
+   "query": "把图层导出为高精SVG和PDF截图",
+   "primary_domain": "visualization",
+   "nodes": [
+    {
+     "id": "task_data_discover",
+     "agent_name": "data_agent",
+     "action": "discover_and_validate",
+     "dependencies": []
+    },
+    {
+     "id": "task_gis_spatial",
+     "agent_name": "gis_agent",
+     "action": "analyze_spatial_constraints",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_carto_generate",
+     "agent_name": "carto_agent",
+     "action": "generate_factor_surface",
+     "dependencies": [
+      "task_gis_spatial"
+     ]
+    },
+    {
+     "id": "task_viz_compose",
+     "agent_name": "viz_agent",
+     "action": "compose_map_layout",
+     "dependencies": [
+      "task_carto_generate"
+     ]
+    },
+    {
+     "id": "task_qa_audit",
+     "agent_name": "qa_agent",
+     "action": "audit_and_verify",
+     "dependencies": [
+      "task_viz_compose"
+     ]
+    },
+    {
+     "id": "task_result_delivery",
+     "agent_name": "result_agent",
+     "action": "package_and_report",
+     "dependencies": [
+      "task_qa_audit"
+     ]
+    }
+   ]
+  },
+  {
+   "query": "清理目录中的孤立点并对资产版本做质检QC",
+   "primary_domain": "qa",
+   "nodes": [
+    {
+     "id": "task_data_discover",
+     "agent_name": "data_agent",
+     "action": "discover_and_validate",
+     "dependencies": []
+    },
+    {
+     "id": "task_gis_spatial",
+     "agent_name": "gis_agent",
+     "action": "analyze_spatial_constraints",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_carto_generate",
+     "agent_name": "carto_agent",
+     "action": "generate_factor_surface",
+     "dependencies": [
+      "task_gis_spatial"
+     ]
+    },
+    {
+     "id": "task_viz_compose",
+     "agent_name": "viz_agent",
+     "action": "compose_map_layout",
+     "dependencies": [
+      "task_carto_generate"
+     ]
+    },
+    {
+     "id": "task_qa_audit",
+     "agent_name": "qa_agent",
+     "action": "audit_and_verify",
+     "dependencies": [
+      "task_viz_compose"
+     ]
+    },
+    {
+     "id": "task_result_delivery",
+     "agent_name": "result_agent",
+     "action": "package_and_report",
+     "dependencies": [
+      "task_qa_audit"
+     ]
+    }
+   ]
+  },
+  {
+   "query": "导入新井的LAS测井曲线到数据资产catalog",
+   "primary_domain": "well",
+   "nodes": [
+    {
+     "id": "task_data_discover",
+     "agent_name": "data_agent",
+     "action": "discover_and_validate",
+     "dependencies": []
+    },
+    {
+     "id": "task_well_process",
+     "agent_name": "well_agent",
+     "action": "process_well_tops_and_curves",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_gis_spatial",
+     "agent_name": "gis_agent",
+     "action": "analyze_spatial_constraints",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_carto_generate",
+     "agent_name": "carto_agent",
+     "action": "generate_factor_surface",
+     "dependencies": [
+      "task_gis_spatial",
+      "task_well_process"
+     ]
+    },
+    {
+     "id": "task_viz_compose",
+     "agent_name": "viz_agent",
+     "action": "compose_map_layout",
+     "dependencies": [
+      "task_carto_generate"
+     ]
+    },
+    {
+     "id": "task_qa_audit",
+     "agent_name": "qa_agent",
+     "action": "audit_and_verify",
+     "dependencies": [
+      "task_viz_compose"
+     ]
+    },
+    {
+     "id": "task_result_delivery",
+     "agent_name": "result_agent",
+     "action": "package_and_report",
+     "dependencies": [
+      "task_qa_audit"
+     ]
+    }
+   ]
+  },
+  {
+   "query": "今天天气怎么样",
+   "primary_domain": "general",
+   "nodes": [
+    {
+     "id": "task_data_discover",
+     "agent_name": "data_agent",
+     "action": "discover_and_validate",
+     "dependencies": []
+    },
+    {
+     "id": "task_gis_spatial",
+     "agent_name": "gis_agent",
+     "action": "analyze_spatial_constraints",
+     "dependencies": [
+      "task_data_discover"
+     ]
+    },
+    {
+     "id": "task_carto_generate",
+     "agent_name": "carto_agent",
+     "action": "generate_factor_surface",
+     "dependencies": [
+      "task_gis_spatial"
+     ]
+    },
+    {
+     "id": "task_viz_compose",
+     "agent_name": "viz_agent",
+     "action": "compose_map_layout",
+     "dependencies": [
+      "task_carto_generate"
+     ]
+    },
+    {
+     "id": "task_qa_audit",
+     "agent_name": "qa_agent",
+     "action": "audit_and_verify",
+     "dependencies": [
+      "task_viz_compose"
+     ]
+    },
+    {
+     "id": "task_result_delivery",
+     "agent_name": "result_agent",
+     "action": "package_and_report",
+     "dependencies": [
+      "task_qa_audit"
+     ]
+    }
+   ]
+  }
+ ],
+ "spec_validation": [
+  {
+   "name": "ok_compute",
+   "problems": [
+    "spec needs a handler or a provider_id to be executable"
+   ]
+  },
+  {
+   "name": "bad_id",
+   "problems": [
+    "action_id 'Bad-ID' must be '<domain>.<name>' lowercase dotted",
+    "spec needs a handler or a provider_id to be executable"
+   ]
+  },
+  {
+   "name": "bad_cacheable",
+   "problems": [
+    "spec needs a handler or a provider_id to be executable",
+    "cacheable requires deterministic (a cache hit replays the execution)",
+    "cacheable requires declared output_refs: a cache hit must re-materialise from catalog-resolvable outputs"
+   ]
+  },
+  {
+   "name": "bad_version",
+   "problems": [
+    "spec needs a handler or a provider_id to be executable",
+    "version 'v1' must be numeric dotted (e.g. 1.0)"
+   ]
+  },
+  {
+   "name": "no_executable",
+   "problems": [
+    "spec needs a handler or a provider_id to be executable"
+   ]
+  },
+  {
+   "name": "bad_tag",
+   "problems": [
+    "spec needs a handler or a provider_id to be executable",
+    "domain_tag 'Bad Tag' must match ^[a-z0-9][a-z0-9_.-]*$"
+   ]
+  },
+  {
+   "name": "destructive",
+   "problems": [
+    "spec needs a handler or a provider_id to be executable"
+   ]
+  }
+ ],
+ "tool_schema": {
+  "type": "function",
+  "function": {
+   "name": "geology__factor_summary",
+   "description": "Summarize a factor dataset [risk: read; via provider geology.factor_stats]",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "report_name": {
+      "type": "string",
+      "description": "报告工件名"
+     }
+    },
+    "required": [
+     "report_name"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "default_permissions": [
+  "compute",
+  "read"
+ ]
+}

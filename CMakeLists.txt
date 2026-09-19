@@ -573,6 +573,16 @@ if(PWB_BUILD_CONV_07)
     add_subdirectory(libs/workflow_engine)
 endif()
 # END CONV-07
+# BEGIN CLOSURE-AGENT (line 11) subdirectory — guarded agent/harness
+# execution core: ActionSpec/registry/executor port, agent session state
+# machine, intent+DAG planner, session checkpoint/recovery, event stream,
+# chat-model transport seam. Consumes Pwb::Providers (line-10 tool
+# interface) — no provider registry rebuilt. Placed after the CONV-06/07
+# blocks so the optional workflow adapter can link Pwb::WorkflowEngine.
+if(PWB_BUILD_CLOSURE_AGENT AND PWB_BUILD_PROVIDERS AND TARGET pwb_providers)
+    add_subdirectory(libs/closure_agent)
+endif()
+# END CLOSURE-AGENT
 # BEGIN CONV-08
 if(PWB_BUILD_CONV_08)
     add_subdirectory(libs/factor_host)

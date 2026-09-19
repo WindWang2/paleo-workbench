@@ -110,6 +110,20 @@ pwb_declare_feature(PWB_BUILD_CONV_06
 pwb_declare_feature(PWB_BUILD_CONV_07
     "CONV-07 in-memory DAG workflow engine" OFF
     REQUIRES PWB_BUILD_MAPPING_KERNEL)
+# BEGIN CLOSURE-AGENT (line 11) — agent/harness closure core. Declares the
+# provider SDK switch in the graph (the legacy CONV-PROVIDERS option block
+# below restates the same implications) so the resolver can chain
+# CLOSURE_AGENT -> PROVIDERS -> DATA + MAPPING_KERNEL + CONV-02 up front;
+# the closure_agent subdirectory is added after CONV-07 so its optional
+# workflow adapter can link Pwb::WorkflowEngine. Lease registered in
+# codex-coordination 11-line.json.
+pwb_declare_feature(PWB_BUILD_PROVIDERS
+    "CONV-PROVIDERS native provider SDK + builtins" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_MAPPING_KERNEL;PWB_BUILD_CONV_02)
+pwb_declare_feature(PWB_BUILD_CLOSURE_AGENT
+    "CLOSURE-AGENT agent/harness closure core (libs/closure_agent)" OFF
+    IMPLIES PWB_BUILD_PROVIDERS)
+# END CLOSURE-AGENT
 pwb_declare_feature(PWB_BUILD_CONV_08
     "CONV-08 factor interpolation task host" OFF)
 pwb_declare_feature(PWB_BUILD_CONV_09
