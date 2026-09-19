@@ -23,8 +23,8 @@ else()
     set(VIZ_A_GL_ENV "LIBGL_ALWAYS_SOFTWARE=1")
 endif()
 
-function(viz_a_test target source)
-    add_executable(${target} ${source})
+function(viz_a_test target)
+    add_executable(${target} ${ARGN})
     target_compile_features(${target} PRIVATE cxx_std_20)
     set_target_properties(${target} PROPERTIES
         CXX_EXTENSIONS OFF
