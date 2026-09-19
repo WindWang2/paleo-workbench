@@ -95,8 +95,12 @@ bool install(QMainWindow* window, JobCenter* jobs) {
 
     if (window == nullptr || jobs == nullptr) return false;
     QDockWidget* dock = window->findChild<QDockWidget*>("well-log-dock");
+    // The host carries no Q_OBJECT (by design, moc-free) so qobject_cast is
+    // unusable; the dock's widget is the host by construction in
+    // MainWindow (same pattern as loadLasIntoDock) — static_cast with the
+    // null dock guarded above.
     auto* host = dock != nullptr
-                     ? qobject_cast<pwb::viz::WellLogHostWidget*>(dock->widget())
+                     ? static_cast<pwb::viz::WellLogHostWidget*>(dock->widget())
                      : nullptr;
     if (host == nullptr || jobs == nullptr) return false;
 
