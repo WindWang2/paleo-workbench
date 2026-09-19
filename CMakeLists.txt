@@ -443,6 +443,33 @@ if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
 endif()
 # END UI-10-IMPLY
 
+# BEGIN UI-14-IMPLY — the UI-14 root controllers (libs/ui_controllers) bind
+# the workflow-runtime closure (CONV-26B recompute planner) and the
+# prediction contract cores (CONV-21 → CONV-13/14/19). UI slices carry no
+# per-slice option (taskbook §2), so a platform+data configure implies the
+# kernel closure the controllers need — the UI-04/UI-10 precedent.
+if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
+    foreach(_ui14_kernel CONV_26B CONV_21)
+        if(NOT PWB_BUILD_${_ui14_kernel})
+            set(PWB_BUILD_${_ui14_kernel} ON)
+            message(STATUS
+                "UI-14: implying PWB_BUILD_${_ui14_kernel}=ON — "
+                "libs/ui_controllers binds the controller kernels")
+        endif()
+    endforeach()
+    # CONV-26B's own imply-if ran earlier (its option block sits above
+    # this point), so land the downstream switches it would have set.
+    # CONV-06/07/08 option blocks still lie ahead — normal-variable sets
+    # shadow them (CMP0077) and their subdirectory adds run on time.
+    # CONV-25's add_subdirectory already passed, so mount it directly.
+    set(PWB_BUILD_CONV_06 ON)
+    set(PWB_BUILD_CONV_07 ON)
+    set(PWB_BUILD_CONV_08 ON)
+    set(PWB_BUILD_CONV_25 ON)
+    pwb_add_subdirectory_once(libs/workflow_graph)
+endif()
+# END UI-14-IMPLY
+
 # BEGIN CONV-02
 # Qt-free MapDocument / MapCompositionDocument JSON kernel (swarm
 # cpp-conv-02): data-contract port of mapping/layers.py +
