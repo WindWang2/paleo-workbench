@@ -12,6 +12,9 @@
 
 #include <qgsapplication.h>
 
+#include <pwb/platform_services/diagnostics_report.hpp>
+#include <pwb/platform_services/qt_session_policy.hpp>
+#include <pwb/platform_services/settings_service.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 
 #include <exception>
@@ -123,12 +126,19 @@ int Bootstrap::run(int argc, char** argv) {
 
     diagnostics::install_message_collector();
 
+    // Session policy must run before the application object exists
+    // (qt_platform.py contract): EGL pin, xcb clear, fractional-scale guard.
+    pwb::platform_services::configure_qt_platform_for_session();
+    pwb::platform_services::apply_wayland_fractional_scale_guard();
+
     // QgsApplication must be THE application object (QGIS 4.x contract);
     // GUI-enabled so the interactive shell and offscreen self-checks share
     // one code path.
     QgsApplication app(argc, argv, true);
     QApplication::setApplicationName(QStringLiteral("pwb-platform"));
     QApplication::setOrganizationName(QStringLiteral("paleo-workbench"));
+    QApplication::setApplicationVersion(QString::fromStdString(
+        pwb::platform_services::version_line()));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(
@@ -148,6 +158,12 @@ int Bootstrap::run(int argc, char** argv) {
                       QStringLiteral("print the product diagnostics report "
                                      "(versions/providers/probes/log tail)")});
     parser.process(app);
+
+    // The unified settings identity predates the native shell: migrate the
+    // legacy (WorkstationV3 / paleo-workbench) stores on every startup —
+    // idempotent, cheap (ui/layout_persistence.py contract). Theme, window
+    // layout and recent lists are owned by MainWindow on the same store.
+    pwb::platform_services::migrate_legacy_settings();
 
     const RunMode mode = parse_mode(parser);
 

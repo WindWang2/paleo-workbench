@@ -14,6 +14,20 @@
 
 #include <fstream>
 
+// CONV-PS platform services.
+#include <QActionGroup>
+#include <QApplication>
+#include <QClipboard>
+#include <QDialogButtonBox>
+#include <QPushButton>
+#include <QSettings>
+#include <QTextBrowser>
+#include <QVBoxLayout>
+
+#include <pwb/platform_services/diagnostics_report.hpp>
+#include <pwb/platform_services/settings_service.hpp>
+#include <pwb/platform_services/theme_service.hpp>
+
 #ifdef PWB_WITH_CONV_16
 #include "factor_stats_dock.hpp"
 #endif
@@ -230,19 +244,20 @@ private:
 };
 
 
-MainWindow::MainWindow(AppContext& context, QWidget* parent)
+MainWindow::MainWindow(AppContext& context, QWidget* parent,
+                       QSettings* services_settings)
     : QMainWindow(parent), owned_context_(nullptr), context_(context) {
-    init_shell();
+    init_shell(services_settings);
 }
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(QWidget* parent, QSettings* services_settings)
     : QMainWindow(parent),
       owned_context_(std::make_unique<AppContext>()),
       context_(*owned_context_) {
-    init_shell();
+    init_shell(services_settings);
 }
 
-void MainWindow::init_shell() {
+void MainWindow::init_shell(QSettings* services_settings) {
     dirty_close_responder_ = [this]() {
         return QMessageBox::question(
             this, tr("未提交的修改"),
@@ -259,6 +274,34 @@ void MainWindow::init_shell() {
     connectActions();
     setWindowTitle(tr("Paleo Workbench Platform (C++/QGIS)"));
     resize(1280, 800);
+
+    // CONV-PS: platform services own the unified settings store, the theme
+    // lifecycle and the window layout. Restore runs after the docks exist
+    // (restoreState needs their objectNames) and before show().
+    if (services_settings != nullptr) {
+        services_settings_ = services_settings;  // injected: never owned
+    } else {
+        owned_services_settings_ = std::make_unique<QSettings>(
+            pwb::platform_services::settings_organization(),
+            pwb::platform_services::settings_application());
+        services_settings_ = owned_services_settings_.get();
+    }
+    theme_service_ =
+        std::make_unique<pwb::platform_services::ThemeService>(this);
+    theme_service_->set_store(services_settings_);
+    connect(theme_service_.get(),
+            &pwb::platform_services::ThemeService::theme_changed, this,
+            [this](const QString&, const QString&) {
+                theme_service_->apply(*this);
+                syncThemeMenuChecks();
+            });
+    theme_service_->load_persisted(*services_settings_);
+    buildPlatformMenus();
+    pwb::platform_services::restore_window_layout(*services_settings_, *this);
+    // Apply the restored sheet once the widget tree is complete (and sync
+    // the checkable theme/density actions to the restored state).
+    theme_service_->apply(*this);
+    syncThemeMenuChecks();
 }
 
 MainWindow::~MainWindow() {
@@ -467,6 +510,9 @@ void MainWindow::buildMenusAndToolbar() {
     file_menu->addSeparator();
     file_menu->addAction(actions_.action("map_export"));
     file_menu->addSeparator();
+    // CONV-PS recent-projects MRU (populated after the settings store is
+    // bound in the constructor).
+    recent_projects_menu_ = file_menu->addMenu(tr("最近工程(&R)"));
     file_menu->addAction(tr("退出"), this, &MainWindow::close,
                          QKeySequence::Quit);
 
@@ -919,6 +965,12 @@ QString MainWindow::openProject(const QString& project_file) {
     statusBar()->showMessage(summary, 10000);
     if (!first_error.empty()) {
         return QString::fromStdString(first_error);
+    }
+    // Success: the project becomes the MRU head (native recent-projects).
+    if (services_settings_ != nullptr) {
+        pwb::platform_services::push_recent_project(*services_settings_,
+                                                    project_file);
+        refreshRecentProjects();
     }
     return QString();
 }
@@ -1499,15 +1551,178 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
 #ifdef PWB_WITH_CONV_27
     // UI layout only; business state lives in the store/catalog round.
-    // A pending reset must NOT be overwritten by this close.
-    if (layout_store_ != nullptr && !layout_reset_pending_) {
+    // A pending reset must NOT be overwritten by this close — and the
+    // CONV-PS store below must skip the write for the same reason (its
+    // restore runs after layout_store_'s at startup, so it would
+    // otherwise resurrect the pre-reset layout).
+    const bool layout_reset_pending = layout_reset_pending_;
+    if (layout_store_ != nullptr && !layout_reset_pending) {
         layout_store_->save(*this);
     }
+#else
+    const bool layout_reset_pending = false;
 #endif
+    // Persist the window layout on the confirmed close path only: the
+    // window is still visible here, so save_window_layout accepts it
+    // (a cancelled close must not rewrite the store).
+    if (services_settings_ != nullptr && !layout_reset_pending) {
+        pwb::platform_services::save_window_layout(*services_settings_, *this);
+    }
     // Contract teardown order: session (edit -> canvas detach -> layers ->
     // project) before widget children die with the window.
     context_.session().close();
     QMainWindow::closeEvent(event);
+}
+
+// ------------------------------------------- CONV-PS platform services ----
+
+void MainWindow::buildPlatformMenus() {
+    // ---- 设置 menu: theme, density, diagnostics (production entry points,
+    // mirroring the workstation app-bar View menu of the Python shell).
+    QMenu* settings_menu = menuBar()->addMenu(tr("设置(&S)"));
+    QMenu* theme_menu = settings_menu->addMenu(tr("主题"));
+
+    const struct {
+        const char* value;
+        const char* label;
+    } themes[] = {
+        {"light", "浅色"},
+        {"dark", "深色"},
+        {"high_contrast", "高对比度"},
+    };
+    auto* theme_group = new QActionGroup(this);
+    for (int i = 0; i < 3; ++i) {
+        QAction* action =
+            theme_menu->addAction(tr(themes[i].label));
+        action->setCheckable(true);
+        action->setData(QString::fromLatin1(themes[i].value));
+        theme_group->addAction(action);
+        theme_actions_[i] = action;
+        connect(action, &QAction::triggered, this, [this, action]() {
+            theme_service_->set_theme(
+                pwb::platform_services::theme_from_string(
+                    action->data().toString().toStdString()));
+        });
+    }
+    density_action_ = settings_menu->addAction(tr("紧凑密度"));
+    density_action_->setCheckable(true);
+    connect(density_action_, &QAction::triggered, this, [this]() {
+        theme_service_->set_density(
+            density_action_->isChecked()
+                ? pwb::platform_services::Density::Compact
+                : pwb::platform_services::Density::Comfortable);
+    });
+    syncThemeMenuChecks();
+    refreshRecentProjects();
+
+    settings_menu->addSeparator();
+    settings_menu->addAction(tr("诊断信息…"), this,
+                             &MainWindow::showDiagnosticsDialog);
+
+    // ---- 帮助 menu (app.py _on_about parity + the native probe report).
+    QMenu* help_menu = menuBar()->addMenu(tr("帮助(&H)"));
+    help_menu->addAction(tr("关于…"), this, &MainWindow::showAboutDialog);
+    help_menu->addAction(tr("诊断信息…"), this,
+                         &MainWindow::showDiagnosticsDialog);
+}
+
+void MainWindow::syncThemeMenuChecks() {
+    if (theme_service_ == nullptr) return;
+    const QString current = QString::fromStdString(
+        pwb::platform_services::to_string(theme_service_->theme()));
+    for (QAction* action : theme_actions_) {
+        if (action != nullptr) {
+            action->setChecked(action->data().toString() == current);
+        }
+    }
+    if (density_action_ != nullptr) {
+        density_action_->setChecked(theme_service_->density()
+                                    == pwb::platform_services::Density::Compact);
+    }
+}
+
+void MainWindow::refreshRecentProjects() {
+    if (recent_projects_menu_ == nullptr) return;
+    recent_projects_menu_->clear();
+    if (services_settings_ == nullptr) return;
+    const QStringList projects =
+        pwb::platform_services::load_recent_projects(*services_settings_);
+    if (projects.isEmpty()) {
+        QAction* empty = recent_projects_menu_->addAction(tr("(暂无最近工程)"));
+        empty->setEnabled(false);
+        return;
+    }
+    for (const QString& project : projects) {
+        QAction* action = recent_projects_menu_->addAction(project);
+        connect(action, &QAction::triggered, this,
+                [this, project]() { openRecentProject(project); });
+    }
+    recent_projects_menu_->addSeparator();
+    recent_projects_menu_->addAction(
+        tr("清除最近工程"), this, [this]() {
+            pwb::platform_services::clear_recent_projects(*services_settings_);
+            refreshRecentProjects();
+        });
+}
+
+void MainWindow::openRecentProject(const QString& project_file) {
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // openProject's success path already heads the MRU and refreshes the
+    // menu — here only the failure needs surfacing.
+    const QString error = openProject(project_file);
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("打开工程失败"), error);
+    }
+#else
+    // Honest degraded state: this build has no data stack, so projects
+    // cannot be opened from the MRU (same contract as openProjectDialog).
+    Q_UNUSED(project_file);
+    QMessageBox::information(this, tr("最近工程"),
+                             tr("当前构建未包含数据栈，无法打开工程。"));
+#endif
+}
+
+void MainWindow::showAboutDialog() {
+    // app.py _on_about text at parity, plus the native identity line.
+    QMessageBox::about(
+        this, tr("关于"),
+        tr("智能岩相古地理重建系统\n"
+           "Paleogeography Workbench\n\n"
+           "数据管理 · 沉积相预测 · 古地理编图 · 三维地质建模\n\n")
+            + QString::fromStdString(pwb::platform_services::version_line()));
+}
+
+void MainWindow::showDiagnosticsDialog() {
+    const QString report = QString::fromStdString(
+        pwb::platform_services::environment_report_text());
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("诊断信息"));
+    dialog.resize(720, 520);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* view = new QTextBrowser(&dialog);
+    view->setPlainText(report);
+    view->setReadOnly(true);
+    layout->addWidget(view);
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Save | QDialogButtonBox::Close, &dialog);
+    auto* copy_button =
+        buttons->addButton(tr("复制"), QDialogButtonBox::ActionRole);
+    QObject::connect(copy_button, &QPushButton::clicked, &dialog,
+                     [view]() { QApplication::clipboard()->setText(view->toPlainText()); });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons->button(QDialogButtonBox::Save), &QPushButton::clicked,
+            &dialog, [this, view, &dialog]() {
+                const QString path = QFileDialog::getSaveFileName(
+                    &dialog, tr("保存诊断报告"), QStringLiteral("pwb-diagnostics.txt"));
+                if (path.isEmpty()) return;
+                QFile file(path);
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    file.write(view->toPlainText().toUtf8());
+                }
+            });
+    layout->addWidget(buttons);
+    dialog.exec();
 }
 
 // ------------------------------------------------------------ fixtures ----
@@ -2163,6 +2378,16 @@ void MainWindow::saveLayoutState() {
 void MainWindow::resetLayoutState() {
     if (layout_store_ != nullptr) layout_store_->reset();
     layout_reset_pending_ = true;
+    // The CONV-PS store restores AFTER layout_store_ at startup, so its
+    // layout keys must go too or the pre-reset layout wins the next launch.
+    if (services_settings_ != nullptr) {
+        services_settings_->remove(
+            pwb::platform_services::LayoutKeys::window_state);
+        services_settings_->remove(
+            pwb::platform_services::LayoutKeys::window_geometry);
+        services_settings_->remove(
+            pwb::platform_services::LayoutKeys::state_version);
+    }
     statusBar()->showMessage(tr("布局已重置（下次启动恢复默认）"), 6000);
 }
 #endif

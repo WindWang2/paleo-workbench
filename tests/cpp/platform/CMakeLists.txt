@@ -105,7 +105,8 @@ target_include_directories(platform_ui_wiring PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
     ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(platform_ui_wiring PRIVATE
-    Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy)
+    Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+    Pwb::PlatformServices)
 add_test(NAME platform.ui_wiring COMMAND platform_ui_wiring)
 set_tests_properties(platform.ui_wiring PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
@@ -124,7 +125,8 @@ if(PWB_BUILD_DATA)
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
         ${CMAKE_BINARY_DIR}/generated)
     target_link_libraries(platform_project_session PRIVATE
-        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data)
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data
+        Pwb::PlatformServices)
     target_compile_definitions(platform_project_session PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME platform.project_session COMMAND platform_project_session)
@@ -150,7 +152,7 @@ if(PWB_BUILD_DATA AND PWB_BUILD_SEISMIC_VIEWER
     target_link_libraries(platform_attribute_ui PRIVATE
         Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data
         Pwb::SeismicViewer Pwb::SeismicAttributes Pwb::Visualization
-        Pwb::Science Pwb::Workflow)
+        Pwb::Science Pwb::Workflow Pwb::PlatformServices)
     target_compile_definitions(platform_attribute_ui PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         PWB_WITH_SEISMIC_VIEWER=1 PWB_WITH_SEISMIC_ATTRIBUTES=1)
@@ -245,6 +247,42 @@ if(UNIX)
 endif()
 # END native-product closure (app-entry modes)
 
+# BEGIN CONV-PS
+# Platform services: tokens/QSS oracle replay, legacy QSettings migration,
+# window-layout fence, recent lists, diagnostics probe, session policy.
+add_executable(platform_services test_platform_services.cpp)
+target_compile_features(platform_services PRIVATE cxx_std_20)
+target_link_libraries(platform_services PRIVATE
+    Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::PlatformServices)
+target_include_directories(platform_services PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(platform_services PRIVATE
+    PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    PWB_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME platform.services COMMAND platform_services)
+set_tests_properties(platform.services PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+    TIMEOUT 300)
+
+# Services UI wiring: real MainWindow + menus/recent/layout persistence on
+# an injected temp-file settings store.
+add_executable(platform_ui_services test_ui_services.cpp
+    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+set_target_properties(platform_ui_services PROPERTIES AUTOMOC ON)
+target_compile_features(platform_ui_services PRIVATE cxx_std_20)
+target_include_directories(platform_ui_services PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+target_link_libraries(platform_ui_services PRIVATE
+    Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::PlatformServices)
+add_test(NAME platform.ui_services COMMAND platform_ui_services)
+set_tests_properties(platform.ui_services PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+    TIMEOUT 300)
+# END CONV-PS
+
 # BEGIN CONV-01
 # Swarm task 01: map-pipeline E2E — the REAL MainWindow runs the frozen
 # mapping_kernel chain (well points -> IDW -> contours + facies polygons)
@@ -261,7 +299,8 @@ if(PWB_BUILD_CONV_01)
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
         ${CMAKE_BINARY_DIR}/generated)
     target_link_libraries(platform_map_pipeline PRIVATE
-        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data)
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::Data
+        Pwb::PlatformServices)
     target_compile_definitions(platform_map_pipeline PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         PWB_WITH_CONV_01=1)

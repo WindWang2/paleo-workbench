@@ -1,0 +1,47 @@
+{
+  "comfortable": {
+    "app_bar_height": 46,
+    "btn_height": 30,
+    "combo_item_height": 26,
+    "font_delta": 0,
+    "item_padding": "4px 6px",
+    "menu_padding": "6px 24px 6px 12px",
+    "padding_x": 12,
+    "padding_y": 6,
+    "rail_item_size": 48,
+    "rail_width": 54,
+    "row_height": 28,
+    "tab_padding": "8px 16px",
+    "toolbar_height": 36
+  },
+  "compact": {
+    "app_bar_height": 40,
+    "btn_height": 24,
+    "combo_item_height": 22,
+    "font_delta": 0,
+    "item_padding": "3px 6px",
+    "menu_padding": "4px 18px 4px 8px",
+    "padding_x": 8,
+    "padding_y": 3,
+    "rail_item_size": 44,
+    "rail_width": 48,
+    "row_height": 22,
+    "tab_padding": "6px 12px",
+    "toolbar_height": 30
+  },
+  "fallback_bogus": {
+    "app_bar_height": 46,
+    "btn_height": 30,
+    "combo_item_height": 26,
+    "font_delta": 0,
+    "item_padding": "4px 6px",
+    "menu_padding": "6px 24px 6px 12px",
+    "padding_x": 12,
+    "padding_y": 6,
+    "rail_item_size": 48,
+    "rail_width": 54,
+    "row_height": 28,
+    "tab_padding": "8px 16px",
+    "toolbar_height": 36
+  }
+}
