@@ -15,6 +15,12 @@ target_include_directories(pwb_qgis PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pwb_qgis PUBLIC cxx_std_20)
 target_link_libraries(pwb_qgis PUBLIC PwbQgis::Sdk)
+# map_session.cpp uses pwb::domain::Json unconditionally — the link cannot
+# wait for the CONV_29 LayoutExport chain (linux-ninja configures without
+# it and the TU fails on the missing include path).
+if(TARGET Pwb::Domain)
+    target_link_libraries(pwb_qgis PUBLIC Pwb::Domain)
+endif()
 # Vendored prefix path baked at build time (SDK admission owns the value).
 target_compile_definitions(pwb_qgis PRIVATE
     PALEO_QGIS_PREFIX_PATH="${PALEO_QGIS_SDK_DIR}")
