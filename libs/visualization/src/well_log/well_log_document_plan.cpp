@@ -203,6 +203,12 @@ std::string python_repr_double(double value) {
 
 // --- vendored color tables (mirror the Python adapter verbatim) -------------
 
+}  // namespace
+
+// BEGIN VIZ-A — exported for the pattern vocabulary (well_log_patterns.hpp)
+// so the frozen FACIES_COLORS table exists exactly once per binary; the
+// fuzzy lookup semantics stay per consumer (plan: interval_color; viz-a:
+// facies_color_for with the Python longest-substring rule).
 const std::vector<std::pair<std::string, std::string>>& facies_colors() {
     static const std::vector<std::pair<std::string, std::string>> table = {
         {"砂岩", "#f0d9b5"},     {"泥岩", "#d4c5a9"},     {"灰岩", "#b5d4c1"},
@@ -239,6 +245,8 @@ const std::vector<std::pair<std::string, std::string>>& facies_colors() {
     };
     return table;
 }
+
+namespace {
 
 std::string interval_color(const std::string& label, std::size_t index,
                            std::string_view semantic) {

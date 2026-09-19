@@ -25,9 +25,33 @@ submodule：`well-log-engine @ f845e7ab`（只读）、`geo-viz-engine @ 0885195
 | 轮 | 改动 | 验证 | 结果 | 下一步 |
 |---|---|---|---|---|
 | 1 | 定位仓库/worktree 创建（origin/main @ 7290f727）、submodule 初始化（WLE f845e7ab、geoviz 08851951）、四路只读勘察（WLE 能力面/geoviz 行为面/ui_workers+预览消费链/构建门禁体系）、读 #1359/#1394/#1375 实现 | worktree `git rev-parse HEAD` = 7290f727；submodule status 正确 | 通过 | 建 ledger/差距表骨架；写 ingest LAS preview 核心 |
+| 2 | 全量实现并本地 commit 9214994：ingest LAS 预览核心+registry 替换+WLE bridge（受守卫 target）、ui_workers wle_load 生产适配、pattern/robust_scale 绘制差量内核、app viz_a_install、oracle 生成器×2、fixture 17+1、差距表/对账/交接文档、run-viz-a-gate.sh | 逐文件 `g++ -fsyntax-only -Wall -Wextra` 全过；oracle 18 案例（9 一致/9 裁决、18/18 负面自检） | 通过（静态） | 门禁实跑 |
+| 3 | 门禁首跑（后台等锁）：**假绿**——gate() 内 `if cmd; then` 吞掉 exit 75，6 步全"成功"打印 ALL GREEN；exit 0 无效。审核 1（Python/科学语义）+审核 2（C++/Qt 生命周期）并行完成 | 读 /tmp/viz_a_gate_run1.log 确认 6×"gate action failed (exit 0)" 后仍 ALL GREEN | **失败（脚本缺陷，已定性）** | 修 gate 重试逻辑 + 审核发现 |
+| 4 | 修审核 1/2 全部发现（生成器 first_token/tab 转录、坏 ~C 分层 R18、井名 last-wins R16、行内 # R15、py_round printf 正确舍入、PNG 魔数、apps CMake 顺序死接线→根 VIZ-A 块、DATA+SCIENCE+VIEWER 顺序→VIZ_A_LATE_BRIDGE 重入、gate `\|\| code=$?`、viz_a_install generation 守卫）；补 fixture 18-22 重生成 oracle（23 案例、12 一致/11 裁决、23/23 负检） | 静态检查全过；commit 84c6b707 | 通过（静态） | 门禁重跑 |
+| 5 | 门禁二跑：**再次假绿且 configure 实败**——①重入守卫在 add_library 之后→CMP0002 重复 target（审核 3 实测复现）；②set -e 被移除且未检查 gate() 返回值→失败照走 ALL GREEN。审核 3（产品接线/范围/构建）完成：P0×2、P1×4、P2×6 | /tmp/viz_a_gate_run2.log：CMake Error duplicate pwb_ingest + 末行 ALL GREEN（exit 0） | **失败（已定性）** | 修审核 3 全部发现 |
+| 6 | 修审核 3：①重入守卫移到 add_library 前（ingest CMake 头部 VIZ-A 块）②gate 全步骤过 `must()`（失败即 exit）+ 注明失败传播契约 ③颜色表去重（document_plan 导出 `facies_colors()`，viz_a 委托，8 5 条单副本）④诊断要素贯通（LasPreviewData.diagnostics + WleDocumentPayload{document,diagnostics}，consistency 三路断言）⑤迟到丢弃回归（resolve seam 置 flag→JobCancelled）⑥删恒真断言/死宏 ⑦WRAP 首 token 归一 ⑧tie 排序纯 CJK 前置断言 ⑨hpp 文案对齐实现 | 静态检查全过（本轮） | 通过（静态） | 门禁三跑（带失败传播 + QGIS SDK 复用） |
 
 ## 环境
 
 - Linux x86_64，gcc 16.2.1，cmake 4.4.3，ninja 1.13.2，Qt 6.11.2（/usr，满足 WLE Qt≥6.8），python3 3.13.15，nproc 16，内存 available ≈47 GiB。
 - 无预建 WLE 安装树（全盘无 WellLogConfig.cmake）→ viewer 配置走 submodule 源码构建（`libs/science_suite` 强制 WELLLOG_BUILD_PYTHON/TEXT/TESTS/BENCHMARKS=OFF、QT_WIDGETS=ON）。
 - 主工作区 `/home/kevin/projects/paleo_project/main` 有用户未跟踪文件（docs/development/cpp-conversion-swarm-20/*）——不触碰。
+
+## 记录不改项（审核 P2 残留，如实声明）
+
+- `path_stem`（Python Path.stem 语义）三处小复制：`las_preview.cpp`、`wle_load.cpp`、`las_preview_wle_test.cpp`——为 8 行工具跨 lib 建依赖不值；三处均有注释指向彼此。
+- `JobCenter::make_owner` 每次"打开 LAS"新建 owner（只增不减，随窗口生命周期回收）：沿用 main_window 既有模式（SEG-Y/因子图同款），不为本线改 JobCenter。
+- pattern tie 排序按字节长度（==字符数，前提：纯 CJK 键集）——`viz_a.patterns` 有前置断言锁死该前提。
+- app 级 generation 守卫（过期投递丢弃）为 compile-cover：platform app 无独立测试目录归本线，运行面由 worker 级迟到丢弃回归 + job_bridge released 契约（审核 2 核实）背书；如实标注。
+
+## 门禁执行记录
+
+- run1（2026-09-19，/tmp/viz_a_gate_run1.log）：假绿（exit 75 被 if/fi 吞）。教训已写进脚本注释。
+- run2（2026-09-19，/tmp/viz_a_gate_run2.log）：configure 实败（重复 pwb_ingest target）+ 假绿（未检查 gate() 返回值）。两缺陷均已修。
+- run3：见下（本轮带 `must()` 失败传播 + PALEO_QGIS_SDK_DIR 同源默认）。
+- step-7 跳过条件：`SKIP_VIZ_A_PLATFORM=1` 或无 PALEO_QGIS_SDK_DIR 且同源 sibling main SDK 不存在。跳过必须在此记录（不允许静默）。
+
+## 覆盖差异声明（默认门禁 vs 本专用门禁）
+
+- 默认 `run-integrated-gate.sh`（PLATFORM+DATA+SCIENCE，VIEWER=OFF）：覆盖 ingest/ui_workers/science.* 回归，不覆盖 science.viewer.*、viz_a.* 的 WLE 依赖测试，也不编译 app 接线（PWB_WITH_VIZ_A 不定义，main_window 钩子在 #ifdef 内为死码，合法降级）。
+- 本专用门禁（SCIENCE+VIEWER+VIEWER_TESTS+CONV_22，PLATFORM=OFF）：上述 WLE 面全测 + OFF 反向检查（默认配置可配置、LAS 分支诚实降级、无桥 target）；step 7 追加 PLATFORM=ON 编译覆盖 app 接线（复用 sibling main 的 vendored QGIS SDK，只读）。

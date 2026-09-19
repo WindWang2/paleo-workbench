@@ -25,6 +25,13 @@
 # (jobs pinned to 2, min 8 GiB free; exit 75 = busy/low memory → the
 # script backs off and retries; never bypasses the lock). This script does
 # NOT nest gate calls while a gate lock is already held by this process.
+#
+# Failure policy: `set -uo pipefail` does NOT abort on a failing function
+# call, so every step goes through `must` which exits on the first
+# non-green action (a bare `gate ...` statement — and worse, an `if cmd;
+# then` compound — silently swallowed failures in earlier revisions; the
+# x2 pass, OFF check and step-7 grep only mean anything when the steps
+# before them can actually fail).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,8 +48,8 @@ VIZ_A_REGEX='^(viz_a\.|science\.viewer\.|ingest\.|ui_workers\.)'
 gate() {
     # Run one gate action, retrying ONLY on exit 75 (slot busy / low
     # memory) with a 30-60s backoff. Any other non-zero status propagates.
-    # NOTE: the status must be captured via `|| code=$?` — an `if cmd; then`
-    # compound swallows it (the exact false-green this script once had).
+    # The status must be captured via `|| code=$?` — an `if cmd; then`
+    # compound swallows it.
     local attempt=0 code=0
     while true; do
         code=0
@@ -64,28 +71,32 @@ gate() {
     done
 }
 
+must() {
+    gate "$@" || exit $?
+}
+
 echo "== [1/7] Configure build/viz-a (viewer ON, jobs=$JOBS) =="
-gate Configure -s "$REPO_ROOT" -b "$BUILD_DIR" -c Release -a "$VIZ_A_ARGS"
+must Configure -s "$REPO_ROOT" -b "$BUILD_DIR" -c Release -a "$VIZ_A_ARGS"
 
 echo "== [2/7] Build the line-A closure =="
-gate Build -b "$BUILD_DIR" -t "pwb_ingest;pwb_ingest_las_wle;pwb_ui_workers;pwb_ui_workers_wle_load;pwb_visualization_well_log;viz_a.las_preview_core;viz_a.las_preview_wle;viz_a.wle_load;viz_a.consistency;viz_a.viewer_flow;viz_a.patterns;ingest.parsers;ui_workers.oracle;ui_workers.lifecycle"
+must Build -b "$BUILD_DIR" -t "pwb_ingest;pwb_ingest_las_wle;pwb_ui_workers;pwb_ui_workers_wle_load;pwb_visualization_well_log;viz_a.las_preview_core;viz_a.las_preview_wle;viz_a.wle_load;viz_a.consistency;viz_a.viewer_flow;viz_a.patterns;ingest.parsers;ui_workers.oracle;ui_workers.lifecycle"
 
 echo "== [3/7] Tests, pass 1 of 2 (green x2 rule) =="
-gate Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
+must Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
 
 echo "== [4/7] Tests, pass 2 of 2 =="
-gate Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
+must Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
 
 echo "== [5/7] MALLOC audit subset (heap abuse on the line-A surface) =="
-gate Exec -m 8 -- env MALLOC_CHECK_=3 QT_QPA_PLATFORM=offscreen LIBGL_ALWAYS_SOFTWARE=1 \
+must Exec -m 8 -- env MALLOC_CHECK_=3 QT_QPA_PLATFORM=offscreen LIBGL_ALWAYS_SOFTWARE=1 \
     ctest --test-dir "$BUILD_DIR" -R '^viz_a\.' --output-on-failure --no-tests=error --timeout 300
 
 echo "== [6/7] OFF check: default (viewer OFF) still configures and the LAS branch degrades honestly =="
 rm -rf "$BUILD_DIR_OFF"
-gate Configure -s "$REPO_ROOT" -b "$BUILD_DIR_OFF" -c Release \
+must Configure -s "$REPO_ROOT" -b "$BUILD_DIR_OFF" -c Release \
     -a "-DPWB_BUILD_PLATFORM=OFF;-DPWB_BUILD_SCIENCE=ON;-DPWB_BUILD_CONV_22=ON"
-gate Build -b "$BUILD_DIR_OFF" -t "pwb_ingest;viz_a.las_preview_core"
-gate Test -b "$BUILD_DIR_OFF" -r '^viz_a\.las_preview_core$'
+must Build -b "$BUILD_DIR_OFF" -t "pwb_ingest;viz_a.las_preview_core"
+must Test -b "$BUILD_DIR_OFF" -r '^viz_a\.las_preview_core$'
 # No WLE bridge target may exist in the OFF tree.
 if grep -q "pwb_ingest_las_wle" "$BUILD_DIR_OFF/build.ninja" 2>/dev/null; then
     echo "run-viz-a-gate: OFF configure unexpectedly built the WLE bridge" >&2
@@ -93,15 +104,24 @@ if grep -q "pwb_ingest_las_wle" "$BUILD_DIR_OFF/build.ninja" 2>/dev/null; then
 fi
 
 echo "== [7/7] App wiring compile cover (PLATFORM=ON + viewer; reuses the shared QGIS SDK read-only) =="
+# Default discovery: sibling main workspace holds the shared vendored SDK
+# (read-only reuse; any build output goes to this worktree's build tree).
+SIBLING_QGIS_SDK="$REPO_ROOT/../main/native/qgis_render_bridge/build/qgis-vendor/output"
+if [[ -z "${PALEO_QGIS_SDK_DIR:-}" && -d "$SIBLING_QGIS_SDK/lib" ]]; then
+    export PALEO_QGIS_SDK_DIR="$SIBLING_QGIS_SDK"
+    export PALEO_QGIS_BUILD_DIR="$REPO_ROOT/../main/native/qgis_render_bridge/build/qgis-vendor"
+    [[ -z "${PALEO_QGIS_SOURCE_DIR:-}" ]] && \
+        export PALEO_QGIS_SOURCE_DIR="$REPO_ROOT/third_party/qgis"
+fi
 if [[ "${SKIP_VIZ_A_PLATFORM:-0}" == "1" ]]; then
     echo "run-viz-a-gate: SKIP_VIZ_A_PLATFORM=1 — app wiring compile cover SKIPPED (record in ledger)"
 elif [[ -z "${PALEO_QGIS_SDK_DIR:-}" ]]; then
     echo "run-viz-a-gate: PALEO_QGIS_SDK_DIR not set — app wiring compile cover SKIPPED (no QGIS SDK; record in ledger)"
 else
     rm -rf "$BUILD_DIR_PLATFORM"
-    gate Configure -s "$REPO_ROOT" -b "$BUILD_DIR_PLATFORM" -c Release \
+    must Configure -s "$REPO_ROOT" -b "$BUILD_DIR_PLATFORM" -c Release \
         -a "-DPWB_BUILD_PLATFORM=ON;-DPWB_BUILD_SCIENCE=ON;-DPWB_SCIENCE_BUILD_VIEWER=ON;-DPWB_BUILD_CONV_22=ON"
-    gate Build -b "$BUILD_DIR_PLATFORM" -t "pwb-platform"
+    must Build -b "$BUILD_DIR_PLATFORM" -t "pwb-platform"
     grep -q "viz_a_install" "$BUILD_DIR_PLATFORM/build.ninja" \
         || { echo "run-viz-a-gate: pwb-platform built WITHOUT viz_a_install (wiring dead)" >&2; exit 1; }
 fi

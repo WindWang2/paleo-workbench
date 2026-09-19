@@ -47,9 +47,11 @@ int main() {
     if (loaded) {
         check(loaded->well_name.find("\xE4\xBA\x95") != std::string::npos,
               "unicode well name scanned");  // 井
-        auto document = std::any_cast<std::shared_ptr<const welllog::WellLogDocument>>(
+        auto payload = std::any_cast<pwb::ui_workers::WleDocumentPayload>(
             loaded->data);
+        const auto& document = payload.document;
         check(document != nullptr, "payload type is the WLE document");
+        check(payload.diagnostics == 0, "clean fixture has no diagnostics");
         check(document->sampling_axes().size() == 1, "one sampling axis");
         check(document->sampling_axes().front().coordinates.length() == 5,
               "row count (5 accepted rows)");
@@ -153,8 +155,12 @@ int main() {
         pwb::job::JobContext ctx{"viz-a-test", pwb::job::CancellationToken{}};
         auto result = run_well_log_load(input, ctx);
         check(result.payload.kind == "well_log", "worker run payload kind");
+        const bool cancelled_flag_before =
+            input.phase->cancel_requested.load();
         request_well_log_cancel(input.phase, [] {});
-        check(!input.phase->cancelling_sent || true, "post-run cancel is inert");
+        check(cancelled_flag_before == false &&
+                  input.phase->cancel_requested.load() == true,
+              "post-run cancel only sets the flag");
         check(!input.phase->parse_active, "parse_active cleared after run");
     }
 
@@ -167,6 +173,45 @@ int main() {
         request_well_log_cancel(input.phase, [&] { ++hints; });
         request_well_log_cancel(input.phase, [&] { ++hints; });
         check(hints == 1, "cancelling hint emitted once");
+    }
+
+    // (d) LATE-RESULT DISCARD regression: the resolve seam returns a valid
+    // payload but the cancel flag was raised while it ran — the worker must
+    // surface JobCancelled and the payload must never reach on_done
+    // (well_log_load.cpp "late successful payload -> DISCARDED" path).
+    {
+        WellLogLoadInput input;
+        input.ref.kind = "well_log";
+        ResourceSlice res;
+        res.id = "late";
+        res.path = las;
+        res.type = "well_log";
+        res.format = "las";
+        input.resources.push_back(res);
+        // The flag must be set before run_well_log_load's return checkpoint
+        // sees it: the resolve closure raises it mid-run, then succeeds.
+        input.resolve_fn = [&input](const VizRefSlice&,
+                                    const std::vector<ResourceSlice>&,
+                                    const std::string&,
+                                    const std::function<bool()>&) {
+            input.phase->cancel_requested.store(true);
+            VizPayloadSlice payload;
+            payload.kind = "well_log";
+            payload.well_log = WleDocumentPayload{};
+            payload.well_names.push_back("late");
+            return payload;
+        };
+        pwb::job::JobContext ctx{"viz-a-test", pwb::job::CancellationToken{}};
+        bool late_discarded = false;
+        try {
+            const auto result = run_well_log_load(input, ctx);
+            // Reaching here means the payload survived — failure.
+            check(result.payload.kind != "well_log",
+                  "late payload must not be returned");
+        } catch (const pwb::job::JobCancelled&) {
+            late_discarded = true;
+        }
+        check(late_discarded, "late successful payload discarded -> JobCancelled");
     }
 
     if (g_failures == 0) {

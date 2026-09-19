@@ -1,8 +1,8 @@
 // viz_a.viewer_flow — hard oracle 3: real load -> display -> track adjust
 // -> export over the production dock host (offscreen Qt + software GL),
 // plus failure retention, reopen, viewport/cursor interaction, and clean
-// teardown. Late-result safety at the worker level is covered by
-// viz_a.wle_load; this test covers the viewer surface.
+// teardown. Worker-level cancellation and late-result discard are covered
+// by viz_a.wle_load (including the resolve-seam late-discard regression).
 
 #include <QApplication>
 #include <QFile>

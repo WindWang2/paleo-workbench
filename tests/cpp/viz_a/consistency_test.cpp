@@ -139,15 +139,23 @@ int main(int argc, char** argv) {
         check(facts.ok, name + ": dock parse facts");
         check(preview.row_count == static_cast<long long>(facts.rows),
               name + ": row count preview vs dock");
+        check(preview.diagnostics == facts.diagnostics,
+              name + ": diagnostics preview vs dock (" +
+                  std::to_string(preview.diagnostics) + " vs " +
+                  std::to_string(facts.diagnostics) + ")");
         if (loaded) {
-            const auto document =
-                std::any_cast<std::shared_ptr<const welllog::WellLogDocument>>(
+            const auto payload =
+                std::any_cast<pwb::ui_workers::WleDocumentPayload>(
                     loaded->data);
+            const auto& document = payload.document;
+            check(document != nullptr, name + ": worker document");
             check(document->curves().size() == facts.mnemonics.size(),
                   name + ": worker curve count");
             check(document->sampling_axes().front().coordinates.length() ==
                       facts.rows,
                   name + ": worker row count");
+            check(payload.diagnostics == facts.diagnostics,
+                  name + ": diagnostics worker vs dock");
         }
         // Preview table carries every ~C channel in order; the document
         // drops the depth channel — every non-depth preview channel must

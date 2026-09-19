@@ -134,12 +134,13 @@ LasPreviewData wle_las_preview_data(const std::string& bytes,
                 }
             }
         } else if (section == Section::version) {
-            // Python las_preview wrap detection (YES/Y/TRUE/1) — diagnostics
-            // only; the SDK itself accepts YES/NO and both paths stay
-            // byte-identical.
+            // Python las_preview wrap detection (YES/Y/TRUE/1, first token
+            // of the value field) — diagnostics only; the SDK itself
+            // accepts YES/NO and both paths stay byte-identical.
             if (auto item = well_item(line)) {
                 if (item->first == "WRAP") {
-                    const auto value = upper_ascii(item->second);
+                    const auto value =
+                        upper_ascii(first_token(item->second));
                     data.wrapped =
                         value == "YES" || value == "Y" || value == "TRUE" ||
                         value == "1";
@@ -174,6 +175,7 @@ LasPreviewData wle_las_preview_data(const std::string& bytes,
     }
 
     const welllog::WellLogDocument& document = result.value().document;
+    data.diagnostics = result.value().diagnostics.size();
     if (document.sampling_axes().empty()) {
         data.status = LasPreviewData::Status::parse_error;
         data.parse_error_class = "ValueError";

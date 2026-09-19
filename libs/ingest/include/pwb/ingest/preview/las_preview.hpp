@@ -43,6 +43,11 @@ struct LasPreviewData {
     std::vector<Curve> curves;
 
     long long row_count = 0;  // accepted data rows (full file)
+    // Recoverable SDK diagnostics (bad rows/tokens) observed by the parse.
+    // Meta surface for consistency acceptance (dock/worker report the same
+    // count); deliberately NOT rendered into the preview (Python visual
+    // parity — see reconciliation.md R3/R17).
+    std::size_t diagnostics = 0;
 
     // Data table source: the first kLasPreviewDataRows accepted rows in file
     // order, row-major, curves.size() columns; nulls already NaN. The depth

@@ -163,9 +163,10 @@ bool install(QMainWindow* window, JobCenter* jobs) {
                         QObject::tr("无法解析 LAS 井数据"), 4000);
                     return;
                 }
-                const auto document =
-                    std::any_cast<std::shared_ptr<const WellLogDocument>>(
+                const auto payload =
+                    std::any_cast<pwb::ui_workers::WleDocumentPayload>(
                         result->payload.well_log);
+                const auto& document = payload.document;
                 if (document == nullptr) {
                     window->statusBar()->showMessage(
                         QObject::tr("LAS 文档为空"), 4000);
@@ -189,10 +190,15 @@ bool install(QMainWindow* window, JobCenter* jobs) {
                         QObject::tr("加载到轨道失败: %1").arg(error));
                     return;
                 }
+                const QString diag_note =
+                    payload.diagnostics > 0
+                        ? QObject::tr("，%1 条诊断").arg(payload.diagnostics)
+                        : QString();
                 window->statusBar()->showMessage(
-                    QObject::tr("测井已加载: %1（%2 条曲线）")
+                    QObject::tr("测井已加载: %1（%2 条曲线%3）")
                         .arg(path)
-                        .arg(dto.curves.size()),
+                        .arg(dto.curves.size())
+                        .arg(diag_note),
                     5000);
             });
         // Cancel surface: the JobOwner cooperatively cancels via its token

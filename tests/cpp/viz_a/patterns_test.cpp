@@ -43,8 +43,6 @@ int main() {
     }
     Json oracle = Json::parse(in);
 
-    // Frozen tables (order included — ties depend on it).
-    ++g_cases;
     const auto& entries = pattern_map_entries();
     if (entries.size() != oracle["pattern_map"].size()) {
         fail("PATTERN_MAP size mismatch");
@@ -68,6 +66,28 @@ int main() {
                 fail("FACIES_COLORS entry mismatch at " + std::to_string(i));
                 break;
             }
+        }
+    }
+
+    // Frozen tables (order included — ties depend on it).
+    // Tie-sort precondition: the tables are pure-CJK keys, where sorting
+    // by UTF-8 byte length equals sorting by character count (Python len).
+    // A mixed ASCII/CJK key set would need a codepoint-count sort — locked
+    // here so nobody silently breaks the equivalence.
+    ++g_cases;
+    {
+        bool all_multibyte = true;
+        for (const auto& table : {entries, colors}) {
+            for (const auto& [key, value] : table) {
+                (void)value;
+                for (unsigned char c : key) {
+                    if (c < 0x80) all_multibyte = false;
+                }
+            }
+        }
+        if (!all_multibyte) {
+            fail("tie-sort precondition broken: ASCII keys present (byte "
+                 "length != character count)");
         }
     }
 

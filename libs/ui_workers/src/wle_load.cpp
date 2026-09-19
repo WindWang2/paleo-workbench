@@ -124,10 +124,12 @@ WellLogLoadFn make_wle_load_fn() {
         }
         if (!result.has_value()) return std::nullopt;
 
-        auto document = std::make_shared<const welllog::WellLogDocument>(
+        WleDocumentPayload payload;
+        payload.document = std::make_shared<const welllog::WellLogDocument>(
             std::move(result.value().document));
+        payload.diagnostics = result.value().diagnostics.size();
         LoadedWellLog loaded;
-        loaded.data = document;
+        loaded.data = payload;
         loaded.well_name = scan_well_name(bytes, path);
         return loaded;
     };

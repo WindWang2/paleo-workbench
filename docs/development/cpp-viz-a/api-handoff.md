@@ -30,10 +30,10 @@ E 负责把 `ui_pages_preview`/`ui_pages_data` 挂进主程序。A 提供的真�
 1. **剖面基座（主线 WLE，直接用）**：
    `welllog::WellLogSession`（`welllog/session/session.hpp`）——
    `SetWellLayoutCommand`/`WellPlacement`（井位布局）、`compose_multi_well_scene`
-   （`welllog/scene/scene.hpp:948`）、`SetSharedDepthViewportCommand`（多井深度联动）、
+   （`welllog/scene/scene.hpp:949`）、`SetSharedDepthViewportCommand`（多井深度联动）、
    `DepthTransform`+`SetDepthTransformCommand`（datum 变换）、
    `AlignWellsToMarkersCommand`（按层位拉平，对应 geoviz datum_shift）、
-   `CrossWellOverlay`+`SetCrossWellOverlaysCommand`（井间相关线/带，对应
+   `CrossWellOverlay`（`session.hpp:121-141`）+`SetCrossWellOverlaysCommand`（井间相关线/带，对应
    connection_overlay 的 horizon 线/相带四边形基座）、
    `SetSurfaceHorizontalViewCommand`/`prepared_surface_scene()`（水平虚拟化）。
    参考测试：SDK 内 `unified_surface_test/multi_well_surface_test/depth_transform_overlay_test`。
@@ -46,7 +46,7 @@ E 负责把 `ui_pages_preview`/`ui_pages_data` 挂进主程序。A 提供的真�
    合并时以 A 的实现为准收敛。
 4. **worker seam（本分支新增）**：`pwb::ui_workers::make_wle_load_fn()`
    （`pwb/ui_workers/wle_load.hpp`，target `Pwb::UiWorkersWleLoad`）——返回
-   UI-04 `WellLogLoadFn`，payload 为 `shared_ptr<const welllog::WellLogDocument>`。
+   UI-04 `WellLogLoadFn`，payload 为 `WleDocumentPayload`（`shared_ptr<const WellLogDocument>` + 诊断计数，`pwb/ui_workers/wle_load.hpp`）。
    B 的 correlation/dtw worker 需要井数据时按同模式注入。
 
 ## 依赖声明
