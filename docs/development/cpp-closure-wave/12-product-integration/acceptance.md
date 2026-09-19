@@ -8,7 +8,7 @@
 见 `../closure-matrix.md`（由 tools/migration/pwb_closure_matrix.py 生成，
 源 = 本目录 capability-matrix.json）。
 
-## R3 平台闭包构建与测试（候选 SHA：见提交；测试树与提交内容一致）
+## R3 平台闭包构建与测试（候选 SHA：8f00fe0cb9c66afe85bbdc23636accd808376423，push 后验证内容一致；PR #1421）
 
 - 资源租约：`scripts/cpp-migration/invoke-resource-gate.sh`（common-dir
   flock，j2，MinFreeGiB=8）。排队记录：R2–R4 期间多线轮转持锁（exit 75
@@ -68,4 +68,4 @@
 - [x] 许可审计工具 + 部署契约补齐
 - [x] 平台闭包构建 + 21/21 测试 + 关键回归 ×2（本地 Linux）
 - [x] 独立审查 + P0/P1 修复 + 复验
-- [ ] 提交/推送/PR（进行中）
+- [x] 提交/推送/PR：https://github.com/WindWang2/paleo-workbench/pull/1421
