@@ -148,16 +148,16 @@ Statement Database::prepare(std::string_view sql) {
     return Statement(db_, stmt);
 }
 
-void Database::begin_immediate() {
-    execute("BEGIN IMMEDIATE");
+DataError Database::begin_immediate() {
+    return execute("BEGIN IMMEDIATE");
 }
 
-void Database::commit() {
-    execute("COMMIT");
+DataError Database::commit() {
+    return execute("COMMIT");
 }
 
-void Database::rollback() {
-    execute("ROLLBACK");
+DataError Database::rollback() {
+    return execute("ROLLBACK");
 }
 
 DataError Database::ensure_schema() {
@@ -406,26 +406,37 @@ std::string Statement::column_name(int column) const {
 }
 
 Transaction::Transaction(Database& db) : db_(db) {
-    db_.begin_immediate();
-    began_ = true;
+    begin_error_ = db_.begin_immediate();
+    began_ = begin_error_.ok();
 }
 
 Transaction::~Transaction() {
     if (began_ && !committed_) {
-        db_.rollback();
+        db_.rollback();  // best-effort; nothing to surface from a destructor
     }
 }
 
-void Transaction::commit() {
-    db_.commit();
+DataError Transaction::commit() {
+    // A failed BEGIN means there is nothing to commit — surface the begin
+    // error instead of issuing a stray COMMIT outside any transaction.
+    if (!began_) return begin_error_;
+    DataError error = db_.commit();
+    if (error.code != ErrorCode::Ok) {
+        // COMMIT failed (disk full / BUSY / I/O): the transaction is still
+        // open per sqlite semantics — leave it for the destructor's
+        // rollback and report the error. Never mark committed.
+        return error;
+    }
     committed_ = true;
+    return DataError(ErrorCode::Ok, "");
 }
 
-void Transaction::rollback() {
-    if (began_ && !committed_) {
-        db_.rollback();
-        committed_ = true;
-    }
+DataError Transaction::rollback() {
+    if (!began_) return begin_error_;
+    if (committed_) return DataError(ErrorCode::Ok, "");
+    DataError error = db_.rollback();
+    committed_ = true;  // nothing left to roll back either way
+    return error;
 }
 
 }  // namespace pwb::catalog

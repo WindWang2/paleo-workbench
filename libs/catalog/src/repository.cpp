@@ -1663,7 +1663,8 @@ DataError CatalogRepository::upsert_asset(const DataAsset& asset) {
     auto error = upsert_asset_in_transaction(asset);
     if (error.code != ErrorCode::Ok) return error;
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1673,7 +1674,8 @@ DataError CatalogRepository::upsert_version(const DataVersion& version) {
     auto error = upsert_version_rows(version);
     if (error.code != ErrorCode::Ok) return error;
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1683,7 +1685,8 @@ DataError CatalogRepository::upsert_run(const DataRun& run) {
     auto error = upsert_run_rows(run);
     if (error.code != ErrorCode::Ok) return error;
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1700,7 +1703,8 @@ DataError CatalogRepository::set_current_version(
     statement.bind(3, asset_id.str());
     statement.step_done();
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1749,7 +1753,8 @@ DataError CatalogRepository::insert_working_copy(const WorkingCopy& copy) {
     if (auto failure = sqlite_step_error(db_, "insert working copy")) {
         return *failure;
     }
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1763,7 +1768,8 @@ DataError CatalogRepository::remove_working_copy(
         "DELETE FROM working_copies WHERE working_id = ?");
     statement.bind(1, working_id);
     statement.step_done();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1780,7 +1786,8 @@ DataError CatalogRepository::set_working_copy_state(
     statement.bind(2, local_now_iso_seconds());
     statement.bind(3, working_id);
     statement.step_done();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1807,7 +1814,8 @@ DataError CatalogRepository::commit_version_transaction(
         row.step_done();
     }
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1835,7 +1843,8 @@ DataError CatalogRepository::publish_result_transaction(
     row.bind(2, version.id.str());
     row.step_done();
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1855,7 +1864,8 @@ DataError CatalogRepository::import_raw_transaction(const DataAsset& asset,
     pointer.bind(3, version.asset_id.str());
     pointer.step_done();
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1951,7 +1961,8 @@ int CatalogRepository::rebase_artifact_paths() {
         }
     }
     if (changed > 0) bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return -1;
     return changed;
 }
 
@@ -1985,7 +1996,8 @@ DataError CatalogRepository::finish_run_transaction(
     update.bind(3, run_id.str());
     update.step_done();
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -2063,7 +2075,7 @@ void CatalogRepository::record_manifest_mtime_ns(
     statement.bind(1, "manifest_mtime_ns");
     statement.bind(2, std::to_string(*mtime));
     statement.step_done();
-    transaction.commit();
+    (void)transaction.commit();  // swallow parity (bookkeeping writes)
 }
 
 // ---- working-copy registry completion (db.py 1335-1425) ---------------------
@@ -2208,7 +2220,8 @@ Result<std::string> CatalogRepository::register_working_copy(
     if (auto failure = sqlite_step_error(*db, "register working copy")) {
         return *failure;
     }
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return working_id;
 }
 
@@ -2243,7 +2256,8 @@ std::optional<std::string> CatalogRepository::acquire_staging_lease(
             return std::nullopt;  // RAII rolls the transaction back
         }
     }
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return std::nullopt;
     return lease_id;
 }
 
@@ -2258,7 +2272,7 @@ void CatalogRepository::release_staging_lease(const std::string& lease_id) {
     if (!statement.is_valid()) return;
     statement.bind(1, lease_id);
     statement.step_done();
-    transaction.commit();
+    (void)transaction.commit();  // swallow parity (bookkeeping writes)
 }
 
 void CatalogRepository::heartbeat_staging_lease(
@@ -2274,7 +2288,7 @@ void CatalogRepository::heartbeat_staging_lease(
     statement.bind(1, local_now_iso_seconds());
     statement.bind(2, lease_id);
     statement.step_done();
-    transaction.commit();
+    (void)transaction.commit();  // swallow parity (bookkeeping writes)
 }
 
 int CatalogRepository::prune_stale_staging_leases(
@@ -2295,7 +2309,8 @@ int CatalogRepository::prune_stale_staging_leases(
     statement.bind(1, local_iso_seconds(cutoff));
     statement.step_done();
     const int removed = sqlite3_changes(db->handle());
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return -1;
     return removed >= 0 ? removed : 0;
 }
 
@@ -2306,7 +2321,8 @@ DataError CatalogRepository::upsert_model(const Model& model) {
     auto error = upsert_model_in_transaction(db_, model);
     if (error.code != ErrorCode::Ok) return error;
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -2316,7 +2332,8 @@ DataError CatalogRepository::upsert_model_version(
     auto error = upsert_model_version_in_transaction(db_, version);
     if (error.code != ErrorCode::Ok) return error;
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -2330,7 +2347,8 @@ DataError CatalogRepository::promote_model_transaction(
     error = upsert_model_version_in_transaction(db_, version);
     if (error.code != ErrorCode::Ok) return error;
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -2352,7 +2370,8 @@ DataError CatalogRepository::commit_promote_transaction(
     pointer.bind(3, version.asset_id.str());
     pointer.step_done();
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -2384,7 +2403,8 @@ DataError CatalogRepository::commit_working_copy_transaction(
         row.step_done();
     }
     bump_revision();
-    transaction.commit();
+    if (auto commit_error = transaction.commit();
+        commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
 }
 

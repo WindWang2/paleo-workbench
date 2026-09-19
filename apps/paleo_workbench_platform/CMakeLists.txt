@@ -83,6 +83,30 @@ if(PWB_BUILD_CONV_01)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_01=1)
 endif()
 # END CONV-01
+# BEGIN cpp-close-01 — catalog/project lifecycle closure (line 01)
+# The CONCRETE catalog service adapter (closure_catalog_service) + its
+# production runtime installer (closure_catalog_install) bound over the
+# CONV-31b deep core. Composition-root wiring into MainWindow/AppContext
+# stays with line 12; this block only ships the files + link closure.
+# The option is declared here (NOT in PwbFeatures.cmake) so line 01 never
+# touches the shared feature gate; 12 can hoist it verbatim later.
+option(PWB_BUILD_CATALOG_CLOSURE
+    "Line-01 catalog/project closure adapter inside pwb-platform" ON)
+if(PWB_BUILD_CATALOG_CLOSURE
+        AND TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore
+        AND TARGET Pwb::Catalog AND TARGET Pwb::Project)
+    target_sources(pwb-platform PRIVATE
+        closure_catalog_service.cpp
+        closure_catalog_install.cpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::UiControllers Pwb::UiDataCore Pwb::Catalog Pwb::Project)
+    # ICatalogApi is a Qt-free header; the seam is consumed via the include
+    # path only (no link dep on the Qt-side ui_review library).
+    target_include_directories(pwb-platform PRIVATE
+        ${CMAKE_SOURCE_DIR}/libs/ui_review/include)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CATALOG_CLOSURE=1)
+endif()
+# END cpp-close-01
 # BEGIN native-product closure
 # Minimal DAG workflow engine (CONV-07) in the product link closure: the
 # self-check battery drives a 4-node diamond through it, proving the
