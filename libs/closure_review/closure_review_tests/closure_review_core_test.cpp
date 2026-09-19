@@ -209,13 +209,16 @@ PWB_TEST(broken_project_qc_is_explained) {
 
     // V8 M11 honesty: basics all evaluated; extended + the cartographic
     // delegate accounting are skipped WITHOUT inputs / binding, each with
-    // a visible reason.
+    // a visible reason. Always-evaluated: 6 basic + 6 extended;
+    // skipped: out_of_bound / low_confidence / export_fallback +
+    // cartographic_side_checks (composition_incomplete carries no
+    // coverage entry — Python parity).
     const auto& rule_status = report.at("rule_status");
     CHECK(rule_status.at("target_horizon_present").at("evaluated") == true);
     CHECK(rule_status.at("out_of_bound_feature").at("evaluated") == false);
     CHECK(rule_status.at("out_of_bound_feature").at("reason") ==
           "未提供图幅范围（map_extent）");
-    CHECK_EQ(report.at("coverage").at("evaluated").get<int>(), 6 + 7);
+    CHECK_EQ(report.at("coverage").at("evaluated").get<int>(), 12);
     CHECK_EQ(report.at("coverage").at("skipped").get<int>(), 4);
 
     // The report is stored on the document and bound to the active run.
@@ -272,7 +275,9 @@ PWB_TEST(self_intersecting_facies_is_located) {
         CHECK(issue.contains("geometry"));
         CHECK(issue.at("geometry").at("type") == "Polygon");
         CHECK(issue.contains("centroid"));
-        CHECK(issue.at("extra").at("code") == "self_intersection");
+        // make_issue merges `extra` FLAT into the issue (Python
+        // issue.update(extra) parity) — the code sits at the top level.
+        CHECK(issue.at("code") == "self_intersection");
         CHECK(issue.at("feature_id") == "bt1");
         CHECK(issue.at("ref") == "map:map_bowtie/facies/bt1");
         saw = true;

@@ -956,12 +956,22 @@ domain::Json issue_locate_point(const domain::Json& geometry) {
     if (auto ring = to_kernel_ring(*coords_it)) {
         return locate_from_ring(*ring);
     }
-    // MultiPolygon: first polygon's exterior ring
-    // (coordinates: [[ [[ring]], ... ]] → descend two levels).
-    if (!coords_it->empty() && (*coords_it)[0].is_array() &&
-        !(*coords_it)[0].empty() && (*coords_it)[0][0].is_array() &&
-        !(*coords_it)[0][0].empty() && (*coords_it)[0][0][0].is_array()) {
-        if (auto ring = to_kernel_ring((*coords_it)[0][0])) {
+    // Generic ring descent — bare ring → Polygon shell ([[ring]]) →
+    // MultiPolygon ([[ [ring] ]]): the first level that yields a valid
+    // ring (≥3 [x,y] pairs) locates the issue (facade centroid parity:
+    // 面/多面统一取第一个外环).
+    const Json* levels[3] = {&(*coords_it), nullptr, nullptr};
+    if (!coords_it->empty() && (*coords_it)[0].is_array()) {
+        levels[1] = &(*coords_it)[0];
+        if (!(*coords_it)[0].empty() && (*coords_it)[0][0].is_array()) {
+            levels[2] = &(*coords_it)[0][0];
+        }
+    }
+    for (const Json* level : levels) {
+        if (level == nullptr) {
+            continue;
+        }
+        if (auto ring = to_kernel_ring(*level)) {
             return locate_from_ring(*ring);
         }
     }
@@ -992,7 +1002,10 @@ domain::Json paleomap_documents_of(const Json& root) {
 }
 
 const Json* find_map_document(const Json& root, const std::string& doc_id) {
-    for (const auto& doc : paleomap_documents_of(root)) {
+    // Iterate the SECTION BY REFERENCE — paleomap_documents_of() returns a
+    // copy, and a pointer into that copy would dangle on return.
+    const Json& docs = section_array(root, "paleomap_documents");
+    for (const auto& doc : docs) {
         if (doc.is_object() && field_string(doc, "id") == doc_id) {
             return &doc;
         }

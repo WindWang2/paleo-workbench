@@ -32,19 +32,35 @@ $scripts Build -b build/presets/linux-ninja -c Release -j 2 \
 $scripts Test  -b build/presets/linux-ninja -r "platform.closure_review_install"
 ```
 
-## 结果（R4 填写）
+## 结果（R4/R5 实测，2026-09-20）
 
-- [ ] closure_review.core_test：待门内运行
-- [ ] ui_review.core_smoke / qt_widgets_smoke（回归）：待门内运行
-- [ ] platform.closure_review_install：待门内运行
-- [ ] 受影响集复跑（两次确定性确认）：待做
+- [x] closure_review.core_test：**Passed（19/19，两遍确定性）**
+- [x] ui_review.core_smoke / ui_review.qt_widgets_smoke（回归）：**Passed（两遍）**
+- [x] platform.closure_review_install：**Passed（两遍）**——真实 MainWindow +
+  typical fixture 工程：装配、页面状态来自真实文档、save_document、重开追溯
+- [x] 受影响集：platform.app_shell / platform.ui_wiring / platform.project_session
+  （data_store.hpp、main_window.cpp、平台测试 CMake 变更波及）：**Passed**
+- [x] pwb-platform + platform_closure_review_install 目标构建成功
 
-## 明确未执行 / 限制
+### 验证轮中发现并修复的实现缺陷（审查轮之外）
+
+1. **find_map_document 悬垂指针**（编译警告暴露）：遍历按值返回的
+   paleomap_documents_of() 临时副本并返回元素指针 → 整个 QC 从释放内存读文档。
+   改为按引用遍历 section。此为 R4 首轮 10 个测试失败的共同根因。
+2. **issue_locate_point 环下钻缺陷**：Polygon 形（coordinates=[[ring]]）几何
+   落不进任何分支（ISSUE-DUMP 实证）→ 定位点缺失。改为统一三层下钻
+   （裸环 → Polygon 壳 → MultiPolygon 首外环）。
+
+### 明确未执行 / 限制
 
 - Python 参考流程兼容性：未删除任何 Python 参考代码；C++ 生产路径无解释器/subprocess。
 - catalog qc-DataRun / version_finalize DataRun 登记：catalog 侧注册面未合流，
   报告以 `provenance_registered=false` 诚实记录（不虚报来源运行）。
 - 编图侧完整规则集（§14 cartographic_qa 全量）：归 08 线；本线交付委托 seam +
-  真实几何默认委托， richer 规则集经同一 seam 接入。
+  真实几何默认委托（未闭合环/重复顶点/退化面，mapping kernel 支撑），
+  richer 规则集经同一 seam 接入，未绑定时 coverage 记 skipped+原因
+  （`cartographic_side_checks` 键为本线扩展）。
 - GL/硬件相关验证：不涉及（本线无 GL 面）。
 - 全量产品矩阵：由 12 线在集成候选 SHA 上统一执行（本线提交可重放命令）。
+- 需要真实磁盘满环境的注入测试未执行（以父目录为文件的短路失败路径替代，
+  覆盖同一"写失败不产生回执"语义）。

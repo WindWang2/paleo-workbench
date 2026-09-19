@@ -2,6 +2,7 @@
 
 #include <QObject>
 
+#include <pwb/application/adapters/data_store.hpp>
 #include <pwb/closure_review/project_review_actions.hpp>
 #include <pwb/domain/errors.hpp>
 #include <pwb/domain/json.hpp>
@@ -13,6 +14,10 @@
 
 #include "app_context.hpp"
 #include "app_shell.hpp"
+
+// The backend lives in pwb::closure_review; inside pwb::app::closure_review
+// the unqualified name would resolve to this (empty) namespace.
+namespace clr = pwb::closure_review;
 
 namespace pwb::app::closure_review {
 
@@ -30,7 +35,7 @@ public:
     ReviewBinding(AppShell* shell, AppContext* context)
         : QObject(shell), shell_(shell), context_(context) {
 #ifdef PWB_WITH_DATA_INTEGRATION
-        closure_review::ProjectReviewActions::Delegates d;
+        clr::ProjectReviewActions::Delegates d;
         d.document = [this]() -> domain::Json* {
             const auto store = context_->projectStore();
             return store != nullptr ? &store->document().root() : nullptr;
@@ -49,15 +54,14 @@ public:
             return store->save_document();
         };
         actions_ =
-            std::make_unique<closure_review::ProjectReviewActions>(
-                std::move(d));
+            std::make_unique<clr::ProjectReviewActions>(std::move(d));
 #endif  // PWB_WITH_DATA_INTEGRATION
     }
 
     void attach() {
         setObjectName(QString::fromLatin1(kBindingObjectName));
-        auto* page = page();
-        if (page == nullptr) {
+        auto* widget = review_page();
+        if (widget == nullptr) {
             return;
         }
 #ifdef PWB_WITH_DATA_INTEGRATION
@@ -65,7 +69,7 @@ public:
         // the shell); the page additionally guards with project_bound_, so
         // an absent store keeps its honest 未绑定工程 state.
         ui_review::IReviewActions* exposed = actions_.get();
-        page->set_actions_provider(
+        widget->set_actions_provider(
             [exposed]() -> ui_review::IReviewActions* { return exposed; });
 #endif
         refresh();
@@ -77,23 +81,24 @@ public:
     }
 
     void refresh() {
-        auto* page = page();
-        if (page == nullptr) {
+        auto* widget = review_page();
+        if (widget == nullptr) {
             return;
         }
-        page->set_project_bound(available());
 #ifdef PWB_WITH_DATA_INTEGRATION
         if (available()) {
+            widget->set_project_bound(true);
             const domain::Json& root =
                 context_->projectStore()->document().root();
-            page->update_state(closure_review::active_quality_reports_of(root),
-                               closure_review::paleomap_documents_of(root),
-                               export_artifacts_section(root));
+            widget->update_state(clr::active_quality_reports_of(root),
+                                 clr::paleomap_documents_of(root),
+                                 export_artifacts_section(root));
             return;
         }
 #endif
-        page->update_state(domain::Json::array(), domain::Json::array(),
-                           domain::Json::array());
+        widget->set_project_bound(false);
+        widget->update_state(domain::Json::array(), domain::Json::array(),
+                             domain::Json::array());
     }
 
 private:
@@ -105,7 +110,7 @@ private:
     bool available() const { return false; }
 #endif
 
-    ui_review::qt::ReviewExportPage* page() const {
+    ui_review::qt::ReviewExportPage* review_page() const {
         return shell_ != nullptr ? shell_->review_page() : nullptr;
     }
 
@@ -120,7 +125,7 @@ private:
     AppShell* shell_ = nullptr;
     AppContext* context_ = nullptr;
 #ifdef PWB_WITH_DATA_INTEGRATION
-    std::unique_ptr<closure_review::ProjectReviewActions> actions_;
+    std::unique_ptr<clr::ProjectReviewActions> actions_;
 #endif
 };
 

@@ -14,6 +14,7 @@
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+#include <pwb/ui_review/qt/qc_issue_table.hpp>
 #include <pwb/ui_review/qt/review_export_page.hpp>
 
 #include "app_shell.hpp"
