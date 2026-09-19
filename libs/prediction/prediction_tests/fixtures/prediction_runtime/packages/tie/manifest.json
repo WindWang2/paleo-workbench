@@ -1,0 +1,41 @@
+{
+  "model_id": "tie-c1",
+  "model_version": "1.0.0",
+  "model_name": "tie-c1 fixture",
+  "capability": "seismic_facies",
+  "provider": "onnx_native",
+  "artifact": "model.onnx",
+  "checksum": "73b2970957d03c016e29ff0b44930ad3f58ce4dd86c044d0250b5da8602f9d9b",
+  "runtime": "onnxruntime",
+  "preprocessing_version": "prediction-runtime-fixture-v1",
+  "input_schema": {
+    "bands": []
+  },
+  "output_schema": {
+    "spatial_output_type": "CLASSIFIED_RASTER",
+    "class_names": [
+      "background",
+      "facies"
+    ]
+  },
+  "metadata": {
+    "prediction_runtime": {
+      "classes": 2,
+      "class_names": [
+        "background",
+        "facies"
+      ],
+      "tile": [
+        6,
+        8,
+        5
+      ],
+      "overlap": 0
+    }
+  },
+  "provenance": {
+    "source": "generate_prediction_runtime_fixtures.py"
+  },
+  "deterministic": true,
+  "scientific": true
+}

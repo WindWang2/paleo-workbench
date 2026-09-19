@@ -1,0 +1,43 @@
+{
+  "model_id": "conv3d-c2-mismatch",
+  "model_version": "1.0.0",
+  "model_name": "conv3d-c2-mismatch fixture",
+  "capability": "seismic_facies",
+  "provider": "onnx_native",
+  "artifact": "model.onnx",
+  "checksum": "3118697495167fc5e0cb581e3121c17625c775fefedee8bb58313d66b61c6888",
+  "runtime": "onnxruntime",
+  "preprocessing_version": "prediction-runtime-fixture-v1",
+  "input_schema": {
+    "bands": []
+  },
+  "output_schema": {
+    "spatial_output_type": "CLASSIFIED_RASTER",
+    "class_names": [
+      "sand",
+      "mud",
+      "shale"
+    ]
+  },
+  "metadata": {
+    "prediction_runtime": {
+      "classes": 3,
+      "class_names": [
+        "sand",
+        "mud",
+        "shale"
+      ],
+      "tile": [
+        6,
+        8,
+        5
+      ],
+      "overlap": 2
+    }
+  },
+  "provenance": {
+    "source": "generate_prediction_runtime_fixtures.py"
+  },
+  "deterministic": true,
+  "scientific": true
+}

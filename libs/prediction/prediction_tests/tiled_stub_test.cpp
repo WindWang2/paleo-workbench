@@ -308,6 +308,13 @@ std::string replace_all(std::string text, const std::string& from,
     return text;
 }
 
+// The oracle was generated on POSIX: compare path-bearing text with forward
+// slashes so the Windows test run is platform-stable.
+std::string forward_slashes(std::string text) {
+    std::replace(text.begin(), text.end(), '\\', '/');
+    return text;
+}
+
 std::vector<std::string> list_done_markers(const fs::path& work) {
     std::vector<std::string> names;
     for (const auto& entry : fs::directory_iterator(work / "tiles.done")) {
@@ -378,7 +385,7 @@ int main() {
     const fs::path root = fs::temp_directory_path()
                         / ("conv13_tiled_stub_" + std::to_string(stamp));
     fs::create_directories(root);
-    const std::string work_token = root.string();
+    const std::string work_token = forward_slashes(root.generic_string());
 
     const std::string model_content = meta["model_content"].get<std::string>();
     const std::string model_path = (root / "stub-model.onnx").string();
@@ -516,7 +523,7 @@ int main() {
             const std::string want_text = replace_all(
                 c["error"].get<std::string>(), "<WORK>", work_token);
             check(threw, "model_file " + kind + " throws");
-            check(got == want_text,
+            check(forward_slashes(got) == forward_slashes(want_text),
                   "model_file " + kind + " error text\n  got:  " + got
                       + "\n  want: " + want_text);
         }
@@ -610,7 +617,7 @@ int main() {
             check(threw, id + " throws " + want_type);
             const std::string want_text = replace_all(
                 c["error"].get<std::string>(), "<WORK>", work_token);
-            check(got == want_text,
+            check(forward_slashes(got) == forward_slashes(want_text),
                   id + " error text\n  got:  " + got + "\n  want: "
                       + want_text);
             continue;
@@ -730,7 +737,7 @@ int main() {
         check(threw, id + " throws " + want_type);
         const std::string want_text = replace_all(
             c["error"].get<std::string>(), "<WORK>", work_token);
-        check(got == want_text,
+        check(forward_slashes(got) == forward_slashes(want_text),
               id + " error text\n  got:  " + got + "\n  want: " + want_text);
     }
 
@@ -800,3 +807,4 @@ int main() {
                 g_failures == 0 ? "PASS" : "FAIL", g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;
 }
+

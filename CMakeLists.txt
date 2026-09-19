@@ -118,6 +118,31 @@ if(PWB_BUILD_CONV_25)
     add_subdirectory(libs/workflow_graph)
 endif()
 # END CONV-25
+
+# BEGIN PREDICTION-RUNTIME — native prediction runtime closure (M9): the
+# production ONNX Runtime session (dynamic loading), the model package /
+# input-contract runtime, the tiled pipeline with bounded outputs +
+# deterministic summary, the task service and the workflow/catalog seams.
+# Implies PWB_BUILD_DATA + CONV-21 (contracts), so a standalone
+# -DPWB_BUILD_PREDICTION_RUNTIME=ON configure really builds the closure.
+# The ONNX Runtime library itself stays a runtime discovery: set
+# -DPWB_ONNXRUNTIME_LIBRARY=<path> to bake a hint for tests/production.
+# Declared BEFORE the data and CONV-13/21 blocks so the implied switches
+# land in time.
+option(PWB_BUILD_PREDICTION_RUNTIME
+    "Build the native prediction runtime (implies PWB_BUILD_DATA + CONV-21; ONNX Runtime loaded at run time)" OFF)
+if(PWB_BUILD_PREDICTION_RUNTIME)
+    # Set the whole chain here as normal variables: option() does nothing
+    # when the variable is already set (CMP0077), so the later CONV blocks
+    # keep these values.
+    set(PWB_BUILD_DATA ON)
+    set(PWB_BUILD_CONV_21 ON)
+    set(PWB_BUILD_CONV_13 ON)
+    set(PWB_BUILD_CONV_14 ON)
+    set(PWB_BUILD_CONV_19 ON)
+endif()
+# END PREDICTION-RUNTIME
+
 # ------------------------------------------------- B/C integration switches --
 # ON must mean the module is really there; a missing module is a configure
 # error, never a silent skip (protocol: independent validation).
@@ -352,6 +377,7 @@ if(PWB_BUILD_CONV_21)
     set(PWB_BUILD_CONV_19 ON)
 endif()
 # END CONV-21
+
 # BEGIN CONV-13 — prediction tiled inference geometry (M9 first slice).
 # Qt-free core: tile/halo/center-crop-fusion contract from
 # paleo_workbench/prediction/tiled_onnx.py, frozen against the Python

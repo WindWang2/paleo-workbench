@@ -82,6 +82,11 @@ namespace detail {
 // for the bit-exact oracle conversion table.
 std::uint16_t float_to_half_bits(float value);
 
+// float16 bits → float32 (IEEE 754 binary16, subnormals/inf/NaN included).
+// Exact inverse of the finite path; the runtime uses it to summarize and
+// inspect persisted probability maps without depending on numpy.
+float half_bits_to_float(std::uint16_t bits);
+
 }  // namespace detail
 
 // Batched logits: float32 (N,C,D,H,W), C-order. `ndim` mirrors the numpy

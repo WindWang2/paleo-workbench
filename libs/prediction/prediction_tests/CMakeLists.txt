@@ -27,3 +27,26 @@ if(PWB_BUILD_CONV_21)
     set_tests_properties(prediction.contracts PROPERTIES TIMEOUT 120)
 endif()
 # END CONV-21
+
+# BEGIN PREDICTION-RUNTIME — native runtime oracle replay (real ONNX Runtime
+# session; the library is discovered at run time, so the test needs the
+# shared library on the ctest environment when it is not installed globally).
+if(PWB_BUILD_PREDICTION_RUNTIME)
+    add_executable(prediction.runtime runtime_test.cpp)
+    target_compile_features(prediction.runtime PRIVATE cxx_std_20)
+    target_link_libraries(prediction.runtime PRIVATE
+        Pwb::Prediction Pwb::Domain)
+    if(NOT MSVC)
+        target_compile_options(prediction.runtime PRIVATE -ffp-contract=off)
+    endif()
+    target_compile_definitions(prediction.runtime PRIVATE
+        PWB_RUNTIME_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/prediction_runtime_oracle.json")
+    add_test(NAME prediction.runtime COMMAND prediction.runtime)
+    set_tests_properties(prediction.runtime PROPERTIES TIMEOUT 600)
+    if(PWB_ONNXRUNTIME_LIBRARY)
+        file(TO_CMAKE_PATH "${PWB_ONNXRUNTIME_LIBRARY}" _pwb_ort_test_library)
+        set_tests_properties(prediction.runtime PROPERTIES
+            ENVIRONMENT "PALEO_ONNXRUNTIME_LIBRARY=${_pwb_ort_test_library}")
+    endif()
+endif()
+# END PREDICTION-RUNTIME

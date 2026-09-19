@@ -1,0 +1,50 @@
+{
+  "model_id": "conv3d-c3-norm",
+  "model_version": "1.0.0",
+  "model_name": "conv3d-c3-norm fixture",
+  "capability": "seismic_facies",
+  "provider": "onnx_native",
+  "artifact": "model.onnx",
+  "checksum": "027d91279d05c39650f8e30851bb89ee241e16b4d6f6c972dee693eb36e799fa",
+  "runtime": "onnxruntime",
+  "preprocessing_version": "prediction-runtime-fixture-v1",
+  "input_schema": {
+    "bands": []
+  },
+  "output_schema": {
+    "spatial_output_type": "CLASSIFIED_RASTER",
+    "class_names": [
+      "sand",
+      "mud",
+      "shale"
+    ]
+  },
+  "metadata": {
+    "prediction_runtime": {
+      "classes": 3,
+      "class_names": [
+        "sand",
+        "mud",
+        "shale"
+      ],
+      "input_bands": [
+        "amplitude"
+      ],
+      "normalization": {
+        "mean": 0.5,
+        "std": 2.0
+      },
+      "tile": [
+        6,
+        8,
+        5
+      ],
+      "overlap": 2
+    }
+  },
+  "provenance": {
+    "source": "generate_prediction_runtime_fixtures.py"
+  },
+  "deterministic": true,
+  "scientific": true
+}

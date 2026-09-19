@@ -1,0 +1,47 @@
+{
+  "model_id": "corrupt-onnx",
+  "model_version": "1.0.0",
+  "model_name": "corrupt-onnx fixture",
+  "capability": "seismic_facies",
+  "provider": "onnx_native",
+  "artifact": "model.onnx",
+  "checksum": "ef79f03df8f2050c9678f7f6d9d95d3b12500a173927845f80d333d7e13330a0",
+  "runtime": "onnxruntime",
+  "preprocessing_version": "prediction-runtime-fixture-v1",
+  "input_schema": {
+    "bands": []
+  },
+  "output_schema": {
+    "spatial_output_type": "CLASSIFIED_RASTER",
+    "class_names": [
+      "sand",
+      "mud",
+      "shale"
+    ]
+  },
+  "metadata": {
+    "prediction_runtime": {
+      "classes": 3,
+      "class_names": [
+        "sand",
+        "mud",
+        "shale"
+      ],
+      "input_bands": [
+        "amplitude"
+      ],
+      "tile": [
+        6,
+        8,
+        5
+      ],
+      "overlap": 2,
+      "batch": 2
+    }
+  },
+  "provenance": {
+    "source": "generate_prediction_runtime_fixtures.py"
+  },
+  "deterministic": true,
+  "scientific": true
+}

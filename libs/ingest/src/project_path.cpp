@@ -64,7 +64,10 @@ Relativized relativize_path(const std::string& path,
         out.external = true;
         return out;
     }
-    out.path = (rel.native() == "." ? std::string(".") : rel.generic_string());
+    // generic_string() (not native(): wchar_t on Windows) so the "." literal
+    // comparison is well-formed on both platforms.
+    const std::string rel_text = rel.generic_string();
+    out.path = (rel_text == "." ? std::string(".") : rel_text);
     out.external = false;
     return out;
 }
@@ -109,12 +112,15 @@ std::string resolve_asset_path(const std::string& path,
     fs::path candidate(path);
     std::error_code ec;
     // expanduser: a bare "~" prefix maps to the user home (POSIX layout).
-    if (candidate.native() == "~") {
+    // Compare on the generic (UTF-8) form: path::native() is wchar_t on
+    // Windows, where the narrow literals would not compile.
+    const std::string candidate_text = candidate.generic_string();
+    if (candidate_text == "~") {
         const char* home = std::getenv("HOME");
         if (home) candidate = fs::path(home);
-    } else if (candidate.native().rfind("~/", 0) == 0) {
+    } else if (candidate_text.rfind("~/", 0) == 0) {
         const char* home = std::getenv("HOME");
-        if (home) candidate = fs::path(home) / candidate.native().substr(2);
+        if (home) candidate = fs::path(home) / candidate_text.substr(2);
     }
     if (fs::is_regular_file(candidate, ec)) {
         auto resolved = fs::weakly_canonical(candidate, ec);
