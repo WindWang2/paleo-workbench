@@ -878,6 +878,17 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-14
 
+# BEGIN VIZ-E — charts drawing kernel + Qt widgets (libs/viz_charts), plan
+# V6 of docs/development/cpp-geoviz-completion-plan.md: the geoviz_plots
+# drawing half (chart/surface/fence/analytics/factor presentation) with a
+# Qt-free core and QPainter widget layer. Joins platform configures (Qt6
+# comes from the platform block's find_package); the Qt-free core carries
+# its own oracle replay test.
+if(PWB_BUILD_PLATFORM)
+    add_subdirectory(libs/viz_charts)
+endif()
+# END VIZ-E
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared
