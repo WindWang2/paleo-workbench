@@ -32,9 +32,10 @@ void check(bool ok, const std::string& what) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // Deterministic rendering environment regardless of how ctest was
-    // invoked (mirrors the science viewer tests' ENVIRONMENT contract).
-    qputenv("QT_QPA_PLATFORM", "offscreen");
+    // Deterministic software-GL hint regardless of how ctest was invoked;
+    // the PLATFORM itself is chosen by the test ENVIRONMENT contract
+    // (real display when present — the offscreen GLX path cannot create
+    // contexts on some hosts — offscreen under headless CI).
     qputenv("LIBGL_ALWAYS_SOFTWARE", "1");
     QApplication app(argc, argv);
     const fs::path root = PWB_VIZ_A_FIXTURE_ROOT;

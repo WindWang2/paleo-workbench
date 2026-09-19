@@ -13,6 +13,16 @@ set(VIZ_A_FIXTURE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 # below can see Qt6::Widgets; QUIET — the target guards handle absence.
 find_package(Qt6 6.8 QUIET COMPONENTS Widgets OpenGLWidgets)
 
+# GL-test environment: on hosts with a real display, the offscreen
+# platform's GLX path fails context creation (X_GLXCreateNewContext
+# BadValue) while the real display works — force offscreen ONLY when no
+# display is available (headless CI); always software GL.
+if(NOT DEFINED ENV{DISPLAY} AND NOT DEFINED ENV{WAYLAND_DISPLAY})
+    set(VIZ_A_GL_ENV "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1")
+else()
+    set(VIZ_A_GL_ENV "LIBGL_ALWAYS_SOFTWARE=1")
+endif()
+
 function(viz_a_test target source)
     add_executable(${target} ${source})
     target_compile_features(${target} PRIVATE cxx_std_20)
@@ -56,7 +66,7 @@ if(TARGET Pwb::IngestLasWle AND TARGET Pwb::UiWorkersWleLoad
         Pwb::Ingest Pwb::IngestLasWle Pwb::UiWorkers Pwb::UiWorkersWleLoad
         Pwb::VisualizationWellLog Qt6::Widgets)
     set_tests_properties(viz_a.consistency PROPERTIES ENVIRONMENT
-        "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1")
+        "${VIZ_A_GL_ENV}")
 endif()
 
 # Viewer flow: load -> display -> track adjust -> export; failure, reopen,
@@ -68,7 +78,7 @@ if(TARGET Pwb::VisualizationWellLog)
     target_link_libraries(viz_a.viewer_flow PRIVATE
         Pwb::VisualizationWellLog Qt6::Widgets)
     set_tests_properties(viz_a.viewer_flow PROPERTIES ENVIRONMENT
-        "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1")
+        "${VIZ_A_GL_ENV}")
 
     viz_a_test(viz_a.patterns patterns_test.cpp)
     target_link_libraries(viz_a.patterns PRIVATE

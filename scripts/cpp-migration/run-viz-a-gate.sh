@@ -88,7 +88,10 @@ echo "== [4/7] Tests, pass 2 of 2 =="
 must Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"
 
 echo "== [5/7] MALLOC audit subset (heap abuse on the line-A surface) =="
-must Exec -m 8 -- env MALLOC_CHECK_=3 QT_QPA_PLATFORM=offscreen LIBGL_ALWAYS_SOFTWARE=1 \
+# No QT_QPA_PLATFORM forcing: the offscreen plugin's GLX path cannot create
+# contexts on real-display hosts (see the test ENVIRONMENT note); headless
+# shells inherit offscreen from the environment as usual.
+must Exec -m 8 -- env MALLOC_CHECK_=3 LIBGL_ALWAYS_SOFTWARE=1 \
     ctest --test-dir "$BUILD_DIR" -R '^viz_a\.' --output-on-failure --no-tests=error --timeout 300
 
 echo "== [6/7] OFF check: default (viewer OFF) still configures and the LAS branch degrades honestly =="

@@ -84,9 +84,19 @@ if(PWB_SCIENCE_VIEWER_TESTS)
     )
     add_test(NAME science.viewer.well_log_native_host
         COMMAND science.viewer.well_log_native_host)
+    # BEGIN VIZ-A (P-B gate fix): the forced offscreen platform breaks GL
+    # context creation on hosts with a real display (X_GLXCreateNewContext
+    # BadValue via the offscreen plugin's GLX path); only force it when no
+    # display exists (headless CI). Software GL stays unconditional.
+    if(NOT DEFINED ENV{DISPLAY} AND NOT DEFINED ENV{WAYLAND_DISPLAY})
+        set(VIZ_A_NATIVE_HOST_ENV "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1")
+    else()
+        set(VIZ_A_NATIVE_HOST_ENV "LIBGL_ALWAYS_SOFTWARE=1")
+    endif()
     set_tests_properties(science.viewer.well_log_native_host PROPERTIES
         TIMEOUT 300
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1")
+        ENVIRONMENT "${VIZ_A_NATIVE_HOST_ENV}")
+    # END VIZ-A
 
     add_executable(science.viewer.well_log viewer/well_log_viewer_test.cpp)
     target_compile_features(science.viewer.well_log PRIVATE cxx_std_20)

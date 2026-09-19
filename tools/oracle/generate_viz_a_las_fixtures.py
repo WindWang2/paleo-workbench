@@ -486,10 +486,13 @@ def main() -> int:
             # Negative self-check: flip single bits in the data half of the
             # file until the frozen reference changes — proves the fixture
             # is load-bearing, not satisfied by any parse of any bytes.
+            # Whole-file single-bit flips: for structural cases (no ~C at
+            # all) the preview is genuinely content-invariant — the flag
+            # then records "static by design" and the C++ replay skips the
+            # tamper check for that case.
             negative_ok = False
             original = path.read_bytes()
-            start = max(0, int(len(original) * 0.5))
-            for offset in range(start, len(original)):
+            for offset in range(len(original)):
                 corrupted = bytearray(original)
                 corrupted[offset] ^= 0x01
                 if bytes(corrupted) == original:

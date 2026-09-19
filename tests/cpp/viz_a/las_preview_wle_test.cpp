@@ -162,7 +162,14 @@ int main() {
         // file in a TEMP COPY (the registry re-reads from disk); the
         // preview must diverge for at least one flip — for rejected/no-curve
         // cases the load-bearing bytes live in the HEADER (well name, ~C),
-        // not only after ~A.
+        // not only after ~A. The no_curve_headers verdict is content-
+        // invariant BY CONSTRUCTION (stem + zeros, nothing parsed), so the
+        // tamper check does not apply there — that branch's discrimination
+        // is covered cross-case (every other fixture produces a different
+        // result shape).
+        if (case_json["wle_verdict"].get<std::string>() == "no_curve_headers") {
+            continue;
+        }
         const fs::path corrupt_dir = fs::temp_directory_path() / "viz_a_corrupt";
         fs::create_directories(corrupt_dir);
         const fs::path corrupt_path = corrupt_dir / path.filename();
