@@ -56,6 +56,8 @@ class WellTieCalibration {
 // volume's regular grid i*dt_ms + t0_ms (i = 0..n_samples-1). Values
 // OUTSIDE the source range are ZERO-filled (left=0, right=0 — different
 // from the clamp semantics above). Returns float32-amplitude values.
+// Throws std::invalid_argument when values/src_twt lengths differ (Python:
+// np.interp's ValueError); empty inputs zero-fill as before.
 [[nodiscard]] std::vector<double> resample_to_seismic_grid(
     const std::vector<double>& values, const std::vector<double>& src_twt,
     double dt_ms, double t0_ms, int n_samples);

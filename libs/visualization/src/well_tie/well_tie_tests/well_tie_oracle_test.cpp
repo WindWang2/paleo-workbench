@@ -136,7 +136,8 @@ void run_case(const Json& c) {
     } else if (kind == "reflectivity_error") {
         bool threw = false;
         try {
-            pwb::viz::well_tie::compute_reflectivity(
+            // 错误路径探针：只关心是否抛出，返回值无关。
+            (void)pwb::viz::well_tie::compute_reflectivity(
                 read_nums(c.at("sonic")), read_nums(c.at("density")));
         } catch (const std::invalid_argument&) {
             threw = true;
@@ -199,7 +200,8 @@ void run_case(const Json& c) {
         bool threw = false;
         try {
             if (kind == "cal_from_sonic_error") {
-                pwb::viz::well_tie::WellTieCalibration::from_sonic(
+                // 错误路径探针：只关心是否抛出，返回值无关。
+                (void)pwb::viz::well_tie::WellTieCalibration::from_sonic(
                     read_nums(c.at("depths")), read_nums(c.at("sonic")));
             } else {
                 pwb::viz::well_tie::WellTieCalibration(

@@ -125,7 +125,7 @@ int main(int argc, char** argv) {
     canvas.set_models(&tops, &picks);
     canvas.set_pick_mode(true);
     canvas.show();
-    QTest::qWaitForWindowExposed(&canvas);
+    check(QTest::qWaitForWindowExposed(&canvas), "section window exposed");
 
     const QImage grabbed = canvas.grab().toImage();
     check(!grabbed.isNull() && grabbed.width() > 100, "grab non-empty");
@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
     // The exported SVG must carry the data identity (well names).
     {
         QFile f(svg);
-        f.open(QIODevice::ReadOnly);
+        check(f.open(QIODevice::ReadOnly), "exported svg readable");
         const QString text = QString::fromUtf8(f.readAll());
         check(text.contains("A4") && text.contains("A13") &&
                   text.contains("A16"),
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
     }
     preview.set_tops(preview_tops);
     preview.show();
-    QTest::qWaitForWindowExposed(&preview);
+    check(QTest::qWaitForWindowExposed(&preview), "preview window exposed");
     const QImage preview_grab = preview.grab().toImage();
     check(!preview_grab.isNull(), "preview grab");
     QSignalSpy hover(&preview, &FormationTopsPreview::hovered_top_changed);

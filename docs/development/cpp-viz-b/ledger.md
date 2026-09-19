@@ -52,3 +52,27 @@
 - 分支：`codex/viz-b-crosswell-welltie`，基线 origin/main@7290f727，提交 9aa4b342 + 本账本更新。
 - PR：#1400（base main，非 stacked——对 A 线无代码依赖，LAS 接通走既有 seam）。
 - 硬门全部满足或如实记录阻塞（pwb-platform 完整二进制：上游 #1399）。
+
+## Fix round（PR 评审驱动，2026-09-19）
+
+独立评审（离树 worktree 重建 + 全量对拍）结论 NEEDS_CHANGES：代码/测试/边界达标，
+阻塞项 = 与 main 一处 CMakeLists 文本冲突 + 域内告警未清零。本轮回修：
+
+- **告警清零（viz_b 域内全部）**：dock TU 3 处 nodiscard（undo/redo 空栈时
+  status_message 反馈；add_dtw_pick id 显式丢弃）+ 测试 TU 9 处（错误路径探针
+  `(void)`；qWaitForWindowExposed/QFile::open 升级为 check 断言；replay 的
+  undo/redo 丢弃注记）+ 画布 3 处（tie_canvas 未用局部 content_h 删除；
+  section_canvas 两 painter 对称参数匿名化）。修复后六目标重建 0 warning。
+- **resample_to_seismic_grid 长度守卫（真实缺陷）**：values/src_twt 等长校验
+  （Python np.interp ValueError 对应），**当场拦下 example/integration 的错位
+  调用**——原始域 synthetic（n-1 区间采样）配过滤域 calibration.twt()
+  （from_sonic 去非有限对），此前静默错位插值。两壳重构：synthetic 建于同一
+  过滤域、src_twt 取相邻 twt 中点，values/src_twt 真正同域等长。
+- 验证：六 viz_b 目标零告警重建；`ctest -R viz_b` **3×100%（6/6，含
+  MALLOC_CHECK_=3）**；受影响回归 `well_science.dtw` + `ui_workers.oracle` +
+  `ui_workers.lifecycle` 3/3。oracle fixture 未动（错误路径 fixture 数组
+  本就等长，守卫对其零影响）。
+- 合并 origin/main（UI-11..15 入主线）：根 CMakeLists.txt 冲突 keep-both
+  解析（双方独立追加块），合并后全套复验过。
+- 评审 P2 存档不回修（sidecar view 恢复、tops CSV 读侧引号、生成器 LAS
+  路径硬编码）——记入上文"已知声明"，留后续线。

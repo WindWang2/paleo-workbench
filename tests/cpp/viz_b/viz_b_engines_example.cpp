@@ -150,13 +150,31 @@ int main(int argc, char** argv) {
         const auto calibration =
             pwb::viz::well_tie::WellTieCalibration::from_sonic(depths,
                                                                 sonic);
+        // from_sonic 丢弃非有限 (depth, sonic) 样本；合成记录必须建在同一
+        // 过滤域上，resample 的 values/src_twt 才同域等长（此前原始域的
+        // synthetic 配过滤域的 twt，错位插值被长度守卫拦下）。
+        std::vector<double> kept_sonic;
+        std::vector<double> kept_density;
+        kept_sonic.reserve(sonic.size());
+        for (std::size_t i = 0; i < depths.size(); ++i) {
+            if (std::isfinite(depths[i]) && std::isfinite(sonic[i])) {
+                kept_sonic.push_back(sonic[i]);
+                kept_density.push_back(density[i]);
+            }
+        }
         const auto synthetic =
-            pwb::viz::well_tie::synthetic_from_logs(sonic, density);
+            pwb::viz::well_tie::synthetic_from_logs(kept_sonic, kept_density);
+        // 合成记录定义在深度区间上（n-1 个采样）：src_twt 取相邻 twt 中点。
+        const std::vector<double>& twt = calibration.twt();
+        std::vector<double> src_twt(synthetic.size(), 0.0);
+        for (std::size_t i = 0; i + 1 < twt.size() && i < synthetic.size();
+             ++i) {
+            src_twt[i] = (twt[i] + twt[i + 1]) / 2.0;
+        }
         const std::vector<double> grid =
             pwb::viz::well_tie::resample_to_seismic_grid(
                 std::vector<double>(synthetic.begin(), synthetic.end()),
-                calibration.twt(), 4.0, calibration.twt().front() + 40.0,
-                512);
+                src_twt, 4.0, twt.front() + 40.0, 512);
         const auto tie = pwb::viz::well_tie::correlate_synthetic_to_trace(
             grid, grid);
         std::cout << "[viz-b example] well " << well.at("name").get<std::string>()

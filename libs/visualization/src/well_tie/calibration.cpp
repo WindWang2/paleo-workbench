@@ -122,6 +122,14 @@ std::vector<double> resample_to_seismic_grid(
     if (src_twt.empty() || values.empty()) {
         return std::vector<double>(static_cast<std::size_t>(n_samples), 0.0);
     }
+    // Python relies on np.interp's ValueError for mismatched sample arrays;
+    // without this guard the bracketing below indexes values out of bounds.
+    if (values.size() != src_twt.size()) {
+        throw std::invalid_argument(
+            "values and src_twt must have same length, got " +
+            std::to_string(values.size()) + " and " +
+            std::to_string(src_twt.size()));
+    }
     // np.interp with left=0, right=0 — manual bracketing (src_twt may be
     // irregular but must be ascending; np.interp has the same requirement).
     std::vector<double> out;

@@ -43,7 +43,8 @@ struct ColumnLayout {
 };
 
 std::vector<ColumnLayout> layout_columns(const SectionScene& scene,
-                                         double width_px, double height_px) {
+                                         double /*width_px*/,
+                                         double height_px) {
     std::vector<ColumnLayout> out;
     const std::size_t n = scene.wells.size();
     if (n == 0) return out;
@@ -251,7 +252,7 @@ void paint_ties(QPainter* painter, const SectionScene& scene,
 
 void paint_depth_ruler(QPainter* painter, const SectionScene& scene,
                        const std::vector<ColumnLayout>& columns,
-                       double width_px, double height_px) {
+                       double width_px, double /*height_px*/) {
     if (columns.empty()) return;
     const double x = width_px - kDepthRulerWidthPx + 4.0;
     QFont font = painter->font();

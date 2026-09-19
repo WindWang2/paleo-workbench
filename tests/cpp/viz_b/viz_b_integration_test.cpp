@@ -264,7 +264,7 @@ int main(int argc, char** argv) {
           "composite svg");
     {
         QFile f(section_svg);
-        f.open(QIODevice::ReadOnly);
+        check(f.open(QIODevice::ReadOnly), "section svg readable");
         const QString text = QString::fromUtf8(f.readAll());
         check(text.contains("A4") && text.contains("A13"),
               "svg identity: well names");
@@ -291,13 +291,34 @@ int main(int argc, char** argv) {
             pwb::viz::well_tie::synthetic_from_logs(sonic, density);
         check(synthetic.size() + 1 == depths.size(),
               w.at("name").get<std::string>() + " synthetic length");
+        // from_sonic 丢弃非有限 (depth, sonic) 样本：resample 的 values 与
+        // src_twt 必须同域等长（原始域 synthetic 配过滤域 twt 是错位调用，
+        // 被长度守卫拦下）。合成记录建于过滤域（区间采样 n-1），src_twt 取
+        // 相邻 twt 中点。
+        std::vector<double> kept_sonic;
+        std::vector<double> kept_density;
+        kept_sonic.reserve(sonic.size());
+        for (std::size_t i = 0; i < depths.size(); ++i) {
+            if (std::isfinite(depths[i]) && std::isfinite(sonic[i])) {
+                kept_sonic.push_back(sonic[i]);
+                kept_density.push_back(density[i]);
+            }
+        }
+        const auto kept_synthetic =
+            pwb::viz::well_tie::synthetic_from_logs(kept_sonic, kept_density);
+        const std::vector<double>& twt = calibration.twt();
+        std::vector<double> src_twt(kept_synthetic.size(), 0.0);
+        for (std::size_t i = 0; i + 1 < twt.size() && i < kept_synthetic.size();
+             ++i) {
+            src_twt[i] = (twt[i] + twt[i + 1]) / 2.0;
+        }
         // Resample onto a regular seismic grid and cross-correlate the
         // synthetic against itself shifted — the lag must be recovered.
         const std::vector<double> grid =
             pwb::viz::well_tie::resample_to_seismic_grid(
-                std::vector<double>(synthetic.begin(), synthetic.end()),
-                calibration.twt(), 4.0, calibration.twt().front() + 40.0,
-                512);
+                std::vector<double>(kept_synthetic.begin(),
+                                    kept_synthetic.end()),
+                src_twt, 4.0, twt.front() + 40.0, 512);
         check(grid.size() == 512, "seismic grid size");
         std::vector<double> shifted(grid.size(), 0.0);
         const int offset = 24;

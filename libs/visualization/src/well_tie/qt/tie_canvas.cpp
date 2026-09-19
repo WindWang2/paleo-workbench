@@ -178,7 +178,6 @@ void WellTieCanvas::paintEvent(QPaintEvent*) {
     const double w = static_cast<double>(width());
     const double h = static_cast<double>(height());
     painter.fillRect(QRectF(0, 0, w, h), QColor(250, 249, 245));
-    const double content_h = std::max(10.0, h - kTieHeaderHeightPx);
     // Header row.
     QFont header_font = painter.font();
     header_font.setPointSize(9);

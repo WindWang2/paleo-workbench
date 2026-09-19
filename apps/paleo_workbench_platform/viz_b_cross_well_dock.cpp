@@ -144,13 +144,19 @@ void VizBCrossWellDock::build_ui() {
     toolbar->addWidget(pick_mode_button);
 
     auto* undo_button = new QPushButton(tr("撤销"), section_page);
-    connect(undo_button, &QPushButton::clicked, this,
-            [this]() { picks_model_.undo(); });
+    connect(undo_button, &QPushButton::clicked, this, [this]() {
+        if (!picks_model_.undo()) {
+            emit status_message(tr("没有可撤销的拾取"));
+        }
+    });
     toolbar->addWidget(undo_button);
 
     auto* redo_button = new QPushButton(tr("重做"), section_page);
-    connect(redo_button, &QPushButton::clicked, this,
-            [this]() { picks_model_.redo(); });
+    connect(redo_button, &QPushButton::clicked, this, [this]() {
+        if (!picks_model_.redo()) {
+            emit status_message(tr("没有可重做的拾取"));
+        }
+    });
     toolbar->addWidget(redo_button);
 
     auto* dtw_button = new QPushButton(tr("DTW 传播"), section_page);
@@ -479,8 +485,10 @@ void VizBCrossWellDock::apply_dtw_results(
     const std::vector<std::pair<std::string, double>>& pairs,
     const std::string& formation) {
     for (const auto& [well, depth] : pairs) {
-        picks_model_.add_dtw_pick(formation, well, depth,
-                                  pwb::viz::cross_well::PickConfidence{});
+        // 返回的 pick id 仅供模型内部键控；UI 刷新走 changed-handler，
+        // 此处显式丢弃。
+        (void)picks_model_.add_dtw_pick(formation, well, depth,
+                                        pwb::viz::cross_well::PickConfidence{});
     }
 }
 

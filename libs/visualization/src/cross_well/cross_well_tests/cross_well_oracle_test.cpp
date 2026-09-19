@@ -199,21 +199,21 @@ void replay_picks_sequence(const Json& case_data) {
     compare_snapshot("dtw_add_confidence");
     model.reject_dtw_pick(d);
     compare_snapshot("dtw_reject");
-    model.undo();
+    (void)model.undo();  // 快照即 oracle，bool 仅示是否有东西可撤
     compare_snapshot("undo_reject");
     model.accept_dtw_pick(d);
     compare_snapshot("dtw_accept");
     model.delete_pick(b);
     compare_snapshot("delete2");
-    model.undo();
+    (void)model.undo();  // 快照即 oracle，bool 仅示是否有东西可撤
     compare_snapshot("undo_delete");
-    model.redo();
+    (void)model.redo();
     compare_snapshot("redo_delete");
-    model.undo();
-    model.undo();
-    model.undo();
+    (void)model.undo();  // 快照即 oracle，bool 仅示是否有东西可撤
+    (void)model.undo();  // 快照即 oracle，bool 仅示是否有东西可撤
+    (void)model.undo();  // 快照即 oracle，bool 仅示是否有东西可撤
     compare_snapshot("undo_x3");
-    model.redo();
+    (void)model.redo();
     compare_snapshot("redo_x1");
 }
 
@@ -639,7 +639,8 @@ int main() {
                 {"A", 0.0, 0.0}, {"B", 1.0, 1.0}};
             bool threw = false;
             try {
-                pwb::viz::cross_well::plan_section(wells, "bogus");
+                // 错误路径探针：只关心是否抛出，返回值无关。
+                (void)pwb::viz::cross_well::plan_section(wells, "bogus");
             } catch (const pwb::viz::cross_well::PlannerError&) {
                 threw = true;
             }
