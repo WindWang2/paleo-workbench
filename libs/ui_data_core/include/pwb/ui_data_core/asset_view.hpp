@@ -288,6 +288,8 @@ AssetHandle make_asset_handle(GenericAsset asset);
 AssetHandle make_asset_handle(std::shared_ptr<AssetView> view);
 // Non-owning handle over a catalog DataAsset (raw_asset for catalog-only rows).
 AssetHandle make_asset_handle(const catalog::DataAsset* asset);
+// Owning form (#1382): the handle keeps the catalog row alive.
+AssetHandle make_asset_handle(std::shared_ptr<const catalog::DataAsset> asset);
 // Python ``raw_asset is other_raw`` identity: pointer identity of the wrapped
 // object for pointer-carrying variants, else the handle object itself.
 const void* asset_handle_identity(const AssetHandle& handle);
@@ -354,7 +356,12 @@ struct CatalogRowOverview {
     std::string created_at;
     bool managed = true;
     bool trashed = false;
-    const catalog::DataAsset* asset = nullptr;  // non-owning doc pointer
+    // #1382: shared ownership of the catalog document row. compute_catalog_
+    // row_overview builds overviews from a BY-VALUE list_assets copy, and
+    // the overviews outlive that copy (long-lived CatalogEnricher) — a raw
+    // pointer into it dangles at function return. The owning copy decouples
+    // the overview from both the local vector and the service lifetime.
+    std::shared_ptr<const catalog::DataAsset> asset;
 };
 
 // _lineage_status_text(summary, stage)
