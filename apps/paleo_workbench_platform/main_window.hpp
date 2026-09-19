@@ -21,6 +21,11 @@
 #include <pwb/application/project_session.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/ui/tool_actions.hpp>
+#ifdef PWB_WITH_APP_SHELL
+// CommandContext for the palette context buffer below — must stay OUTSIDE
+// the pwb::app namespace block (a global-include, not a nested decl).
+#include <pwb/ui_shell/command_registry.hpp>
+#endif
 #ifdef PWB_WITH_CONV_27
 // CONV-27 workbench surface: stage dock, domain layer tree, edit tools,
 // constraint panel, layout persistence (all in Pwb::Ui / Pwb::UiWorkbench).
@@ -52,6 +57,12 @@ class QSettings;
 namespace pwb::platform_services {
 class ThemeService;
 }
+
+#ifdef PWB_WITH_UI_PAGES_PREVIEW_QT
+namespace pwb::ui_pages_preview {
+class PreviewSettingsStore;
+}
+#endif
 
 namespace pwb::mapping {
 struct GridStatistics;
@@ -193,6 +204,33 @@ public:
     void setDiscardConfirmResponder(std::function<int()> responder) {
         discard_confirm_responder_ = std::move(responder);
     }
+    // cpp-close-12 — the 工程属性 surface (AppShell properties_requested).
+    // Production answers with a QMessageBox; tests capture the text via a
+    // scripted responder (same pattern as the dirty-close responder).
+    void setPropertiesResponder(
+        std::function<void(const QString&)> responder) {
+        properties_responder_ = std::move(responder);
+    }
+    // Registers domain facts for a layer added outside the open/new flows
+    // (the sample-project bootstrap; openProject parity for facts_).
+    void noteDomainLayerFacts(
+        const pwb::application::DomainLayerFacts& facts);
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // cpp-close-12 — AppShell deferred request surfaces, now production
+    // handlers; public per the "test/automation entry points" convention
+    // (the signals connect to these exact bodies).
+    void saveProjectRequested();
+    void openSampleProjectRequested();
+    void showProjectProperties();
+#endif
+    // cpp-close-12 — shared preview-settings dialog (preview-only
+    // preferences on the unified platform settings store; window-modal
+    // non-blocking open hosting the UI-07 settings panel). The preview
+    // settings request surface exists only in the AppShell build
+    // (PWB_WITH_APP_SHELL), the body only when the UI-07 Qt slice is in
+    // the closure (PWB_WITH_UI_PAGES_PREVIEW_QT); both defined by the
+    // root-CMake assembly block.
+    void showPreviewSettingsRequested();
     // True when the action id has a real handler connected (wiring audit).
     bool actionWired(const QString& tool_id) const {
         return wired_action_ids_.count(tool_id.toStdString()) > 0;
@@ -381,6 +419,10 @@ private:
     // Central shell: owns the composite document that reparents canvas_.
     // The session's attachCanvas pointer stays valid across the reparent.
     AppShell* app_shell_ = nullptr;
+    // cpp-close-12 — the palette context provider's refresh buffer (the
+    // returned pointer must stay valid for the duration of the call only;
+    // GUI-thread only).
+    pwb::ui_shell::CommandContext palette_context_;
 #endif
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;
@@ -436,6 +478,7 @@ private:
     std::map<std::string, pwb::application::DomainLayerFacts> facts_;
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;
+    std::function<void(const QString&)> properties_responder_;
     std::set<std::string> wired_action_ids_;
 
     // Platform services state (null until the constructor built them).
@@ -450,6 +493,13 @@ private:
     // (close protocol) + app-quit drain. Declared last so it outlives the
     // surfaces it supervises.
     std::unique_ptr<JobCenter> job_center_;
+#endif
+#ifdef PWB_WITH_UI_PAGES_PREVIEW_QT
+    // cpp-close-12 — the shared preview-settings store, cached on the
+    // window (Python controller caches the dialog; the store outlives the
+    // recreated dialogs). Complete type in main_window.cpp.
+    std::unique_ptr<pwb::ui_pages_preview::PreviewSettingsStore>
+        preview_settings_store_;
 #endif
 
     // BEGIN VIZ-E — the mounted data-page dock (plan P-A).

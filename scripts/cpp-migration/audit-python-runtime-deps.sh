@@ -47,9 +47,12 @@ scan_sources() {
     )
     echo "== source audit: ${paths[*]}"
     # Raw patterns: Python C API, PySide/shiboken includes, spawning python.
+    # cpp-close-12: pure comment lines (// or /* or leading *) are exempt —
+    # the raw pattern matched prose like "dlopened ... pulled a python" in
+    # self_check.cpp, a false positive of the must-remove class.
     local hits
     hits=$(grep -rnE '(#include[[:space:]]*<Python\.h>|#include[[:space:]]*"Python\.h"|#include[[:space:]]*<PySide|#include[[:space:]]*<shiboken|Py_Initialize|Py_RunString|PyRun_|PyImport_|subprocess.*python|system\("python|QProcess[^;]*start[^;]*python|startDetached.*python|dlopen[^;]*python)' \
-        "${paths[@]}" 2>/dev/null || true)
+        "${paths[@]}" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true)
     if [ -n "$hits" ]; then
         echo "VIOLATION (must-remove class):"
         echo "$hits"
@@ -58,16 +61,20 @@ scan_sources() {
         echo "  clean: no python C API / PySide / subprocess-python references"
     fi
 
-    # pybind usage outside the sanctioned facade is a violation too.
+    # pybind usage outside the sanctioned compat facades is a violation
+    # too. cpp-close-12: cartography_bind joins mapping_bind — the same
+    # HAS_CPP-dispatch class (pybind facade consumed BY Python via
+    # paleo_workbench/mapping/cartography_native.py, never linked into the
+    # product binary; the --exe ldd audit verifies that).
     local pybind
     pybind=$(grep -rln "pybind11" "$RepoRoot/libs" --include="*.cpp" --include="*.hpp" 2>/dev/null \
-        | grep -v "libs/mapping_bind" || true)
+        | grep -v -e "libs/mapping_bind" -e "libs/cartography/cartography_bind" || true)
     if [ -n "$pybind" ]; then
-        echo "VIOLATION (pybind11 outside libs/mapping_bind compat seam):"
+        echo "VIOLATION (pybind11 outside the mapping_bind/cartography_bind compat seams):"
         echo "$pybind"
         Status=1
     else
-        echo "  clean: pybind11 confined to the libs/mapping_bind compat seam"
+        echo "  clean: pybind11 confined to the mapping_bind/cartography_bind compat seams"
     fi
 }
 

@@ -1,0 +1,116 @@
+{
+  "line": "12",
+  "title": "主程序收口、双平台部署与无 Python 验收",
+  "capabilities": [
+    {
+      "capability": "AppShell 工程保存入口（三阶段保存 + 编辑提交门）",
+      "python_source": "paleo_workbench/ui/project_controller.py save_project/_on_save_project",
+      "cpp_target": "apps/paleo_workbench_platform/shell_project_actions.cpp save_open_project + main_window.cpp saveProjectRequested",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "platform.shell_project_actions (save/reopen roundtrip)"
+      ]
+    },
+    {
+      "capability": "样例工程入口（真实 newProject 生命周期 + 内置 8 井发布 + 绑定持久化）",
+      "python_source": "paleo_workbench/pipeline/bootstrap.py bootstrap_sample_project",
+      "cpp_target": "apps/paleo_workbench_platform/shell_project_actions.cpp bootstrap_sample_project",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "platform.shell_project_actions (bootstrap + reopen binding)"
+      ],
+      "note": "资源扫描/catalog 批量登记为 01 线目录依赖；本入口复用已合流的 run lifecycle，不复制 01 分支 WIP"
+    },
+    {
+      "capability": "工程属性入口（只读摘要）",
+      "python_source": "paleo_workbench/ui/project_controller.py project_properties_text/_show_properties",
+      "cpp_target": "apps/paleo_workbench_platform/shell_project_actions.cpp project_properties_text",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "platform.shell_project_actions (empty-state + saved-state text)"
+      ]
+    },
+    {
+      "capability": "预览设置入口（共享 PreviewSettings 存储 + UI-07 面板）",
+      "python_source": "paleo_workbench/ui/workflow_controller.py show_preview_settings",
+      "cpp_target": "main_window.cpp showPreviewSettingsRequested + libs/ui_pages_preview qt panel/store",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "platform.shell_project_actions (apply→store 持久化)"
+      ]
+    },
+    {
+      "capability": "CommandPalette context/tool-details provider 注入",
+      "python_source": "paleo_workbench/ui/command_registry.py + workstation/action_help.py",
+      "cpp_target": "main_window.cpp wire_app_shell + libs/ui_shell command_palette set_context_provider（具名租约）",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "platform.app_shell (map: 详情 tooltip 断言)"
+      ]
+    },
+    {
+      "capability": "全局迁移矩阵生成器（implemented/merged/wired/verified 四列）",
+      "python_source": "—",
+      "cpp_target": "tools/migration/pwb_closure_matrix.py + docs/development/cpp-closure-wave/closure-matrix.md",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "tests/test_closure_matrix_generator.py (6 passed)"
+      ]
+    },
+    {
+      "capability": "无 Python 生产路径审计（复验 native-product closure 任务 F）",
+      "python_source": "—",
+      "cpp_target": "scripts/cpp-migration/audit-python-runtime-deps.sh（复用）",
+      "implemented": true,
+      "merged": true,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "源审计 exit 0 + 发行树 ldd --exe 审计 clean: closure python-free"
+      ],
+      "note": "本线复验并记录结果；--exe 链路审计依赖部署包构建"
+    },
+    {
+      "capability": "独立部署包（native-product closure 任务 G 复验 + 许可材料）",
+      "python_source": "—",
+      "cpp_target": "scripts/cpp-migration/deploy-native-product.sh（复用）+ scripts/cpp-migration/audit-licenses.sh（新）",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "部署树 self-check 12/12（python_free_process verified）；audit-licenses.sh PASS"
+      ],
+      "note": "部署包级 verified 需 QGIS SDK 就绪后的 dist 树 self-check；在无 SDK 主机上标注为未执行"
+    },
+    {
+      "capability": "占位宿主收口（joint host/IReviewActions/DataPage composite/PreparationPage/LocalVizProvider base seam）",
+      "python_source": "paleo_workbench/ui/app_shell.py",
+      "cpp_target": "app_shell.cpp 占位宿主（属主 04/06/08/09 未合流前保持诚实占位）",
+      "implemented": false,
+      "merged": false,
+      "wired": false,
+      "verified": false,
+      "evidence": [],
+      "note": "审计完成（findings.md），装配等真实依赖合流后进行；不得以 stub 冒充交付"
+    }
+  ]
+}

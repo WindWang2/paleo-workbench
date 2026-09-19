@@ -116,7 +116,19 @@
 #include "diagnostics.hpp"
 #ifdef PWB_WITH_APP_SHELL
 #include "app_shell.hpp"
+#include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/status_bar.hpp>
+// cpp-close-12 — palette tool-details come from the canonical explain()
+// formatter (UI-12 domain); no second state table in this shell.
+#include <pwb/ui_workstation/action_help.hpp>
+#endif
+#include "shell_project_actions.hpp"
+#include <QStandardPaths>
+#ifdef PWB_WITH_UI_PAGES_PREVIEW_QT
+// UI-15's modal container for the shared UI-07 settings editor — reused
+// verbatim; this shell adds only the store lifetime and the open() call.
+#include <pwb/ui_canvas/qt/preview_settings_dialog.hpp>
+#include <pwb/ui_pages_preview/qt/preview_settings_store.hpp>
 #endif
 
 #ifdef PWB_WITH_CONV_01
@@ -335,6 +347,10 @@ void MainWindow::init_shell(QSettings* services_settings) {
         return QMessageBox::question(
             this, tr("放弃编辑"), tr("确定放弃当前图层的全部未提交修改？"),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    };
+    // cpp-close-12 — 工程属性 default surface (tests inject a responder).
+    properties_responder_ = [this](const QString& text) {
+        QMessageBox::information(this, tr("工程属性"), text);
     };
     buildUi();
     buildMenusAndToolbar();
@@ -593,6 +609,15 @@ void MainWindow::wire_app_shell() {
             [this] { newProjectDialog(); });
     connect(app_shell_, &AppShell::open_project_requested, this,
             [this] { openProjectDialog(); });
+    // BEGIN CPP-CLOSE-12 — the UI-17 deferred request surfaces get their
+    // production handlers (shell_project_actions integration slice).
+    connect(app_shell_, &AppShell::save_project_requested, this,
+            [this] { saveProjectRequested(); });
+    connect(app_shell_, &AppShell::open_sample_project_requested, this,
+            [this] { openSampleProjectRequested(); });
+    connect(app_shell_, &AppShell::properties_requested, this,
+            [this] { showProjectProperties(); });
+    // END CPP-CLOSE-12
 #endif
     connect(app_shell_, &AppShell::theme_requested, this,
             [this](const QString& value) {
@@ -613,10 +638,38 @@ void MainWindow::wire_app_shell() {
                             value.toStdString()));
                 }
             });
-    // Deferred request surfaces (no production handler yet — recorded in
-    // the integration ledger, never silently faked):
-    //   save_project_requested / open_sample_project_requested /
-    //   properties_requested / preview_settings_requested.
+    // BEGIN CPP-CLOSE-12 — CommandPalette providers (the remaining UI-17
+    // deferred injections). The context derives from the live session
+    // snapshot each popup; tool details come from the canonical
+    // ui_workstation explain() formatter (no second state table here).
+    if (app_shell_->command_palette() != nullptr) {
+        app_shell_->command_palette()->set_context_provider(
+            [this]() -> const pwb::ui_shell::CommandContext* {
+                const pwb::tool_policy::ToolContextSnapshot snapshot =
+                    context_.session().snapshot();
+                palette_context_ = pwb::ui_shell::CommandContext();
+                palette_context_.write_granted = snapshot.write_granted;
+                palette_context_.mapping_stage = snapshot.mapping_stage;
+                return &palette_context_;
+            });
+        app_shell_->command_palette()->set_tool_details_provider(
+            [this](const std::string& tool_id,
+                   const pwb::ui_shell::CommandContext&) -> QString {
+                return QString::fromStdString(pwb::ui_workstation::
+                                                  format_details(
+                                                      pwb::ui_workstation::
+                                                          explain(
+                                                              tool_id,
+                                                              context_
+                                                                  .session()
+                                                                  .snapshot())));
+            });
+    }
+    // END CPP-CLOSE-12
+#ifdef PWB_WITH_UI_PAGES_PREVIEW_QT
+    connect(app_shell_, &AppShell::preview_settings_requested, this,
+            [this] { showPreviewSettingsRequested(); });
+#endif
 }
 #endif
 
@@ -682,6 +735,15 @@ void MainWindow::buildMenusAndToolbar() {
                          QKeySequence::New);
     file_menu->addAction(tr("打开工程…"), this,
                          &MainWindow::openProjectDialog, QKeySequence::Open);
+    // BEGIN CPP-CLOSE-12 — 工程保存/样例工程/属性 menu parity with the
+    // app-bar surfaces (no shortcut: Ctrl+S stays 提交编辑 in this shell).
+    file_menu->addAction(tr("保存工程"), this,
+                         [this] { saveProjectRequested(); });
+    file_menu->addAction(tr("打开样例工程"), this,
+                         [this] { openSampleProjectRequested(); });
+    file_menu->addAction(tr("工程属性…"), this,
+                         [this] { showProjectProperties(); });
+    // END CPP-CLOSE-12
 #endif
     file_menu->addAction(actions_.action("reference_import"));
     file_menu->addAction(actions_.action("layer_new"));
@@ -938,6 +1000,88 @@ void MainWindow::newProjectDialog() {
         QMessageBox::warning(this, tr("新建工程"), error);
     }
 }
+
+// --------------------------------------- cpp-close-12 shell actions ----
+// The AppShell app-bar request surfaces (UI-17 deferred list) — the
+// document-level bodies live in shell_project_actions.cpp; these handlers
+// only add the window-level presentation (status bar / dialogs / sample
+// project location policy).
+#ifdef PWB_WITH_DATA_INTEGRATION
+void MainWindow::saveProjectRequested() {
+    QString saved_to;
+    const QString error =
+        shell_project_actions::save_open_project(*this, &saved_to);
+    if (!error.isEmpty()) {
+        // Same presentation contract as the other project dialogs: the
+        // message carries the failure, the document stays untouched.
+        QMessageBox::warning(this, tr("保存工程"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("工程已保存：%1").arg(saved_to), 10000);
+}
+
+void MainWindow::openSampleProjectRequested() {
+    // Sample location policy: PALEO_SAMPLE_PROJECT_DIR overrides; default
+    // is a per-user app-data location so the bootstrap is repeatable and
+    // never writes into a repository checkout.
+    const QByteArray override_dir = qgetenv("PALEO_SAMPLE_PROJECT_DIR");
+    const QString sample_dir = !override_dir.isEmpty()
+        ? QString::fromLocal8Bit(override_dir)
+        : QStandardPaths::writableLocation(
+              QStandardPaths::AppDataLocation);
+    const QString error =
+        shell_project_actions::bootstrap_sample_project(*this, sample_dir);
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("打开样例工程"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("样例工程已就绪：%1").arg(sample_dir),
+                             10000);
+}
+
+void MainWindow::showProjectProperties() {
+    properties_responder_(
+        shell_project_actions::project_properties_text(*this));
+}
+#endif  // PWB_WITH_DATA_INTEGRATION
+
+void MainWindow::noteDomainLayerFacts(
+    const pwb::application::DomainLayerFacts& facts) {
+    facts_[facts.layer_id] = facts;
+    // openProject parity: the first materialized layer becomes the active
+    // session layer and frames the canvas (tool-policy gating and the
+    // palette context derive from this state).
+    if (!context_.session().active_layer().has_value()) {
+        context_.session().set_active_layer(facts);
+        if (QgsVectorLayer* layer =
+                context_.session().map().vectorLayerById(facts.layer_id);
+            layer != nullptr) {
+            canvas_->setExtent(layer->extent());
+        }
+    }
+    refreshActionStates();
+}
+
+#ifdef PWB_WITH_UI_PAGES_PREVIEW_QT
+void MainWindow::showPreviewSettingsRequested() {
+    // Store cached on the window (Python controller caches the dialog);
+    // the UI-15 container is recreated per request with the current store
+    // state and deletes on close. open(): window-modal without blocking
+    // the GUI thread turn (offscreen-testable).
+    if (preview_settings_store_ == nullptr) {
+        preview_settings_store_ =
+            std::make_unique<pwb::ui_pages_preview::PreviewSettingsStore>(
+                services_settings_);
+    }
+    auto* dialog =
+        new pwb::ui_canvas::PreviewSettingsDialog(this,
+                                                  preview_settings_store_
+                                                      .get());
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->set_settings(preview_settings_store_->load());
+    dialog->open();
+}
+#endif  // PWB_WITH_UI_PAGES_PREVIEW_QT
 
 QString MainWindow::newProject(const QString& dir_path,
                                const QString& name) {
