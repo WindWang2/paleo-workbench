@@ -39,11 +39,12 @@ if(TARGET Pwb::IngestLasWle)
 endif()
 
 # Worker seam production adapter: real WLE loads, cancellation, non-LAS
-# honesty, resolve integration.
+# honesty, resolve integration. WellLog::IO linked directly for the WLE
+# headers the payload checks include (the adapter keeps it PRIVATE).
 if(TARGET Pwb::UiWorkersWleLoad)
     viz_a_test(viz_a.wle_load wle_load_test.cpp)
     target_link_libraries(viz_a.wle_load PRIVATE
-        Pwb::UiWorkers Pwb::UiWorkersWleLoad)
+        Pwb::UiWorkers Pwb::UiWorkersWleLoad WellLog::IO)
 endif()
 
 # Dock/preview/worker three-way consistency over the same files — needs the
