@@ -6,6 +6,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -83,9 +84,12 @@ private:
         if (std::isdigit(static_cast<unsigned char>(c)) ||
             (c == '.' && pos_ + 1 < src_.size() &&
              std::isdigit(static_cast<unsigned char>(src_[pos_ + 1])))) {
-            std::size_t len = 0;
-            const double value = std::stod(std::string(src_.substr(pos_)), &len);
-            pos_ += len;
+            // strtod, not stod: float("1e999") is inf in Python (and
+            // "1e-999" underflows to 0) — neither is a syntax error.
+            const char* begin = src_.data() + pos_;
+            char* end = nullptr;
+            const double value = std::strtod(begin, &end);
+            pos_ += static_cast<std::size_t>(end - begin);
             return Token{Tok::Number, value};
         }
         if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
@@ -355,10 +359,22 @@ Value call_function(const std::string& name, std::vector<Value> args) {
         const Value& a = args[1];
         const Value& b = args[2];
         if (!cond.is_array) {
-            const double chosen = cond.scalar != 0.0 ? elem(a, 0) : elem(b, 0);
-            if (!a.is_array && !b.is_array) return scalar(chosen);
-            return array_value(std::vector<double>(broadcast_size(a, b), chosen));
+            // np.where(scalar, a, b) broadcasts (a, b) and returns the
+            // selected operand wholesale — an array stays elementwise,
+            // it is not flattened to its first element.
+            const Value& sel = cond.scalar != 0.0 ? a : b;
+            if (!a.is_array && !b.is_array) return scalar(sel.scalar);
+            const std::size_t n = broadcast_size(a, b);
+            if (!sel.is_array)
+                return array_value(std::vector<double>(n, sel.scalar));
+            return array_value(sel.arr);
         }
+        // numpy broadcasts cond/a/b together: a mismatched array operand
+        // raises "could not be broadcast together" instead of reading OOB.
+        if (a.is_array && a.arr.size() != cond.arr.size())
+            broadcast_error(cond, a);
+        if (b.is_array && b.arr.size() != cond.arr.size())
+            broadcast_error(cond, b);
         std::vector<double> res(cond.arr.size());
         for (std::size_t i = 0; i < res.size(); ++i)
             res[i] = cond.arr[i] != 0.0 ? elem(a, i) : elem(b, i);

@@ -539,9 +539,14 @@ std::vector<double> despike(const std::vector<double>& values, double threshold_
 
     const int w = std::max(1, static_cast<int>(window) | 1);
     std::vector<double> finite_vals;
-    for (std::size_t i = 0; i < n; ++i)
+    std::vector<double> non_nan_vals;
+    for (std::size_t i = 0; i < n; ++i) {
         if (mask[i]) finite_vals.push_back(arr[i]);
-    const double nan_median = numpy_median(finite_vals);
+        // np.nanmedian(arr) drops NaN alone — ±inf keeps its sorted slot.
+        // finite_vals stays finite-only for np.ptp(arr[finite]) below.
+        if (!std::isnan(arr[i])) non_nan_vals.push_back(arr[i]);
+    }
+    const double nan_median = numpy_median(std::move(non_nan_vals));
     std::vector<double> filled(n);
     for (std::size_t i = 0; i < n; ++i) filled[i] = mask[i] ? arr[i] : nan_median;
 

@@ -172,6 +172,29 @@ int main() {
         }
     }
     {
+        // math.isclose(abs_tol=1e-5) keeps the 1e-9*max(|a|,|b|) relative
+        // term: at projected-crs scale a 5e-4 endpoint gap still counts
+        // as closed (a pure 1e-5 absolute check would misread it open).
+        const Polyline near_closed = {
+            {1000000.0, 2000000.0},
+            {1000100.0, 2000000.0},
+            {1000100.0, 2000100.0},
+            {1000000.0, 2000000.0005},
+        };
+        const Polyline got = pwb::mapping::chaikin_smooth(near_closed, 1);
+        check(got.size() == 7, "chaikin near-closed count");
+        check(!got.empty() && got.front() == got.back(),
+              "chaikin near-closed stays closed");
+        if (got.size() == 7) {
+            check(std::fabs(got[0][0] - 1000025.0) < 1e-9
+                      && std::fabs(got[0][1] - 2000000.0) < 1e-9,
+                  "chaikin near-closed first point");
+            check(std::fabs(got[4][0] - 1000075.0) < 1e-9
+                      && std::fabs(got[4][1] - 2000075.0) < 1e-9,
+                  "chaikin near-closed mid point");
+        }
+    }
+    {
         const double got = pwb::mapping::polyline_length(
             poly_from_json(units["length"]["points"]));
         check(std::fabs(got - units["length"]["result"].get<double>())

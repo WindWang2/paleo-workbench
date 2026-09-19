@@ -154,6 +154,15 @@ bool is_close(double a, double b) {
         <= 1e-9 * std::max(std::fabs(a), std::fabs(b));
 }
 
+namespace {
+// math.isclose(a, b, abs_tol=abs_tol): |a-b| <= max(1e-9*max(|a|,|b|), abs_tol)
+// — same helper as polygonization.cpp / layer_products.cpp.
+bool is_close_abs(double a, double b, double abs_tol) {
+    return std::fabs(a - b)
+        <= std::max(1e-9 * std::max(std::fabs(a), std::fabs(b)), abs_tol);
+}
+}  // namespace
+
 std::vector<double> nice_contour_levels(double vmin, double vmax,
                                         int target_count) {
     if (!std::isfinite(vmin) || !std::isfinite(vmax) || is_close(vmin, vmax)) {
@@ -262,9 +271,11 @@ Polyline douglas_peucker(const Polyline& points, double tolerance) {
 Polyline chaikin_smooth(const Polyline& points, int iterations) {
     if (points.size() < 3 || iterations <= 0) return points;
     Polyline curr = points;
+    // math.isclose(abs_tol=1e-5) includes the 1e-9*max(|a|,|b|) relative
+    // term — projected coordinates (~1e6) accept gaps up to ~1e-3.
     const bool is_closed =
-        std::fabs(curr.front()[0] - curr.back()[0]) <= 1e-5
-        && std::fabs(curr.front()[1] - curr.back()[1]) <= 1e-5;
+        is_close_abs(curr.front()[0], curr.back()[0], 1e-5)
+        && is_close_abs(curr.front()[1], curr.back()[1], 1e-5);
     for (int iteration = 0; iteration < iterations; ++iteration) {
         Polyline smoothed;
         if (is_closed) {
