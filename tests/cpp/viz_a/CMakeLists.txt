@@ -7,6 +7,12 @@
 
 set(VIZ_A_FIXTURE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
+# Qt6 components are IMPORTED targets scoped to their find_package call
+# site (science_suite resolves them for the viewer stack, but this
+# directory is added from the root). Resolve here so the Qt-linking tests
+# below can see Qt6::Widgets; QUIET — the target guards handle absence.
+find_package(Qt6 6.8 QUIET COMPONENTS Widgets OpenGLWidgets)
+
 function(viz_a_test target source)
     add_executable(${target} ${source})
     target_compile_features(${target} PRIVATE cxx_std_20)
