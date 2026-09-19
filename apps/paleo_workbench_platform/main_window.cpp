@@ -58,6 +58,12 @@
 #include "geo3d_dock.hpp"
 #endif
 
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+#include "viz_b_cross_well_dock.hpp"
+#endif
+// END VIZ-B
+
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -412,6 +418,22 @@ void MainWindow::buildUi() {
             });
 #endif
 // END CONV-GEO3D
+
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+    // Cross-well correlation & well-tie dock (line B): section canvas +
+    // DTW propagation through the JobCenter + link editor/export
+    // bindings + sidecar persistence. All logic lives in the dock.
+    viz_b_dock_ = new pwb::app::VizBCrossWellDock(
+        job_center_.get(), this);
+    viz_b_dock_->setObjectName(QStringLiteral("viz-b-cross-well-dock"));
+    addDockWidget(Qt::RightDockWidgetArea, viz_b_dock_);
+    connect(viz_b_dock_, &pwb::app::VizBCrossWellDock::status_message,
+            this, [this](const QString& message) {
+                statusBar()->showMessage(message, 5000);
+            });
+#endif
+// END VIZ-B
 
 #ifdef PWB_WITH_WELL_LOG
     // C's WLE-backed well-log host in a dock (same Qt ABI, one process;
@@ -1016,6 +1038,19 @@ QString MainWindow::openProject(const QString& project_file) {
                                                     project_file);
         refreshRecentProjects();
     }
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+    if (viz_b_dock_ != nullptr) {
+        // Flush + generation-bump + detach BEFORE switching: a pending
+        // coalesced write must never land in the new project's sidecar,
+        // and in-flight DTW results must drop on arrival.
+        viz_b_dock_->handle_project_closed();
+        viz_b_dock_->set_project_directory(
+            QString::fromStdString(project_dir.string()));
+        viz_b_dock_->restore_from_project();
+    }
+#endif
+// END VIZ-B
     return QString();
 }
 #endif  // PWB_WITH_DATA_INTEGRATION
@@ -1709,6 +1744,14 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     if (services_settings_ != nullptr && !layout_reset_pending) {
         pwb::platform_services::save_window_layout(*services_settings_, *this);
     }
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+    if (viz_b_dock_ != nullptr) {
+        // After the cancel gate: a cancelled close must not have flushed.
+        viz_b_dock_->handle_project_closed();  // flush + drop late results
+    }
+#endif
+// END VIZ-B
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — window close while a task runs: bounded cancel+wait for
     // every owned job (AppShell.shutdown_workers parity); a job that

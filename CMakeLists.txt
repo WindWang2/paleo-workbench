@@ -754,6 +754,28 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-09
 
+# BEGIN VIZ-B
+# Cross-well correlation / well-tie viz cores (completion-plan §V3):
+# Qt-free tops/picks models, auto-section planner, seismic tie tables,
+# wavelet/synthetic/calibration/auto-tie numeric kernels in
+# libs/visualization/src/{cross_well,well_tie} + their Qt Widgets halves
+# where Qt6::Widgets already resolved. The option is a plain switch so an
+# OFF configuration works everywhere (ON/OFF configure parity is part of
+# this line's acceptance); the app-side wiring additionally requires
+# Pwb::UiWorkers + Pwb::UiWellseisQt (apps/.../CMakeLists.txt VIZ-B
+# block, PWB_WITH_VIZ_B).
+option(PWB_BUILD_VIZ_B
+    "Build the cross-well correlation & well-tie viz cores (line B)" ON)
+if(PWB_BUILD_VIZ_B)
+    if(NOT TARGET Pwb::Domain)
+        pwb_add_subdirectory_once(libs/domain)
+    endif()
+    # well_tie first: the cross-well core links Pwb::VisualizationWellTie.
+    add_subdirectory(libs/visualization/src/well_tie)
+    add_subdirectory(libs/visualization/src/cross_well)
+endif()
+# END VIZ-B
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared

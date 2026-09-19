@@ -87,6 +87,14 @@ class FactorStatsDock;
 class Geo3DDock;
 #endif
 
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+namespace pwb::app {
+class VizBCrossWellDock;
+}  // namespace pwb::app
+#endif
+// END VIZ-B
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -373,6 +381,11 @@ private:
 #ifdef PWB_WITH_GEO3D_VIZ
     Geo3DDock* geo3d_dock_ = nullptr;
 #endif
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+    VizBCrossWellDock* viz_b_dock_ = nullptr;
+#endif
+// END VIZ-B
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     QDockWidget* seismic_dock_ = nullptr;
     pwb::seismic_viewer::SeismicSliceWidget* slice_widget_ = nullptr;
