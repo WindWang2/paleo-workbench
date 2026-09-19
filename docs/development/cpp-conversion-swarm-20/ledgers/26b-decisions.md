@@ -41,4 +41,4 @@ fixture 每案例的 `input` 携带可独立重建场景的 JSON（versions/runs
 
 ## D8 构建挂接
 
-`PWB_BUILD_CONV_26`（默认 OFF）implied 开关置于 CONV-25 块之前（DATA/MAPPING_KERNEL/CONV-07/08/25），add_subdirectory 置于 engine/factor_host/graph 块之后。FactorHost 为 PRIVATE 链接（公共头干净）。tests 链 Threads。
+`PWB_BUILD_CONV_26B`（默认 OFF）implied 开关置于 CONV-25 块之前（DATA/MAPPING_KERNEL/CONV-07/08/25），add_subdirectory 置于 engine/factor_host/graph 块之后。FactorHost 为 PRIVATE 链接（公共头干净）。tests 链 Threads。

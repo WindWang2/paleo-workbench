@@ -130,16 +130,16 @@ endif()
 # (canonical_json encoder) — the implied switches land BEFORE the data /
 # engine / factor_host subdirectory blocks below; the subdirectory itself
 # is added after those blocks.
-option(PWB_BUILD_CONV_26
-    "Build the CONV-26 workflow runtime closure (libs/workflow_runtime; implies PWB_BUILD_DATA + CONV-07/08/25)" OFF)
-if(PWB_BUILD_CONV_26)
+option(PWB_BUILD_CONV_26B
+    "Build the CONV-26B workflow runtime closure (libs/workflow_runtime; implies PWB_BUILD_DATA + CONV-07/08/25)" OFF)
+if(PWB_BUILD_CONV_26B)
     set(PWB_BUILD_DATA ON)
     set(PWB_BUILD_MAPPING_KERNEL ON)
     set(PWB_BUILD_CONV_07 ON)
     set(PWB_BUILD_CONV_08 ON)
     set(PWB_BUILD_CONV_25 ON)
 endif()
-# END CONV-26
+# END CONV-26B
 
 # BEGIN CONV-25 — workflow dependency graph + evidence selectors (M7 tail):
 # the catalog-lineage DAG (dependency_graph.py) and the typed evidence
@@ -506,9 +506,9 @@ endif()
 if(PWB_BUILD_CONV_24)
     add_subdirectory(libs/factor_fusion)
 endif()
-# CONV-26 subdirectory — after the CONV-07/08/25 blocks so the engine,
+# CONV-26B subdirectory — after the CONV-07/08/25 blocks so the engine,
 # factor_host and graph targets exist.
-if(PWB_BUILD_CONV_26)
+if(PWB_BUILD_CONV_26B)
     add_subdirectory(libs/workflow_runtime)
 endif()
 # BEGIN CONV-09

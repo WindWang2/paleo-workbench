@@ -1,7 +1,7 @@
 # CONV-26 — Workflow / Provenance / Recompute Native Runtime Closure
 
 Branch: `feat/cpp-workflow-runtime-closure` · Base: `origin/main` (ff67dcf3)
-Library: `libs/workflow_runtime` (`Pwb::WorkflowRuntime`, gate `PWB_BUILD_CONV_26`)
+Library: `libs/workflow_runtime` (`Pwb::WorkflowRuntime`, gate `PWB_BUILD_CONV_26B`)
 
 ## 本分支负责
 
@@ -54,5 +54,5 @@ Library: `libs/workflow_runtime` (`Pwb::WorkflowRuntime`, gate `PWB_BUILD_CONV_2
 - 不修改 CONV-06/07/23/25 已冻结库的公共 API；`workflow_runtime` 只**消费**它们
   （WorkflowGraph 算法、WorkflowEngine 执行器/CancelToken/NodeRegistry、factor_host
   canonical_encode、domain Sha256/Json）。
-- 根 CMakeLists.txt 只加一个 `PWB_BUILD_CONV_26` 选项 + 一个 add_subdirectory（最小 patch）。
+- 根 CMakeLists.txt 只加一个 `PWB_BUILD_CONV_26B` 选项 + 一个 add_subdirectory（最小 patch）。
 - ledger 台账 `.goal-loop-ledger.md` 追加一节，不重写他节。

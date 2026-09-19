@@ -1,6 +1,6 @@
 # CONV-26 — Workflow Runtime Closure 勘察记录（findings）
 
-分支 `feat/cpp-workflow-runtime-closure` · 库 `libs/workflow_runtime`（`Pwb::WorkflowRuntime`，gate `PWB_BUILD_CONV_26`）
+分支 `feat/cpp-workflow-runtime-closure` · 库 `libs/workflow_runtime`（`Pwb::WorkflowRuntime`，gate `PWB_BUILD_CONV_26B`）
 
 ## Python source surface（移植源）
 
@@ -64,4 +64,4 @@
 
 ## 资源记录
 
-- 共享构建锁被主仓 vendored QGIS 构建长期占用（数小时级）；本切片为小型 Qt-free 目标（~10 TU），在 MemAvailable≥50GiB 下按资源治理硬规则定向构建（-j2、单 worktree 单构建、仅目标库目标测试、无全树 rebuild），已在本记录备案。gate 正常路径用法：`scripts/cpp-migration/invoke-resource-gate.sh Configure -s . -b build/conv-26 -a "-DPWB_BUILD_CONV_26=ON;-DBUILD_TESTING=ON"`。
+- 共享构建锁被主仓 vendored QGIS 构建长期占用（数小时级）；本切片为小型 Qt-free 目标（~10 TU），在 MemAvailable≥50GiB 下按资源治理硬规则定向构建（-j2、单 worktree 单构建、仅目标库目标测试、无全树 rebuild），已在本记录备案。gate 正常路径用法：`scripts/cpp-migration/invoke-resource-gate.sh Configure -s . -b build/conv-26 -a "-DPWB_BUILD_CONV_26B=ON;-DBUILD_TESTING=ON"`。
