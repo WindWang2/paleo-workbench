@@ -754,6 +754,15 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-09
 
+# BEGIN VIZ-A — line-A acceptance tests (LAS/WLE convergence + well-log
+# drawing differentials). Mounted after science_suite/ingest/ui_workers so
+# the guarded WLE-bridge targets exist when this directory configures.
+if(BUILD_TESTING AND TARGET Pwb::Ingest AND TARGET Pwb::UiWorkers)
+    enable_testing()
+    add_subdirectory(tests/cpp/viz_a)
+endif()
+# END VIZ-A
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared

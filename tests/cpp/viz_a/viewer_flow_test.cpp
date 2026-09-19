@@ -1,0 +1,140 @@
+// viz_a.viewer_flow — hard oracle 3: real load -> display -> track adjust
+// -> export over the production dock host (offscreen Qt + software GL),
+// plus failure retention, reopen, viewport/cursor interaction, and clean
+// teardown. Late-result safety at the worker level is covered by
+// viz_a.wle_load; this test covers the viewer surface.
+
+#include <QApplication>
+#include <QFile>
+#include <QTemporaryDir>
+
+#include <pwb/viz/well_log_host_widget.hpp>
+
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <string>
+
+namespace fs = std::filesystem;
+
+namespace {
+
+int g_failures = 0;
+
+void check(bool ok, const std::string& what) {
+    if (!ok) {
+        std::fprintf(stderr, "FAIL %s\n", what.c_str());
+        ++g_failures;
+    }
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    QApplication app(argc, argv);
+    const fs::path root = PWB_VIZ_A_FIXTURE_ROOT;
+    const std::string good1 = (root / "las/01_normal_multisection.las").string();
+    const std::string good2 = (root / "las/04_custom_null.las").string();
+    const std::string bad = (root / "las/11_missing_vers.las").string();
+
+    QTemporaryDir tmp;
+    check(tmp.isValid(), "temp dir");
+
+    {
+        pwb::viz::WellLogHostWidget host;
+        host.resize(900, 600);
+        host.show();
+
+        // Load a real file -> real tracks.
+        QString error;
+        check(host.load_las(QString::fromStdString(good1), &error),
+              "load 01: " + error.toStdString());
+        check(host.has_document(), "document present");
+        check(host.last_track_count() >= 3, "real track count (>= 3 curves)");
+        check(host.axis_unit_text().toStdString() == "M", "axis unit M");
+
+        // Display: viewport exists and reacts to zoom/pan.
+        auto viewport = host.depth_viewport();
+        check(viewport.has_value(), "viewport present");
+        if (viewport) {
+            check(host.zoom_at_depth((viewport->first + viewport->second) / 2, 0.5),
+                  "zoom");
+            auto zoomed = host.depth_viewport();
+            check(zoomed.has_value() && zoomed->second - zoomed->first <
+                                             viewport->second - viewport->first,
+                  "zoom narrowed the viewport");
+        }
+        check(host.set_depth_cursor(1000.5), "depth cursor set");
+        check(host.cursor_depth().has_value() &&
+                  std::abs(*host.cursor_depth() - 1000.5) < 1e-9,
+              "cursor round-trip");
+
+        // Track adjust: toggle visibility of the first curve; document
+        // identity and viewport survive.
+        auto layout = host.track_layout();
+        const std::string id_before = host.document_id_text().toStdString();
+        check(!layout.curve_keys.empty() && !layout.visible.empty(),
+              "layout has curves");
+        if (!layout.visible.empty()) {
+            layout.visible.front() = !layout.visible.front();
+        }
+        check(host.apply_track_layout(layout, &error),
+              "apply layout: " + error.toStdString());
+        check(host.has_document() &&
+                  host.document_id_text().toStdString() == id_before,
+              "layout change keeps document identity");
+
+        // Export: real bytes on disk.
+        const std::string png = (fs::path(tmp.path().toStdString()) / "flow.png").string();
+        const std::string svg = (fs::path(tmp.path().toStdString()) / "flow.svg").string();
+        const std::string pdf = (fs::path(tmp.path().toStdString()) / "flow.pdf").string();
+        check(host.export_png(QString::fromStdString(png), &error),
+              "export png: " + error.toStdString());
+        check(host.export_svg(QString::fromStdString(svg), &error),
+              "export svg: " + error.toStdString());
+        check(host.export_pdf(QString::fromStdString(pdf), &error),
+              "export pdf: " + error.toStdString());
+        check(QFile::exists(QString::fromStdString(png)) &&
+                  QFile(QString::fromStdString(png)).size() > 0,
+              "png non-empty");
+        check(QFile::exists(QString::fromStdString(svg)) &&
+                  QFile(QString::fromStdString(svg)).size() > 0,
+              "svg non-empty");
+        check(QFile::exists(QString::fromStdString(pdf)) &&
+                  QFile(QString::fromStdString(pdf)).size() > 0,
+              "pdf non-empty");
+        // PNG is a real image (magic bytes).
+        QFile png_file(QString::fromStdString(png));
+        png_file.open(QIODevice::ReadOnly);
+        const QByteArray magic = png_file.read(8);
+        check(magic.size() == 8 && (unsigned char)magic[1] == 0x89 &&
+                  magic[2] == 'P' && magic[3] == 'N' && magic[4] == 'G',
+              "png magic bytes");
+
+        // Failure: rejected file keeps the previous document, reports error.
+        const auto revision_before = host.document_revision();
+        check(!host.load_las(QString::fromStdString(bad), &error) &&
+                  !error.isEmpty(),
+              "bad file fails with error");
+        check(host.has_document() &&
+                  host.document_revision() == revision_before,
+              "failed reload keeps previous document");
+
+        // Reopen: second good file replaces the document.
+        check(host.load_las(QString::fromStdString(good2), &error),
+              "reopen 04: " + error.toStdString());
+        check(host.has_document() &&
+                  host.document_id_text().toStdString() != id_before,
+              "reopen replaced document");
+        check(host.axis_unit_text().toStdString() == "M", "reopen axis unit");
+
+        host.hide();
+    }  // teardown: host destroyed while app alive — must not crash
+
+    if (g_failures == 0) {
+        std::printf("viz_a.viewer_flow: OK\n");
+        return 0;
+    }
+    std::printf("viz_a.viewer_flow: %d failure(s)\n", g_failures);
+    return 1;
+}

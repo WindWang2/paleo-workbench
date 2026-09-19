@@ -47,6 +47,17 @@ if(TARGET Pwb::VisualizationWellLog)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_WELL_LOG=1)
     # Native track settings panel (layout/template/export) over the host.
     target_sources(pwb-platform PRIVATE well_log_track_panel.cpp)
+    # BEGIN VIZ-A -- line-A production wiring: ingest LAS preview provider +
+    # JobCenter-backed background LAS loads delivered to the dock. Needs the
+    # WLE bridge targets (present when the viewer + CONV-19/22 resolved).
+    if(TARGET Pwb::IngestLasWle AND TARGET Pwb::UiWorkersWleLoad
+       AND TARGET Pwb::JobQt)
+        target_sources(pwb-platform PRIVATE viz_a_install.cpp)
+        target_link_libraries(pwb-platform PRIVATE
+            Pwb::IngestLasWle Pwb::UiWorkersWleLoad Pwb::JobQt)
+        target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_A=1)
+    endif()
+    # END VIZ-A
 endif()
 
 # D seismic viewer dock + E attribute kernels: the context is the composition

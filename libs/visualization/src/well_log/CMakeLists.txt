@@ -8,6 +8,11 @@ add_library(pwb_visualization_well_log STATIC
     well_log_host_widget.cpp
     well_log_track_layout.cpp
     well_log_document_plan.cpp
+    # BEGIN VIZ-A — drawing differentials: Chinese lithology/facies pattern
+    # vocabulary over the WLE pattern stack + robust display-range port.
+    viz_a_patterns.cpp
+    viz_a_robust_scale.cpp
+    # END VIZ-A
 )
 add_library(Pwb::VisualizationWellLog ALIAS pwb_visualization_well_log)
 set_target_properties(pwb_visualization_well_log PROPERTIES

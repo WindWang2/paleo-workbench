@@ -132,6 +132,9 @@
 #include <pwb/viz/well_log_events.hpp>
 #include <pwb/viz/well_log_host_widget.hpp>
 #endif
+#ifdef PWB_WITH_VIZ_A
+#include "viz_a_install.hpp"
+#endif
 
 namespace pwb::app {
 
@@ -457,6 +460,13 @@ void MainWindow::buildUi() {
                                            .arg(QString::fromStdString(event.unit)));
             }
         });
+#if defined(PWB_WITH_VIZ_A) && defined(PWB_WITH_CONV_30)
+    // BEGIN VIZ-A — production wiring (preview provider + background LAS
+    // loads through the JobCenter). One call; the body lives in
+    // viz_a_install.cpp.
+    viz_a::install(this, job_center_.get());
+#endif
+    // END VIZ-A
 #endif
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     // D's slice host in a dock (moc-free widget like the WLE host).

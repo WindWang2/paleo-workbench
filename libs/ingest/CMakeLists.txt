@@ -15,6 +15,7 @@ add_library(pwb_ingest STATIC
     src/preview/spreadsheetml.cpp
     src/preview/well_log_xml_preview.cpp
     src/preview/office.cpp
+    src/preview/las_preview.cpp
     src/preview/registry.cpp)
 add_library(Pwb::Ingest ALIAS pwb_ingest)
 target_include_directories(pwb_ingest PUBLIC
@@ -23,6 +24,24 @@ target_compile_features(pwb_ingest PUBLIC cxx_std_20)
 # Pwb::Domain provides nlohmann JSON + SHA-256 (same vendored dependency the
 # data kernel uses; no new third-party code).
 target_link_libraries(pwb_ingest PUBLIC Pwb::Domain)
+
+# BEGIN VIZ-A: WLE-backed LAS preview bridge. Only when the SDK participates
+# in the build (science_suite adds well-log-engine before this directory);
+# without it the registry LAS branch reports capability-unavailable.
+if(TARGET WellLog::IO)
+    add_library(pwb_ingest_las_wle STATIC
+        src/preview/las_wle_bridge.cpp)
+    add_library(Pwb::IngestLasWle ALIAS pwb_ingest_las_wle)
+    target_include_directories(pwb_ingest_las_wle PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_compile_features(pwb_ingest_las_wle PUBLIC cxx_std_20)
+    target_link_libraries(pwb_ingest_las_wle
+        PUBLIC Pwb::Ingest
+        PRIVATE WellLog::IO)
+    target_compile_definitions(pwb_ingest_las_wle PRIVATE
+        PWB_INGEST_HAVE_WLE_LAS=1)
+endif()
+# END VIZ-A
 
 if(BUILD_TESTING)
     add_subdirectory(ingest_tests)

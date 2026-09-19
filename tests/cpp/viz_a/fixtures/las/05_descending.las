@@ -1,0 +1,14 @@
+~VERSION INFORMATION
+VERS.                  2.0 :
+WRAP.                  NO  :
+~WELL INFORMATION
+WELL.                 DESCEND :
+NULL.               -999.25 :
+~CURVE INFORMATION
+DEPT.M : depth
+GR.GAPI : gamma
+~ASCII LOG DATA
+1001.00 48.10
+1000.75 47.30
+1000.50 46.10
+1000.25 45.20
