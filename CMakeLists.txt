@@ -494,6 +494,11 @@ if(PWB_BUILD_CONV_07)
             "PWB_BUILD_CONV_07=ON requires PWB_BUILD_MAPPING_KERNEL=ON "
             "(node ops wrap the mapping kernels)")
     endif()
+    if(NOT PWB_BUILD_CONV_06)
+        message(FATAL_ERROR
+            "PWB_BUILD_CONV_07=ON requires PWB_BUILD_CONV_06=ON "
+            "(CONV-32 store/run_engine persist the workflow_spec DTOs)")
+    endif()
     add_subdirectory(libs/workflow_engine)
 endif()
 # END CONV-07
@@ -511,6 +516,24 @@ endif()
 if(PWB_BUILD_CONV_26B)
     add_subdirectory(libs/workflow_runtime)
 endif()
+# BEGIN CONV-32
+# Workflow interpretation domain spine (Qt-free, M7 interpretation core):
+# constraint capabilities + algorithm registry, factor products +
+# summaries, constraint products + interpretation revisions, integrated
+# interpretation + compilation input sets. Requires the graph / runtime /
+# fusion cores from CONV-25/26B/24.
+option(PWB_BUILD_CONV_32
+    "Build the CONV-32 workflow interpretation core (libs/workflow_interpretation; implies PWB_BUILD_CONV_25 + CONV_26B + CONV_24)" OFF)
+if(PWB_BUILD_CONV_32)
+    foreach(_conv32_req CONV_25 CONV_26B CONV_24)
+        if(NOT PWB_BUILD_${_conv32_req})
+            message(FATAL_ERROR
+                "PWB_BUILD_CONV_32=ON requires PWB_BUILD_${_conv32_req}=ON")
+        endif()
+    endforeach()
+    add_subdirectory(libs/workflow_interpretation)
+endif()
+# END CONV-32
 # BEGIN CONV-09
 # M8 first slice: DTW well-log matcher kernel (viz/dtw_log_matcher.py port),
 # Qt-free, frozen against the Python oracle. Tests need Pwb::Domain

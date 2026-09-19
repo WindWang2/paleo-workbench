@@ -1,0 +1,983 @@
+{
+ "python": {
+  "generator": "tools/oracle/generate_workflow_store_fixtures.py",
+  "modules": [
+   "paleo_workbench.workflow.dag.model",
+   "paleo_workbench.workflow.dag.store",
+   "paleo_workbench.workflow.dag.reproduction"
+  ]
+ },
+ "spec": {
+  "workflow_id": "wf-store-parity",
+  "name": "Store Parity Spec",
+  "description": "CONV-32 store oracle spec",
+  "max_concurrency": 2,
+  "schema_version": "1.0",
+  "slots": [
+   {
+    "name": "horizon",
+    "schema": {
+     "type": "string"
+    },
+    "required": true,
+    "default": "H1",
+    "description": "target horizon"
+   },
+   {
+    "name": "grid_n",
+    "schema": {
+     "type": "integer",
+     "minimum": 4
+    },
+    "required": false,
+    "default": 8,
+    "description": ""
+   }
+  ],
+  "nodes": [
+   {
+    "node_id": "extract",
+    "action_id": "map.extract_factors",
+    "parameters": {
+     "factor_name": "gr",
+     "target_horizon": "$slot:horizon",
+     "nested": {
+      "k": [
+       1,
+       2.5,
+       "ü"
+      ]
+     }
+    },
+    "depends_on": [],
+    "condition": null,
+    "retry": {
+     "max_attempts": 2,
+     "backoff_seconds": 0.5
+    },
+    "description": "extract points"
+   },
+   {
+    "node_id": "interp",
+    "action_id": "map.interpolate_idw",
+    "parameters": {
+     "samples": {
+      "$ref": "extract",
+      "key": "points"
+     },
+     "grid_n": "$slot:grid_n"
+    },
+    "depends_on": [
+     "extract"
+    ],
+    "condition": {
+     "kind": "node_succeeded",
+     "node": "extract"
+    },
+    "retry": {
+     "max_attempts": 1,
+     "backoff_seconds": 0.0
+    },
+    "description": ""
+   },
+   {
+    "node_id": "report",
+    "action_id": "test.noop",
+    "parameters": {},
+    "depends_on": [
+     "extract",
+     "interp"
+    ],
+    "condition": null,
+    "retry": {
+     "max_attempts": 1,
+     "backoff_seconds": 0.0
+    },
+    "description": ""
+   }
+  ]
+ },
+ "spec_hash": "80b9da6440c334664a0c26cb3dc9540e1febb60a7c27d5725ce5581b90bfa637",
+ "mini_spec": {
+  "workflow_id": "wf-mini",
+  "name": "Mini",
+  "description": "",
+  "max_concurrency": 1,
+  "schema_version": "1.0",
+  "slots": [],
+  "nodes": [
+   {
+    "node_id": "solo",
+    "action_id": "test.noop",
+    "parameters": {},
+    "depends_on": [],
+    "condition": null,
+    "retry": {
+     "max_attempts": 1,
+     "backoff_seconds": 0.0
+    },
+    "description": ""
+   }
+  ]
+ },
+ "mini_spec_hash": "22615c0cb6c3ec74294188099c412aef7a411567431bdee1b61725b4454aeaaf",
+ "rich_run_id": "aaaabbbbccccdddd",
+ "rich_slot_values": {
+  "horizon": "H2",
+  "grid_n": 16
+ },
+ "case01_roundtrip": {
+  "saved_to_dict": {
+   "run_id": "aaaabbbbccccdddd",
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-store-parity",
+    "name": "Store Parity Spec",
+    "description": "CONV-32 store oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "report",
+      "action_id": "test.noop",
+      "parameters": {},
+      "depends_on": [
+       "extract",
+       "interp"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "state": "completed",
+   "slot_values": {
+    "horizon": "H2",
+    "grid_n": 16
+   },
+   "node_runs": [
+    {
+     "node_id": "extract",
+     "state": "succeeded",
+     "attempt": 1,
+     "action_status": "ok",
+     "from_cache": false,
+     "parameters": {
+      "factor_name": "gr",
+      "target_horizon": "H2",
+      "nested": {
+       "k": [
+        1,
+        2.5,
+        "ü"
+       ]
+      }
+     },
+     "input_version_ids": [],
+     "cache_identity": "ident-rich-extract",
+     "output_version_ids": [
+      "ver-extract-0001"
+     ],
+     "outputs": {
+      "point_count": 3
+     },
+     "receipt": {
+      "provider_id": "prov://native/extract",
+      "provider_version": "1.2.3",
+      "action_version": "4.5.6",
+      "cache_identity": "ident-receipt-extract",
+      "environment": {
+       "python": "3.11.9",
+       "platform": "linux",
+       "build": "par0"
+      }
+     },
+     "skip_reason": null,
+     "error": null,
+     "started_at": 1000.5,
+     "finished_at": 1001.25
+    },
+    {
+     "node_id": "interp",
+     "state": "succeeded",
+     "attempt": 2,
+     "action_status": null,
+     "from_cache": true,
+     "parameters": {
+      "samples": [],
+      "grid_n": 16
+     },
+     "input_version_ids": [
+      "ver-extract-0001"
+     ],
+     "cache_identity": "ident-rich-interp",
+     "output_version_ids": [
+      "ver-interp-0002"
+     ],
+     "outputs": {
+      "grid_z": [
+       [
+        1.0,
+        2.0
+       ]
+      ]
+     },
+     "receipt": null,
+     "skip_reason": null,
+     "error": null,
+     "started_at": null,
+     "finished_at": null
+    },
+    {
+     "node_id": "report",
+     "state": "pending",
+     "attempt": 0,
+     "action_status": null,
+     "from_cache": false,
+     "parameters": {},
+     "input_version_ids": [],
+     "cache_identity": null,
+     "output_version_ids": [],
+     "outputs": {},
+     "receipt": null,
+     "skip_reason": null,
+     "error": null,
+     "started_at": null,
+     "finished_at": null
+    }
+   ],
+   "project_name": "Demo Project",
+   "project_path": "/opt/fake/demo.paleo.json",
+   "created_at": 1000.0,
+   "updated_at": 2000.0,
+   "spec_hash": "80b9da6440c334664a0c26cb3dc9540e1febb60a7c27d5725ce5581b90bfa637",
+   "parent_run_id": null
+  },
+  "loaded_to_dict": {
+   "run_id": "aaaabbbbccccdddd",
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-store-parity",
+    "name": "Store Parity Spec",
+    "description": "CONV-32 store oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     },
+     {
+      "node_id": "report",
+      "action_id": "test.noop",
+      "parameters": {},
+      "depends_on": [
+       "extract",
+       "interp"
+      ],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   },
+   "state": "completed",
+   "slot_values": {
+    "horizon": "H2",
+    "grid_n": 16
+   },
+   "node_runs": [
+    {
+     "node_id": "extract",
+     "state": "succeeded",
+     "attempt": 1,
+     "action_status": "ok",
+     "from_cache": false,
+     "parameters": {
+      "factor_name": "gr",
+      "target_horizon": "H2",
+      "nested": {
+       "k": [
+        1,
+        2.5,
+        "ü"
+       ]
+      }
+     },
+     "input_version_ids": [],
+     "cache_identity": "ident-rich-extract",
+     "output_version_ids": [
+      "ver-extract-0001"
+     ],
+     "outputs": {
+      "point_count": 3
+     },
+     "receipt": {
+      "provider_id": "prov://native/extract",
+      "provider_version": "1.2.3",
+      "action_version": "4.5.6",
+      "cache_identity": "ident-receipt-extract",
+      "environment": {
+       "python": "3.11.9",
+       "platform": "linux",
+       "build": "par0"
+      }
+     },
+     "skip_reason": null,
+     "error": null,
+     "started_at": 1000.5,
+     "finished_at": 1001.25
+    },
+    {
+     "node_id": "interp",
+     "state": "succeeded",
+     "attempt": 2,
+     "action_status": null,
+     "from_cache": true,
+     "parameters": {
+      "samples": [],
+      "grid_n": 16
+     },
+     "input_version_ids": [
+      "ver-extract-0001"
+     ],
+     "cache_identity": "ident-rich-interp",
+     "output_version_ids": [
+      "ver-interp-0002"
+     ],
+     "outputs": {
+      "grid_z": [
+       [
+        1.0,
+        2.0
+       ]
+      ]
+     },
+     "receipt": null,
+     "skip_reason": null,
+     "error": null,
+     "started_at": null,
+     "finished_at": null
+    },
+    {
+     "node_id": "report",
+     "state": "pending",
+     "attempt": 0,
+     "action_status": null,
+     "from_cache": false,
+     "parameters": {},
+     "input_version_ids": [],
+     "cache_identity": null,
+     "output_version_ids": [],
+     "outputs": {},
+     "receipt": null,
+     "skip_reason": null,
+     "error": null,
+     "started_at": null,
+     "finished_at": null
+    }
+   ],
+   "project_name": "Demo Project",
+   "project_path": "/opt/fake/demo.paleo.json",
+   "created_at": 1000.0,
+   "updated_at": 2000.0,
+   "spec_hash": "80b9da6440c334664a0c26cb3dc9540e1febb60a7c27d5725ce5581b90bfa637",
+   "parent_run_id": null
+  },
+  "saved_hash": "55223347f122ef7e554e7826600bf2adf242fccecd95637227befb27087ba47a",
+  "loaded_hash": "55223347f122ef7e554e7826600bf2adf242fccecd95637227befb27087ba47a"
+ },
+ "case02_file_format": {
+  "text": "{\n \"store_version\": 1,\n \"run_id\": \"aaaabbbbccccdddd\",\n \"workflow\": {\n  \"schema_version\": \"1.0\",\n  \"workflow_id\": \"wf-store-parity\",\n  \"name\": \"Store Parity Spec\",\n  \"description\": \"CONV-32 store oracle spec\",\n  \"max_concurrency\": 2,\n  \"slots\": [\n   {\n    \"name\": \"horizon\",\n    \"schema\": {\n     \"type\": \"string\"\n    },\n    \"required\": true,\n    \"default\": \"H1\",\n    \"description\": \"target horizon\"\n   },\n   {\n    \"name\": \"grid_n\",\n    \"schema\": {\n     \"type\": \"integer\",\n     \"minimum\": 4\n    },\n    \"required\": false,\n    \"default\": 8,\n    \"description\": \"\"\n   }\n  ],\n  \"nodes\": [\n   {\n    \"node_id\": \"extract\",\n    \"action_id\": \"map.extract_factors\",\n    \"parameters\": {\n     \"factor_name\": \"gr\",\n     \"target_horizon\": \"$slot:horizon\",\n     \"nested\": {\n      \"k\": [\n       1,\n       2.5,\n       \"ü\"\n      ]\n     }\n    },\n    \"depends_on\": [],\n    \"condition\": null,\n    \"retry\": {\n     \"max_attempts\": 2,\n     \"backoff_seconds\": 0.5\n    },\n    \"description\": \"extract points\"\n   },\n   {\n    \"node_id\": \"interp\",\n    \"action_id\": \"map.interpolate_idw\",\n    \"parameters\": {\n     \"samples\": {\n      \"$ref\": \"extract\",\n      \"key\": \"points\"\n     },\n     \"grid_n\": \"$slot:grid_n\"\n    },\n    \"depends_on\": [\n     \"extract\"\n    ],\n    \"condition\": {\n     \"kind\": \"node_succeeded\",\n     \"node\": \"extract\"\n    },\n    \"retry\": {\n     \"max_attempts\": 1,\n     \"backoff_seconds\": 0.0\n    },\n    \"description\": \"\"\n   },\n   {\n    \"node_id\": \"report\",\n    \"action_id\": \"test.noop\",\n    \"parameters\": {},\n    \"depends_on\": [\n     \"extract\",\n     \"interp\"\n    ],\n    \"condition\": null,\n    \"retry\": {\n     \"max_attempts\": 1,\n     \"backoff_seconds\": 0.0\n    },\n    \"description\": \"\"\n   }\n  ]\n },\n \"state\": \"completed\",\n \"slot_values\": {\n  \"horizon\": \"H2\",\n  \"grid_n\": 16\n },\n \"node_runs\": [\n  {\n   \"node_id\": \"extract\",\n   \"state\": \"succeeded\",\n   \"attempt\": 1,\n   \"action_status\": \"ok\",\n   \"from_cache\": false,\n   \"parameters\": {\n    \"factor_name\": \"gr\",\n    \"target_horizon\": \"H2\",\n    \"nested\": {\n     \"k\": [\n      1,\n      2.5,\n      \"ü\"\n     ]\n    }\n   },\n   \"input_version_ids\": [],\n   \"cache_identity\": \"ident-rich-extract\",\n   \"output_version_ids\": [\n    \"ver-extract-0001\"\n   ],\n   \"outputs\": {\n    \"point_count\": 3\n   },\n   \"receipt\": {\n    \"provider_id\": \"prov://native/extract\",\n    \"provider_version\": \"1.2.3\",\n    \"action_version\": \"4.5.6\",\n    \"cache_identity\": \"ident-receipt-extract\",\n    \"environment\": {\n     \"python\": \"3.11.9\",\n     \"platform\": \"linux\",\n     \"build\": \"par0\"\n    }\n   },\n   \"skip_reason\": null,\n   \"error\": null,\n   \"started_at\": 1000.5,\n   \"finished_at\": 1001.25\n  },\n  {\n   \"node_id\": \"interp\",\n   \"state\": \"succeeded\",\n   \"attempt\": 2,\n   \"action_status\": null,\n   \"from_cache\": true,\n   \"parameters\": {\n    \"samples\": [],\n    \"grid_n\": 16\n   },\n   \"input_version_ids\": [\n    \"ver-extract-0001\"\n   ],\n   \"cache_identity\": \"ident-rich-interp\",\n   \"output_version_ids\": [\n    \"ver-interp-0002\"\n   ],\n   \"outputs\": {\n    \"grid_z\": [\n     [\n      1.0,\n      2.0\n     ]\n    ]\n   },\n   \"receipt\": null,\n   \"skip_reason\": null,\n   \"error\": null,\n   \"started_at\": null,\n   \"finished_at\": null\n  },\n  {\n   \"node_id\": \"report\",\n   \"state\": \"pending\",\n   \"attempt\": 0,\n   \"action_status\": null,\n   \"from_cache\": false,\n   \"parameters\": {},\n   \"input_version_ids\": [],\n   \"cache_identity\": null,\n   \"output_version_ids\": [],\n   \"outputs\": {},\n   \"receipt\": null,\n   \"skip_reason\": null,\n   \"error\": null,\n   \"started_at\": null,\n   \"finished_at\": null\n  }\n ],\n \"project_name\": \"Demo Project\",\n \"project_path\": \"/opt/fake/demo.paleo.json\",\n \"created_at\": 1000.0,\n \"updated_at\": 2000.0,\n \"spec_hash\": \"80b9da6440c334664a0c26cb3dc9540e1febb60a7c27d5725ce5581b90bfa637\",\n \"parent_run_id\": null\n}",
+  "top_keys": [
+   "store_version",
+   "run_id",
+   "workflow",
+   "state",
+   "slot_values",
+   "node_runs",
+   "project_name",
+   "project_path",
+   "created_at",
+   "updated_at",
+   "spec_hash",
+   "parent_run_id"
+  ],
+  "workflow_keys": [
+   "schema_version",
+   "workflow_id",
+   "name",
+   "description",
+   "max_concurrency",
+   "slots",
+   "nodes"
+  ],
+  "node_run_keys": [
+   "node_id",
+   "state",
+   "attempt",
+   "action_status",
+   "from_cache",
+   "parameters",
+   "input_version_ids",
+   "cache_identity",
+   "output_version_ids",
+   "outputs",
+   "receipt",
+   "skip_reason",
+   "error",
+   "started_at",
+   "finished_at"
+  ],
+  "store_version": 1
+ },
+ "case03_updated_at": {
+  "created_at": 1000.0,
+  "updated_at": 2000.5,
+  "updated_ge_created": true,
+  "stamped_in_file": 2000.5
+ },
+ "case04_missing": {
+  "run_id": "ghost",
+  "message": "no workflow run 'ghost' in {ROOT}"
+ },
+ "case05_corrupt": {
+  "run_id": "bad1",
+  "raw": "{corrupted",
+  "message_prefix": "workflow run 'bad1' checkpoint is corrupted:",
+  "python_detail": "workflow run 'bad1' checkpoint is corrupted: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+ },
+ "case06_list_ids": {
+  "ids": [
+   "a",
+   "b",
+   "c"
+  ]
+ },
+ "case07_list_runs": {
+  "ids": [
+   "good"
+  ],
+  "warnings": [
+   "skipping unreadable workflow run zcorrupt"
+  ]
+ },
+ "case08_index_gates": {
+  "identity": "ident-gates",
+  "rebuild_count": 1,
+  "candidates": [
+   [
+    "goodrun",
+    "solo"
+   ]
+  ],
+  "empty_identity_candidates": []
+ },
+ "case09_many": {
+  "identity": "ident-many",
+  "count": 30,
+  "initial_head": [
+   "r29",
+   "solo"
+  ],
+  "initial_len": 30,
+  "after_r99_head": [
+   "r99",
+   "solo"
+  ],
+  "after_r99_len": 31,
+  "reusable_run": "r99",
+  "reusable_node": {
+   "node_id": "solo",
+   "state": "succeeded",
+   "attempt": 1,
+   "action_status": null,
+   "from_cache": false,
+   "parameters": {},
+   "input_version_ids": [],
+   "cache_identity": "ident-many",
+   "output_version_ids": [
+    "ver-r99"
+   ],
+   "outputs": {},
+   "receipt": null,
+   "skip_reason": null,
+   "error": null,
+   "started_at": null,
+   "finished_at": null
+  }
+ },
+ "case10_miss": {
+  "identity": "ident-none",
+  "found": false
+ },
+ "case11_revalidation": {
+  "identity": "ident-fb",
+  "fallback_run": "fbold",
+  "fallback_node": {
+   "node_id": "solo",
+   "state": "succeeded",
+   "attempt": 1,
+   "action_status": null,
+   "from_cache": false,
+   "parameters": {},
+   "input_version_ids": [],
+   "cache_identity": "ident-fb",
+   "output_version_ids": [
+    "v-old"
+   ],
+   "outputs": {},
+   "receipt": null,
+   "skip_reason": null,
+   "error": null,
+   "started_at": null,
+   "finished_at": null
+  },
+  "from_cache_only_identity": "ident-fc",
+  "from_cache_only_found": false,
+  "trashed_found": false,
+  "integrity_found": false,
+  "verify_off_found": true,
+  "verify_off_node": {
+   "node_id": "solo",
+   "state": "succeeded",
+   "attempt": 1,
+   "action_status": null,
+   "from_cache": false,
+   "parameters": {},
+   "input_version_ids": [],
+   "cache_identity": "ident-intfail",
+   "output_version_ids": [
+    "v-int"
+   ],
+   "outputs": {},
+   "receipt": null,
+   "skip_reason": null,
+   "error": null,
+   "started_at": null,
+   "finished_at": null
+  },
+  "resolve_raising_found": false,
+  "corrupt_identity": "ident-corrupt",
+  "corrupt_fallback_run": "cgood",
+  "corrupt_fallback_node": {
+   "node_id": "solo",
+   "state": "succeeded",
+   "attempt": 1,
+   "action_status": null,
+   "from_cache": false,
+   "parameters": {},
+   "input_version_ids": [],
+   "cache_identity": "ident-corrupt",
+   "output_version_ids": [
+    "v-c2"
+   ],
+   "outputs": {},
+   "receipt": null,
+   "skip_reason": null,
+   "error": null,
+   "started_at": null,
+   "finished_at": null
+  },
+  "corrupt_candidate_warnings": [
+   "cache candidate run cbad unreadable; skipping"
+  ]
+ },
+ "case12_lineage": {
+  "grandchild": [
+   "orig",
+   "child",
+   "grandchild"
+  ],
+  "orphan": [
+   "vanished",
+   "orphan"
+  ],
+  "cycle_from_acyc": [
+   "bcyc",
+   "acyc"
+  ],
+  "parent_after_roundtrip": "child"
+ },
+ "case13_reproduction": {
+  "describe": {
+   "run_id": "aaaabbbbccccdddd",
+   "workflow_id": "wf-store-parity",
+   "workflow_schema_version": "1.0",
+   "spec_hash": "80b9da6440c334664a0c26cb3dc9540e1febb60a7c27d5725ce5581b90bfa637",
+   "slot_values": {
+    "horizon": "H2",
+    "grid_n": 16
+   },
+   "project": {
+    "name": "Demo Project",
+    "path": "/opt/fake/demo.paleo.json"
+   },
+   "nodes": [
+    {
+     "node_id": "extract",
+     "action_id": "map.extract_factors",
+     "action_version": "4.5.6",
+     "deterministic_action": null,
+     "parameters": {
+      "factor_name": "gr",
+      "target_horizon": "H2",
+      "nested": {
+       "k": [
+        1,
+        2.5,
+        "ü"
+       ]
+      }
+     },
+     "input_version_ids": [],
+     "output_version_ids": [
+      "ver-extract-0001"
+     ],
+     "provider_id": "prov://native/extract",
+     "provider_version": "1.2.3",
+     "cache_identity": "ident-receipt-extract",
+     "from_cache": false,
+     "executed": true
+    },
+    {
+     "node_id": "interp",
+     "action_id": "map.interpolate_idw",
+     "action_version": null,
+     "deterministic_action": null,
+     "parameters": {
+      "samples": [],
+      "grid_n": 16
+     },
+     "input_version_ids": [
+      "ver-extract-0001"
+     ],
+     "output_version_ids": [
+      "ver-interp-0002"
+     ],
+     "provider_id": null,
+     "provider_version": null,
+     "cache_identity": "ident-rich-interp",
+     "from_cache": true,
+     "executed": false
+    },
+    {
+     "node_id": "report",
+     "action_id": "test.noop",
+     "action_version": null,
+     "deterministic_action": null,
+     "parameters": {},
+     "input_version_ids": [],
+     "output_version_ids": [],
+     "provider_id": null,
+     "provider_version": null,
+     "cache_identity": null,
+     "from_cache": false,
+     "executed": false
+    }
+   ],
+   "environment": {
+    "python": "3.11.9",
+    "platform": "linux",
+    "build": "par0"
+   },
+   "contract": {
+    "bit_identity": "promised only for nodes whose action/provider declares deterministic and whose input version ids match",
+    "how_to_rerun": "load the recipe saved from this run, rebind slots, and run through workflow.run — completed nodes with matching cache identity are reused, everything else re-executes"
+   }
+  },
+  "hash": "9875c0c5a527559b165d93c979d9a3968573495a94c440ac15cd3539a773e779",
+  "describe_after_roundtrip": {
+   "run_id": "aaaabbbbccccdddd",
+   "workflow_id": "wf-store-parity",
+   "workflow_schema_version": "1.0",
+   "spec_hash": "80b9da6440c334664a0c26cb3dc9540e1febb60a7c27d5725ce5581b90bfa637",
+   "slot_values": {
+    "horizon": "H2",
+    "grid_n": 16
+   },
+   "project": {
+    "name": "Demo Project",
+    "path": "/opt/fake/demo.paleo.json"
+   },
+   "nodes": [
+    {
+     "node_id": "extract",
+     "action_id": "map.extract_factors",
+     "action_version": "4.5.6",
+     "deterministic_action": null,
+     "parameters": {
+      "factor_name": "gr",
+      "target_horizon": "H2",
+      "nested": {
+       "k": [
+        1,
+        2.5,
+        "ü"
+       ]
+      }
+     },
+     "input_version_ids": [],
+     "output_version_ids": [
+      "ver-extract-0001"
+     ],
+     "provider_id": "prov://native/extract",
+     "provider_version": "1.2.3",
+     "cache_identity": "ident-receipt-extract",
+     "from_cache": false,
+     "executed": true
+    },
+    {
+     "node_id": "interp",
+     "action_id": "map.interpolate_idw",
+     "action_version": null,
+     "deterministic_action": null,
+     "parameters": {
+      "samples": [],
+      "grid_n": 16
+     },
+     "input_version_ids": [
+      "ver-extract-0001"
+     ],
+     "output_version_ids": [
+      "ver-interp-0002"
+     ],
+     "provider_id": null,
+     "provider_version": null,
+     "cache_identity": "ident-rich-interp",
+     "from_cache": true,
+     "executed": false
+    },
+    {
+     "node_id": "report",
+     "action_id": "test.noop",
+     "action_version": null,
+     "deterministic_action": null,
+     "parameters": {},
+     "input_version_ids": [],
+     "output_version_ids": [],
+     "provider_id": null,
+     "provider_version": null,
+     "cache_identity": null,
+     "from_cache": false,
+     "executed": false
+    }
+   ],
+   "environment": {
+    "python": "3.11.9",
+    "platform": "linux",
+    "build": "par0"
+   },
+   "contract": {
+    "bit_identity": "promised only for nodes whose action/provider declares deterministic and whose input version ids match",
+    "how_to_rerun": "load the recipe saved from this run, rebind slots, and run through workflow.run — completed nodes with matching cache identity are reused, everything else re-executes"
+   }
+  },
+  "hash_after_roundtrip": "9875c0c5a527559b165d93c979d9a3968573495a94c440ac15cd3539a773e779"
+ },
+ "case14_empty": {
+  "describe": {
+   "run_id": "ffffffffffffffff",
+   "workflow_id": "wf-mini",
+   "workflow_schema_version": "1.0",
+   "spec_hash": "22615c0cb6c3ec74294188099c412aef7a411567431bdee1b61725b4454aeaaf",
+   "slot_values": {},
+   "project": {
+    "name": null,
+    "path": null
+   },
+   "nodes": [
+    {
+     "node_id": "solo",
+     "action_id": "test.noop",
+     "action_version": null,
+     "deterministic_action": null,
+     "parameters": {},
+     "input_version_ids": [],
+     "output_version_ids": [],
+     "provider_id": null,
+     "provider_version": null,
+     "cache_identity": null,
+     "from_cache": false,
+     "executed": false
+    }
+   ],
+   "environment": null,
+   "contract": {
+    "bit_identity": "promised only for nodes whose action/provider declares deterministic and whose input version ids match",
+    "how_to_rerun": "load the recipe saved from this run, rebind slots, and run through workflow.run — completed nodes with matching cache identity are reused, everything else re-executes"
+   }
+  },
+  "hash": "7ee6bc3bcddf8c3699a3a16bfee6f09935cc228b52120aa325dd2b8589c12dab",
+  "describe_missing_node": {
+   "run_id": "ffffffffffffffff",
+   "workflow_id": "wf-mini",
+   "workflow_schema_version": "1.0",
+   "spec_hash": "22615c0cb6c3ec74294188099c412aef7a411567431bdee1b61725b4454aeaaf",
+   "slot_values": {},
+   "project": {
+    "name": null,
+    "path": null
+   },
+   "nodes": [
+    {
+     "node_id": "solo",
+     "action_id": "test.noop",
+     "action_version": null,
+     "deterministic_action": null,
+     "parameters": {},
+     "input_version_ids": [],
+     "output_version_ids": [],
+     "provider_id": null,
+     "provider_version": null,
+     "cache_identity": null,
+     "from_cache": null,
+     "executed": false
+    }
+   ],
+   "environment": null,
+   "contract": {
+    "bit_identity": "promised only for nodes whose action/provider declares deterministic and whose input version ids match",
+    "how_to_rerun": "load the recipe saved from this run, rebind slots, and run through workflow.run — completed nodes with matching cache identity are reused, everything else re-executes"
+   }
+  }
+ },
+ "case15_default_root": {
+  "project_arg": "/opt/fake/demo.paleo.json",
+  "with_project": "/opt/fake/demo.artifacts/workflows",
+  "no_project": "{TMP}/paleo-workflow-runs"
+ }
+}
