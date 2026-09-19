@@ -35,6 +35,19 @@ public:
 
     const PreviewSettings& settings() const { return settings_; }
 
+    // Optional per-kind overrides (UI-10 LocalVisualizationProvider parity:
+    // Python subclasses PreviewProvider and overrides preview_summary /
+    // preview_visualization — the hooks carry the provider's CURRENT
+    // settings so a with_settings copy never calls back into stale state).
+    using SummaryFn = std::function<PreviewResult(
+        const AssetObjectData* asset, const PreviewSettings& settings)>;
+    using VisualizationFn = std::function<PreviewResult(
+        const AssetObjectData* asset, const PreviewSettings& settings)>;
+    void set_summary_hook(SummaryFn hook) { summary_fn_ = std::move(hook); }
+    void set_visualization_hook(VisualizationFn hook) {
+        visualization_fn_ = std::move(hook);
+    }
+
     // asset == nullptr → the empty result (Python preview(None)).
     PreviewResult preview(const AssetObjectData* asset) const;
     // preview_summary — the lightweight reader payload (== preview today).
@@ -46,6 +59,8 @@ public:
 private:
     BuildFn builder_;
     PreviewSettings settings_;
+    SummaryFn summary_fn_;
+    VisualizationFn visualization_fn_;
 };
 
 }  // namespace pwb::ui_data_core

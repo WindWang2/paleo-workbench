@@ -422,6 +422,27 @@ if(PWB_BUILD_CONV_01)
     endif()
 endif()
 # END CONV-01
+# BEGIN UI-10-IMPLY — the UI-10 sequence/factor/visualization pages cluster
+# (libs/ui_seqviz) binds the composition document/session kernels
+# (CONV-02 mapping_document), the composition template cartography
+# (CONV-27C), the layout-export kernel (CONV-29) and the well-curve
+# operation kernels (CONV-11 well_science). UI slices carry no per-slice
+# option — they gate under PWB_BUILD_PLATFORM (taskbook §2: no new
+# option(), no flag preemption) — so a platform+data configure implies the
+# kernel closure the pages need, exactly like the UI-04 block implies
+# CONV-22 for libs/ui_workers.
+if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
+    foreach(_ui10_kernel CONV_02 CONV_27C CONV_29 CONV_11)
+        if(NOT PWB_BUILD_${_ui10_kernel})
+            set(PWB_BUILD_${_ui10_kernel} ON)
+            message(STATUS
+                "UI-10: implying PWB_BUILD_${_ui10_kernel}=ON — "
+                "libs/ui_seqviz binds the seqviz page kernels")
+        endif()
+    endforeach()
+endif()
+# END UI-10-IMPLY
+
 # BEGIN CONV-02
 # Qt-free MapDocument / MapCompositionDocument JSON kernel (swarm
 # cpp-conv-02): data-contract port of mapping/layers.py +
@@ -725,6 +746,25 @@ elseif(PWB_BUILD_PLATFORM)
         "remain the production path")
 endif()
 # END UI-04
+
+# BEGIN UI-10 — sequence/factor/visualization pages cluster
+# (libs/ui_seqviz): Qt-free page state/view models + Qt Widgets shells for
+# the 16 taskbook pages. Binds the UI-04 worker contracts (libs/ui_workers)
+# plus the UI-03 preview/data core, the CONV-30 job runtime, the
+# mapping-document composition session and the well-science curve kernels.
+# Joins every configuration that resolves those targets; configs without
+# them keep the Python pages as the production path.
+if(TARGET Pwb::UiWorkers AND TARGET Pwb::UiDataCore
+   AND TARGET Pwb::MappingDocument AND TARGET Pwb::WellScience
+   AND TARGET Pwb::JobRuntime AND TARGET Pwb::Domain)
+    add_subdirectory(libs/ui_seqviz)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-10: libs/ui_seqviz skipped — enable PWB_BUILD_CONV_22 "
+        "(worker ports) plus the platform/data/mapping/well slices for "
+        "the seqviz pages; the Python pages remain the production path")
+endif()
+# END UI-10
 
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
