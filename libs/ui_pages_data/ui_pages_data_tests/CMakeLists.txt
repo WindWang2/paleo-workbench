@@ -1,0 +1,5 @@
+add_executable(ui_pages_data.smoke smoke_test.cpp)
+target_compile_features(ui_pages_data.smoke PRIVATE cxx_std_20)
+target_link_libraries(ui_pages_data.smoke PRIVATE Pwb::UiPagesData)
+add_test(NAME ui_pages_data.smoke COMMAND ui_pages_data.smoke)
+set_tests_properties(ui_pages_data.smoke PROPERTIES TIMEOUT 120)
