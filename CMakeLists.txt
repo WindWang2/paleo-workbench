@@ -731,6 +731,29 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-04
 
+# BEGIN UI-09 — qt-well-seismic slice (libs/ui_wellseis): Qt-free semantic
+# cores + thin Qt Widgets shells + the QGIS well-map surface for the
+# well/seismic page cluster. Same gating model as UI-04: no per-slice
+# option; the library joins platform configures that already resolved
+# Pwb::UiWorkers (the CONV-22 implication above) and pulls in the CONV-11
+# well_science leaf (depth-unit vocabulary for the cursor gates) when the
+# kernel slices left it out. The QGIS surface target only exists where
+# Pwb::Qgis was admitted; the Qt target needs Qt6::Widgets from the
+# platform block. Configures without those keep the Python pages as the
+# production path.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::UiWorkers AND TARGET Qt6::Widgets)
+    if(NOT TARGET pwb_well_science)
+        pwb_add_subdirectory_once(libs/well_science)
+    endif()
+    add_subdirectory(libs/ui_wellseis)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-09: libs/ui_wellseis skipped — needs Pwb::UiWorkers "
+        "(PWB_BUILD_DATA + implied PWB_BUILD_CONV_22) and Qt6::Widgets; "
+        "the Python pages remain the production path")
+endif()
+# END UI-09
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared
