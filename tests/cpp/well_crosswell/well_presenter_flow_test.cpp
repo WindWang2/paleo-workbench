@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "job_center.hpp"
 #include "viz_e_install.hpp"
@@ -54,8 +55,8 @@ AssetRow row_for(const QString& path, const char* name,
 struct Counter : public QObject {
     int count = 0;
     QString last;
-    void track(pwb::app::VizEDataPage* page) {
-        connect(page, &pwb::app::VizEDataPage::preview_rendered, this,
+    void track(pwb::viz_e::VizEDataPage* page) {
+        connect(page, &pwb::viz_e::VizEDataPage::preview_rendered, this,
                 [this](const QString& target) {
                     ++count;
                     last = target;
@@ -74,6 +75,19 @@ struct Counter : public QObject {
         return count >= wanted;
     }
 };
+
+// moc-free 页面（无 Q_OBJECT）不能进 findChild 的静态断言——dynamic_cast
+// 遍历代替。
+template <typename T>
+std::vector<T*> find_pages(const QWidget* root) {
+    std::vector<T*> out;
+    for (const QObject* child : root->findChildren<QObject*>()) {
+        if (auto* page = dynamic_cast<T*>(const_cast<QObject*>(child))) {
+            out.push_back(page);
+        }
+    }
+    return out;
+}
 
 }  // namespace
 
@@ -106,7 +120,7 @@ int main(int argc, char** argv) {
     CHECK(!pwb::viz_e::register_external_presenter(std::move(duplicate)));
 
     pwb::app::JobCenter jobs;
-    pwb::app::VizEDataPage page(nullptr, &jobs);
+    pwb::viz_e::VizEDataPage page(nullptr, &jobs);
     Counter rendered;
     rendered.track(&page);
 
@@ -115,17 +129,20 @@ int main(int argc, char** argv) {
     page.preview_asset(row_for(las, "W1", "las"));
     CHECK(rendered.wait_for(1));
     CHECK(page.active_target() == QStringLiteral("well_log"));
-    auto* well_page = page.findChild<pwb::ui_pages_preview::qt::WellLogPreviewPage*>();
-    CHECK(well_page != nullptr);
-    if (well_page != nullptr) {
+    const auto well_pages =
+        find_pages<pwb::ui_pages_preview::qt::WellLogPreviewPage>(&page);
+    CHECK(well_pages.size() == 1);
+    if (!well_pages.empty()) {
+        auto* well_page = well_pages.front();
         CHECK(well_page->data().diagnostic.empty());   // 不是诊断降级
         CHECK(well_page->data().well_name == "Well A");
         CHECK(well_page->data().curves.size() == 4);   // GR+DT+AC+DEN 真曲线
-        // 渲染非空 smoke（offscreen grab 不崩溃、非空尺寸）。
-        well_page->resize(480, 320);
-        const QPixmap snapshot = well_page->grab();
+        // 渲染非空 smoke：grab 指定区域（页面可能已被父布局重新排布，
+        // 以固定区域渲染保证可复现断言）。
+        const QPixmap snapshot =
+            well_page->grab(QRect(0, 0, 480, 320));
         CHECK(!snapshot.isNull());
-        CHECK(snapshot.size().width() == 480);
+        CHECK(snapshot.width() == 480);
     }
 
     // 04 消费：真时深 CSV → time_depth 真页面（校准对 + 探针）。
@@ -133,12 +150,12 @@ int main(int argc, char** argv) {
     page.preview_asset(row_for(csv, "TD1", "csv"));
     CHECK(rendered.wait_for(2));
     CHECK(page.active_target() == QStringLiteral("time_depth"));
-    auto* td_page =
-        page.findChild<pwb::ui_pages_preview::qt::TimeDepthPreviewPage*>();
-    CHECK(td_page != nullptr);
-    if (td_page != nullptr) {
-        CHECK(td_page->data().diagnostic.empty());
-        CHECK(td_page->data().pairs.size() == 4);  // 首井 W-SHEET 4 对
+    const auto td_pages =
+        find_pages<pwb::ui_pages_preview::qt::TimeDepthPreviewPage>(&page);
+    CHECK(td_pages.size() == 1);
+    if (!td_pages.empty()) {
+        CHECK(td_pages.front()->data().diagnostic.empty());
+        CHECK(td_pages.front()->data().pairs.size() == 4);  // 首井 4 对
     }
 
     // 非井 XML：诚实诊断页（解析拒绝可见，绝非假曲线）。
@@ -146,17 +163,13 @@ int main(int argc, char** argv) {
         dir + "/xml/negative_generic_points.xml");
     page.preview_asset(row_for(junk, "X1", "xml"));
     CHECK(rendered.wait_for(3));
-    auto* diag_page =
-        page.findChild<pwb::ui_pages_preview::qt::WellLogPreviewPage*>();
-    CHECK(diag_page != nullptr);
     bool saw_diagnostic = false;
-    for (auto* candidate :
-         page.findChildren<pwb::ui_pages_preview::qt::WellLogPreviewPage*>()) {
+    for (const auto* candidate :
+         find_pages<pwb::ui_pages_preview::qt::WellLogPreviewPage>(&page)) {
         saw_diagnostic =
             saw_diagnostic || !candidate->data().diagnostic.empty();
     }
     CHECK(saw_diagnostic);
-    (void)diag_page;
 
     pwb::viz_e::reset_external_presenters_for_tests();
 

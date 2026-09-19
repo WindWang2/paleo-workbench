@@ -8,6 +8,7 @@
 #include <QObject>
 
 #include <welllog/core/document.hpp>
+#include <pwb/ui_workers/wle_load.hpp>
 
 namespace pwb::app {
 

@@ -31,6 +31,7 @@
 #include <pwb/ui_wellseis/qt/object_table_model.hpp>
 #include <pwb/ui_workers/dtw_propagation.hpp>
 #include <pwb/ui_workers/well_identity.hpp>
+#include <pwb/ui_workers/wle_load.hpp>
 #include <pwb/viz/cross_well/auto_section_planner.hpp>
 #include <pwb/viz/cross_well/qt/formation_tops_preview.hpp>
 #include <pwb/viz/cross_well/qt/report_export.hpp>
@@ -629,6 +630,10 @@ void VizBCrossWellDock::on_propagate_dtw() {
     // (Python worker contract).
     input.n_samples = static_cast<int>(max_samples);
     input.band_radius = std::nullopt;
+    // 绑定真 banded-DTW 核（05 线修复：seam 若不注入，作业体抛
+    // KernelUnavailable——B 线集成测试只直接调 compute 绕过了本路径，
+    // dock 的 DTW 按钮此前在真实作业路径上恒失败）。
+    input.correlate_fn = pwb::ui_workers::dtw_engine_correlate;
     // NOTE: spec.on_done/on_fail/on_cancel are left EMPTY on purpose —
     // they run on the WORKER thread (job_bridge contract). All GUI work
     // (dialog teardown, generation check, picks apply) happens in the

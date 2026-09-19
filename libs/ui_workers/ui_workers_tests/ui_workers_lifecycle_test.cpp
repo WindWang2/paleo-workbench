@@ -85,6 +85,8 @@ pwb::ui_workers::DtwPropagationInput small_input() {
     input.formation = "T-LIFE";
     input.n_samples = 80;
     input.band_radius = std::nullopt;
+    // 生产绑定（dock 同款）：seam 不注入 = KernelUnavailable。
+    input.correlate_fn = pwb::ui_workers::dtw_engine_correlate;
     return input;
 }
 

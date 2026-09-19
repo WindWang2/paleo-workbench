@@ -17,7 +17,10 @@ set(PWB_WELL_FIXTURE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 add_executable(well.load_path well_load_path_test.cpp)
 target_compile_features(well.load_path PRIVATE cxx_std_20)
 target_link_libraries(well.load_path PRIVATE
-    Pwb::UiWorkersWleLoad Pwb::Domain)
+    Pwb::UiWorkersWleLoad Pwb::Domain
+    # WLE 头（welllog/core/document.hpp）不经 UiWorkersWleLoad 透传
+    #（PRIVATE 链接）——直链（viz_a.wle_load 同款修法）。
+    WellLog::IO)
 target_compile_definitions(well.load_path PRIVATE
     PWB_WELL_FIXTURE_DIR="${PWB_WELL_FIXTURE_DIR}")
 add_test(NAME well.load_path COMMAND well.load_path)
@@ -34,6 +37,7 @@ target_include_directories(well.vizb_las_path PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
 target_link_libraries(well.vizb_las_path PRIVATE
     Pwb::UiWorkersWleLoad Pwb::VisualizationCrossWell Pwb::Domain
+    WellLog::IO  # WLE 头直链（不经 UiWorkersWleLoad 透传）
     Qt6::Core)
 target_compile_definitions(well.vizb_las_path PRIVATE
     PWB_WELL_FIXTURE_DIR="${PWB_WELL_FIXTURE_DIR}")
@@ -56,7 +60,8 @@ if(TARGET Pwb::VisualizationCrossWellQt AND TARGET Pwb::VisualizationWellTieQt
     target_link_libraries(well.dock_lifecycle PRIVATE
         Pwb::UiWorkersWleLoad Pwb::VisualizationCrossWellQt
         Pwb::VisualizationWellTieQt Pwb::UiWorkers Pwb::UiWellseisQt
-        Pwb::Domain Pwb::JobQt Qt6::Widgets)
+        Pwb::Domain Pwb::JobQt WellLog::IO  # WLE 头直链
+        Qt6::Widgets)
     target_compile_definitions(well.dock_lifecycle PRIVATE
         PWB_WELL_FIXTURE_DIR="${PWB_WELL_FIXTURE_DIR}"
         PWB_WITH_VIZ_B=1
@@ -86,14 +91,18 @@ if(TARGET Pwb::VizChartsQt AND TARGET Pwb::UiPagesDataQt
     target_link_libraries(well.presenter_flow PRIVATE
         Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::UiPagesPreviewQt
         Pwb::MappingKernel Pwb::UiWorkers Pwb::UiWorkersWleLoad
-        Pwb::VisualizationCrossWell Pwb::JobQt Pwb::Domain Qt6::Widgets)
+        Pwb::VisualizationCrossWell Pwb::JobQt Pwb::Domain WellLog::IO
+        Qt6::Widgets)
     target_compile_definitions(well.presenter_flow PRIVATE
         PWB_WELL_FIXTURE_DIR="${PWB_WELL_FIXTURE_DIR}"
         PWB_WITH_CONV_30=1
         PWB_WELL_PRESENTERS_HAVE_WLE=1
         PWB_WELL_PRESENTERS_HAVE_TIE=1)
     add_test(NAME well.presenter_flow COMMAND well.presenter_flow)
+    # 数据页链路带 QGIS 运行时依赖（QtSQL→odbc 等）——SDK/vendored 输出
+    # 的 lib 目录进 LD_LIBRARY_PATH（只读复用）。
+    set(PWELL_RT_LIBS "${PALEO_QGIS_SDK_DIR}/lib:${PALEO_QGIS_BUILD_DIR}:${PWB_QGIS_DEPS_PREFIX}/lib")
     set_tests_properties(well.presenter_flow PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LD_LIBRARY_PATH=${PWELL_RT_LIBS}"
         TIMEOUT 300)
 endif()

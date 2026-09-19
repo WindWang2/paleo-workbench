@@ -22,6 +22,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <memory>
 #include <string>
 
 #include "job_center.hpp"
@@ -71,6 +72,7 @@ int main(int argc, char** argv) {
     // QWidget 家族（dock/进度对话框）要求 QApplication；offscreen 平台由
     // CMake 测试属性注入。
     QApplication app(argc, argv);
+    using pwb::domain::Json;
     const std::string dir = PWB_WELL_FIXTURE_DIR;
     const QString las_a = QString::fromStdString(dir + "/las/well_a_metric.las");
     const QString las_b =
@@ -111,30 +113,34 @@ int main(int argc, char** argv) {
 
     // ---------------------------------------------------------------
     // 2) 在飞 DTW 下销毁 dock。
+    // JobOwner 双重所有权（JobCenter unique_ptr + QObject 父=dock）要求
+    // JobCenter 先于 dock 析构——生产中由「JobCenter 是 MainWindow 成员、
+    // dock 是 QObject 子」的析构序保证；测试用 unique_ptr 复刻同一序。
     // ---------------------------------------------------------------
     {
-        pwb::app::JobCenter jobs;
-        auto* dock = new pwb::app::VizBCrossWellDock(&jobs);
+        auto jobs = std::make_unique<pwb::app::JobCenter>();
+        auto* dock = new pwb::app::VizBCrossWellDock(jobs.get());
         CHECK(dock->load_wells_from_las({las_a, las_b}, &error));
-        // 播种拾取（restore_state 是公共 API），让 DTW 有参考层位。
-        Json seed = Json::object(
-            {{"picks",
-              Json::array({Json::object(
-                  {{"pick_id", "p-seed"},
-                   {"formation_name", "T-SEED"},
-                   {"well_depths", Json::array({Json::array({"Well A", 97.0})})},
-                   {"source", "manual"}})})}});
+        // 播种拾取（restore_state 公共 API；state["picks"] 的形状 =
+        // HorizonPicksModel::to_json() 的 {"picks": [...]} 包装）。
+        Json pick = Json::object(
+            {{"pick_id", "p-seed"},
+             {"formation_name", "T-SEED"},
+             {"well_depths", Json::array({Json::array({"Well A", 97.0})})},
+             {"source", "manual"}});
+        Json seed = Json::object();
+        seed["picks"] = Json::object({{"picks", Json::array({pick})}});
         dock->restore_state(seed);
         CHECK(dock->pick_count() == 1);
         // 私有槽经 moc 名字调用（与真实按钮同一路径）。
         QMetaObject::invokeMethod(dock, "on_propagate_dtw");
-        // 立即销毁：在飞结果必须被 released 守卫/generation 丢弃。
-        delete dock;
-        // 收尾事件循环：让任何迟到的排队投递真的到达（若守卫失效，
-        // 这里就是 UAF 现场）。
-        spin(300);
-        jobs.shutdown_workers(400);
-        spin(100);
+        // 产品关闭协议：先 bounded 关停（取消+汇合），再按生产析构序
+        //（JobCenter 先亡，dock 后亡）。
+        jobs->shutdown_workers(400);
+        spin(200);
+        jobs.reset();  // JobCenter 析构：owners_ 在 dock 存活时回收
+        delete dock;   // 其后销毁 dock（迟到投递若未被代际丢弃即 UAF 现场）
+        spin(200);
     }
 
     // ---------------------------------------------------------------
@@ -147,13 +153,14 @@ int main(int argc, char** argv) {
         Json saved_state;
 
         // 工程 A：打开工程（设目录）→ 加载 → DTW（真实作业）→ 落盘 sidecar。
+        // （析构序同上：JobCenter 先亡。）
         {
-            pwb::app::JobCenter jobs;
-            pwb::app::VizBCrossWellDock dock(&jobs);
+            auto jobs = std::make_unique<pwb::app::JobCenter>();
+            pwb::app::VizBCrossWellDock dock(jobs.get());
             dock.set_project_directory(project_a.path());
             CHECK(dock.load_wells_from_las({las_a, las_b}, &error));
             QMetaObject::invokeMethod(&dock, "on_propagate_dtw");
-            // 等真实 DTW 作业完成（状态消息出现"DTW 传播完成"）。
+            // 等真实 DTW 作业完成（拾取落地）。
             const auto deadline = std::chrono::steady_clock::now() +
                                   std::chrono::seconds(8);
             while (dock.pick_count() == 0 &&
@@ -173,12 +180,13 @@ int main(int argc, char** argv) {
             CHECK(saved_state.contains("well_source_las"));  // 05：LAS 来源
             // handle_project_closed：flush + generation bump。
             dock.handle_project_closed();
+            jobs.reset();
         }
 
         // 切到工程 B（无 sidecar）：工作区必须清空，绝不串扰。
         {
-            pwb::app::JobCenter jobs;
-            pwb::app::VizBCrossWellDock dock(&jobs);
+            auto jobs = std::make_unique<pwb::app::JobCenter>();
+            pwb::app::VizBCrossWellDock dock(jobs.get());
             CHECK(dock.load_wells_from_las({las_a}, &error));
             dock.restore_state(saved_state);
             CHECK(dock.well_count() == 2);
@@ -198,6 +206,16 @@ int main(int argc, char** argv) {
             // 复现：恢复后的 picks JSON 与保存时逐值一致。
             const Json restored_picks = dock.save_state().at("picks");
             CHECK(restored_picks == saved_state.at("picks"));
+
+            // 迟到投递丢弃：再起一个 DTW，随即 restore_state（代际
+            // bump）——迟到的完成不得改动已恢复的拾取集。
+            QMetaObject::invokeMethod(&dock, "on_propagate_dtw");
+            dock.restore_state(saved_state);
+            jobs->shutdown_workers(400);
+            spin(200);
+            const Json after_late = dock.save_state().at("picks");
+            CHECK(after_late == saved_state.at("picks"));
+            jobs.reset();
         }
     }
 
