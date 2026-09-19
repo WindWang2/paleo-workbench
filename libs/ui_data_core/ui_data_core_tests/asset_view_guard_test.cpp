@@ -263,6 +263,34 @@ int main() {
         CHECK(index.last_rebuild_view_builds >= 0);
     }
 
+    // --- #1391: search fold is Unicode, not ASCII-only ------------------
+    // Python filter_index folds needle+haystack with str.lower(): a query
+    // in lowercase must still match an asset whose name carries uppercase
+    // accented/Cyrillic letters. ASCII-only folding silently zeroed these.
+    {
+        auto mk = [](const std::string& name) {
+            GenericAsset gen;
+            gen.attrs = domain::Json::object();
+            gen.attrs["id"] = "g_" + name;
+            gen.attrs["name"] = name;
+            gen.attrs["type"] = "well_log";
+            return make_asset_handle(gen);
+        };
+        FilterIndex index;
+        index.rebuild({mk("ÄÖL-Äquifer"), mk("ПЛАСТ-Верхний"),
+                       mk("plain-asset")},
+                      nullptr);
+        FilterQuery q;
+        q.search_text = "äöl";  // lowercase query vs uppercase name
+        CHECK(index.filter_query(q).size() == 1);
+        q.search_text = "пласт";  // Cyrillic lowercase vs uppercase name
+        CHECK(index.filter_query(q).size() == 1);
+        q.search_text = "PLAIN";  // reverse direction still folds
+        CHECK(index.filter_query(q).size() == 1);
+        q.search_text = "nomatch";
+        CHECK(index.filter_query(q).empty());
+    }
+
     std::printf("%s: %d checks, %d failures\n", __func__, checks, failures);
     return failures == 0 ? 0 : 1;
 }

@@ -106,6 +106,12 @@ void DataAssetTable::set_model(AssetRowSource* model) {
         install_model(model_);
         connect(model_, &QAbstractItemModel::modelReset, this,
                 &DataAssetTable::on_model_reset);
+        // #1390: a source that re-sorts via layoutChanged + persistent-index
+        // remap (the ObjectTableModel convention) never emits modelReset —
+        // without this connection visible_assets_ keeps the pre-sort order
+        // and sync_selection() selects the wrong rows.
+        connect(model_, &QAbstractItemModel::layoutChanged, this,
+                &DataAssetTable::on_model_reset);
     }
 }
 
@@ -113,6 +119,8 @@ void DataAssetTable::set_paged_model(AssetRowSource* model) {
     paged_model_ = model;
     if (paged_model_ != nullptr) {
         connect(paged_model_, &QAbstractItemModel::modelReset, this,
+                &DataAssetTable::on_model_reset);
+        connect(paged_model_, &QAbstractItemModel::layoutChanged, this,
                 &DataAssetTable::on_model_reset);
     }
 }

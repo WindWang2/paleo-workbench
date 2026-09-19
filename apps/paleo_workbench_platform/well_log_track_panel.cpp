@@ -264,7 +264,14 @@ void WellLogTrackPanel::on_save_template() {
         return;
     }
     const auto json_text = host()->track_layout().to_template_json();
-    file.write(json_text.data(), static_cast<qint64>(json_text.size()));
+    // #1387: fail-closed — a short write (disk full / RO media) is NOT a
+    // saved template. save_style_sidecar is the same-pattern precedent.
+    const auto written =
+        file.write(json_text.data(), static_cast<qint64>(json_text.size()));
+    if (written != static_cast<qint64>(json_text.size()) ||
+        !file.flush()) {
+        QMessageBox::warning(this, tr("保存失败"), tr("无法写入文件"));
+    }
 }
 
 void WellLogTrackPanel::on_load_template() {

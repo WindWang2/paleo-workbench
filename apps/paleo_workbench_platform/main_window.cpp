@@ -2031,8 +2031,17 @@ void MainWindow::showDiagnosticsDialog() {
                     &dialog, tr("保存诊断报告"), QStringLiteral("pwb-diagnostics.txt"));
                 if (path.isEmpty()) return;
                 QFile file(path);
-                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                    file.write(view->toPlainText().toUtf8());
+                if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QMessageBox::warning(&dialog, tr("保存失败"),
+                                         tr("无法写入文件"));
+                    return;
+                }
+                // #1387: fail-closed — report short write / flush failure
+                // instead of pretending the report was saved.
+                const QByteArray bytes = view->toPlainText().toUtf8();
+                if (file.write(bytes) != bytes.size() || !file.flush()) {
+                    QMessageBox::warning(&dialog, tr("保存失败"),
+                                         tr("无法写入文件"));
                 }
             });
     layout->addWidget(buttons);

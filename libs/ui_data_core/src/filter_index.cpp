@@ -3,6 +3,7 @@
 #include "pwb/ui_data_core/filter_index.hpp"
 
 #include "pwb/catalog/entity_view.hpp"  // normalize_tag_name
+#include "pwb/domain/text.hpp"          // lowercase_utf8 (#1391)
 #include "pwb/ui_data_core/json_util.hpp"
 
 #include <algorithm>
@@ -74,11 +75,11 @@ const std::unordered_map<std::string, std::string>& status_labels() {
 
 namespace {
 
-std::string lower_ascii(std::string value) {
-    for (auto& c : value) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return value;
+// #1391: Python folds search text with str.lower() — Unicode-aware, not
+// ASCII-only — so an accented/Cyrillic/Greek asset name typed in any case
+// still matches. lowercase_utf8 is the generated str.lower() table.
+std::string lower_search_text(std::string_view value) {
+    return pwb::domain::lowercase_utf8(value);
 }
 
 // str(getattr(raw, "id", "") or "") / legacy_resource_id pair per variant.
@@ -213,7 +214,7 @@ std::vector<int> FilterIndex::filter(const std::string& category,
 }
 
 std::vector<int> FilterIndex::filter_query(const FilterQuery& query) const {
-    const std::string needle = lower_ascii(strip_copy(query.search_text));
+    const std::string needle = lower_search_text(strip_copy(query.search_text));
     std::vector<int> rows;
     for (std::size_t i = 0; i < views_.size(); ++i) {
         if (!matches_query(views_[i], query)) {
@@ -545,7 +546,7 @@ std::string FilterIndex::haystack(const AssetView& view) {
         }
         out += part;
     }
-    return lower_ascii(std::move(out));
+    return lower_search_text(out);
 }
 
 // ---------------------------------------------------------------------------

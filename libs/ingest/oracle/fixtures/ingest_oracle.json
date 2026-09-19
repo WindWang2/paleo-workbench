@@ -368,6 +368,42 @@
    "expected": []
   },
   {
+   "name": "unicode_space_separators",
+   "text": "A1　X　850.0　0　0　0　850.0　0\nB2 Y 1164.5 1 2 3 1164.5 0\nC3　Z　2000.0\n",
+   "expected": [
+    {
+     "well_name": "A1",
+     "top_name": "X",
+     "md": "850.0",
+     "tvd": "850.0"
+    },
+    {
+     "well_name": "B2",
+     "top_name": "Y",
+     "md": "1164.5",
+     "tvd": "1164.5"
+    },
+    {
+     "well_name": "C3",
+     "top_name": "Z",
+     "md": "2000.0",
+     "tvd": null
+    }
+   ]
+  },
+  {
+   "name": "nbsp_separator",
+   "text": "A4 W 700.25 0 0 0 700.25 0\n",
+   "expected": [
+    {
+     "well_name": "A4",
+     "top_name": "W",
+     "md": "700.25",
+     "tvd": "700.25"
+    }
+   ]
+  },
+  {
    "name": "realdata_DC.dat",
    "text": "#WellTops File From SMI\n#WellName Name MD X Y Z TVD Time(ms)\nA1 Top-A 1000 100 500 0 1000 800\nA1 Top-B 1500 100 500 0 1500 1100\nB2 Top-A 1050 130 480 0 1050 820\nC3 Top-A 980 125 525 0 980 790\n",
    "expected": [

@@ -16,6 +16,11 @@ struct CodePoint {
 // Decode one UTF-8 code point at s[i]; nullopt on ill-formed input.
 std::optional<CodePoint> utf8_code_point(std::string_view s, size_t i);
 
+// Non-ASCII members of CPython's str.isspace() set reachable in practice
+// (U+00A0, U+1680, U+2000..U+200A, U+2028/2029, U+202F, U+205F, U+3000) —
+// the whitespace predicate py_strip and py_split share (#1386).
+bool cp_is_unicode_space(char32_t cp);
+
 }  // namespace pwb::ingest::detail
 
 namespace pwb::ingest {
@@ -25,8 +30,9 @@ namespace pwb::ingest {
 // Rejects hex, commas, empty. NaN/Infinity are VALID results (D14).
 std::optional<double> py_parse_float(std::string_view text);
 
-// Python str.strip() over the full Unicode whitespace set CPython uses
-// (ASCII space/tab/newline/CR/FF/VT plus the common Unicode spaces).
+// Python str.strip() over the full str.isspace() set: ASCII HT/LF/VT/FF/
+// CR/SP/FS/GS/RS/US plus the non-ASCII Unicode spaces (NEL, NBSP, Ogham,
+// U+2000-U+200A, LS/PS, NNBSP, MMSP, ideographic space).
 std::string py_strip(std::string_view text);
 
 // well_location_xml._key: strip namespace/ prefix, keep [0-9A-Za-z] and

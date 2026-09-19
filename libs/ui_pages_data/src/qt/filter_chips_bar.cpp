@@ -166,12 +166,26 @@ void FilterChipsBar::apply_saved(int index) {
             return pair.first == name.toStdString();
         });
     if (it == stored.end()) return;
-    try {
-        Q_EMIT filter_applied(filter_query_from_dict(it->second));
-    } catch (...) {
+    // Python `if not stored: return` — falsy payloads (null/false/0/""/{}/[])
+    // are a silent no-op before parsing even starts.
+    const auto& stored_q = it->second;
+    const bool falsy = stored_q.is_null() ||
+                       (stored_q.is_boolean() && !stored_q.get<bool>()) ||
+                       (stored_q.is_number() && stored_q.get<double>() == 0.0) ||
+                       (stored_q.is_string() && stored_q.get<std::string>().empty()) ||
+                       (stored_q.is_array() && stored_q.empty()) ||
+                       (stored_q.is_object() && stored_q.empty());
+    if (falsy) return;
+    // #1391: a corrupted saved query must warn (Python except -> warning),
+    // not silently reset the view to "all". filter_query_from_dict returns
+    // nullopt on malformed input, so this branch is reachable again.
+    const auto query = filter_query_from_dict(stored_q);
+    if (!query.has_value()) {
         QMessageBox::warning(this, QStringLiteral("应用过滤器"),
                              QStringLiteral("该保存的过滤器无法解析"));
+        return;
     }
+    Q_EMIT filter_applied(*query);
 }
 
 void FilterChipsBar::save_current() {

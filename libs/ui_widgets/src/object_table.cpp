@@ -5,6 +5,7 @@
 #include <QHeaderView>
 
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <map>
 #include <set>
@@ -38,6 +39,15 @@ SortKey sort_key_of(const QVariant& v) {
         case QMetaType::ULongLong:
         case QMetaType::Double:
         case QMetaType::Float:
+            // #1390: a NaN key makes sort_key_less always-false against every
+            // value — the equivalence relation stops being transitive and
+            // std::stable_sort's strict-weak-ordering precondition breaks
+            // (UB). NaN cells sort as absent (tier 2); ±inf is a real
+            // orderable number in Python and stays numeric.
+            if (std::isnan(v.toDouble())) {
+                k.tier = 2;
+                return k;
+            }
             k.tier = 0;
             k.numeric = v.toDouble();
             return k;
@@ -108,6 +118,11 @@ QVariant ObjectTableModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid()) return {};
     const int row_idx = index.row();
     if (row_idx < 0 || row_idx >= int(rows_.size())) return {};
+    // #1390: column bound — a proxy/delegate may hand in a column beyond
+    // columns_.size(); headerData already guards, data() must too.
+    if (index.column() < 0 || index.column() >= int(columns_.size())) {
+        return {};
+    }
     const QVariant& row = rows_[size_t(row_idx)];
     const ColumnSpec& col = columns_[size_t(index.column())];
     if (role == Qt::DisplayRole) {

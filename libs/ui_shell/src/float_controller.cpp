@@ -330,8 +330,11 @@ std::vector<FloatablePanelEntry> floatable_panel_entries(
         entry.title = qstr(dock_manager().panel_title(key));
         const bool floating = controller.is_floating(key);
         entry.floating = floating;
+        // #1389: capture QPointer, never the raw pointer — dock_panel()
+        // deleteLater()s the panel and entries can outlive it; a dangling
+        // captured pointer passes the null check and then crashes.
         if (floating) {
-            FloatingPanel* window = controller.floating_panel(key);
+            const QPointer<FloatingPanel> window = controller.floating_panel(key);
             entry.visible = window != nullptr && window->isVisible();
             entry.set_visible = [window](bool on) {
                 if (window != nullptr) {
@@ -339,15 +342,20 @@ std::vector<FloatablePanelEntry> floatable_panel_entries(
                 }
             };
         } else {
+            const QPointer<QWidget> guarded = widget;
             entry.visible = widget != nullptr && !widget->isHidden();
-            entry.set_visible = [widget](bool on) {
-                if (widget != nullptr) {
-                    widget->setVisible(on);
+            entry.set_visible = [guarded](bool on) {
+                if (guarded != nullptr) {
+                    guarded->setVisible(on);
                 }
             };
         }
-        entry.toggle_float = [&controller, key, widget] {
-            controller.toggle(key, widget);
+        const QPointer<FloatController> guarded_controller = &controller;
+        const QPointer<QWidget> guarded_widget = widget;
+        entry.toggle_float = [guarded_controller, key, guarded_widget] {
+            if (guarded_controller != nullptr) {
+                guarded_controller->toggle(key, guarded_widget.data());
+            }
         };
         entries.push_back(std::move(entry));
     }

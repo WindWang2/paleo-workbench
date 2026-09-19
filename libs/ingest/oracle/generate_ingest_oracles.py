@@ -201,6 +201,16 @@ tops_case("nan_md", "A1 X nan 0 0 0 1.5\nB2 Y inf 0 0 0\n")
 tops_case("underscore_float", "A1 X 1_000.5 0 0 0 2_000\n")
 tops_case("crlf_mixed", "A T1 1 0 0 0 10\rB T2 2 0 0 0 20\r\nC T3 3 0 0 0\n")
 tops_case("two_token_row", "A1 T1\n")
+# #1386: Unicode whitespace separators — str.split() treats U+3000
+# (ideographic space, emitted by CJK editors/Excel) and U+00A0 (NBSP) as
+# whitespace; an ASCII-only splitter silently drops these rows.
+tops_case(
+    "unicode_space_separators",
+    "A1\u3000X\u3000850.0\u30000\u30000\u30000\u3000850.0\u30000\n"
+    "B2\u00a0Y\u00a01164.5\u00a01\u00a02\u00a03\u00a01164.5\u00a00\n"
+    "C3\u3000Z\u30002000.0\n",
+)
+tops_case("nbsp_separator", "A4\u00a0W\u00a0700.25\u00a00\u00a00\u00a00\u00a0700.25\u00a00\n")
 for fixture in ("DC.dat", "ExportWellHead.dat", "A1_td.dat"):
     src = REPO / "tests/fixtures/realdata" / fixture
     rows = wtp.parse_well_tops(src)

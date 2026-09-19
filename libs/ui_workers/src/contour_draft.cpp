@@ -89,6 +89,12 @@ Grid2D any_to_grid(const std::any& value, bool* ok) {
         grid.cols = rows_vec->empty() ? 0 : rows_vec->front().size();
         grid.data.reserve(grid.rows * grid.cols);
         for (const auto& row : *rows_vec) {
+            // #1391: ragged input would produce rows*cols != data.size() and
+            // every downstream Grid2D::at() read goes out of bounds — the
+            // numpy asarray equivalent raises on inconsistent row length.
+            if (row.size() != grid.cols) {
+                throw PyValueError("grid_z 维数错误");
+            }
             for (double v : row) grid.data.push_back(v);
         }
         *ok = true;
@@ -97,6 +103,7 @@ Grid2D any_to_grid(const std::any& value, bool* ok) {
     if (!rows_any) return grid;
     grid.rows = rows_any->size();
     std::size_t cols = 0;
+    bool first_row = true;
     std::vector<double> data;
     for (const auto& row_any : *rows_any) {
         bool row_ok = false;
@@ -105,7 +112,12 @@ Grid2D any_to_grid(const std::any& value, bool* ok) {
             // Non-sequence row -> the numpy asarray would produce ndim != 2.
             throw PyValueError("grid_z 维数错误");
         }
-        if (cols == 0) cols = row.size();
+        if (first_row) {
+            cols = row.size();
+            first_row = false;
+        } else if (row.size() != cols) {
+            throw PyValueError("grid_z 维数错误");
+        }
         for (double v : row) data.push_back(v);
     }
     grid.cols = cols;

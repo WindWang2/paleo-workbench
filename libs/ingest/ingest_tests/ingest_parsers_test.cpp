@@ -860,6 +860,29 @@ void test_format_size(const Json& fixture) {
     }
 }
 
+// #1386 — Unicode whitespace parity for the float/strip primitives. The
+// well_tops oracle cases cover py_split; these pin the same predicate where
+// the separators are embedded INSIDE the token (float() strips them, Python
+// accepts NBSP/ideographic space padding).
+void test_py_compat_unicode_space() {
+    ++g_cases;
+    const auto padded = py_parse_float("\xC2\xA0\xC2\xA0" "300.0" "\xE3\x80\x80");
+    check(padded.has_value() && *padded == 300.0,
+          "py_parse_float must strip NBSP + U+3000 like Python float()");
+    ++g_cases;
+    check(py_strip("\xE3\x80\x80" "abc" "\xC2\xA0") == "abc",
+          "py_strip U+3000/NBSP edges");
+    ++g_cases;
+    // Full str.isspace() membership: NEL (U+0085) and FS/GS/RS/US
+    // (0x1C-0x1F) are Python whitespace too.
+    check(py_strip("\xC2\x85" "abc" "\x1C\x1F") == "abc",
+          "py_strip NEL + FS/US edges (str.isspace members)");
+    ++g_cases;
+    const auto nel = py_parse_float("\xC2\x85" "7.5" "\x1E");
+    check(nel.has_value() && *nel == 7.5,
+          "py_parse_float must strip NEL + RS like Python float()");
+}
+
 }  // namespace
 
 template <typename F>
@@ -891,6 +914,8 @@ int main() {
     run_group("test_shlex", [&] { test_shlex(fixture); });
     run_group("test_markdown_direct", [&] { test_markdown_direct(fixture); });
     run_group("test_format_size", [&] { test_format_size(fixture); });
+    run_group("test_py_compat_unicode_space",
+              [] { test_py_compat_unicode_space(); });
 
     std::printf("ingest.parsers: %d comparisons, %d failures\n", g_cases,
                 g_failures);

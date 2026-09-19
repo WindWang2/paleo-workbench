@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <set>
 #include <string>
 #include <thread>
@@ -191,6 +192,57 @@ PWB_TEST(sort_mixed_values_and_persistent_remap) {
     CHECK(before.isValid());
     CHECK_QSTR(model.key_for_index(before), QString("e"));
     CHECK_EQ(before.row(), model.index_for_key("e").row());
+}
+
+// -- 3b. #1390 — data() column bound + NaN sort key -------------------------
+PWB_TEST(object_table_data_column_out_of_bounds) {
+    // A foreign-model index is still isValid() — the delegate/proxy contract
+    // can hand one in, and data() must not index columns_ past its size.
+    ObjectTableModel narrow(columns(), key_of_row);
+    narrow.set_rows(rows(3));
+
+    std::vector<ColumnSpec> wide_cols = columns();
+    for (int i = 0; i < 4; ++i) {
+        ColumnSpec extra;
+        extra.key = QStringLiteral("extra%1").arg(i);
+        extra.title = QStringLiteral("E");
+        extra.value = [](const QVariant&) { return QVariant(); };
+        wide_cols.push_back(extra);
+    }
+    ObjectTableModel wide(wide_cols, key_of_row);
+    wide.set_rows(rows(3));
+
+    const QModelIndex foreign = wide.index(0, 6);  // valid for wide only
+    CHECK(foreign.isValid());
+    // Pre-fix: columns_[6] on a 3-column model — UB read. Post-fix: {}.
+    CHECK(!narrow.data(foreign).isValid());
+    CHECK(!narrow.data(foreign, Qt::ToolTipRole).isValid());
+    // In-range foreign index still resolves normally.
+    CHECK(narrow.data(wide.index(0, 0)).isValid());
+    CHECK_QSTR(narrow.data(wide.index(0, 0)).toString(), QString("k000000"));
+}
+
+PWB_TEST(sort_nan_numeric_lands_in_absent_tier) {
+    ObjectTableModel model(columns(), key_of_row);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<QVariant> mixed = {
+        QVariant::fromValue(QVariantMap{{"id", "a"}, {"value", 3}}),
+        QVariant::fromValue(QVariantMap{{"id", "n"}, {"value", nan}}),
+        QVariant::fromValue(QVariantMap{{"id", "e"}, {"value", 1}}),
+        QVariant::fromValue(QVariantMap{{"id", "m"}, {"value", 2}}),
+    };
+    model.set_rows(mixed);
+    model.sort(2, Qt::AscendingOrder);
+    // Numeric tier {e=1, m=2, a=3} then absent tier {n=NaN} — deterministic,
+    // no strict-weak-ordering violation (pre-fix NaN made every comparison
+    // false, which is UB inside std::stable_sort, not just a wrong order).
+    CHECK_QSTR(model.key_for_index(model.index(0, 0)), QString("e"));
+    CHECK_QSTR(model.key_for_index(model.index(1, 0)), QString("m"));
+    CHECK_QSTR(model.key_for_index(model.index(2, 0)), QString("a"));
+    CHECK_QSTR(model.key_for_index(model.index(3, 0)), QString("n"));
+    // And again descending — Python puts absent first on reverse sort.
+    model.sort(2, Qt::DescendingOrder);
+    CHECK_QSTR(model.key_for_index(model.index(0, 0)), QString("n"));
 }
 
 // -- 4. 首绘有界（test_table_view_first_paint_bounded_to_viewport）----------

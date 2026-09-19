@@ -36,7 +36,11 @@ std::optional<FilterQuery> remove_filter_dimension(const FilterQuery& query,
 // --- saved filters (QSettings JSON payload) -----------------------------------
 // Stored shape: [{"name": str, "query": {field→value}}, ...]; ensure_ascii=False.
 pwb::domain::Json filter_query_to_dict(const FilterQuery& query);
-FilterQuery filter_query_from_dict(const pwb::domain::Json& dict);
+// #1391: nullopt when the stored dict is malformed (non-object or a field
+// with a mismatched type) — Python's _apply_saved catches the constructor
+// failure and warns; a silently-defaulted "all" query must not be applied.
+std::optional<FilterQuery> filter_query_from_dict(
+    const pwb::domain::Json& dict);
 
 // Parse the stored JSON payload into {name → query-dict} preserving
 // Python dict semantics: first-occurrence position kept, later duplicate
@@ -50,8 +54,8 @@ std::string saved_filters_dump(
     const std::vector<std::pair<std::string, pwb::domain::Json>>& filters);
 
 // reload_saved's combo ordering: sorted(names, key=str.casefold).
-// ASCII-exact case fold (CJK/other scripts fold to themselves — same as
-// Python for the realistic name set).
+// Full Unicode casefold via the generated table in Pwb::Domain (same
+// Unicode data CPython uses).
 std::vector<std::string> saved_filter_names_sorted(
     const std::vector<std::pair<std::string, pwb::domain::Json>>& filters);
 
