@@ -18,6 +18,24 @@ std::string padded_counter(const char* prefix, unsigned long value) {
     std::snprintf(buf, sizeof(buf), "%s%06lu", prefix, value);
     return buf;
 }
+
+// Largest numeric suffix of `<prefix><number>` ids (padded_counter order).
+template <typename Records, typename Field>
+unsigned long max_numeric_suffix(const Records& records, Field field) {
+    unsigned long max_value = 0;
+    for (const auto& record : records) {
+        const std::string& id = (record.*field);
+        std::size_t pos = id.size();
+        while (pos > 0 && id[pos - 1] >= '0' && id[pos - 1] <= '9') {
+            --pos;
+        }
+        if (pos < id.size()) {
+            const unsigned long value = std::strtoul(id.c_str() + pos, nullptr, 10);
+            if (value > max_value) max_value = value;
+        }
+    }
+    return max_value;
+}
 }  // namespace
 
 RuntimeStore::RuntimeStore(Clock clock) : clock_(std::move(clock)) {}
@@ -33,6 +51,42 @@ std::string RuntimeStore::next_time() {
     std::snprintf(buf, sizeof(buf), "2026-01-01T%02ld:%02ld:%02ld", hours,
                   minutes, seconds);
     return buf;
+}
+
+void RuntimeStore::restore_state(std::vector<AssetRecord> assets,
+                                 std::vector<VersionRecord> versions,
+                                 std::vector<RunRecord> runs) {
+    assets_ = std::move(assets);
+    versions_ = std::move(versions);
+    runs_ = std::move(runs);
+    asset_index_.clear();
+    version_index_.clear();
+    run_index_.clear();
+    asset_versions_index_.clear();
+    for (std::size_t i = 0; i < assets_.size(); ++i) {
+        if (!asset_index_.emplace(assets_[i].id, i).second) {
+            throw std::invalid_argument("duplicate asset id in store: " +
+                                        assets_[i].id);
+        }
+    }
+    for (std::size_t i = 0; i < versions_.size(); ++i) {
+        if (!version_index_.emplace(versions_[i].version_id, i).second) {
+            throw std::invalid_argument("duplicate version id in store: " +
+                                        versions_[i].version_id);
+        }
+        asset_versions_index_[versions_[i].asset_id].push_back(i);
+    }
+    for (std::size_t i = 0; i < runs_.size(); ++i) {
+        if (!run_index_.emplace(runs_[i].run_id, i).second) {
+            throw std::invalid_argument("duplicate run id in store: " +
+                                        runs_[i].run_id);
+        }
+    }
+    // Counters resume past the LARGEST loaded id — container size would
+    // collide after a snapshot with gaps (fail-closed hardening).
+    next_asset_ = max_numeric_suffix(assets_, &AssetRecord::id);
+    next_version_ = max_numeric_suffix(versions_, &VersionRecord::version_id);
+    next_run_ = max_numeric_suffix(runs_, &RunRecord::run_id);
 }
 
 std::vector<AssetRecord> RuntimeStore::list_assets() { return assets_; }
@@ -164,6 +218,24 @@ void RuntimeStore::update_run_status(const std::string& run_id,
     runs_[it->second].status = status;
     if (status == "complete" || status == "failed" || status == "cancelled") {
         runs_[it->second].finished_at = next_time();
+    }
+}
+
+void RuntimeStore::update_run_status(const std::string& run_id,
+                                     const std::string& status,
+                                     const Json& extra_parameters) {
+    const auto it = run_index_.find(run_id);
+    if (it == run_index_.end()) {
+        throw std::invalid_argument("unknown run: " + run_id);
+    }
+    update_run_status(run_id, status);
+    if (extra_parameters.is_object()) {
+        Json& metadata = runs_[it->second].run_metadata;
+        if (!metadata.is_object()) metadata = Json::object();
+        for (auto entry = extra_parameters.begin();
+             entry != extra_parameters.end(); ++entry) {
+            metadata[entry.key()] = entry.value();
+        }
     }
 }
 

@@ -61,6 +61,22 @@ void CurrentProjectVersionContext::mark_domain_product_current(
     }
 }
 
+void CurrentProjectVersionContext::deselect_version(
+    const std::string& version_id) {
+    discard_selected(version_id);
+}
+
+void CurrentProjectVersionContext::select_version_only(
+    const std::string& version_id, const std::string& label) {
+    if (version_id.empty()) return;
+    if (selected_set_.insert(version_id).second) {
+        selected_order_.push_back(version_id);
+    }
+    if (!label.empty()) {
+        labels_[version_id] = label;
+    }
+}
+
 std::optional<std::string> CurrentProjectVersionContext::current_for_asset(
     const std::optional<std::string>& asset_id) const {
     if (!asset_id || asset_id->empty()) return std::nullopt;
