@@ -186,6 +186,23 @@ visual_qa_v{6,7,8,9,10,11}.py + prototypes/proto_dual_volume_overlay.py
 
 ## 6. 收尾（全部切片后）
 
+### UI-17 integration（W5,另行编号定稿）
+
+- 范围：`apps/paleo_workbench_platform` 的 MainWindow/AppContext 接线。
+  Python 组合根 `ui/app_shell.py`（1512 行）import 11 个页类
+  （DataPage/GeologicalModeling3DPage/HomePage/HubPage/MappingPage/
+  PreparationPage/ReviewExportPage/SeismicPredictionPage/
+  SequenceFrameworkPage/StratigraphyCorrelationPage/VisualizationPage/
+  WellLogPredictionPage）——其 C++ 对应物已分散在 libs/ui_pages_*、
+  libs/ui_wellseis、libs/ui_seqviz、libs/ui_review、libs/ui_workstation、
+  libs/ui_map、libs/ui_controllers。
+- 纪律：页注册表 → dock/navigation（libs/ui_shell DockManager/
+  Navigation）+ 命令注册表;服务注入沿用各片 seam(DataPageServices/
+  PrepareBackend/MapSnapshotProvider 等),真服务适配器在 libs/*
+  存在则直绑,缺则记 deferred。
+- 不新开 lib;改动集中在 apps/paleo_workbench_platform + 必要 seam
+  适配器文件。
+
 1. 逐簇集成片：MainWindow/AppContext 接线（页注册表 → dock/navigation）。
 2. `pwb_migration_inventory.py` 刷新 + 本表终态汇总。
 3. 全量 configure+build+ctest ×2（linux-native-product）。
