@@ -48,10 +48,32 @@ submodule：`well-log-engine @ f845e7ab`（只读）、`geo-viz-engine @ 0885195
 
 - run1（2026-09-19，/tmp/viz_a_gate_run1.log）：假绿（exit 75 被 if/fi 吞）。教训已写进脚本注释。
 - run2（2026-09-19，/tmp/viz_a_gate_run2.log）：configure 实败（重复 pwb_ingest target）+ 假绿（未检查 gate() 返回值）。两缺陷均已修。
-- run3：见下（本轮带 `must()` 失败传播 + PALEO_QGIS_SDK_DIR 同源默认）。
-- step-7 跳过条件：`SKIP_VIZ_A_PLATFORM=1` 或无 PALEO_QGIS_SDK_DIR 且同源 sibling main SDK 不存在。跳过必须在此记录（不允许静默）。
+- run3（/tmp/viz_a_gate_run3.log）：configure 真实失败暴露（Qt6 IMPORTED target 作用域），已修（测试目录自行 find_package）。
+- run4（…run4.log）：构建暴露 viz_a.wle_load 缺 WLE 头路径，已修（直链 WellLog::IO）。
+- run5（…run5.log）：首轮真实测试——暴露 4 类问题：ingest oracle 重冻结污染（本机 Python 依赖与原冻结环境不同）、core 测试数据形状 UB、tamper 未写盘、patterns oracle 裸 NaN、viewer_flow GLX BadValue。
+- run6（…run6.log）：GLX 定性——offscreen 平台插件在本机（真实显示器）无法建 GL 上下文；对比 science.viewer.well_log（未强制 offscreen）通过。
+- run7（…run7.log）：ingest oracle 恢复原件+仅两处裁决补丁；tamper 全文件覆盖；science.viewer 构建清单补齐。
+- run8（…run8.log）：GL 环境改显示器条件化（DISPLAY 存在→仅软件 GL；无显示→offscreen）；02 号 no-curve 案例按构造内容不变（豁免篡改分歧检查，跨案例判别覆盖）。
+- run9（…run9.log）：两遍 ctest 首次全绿（12/12×2）；MALLOC 步骤 Exec 参数拼接 bug（-j/-m 落进被包裹命令）已修（gate() 传verbatim）。
+- run10（…run10.log）：**全绿**（12/12×2 + MALLOC 6/6 + OFF 1/1）；step7 因 SDK 发现路径错跳过。
+- run11（…run11.log）：路径修后 step7 全平台 configure 暴露 QGIS SDK 清单缺陷（`/home/kevin/pwb-sdks/root/usr/include` 不存在——SDK 打包问题，非本分支）。
+- run12-15（…run12-15.log）：install_cover 目标引入与编译修复（QMainWindow include、viz_a_test ARGN、moc-free host 的 static_cast 语义）。
+- run16（…run16.log）：**最终全绿**——13/13 测试 ×2 遍、MALLOC 7/7、OFF 检查 1/1、step7 install_cover 过（全平台 configure 因上述 SDK 清单缺陷按设计记为 best-effort 失败，不阻塞；接线由 install_cover 编译+运行覆盖）。
+- step-7 说明：QGIS SDK 清单含不存在绝对路径属平台线/SDK 打包问题，本线不修共享 SDK；如实记录于此。
 
 ## 覆盖差异声明（默认门禁 vs 本专用门禁）
 
 - 默认 `run-integrated-gate.sh`（PLATFORM+DATA+SCIENCE，VIEWER=OFF）：覆盖 ingest/ui_workers/science.* 回归，不覆盖 science.viewer.*、viz_a.* 的 WLE 依赖测试，也不编译 app 接线（PWB_WITH_VIZ_A 不定义，main_window 钩子在 #ifdef 内为死码，合法降级）。
 - 本专用门禁（SCIENCE+VIEWER+VIEWER_TESTS+CONV_22，PLATFORM=OFF）：上述 WLE 面全测 + OFF 反向检查（默认配置可配置、LAS 分支诚实降级、无桥 target）；step 7 追加 PLATFORM=ON 编译覆盖 app 接线（复用 sibling main 的 vendored QGIS SDK，只读）。
+
+## 最终验收快照（2026-09-19，run16）
+
+- 分支 HEAD：见 git log（本 ledger 与代码同 commit）。
+- 专用门禁 `scripts/cpp-migration/run-viz-a-gate.sh`：exit 0。
+  - 两遍 ctest：`viz_a.*|science.viewer.*|ingest.*|ui_workers.*` 13/13 × 2。
+  - MALLOC 审计（MALLOC_CHECK_=3）：viz_a.* 7/7。
+  - OFF 检查：viewer-OFF 配置成功、`viz_a.las_preview_core` 通过、build.ninja 无 WLE bridge target。
+  - step7：`viz_a.install_cover` 过；全平台 configure 因共享 QGIS SDK 清单缺陷（不存在的绝对 include 路径）按设计 best-effort 记录失败。
+- GL 环境声明：本机有真实显示器（GLX）→ 测试以软件 GL + 真实显示器跑；无显示环境（headless CI）自动 offscreen。真 GL 初始化断言在 science.viewer.well_log（真实 GL 上下文 + capability report）通过。
+- 三轮独立审核（Python/科学语义、C++/Qt 生命周期、产品接线/范围/构建）全部 P0/P1 修复并复测；P2 残留见"记录不改项"。
+- 迭代：16 轮门禁执行（2 次脚本假绿事故已修复并写入脚本注释）、6 个测试目标、23 oracle 案例（12 一致/11 裁决/23 负检）+22 scale 案例+42 图案探针+12 颜色探针。
