@@ -6,7 +6,7 @@
 ## 独占落点（并行写入协议）
 
 - `libs/viz_charts`（新库：Qt-free 核 + Qt widget 层）
-- `libs/ui_pages_preview` 的 chart/surface 预览装配（dispatcher/总装侧）
+- ~~`libs/ui_pages_preview` 的 chart/surface 预览装配~~（修正：实际零改动——预览装配经 ui_pages_data 的 preview_dispatch + DataReaderPanel 既有 seam 完成，无需触碰 ui_pages_preview）
 - `libs/ui_pages_data` 消费接线（`preview_dispatch` 模式词表扩展）
 - `libs/ui_data_core` 的 #1382/#1383 最小修复（独立提交，先行）
 - `apps/paleo_workbench_platform/viz_e_*`（install/adapter）
@@ -32,7 +32,7 @@
 | `chart/convex_hull.py`（点在多边形/凸包） | 65 | 无 | Qt-free 核 |
 | `chart/cross_plot_widget.py`（散点+z 着色+套索掩码） | 320 | 无 | Qt 层 |
 | `surface/surface_widget.py`（等值线/带填充/控制点/断层线） | 611 | 无 | Qt 层 |
-| `surface/marching_squares.py`（contourpy 提取线/带） | 206 | 无（contourpy 无 C++ 对应） | Qt-free 核自实现（行进方块） |
+| `surface/marching_squares.py`（contourpy 提取线/带） | 206 | mapping_kernel/contouring.hpp 已有另一行进方块（geological_pipeline 冻结源，含 DP/Chaikin/分位层）——**不同冻结源的平行移植，非重复**；contourpy 语义（带填充/palette/取消）无对应 | Qt-free 核自实现（contourpy 语义对齐） |
 | `surface/colormaps.py`（viridis/cnpc_strat/cnpc_fluid/thermal） | 80 | seismic_viewer 有 color_maps（地震色标，非同集） | Qt-free 核（按停靠点精确转录） |
 | `fence/fence_generator.py`（井栅栏网格/地震切片） | 119 | 无 | Qt-free 核 |
 | `analytics/well_qc.py`（MAD/z-score/sand ratio） | 66 | 无 | Qt-free 核 |
@@ -92,7 +92,34 @@
 - **挂载**：根 CMake VIZ-E 块（闭包齐全时 target_sources+PWB_WITH_VIZ_E），main_window 仅 include+install_data_dock 调用（QMainWindow* 签名保持可测性）。
 - **presenter 契约**：`register_external_presenter({kind, supports, create, note})` 进程级注册表（首注册胜出，重复注册响亮失败）；A(.las)/B(time_depth)/D(seismic) 经此接入；未注册时不可用消息如实列出依赖状态。
 - **actor 修正**：JobOwner 不再以页面为 QObject 父（JobCenter unique_ptr 独占所有权）——原双重所有权在页面先于 JobCenter 析构时 double-delete（"pure virtual method called"复现）。
-- **主线潜在缺陷顺带修复**（如实声明）：main_window.cpp importSegyDialog 在 CONV_30+SEISMIC_VIEWER 组合下 `version_id` 未声明即编译失败（CONV-30 分支提前 return，尾随同步视图代码无卫）——门禁配置从未同时启用两开关故未暴露；本线 CONV_30 必开故加 `!defined(PWB_WITH_CONV_30)` 卫（行为不变：该路径本就不可达）。
+- **主线潜在缺陷顺带修复**（如实声明，归因修正）：main_window.cpp importSegyDialog 尾部 statusBar() 行无条件使用 `version_id`——凡 `PWB_WITH_CONV_30=ON` 的任何配置该 TU 都编译失败（CONV-30 分支提前 return 后变量未声明），说明基线从未在 CONV-30 开启下编译过此文件；本线 CONV_30 必开故暴露。修复为 `!defined(PWB_WITH_CONV_30)` 卫（行为不变：CONV-30 路径该代码本就不可达）。
 - **导出健壮性**：PlotWidget/SurfaceWidget 增加显式画布 export_svg/export_pdf 重载；隐藏栈页/无头导出的退化 0 尺寸回退 900×600（可见 widget 仍用实时尺寸，Python 语义不变）。
 - **dat 解析 oracle**：generate_viz_e_dat_fixtures.py 冻结真实 Python 后端输出（记录/CRS/UWI/跳过行/horizon 轴决策），provenance SHA 校验 + 8 族负检。
 | 6 | contour_draft/factor_prepare 呈现端：surface_data_from_factor_task 适配器 + present_factor_surface 页面入口 + worker 全链路测试（真 mapping_kernel→真 make_contour_draft_job_spec（viz_charts 作 extract seam）→页面呈现+provenance） | viz_e.pa_flow 96 检查 ×2 + MALLOC | 通过 | ON/OFF + 全量门禁 |
+
+## 全量门禁与环境性失败记录（第 7 轮）
+
+- `ui_pages_preview.qt_widgets_smoke`：媒体播放器构造处 X BadValue（offscreen 无视频 surface）——**环境性**；本线对 libs/ui_pages_preview 零改动（git diff 基线为空）。
+- `integration.attribute_chain`：期望 registered_ids==4，而 seismic_attributes 库无条件注册 10 个候选（attributes.cpp:388-393 固定 10 项）——**主线既有失配**（本线对 libs/seismic_attributes 与 tests/cpp/integration 均零改动；origin/main 后续 349a0ba8 亦未修）。如实记录，不在本线修他人域。
+- origin/main 在任务期间推进（7bf29aae→349a0ba8，UI-15 ui_canvas 等合入）；本分支保持原基线，PR 合并时根 CMake 的 BEGIN/END 块预期有文本级冲突需人工合入。
+- ON/OFF：ON=集成闭包（CONV_22/30 由 DATA/SCIENCE 特征模型蕴含强制 ON）；OFF=platform-only（DATA/SCIENCE/MAPPING_KERNEL=OFF）configure 通过、pwb-platform 构建通过、viz_e.* 测试不注册、viz_charts 核回放 792 检查通过。守卫含 Pwb::MappingKernel/Pwb::UiWorkers（漏 MappingKernel 时 platform-only 配置曾报缺失目标，已修）。
+
+## 三轮独立审核结论与处置（第 8 轮）
+
+**轴2（C++/Qt 生命周期与并发）**：无 P0。P1×2 已修：
+- asset_view_from_object 对空 AssetHandle（shared_ptr 本身为 null）补守卫（原先仅守卫 variant 内空指针）——扩展 asset_view_guard 测试覆盖。
+- VizEDataPage 增 alive_ 标志（shared_ptr<atomic<bool>>），surface job 投递 lambda 持副本，页面析构后的迟到投递丢弃——消除对隐式析构序的依赖。
+P2 处置：try_external_presenter 改为锁内快照、锁外调用用户回调（防递归加锁/IO 阻塞注册表）；compute_factor_preview 的等值线提取传入取消检查；SurfaceWidget 补 leaveEvent 清十字线（PlotWidget 对齐）。不修（记录）：JobOwner 每请求增长（JobCenter 生命周期内有限）、parse_well_head 在 GUI 线程（文件小）、autofit 全 NaN 行为与 Python 完全一致（审核 2 的 P2-5 判定与 Python 源不符，经核对 series.py:112 与 plot_widget.py:306-310 确认 Python 同样把 (0,0) 纳入）。
+**轴3（接线/重复/范围/构建）**：无 P0/P1。核实：范围全落独占面、A/B/C/D 域零触碰；marching_squares 与 mapping_kernel/contouring.hpp 为不同冻结源的平行移植（账本已修正表述）；viz_charts_qt 的 Svg/PrintSupport 依赖来自 qgis bridge 的全局 imported target（稳健性缺口记录，不改）；presenter 注册复用 DataReaderPanel 既有 seam（非新插件架构，账本措辞已澄清）。
+**轴1（Python/科学语义）**：首轮票据过期，重试后台运行中（完成后结论补记本节）。
+
+## 终版验证汇总
+
+- viz_charts.oracle_replay：792 检查 ×2 + MALLOC；viz_charts.qt_widgets_smoke：全 PASS ×2 + MALLOC。
+- viz_e.pa_flow：96 检查 ×3 + MALLOC；ui_data_core.asset_view_guard：44 检查 ×2 + MALLOC（修复前 SIGSEGV 复现）。
+- ON 闭包全量 ctest 两遍：127/127（排除 2 个已论证失败：ui_pages_preview.qt_widgets_smoke 环境性 X BadValue——本线零改动该库；integration.attribute_chain 主线既有失配——库注册 10 属性 vs 测试期望 4，两侧本线零改动）。
+- MALLOC 审计 platform.*：18/18。
+- OFF（platform-only，DATA/SCIENCE/MAPPING_KERNEL=OFF）：configure + pwb-platform 构建 + viz_charts.oracle_replay 792 检查通过；viz_e.* 不注册。
+- 资源：全程 invoke-resource-gate.sh（flock .bare 共享锁，jobs=2），无绕锁编译。
+
+**轴1 补记（第 9 轮，后台重试完成）**：10/10 项 PASS，无 P0/P1。全部 P2 为 ulp 级差异或已文档化窄偏差（std::round vs banker's rounding、np.mean 成对求和、fence linspace 舍入序、近退化 sliver、nfin==3 边公式方向、Unicode 解析差异）；两处措辞已修正（supports 谓词"严格强于 Python"已在其声明处文档化、上限参数化偏离已声明且默认等价）。oracle 真实性确认：冻结值均来自真实 Python 运行 + gitlink 硬校验 + 负检。

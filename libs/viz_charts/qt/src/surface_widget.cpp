@@ -349,6 +349,16 @@ void SurfaceWidget::export_pdf(const QString& filepath, QSize canvas) {
 
 // -- core paint ---------------------------------------------------------------------------
 
+void SurfaceWidget::leaveEvent(QEvent* event) {
+    // PlotWidget parity: the crosshair must not linger after the cursor
+    // leaves the widget.
+    if (hover_pos_.has_value()) {
+        hover_pos_.reset();
+        update();
+    }
+    QWidget::leaveEvent(event);
+}
+
 void SurfaceWidget::paintEvent(QPaintEvent* event) {
     Q_UNUSED(event);
     QPainter painter(this);

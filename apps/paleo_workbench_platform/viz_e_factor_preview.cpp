@@ -63,7 +63,8 @@ FactorPreviewOutcome compute_factor_preview(const FactorPreviewRequest& request,
         auto lines = pwb::viz_charts::extract_contour_lines(
             grid.grid_x, grid.grid_y,
             std::vector<double>(grid.grid_z.begin(), grid.grid_z.end()),
-            levels);
+            levels,
+            [&ctx]() { return ctx.token().is_cancelled(); });
         ctx.check_cancelled();
         ctx.report_progress(0.9, 1.0, QStringLiteral("组装呈现").toStdString());
 

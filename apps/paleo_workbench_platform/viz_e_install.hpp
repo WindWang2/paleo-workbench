@@ -28,7 +28,9 @@
 #include <QString>
 #include <QWidget>
 
+#include <atomic>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -135,6 +137,10 @@ private:
                          const pwb::viz_e::FactorPreviewOutcome& outcome);
     QWidget* try_external_presenter(const QString& path);
 
+    // Cleared in ~VizEDataPage; the surface job's delivery lambda holds a
+    // copy so a completion hopping to the GUI thread after the page died
+    // drops instead of touching freed members.
+    std::shared_ptr<std::atomic<bool>> alive_;
     pwb::ui_pages_data::qt::DataWorkspace* workspace_ = nullptr;
     XyScatterHost* xy_host_ = nullptr;
     SurfaceHost* surface_host_ = nullptr;

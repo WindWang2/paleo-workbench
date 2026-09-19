@@ -708,6 +708,12 @@ AssetView asset_view_from_generic(const GenericAsset& asset,
 AssetView asset_view_from_object(const AssetHandle& handle,
                                  const std::filesystem::path* project_root,
                                  FsProbeCache* fs_probe) {
+    if (handle == nullptr) {
+        // A null AssetHandle is a wiring bug, not a payload variant —
+        // degrade instead of dereferencing (#1383 guard extended to the
+        // handle itself; Python's isinstance chain simply falls through).
+        return AssetView{};
+    }
     const AssetObjectData& data = *handle;
     if (const auto* view = std::get_if<std::shared_ptr<AssetView>>(&data)) {
         // #1383: make_asset_handle never validates non-null — a null

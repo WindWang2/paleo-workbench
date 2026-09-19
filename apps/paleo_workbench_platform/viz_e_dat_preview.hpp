@@ -20,8 +20,9 @@
 //     axis ranges/resolution. The `_MAX_IDW_POINT_CELLS` budget constrains
 //     the interpolation input, not the grid resolution (dat.py:828-832).
 //
-// Documented deviations from the frozen Python (all narrow, none change
-// which files are accepted):
+// Documented deviations from the frozen Python (all narrow; none change
+// which files PARSE — the *supported predicate* is separately declared
+// strictly stronger below):
 //   * PreviewOptions collapses into the `max_points` argument. The frozen
 //     well-head path IGNORES options and hard-caps valid records at
 //     `_MAX_POINTS` (dat.py:715-718, param named `_options` at :589), so

@@ -87,7 +87,8 @@ void reset_external_presenters_for_tests() {
 // ---------------------------------------------------------------------------
 
 VizEDataPage::VizEDataPage(QWidget* parent, pwb::app::JobCenter* jobs)
-    : QWidget(parent), jobs_(jobs) {
+    : QWidget(parent), jobs_(jobs),
+      alive_(std::make_shared<std::atomic<bool>>(true)) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     workspace_ = new updqt::DataWorkspace(this);
@@ -108,7 +109,9 @@ VizEDataPage::VizEDataPage(QWidget* parent, pwb::app::JobCenter* jobs)
             &VizEDataPage::on_selected_asset);
 }
 
-VizEDataPage::~VizEDataPage() = default;
+VizEDataPage::~VizEDataPage() {
+    alive_->store(false);  // in-flight deliveries drop instead of UAF
+}
 
 void VizEDataPage::set_asset_rows(
     const std::vector<pwb::ui_pages_data::AssetRow>& rows) {
@@ -170,9 +173,16 @@ void VizEDataPage::preview_asset(
 }
 
 QWidget* VizEDataPage::try_external_presenter(const QString& path) {
-    auto& reg = registry();
-    std::lock_guard<std::mutex> lock(reg.mutex);
-    for (auto& entry : reg.entries) {
+    // Snapshot under the lock, invoke user code outside it: presenter
+    // callbacks may register presenters (non-recursive mutex) or block on
+    // file IO.
+    std::vector<ExternalPresenter> entries;
+    {
+        auto& reg = registry();
+        std::lock_guard<std::mutex> lock(reg.mutex);
+        entries = reg.entries;
+    }
+    for (auto& entry : entries) {
         if (entry.supports(path)) {
             QWidget* widget = entry.create(path, this);
             if (widget == nullptr) {
@@ -271,8 +281,13 @@ void VizEDataPage::present_horizon(const QString& path,
     spec.run = [request](pwb::job::JobContext& ctx) -> std::any {
         return compute_factor_preview(request, ctx);
     };
+    const std::shared_ptr<std::atomic<bool>> alive = alive_;
     owner.start(jobs_->scheduler(), std::move(spec),
-                 [this, generation](const pwb::job::qtbridge::JobOutcome& o) {
+                 [this, alive, generation](
+                     const pwb::job::qtbridge::JobOutcome& o) {
+                     if (!alive->load()) {
+                         return;  // page died mid-flight — drop the delivery
+                     }
                      if (o.state == pwb::job::JobState::done ||
                          o.state == pwb::job::JobState::degraded) {
                          const FactorPreviewOutcome* outcome =

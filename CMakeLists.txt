@@ -895,7 +895,8 @@ endif()
 # Python pages as the production path (guard stays off, main_window hook
 # compiles out).
 if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
-   AND TARGET Pwb::UiPagesDataQt AND TARGET Pwb::JobQt
+   AND TARGET Pwb::UiPagesDataQt AND TARGET Pwb::UiWorkers
+   AND TARGET Pwb::MappingKernel AND TARGET Pwb::JobQt
    AND PWB_BUILD_CONV_30)
     target_sources(pwb-platform PRIVATE
         apps/paleo_workbench_platform/viz_e_dat_preview.cpp
