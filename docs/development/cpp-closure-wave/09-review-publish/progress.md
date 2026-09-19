@@ -95,3 +95,31 @@
 - 门竞争：08→其他线连续持锁；链脚本 `/tmp/p09_gate_chain.sh` 每阶段
   Probe 等待 + 90s 退避，被拒不抢锁。
 - `gate ... | tail` 吞退出码（tail 恒 0）——一律以 RESOURCE_* 诊断令牌为准。
+
+## R6 验证与交付（2026-09-20）
+
+- 门内链（configure→build→test 全部经 invoke-resource-gate.sh，j2）：
+  - configure OK（QGIS vendored 快照=本 worktree third_party/qgis；
+    SDK 产物只读复用主仓 native/qgis_render_bridge/build/qgis-vendor/output；
+    deps prefix=/home/kevin/pwb-sdks/root/usr）。
+  - closure_review.core_test **19/19 Passed（×2 确定性）**
+  - ui_review.core_smoke / qt_widgets_smoke **Passed（×2）**
+  - platform.closure_review_install **Passed（×2）**
+  - 受影响集 platform.app_shell / ui_wiring / project_session **Passed**
+  - pwb-platform 与平台测试目标构建成功。
+- 验证轮发现并修复（详见 acceptance.md）：find_map_document 悬垂指针
+  （按值遍历临时副本，10 个失败共同根因）、issue_locate_point Polygon 壳
+  不下钻（ISSUE-DUMP 实证）、installer 编译期三错（include/命名空间/命名冲突）。
+- 基线复核：推送前 `git fetch` 确认 origin/main 仍为 06211541（is-ancestor ✓）。
+- 提交：97c7ae42（实现+ledger）→ ab396aeb（审查轮 ledger）→ 9a8e0f12（验证修复）。
+- **PR: https://github.com/WindWang2/paleo-workbench/pull/1422**（base=main）。
+- 协调登记已更新（09-line.json：head_sha、pr_url）。
+- 预算记录：根 agent 子代理 1 个（独立审查，6.8M tokens 累计）；无其他派生。
+
+## 本线完成定义核对
+
+- [x] 本线必需能力已实现（后端/委托/保存 seam/装配，无 stub 充数）
+- [x] 必要生产调用链有真实证据（平台测试经真实 MainWindow + 真实工程文件）
+- [x] 受影响测试通过（本线 + 回归 + 受影响集，关键项两遍）
+- [x] PR 已创建且与最新 base 关系明确（origin/main=06211541 为 HEAD 祖先）
+- [ ] 全项目完成：由 12 基于最终统一候选证据判断（非本线可宣称）
