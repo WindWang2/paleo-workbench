@@ -123,3 +123,48 @@ endif()
 if(BUILD_TESTING)
     add_subdirectory(ui_pages_preview_tests)
 endif()
+
+# BEGIN VIZ-D
+# VIZ-D — D 线增量源（只追加，不改上方既有内容）：
+#   * well_head_scatter_core / formation_tops_preview —— Qt-free 核心，
+#     进 pwb_ui_pages_preview。经 Pwb::Ingest 复用冻结的 Python 兼容
+#     原语（py_strip / py_parse_float / UTF-8 码点）与
+#     parse_well_tops_text；formation_tops_preview.hpp 公开包含
+#     <pwb/ingest/well_parsers.hpp>，故为 PUBLIC 链接。
+#   * seismic_preview_presenter —— A3 异步地震预览 presenter，仅进 Qt 壳
+#     目标；切片调度复用 seismic_viewer 的 SliceController（根构建里
+#     libs/seismic_viewer 先于本目录加入，别名已存在；独立配置时拉入
+#     同级目录并关闭其自带测试以避开冻结 fixture 门）。
+if(NOT TARGET Pwb::Ingest)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ingest
+                     ${CMAKE_CURRENT_BINARY_DIR}/viz_d_ingest)
+endif()
+target_sources(pwb_ui_pages_preview PRIVATE
+    src/well_head_scatter_core.cpp
+    src/formation_tops_preview.cpp
+)
+target_link_libraries(pwb_ui_pages_preview PUBLIC Pwb::Ingest)
+
+if(TARGET Qt6::Widgets AND TARGET pwb_ui_pages_preview_qt)
+    target_sources(pwb_ui_pages_preview_qt PRIVATE
+        src/qt/seismic_preview_presenter.cpp
+        # 无 Q_OBJECT；列出以与上方壳目标的头文件罗列惯例一致。
+        include/pwb/ui_pages_preview/qt/seismic_preview_presenter.hpp
+    )
+    if(NOT TARGET Pwb::SeismicViewer)
+        set(PWB_SEISMIC_VIEWER_BUILD_TESTS OFF) # 被消费时不注册其自带测试
+        # seismic_viewer 私有链接 pwb_seismic_attributes（crossplot 核复用
+        # 冻结核），此处先补属性库，避免普通目标名落空。
+        if(NOT TARGET pwb_seismic_attributes)
+            set(PWB_SEISMIC_ATTRIBUTES_BUILD_TESTS OFF)
+            add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../seismic_attributes
+                             ${CMAKE_CURRENT_BINARY_DIR}/viz_d_seismic_attributes)
+        endif()
+        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../seismic_viewer
+                         ${CMAKE_CURRENT_BINARY_DIR}/viz_d_seismic_viewer)
+    endif()
+    # presenter 头文件公开引用 SliceController/VolumeIdentity；编译期为
+    # PRIVATE（按 VIZ-D 契约，消费方按需自行链 Pwb::SeismicViewer）。
+    target_link_libraries(pwb_ui_pages_preview_qt PRIVATE Pwb::SeismicViewer)
+endif()
+# END VIZ-D

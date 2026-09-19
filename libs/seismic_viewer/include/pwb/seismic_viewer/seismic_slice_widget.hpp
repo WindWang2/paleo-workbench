@@ -32,9 +32,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <QWidget>
 
+#include <pwb/seismic_viewer/colorbar_widget.hpp>
+#include <pwb/seismic_viewer/display_core.hpp>
+#include <pwb/seismic_viewer/horizon_core.hpp>
 #include <pwb/seismic_viewer/slice_controller.hpp>
 #include <pwb/seismic_viewer/slice_selection.hpp>
 
@@ -54,6 +58,18 @@ enum class ViewerState : std::uint8_t {
     degenerate,  // rendered, but stretch degenerate (constant / all-invalid)
     failed       // read failure; last good slice (if any) stays visible dimmed
 };
+
+// VIZ-D display modes (profile_vd / profile_wiggle parity). Wiggle is a
+// section-view renderer (the vertical image axis must be the sample axis);
+// switching to wiggle on the sample (map) view is a no-op.
+enum class DisplayMode : std::uint8_t {
+    variable_density,
+    wiggle,
+};
+
+// Result of a picks file load (identity is always restored from the file;
+// a volume mismatch still loads and is reported).
+enum class PicksLoadStatus : std::uint8_t { ok, mismatched_volume, error };
 
 class SeismicSliceWidget final : public QWidget {
 public:
@@ -82,6 +98,57 @@ public:
     void set_explicit_range(double min, double max); // min < max, else no-op
     void reset_view();                         // zoom/pan origin + auto range
 
+    // --- VIZ-D advanced display (profile_vd / profile_wiggle parity) ------
+    // variable_density (default) paints the indexed8 raster; wiggle paints
+    // per-trace deflection polylines with positive fill lobes from the SAME
+    // retained float plane (no extra read, no volume copy). Switching to
+    // wiggle on the sample (map) view is a no-op (section views only).
+    void set_display_mode(DisplayMode mode);
+    [[nodiscard]] DisplayMode display_mode() const;
+
+    // SEG polarity flip — display-only (raw readouts and picks keep the
+    // survey sign). Applies to both VD normalization and wiggle deflection.
+    void set_polarity(bool normal);
+    [[nodiscard]] bool polarity_normal() const;
+
+    // Asymmetric percentile clip (P(100-pct)..P(pct)) computed on the raw
+    // plane and cached per (volume, axis) across sibling slices — the
+    // profile_vd normalization. Disabled by default: the default auto range
+    // stays the frozen v3 finite min/max stretch. When enabled, non-finite
+    // samples render at the LUT centre (128) instead of index 0 (colormap.py
+    // #119 parity).
+    void set_clip_percentile_enabled(bool enabled);
+    [[nodiscard]] bool clip_percentile_enabled() const;
+    void set_clip_percentile(double pct); // clamps to [1, 99]
+    [[nodiscard]] double clip_percentile() const;
+
+    // Wiggle deflection gain (one trace slot at 1.0; the source default 2.0
+    // lets adjacent traces overlap). Positive finite, else no-op.
+    void set_wiggle_gain(double gain);
+    [[nodiscard]] double wiggle_gain() const;
+
+    // --- VIZ-D horizon picking ---------------------------------------------
+    // While picking is enabled, left-click adds a pick at the clicked
+    // survey coordinates, dragging a pick moves it, right-click near a pick
+    // deletes it. Picks are stored in survey coordinates; the visible
+    // markers re-project per view.
+    void enable_picking(bool enabled);
+    [[nodiscard]] bool picking_enabled() const;
+
+    // Programmatic pick API (tests and hosts). add_pick records the current
+    // volume binding into the set on first use.
+    void add_pick(horizon::HorizonPick pick);
+    void clear_picks();
+    [[nodiscard]] const horizon::HorizonPickSet& picks() const;
+
+    // JSON persistence with stable source binding (volume id + revision,
+    // axis, slice index, time unit, schema version). Saving an empty set is
+    // allowed (the binding block is still written). Loading restores the
+    // exact saved identity; a different current volume loads with
+    // mismatched_volume (picks still shown, status notes the mismatch).
+    [[nodiscard]] bool save_picks(const std::string& path, std::string& error);
+    [[nodiscard]] PicksLoadStatus load_picks(const std::string& path, std::string& error);
+
     // Zoom scales image pixels; pan offsets are in image pixel units. Both
     // clamp so the slice stays reachable. Used by tests and hosts.
     void set_view_transform(double scale, double offset_x, double offset_y);
@@ -107,6 +174,11 @@ public:
     [[nodiscard]] std::uint64_t volume_revision() const;
     [[nodiscard]] VolumeIdentity volume_identity() const;
     [[nodiscard]] ControllerStats controller_stats() const;
+
+    // The applied VD value range of the displayed image (percentile clip
+    // range when enabled, the v3 stretch otherwise). {0, 0} when nothing is
+    // displayed — the colorbar and hosts use this.
+    [[nodiscard]] std::pair<double, double> displayed_range() const;
 
     // The currently displayed indexed8 image (pre-transform). Null image when
     // nothing is rendered. Ownership stays with the widget.
@@ -134,6 +206,19 @@ public:
     void report_click_selection(const class QPointF& image_point);
     void report_drag_selection(const class QPointF& from, const class QPointF& to);
     void handle_result(const SliceResult& result); // queued worker delivery
+
+    // Canvas -> widget pick interactions (public for the canvas child).
+    // Returns the image-space markers for the current picks (re-projected
+    // onto this view); used by the canvas to hit-test and paint them.
+    [[nodiscard]] std::vector<QPointF> pick_markers() const;
+    // Canvas left-click while picking is enabled: add / begin-drag-edit.
+    void report_pick_press(const class QPointF& image_point);
+    void report_pick_drag(const class QPointF& image_point);
+    // Returns true when the click deleted a pick (right-click near one).
+    bool report_pick_context_menu(const class QPointF& image_point);
+    // Rebuilds the cached wiggle geometry for the current canvas size.
+    void rebuild_wiggle(int width, int height);
+    [[nodiscard]] const display::WiggleGeometry* wiggle_geometry() const;
 
 private:
     struct Impl;

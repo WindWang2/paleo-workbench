@@ -29,6 +29,10 @@ struct PlaneKeyHash {
     }
 };
 
+// Neighbour offsets for opportunistic prefetch, mirroring the Python
+// SliceReadWorker._PREFETCH_OFFSETS (nearest planes first).
+constexpr std::int64_t kPrefetchOffsets[]{1, -1, 2, -2};
+
 } // namespace
 
 struct SliceController::Impl {
@@ -57,6 +61,7 @@ struct SliceController::Impl {
     std::optional<Queued> queued;
     std::uint64_t newest_generation{0}; // generation of the newest submit
     bool shutdown{false};
+    bool prefetch_enabled{true}; // opportunistic neighbour prefetch toggle
 
     // LRU of raw float planes, front = most recent. Capacity-bounded.
     std::list<std::pair<PlaneKey, std::vector<float>>> cache;
@@ -70,6 +75,23 @@ struct SliceController::Impl {
     explicit Impl(std::shared_ptr<pwb::viz::ISeismicVolume> src, std::size_t cap, ResultSink fn)
         : sink(std::move(fn)), cache_capacity(std::max<std::size_t>(cap, 1)),
           source(std::move(src)) {}
+
+    // Inserts or renews one cache entry and trims to capacity. The caller
+    // holds the mutex; cache_peak tracks the high-water mark.
+    void put_plane(const PlaneKey& key, std::vector<float> values) {
+        const auto found = cache_index.find(key);
+        if (found != cache_index.end()) {
+            cache.erase(found->second);
+            cache_index.erase(found);
+        }
+        cache.emplace_front(key, std::move(values));
+        cache_index[key] = cache.begin();
+        while (cache.size() > cache_capacity) {
+            cache_index.erase(cache.back().first);
+            cache.pop_back();
+        }
+        cache_peak = std::max(cache_peak, cache.size());
+    }
 
     void worker_loop(const std::stop_token& stop) {
         for (;;) {
@@ -100,18 +122,7 @@ struct SliceController::Impl {
                                    static_cast<std::uint8_t>(
                                        pwb::viz::axis_index(result.axis)),
                                    result.index};
-                const auto found = cache_index.find(key);
-                if (found != cache_index.end()) {
-                    cache.erase(found->second);
-                    cache_index.erase(found);
-                }
-                cache.emplace_front(key, result.values);
-                cache_index[key] = cache.begin();
-                while (cache.size() > cache_capacity) {
-                    cache_index.erase(cache.back().first);
-                    cache.pop_back();
-                }
-                cache_peak = std::max(cache_peak, cache.size());
+                put_plane(key, result.values);
             }
             if (stale) {
                 ++stats.discarded_stale;
@@ -128,6 +139,71 @@ struct SliceController::Impl {
                     lock.lock();
                 }
             }
+            // Opportunistic neighbour prefetch: only after a fresh, successful
+            // request (a stale result means newer work exists) and never once
+            // shutdown was requested.
+            const bool prefetch = result.ok && !stale && prefetch_enabled && !shutdown;
+            lock.unlock();
+            if (prefetch) {
+                prefetch_neighbours(result, volume);
+            }
+        }
+    }
+
+    // Warms the plane cache with the delivered plane's +1/-1/+2/-2
+    // neighbours (Python SliceReadWorker semantics). Worker-thread only and
+    // cache-warming only: no sink results are ever emitted. Every read is
+    // preceded by a re-check under the lock that abandons the pass as soon
+    // as new work, a source swap, or shutdown arrives.
+    void prefetch_neighbours(const SliceResult& result,
+                             const std::shared_ptr<pwb::viz::ISeismicVolume>& volume) {
+        // A native timeslice read is O(volume): prefetching its neighbours
+        // would block the worker after every sample-slider tick, so sample
+        // slices are skipped (the Python worker skips "time" likewise).
+        if (result.axis == pwb::viz::VolumeAxis::sample) {
+            return;
+        }
+        const pwb::viz::VolumeGeometryV1& geometry = volume->geometry();
+        const std::size_t axis_no = pwb::viz::axis_index(result.axis);
+        const std::int64_t extent = geometry.shape[axis_no];
+        const std::size_t plane_size =
+            static_cast<std::size_t>(result.rows * result.cols);
+        for (const std::int64_t offset : kPrefetchOffsets) {
+            const std::int64_t neighbour = result.index + offset;
+            if (neighbour < 0 || neighbour >= extent) {
+                continue; // clamped to the axis extent
+            }
+            const PlaneKey key{result.epoch,
+                               static_cast<std::uint8_t>(axis_no),
+                               neighbour};
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                if (!prefetch_enabled) {
+                    return;
+                }
+                if (shutdown || current_epoch != result.epoch ||
+                    queued.has_value()) {
+                    ++stats.prefetch_abandoned;
+                    return;
+                }
+                if (cache_index.find(key) != cache_index.end()) {
+                    continue; // already warm
+                }
+            }
+            std::vector<float> plane(plane_size, 0.0f);
+            const std::size_t written =
+                volume->read_slice(result.axis, neighbour, plane);
+            std::lock_guard<std::mutex> lock(mutex);
+            if (shutdown || current_epoch != result.epoch || queued.has_value()) {
+                ++stats.prefetch_abandoned;
+                return;
+            }
+            ++stats.prefetch_reads;
+            if (written == plane_size) {
+                put_plane(key, std::move(plane));
+            }
+            // A rejected prefetch read is dropped silently, like the Python
+            // worker's per-neighbour except: continue.
         }
     }
 
@@ -263,6 +339,16 @@ void SliceController::request_shutdown() {
         impl_->worker.request_stop();
         impl_->worker.join();
     }
+}
+
+void SliceController::set_prefetch_enabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->prefetch_enabled = enabled;
+}
+
+bool SliceController::prefetch_enabled() const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    return impl_->prefetch_enabled;
 }
 
 ControllerStats SliceController::stats() const {

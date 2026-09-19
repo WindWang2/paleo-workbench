@@ -330,6 +330,13 @@ endif()
 # ---------------------------------------------------- D/E fail-closed gates --
 # D (libs/seismic_viewer) and E (libs/seismic_attributes) are separate
 # lines; until their owners deliver, the switches exist but cannot be ON.
+# BEGIN VIZ-D — the viewer's crossplot core reuses the frozen single-trace
+# attribute kernels, so the viewer line now implies the attributes line
+# (same pattern as PWB_BUILD_SEISMIC_SERVICE implying seismic_io below).
+if(PWB_BUILD_SEISMIC_VIEWER)
+    set(PWB_BUILD_SEISMIC_ATTRIBUTES ON)
+endif()
+# END VIZ-D
 if(PWB_BUILD_SEISMIC_VIEWER)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/seismic_viewer/CMakeLists.txt")
         message(FATAL_ERROR
@@ -796,6 +803,16 @@ if(BUILD_TESTING AND TARGET Pwb::Application)
     add_subdirectory(tests/cpp/viz_c)
 endif()
 # END VIZ-C
+
+# BEGIN VIZ-D — advanced seismic display tests (CONV-VIZ V5 D-line):
+# frozen-Python replay (display/horizon/crossplot/isosurface/wellhead
+# oracles), Qt widget integration and the preview presenter replay. Only
+# the viewer library is required; the preview replay additionally needs
+# Pwb::UiPagesPreview (PLATFORM family) and registers only when present.
+if(BUILD_TESTING AND TARGET Pwb::SeismicViewer)
+    add_subdirectory(tests/cpp/viz_d)
+endif()
+# END VIZ-D
 
 # BEGIN UI-04 — core page-worker ports (libs/ui_workers): the Qt-free C++
 # halves of the seven PySide6 worker modules in paleo_workbench/ui/pages.

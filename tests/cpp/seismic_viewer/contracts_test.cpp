@@ -17,10 +17,22 @@ using namespace pwb::seismic_viewer;
 
 TEST(colormap_registry_is_frozen) {
     const auto names = color_map_names();
-    PWB_CHECK(names.size() == 3);
+    // BEGIN VIZ-D — the registry is now the colormap.py superset (V5
+    // diff-set): the v3 trio keeps its frozen order at the front, the
+    // colormap.py names follow; "heat" remains a C++-only extra. Exact
+    // 256-entry LUT parity with the frozen Python builder is asserted in
+    // viz_d.core (colormaps_match_frozen_python_luts).
+    PWB_CHECK(names.size() == 9);
     PWB_CHECK(names[0] == "grayscale");
     PWB_CHECK(names[1] == "seismic");
-    PWB_CHECK(names[2] == "heat");
+    PWB_CHECK(names[2] == "seismic_r");
+    PWB_CHECK(names[3] == "gray");
+    PWB_CHECK(names[4] == "jet");
+    PWB_CHECK(names[5] == "hsv");
+    PWB_CHECK(names[6] == "viridis");
+    PWB_CHECK(names[7] == "phase_wheel");
+    PWB_CHECK(names[8] == "heat");
+    // END VIZ-D
     for (const auto name : names) {
         const ColorLut lut = color_lut(name);
         PWB_CHECK_MSG(lut.size() == 256, "every colormap has 256 entries");
