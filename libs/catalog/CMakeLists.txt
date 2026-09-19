@@ -58,3 +58,30 @@ target_sources(pwb_catalog PRIVATE
     src/paged_sql.cpp
 )
 # END CONV-26
+
+# BEGIN CONV-31
+# Catalog domain core (conv-31): document indexes, seam value types,
+# checksum, policy layers (governance / artifact policy / port roles /
+# model gates), telemetry, lineage walks, impact/staleness, explain,
+# missing-source scan + relink, queries, tags collaborator, legacy
+# migration/projection, structural audit, V11 policy core and the trash /
+# working-copy storage surface. New TUs only — the existing lists above
+# are untouched.
+target_sources(pwb_catalog PRIVATE
+    src/document_index.cpp
+    src/refs.cpp
+    src/checksum.cpp
+    src/policies.cpp
+    src/telemetry.cpp
+    src/lineage_graph.cpp
+    src/impact.cpp
+    src/explain.cpp
+    src/sources.cpp
+    src/queries.cpp
+    src/tags.cpp
+    src/legacy_migration.cpp
+    src/audit.cpp
+    src/v11_policy.cpp
+    src/trash.cpp
+)
+# END CONV-31
