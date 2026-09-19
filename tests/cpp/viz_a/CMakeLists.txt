@@ -84,3 +84,21 @@ if(TARGET Pwb::VisualizationWellLog)
     target_link_libraries(viz_a.patterns PRIVATE
         Pwb::VisualizationWellLog Pwb::Domain)
 endif()
+
+# App wiring compile/link cover: the production TU compiled against the
+# real JobCenter + bridge targets without the full platform app (whose
+# vendored QGIS SDK does not configure on every host — see run-viz-a-gate
+# step 7). Exercises the no-dock/no-jobs early-outs at runtime.
+if(TARGET Pwb::IngestLasWle AND TARGET Pwb::UiWorkersWleLoad
+   AND TARGET Pwb::JobQt AND TARGET Pwb::VisualizationWellLog)
+    viz_a_test(viz_a.install_cover install_cover_test.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/viz_a_install.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/job_center.cpp)
+    target_include_directories(viz_a.install_cover PRIVATE
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+    target_link_libraries(viz_a.install_cover PRIVATE
+        Pwb::Ingest Pwb::IngestLasWle Pwb::UiWorkers Pwb::UiWorkersWleLoad
+        Pwb::VisualizationWellLog Pwb::JobQt Qt6::Widgets)
+    set_tests_properties(viz_a.install_cover PROPERTIES ENVIRONMENT
+        "${VIZ_A_GL_ENV}")
+endif()

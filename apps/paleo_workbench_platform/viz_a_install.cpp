@@ -92,6 +92,7 @@ bool install(QMainWindow* window, JobCenter* jobs) {
     // branch and the well_log fallback branch become real previews.
     pwb::ingest::preview::install_wle_las_preview_provider();
 
+    if (window == nullptr || jobs == nullptr) return false;
     QDockWidget* dock = window->findChild<QDockWidget*>("well-log-dock");
     auto* host = dock != nullptr
                      ? qobject_cast<pwb::viz::WellLogHostWidget*>(dock->widget())
