@@ -825,6 +825,36 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-10
 
+# BEGIN UI-14 — root-controllers slice (libs/ui_controllers): Qt-free
+# cores of the six paleo_workbench/ui root controllers (selection bus +
+# view coordination, map actions, data lifecycle, project lifecycle +
+# three-phase save worker, cross-page workflow) plus thin Qt Widgets
+# shells (JobOwner-backed workers, stock-dialog binds). Same gating
+# model as UI-09/10/11: no per-slice option; the library joins platform
+# configures that already resolved the data catalog (Pwb::Catalog via
+# libs/data_suite or libs/catalog), the project document stack
+# (Pwb::Project), the UI-04 worker contracts (Pwb::UiWorkers), the UI-01
+# shell substrate + UI-03 data core (Pwb::UiShell + Pwb::UiDataCore),
+# the recompute planner (Pwb::WorkflowRuntime), the spatial-result gate
+# (Pwb::Prediction) and the tool registries (Pwb::ToolPolicy +
+# Pwb::UiWorkstation). Application-shell wiring stays a later
+# integration slice — these targets only expose the seams it binds.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::UiWorkers AND TARGET Pwb::UiDataCore
+   AND TARGET Pwb::UiShell AND TARGET Pwb::UiWorkstation
+   AND TARGET Pwb::Catalog AND TARGET Pwb::Project
+   AND TARGET Pwb::WorkflowRuntime AND TARGET Pwb::Prediction
+   AND TARGET Pwb::ToolPolicy)
+    add_subdirectory(libs/ui_controllers)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-14: libs/ui_controllers skipped — needs Pwb::UiWorkers + "
+        "Pwb::UiDataCore + Pwb::UiShell + Pwb::UiWorkstation + "
+        "Pwb::Catalog + Pwb::Project + Pwb::WorkflowRuntime + "
+        "Pwb::Prediction + Pwb::ToolPolicy; the Python controllers "
+        "remain the production path")
+endif()
+# END UI-14
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared
