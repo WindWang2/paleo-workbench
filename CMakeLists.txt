@@ -694,6 +694,7 @@ if(PWB_BUILD_PLATFORM)
     # (map canvas panel, work-area widget, layer tree, document/chrome
     # panels, dock manager, constrained mapping-page shell).
     add_subdirectory(libs/ui_map)
+    add_subdirectory(libs/ui_pages_preview)
     add_subdirectory(apps/paleo_workbench_platform)
     if(BUILD_TESTING)
         enable_testing()

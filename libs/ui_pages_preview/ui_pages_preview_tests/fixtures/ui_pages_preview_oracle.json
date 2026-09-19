@@ -1,0 +1,1928 @@
+{
+  "meta": {
+    "generator": "tools/oracle/generate_ui_preview_fixtures.py",
+    "python": "3.14.6",
+    "note": "PySide6 stubbed comprehensively; seismic_3d_api and geoviz host are sentinels/stubs — their kernels live in other slices. Widget-observable sections are replayed by ui_pages_preview.qt_widgets_smoke; the Qt-free cores by ui_pages_preview.oracle_replay."
+  },
+  "settings": {
+    "defaults": {
+      "font_size": 12,
+      "show_metadata": true,
+      "text_limit_kib": 256,
+      "wrap_text": false,
+      "table_max_rows": 200,
+      "table_max_columns": 40,
+      "auto_fit_columns": true,
+      "smooth_images": true,
+      "geotiff_thumbnail_px": 256,
+      "show_geo_metadata": true,
+      "pdf_fit_mode": "width",
+      "pdf_zoom_percent": 100,
+      "json_limit_mib": 5,
+      "json_array_collapse_threshold": 100,
+      "json_expand_depth": 2,
+      "media_autoplay": false,
+      "media_volume": 70,
+      "geoviz_max_curves": 12,
+      "geoviz_max_depth_samples": 2000,
+      "geoviz_max_slice_axis": 512,
+      "geoviz_max_points": 50000,
+      "geoviz_surface_grid_size": 256,
+      "density": "comfortable",
+      "theme_mode": "light"
+    },
+    "fingerprint": "04e986d3aa5330c0",
+    "from_mapping_cases": [
+      {
+        "label": "empty",
+        "ok": true,
+        "settings": {
+          "font_size": 12,
+          "show_metadata": true,
+          "text_limit_kib": 256,
+          "wrap_text": false,
+          "table_max_rows": 200,
+          "table_max_columns": 40,
+          "auto_fit_columns": true,
+          "smooth_images": true,
+          "geotiff_thumbnail_px": 256,
+          "show_geo_metadata": true,
+          "pdf_fit_mode": "width",
+          "pdf_zoom_percent": 100,
+          "json_limit_mib": 5,
+          "json_array_collapse_threshold": 100,
+          "json_expand_depth": 2,
+          "media_autoplay": false,
+          "media_volume": 70,
+          "geoviz_max_curves": 12,
+          "geoviz_max_depth_samples": 2000,
+          "geoviz_max_slice_axis": 512,
+          "geoviz_max_points": 50000,
+          "geoviz_surface_grid_size": 256,
+          "density": "comfortable",
+          "theme_mode": "light"
+        }
+      },
+      {
+        "label": "subset_valid",
+        "ok": true,
+        "settings": {
+          "font_size": 20,
+          "show_metadata": true,
+          "text_limit_kib": 256,
+          "wrap_text": true,
+          "table_max_rows": 200,
+          "table_max_columns": 40,
+          "auto_fit_columns": true,
+          "smooth_images": true,
+          "geotiff_thumbnail_px": 256,
+          "show_geo_metadata": true,
+          "pdf_fit_mode": "page",
+          "pdf_zoom_percent": 100,
+          "json_limit_mib": 5,
+          "json_array_collapse_threshold": 100,
+          "json_expand_depth": 2,
+          "media_autoplay": false,
+          "media_volume": 70,
+          "geoviz_max_curves": 12,
+          "geoviz_max_depth_samples": 2000,
+          "geoviz_max_slice_axis": 512,
+          "geoviz_max_points": 50000,
+          "geoviz_surface_grid_size": 256,
+          "density": "comfortable",
+          "theme_mode": "light"
+        }
+      },
+      {
+        "label": "unknown_ignored",
+        "ok": true,
+        "settings": {
+          "font_size": 10,
+          "show_metadata": true,
+          "text_limit_kib": 256,
+          "wrap_text": false,
+          "table_max_rows": 200,
+          "table_max_columns": 40,
+          "auto_fit_columns": true,
+          "smooth_images": true,
+          "geotiff_thumbnail_px": 256,
+          "show_geo_metadata": true,
+          "pdf_fit_mode": "width",
+          "pdf_zoom_percent": 100,
+          "json_limit_mib": 5,
+          "json_array_collapse_threshold": 100,
+          "json_expand_depth": 2,
+          "media_autoplay": false,
+          "media_volume": 70,
+          "geoviz_max_curves": 12,
+          "geoviz_max_depth_samples": 2000,
+          "geoviz_max_slice_axis": 512,
+          "geoviz_max_points": 50000,
+          "geoviz_surface_grid_size": 256,
+          "density": "comfortable",
+          "theme_mode": "light"
+        }
+      },
+      {
+        "label": "bool_not_bool",
+        "ok": false,
+        "kind": "TypeError",
+        "error": "wrap_text must be a boolean"
+      },
+      {
+        "label": "int_not_int",
+        "ok": false,
+        "kind": "TypeError",
+        "error": "font_size must be an integer"
+      },
+      {
+        "label": "int_bool",
+        "ok": false,
+        "kind": "TypeError",
+        "error": "font_size must be an integer"
+      },
+      {
+        "label": "below_min",
+        "ok": false,
+        "kind": "ValueError",
+        "error": "font_size must be between 8 and 32"
+      },
+      {
+        "label": "above_max",
+        "ok": false,
+        "kind": "ValueError",
+        "error": "table_max_rows must be between 20 and 2000"
+      },
+      {
+        "label": "bad_fit_mode",
+        "ok": false,
+        "kind": "ValueError",
+        "error": "pdf_fit_mode must be page, width, or custom"
+      },
+      {
+        "label": "bad_density",
+        "ok": false,
+        "kind": "ValueError",
+        "error": "density must be 'comfortable' or 'compact'"
+      },
+      {
+        "label": "bad_theme",
+        "ok": false,
+        "kind": "ValueError",
+        "error": "theme_mode must be 'light' or 'system'"
+      }
+    ],
+    "mode_category": {
+      "text": "text",
+      "rich_text": "text",
+      "web_document": "text",
+      "table": "table",
+      "well_log": "table",
+      "seismic": "table",
+      "image": "image",
+      "geotiff": "image",
+      "pdf": "pdf",
+      "json_tree": "json",
+      "media": "media",
+      "geoviz": "geoviz",
+      "unknown_mode": "general",
+      "": "general"
+    },
+    "store": {
+      "loaded_default": {
+        "font_size": 12,
+        "show_metadata": true,
+        "text_limit_kib": 256,
+        "wrap_text": false,
+        "table_max_rows": 200,
+        "table_max_columns": 40,
+        "auto_fit_columns": true,
+        "smooth_images": true,
+        "geotiff_thumbnail_px": 256,
+        "show_geo_metadata": true,
+        "pdf_fit_mode": "width",
+        "pdf_zoom_percent": 100,
+        "json_limit_mib": 5,
+        "json_array_collapse_threshold": 100,
+        "json_expand_depth": 2,
+        "media_autoplay": false,
+        "media_volume": 70,
+        "geoviz_max_curves": 12,
+        "geoviz_max_depth_samples": 2000,
+        "geoviz_max_slice_axis": 512,
+        "geoviz_max_points": 50000,
+        "geoviz_surface_grid_size": 256,
+        "density": "comfortable",
+        "theme_mode": "light"
+      },
+      "loaded_custom": {
+        "font_size": 14,
+        "show_metadata": true,
+        "text_limit_kib": 256,
+        "wrap_text": true,
+        "table_max_rows": 200,
+        "table_max_columns": 40,
+        "auto_fit_columns": true,
+        "smooth_images": true,
+        "geotiff_thumbnail_px": 256,
+        "show_geo_metadata": true,
+        "pdf_fit_mode": "page",
+        "pdf_zoom_percent": 100,
+        "json_limit_mib": 5,
+        "json_array_collapse_threshold": 100,
+        "json_expand_depth": 2,
+        "media_autoplay": false,
+        "media_volume": 55,
+        "geoviz_max_curves": 12,
+        "geoviz_max_depth_samples": 2000,
+        "geoviz_max_slice_axis": 512,
+        "geoviz_max_points": 50000,
+        "geoviz_surface_grid_size": 256,
+        "density": "comfortable",
+        "theme_mode": "light"
+      },
+      "loaded_bad": {
+        "font_size": 12,
+        "show_metadata": true,
+        "text_limit_kib": 256,
+        "wrap_text": false,
+        "table_max_rows": 200,
+        "table_max_columns": 40,
+        "auto_fit_columns": true,
+        "smooth_images": true,
+        "geotiff_thumbnail_px": 256,
+        "show_geo_metadata": true,
+        "pdf_fit_mode": "width",
+        "pdf_zoom_percent": 100,
+        "json_limit_mib": 5,
+        "json_array_collapse_threshold": 100,
+        "json_expand_depth": 2,
+        "media_autoplay": false,
+        "media_volume": 70,
+        "geoviz_max_curves": 12,
+        "geoviz_max_depth_samples": 2000,
+        "geoviz_max_slice_axis": 512,
+        "geoviz_max_points": 50000,
+        "geoviz_surface_grid_size": 256,
+        "density": "comfortable",
+        "theme_mode": "light"
+      },
+      "reset_result": {
+        "font_size": 12,
+        "show_metadata": true,
+        "text_limit_kib": 256,
+        "wrap_text": false,
+        "table_max_rows": 200,
+        "table_max_columns": 40,
+        "auto_fit_columns": true,
+        "smooth_images": true,
+        "geotiff_thumbnail_px": 256,
+        "show_geo_metadata": true,
+        "pdf_fit_mode": "width",
+        "pdf_zoom_percent": 100,
+        "json_limit_mib": 5,
+        "json_array_collapse_threshold": 100,
+        "json_expand_depth": 2,
+        "media_autoplay": false,
+        "media_volume": 70,
+        "geoviz_max_curves": 12,
+        "geoviz_max_depth_samples": 2000,
+        "geoviz_max_slice_axis": 512,
+        "geoviz_max_points": 50000,
+        "geoviz_surface_grid_size": 256,
+        "density": "comfortable",
+        "theme_mode": "light"
+      },
+      "group": "preview/settings"
+    }
+  },
+  "table": {
+    "is_number": {
+      "NaN": true,
+      "0": true,
+      "-1": true,
+      "3.14": true,
+      "+2.5": true,
+      ".5": true,
+      "5.": true,
+      "1e3": true,
+      "1E-3": true,
+      "1_000": true,
+      "inf": true,
+      "-inf": true,
+      "infinity": true,
+      "nan": true,
+      "NAN": true,
+      "0x10": false,
+      "0b11": false,
+      "1__0": false,
+      "_10": false,
+      "10_": false,
+      "": false,
+      "abc": false,
+      " 12": true,
+      "12 ": true,
+      "1.2.3": false,
+      "--5": false,
+      "深度": false
+    },
+    "depth_cases": [
+      {
+        "headers": [
+          "DEPT",
+          "GR",
+          "CALI"
+        ],
+        "depth_col": 0,
+        "curve_def": false
+      },
+      {
+        "headers": [
+          "depth",
+          "x"
+        ],
+        "depth_col": 0,
+        "curve_def": false
+      },
+      {
+        "headers": [
+          "Depth",
+          "y"
+        ],
+        "depth_col": 0,
+        "curve_def": false
+      },
+      {
+        "headers": [
+          "深度",
+          "z"
+        ],
+        "depth_col": 0,
+        "curve_def": false
+      },
+      {
+        "headers": [
+          "dept_extra",
+          "w"
+        ],
+        "depth_col": -1,
+        "curve_def": false
+      },
+      {
+        "headers": [
+          "A",
+          "B"
+        ],
+        "depth_col": -1,
+        "curve_def": false
+      },
+      {
+        "headers": [],
+        "depth_col": -1,
+        "curve_def": false
+      }
+    ],
+    "curve_cases": [
+      {
+        "headers": [
+          "曲线",
+          "单位",
+          "值"
+        ],
+        "curve_def": true,
+        "depth_col": -1
+      },
+      {
+        "headers": [
+          "Mnemonic",
+          "Unit",
+          "Val"
+        ],
+        "curve_def": true,
+        "depth_col": -1
+      },
+      {
+        "headers": [
+          "曲线",
+          "b"
+        ],
+        "curve_def": false,
+        "depth_col": -1
+      },
+      {
+        "headers": [
+          "曲线A",
+          "b",
+          "c"
+        ],
+        "curve_def": false,
+        "depth_col": -1
+      },
+      {
+        "headers": [
+          "a",
+          "b",
+          "c"
+        ],
+        "curve_def": false,
+        "depth_col": -1
+      },
+      {
+        "headers": [],
+        "curve_def": false,
+        "depth_col": -1
+      }
+    ],
+    "truncation_cases": [
+      {
+        "rows": 10,
+        "cols": 5,
+        "kept": 10,
+        "truncated": false,
+        "message": "",
+        "tooltip": ""
+      },
+      {
+        "rows": 0,
+        "cols": 0,
+        "kept": 0,
+        "truncated": false,
+        "message": "",
+        "tooltip": ""
+      },
+      {
+        "rows": 300000,
+        "cols": 5,
+        "kept": 200000,
+        "truncated": true,
+        "message": "表格预览已截断：显示 200000/300000 行（上限 1000000 单元格）",
+        "tooltip": "表格预览已截断：显示 200000/300000 行（上限 1000000 单元格）"
+      },
+      {
+        "rows": 5001,
+        "cols": 200,
+        "kept": 5000,
+        "truncated": true,
+        "message": "表格预览已截断：显示 5000/5001 行（上限 1000000 单元格）",
+        "tooltip": "表格预览已截断：显示 5000/5001 行（上限 1000000 单元格）"
+      },
+      {
+        "rows": 250001,
+        "cols": 4,
+        "kept": 250000,
+        "truncated": true,
+        "message": "表格预览已截断：显示 250000/250001 行（上限 1000000 单元格）",
+        "tooltip": "表格预览已截断：显示 250000/250001 行（上限 1000000 单元格）"
+      }
+    ],
+    "copy_all": "a\tb\tc\n1\t2\t3\nx\t\t\n\t\t",
+    "row_texts": [
+      [
+        "1",
+        "2",
+        "3"
+      ],
+      [
+        "x",
+        "",
+        ""
+      ],
+      [
+        "",
+        "",
+        ""
+      ]
+    ],
+    "copy_all_empty": "",
+    "depth_table_cells": [
+      {
+        "display": "100.5",
+        "font": "mono_bold",
+        "fg": "#0b5563",
+        "bg": "#d8ebef",
+        "align": 130
+      },
+      {
+        "display": "80",
+        "font": "mono",
+        "fg": null,
+        "bg": null,
+        "align": 130
+      },
+      {
+        "display": "NaN",
+        "font": "mono",
+        "fg": "#8c99a3",
+        "bg": null,
+        "align": 130
+      },
+      {
+        "display": "x",
+        "font": "mono_bold",
+        "fg": "#0b5563",
+        "bg": "#d8ebef",
+        "align": 130
+      },
+      {
+        "display": "-1",
+        "font": "mono",
+        "fg": null,
+        "bg": null,
+        "align": 130
+      },
+      {
+        "display": "abc",
+        "font": null,
+        "fg": null,
+        "bg": null,
+        "align": null
+      }
+    ],
+    "curve_table_cells": [
+      {
+        "display": "GR",
+        "font": "mono_bold",
+        "fg": "#0f766e",
+        "bg": "#edf1f4",
+        "align": 132
+      },
+      {
+        "display": "gAPI",
+        "font": "mono",
+        "fg": "#53616c",
+        "bg": null,
+        "align": 132
+      },
+      {
+        "display": "gamma",
+        "font": null,
+        "fg": null,
+        "bg": null,
+        "align": null
+      },
+      {
+        "display": "7",
+        "font": "mono",
+        "fg": null,
+        "bg": null,
+        "align": 130
+      }
+    ],
+    "plain_table_cells": [
+      {
+        "display": "padded",
+        "font": null,
+        "fg": null,
+        "bg": null,
+        "align": null
+      },
+      {
+        "display": "NaN",
+        "font": "mono",
+        "fg": "#8c99a3",
+        "bg": null,
+        "align": 130
+      },
+      {
+        "display": "3.5",
+        "font": "mono",
+        "fg": null,
+        "bg": null,
+        "align": 130
+      },
+      {
+        "display": "plain",
+        "font": null,
+        "fg": null,
+        "bg": null,
+        "align": null
+      }
+    ]
+  },
+  "json_tree": {
+    "expand_batch": 2000,
+    "max_build_depth": 64,
+    "row_cases": [
+      {
+        "case": "scalar_str",
+        "spec": {
+          "key": "k",
+          "label": "hello",
+          "has_container": false,
+          "has_more": false,
+          "children": []
+        }
+      },
+      {
+        "case": "scalar_int",
+        "spec": {
+          "key": "k",
+          "label": "42",
+          "has_container": false,
+          "has_more": false,
+          "children": []
+        }
+      },
+      {
+        "case": "scalar_float",
+        "spec": {
+          "key": "k",
+          "label": "3.5",
+          "has_container": false,
+          "has_more": false,
+          "children": []
+        }
+      },
+      {
+        "case": "scalar_true",
+        "spec": {
+          "key": "k",
+          "label": "True",
+          "has_container": false,
+          "has_more": false,
+          "children": []
+        }
+      },
+      {
+        "case": "scalar_false",
+        "spec": {
+          "key": "k",
+          "label": "False",
+          "has_container": false,
+          "has_more": false,
+          "children": []
+        }
+      },
+      {
+        "case": "scalar_none",
+        "spec": {
+          "key": "k",
+          "label": "None",
+          "has_container": false,
+          "has_more": false,
+          "children": []
+        }
+      },
+      {
+        "case": "small_dict",
+        "spec": {
+          "key": "k",
+          "label": "{object · 2 keys}",
+          "has_container": false,
+          "has_more": false,
+          "children": [
+            {
+              "key": "a",
+              "label": "1",
+              "has_container": false,
+              "has_more": false,
+              "children": []
+            },
+            {
+              "key": "b",
+              "label": "x",
+              "has_container": false,
+              "has_more": false,
+              "children": []
+            }
+          ]
+        }
+      },
+      {
+        "case": "small_list",
+        "spec": {
+          "key": "k",
+          "label": "[list · 3]",
+          "has_container": false,
+          "has_more": false,
+          "children": [
+            {
+              "key": "0",
+              "label": "1",
+              "has_container": false,
+              "has_more": false,
+              "children": []
+            },
+            {
+              "key": "1",
+              "label": "a",
+              "has_container": false,
+              "has_more": false,
+              "children": []
+            },
+            {
+              "key": "2",
+              "label": "None",
+              "has_container": false,
+              "has_more": false,
+              "children": []
+            }
+          ]
+        }
+      },
+      {
+        "case": "lazy_dict",
+        "spec": {
+          "key": "k",
+          "label": "{object · 5 keys}",
+          "has_container": true,
+          "has_more": false,
+          "children": []
+        }
+      },
+      {
+        "case": "lazy_list",
+        "spec": {
+          "key": "k",
+          "label": "[5 items]",
+          "has_container": true,
+          "has_more": false,
+          "children": []
+        }
+      },
+      {
+        "case": "nested",
+        "spec": {
+          "key": "k",
+          "label": "{object · 1 keys}",
+          "has_container": false,
+          "has_more": false,
+          "children": [
+            {
+              "key": "inner",
+              "label": "[list · 2]",
+              "has_container": false,
+              "has_more": false,
+              "children": [
+                {
+                  "key": "0",
+                  "label": "1",
+                  "has_container": false,
+                  "has_more": false,
+                  "children": []
+                },
+                {
+                  "key": "1",
+                  "label": "{object · 1 keys}",
+                  "has_container": false,
+                  "has_more": false,
+                  "children": [
+                    {
+                      "key": "deep",
+                      "label": "True",
+                      "has_container": false,
+                      "has_more": false,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "depth_cap": {
+      "key": "k",
+      "label": "…",
+      "has_container": false,
+      "has_more": false,
+      "children": []
+    },
+    "trees": [
+      {
+        "case": "dict_small",
+        "tree": [
+          {
+            "key": "a",
+            "label": "1",
+            "has_container": false,
+            "has_more": false,
+            "children": []
+          },
+          {
+            "key": "b",
+            "label": "[list · 2]",
+            "has_container": false,
+            "has_more": false,
+            "children": [
+              {
+                "key": "0",
+                "label": "1",
+                "has_container": false,
+                "has_more": false,
+                "children": []
+              },
+              {
+                "key": "1",
+                "label": "2",
+                "has_container": false,
+                "has_more": false,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "case": "dict_lazy_root",
+        "tree": [
+          {
+            "key": "[root]",
+            "label": "{object · 5 keys}",
+            "has_container": true,
+            "has_more": false,
+            "children": []
+          }
+        ]
+      },
+      {
+        "case": "list_root",
+        "tree": [
+          {
+            "key": "[root]",
+            "label": "[list · 2]",
+            "has_container": false,
+            "has_more": false,
+            "children": [
+              {
+                "key": "0",
+                "label": "1",
+                "has_container": false,
+                "has_more": false,
+                "children": []
+              },
+              {
+                "key": "1",
+                "label": "2",
+                "has_container": false,
+                "has_more": false,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "case": "scalar_root",
+        "tree": [
+          {
+            "key": "[root]",
+            "label": "just-a-string",
+            "has_container": false,
+            "has_more": false,
+            "children": []
+          }
+        ]
+      }
+    ],
+    "container_items_list": [
+      [
+        "0",
+        "item0"
+      ],
+      [
+        "1",
+        "item1"
+      ],
+      [
+        "2",
+        "item2"
+      ],
+      [
+        "3",
+        "item3"
+      ],
+      [
+        "4",
+        "item4"
+      ],
+      [
+        "5",
+        "item5"
+      ],
+      [
+        "6",
+        "item6"
+      ]
+    ],
+    "container_items_dict": [
+      [
+        "a",
+        "1"
+      ],
+      [
+        "b",
+        "2"
+      ]
+    ],
+    "batch_trace": {
+      "off1": 2000,
+      "off2": 4000,
+      "off3": 4500,
+      "sentinel1": [
+        "… 展开加载下一批（剩余 2500 项）"
+      ],
+      "sentinel2": [
+        "… 展开加载下一批（剩余 500 项）"
+      ],
+      "total_rows_after": 4502
+    }
+  },
+  "pdf": {
+    "zoom_sequences": [
+      {
+        "op": "in",
+        "percent": 125,
+        "fit_mode": "custom",
+        "zoom_label": "125%",
+        "view_zoom_mode": "Custom",
+        "view_zoom_factor": 1.25
+      },
+      {
+        "op": "in",
+        "percent": 156,
+        "fit_mode": "custom",
+        "zoom_label": "156%",
+        "view_zoom_mode": "Custom",
+        "view_zoom_factor": 1.56
+      },
+      {
+        "op": "out",
+        "percent": 125,
+        "fit_mode": "custom",
+        "zoom_label": "125%",
+        "view_zoom_mode": "Custom",
+        "view_zoom_factor": 1.25
+      },
+      {
+        "op": "out",
+        "percent": 100,
+        "fit_mode": "custom",
+        "zoom_label": "100%",
+        "view_zoom_mode": "Custom",
+        "view_zoom_factor": 1.0
+      },
+      {
+        "op": "out",
+        "percent": 80,
+        "fit_mode": "custom",
+        "zoom_label": "80%",
+        "view_zoom_mode": "Custom",
+        "view_zoom_factor": 0.8
+      },
+      {
+        "op": "in",
+        "percent": 100,
+        "fit_mode": "custom",
+        "zoom_label": "100%",
+        "view_zoom_mode": "Custom",
+        "view_zoom_factor": 1.0
+      },
+      {
+        "op": "in@790",
+        "percent": 800,
+        "fit_mode": "custom",
+        "zoom_label": "800%"
+      },
+      {
+        "op": "out@11",
+        "percent": 10,
+        "fit_mode": "custom",
+        "zoom_label": "10%"
+      },
+      {
+        "op": "fit_page",
+        "percent": 10,
+        "fit_mode": "page",
+        "view_zoom_mode": "FitInView",
+        "page_checked": true,
+        "width_checked": false
+      },
+      {
+        "op": "fit_width",
+        "percent": 10,
+        "fit_mode": "width",
+        "view_zoom_mode": "FitToWidth",
+        "page_checked": false,
+        "width_checked": true
+      }
+    ],
+    "fallback": {
+      "current_is_scroll": true,
+      "labels": 4,
+      "page_label": "1 / 4",
+      "prev_enabled": false,
+      "next_enabled": true,
+      "label0_h": 905,
+      "label0_w": 640,
+      "after_next": {
+        "page": 3,
+        "page_label": "4 / 4",
+        "scroll_value": 0
+      },
+      "scroll_mid": {
+        "page": 2,
+        "page_label": "3 / 4"
+      },
+      "error": {
+        "text": "",
+        "page_label": "1 / 3",
+        "load_failed": false
+      }
+    },
+    "view_path": {
+      "page_label_after_load": "1 / 3",
+      "prev_enabled": false,
+      "next_enabled": true,
+      "page_mode": "MultiPage",
+      "navigator_jumps": [
+        [
+          0,
+          1.0
+        ],
+        [
+          0,
+          1.0
+        ]
+      ],
+      "after_next": {
+        "page": 1,
+        "page_label": "2 / 3",
+        "prev_enabled": true,
+        "next_enabled": true
+      },
+      "after_next3": {
+        "page": 2,
+        "page_label": "3 / 3",
+        "prev_enabled": true,
+        "next_enabled": false
+      },
+      "after_prev": {
+        "page": 1,
+        "page_label": "2 / 3"
+      },
+      "zoom_sync": {
+        "percent": 235,
+        "label": "235%",
+        "fit_mode": "width"
+      },
+      "page_sync": {
+        "page": 0,
+        "label": "1 / 3"
+      },
+      "copy_all": {
+        "clipboard": "PAGE1 TEXT\nPAGE2 TEXT\nPAGE3 TEXT",
+        "btn_text": "已复制"
+      }
+    },
+    "unavailable": {
+      "text": "PDF 预览不可用",
+      "page_label": "0 / 0",
+      "copy_visible": false,
+      "prev_enabled": false
+    }
+  },
+  "image": {
+    "load_failure": {
+      "text": "图片预览加载失败",
+      "pixmap_null": true
+    },
+    "load_ok": {
+      "decoded_w": 800,
+      "decoded_h": 600,
+      "shown_w": 800,
+      "shown_h": 600,
+      "fit_mode": true,
+      "zoom": 1.0
+    },
+    "zoom_seq": [
+      {
+        "op": "in",
+        "zoom": 1.25,
+        "fit_mode": false,
+        "pixmap_null": true
+      },
+      {
+        "op": "in",
+        "zoom": 1.5625,
+        "fit_mode": false,
+        "pixmap_null": true
+      },
+      {
+        "op": "in",
+        "zoom": 1.953125,
+        "fit_mode": false,
+        "pixmap_null": true
+      },
+      {
+        "op": "out",
+        "zoom": 1.5625,
+        "fit_mode": false,
+        "pixmap_null": true
+      },
+      {
+        "op": "reset",
+        "zoom": 1.0,
+        "fit_mode": true,
+        "pixmap_null": true
+      }
+    ],
+    "zoom_emitted": [
+      1.25,
+      1.5625,
+      1.953125,
+      1.5625,
+      1.0
+    ],
+    "clamps": {
+      "high": {
+        "zoom": 8.0,
+        "fit": false
+      },
+      "low": {
+        "zoom": 0.1,
+        "fit": false
+      }
+    },
+    "pan_cases": [
+      {
+        "in": [
+          0,
+          0
+        ],
+        "out": [
+          0,
+          0
+        ]
+      },
+      {
+        "in": [
+          2000,
+          2000
+        ],
+        "out": [
+          1600,
+          700
+        ]
+      },
+      {
+        "in": [
+          -2000,
+          -2000
+        ],
+        "out": [
+          -1600,
+          -700
+        ]
+      },
+      {
+        "in": [
+          700,
+          500
+        ],
+        "out": [
+          700,
+          500
+        ]
+      },
+      {
+        "in": [
+          -700,
+          -500
+        ],
+        "out": [
+          -700,
+          -500
+        ]
+      }
+    ],
+    "virtual_size": [
+      4000,
+      2000
+    ],
+    "size_hints_zoom": {
+      "w": 240,
+      "h": 180
+    }
+  },
+  "media": {
+    "ms": {
+      "0": "00:00",
+      "999": "00:00",
+      "1000": "00:01",
+      "61000": "01:01",
+      "60000": "01:00",
+      "3599999": "59:59",
+      "3600000": "60:00",
+      "7265000": "121:05",
+      "-500": "-1:59"
+    },
+    "unavailable": {
+      "ensure": false,
+      "status": "音频预览不可用",
+      "play_enabled": false,
+      "attempted": true,
+      "available": false
+    },
+    "unavailable_set_path": {
+      "status": "音频预览不可用",
+      "play_enabled": false
+    },
+    "available": {
+      "ensure": true,
+      "status": "未加载",
+      "has_video": true,
+      "volume": 0.8,
+      "after_path": {
+        "status": "就绪",
+        "play_enabled": true,
+        "play_text": "播放",
+        "source_scheme": "file"
+      },
+      "toggle1": {
+        "text": "暂停",
+        "state": 1
+      },
+      "toggle2": {
+        "text": "播放",
+        "state": 2
+      },
+      "time": {
+        "label": "01:01 / 02:05",
+        "slider_value": 61000,
+        "slider_max": 125000
+      },
+      "after_error": {
+        "status": "缺少系统解码器，无法播放：clip.mp3",
+        "play_enabled": false,
+        "path_label": "/tmp/clip.mp3",
+        "path_visible": true,
+        "controls_hidden": true
+      }
+    },
+    "autoplay": {
+      "play_text": "暂停",
+      "status": "就绪",
+      "calls": [
+        "stop",
+        "play"
+      ]
+    }
+  },
+  "web": {
+    "intercept_allowed": {
+      "file": true,
+      "data": true,
+      "about": true,
+      "blob": true,
+      "http": false,
+      "https": false,
+      "ftp": false,
+      "javascript": false,
+      "": false,
+      "FILE": false
+    },
+    "nav_allowed": {
+      "file": true,
+      "data": true,
+      "about": true,
+      "blob": true,
+      "http": false,
+      "https": false,
+      "ftp": false,
+      "javascript": false,
+      "": false,
+      "FILE": false
+    },
+    "html_call": {
+      "html": "<b>hi</b>",
+      "base_scheme": "file"
+    },
+    "load_call": {
+      "scheme": "file"
+    },
+    "zoom_factor": 1.0,
+    "remote_attr": false
+  },
+  "seismic": {
+    "combo_items": [
+      "Inline (剖面)",
+      "Crossline (剖面)",
+      "Time (切片)"
+    ],
+    "null_path": {
+      "text": "无地震数据或无法解析",
+      "slider_enabled": false,
+      "combo_enabled": false,
+      "index_label": "0 / 0",
+      "slider_max": 0
+    },
+    "slider_ranges": [
+      {
+        "shape": [
+          5,
+          7,
+          9
+        ],
+        "axis": 0,
+        "slider_max": 4,
+        "slider_value": 2,
+        "index_label": "2 / 4"
+      },
+      {
+        "shape": [
+          5,
+          7,
+          9
+        ],
+        "axis": 1,
+        "slider_max": 6,
+        "slider_value": 3,
+        "index_label": "3 / 6"
+      },
+      {
+        "shape": [
+          5,
+          7,
+          9
+        ],
+        "axis": 2,
+        "slider_max": 8,
+        "slider_value": 4,
+        "index_label": "4 / 8"
+      },
+      {
+        "shape": [
+          1,
+          1,
+          1
+        ],
+        "axis": 0,
+        "slider_max": 0,
+        "slider_value": 0,
+        "index_label": "0 / 0"
+      },
+      {
+        "shape": [
+          1,
+          1,
+          1
+        ],
+        "axis": 1,
+        "slider_max": 0,
+        "slider_value": 0,
+        "index_label": "0 / 0"
+      },
+      {
+        "shape": [
+          1,
+          1,
+          1
+        ],
+        "axis": 2,
+        "slider_max": 0,
+        "slider_value": 0,
+        "index_label": "0 / 0"
+      },
+      {
+        "shape": [
+          10,
+          3,
+          2
+        ],
+        "axis": 0,
+        "slider_max": 9,
+        "slider_value": 4,
+        "index_label": "4 / 9"
+      },
+      {
+        "shape": [
+          10,
+          3,
+          2
+        ],
+        "axis": 1,
+        "slider_max": 2,
+        "slider_value": 1,
+        "index_label": "1 / 2"
+      },
+      {
+        "shape": [
+          10,
+          3,
+          2
+        ],
+        "axis": 2,
+        "slider_max": 1,
+        "slider_value": 0,
+        "index_label": "0 / 1"
+      }
+    ],
+    "render": {
+      "color_table_len": 256,
+      "color_table_samples": [
+        "0xff0000ff",
+        "0xff0202ff",
+        "0xff8080ff",
+        "0xfffffefe",
+        "0xffff7e7e",
+        "0xffff0000"
+      ],
+      "pixmap_w": 400,
+      "pixmap_h": 300,
+      "stretch_range": [
+        0.0,
+        1.0
+      ]
+    }
+  },
+  "summary": {
+    "chip_cases": [
+      {
+        "rows": [
+          [
+            "井名",
+            "W-1"
+          ],
+          [
+            "曲线数",
+            "12"
+          ],
+          [
+            "采样点",
+            "1500"
+          ]
+        ],
+        "well": "W-1",
+        "curves": "12 条",
+        "samples": "1,500 点",
+        "message": "msg",
+        "summary_min_h": 118
+      },
+      {
+        "rows": [
+          [
+            "井名",
+            " W-2 "
+          ],
+          [
+            "曲线数",
+            "3"
+          ],
+          [
+            "采样点",
+            "1,000"
+          ]
+        ],
+        "well": "W-2",
+        "curves": "3 条",
+        "samples": "1,000 点",
+        "message": "msg",
+        "summary_min_h": 118
+      },
+      {
+        "rows": [
+          [
+            "井名",
+            "W-3"
+          ],
+          [
+            "采样点",
+            "abc"
+          ],
+          [
+            "曲线数",
+            "7"
+          ]
+        ],
+        "well": "W-3",
+        "curves": "7 条",
+        "samples": "abc 点",
+        "message": "msg",
+        "summary_min_h": 118
+      },
+      {
+        "rows": [
+          [
+            "其他",
+            "x"
+          ]
+        ],
+        "well": "W-3",
+        "curves": "7 条",
+        "samples": "abc 点",
+        "message": "msg",
+        "summary_min_h": 62
+      }
+    ],
+    "data_tab_on": true,
+    "data_tab_off": false,
+    "tab_titles": [
+      "曲线定义与元数据",
+      "数据内容"
+    ]
+  },
+  "lazy_tabs": {
+    "scenarios": [
+      {
+        "name": "click_flow",
+        "steps": [
+          {
+            "op": "load_table",
+            "tab": 0,
+            "visual": "prompt",
+            "summary": "table",
+            "requested": false,
+            "host_created": false
+          },
+          {
+            "op": "click_tab1",
+            "tab": 1,
+            "visual": "prompt",
+            "summary": "table",
+            "requested": true,
+            "host_created": false
+          },
+          {
+            "op": "loading",
+            "tab": 1,
+            "visual": "loading",
+            "summary": "table",
+            "requested": true,
+            "host_created": false
+          },
+          {
+            "op": "preview",
+            "tab": 1,
+            "visual": "host",
+            "summary": "table",
+            "requested": true,
+            "host_created": true
+          }
+        ],
+        "emitted": [
+          "currentChanged",
+          "visualization_requested"
+        ]
+      },
+      {
+        "name": "modes_errors",
+        "steps": [
+          {
+            "op": "load_text",
+            "tab": 0,
+            "visual": "prompt",
+            "summary": "text",
+            "requested": false,
+            "host_created": false
+          },
+          {
+            "op": "load_well_log",
+            "tab": 0,
+            "visual": "prompt",
+            "summary": "well_log",
+            "requested": false,
+            "host_created": false
+          },
+          {
+            "op": "error_retry",
+            "tab": 1,
+            "visual": "message",
+            "summary": "well_log",
+            "requested": true,
+            "host_created": false
+          },
+          {
+            "op": "retry",
+            "tab": 1,
+            "visual": "message",
+            "summary": "well_log",
+            "requested": true,
+            "host_created": false
+          },
+          {
+            "op": "error_fatal",
+            "tab": 1,
+            "visual": "message",
+            "summary": "well_log",
+            "requested": true,
+            "host_created": false
+          },
+          {
+            "op": "reset",
+            "tab": 0,
+            "visual": "prompt",
+            "summary": "well_log",
+            "requested": false,
+            "host_created": false
+          }
+        ],
+        "emitted": [
+          "currentChanged",
+          "visualization_requested",
+          "visualization_requested",
+          "currentChanged"
+        ]
+      },
+      {
+        "name": "no_steal",
+        "steps": [
+          {
+            "op": "loading_bg",
+            "tab": 0,
+            "visual": "loading",
+            "summary": "table",
+            "requested": true,
+            "host_created": false
+          },
+          {
+            "op": "preview_noactivate",
+            "tab": 0,
+            "visual": "host",
+            "summary": "table",
+            "requested": true,
+            "host_created": true
+          }
+        ],
+        "emitted": []
+      },
+      {
+        "name": "was_visual",
+        "steps": [
+          {
+            "op": "click_tab1",
+            "tab": 1,
+            "visual": "prompt",
+            "summary": "table",
+            "requested": true,
+            "host_created": false
+          },
+          {
+            "op": "preview_was_visual",
+            "tab": 1,
+            "visual": "host",
+            "summary": "table",
+            "requested": true,
+            "host_created": true
+          }
+        ],
+        "emitted": [
+          "currentChanged",
+          "visualization_requested"
+        ]
+      }
+    ],
+    "engine_guard": "cannot replace engine after visualization host creation"
+  },
+  "settings_panel": {
+    "mode_map": {
+      "text": {
+        "combo_index": 1,
+        "page_index": 1
+      },
+      "rich_text": {
+        "combo_index": 1,
+        "page_index": 1
+      },
+      "web_document": {
+        "combo_index": 1,
+        "page_index": 1
+      },
+      "table": {
+        "combo_index": 2,
+        "page_index": 2
+      },
+      "well_log": {
+        "combo_index": 2,
+        "page_index": 2
+      },
+      "seismic": {
+        "combo_index": 2,
+        "page_index": 2
+      },
+      "image": {
+        "combo_index": 3,
+        "page_index": 3
+      },
+      "geotiff": {
+        "combo_index": 3,
+        "page_index": 3
+      },
+      "pdf": {
+        "combo_index": 4,
+        "page_index": 4
+      },
+      "json_tree": {
+        "combo_index": 5,
+        "page_index": 5
+      },
+      "media": {
+        "combo_index": 6,
+        "page_index": 6
+      },
+      "geoviz": {
+        "combo_index": 7,
+        "page_index": 7
+      },
+      "nonsense": {
+        "combo_index": 0,
+        "page_index": 0
+      }
+    },
+    "settings_defaults": {
+      "font_size": 12,
+      "show_metadata": true,
+      "text_limit_kib": 256,
+      "wrap_text": false,
+      "table_max_rows": 200,
+      "table_max_columns": 40,
+      "auto_fit_columns": true,
+      "smooth_images": true,
+      "geotiff_thumbnail_px": 256,
+      "show_geo_metadata": true,
+      "pdf_fit_mode": "width",
+      "pdf_zoom_percent": 100,
+      "json_limit_mib": 5,
+      "json_array_collapse_threshold": 100,
+      "json_expand_depth": 2,
+      "media_autoplay": false,
+      "media_volume": 70,
+      "geoviz_max_curves": 12,
+      "geoviz_max_depth_samples": 2000,
+      "geoviz_max_slice_axis": 512,
+      "geoviz_max_points": 50000,
+      "geoviz_surface_grid_size": 256,
+      "density": "comfortable",
+      "theme_mode": "light"
+    },
+    "applied": {
+      "font_size": 20,
+      "show_metadata": true,
+      "text_limit_kib": 256,
+      "wrap_text": false,
+      "table_max_rows": 200,
+      "table_max_columns": 40,
+      "auto_fit_columns": true,
+      "smooth_images": true,
+      "geotiff_thumbnail_px": 256,
+      "show_geo_metadata": true,
+      "pdf_fit_mode": "width",
+      "pdf_zoom_percent": 100,
+      "json_limit_mib": 5,
+      "json_array_collapse_threshold": 100,
+      "json_expand_depth": 2,
+      "media_autoplay": false,
+      "media_volume": 33,
+      "geoviz_max_curves": 12,
+      "geoviz_max_depth_samples": 2000,
+      "geoviz_max_slice_axis": 512,
+      "geoviz_max_points": 50000,
+      "geoviz_surface_grid_size": 256,
+      "density": "comfortable",
+      "theme_mode": "light"
+    },
+    "after_apply": {
+      "font_size": 20,
+      "show_metadata": true,
+      "text_limit_kib": 256,
+      "wrap_text": false,
+      "table_max_rows": 200,
+      "table_max_columns": 40,
+      "auto_fit_columns": true,
+      "smooth_images": true,
+      "geotiff_thumbnail_px": 256,
+      "show_geo_metadata": true,
+      "pdf_fit_mode": "width",
+      "pdf_zoom_percent": 100,
+      "json_limit_mib": 5,
+      "json_array_collapse_threshold": 100,
+      "json_expand_depth": 2,
+      "media_autoplay": false,
+      "media_volume": 33,
+      "geoviz_max_curves": 12,
+      "geoviz_max_depth_samples": 2000,
+      "geoviz_max_slice_axis": 512,
+      "geoviz_max_points": 50000,
+      "geoviz_surface_grid_size": 256,
+      "density": "comfortable",
+      "theme_mode": "light"
+    },
+    "reset_emitted": {
+      "font_size": 12,
+      "show_metadata": true,
+      "text_limit_kib": 256,
+      "wrap_text": false,
+      "table_max_rows": 200,
+      "table_max_columns": 40,
+      "auto_fit_columns": true,
+      "smooth_images": true,
+      "geotiff_thumbnail_px": 256,
+      "show_geo_metadata": true,
+      "pdf_fit_mode": "width",
+      "pdf_zoom_percent": 100,
+      "json_limit_mib": 5,
+      "json_array_collapse_threshold": 100,
+      "json_expand_depth": 2,
+      "media_autoplay": false,
+      "media_volume": 70,
+      "geoviz_max_curves": 12,
+      "geoviz_max_depth_samples": 2000,
+      "geoviz_max_slice_axis": 512,
+      "geoviz_max_points": 50000,
+      "geoviz_surface_grid_size": 256,
+      "density": "comfortable",
+      "theme_mode": "light"
+    },
+    "after_reset": {
+      "font_size": 12,
+      "show_metadata": true,
+      "text_limit_kib": 256,
+      "wrap_text": false,
+      "table_max_rows": 200,
+      "table_max_columns": 40,
+      "auto_fit_columns": true,
+      "smooth_images": true,
+      "geotiff_thumbnail_px": 256,
+      "show_geo_metadata": true,
+      "pdf_fit_mode": "width",
+      "pdf_zoom_percent": 100,
+      "json_limit_mib": 5,
+      "json_array_collapse_threshold": 100,
+      "json_expand_depth": 2,
+      "media_autoplay": false,
+      "media_volume": 70,
+      "geoviz_max_curves": 12,
+      "geoviz_max_depth_samples": 2000,
+      "geoviz_max_slice_axis": 512,
+      "geoviz_max_points": 50000,
+      "geoviz_surface_grid_size": 256,
+      "density": "comfortable",
+      "theme_mode": "light"
+    },
+    "controls_after_reset": {
+      "font_size": 12,
+      "show_metadata": true,
+      "text_limit_kib": 256,
+      "wrap_text": false,
+      "table_max_rows": 200,
+      "table_max_columns": 40,
+      "auto_fit_columns": true,
+      "smooth_images": true,
+      "geotiff_thumbnail_px": 256,
+      "show_geo_metadata": true,
+      "pdf_fit_mode": "width",
+      "pdf_zoom_percent": 100,
+      "json_limit_mib": 5,
+      "json_array_collapse_threshold": 100,
+      "json_expand_depth": 2,
+      "media_autoplay": false,
+      "media_volume": 70,
+      "geoviz_max_curves": 12,
+      "geoviz_max_depth_samples": 2000,
+      "geoviz_max_slice_axis": 512,
+      "geoviz_max_points": 50000,
+      "geoviz_surface_grid_size": 256,
+      "density": "comfortable",
+      "theme_mode": "light"
+    }
+  },
+  "misc_widgets": {
+    "text": {
+      "wrap": 1,
+      "font_size": 18
+    },
+    "rich_text": {
+      "wrap": 0,
+      "readonly": true,
+      "resource_allowed": {
+        "file": true,
+        "http": false,
+        "https": false,
+        "": true,
+        "data": false
+      }
+    },
+    "message": {
+      "text": "hello 世界"
+    },
+    "geotiff_noimg": {
+      "label": "缩略图不可用",
+      "summary_rows": 2,
+      "summary_hdr": [
+        "属性",
+        "值"
+      ]
+    },
+    "geotiff_img": {
+      "pixmap_null": false,
+      "label_w": 640,
+      "label_h": 480,
+      "table_visible": true
+    },
+    "geotiff_settings": {
+      "table_visible": false,
+      "transform": 0
+    }
+  }
+}
