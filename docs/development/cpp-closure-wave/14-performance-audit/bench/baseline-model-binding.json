@@ -1,0 +1,49 @@
+{
+  "tool": "pwb-bench",
+  "format_version": 1,
+  "environment": {
+    "sysname": "Linux",
+    "release": "7.2.5-1-cachyos",
+    "machine": "x86_64",
+    "nodename": "cachyos-x8664",
+    "cpu_count": 40,
+    "cxx_compiler": "gcc 16.2",
+    "build_flavor": "ndebug",
+    "thread_env": {
+      "OMP_NUM_THREADS": "",
+      "OPENBLAS_NUM_THREADS": "",
+      "MKL_NUM_THREADS": "",
+      "CMAKE_BUILD_PARALLEL_LEVEL": "",
+      "CTEST_PARALLEL_LEVEL": ""
+    },
+    "pid": 3972741
+  },
+  "scenarios": {
+    "model-binding": {
+      "samples_ms": [
+        400.622,
+        399.720985,
+        400.537637,
+        400.10299,
+        399.786898
+      ],
+      "median_ms": 400.10299,
+      "p95_ms": 400.622,
+      "min_ms": 399.720985,
+      "max_ms": 400.622,
+      "first_ms": 400.622,
+      "sample_count": 5,
+      "alloc_calls": 50,
+      "alloc_bytes": 5294040,
+      "io_read_bytes": 0,
+      "io_write_bytes": 0,
+      "io_rchar": 335544429,
+      "io_wchar": 0,
+      "io_syscr": 327,
+      "io_syscw": 0,
+      "peak_rss_mib": 6.375,
+      "model_bytes": 67108864,
+      "sha256": "601fc533f64b11042a9ae821c272064871306a99496652afb5758c8979d8834d"
+    }
+  }
+}
