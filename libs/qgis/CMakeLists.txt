@@ -15,9 +15,9 @@ target_include_directories(pwb_qgis PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pwb_qgis PUBLIC cxx_std_20)
 target_link_libraries(pwb_qgis PUBLIC PwbQgis::Sdk)
-# canvas_state_json uses pwb::domain::Json — link the domain facade when
-# the data closure is present (PLATFORM without DATA keeps the QGIS lib
-# Qt+QGIS only).
+# canvas_state_json/map_session.cpp use pwb::domain::Json unconditionally —
+# the link cannot wait for the CONV_29 LayoutExport chain (linux-ninja
+# configures without it and the TU fails on the missing include path).
 if(TARGET Pwb::Domain)
     target_link_libraries(pwb_qgis PUBLIC Pwb::Domain)
 endif()

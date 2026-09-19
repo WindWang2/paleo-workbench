@@ -1,0 +1,1733 @@
+{
+  "meta": {
+    "generator": "tools/oracle/generate_ui_shell_fixtures.py",
+    "python": "3.14.6",
+    "note": "PySide6 stubbed (QObject/Signal/QSettings in-memory); tool_availability.stage_whitelist_reason is a sentinel — the real reason text is libs/tool_policy's contract."
+  },
+  "dock_framework": {
+    "descriptors": [
+      {
+        "dock_id": "nav",
+        "title": "资源管理器",
+        "preferred_area": "left",
+        "importance": "core",
+        "default_visible": true,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          280,
+          0
+        ],
+        "preferred_height": 420,
+        "workflow_tags": [
+          "always"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_资源管理器",
+        "remark": "rail + explorer"
+      },
+      {
+        "dock_id": "mapping_stage",
+        "title": "编图阶段",
+        "preferred_area": "left",
+        "importance": "secondary",
+        "default_visible": true,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          280,
+          0
+        ],
+        "preferred_height": 280,
+        "workflow_tags": [
+          "mapping"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_编图阶段",
+        "remark": ""
+      },
+      {
+        "dock_id": "inspector",
+        "title": "检查器",
+        "preferred_area": "right",
+        "importance": "core",
+        "default_visible": true,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "always"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_检查器",
+        "remark": ""
+      },
+      {
+        "dock_id": "composite_layer",
+        "title": "图层管理",
+        "preferred_area": "right",
+        "importance": "core",
+        "default_visible": true,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "mapping"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_图层管理",
+        "remark": ""
+      },
+      {
+        "dock_id": "facies_palette",
+        "title": "相带画刷",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": true,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          240,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "mapping"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_相带画刷",
+        "remark": "M2 相带调色板 + 吸色管 + 数字键装备"
+      },
+      {
+        "dock_id": "hub",
+        "title": "功能页",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": false,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": null,
+        "workflow_tags": [
+          "navigation"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_功能页",
+        "remark": ""
+      },
+      {
+        "dock_id": "composite_input",
+        "title": "输入与结果",
+        "preferred_area": "left",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          280,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "mapping",
+          "review"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_输入与结果",
+        "remark": ""
+      },
+      {
+        "dock_id": "agent",
+        "title": "Agent",
+        "preferred_area": "bottom",
+        "importance": "utility",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 245,
+        "workflow_tags": [
+          "assistant"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_Agent",
+        "remark": ""
+      },
+      {
+        "dock_id": "tasks",
+        "title": "任务中心",
+        "preferred_area": "bottom",
+        "importance": "utility",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 200,
+        "workflow_tags": [
+          "background"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_任务中心",
+        "remark": ""
+      },
+      {
+        "dock_id": "logs",
+        "title": "日志",
+        "preferred_area": "bottom",
+        "importance": "utility",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 200,
+        "workflow_tags": [
+          "diagnostics"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_日志",
+        "remark": ""
+      },
+      {
+        "dock_id": "console",
+        "title": "控制台",
+        "preferred_area": "bottom",
+        "importance": "utility",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 200,
+        "workflow_tags": [
+          "diagnostics"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_控制台",
+        "remark": ""
+      },
+      {
+        "dock_id": "composite_linked",
+        "title": "联动视图",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 200,
+        "workflow_tags": [
+          "mapping",
+          "interpretation"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_联动视图",
+        "remark": ""
+      },
+      {
+        "dock_id": "well",
+        "title": "测井轨道",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": false,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 200,
+        "workflow_tags": [
+          "well",
+          "interpretation"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_测井轨道",
+        "remark": ""
+      },
+      {
+        "dock_id": "seismic",
+        "title": "地震剖面",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": false,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 200,
+        "workflow_tags": [
+          "seismic",
+          "interpretation"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_地震剖面",
+        "remark": ""
+      }
+    ],
+    "ids": [
+      "nav",
+      "mapping_stage",
+      "inspector",
+      "composite_layer",
+      "facies_palette",
+      "hub",
+      "composite_input",
+      "agent",
+      "tasks",
+      "logs",
+      "console",
+      "composite_linked",
+      "well",
+      "seismic"
+    ],
+    "by_tag": {
+      "always": [
+        "nav",
+        "inspector"
+      ],
+      "assistant": [
+        "agent"
+      ],
+      "background": [
+        "tasks"
+      ],
+      "diagnostics": [
+        "logs",
+        "console"
+      ],
+      "interpretation": [
+        "composite_linked",
+        "well",
+        "seismic"
+      ],
+      "mapping": [
+        "mapping_stage",
+        "composite_layer",
+        "facies_palette",
+        "composite_input",
+        "composite_linked"
+      ],
+      "navigation": [
+        "hub"
+      ],
+      "review": [
+        "composite_input"
+      ],
+      "seismic": [
+        "seismic"
+      ],
+      "well": [
+        "well"
+      ]
+    },
+    "require_missing_error": "\"unknown dock_id: 'nonexistent'\"",
+    "classify_viewport": [
+      {
+        "in": -1,
+        "out": "compact"
+      },
+      {
+        "in": 0,
+        "out": "compact"
+      },
+      {
+        "in": 1099,
+        "out": "compact"
+      },
+      {
+        "in": 1100,
+        "out": "normal"
+      },
+      {
+        "in": 1599,
+        "out": "normal"
+      },
+      {
+        "in": 1600,
+        "out": "wide"
+      },
+      {
+        "in": 2199,
+        "out": "wide"
+      },
+      {
+        "in": 2200,
+        "out": "ultrawide"
+      },
+      {
+        "in": 5000,
+        "out": "ultrawide"
+      }
+    ]
+  },
+  "navigation": {
+    "hub_names": [
+      "数据",
+      "井",
+      "地震",
+      "编图",
+      "可视化"
+    ],
+    "submodules": {
+      "-1": [],
+      "0": [
+        {
+          "key": "overview",
+          "title": "项目概述"
+        },
+        {
+          "key": "management",
+          "title": "数据管理"
+        }
+      ],
+      "1": [
+        {
+          "key": "well_log",
+          "title": "测井预测"
+        },
+        {
+          "key": "sequence",
+          "title": "层序格架"
+        },
+        {
+          "key": "stratigraphy",
+          "title": "地层对比"
+        }
+      ],
+      "2": [
+        {
+          "key": "seismic",
+          "title": "地震预测"
+        },
+        {
+          "key": "geomodel",
+          "title": "井震联合 3D"
+        }
+      ],
+      "3": [
+        {
+          "key": "canvas",
+          "title": "编图画布"
+        },
+        {
+          "key": "preparation",
+          "title": "数据制备"
+        },
+        {
+          "key": "review",
+          "title": "成图审核"
+        }
+      ],
+      "4": [
+        {
+          "key": "viz",
+          "title": "可视化"
+        }
+      ],
+      "5": []
+    },
+    "submodule_keys": {
+      "-1": [],
+      "0": [
+        "overview",
+        "management"
+      ],
+      "1": [
+        "well_log",
+        "sequence",
+        "stratigraphy"
+      ],
+      "2": [
+        "seismic",
+        "geomodel"
+      ],
+      "3": [
+        "canvas",
+        "preparation",
+        "review"
+      ],
+      "4": [
+        "viz"
+      ],
+      "5": []
+    },
+    "submodule_title": {
+      "0:overview": "项目概述",
+      "0:missing": "",
+      "4:viz": "可视化",
+      "-1:x": ""
+    },
+    "default_submodule": {
+      "-1": null,
+      "0": "overview",
+      "1": "well_log",
+      "2": "seismic",
+      "3": "canvas",
+      "4": "viz",
+      "5": null
+    },
+    "legacy_page_to_hub": {
+      "-1": null,
+      "0": [
+        0,
+        "overview"
+      ],
+      "1": [
+        0,
+        "management"
+      ],
+      "2": [
+        1,
+        "well_log"
+      ],
+      "3": [
+        2,
+        "seismic"
+      ],
+      "4": [
+        1,
+        "sequence"
+      ],
+      "5": [
+        1,
+        "stratigraphy"
+      ],
+      "6": [
+        4,
+        "viz"
+      ],
+      "7": [
+        3,
+        "preparation"
+      ],
+      "8": [
+        3,
+        "canvas"
+      ],
+      "9": [
+        3,
+        "review"
+      ],
+      "10": [
+        2,
+        "geomodel"
+      ],
+      "11": null
+    }
+  },
+  "command_registry": {
+    "subsequence_score": [
+      {
+        "needle": "abc",
+        "haystack": "aXbXc",
+        "score": 0
+      },
+      {
+        "needle": "xyz",
+        "haystack": "abc",
+        "score": -1
+      },
+      {
+        "needle": "a b",
+        "haystack": "ab",
+        "score": 0
+      },
+      {
+        "needle": "",
+        "haystack": "abc",
+        "score": 0
+      },
+      {
+        "needle": "k",
+        "haystack": "keyword",
+        "score": 0
+      },
+      {
+        "needle": "abc",
+        "haystack": "acb",
+        "score": -1
+      },
+      {
+        "needle": "zz",
+        "haystack": "zaz",
+        "score": 0
+      },
+      {
+        "needle": "ab",
+        "haystack": "a",
+        "score": -1
+      },
+      {
+        "needle": "open",
+        "haystack": "打开工程",
+        "score": -1
+      },
+      {
+        "needle": "map",
+        "haystack": "make a project",
+        "score": 0
+      }
+    ],
+    "evaluate": [
+      {
+        "id": "core:open",
+        "ctx": "none",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "core:open",
+        "ctx": "ro_user",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "core:open",
+        "ctx": "rw_user",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "core:open",
+        "ctx": "unknown_stage",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "core:open",
+        "ctx": "wrong_stage",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:zoom",
+        "ctx": "none",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:zoom",
+        "ctx": "ro_user",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:zoom",
+        "ctx": "rw_user",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:zoom",
+        "ctx": "unknown_stage",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:zoom",
+        "ctx": "wrong_stage",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "edit:digitize",
+        "ctx": "none",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "edit:digitize",
+        "ctx": "ro_user",
+        "enabled": false,
+        "reason": "需要写入授权（当前会话只读）"
+      },
+      {
+        "id": "edit:digitize",
+        "ctx": "rw_user",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "edit:digitize",
+        "ctx": "unknown_stage",
+        "enabled": false,
+        "reason": "当前编图阶段未知"
+      },
+      {
+        "id": "edit:digitize",
+        "ctx": "wrong_stage",
+        "enabled": false,
+        "reason": "STAGE_SENTINEL[pick,digitize]"
+      },
+      {
+        "id": "edit:lock",
+        "ctx": "none",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "edit:lock",
+        "ctx": "ro_user",
+        "enabled": false,
+        "reason": "评审锁定"
+      },
+      {
+        "id": "edit:lock",
+        "ctx": "rw_user",
+        "enabled": false,
+        "reason": "评审锁定"
+      },
+      {
+        "id": "edit:lock",
+        "ctx": "unknown_stage",
+        "enabled": false,
+        "reason": "评审锁定"
+      },
+      {
+        "id": "edit:lock",
+        "ctx": "wrong_stage",
+        "enabled": false,
+        "reason": "评审锁定"
+      },
+      {
+        "id": "agent:run",
+        "ctx": "none",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "agent:run",
+        "ctx": "ro_user",
+        "enabled": false,
+        "reason": "需要写入授权（当前会话只读）"
+      },
+      {
+        "id": "agent:run",
+        "ctx": "rw_user",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "agent:run",
+        "ctx": "unknown_stage",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "agent:run",
+        "ctx": "wrong_stage",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:theme",
+        "ctx": "none",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:theme",
+        "ctx": "ro_user",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:theme",
+        "ctx": "rw_user",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:theme",
+        "ctx": "unknown_stage",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "view:theme",
+        "ctx": "wrong_stage",
+        "enabled": true,
+        "reason": ""
+      },
+      {
+        "id": "missing",
+        "ctx": "none",
+        "enabled": false,
+        "reason": "未知命令"
+      }
+    ],
+    "find": [
+      {
+        "query": "",
+        "ctx": "none",
+        "limit": 50,
+        "ids": [
+          "agent:run",
+          "core:open",
+          "edit:digitize",
+          "edit:lock",
+          "view:theme",
+          "view:zoom"
+        ]
+      },
+      {
+        "query": "zoom",
+        "ctx": "none",
+        "limit": 50,
+        "ids": [
+          "view:zoom"
+        ]
+      },
+      {
+        "query": "数",
+        "ctx": "none",
+        "limit": 50,
+        "ids": [
+          "edit:digitize"
+        ]
+      },
+      {
+        "query": "open",
+        "ctx": "ro_user",
+        "limit": 50,
+        "ids": [
+          "core:open"
+        ]
+      },
+      {
+        "query": "theme",
+        "ctx": "none",
+        "limit": 2,
+        "ids": [
+          "view:theme"
+        ]
+      },
+      {
+        "query": "dakai",
+        "ctx": "none",
+        "limit": 50,
+        "ids": [
+          "core:open"
+        ]
+      },
+      {
+        "query": "edit",
+        "ctx": "ro_user",
+        "limit": 50,
+        "ids": []
+      },
+      {
+        "query": "agent",
+        "ctx": "rw_user",
+        "limit": 50,
+        "ids": [
+          "agent:run"
+        ]
+      },
+      {
+        "query": "zzzzz",
+        "ctx": "none",
+        "limit": 50,
+        "ids": []
+      }
+    ],
+    "recents": {
+      "after_ops": [
+        "edit:digitize",
+        "core:open"
+      ],
+      "reloaded": [
+        "edit:digitize",
+        "core:open",
+        "view:zoom"
+      ],
+      "emitted_during": 0
+    },
+    "clear_keep_core": [
+      "core:open"
+    ]
+  },
+  "dock_manager": {
+    "layouts": {
+      "well_log": {
+        "name": "测井解释与地层对比工作区",
+        "docks": [
+          {
+            "id": "well_tree",
+            "title": "井目录与道模板",
+            "visible": true,
+            "floating": false,
+            "area": "left"
+          },
+          {
+            "id": "correlation_panel",
+            "title": "井间对比与拉平",
+            "visible": true,
+            "floating": false,
+            "area": "right"
+          },
+          {
+            "id": "crossplot",
+            "title": "岩性交会图",
+            "visible": true,
+            "floating": false,
+            "area": "bottom"
+          }
+        ]
+      },
+      "map_authoring": {
+        "name": "古地理综合编图工作区",
+        "docks": [
+          {
+            "id": "layer_tree",
+            "title": "图层管理树",
+            "visible": true,
+            "floating": false,
+            "area": "left"
+          },
+          {
+            "id": "map_tools",
+            "title": "制图工具箱",
+            "visible": true,
+            "floating": false,
+            "area": "left"
+          },
+          {
+            "id": "property_inspector",
+            "title": "图斑属性检查器",
+            "visible": true,
+            "floating": false,
+            "area": "right"
+          },
+          {
+            "id": "history_panel",
+            "title": "拓扑操作历史",
+            "visible": true,
+            "floating": false,
+            "area": "right"
+          },
+          {
+            "id": "qa_audit",
+            "title": "合规质检报告",
+            "visible": false,
+            "floating": false,
+            "area": "bottom"
+          }
+        ]
+      },
+      "workstation_composite": {
+        "name": "默认综合编修",
+        "docks": [
+          {
+            "id": "workstation:explorer",
+            "title": "资源管理器",
+            "visible": true,
+            "floating": false,
+            "area": "left"
+          },
+          {
+            "id": "workstation:inspector",
+            "title": "检查器",
+            "visible": true,
+            "floating": false,
+            "area": "right"
+          },
+          {
+            "id": "workstation:agent",
+            "title": "Agent",
+            "visible": false,
+            "floating": false,
+            "area": "bottom"
+          },
+          {
+            "id": "workstation:tasks",
+            "title": "任务中心",
+            "visible": false,
+            "floating": false,
+            "area": "bottom"
+          },
+          {
+            "id": "workstation:composite_layer",
+            "title": "图层管理",
+            "visible": true,
+            "floating": false,
+            "area": "right"
+          },
+          {
+            "id": "workstation:composite_input",
+            "title": "输入与结果",
+            "visible": false,
+            "floating": false,
+            "area": "left"
+          },
+          {
+            "id": "workstation:composite_linked",
+            "title": "联动视图",
+            "visible": false,
+            "floating": false,
+            "area": "bottom"
+          }
+        ]
+      },
+      "workstation_interpretation": {
+        "name": "解释工作区",
+        "docks": [
+          {
+            "id": "workstation:explorer",
+            "title": "资源管理器",
+            "visible": true,
+            "floating": false,
+            "area": "left"
+          },
+          {
+            "id": "workstation:inspector",
+            "title": "检查器",
+            "visible": true,
+            "floating": false,
+            "area": "right"
+          },
+          {
+            "id": "workstation:agent",
+            "title": "Agent",
+            "visible": true,
+            "floating": false,
+            "area": "bottom"
+          },
+          {
+            "id": "workstation:tasks",
+            "title": "任务中心",
+            "visible": true,
+            "floating": false,
+            "area": "bottom"
+          },
+          {
+            "id": "workstation:composite_layer",
+            "title": "图层管理",
+            "visible": false,
+            "floating": false,
+            "area": "right"
+          },
+          {
+            "id": "workstation:composite_input",
+            "title": "输入与结果",
+            "visible": false,
+            "floating": false,
+            "area": "left"
+          },
+          {
+            "id": "workstation:composite_linked",
+            "title": "联动视图",
+            "visible": false,
+            "floating": false,
+            "area": "bottom"
+          }
+        ]
+      }
+    },
+    "active_default": "map_authoring",
+    "after_set_active_existing": "well_log",
+    "panel_title_cases": [
+      "图层管理树",
+      "图层管理树",
+      null,
+      "资源管理器"
+    ],
+    "retitle_propagates_to_layout": "图层管理树·改",
+    "new_panel": {
+      "id": "custom:panel",
+      "title": "自定义面板",
+      "visible": false,
+      "floating": false,
+      "area": "bottom"
+    },
+    "has_panel": [
+      true,
+      false
+    ],
+    "panel_ids_first8": [
+      "layer_tree",
+      "map_tools",
+      "property_inspector",
+      "history_panel",
+      "qa_audit",
+      "well_tree",
+      "correlation_panel",
+      "crossplot"
+    ],
+    "panel_count_after_custom": 21,
+    "seeded_vocabulary": {
+      "workstation:logs": "日志",
+      "workstation:hub": "功能页",
+      "workstation:well": "测井轨道",
+      "workstation:seismic": "地震剖面"
+    }
+  },
+  "layout_presets": {
+    "presets": [
+      {
+        "id": "composite_default",
+        "label": "编图 · 默认",
+        "description": "Variant C full-bleed map; only the layer dock open among composite panels.",
+        "visibility": {
+          "nav": true,
+          "inspector": true,
+          "agent": false,
+          "tasks": false,
+          "logs": false,
+          "console": false,
+          "composite_layer": true,
+          "composite_input": false,
+          "composite_linked": false,
+          "explorer_expanded": true,
+          "well": false,
+          "seismic": false,
+          "hub": false,
+          "mapping_stage": true
+        }
+      },
+      {
+        "id": "well_interpretation",
+        "label": "测井解释",
+        "description": "Explorer + inspector + well tracks + layer dock; no agent/tasks/seismic.",
+        "visibility": {
+          "nav": true,
+          "inspector": true,
+          "agent": false,
+          "tasks": false,
+          "logs": false,
+          "console": false,
+          "composite_layer": true,
+          "composite_input": false,
+          "composite_linked": false,
+          "explorer_expanded": true,
+          "well": true,
+          "seismic": false,
+          "hub": false,
+          "mapping_stage": true
+        }
+      },
+      {
+        "id": "seismic_interpretation",
+        "label": "地震解释",
+        "description": "Explorer + inspector + seismic sections + layer dock.",
+        "visibility": {
+          "nav": true,
+          "inspector": true,
+          "agent": false,
+          "tasks": false,
+          "logs": false,
+          "console": false,
+          "composite_layer": true,
+          "composite_input": false,
+          "composite_linked": false,
+          "explorer_expanded": true,
+          "well": false,
+          "seismic": true,
+          "hub": false,
+          "mapping_stage": true
+        }
+      },
+      {
+        "id": "well_seismic_joint",
+        "label": "井震联合",
+        "description": "Well tracks + seismic sections side by side with the linked view.",
+        "visibility": {
+          "nav": true,
+          "inspector": true,
+          "agent": false,
+          "tasks": false,
+          "logs": false,
+          "console": false,
+          "composite_layer": false,
+          "composite_input": false,
+          "composite_linked": true,
+          "explorer_expanded": true,
+          "well": true,
+          "seismic": true,
+          "hub": false,
+          "mapping_stage": true
+        }
+      },
+      {
+        "id": "integrated",
+        "label": "综合",
+        "description": "Everything on: agent, tasks, wells, seismic and the linked view.",
+        "visibility": {
+          "nav": true,
+          "inspector": true,
+          "agent": true,
+          "tasks": true,
+          "logs": false,
+          "console": false,
+          "composite_layer": true,
+          "composite_input": true,
+          "composite_linked": true,
+          "explorer_expanded": true,
+          "well": true,
+          "seismic": true,
+          "hub": false,
+          "mapping_stage": true
+        }
+      },
+      {
+        "id": "review",
+        "label": "审核",
+        "description": "Inputs and results dock open next to the layer dock for review.",
+        "visibility": {
+          "nav": true,
+          "inspector": true,
+          "agent": false,
+          "tasks": false,
+          "logs": false,
+          "console": false,
+          "composite_layer": true,
+          "composite_input": true,
+          "composite_linked": false,
+          "explorer_expanded": true,
+          "well": false,
+          "seismic": false,
+          "hub": false,
+          "mapping_stage": true
+        }
+      }
+    ],
+    "labels": [
+      [
+        "composite_default",
+        "编图 · 默认"
+      ],
+      [
+        "well_interpretation",
+        "测井解释"
+      ],
+      [
+        "seismic_interpretation",
+        "地震解释"
+      ],
+      [
+        "well_seismic_joint",
+        "井震联合"
+      ],
+      [
+        "integrated",
+        "综合"
+      ],
+      [
+        "review",
+        "审核"
+      ]
+    ],
+    "get_preset_hit": "composite_default",
+    "get_preset_miss": true,
+    "reset_preset_id": "composite_default",
+    "seeded_panel_titles": {
+      "workstation:explorer": "资源管理器",
+      "workstation:inspector": "检查器",
+      "workstation:agent": "Agent",
+      "workstation:console": "控制台",
+      "workstation:hub": "功能页"
+    }
+  },
+  "operations": {
+    "scenarios": [
+      {
+        "name": "basic",
+        "emitted": [
+          "op1",
+          "op1",
+          "op1"
+        ]
+      },
+      {
+        "name": "queued_promotion",
+        "emitted": [
+          "q1",
+          "q1"
+        ]
+      },
+      {
+        "name": "finish_live_state",
+        "emitted": [
+          "f1",
+          "f1"
+        ]
+      },
+      {
+        "name": "late_finish_no_regress",
+        "emitted": [
+          "t1",
+          "t1"
+        ]
+      },
+      {
+        "name": "cancel_flows",
+        "emitted": [
+          "c1",
+          "c1",
+          "c2",
+          "c2",
+          "c3"
+        ]
+      },
+      {
+        "name": "terminal_eviction",
+        "emitted": [
+          "e00",
+          "e00",
+          "e01",
+          "e01",
+          "e02",
+          "e02",
+          "e03",
+          "e03",
+          "e04",
+          "e04",
+          "e05",
+          "e05",
+          "e06",
+          "e06",
+          "e07",
+          "e07",
+          "e08",
+          "e08",
+          "e09",
+          "e09",
+          "e10",
+          "e10",
+          "e11",
+          "e11",
+          "e12",
+          "e12",
+          "e13",
+          "e13",
+          "e14",
+          "e14",
+          "e15",
+          "e15",
+          "e16",
+          "e16",
+          "e17",
+          "e17",
+          "e18",
+          "e18",
+          "e19",
+          "e19",
+          "e20",
+          "e20",
+          "e21",
+          "e21",
+          "e22",
+          "e22",
+          "e23",
+          "e23",
+          "e24",
+          "e24",
+          "e25",
+          "e25",
+          "e26",
+          "e26",
+          "e27",
+          "e27",
+          "e28",
+          "e28",
+          "e29",
+          "e29",
+          "e30",
+          "e30",
+          "e31",
+          "e31",
+          "e32",
+          "e32",
+          "e33",
+          "e33",
+          "e34",
+          "e34",
+          "e35",
+          "e35",
+          "e36",
+          "e36",
+          "e37",
+          "e37",
+          "e38",
+          "e38",
+          "e39",
+          "e39",
+          "e40",
+          "e00",
+          "e40",
+          "e41",
+          "e01",
+          "e41",
+          "e42",
+          "e02",
+          "e42",
+          "e43",
+          "e03",
+          "e43",
+          "e44",
+          "e04",
+          "e44",
+          "e00"
+        ]
+      },
+      {
+        "name": "ordering_and_clear",
+        "emitted": [
+          "o0",
+          "o1",
+          "o2"
+        ]
+      }
+    ],
+    "snapshots": {
+      "basic_mid": {
+        "op_id": "op1",
+        "title": "校验",
+        "state": "running",
+        "object_label": "well-1.las",
+        "done": 3,
+        "total": 10,
+        "stage": "SHA-256",
+        "error": null,
+        "cancellable": true,
+        "result_label": null,
+        "progress_fraction": 0.3
+      },
+      "basic_final": {
+        "op_id": "op1",
+        "title": "校验",
+        "state": "completed",
+        "object_label": "well-1.las",
+        "done": 3,
+        "total": 10,
+        "stage": "SHA-256",
+        "error": null,
+        "cancellable": true,
+        "result_label": "通过",
+        "progress_fraction": 0.3
+      },
+      "basic_active_label": null,
+      "queued_initial": {
+        "op_id": "q1",
+        "title": "排队任务",
+        "state": "queued",
+        "object_label": null,
+        "done": null,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": false,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "queued_promoted": {
+        "op_id": "q1",
+        "title": "排队任务",
+        "state": "running",
+        "object_label": null,
+        "done": 1,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": false,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "live_finish": {
+        "op_id": "f1",
+        "title": "任务",
+        "state": "failed",
+        "object_label": null,
+        "done": null,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": false,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "late_finish": {
+        "op_id": "t1",
+        "title": "任务",
+        "state": "completed",
+        "object_label": null,
+        "done": null,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": false,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "terminal_update_inert": {
+        "op_id": "t1",
+        "title": "任务",
+        "state": "completed",
+        "object_label": null,
+        "done": null,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": false,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "cancel_request": true,
+      "cancel_state": {
+        "op_id": "c1",
+        "title": "可取消",
+        "state": "cancelling",
+        "object_label": null,
+        "done": null,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": true,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "cancel_sync_terminal": true,
+      "cancel_sync_state": {
+        "op_id": "c2",
+        "title": "同步终结",
+        "state": "cancelled",
+        "object_label": null,
+        "done": null,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": true,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "cancel_hook_raise": false,
+      "cancel_raise_state": {
+        "op_id": "c3",
+        "title": "取消失败",
+        "state": "running",
+        "object_label": null,
+        "done": null,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": true,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "cancel_missing": false,
+      "cancel_terminal": false,
+      "cancel_again": false,
+      "evict_remaining_ids": [
+        "e05",
+        "e06",
+        "e07",
+        "e08",
+        "e09",
+        "e10",
+        "e11",
+        "e12",
+        "e13",
+        "e14",
+        "e15",
+        "e16",
+        "e17",
+        "e18",
+        "e19",
+        "e20",
+        "e21",
+        "e22",
+        "e23",
+        "e24",
+        "e25",
+        "e26",
+        "e27",
+        "e28",
+        "e29",
+        "e30",
+        "e31",
+        "e32",
+        "e33",
+        "e34",
+        "e35",
+        "e36",
+        "e37",
+        "e38",
+        "e39",
+        "e40",
+        "e41",
+        "e42",
+        "e43",
+        "e44"
+      ],
+      "evict_terminal_queue": [
+        "e05",
+        "e06",
+        "e07",
+        "e08",
+        "e09",
+        "e10",
+        "e11",
+        "e12",
+        "e13",
+        "e14",
+        "e15",
+        "e16",
+        "e17",
+        "e18",
+        "e19",
+        "e20",
+        "e21",
+        "e22",
+        "e23",
+        "e24",
+        "e25",
+        "e26",
+        "e27",
+        "e28",
+        "e29",
+        "e30",
+        "e31",
+        "e32",
+        "e33",
+        "e34",
+        "e35",
+        "e36",
+        "e37",
+        "e38",
+        "e39",
+        "e40",
+        "e41",
+        "e42",
+        "e43",
+        "e44"
+      ],
+      "evict_revived": {
+        "op_id": "e00",
+        "title": "复活",
+        "state": "running",
+        "object_label": null,
+        "done": null,
+        "total": null,
+        "stage": null,
+        "error": null,
+        "cancellable": false,
+        "result_label": null,
+        "progress_fraction": null
+      },
+      "records_order": [
+        "o2",
+        "o1",
+        "o0"
+      ],
+      "active_order": [
+        "o2",
+        "o1",
+        "o0"
+      ],
+      "active_label_multi": "任务2",
+      "after_clear": []
+    }
+  },
+  "deferred_bindings": {
+    "scenarios": [
+      {
+        "name": "schedule_order",
+        "calls": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      {
+        "name": "project_first",
+        "calls": [
+          "project",
+          "state",
+          "extra"
+        ]
+      },
+      {
+        "name": "replace_keeps_position",
+        "calls": [
+          "a2",
+          "b"
+        ]
+      },
+      {
+        "name": "reentrant_drain",
+        "calls": [
+          "first",
+          "second",
+          "has_pending=False"
+        ]
+      },
+      {
+        "name": "cross_index_isolation",
+        "calls": [
+          "zero",
+          "pending1=True",
+          "one"
+        ]
+      }
+    ]
+  }
+}
