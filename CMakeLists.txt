@@ -537,6 +537,22 @@ if(PWB_BUILD_CONV_11)
     endif()
 endif()
 # END CONV-11
+# BEGIN UI-04-IMPLY — the UI-04 page-worker ports (libs/ui_workers) bind
+# the CONV-22 geomodel contract cores (advisor rules, V2 exporters,
+# DomainObject). UI slices carry no per-slice option — they gate under
+# PWB_BUILD_PLATFORM (taskbook §2: no new option(), no flag preemption) —
+# so a platform configure implies the kernel closure they need, exactly
+# like CONV-28 / CONV-GEO3D imply CONV-22 for their consumers. DATA is
+# part of the implication because CONV-22 links Pwb::Domain. Kernel-only
+# configures (conversion-kernel) set -DPWB_BUILD_CONV_22=ON directly;
+# configures without DATA keep the Python workers as the production path.
+if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA AND NOT PWB_BUILD_CONV_22)
+    set(PWB_BUILD_CONV_22 ON)
+    message(STATUS
+        "UI-04: implying PWB_BUILD_CONV_22=ON — libs/ui_workers binds "
+        "the geomodel contract cores (advisor/export/DomainObject)")
+endif()
+# END UI-04-IMPLY
 # BEGIN CONV-22 — geomodel contract/writer cores (M8): domain object
 # contracts, QC ladder + export gate, the five export writers + read-back
 # validators + provenance sidecars, advisor rules, lithology tables, and the
@@ -681,6 +697,26 @@ if(PWB_BUILD_PLATFORM)
         endif()
     endif()
 endif()
+
+# BEGIN UI-04 — core page-worker ports (libs/ui_workers): the Qt-free C++
+# halves of the seven PySide6 worker modules in paleo_workbench/ui/pages.
+# No new switch: the library joins every configuration that resolves the
+# kernels the ports bind — under PWB_BUILD_PLATFORM whenever the CONV-22
+# geomodel contracts, Pwb::Domain and the CONV-30 job runtime are present
+# (the platform/native-product and kernel closures pull them in), and in
+# kernel-closure configures like conversion-kernel so the oracle replay
+# tests run without the QGIS weight. Configs without those slices keep
+# the Python workers as the production path.
+if(PWB_BUILD_CONV_22 AND TARGET Pwb::GeoModel AND TARGET Pwb::Domain
+   AND TARGET Pwb::JobRuntime)
+    add_subdirectory(libs/ui_workers)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-04: libs/ui_workers skipped — enable PWB_BUILD_CONV_22 "
+        "(geomodel contracts) for the worker ports; the Python workers "
+        "remain the production path")
+endif()
+# END UI-04
 
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
