@@ -53,10 +53,15 @@
 #include <qgsvectorlayer.h>
 #include <qgsvertexmarker.h>
 
+#ifdef PWB_WITH_DATA_INTEGRATION
 #include <pwb/application/adapters/data_store.hpp>
+#endif
 #include <pwb/qgis/layout_service.hpp>
 #include <pwb/qgis/layer_adapter.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+
+#include "app_context.hpp"
+#include "diagnostics.hpp"
 
 #ifdef PWB_WITH_CONV_01
 #include <QComboBox>
@@ -73,9 +78,6 @@
 #include <pwb/application/map_pipeline_runner.hpp>
 #endif
 
-#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-#include <pwb/seismic_attributes/attributes.hpp>
-#endif
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/seismic_io/segy_reader.hpp>
 #endif
@@ -85,6 +87,11 @@
 #endif
 
 namespace pwb::app {
+
+pwb::application::ProjectSession* MainWindow::session() const {
+    return &context_.session();
+}
+
 namespace {
 QString layerLabelFor(const pwb::application::DomainLayerFacts& facts) {
     if (!facts.role_label.empty()) {
@@ -215,29 +222,19 @@ private:
 };
 
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    session_ = std::make_unique<pwb::application::ProjectSession>();
-#if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-    // The app is the composition root: E's contract has the host register
-    // explicitly (no static auto-registration into a shared registry).
-    attribute_runner_ = std::make_unique<pwb::application::AlgorithmRunner>();
-    const std::string rejections[] = {
-        attribute_runner_->register_kernel(
-            pwb::seismic_attributes::make_envelope("pwb-platform")),
-        attribute_runner_->register_kernel(
-            pwb::seismic_attributes::make_instantaneous_phase("pwb-platform")),
-        attribute_runner_->register_kernel(
-            pwb::seismic_attributes::make_instantaneous_frequency(
-                "pwb-platform")),
-        attribute_runner_->register_kernel(
-            pwb::seismic_attributes::make_rms_amplitude("pwb-platform")),
-    };
-    for (const std::string& rejection : rejections) {
-        if (!rejection.empty()) {
-            qWarning("attribute kernel registration: %s", rejection.c_str());
-        }
-    }
-#endif
+MainWindow::MainWindow(AppContext& context, QWidget* parent)
+    : QMainWindow(parent), owned_context_(nullptr), context_(context) {
+    init_shell();
+}
+
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent),
+      owned_context_(std::make_unique<AppContext>()),
+      context_(*owned_context_) {
+    init_shell();
+}
+
+void MainWindow::init_shell() {
     dirty_close_responder_ = [this]() {
         return QMessageBox::question(
             this, tr("未提交的修改"),
@@ -259,18 +256,18 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 MainWindow::~MainWindow() {
     // Ordered teardown must run while every member the signal paths touch
     // (actions_, status label, canvas) is still alive: member destruction
-    // order would otherwise kill the action set before the session, and
+    // would otherwise kill the action set before the session, and
     // MapSession::close() -> unsetMapTool -> mapToolSet -> refresh would
     // use the destroyed members (observed as a segfault in the integrated
     // build). ProjectSession::close()/MapSession::close() are idempotent
     // when closeEvent already ran.
-    if (session_ != nullptr) session_->close();
+    context_.session().close();
 }
 
 void MainWindow::buildUi() {
-    canvas_ = session_->map().createCanvas(this);
+    canvas_ = context_.session().map().createCanvas(this);
     setCentralWidget(canvas_);
-    session_->attachCanvas(canvas_);
+    context_.session().attachCanvas(canvas_);
 
     auto* dock = new QDockWidget(tr("图层"), this);
     dock->setObjectName(QStringLiteral("layer-tree-dock"));
@@ -278,7 +275,7 @@ void MainWindow::buildUi() {
     // Domain-aware tree panel: join-key active-layer sync (no row-index
     // mapping), native group/rename/context menu, edit indicators.
     layer_panel_ = new pwb::ui::LayerTreePanel(
-        session_->map(), canvas_, [this](const std::string& id) {
+        context_.session().map(), canvas_, [this](const std::string& id) {
             const auto it = facts_.find(id);
             return it == facts_.end()
                 ? std::optional<pwb::application::DomainLayerFacts>{}
@@ -288,7 +285,7 @@ void MainWindow::buildUi() {
     dock->setWidget(layer_panel_);
     tree_ = layer_panel_->view();
 #else
-    tree_ = session_->map().createLayerTree(dock);
+    tree_ = context_.session().map().createLayerTree(dock);
     dock->setWidget(tree_);
 #endif
     addDockWidget(Qt::LeftDockWidgetArea, dock);
@@ -326,7 +323,7 @@ void MainWindow::buildUi() {
     zoom_out_tool_ = new QgsMapToolZoom(canvas_, true);
     vertex_tool_ = new VertexMoveMapTool(canvas_, this);
     canvas_->setMapTool(pan_tool_);
-    session_->set_current_tool("pan");
+    context_.session().set_current_tool("pan");
 
     connect(canvas_, &QgsMapCanvas::mapToolSet, this,
             [this]() { onCanvasMapToolChanged(); });
@@ -521,13 +518,13 @@ void MainWindow::connectActions() {
 }
 
 void MainWindow::refreshActionStates() {
-    const auto availability = pwb::tool_policy::evaluate_all(session_->snapshot());
+    const auto availability = pwb::tool_policy::evaluate_all(context_.session().snapshot());
     actions_.apply(availability);
     setStatusFromPolicy(availability);
 #ifdef PWB_WITH_CONV_27
     // Edit tools retarget the canvas current layer on every active change.
-    if (edit_tools_ != nullptr && session_->active_layer().has_value()) {
-        edit_tools_->set_active_layer(session_->active_layer()->layer_id);
+    if (edit_tools_ != nullptr && context_.session().active_layer().has_value()) {
+        edit_tools_->set_active_layer(context_.session().active_layer()->layer_id);
     }
     if (layer_panel_ != nullptr) layer_panel_->refresh_indicators();
     refresh_constraint_panel();
@@ -556,7 +553,7 @@ QString MainWindow::openVectorLayer(const QString& path) {
     pwb::qgis::LayerBinding binding{
         layer_id.toStdString(), "", "", "vector"};
     std::string error;
-    QgsVectorLayer* layer = session_->map().addVectorLayer(
+    QgsVectorLayer* layer = context_.session().map().addVectorLayer(
         path.toStdString(), layer_id.toStdString(), binding, &error);
     if (layer == nullptr) return QString::fromStdString(error);
 #ifdef PWB_WITH_CONV_27
@@ -574,7 +571,7 @@ QString MainWindow::openVectorLayer(const QString& path) {
     // write here; once B bindings exist the store becomes the authority.
     facts.write_granted = true;
     facts_[facts.layer_id] = facts;
-    session_->set_active_layer(facts);
+    context_.session().set_active_layer(facts);
     canvas_->setExtent(layer->extent());
     refreshActionStates();
     return QString();
@@ -585,7 +582,7 @@ QString MainWindow::openRasterLayer(const QString& path) {
     pwb::qgis::LayerBinding binding{
         layer_id.toStdString(), "", "", "raster"};
     std::string error;
-    QgsRasterLayer* layer = session_->map().addRasterLayer(
+    QgsRasterLayer* layer = context_.session().map().addRasterLayer(
         path.toStdString(), layer_id.toStdString(), binding, &error);
     if (layer == nullptr) return QString::fromStdString(error);
     canvas_->setExtent(layer->extent());
@@ -615,8 +612,8 @@ void MainWindow::openRasterDialog() {
     }
 }
 
-void MainWindow::openProjectDialog() {
 #ifdef PWB_WITH_DATA_INTEGRATION
+void MainWindow::openProjectDialog() {
     const QString path = QFileDialog::getOpenFileName(
         this, tr("打开工程"), QString(),
         tr("Paleo 工程 (*.paleo.json *.paleo);;所有文件 (*)"));
@@ -625,8 +622,8 @@ void MainWindow::openProjectDialog() {
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("打开工程"), error);
     }
-#endif
 }
+#endif
 
 #ifdef PWB_WITH_DATA_INTEGRATION
 void MainWindow::newProjectDialog() {
@@ -646,7 +643,7 @@ void MainWindow::newProjectDialog() {
 
 QString MainWindow::newProject(const QString& dir_path,
                                const QString& name) {
-    if (session_->store() != nullptr) {
+    if (context_.session().store() != nullptr) {
         return tr("已有工程打开（每窗口一个工程会话）");
     }
     // File-system-safe project name (also becomes the .paleo.json stem).
@@ -746,7 +743,7 @@ QString MainWindow::newProject(const QString& dir_path,
 }
 
 QString MainWindow::openProject(const QString& project_file) {
-    if (session_->store() != nullptr) {
+    if (context_.session().store() != nullptr) {
         return tr("已有工程打开（每窗口一个工程会话）");
     }
     std::string open_error;
@@ -760,15 +757,15 @@ QString MainWindow::openProject(const QString& project_file) {
     // any new commit. Pending items stay blocking; surface them honestly.
     const pwb::data::RecoveryReportV1 recovery = store->recover();
 
-    session_->set_store(store);
-    project_store_ = store;
+    context_.session().set_store(store);
+    context_.setProjectStore(store);
 
     // Materialize every bound GeoJSON layer as an explicit working copy —
     // the catalog payload file itself is read-only for the shell.
     auto snapshot = store->snapshot();
     if (!snapshot.is_ok()) {
-        session_->set_store(nullptr);
-        project_store_ = nullptr;
+        context_.session().set_store(nullptr);
+        context_.setProjectStore(nullptr);
         return QString::fromStdString(snapshot.error().message);
     }
     std::map<std::string, const pwb::catalog::DataVersion*> versions;
@@ -817,7 +814,7 @@ QString MainWindow::openProject(const QString& project_file) {
                                          binding.source_version_id,
                                          "vector"};
         std::string add_error;
-        QgsVectorLayer* layer = session_->map().addVectorLayer(
+        QgsVectorLayer* layer = context_.session().map().addVectorLayer(
             working.string(), binding.layer_id, qbinding, &add_error);
 #ifdef PWB_WITH_CONV_27
         if (layer != nullptr) {
@@ -839,8 +836,8 @@ QString MainWindow::openProject(const QString& project_file) {
         // the copy; the payload stays immutable.
         facts.write_granted = true;
         facts_[facts.layer_id] = facts;
-        if (!session_->active_layer().has_value()) {
-            session_->set_active_layer(facts);
+        if (!context_.session().active_layer().has_value()) {
+            context_.session().set_active_layer(facts);
             canvas_->setExtent(layer->extent());
         }
         ++opened;
@@ -881,21 +878,21 @@ void MainWindow::armVertexTool() {
 }
 
 void MainWindow::zoomFullExtent() {
-    session_->map().zoomToFullExtent(canvas_);
+    context_.session().map().zoomToFullExtent(canvas_);
     refreshActionStates();
 }
 
 void MainWindow::refreshMap() {
-    session_->map().refreshCanvases();
+    context_.session().map().refreshCanvases();
     refreshActionStates();
 }
 
 void MainWindow::toggleEditing() {
-    const auto active = session_->active_layer();
+    const auto active = context_.session().active_layer();
     if (!active.has_value()) return;
     const std::string id = active->layer_id;
-    if (session_->edit().editing(id)) {
-        if (session_->edit().dirty(id)) {
+    if (context_.session().edit().editing(id)) {
+        if (context_.session().edit().dirty(id)) {
             // Stop with pending edits goes through the same three-way
             // decision as dirty-close (no silent discard).
             const int choice = dirty_close_responder_();
@@ -904,9 +901,9 @@ void MainWindow::toggleEditing() {
             rollBackEdits();
             return;
         }
-        session_->edit().roll_back(id);
+        context_.session().edit().roll_back(id);
     } else {
-        const std::string error = session_->edit().start_editing(id);
+        const std::string error = context_.session().edit().start_editing(id);
         if (!error.empty()) {
             QMessageBox::warning(this, tr("开始编辑"), QString::fromStdString(error));
         }
@@ -915,13 +912,13 @@ void MainWindow::toggleEditing() {
 }
 
 void MainWindow::saveEdits() {
-    const auto active = session_->active_layer();
-    if (!active.has_value() || !session_->edit().editing(active->layer_id)) return;
+    const auto active = context_.session().active_layer();
+    if (!active.has_value() || !context_.session().edit().editing(active->layer_id)) return;
     const std::filesystem::path staged_dir =
         std::filesystem::temp_directory_path() / "pwb-platform" / "staged";
     std::string error;
     const pwb::qgis::StagedAsset staged =
-        session_->stage_commit(active->layer_id, staged_dir, &error);
+        context_.session().stage_commit(active->layer_id, staged_dir, &error);
     if (!error.empty()) {
         QMessageBox::warning(this, tr("提交编辑"),
             QString::fromStdString(error) + QStringLiteral("\n编辑已保留，可修复后重试。"));
@@ -937,26 +934,26 @@ void MainWindow::saveEdits() {
 }
 
 void MainWindow::rollBackEdits() {
-    const auto active = session_->active_layer();
+    const auto active = context_.session().active_layer();
     if (!active.has_value()) return;
-    if (session_->edit().dirty(active->layer_id)) {
+    if (context_.session().edit().dirty(active->layer_id)) {
         if (discard_confirm_responder_() != QMessageBox::Yes) return;
     }
-    session_->edit().roll_back(active->layer_id);
+    context_.session().edit().roll_back(active->layer_id);
     refreshActionStates();
 }
 
 void MainWindow::undoEdition() {
-    const auto active = session_->active_layer();
+    const auto active = context_.session().active_layer();
     if (!active.has_value()) return;
-    session_->edit().undo(active->layer_id);
+    context_.session().edit().undo(active->layer_id);
     refreshActionStates();
 }
 
 void MainWindow::redoEdition() {
-    const auto active = session_->active_layer();
+    const auto active = context_.session().active_layer();
     if (!active.has_value()) return;
-    session_->edit().redo(active->layer_id);
+    context_.session().edit().redo(active->layer_id);
     refreshActionStates();
 }
 
@@ -966,7 +963,7 @@ void MainWindow::exportLayoutDialog() {
         tr("PNG 图像 (*.png);;PDF 文档 (*.pdf);;SVG 矢量 (*.svg)"));
     if (path.isEmpty()) return;
     const QString suffix = QFileInfo(path).suffix().toLower();
-    pwb::qgis::LayoutService layouts(session_->map());
+    pwb::qgis::LayoutService layouts(context_.session().map());
     pwb::qgis::LayoutSpec spec;
     const std::string error = layouts.export_layout(
         spec, std::filesystem::path(path.toStdWString()),
@@ -1004,7 +1001,7 @@ QString MainWindow::runGeologicalFactorMap(
         crs = "EPSG:4326";
     } else {
         QgsVectorLayer* layer =
-            session_->map().vectorLayerById(layer_id.toStdString());
+            context_.session().map().vectorLayerById(layer_id.toStdString());
         if (layer == nullptr) {
             return QString::fromStdString("layer not found: "
                                           + layer_id.toStdString());
@@ -1073,8 +1070,8 @@ QString MainWindow::runGeologicalFactorMap(
     // Idempotent re-run: regenerate the two product layers in place.
     const QString contour_id = QStringLiteral("factor.contour");
     const QString facies_id = QStringLiteral("factor.classification");
-    removeLayerById(session_->map().project(), contour_id.toStdString());
-    removeLayerById(session_->map().project(), facies_id.toStdString());
+    removeLayerById(context_.session().map().project(), contour_id.toStdString());
+    removeLayerById(context_.session().map().project(), facies_id.toStdString());
     facts_.erase(contour_id.toStdString());
     facts_.erase(facies_id.toStdString());
 
@@ -1131,7 +1128,7 @@ QString MainWindow::runGeologicalFactorMap(
         }
         layer->dataProvider()->addFeatures(parsed);
         layer->updateExtents();
-        session_->map().project()->addMapLayer(layer);
+        context_.session().map().project()->addMapLayer(layer);
         layer->triggerRepaint();
 
         // Factor outputs are RAW-protected (workspace ROLE_RAW_PROTECTED):
@@ -1164,7 +1161,7 @@ QString MainWindow::runGeologicalFactorMap(
     if (facies_layer != nullptr && !facies_layer->extent().isNull()) {
         canvas_->setExtent(facies_layer->extent());
     }
-    session_->map().refreshCanvases();
+    context_.session().map().refreshCanvases();
     refreshActionStates();
     statusBar()->showMessage(
         tr("地质因子图已生成：%1（%2 条等值线 / %3 个相带多边形）")
@@ -1181,8 +1178,8 @@ void MainWindow::geologicalFactorMapDialog() {
     auto* wells = new QComboBox(&dialog);
     wells->addItem(tr("内置示例井点（8 井 · 孔隙度）"),
                    QStringLiteral("builtin.sample_wells"));
-    for (const std::string& id : session_->map().layerIdsTopFirst()) {
-        QgsVectorLayer* layer = session_->map().vectorLayerById(id);
+    for (const std::string& id : context_.session().map().layerIdsTopFirst()) {
+        QgsVectorLayer* layer = context_.session().map().vectorLayerById(id);
         if (layer == nullptr
             || layer->geometryType() != Qgis::GeometryType::Point) {
             continue;
@@ -1252,7 +1249,7 @@ void MainWindow::onCanvasMapToolChanged() {
         tool_id = edit_tools_->tool_id_of(tool);
     }
 #endif
-    session_->set_current_tool(tool_id);
+    context_.session().set_current_tool(tool_id);
     refreshActionStates();
 }
 
@@ -1260,22 +1257,22 @@ void MainWindow::onActiveLayerChanged() {
     const QModelIndex current = tree_->currentIndex();
     if (!current.isValid()) return;
     // Map the tree row back to a domain layer id via the join key.
-    const auto layers = session_->map().layerIdsTopFirst();
+    const auto layers = context_.session().map().layerIdsTopFirst();
     const int row = current.row();
     if (row < 0 || static_cast<size_t>(row) >= layers.size()) return;
     const std::string layer_id = layers[static_cast<size_t>(row)];
     const auto it = facts_.find(layer_id);
     if (it == facts_.end()) return;
-    session_->set_active_layer(it->second);
+    context_.session().set_active_layer(it->second);
     refreshActionStates();
 }
 
 // ---------------------------------------------------------------- close ----
 
 bool MainWindow::anyDirtyEditSession() const {
-    const auto active = session_->active_layer();
-    return active.has_value() && session_->edit().editing(active->layer_id)
-        && session_->edit().dirty(active->layer_id);
+    const auto active = context_.session().active_layer();
+    return active.has_value() && context_.session().edit().editing(active->layer_id)
+        && context_.session().edit().dirty(active->layer_id);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -1286,11 +1283,11 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             return;
         }
         if (choice == QMessageBox::Save) {
-            const auto active = session_->active_layer();
+            const auto active = context_.session().active_layer();
             const std::filesystem::path staged_dir =
                 std::filesystem::temp_directory_path() / "pwb-platform" / "staged";
             std::string error;
-            session_->stage_commit(active->layer_id, staged_dir, &error);
+            context_.session().stage_commit(active->layer_id, staged_dir, &error);
             if (!error.empty()) {
                 // Failed save must not destroy the edits: cancel the close.
                 // (Non-modal: a blocking dialog here is untestable offscreen;
@@ -1302,8 +1299,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
                 return;
             }
         } else {
-            const auto active = session_->active_layer();
-            if (active.has_value()) session_->edit().roll_back(active->layer_id);
+            const auto active = context_.session().active_layer();
+            if (active.has_value()) context_.session().edit().roll_back(active->layer_id);
         }
     }
 #ifdef PWB_WITH_CONV_27
@@ -1315,7 +1312,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 #endif
     // Contract teardown order: session (edit -> canvas detach -> layers ->
     // project) before widget children die with the window.
-    session_->close();
+    context_.session().close();
     QMainWindow::closeEvent(event);
 }
 
@@ -1326,7 +1323,7 @@ QString MainWindow::loadFixtures(const QString& vector_uri,
     const pwb::qgis::LayerBinding vector_binding{
         "fixture.facies_boundary", "asset-fixture-1", "version-1", "vector"};
     std::string error;
-    pwb::qgis::MapSession& map = session_->map();
+    pwb::qgis::MapSession& map = context_.session().map();
     if (map.addVectorLayer(vector_uri.toStdString(), tr("相带边界").toStdString(),
                            vector_binding, &error) == nullptr) {
         return QString::fromStdString(error);
@@ -1347,7 +1344,7 @@ QString MainWindow::loadFixtures(const QString& vector_uri,
     facts.write_granted = true;
     facts.artifact_maturity = "draft";
     facts_[facts.layer_id] = facts;
-    session_->set_active_layer(facts);
+    context_.session().set_active_layer(facts);
     map.setDestinationCrs("EPSG:4326", &error);
     if (!error.empty()) return QString::fromStdString(error);
     map.zoomToFullExtent(canvas_);
@@ -1372,18 +1369,18 @@ QString MainWindow::loadLasIntoDock(const QString& las_path) {
 #endif
 
 QString MainWindow::commitActiveLayer(const std::filesystem::path& staged_dir) {
-    const auto active = session_->active_layer();
+    const auto active = context_.session().active_layer();
     if (!active.has_value()) return QStringLiteral("no active layer");
     std::string error;
-    session_->stage_commit(active->layer_id, staged_dir, &error);
+    context_.session().stage_commit(active->layer_id, staged_dir, &error);
     return QString::fromStdString(error);
 }
 
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
 std::vector<std::string> MainWindow::volumeVersionIds() const {
     std::vector<std::string> ids;
-    if (project_store_ == nullptr) return ids;
-    auto snapshot = project_store_->snapshot();
+    if (context_.projectStore() == nullptr) return ids;
+    auto snapshot = context_.projectStore()->snapshot();
     if (!snapshot.is_ok()) return ids;
     for (const auto& version : snapshot.value().catalog_versions) {
         if (version.format == "PWBVOL1" && !version.trashed) {
@@ -1394,13 +1391,13 @@ std::vector<std::string> MainWindow::volumeVersionIds() const {
 }
 
 QString MainWindow::openVolumeVersion(const std::string& version_id) {
-    if (project_store_ == nullptr) return tr("未打开工程");
-    auto snapshot = project_store_->snapshot();
+    if (context_.projectStore() == nullptr) return tr("未打开工程");
+    auto snapshot = context_.projectStore()->snapshot();
     if (!snapshot.is_ok()) {
         return QString::fromStdString(snapshot.error().message);
     }
     const std::filesystem::path project_dir =
-        project_store_->project_file().parent_path();
+        context_.projectStore()->project_file().parent_path();
     for (const auto& version : snapshot.value().catalog_versions) {
         if (version.id.str() != version_id || version.format != "PWBVOL1") {
             continue;
@@ -1447,22 +1444,17 @@ std::string MainWindow::runAttribute(
     const std::string& algorithm_id,
     const std::map<std::string, std::string>& params,
     const std::string& input_version_id, std::string* error) {
-    if (attribute_runner_ == nullptr) {
-        if (error != nullptr) *error = "attribute runner unavailable";
-        return "";
-    }
-    return attribute_runner_->submit(project_store_, algorithm_id, params,
+    return context_.attributeRunner().submit(context_.projectStore(), algorithm_id, params,
                                      input_version_id, error);
 }
 
 pwb::application::AlgorithmRunner::Outcome MainWindow::attributeOutcome(
     const std::string& request_id) {
-    if (attribute_runner_ == nullptr) return {};
-    return attribute_runner_->outcome(request_id);
+    return context_.attributeRunner().outcome(request_id);
 }
 
 void MainWindow::runAttributeDialog() {
-    if (project_store_ == nullptr) {
+    if (context_.projectStore() == nullptr) {
         QMessageBox::information(this, tr("计算属性"), tr("请先打开工程。"));
         return;
     }
@@ -1477,7 +1469,7 @@ void MainWindow::runAttributeDialog() {
     QDialog dialog(this);
     dialog.setWindowTitle(tr("计算地震属性"));
     auto* algorithm = new QComboBox(&dialog);
-    for (const auto& info : attribute_runner_->algorithms()) {
+    for (const auto& info : context_.attributeRunner().algorithms()) {
         algorithm->addItem(QString::fromStdString(info.display_name),
                            QString::fromStdString(info.algorithm_id));
     }
@@ -1572,7 +1564,7 @@ void MainWindow::runAttributeDialog() {
 
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
 std::string MainWindow::importSegy(const QString& path, std::string* error) {
-    if (project_store_ == nullptr) {
+    if (context_.projectStore() == nullptr) {
         if (error != nullptr) *error = "未打开工程（SEG-Y 导入需要工程目录）";
         return "";
     }
@@ -1603,7 +1595,7 @@ std::string MainWindow::importSegy(const QString& path, std::string* error) {
     payload.samples = std::move(volume->samples);
 
     const std::filesystem::path project_dir =
-        project_store_->project_file().parent_path();
+        context_.projectStore()->project_file().parent_path();
     const std::filesystem::path staged_dir = project_dir / ".pwb-imports";
     std::error_code ec;
     std::filesystem::create_directories(staged_dir, ec);
@@ -1624,7 +1616,7 @@ std::string MainWindow::importSegy(const QString& path, std::string* error) {
     registration.parameters = pwb::domain::Json::object();
     registration.parameters["source_file"] = path.toStdString();
     auto registered =
-        project_store_->coordinator().register_run(registration);
+        context_.projectStore()->coordinator().register_run(registration);
     if (!registered.is_ok()) {
         if (error != nullptr) {
             *error = "register_run failed: " + registered.error().message;
@@ -1648,15 +1640,15 @@ std::string MainWindow::importSegy(const QString& path, std::string* error) {
     publish.result_metadata = pwb::domain::Json::object();
     publish.result_metadata["payload_format"] = "PWBVOL1";
     publish.result_metadata["source_format"] = "SEG-Y";
-    auto published = project_store_->coordinator().publish_run_result(
-        publish, project_store_->document());
+    auto published = context_.projectStore()->coordinator().publish_run_result(
+        publish, context_.projectStore()->document());
     if (!published.is_ok()) {
         if (error != nullptr) {
             *error = "publish failed: " + published.error().message;
         }
         return "";
     }
-    (void)project_store_->export_manifest();
+    (void)context_.projectStore()->export_manifest();
     return published.value().new_version_id.str();
 }
 #endif
@@ -1689,7 +1681,7 @@ void MainWindow::importSegyDialog() {
 
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
 void MainWindow::openVolumeDialog() {
-    if (project_store_ == nullptr) {
+    if (context_.projectStore() == nullptr) {
         QMessageBox::information(this, tr("打开体版本"), tr("请先打开工程。"));
         return;
     }
@@ -1770,7 +1762,7 @@ void MainWindow::install_conv27_surface() {
             this, [this](const QString& layer_id) {
                 const auto it = facts_.find(layer_id.toStdString());
                 if (it == facts_.end()) return;
-                session_->set_active_layer(it->second);
+                context_.session().set_active_layer(it->second);
                 if (layer_panel_ != nullptr) {
                     layer_panel_->set_active_layer(it->first);
                 }
@@ -1779,7 +1771,7 @@ void MainWindow::install_conv27_surface() {
 
     // Edit tools: QGIS select + digitize, applied through the one edit
     // authority.
-    edit_tools_ = new pwb::ui::EditToolController(canvas_, session_.get(),
+    edit_tools_ = new pwb::ui::EditToolController(canvas_, &context_.session(),
                                                   this);
     connect(edit_tools_, &pwb::ui::EditToolController::feature_committed,
             this, [this](const QString&) { refreshActionStates(); });
@@ -1801,7 +1793,7 @@ void MainWindow::install_conv27_surface() {
 
     // Live selection/edit state drives the enablement matrix: wire the
     // QGIS authorities (per-layer signals) to the one refresh path.
-    connect(session_->map().project(), &QgsProject::layersAdded, this,
+    connect(context_.session().map().project(), &QgsProject::layersAdded, this,
             [this](const QList<QgsMapLayer*>& layers) {
               for (QgsMapLayer* layer : layers) {
                 auto* vector_layer = qobject_cast<QgsVectorLayer*>(layer);
@@ -1829,7 +1821,7 @@ void MainWindow::install_conv27_surface() {
 void MainWindow::onActiveLayerIdChanged(const QString& layer_id) {
     const auto it = facts_.find(layer_id.toStdString());
     if (it == facts_.end()) return;
-    session_->set_active_layer(it->second);
+    context_.session().set_active_layer(it->second);
     refreshActionStates();
 }
 
@@ -1838,7 +1830,7 @@ void MainWindow::applyStageValue(const std::string& value) {
     if (!stage.has_value()) return;
     // Canonicalize: the session string feeds the evaluator's stage
     // whitelist comparisons, which speak canonical values only.
-    session_->set_mapping_stage(pwb::tool_policy::stage_value(*stage));
+    context_.session().set_mapping_stage(pwb::tool_policy::stage_value(*stage));
     if (stage_dock_ != nullptr) stage_dock_->set_current_stage(*stage);
     refreshActionStates();
     refresh_readiness();
@@ -1847,7 +1839,7 @@ void MainWindow::applyStageValue(const std::string& value) {
 pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {
     pwb::ui::ReadinessInputs in;
     // CRS straight from the map authority.
-    in.project_crs = session_->map().project()->crs().authid().toStdString();
+    in.project_crs = context_.session().map().project()->crs().authid().toStdString();
     // Horizon: the store document's stratigraphy section when open.
 #ifdef PWB_WITH_DATA_INTEGRATION
     if (project_store_ != nullptr) {
@@ -1878,12 +1870,12 @@ pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {
     }
 #endif  // PWB_WITH_DATA_INTEGRATION
     // Layer-derived facts from the live session (join-key iteration).
-    for (const std::string& layer_id : session_->map().layerIdsTopFirst()) {
+    for (const std::string& layer_id : context_.session().map().layerIdsTopFirst()) {
         const auto it = facts_.find(layer_id);
         const std::string role =
             it != facts_.end() ? it->second.role : std::string();
         QgsVectorLayer* layer =
-            session_->map().vectorLayerById(layer_id);
+            context_.session().map().vectorLayerById(layer_id);
         if (layer == nullptr) continue;
         if (facies_polygon_role(role)) {
             // Python counts Polygon/MultiPolygon FEATURES (not layers):
@@ -1935,30 +1927,30 @@ void MainWindow::refresh_readiness() {
 }
 
 void MainWindow::refresh_constraint_panel() {
-    if (constraint_dock_ != nullptr) constraint_dock_->refresh(*session_);
+    if (constraint_dock_ != nullptr) constraint_dock_->refresh(context_.session());
 }
 
 void MainWindow::deleteSelectedFeatures() {
-    const auto active = session_->active_layer();
+    const auto active = context_.session().active_layer();
     if (!active.has_value()) return;
     int deleted = 0;
     const std::string error =
-        session_->edit().delete_selected(active->layer_id, &deleted);
+        context_.session().edit().delete_selected(active->layer_id, &deleted);
     if (!error.empty()) {
         QMessageBox::warning(this, tr("删除所选"),
                              QString::fromStdString(error));
         return;
     }
-    session_->map().refreshCanvases();
+    context_.session().map().refreshCanvases();
     statusBar()->showMessage(tr("已删除 %1 个要素").arg(deleted), 6000);
     refreshActionStates();
 }
 
 void MainWindow::openActiveLayerProperties() {
-    const auto active = session_->active_layer();
+    const auto active = context_.session().active_layer();
     if (!active.has_value()) return;
     QgsVectorLayer* layer =
-        session_->map().vectorLayerById(active->layer_id);
+        context_.session().map().vectorLayerById(active->layer_id);
     if (layer == nullptr) return;
     // Native QGIS renderer dialog applies on OK.
     pwb::ui::layer_style::open_renderer_properties(layer, canvas_, this);

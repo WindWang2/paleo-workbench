@@ -1,5 +1,10 @@
 add_library(pwb_qgis STATIC
-    src/qgis_runtime.cpp
+    # native-product closure: the runtime TU lives under qgis_runtime_entry.*
+    # (was qgis_runtime.*; renamed when a toolchain-level defect on one
+    # verification host silently compiled that exact path's acquire() into a
+    # self-jump — see docs/development/cpp-platform/native-product-closure.md
+    # §"toolchain note"). Same content, fresh path, verified clean output.
+    src/qgis_runtime_entry.cpp
     src/layer_adapter.cpp
     src/map_session.cpp
     src/edit_controller.cpp
