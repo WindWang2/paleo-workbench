@@ -99,3 +99,7 @@ scratch_wt_batched*
 .v7-baseline-gen.log
 .final-sweep.log
 
+# Local agent/worktree scratch: build logs, diagnostics and generated reports
+# that are not part of the tree. `build/` above is the actual CMake output.
+.workbuddy/
+

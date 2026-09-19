@@ -39,12 +39,167 @@
         "PWB_BUILD_DATA": "OFF",
         "PWB_BUILD_SCIENCE": "OFF"
       }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Native product, Windows MSVC x64 (Release)",
+      "description": "Full native closure: platform + data + science + mapping kernel. Needs the vendored QGIS SDK.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/presets/windows-msvc",
+      "environment": {
+        "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+        "CTEST_PARALLEL_LEVEL": "2"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PWB_BUILD_PLATFORM": "ON",
+        "PWB_BUILD_DATA": "ON",
+        "PWB_BUILD_SCIENCE": "ON",
+        "PWB_BUILD_MAPPING_KERNEL": "ON",
+        "PWB_BUILD_CONV_01": "ON",
+        "PWB_BUILD_CONV_16": "ON",
+        "CMAKE_PREFIX_PATH": "C:/deps/Qt/6.8.0/msvc2022_64"
+      }
+    },
+    {
+      "name": "linux-ninja",
+      "displayName": "Native product, Linux Ninja (Release)",
+      "description": "Same closure as windows-msvc; kept generator-identical for CI-free local runs.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/presets/linux-ninja",
+      "environment": {
+        "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+        "CTEST_PARALLEL_LEVEL": "2"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PWB_BUILD_PLATFORM": "ON",
+        "PWB_BUILD_DATA": "ON",
+        "PWB_BUILD_SCIENCE": "ON",
+        "PWB_BUILD_MAPPING_KERNEL": "ON",
+        "PWB_BUILD_CONV_01": "ON",
+        "PWB_BUILD_CONV_16": "ON"
+      }
+    },
+    {
+      "name": "developer-fast",
+      "displayName": "Developer fast loop (no QGIS SDK, Qt-free kernels)",
+      "description": "Configures and builds quickly: platform OFF so the vendored QGIS SDK is not needed. Kernel sources plus their oracle tests only.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/presets/developer-fast",
+      "environment": {
+        "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+        "CTEST_PARALLEL_LEVEL": "2"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PWB_BUILD_PLATFORM": "OFF",
+        "PWB_BUILD_DATA": "ON",
+        "PWB_BUILD_SCIENCE": "OFF",
+        "PWB_BUILD_MAPPING_KERNEL": "ON",
+        "PWB_BUILD_CONV_04": "ON",
+        "PWB_BUILD_CONV_05": "ON",
+        "PWB_BUILD_CONV_10": "ON",
+        "PWB_BUILD_CONV_17": "ON",
+        "PWB_BUILD_CONV_18": "ON"
+      }
+    },
+    {
+      "name": "conversion-kernel",
+      "displayName": "All Qt-free conversion kernels + oracle tests",
+      "description": "Every CONV slice whose closure is Qt-free/QGIS-free. Use this when verifying a kernel port against its Python oracle.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/presets/conversion-kernel",
+      "environment": {
+        "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+        "CTEST_PARALLEL_LEVEL": "2"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PWB_BUILD_PLATFORM": "OFF",
+        "PWB_BUILD_DATA": "ON",
+        "PWB_BUILD_SCIENCE": "OFF",
+        "PWB_BUILD_MAPPING_KERNEL": "ON",
+        "PWB_BUILD_CONV_02": "ON",
+        "PWB_BUILD_CONV_04": "ON",
+        "PWB_BUILD_CONV_05": "ON",
+        "PWB_BUILD_CONV_06": "ON",
+        "PWB_BUILD_CONV_07": "ON",
+        "PWB_BUILD_CONV_08": "ON",
+        "PWB_BUILD_CONV_09": "ON",
+        "PWB_BUILD_CONV_10": "ON",
+        "PWB_BUILD_CONV_11": "ON",
+        "PWB_BUILD_CONV_12": "ON",
+        "PWB_BUILD_CONV_13": "ON",
+        "PWB_BUILD_CONV_14": "ON",
+        "PWB_BUILD_CONV_17": "ON",
+        "PWB_BUILD_CONV_18": "ON",
+        "PWB_BUILD_CONV_19": "ON",
+        "PWB_BUILD_CONV_21": "ON",
+        "PWB_BUILD_CONV_22": "ON",
+        "PWB_BUILD_CONV_23": "ON",
+        "PWB_BUILD_CONV_24": "ON",
+        "PWB_BUILD_CONV_25": "ON"
+      }
+    },
+    {
+      "name": "native-product-smoke",
+      "displayName": "Native product smoke (platform + data + science, offscreen)",
+      "description": "The full product closure plus the integration tests. Heavy: needs the vendored QGIS SDK and the Qt 6.8 prefix. Run one at a time.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/presets/native-product-smoke",
+      "environment": {
+        "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+        "CTEST_PARALLEL_LEVEL": "2",
+        "QT_QPA_PLATFORM": "offscreen"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PWB_BUILD_PLATFORM": "ON",
+        "PWB_BUILD_DATA": "ON",
+        "PWB_BUILD_SCIENCE": "ON",
+        "PWB_BUILD_MAPPING_KERNEL": "ON",
+        "PWB_BUILD_INTEGRATION_TESTS": "ON",
+        "CMAKE_PREFIX_PATH": "C:/deps/Qt/6.8.0/msvc2022_64"
+      }
+    },
+    {
+      "name": "low-memory",
+      "displayName": "Low memory (serialized, Release, kernels only)",
+      "description": "Same closure as conversion-kernel but one compiler job and smaller objects, for when several worktrees are building at once.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/presets/low-memory",
+      "environment": {
+        "CMAKE_BUILD_PARALLEL_LEVEL": "1",
+        "CTEST_PARALLEL_LEVEL": "1",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PWB_BUILD_PLATFORM": "OFF",
+        "PWB_BUILD_DATA": "ON",
+        "PWB_BUILD_SCIENCE": "OFF",
+        "PWB_BUILD_MAPPING_KERNEL": "ON",
+        "PWB_BUILD_CONV_04": "ON",
+        "PWB_BUILD_CONV_05": "ON",
+        "PWB_BUILD_CONV_10": "ON",
+        "PWB_BUILD_CONV_17": "ON",
+        "PWB_BUILD_CONV_18": "ON"
+      }
     }
   ],
   "buildPresets": [
     {"name": "windows-msvc-debug", "configurePreset": "windows-msvc-debug"},
     {"name": "windows-msvc-release", "configurePreset": "windows-msvc-release"},
-    {"name": "linux-gcc-release", "configurePreset": "linux-gcc-release"}
+    {"name": "linux-gcc-release", "configurePreset": "linux-gcc-release"},
+    {"name": "windows-msvc", "configurePreset": "windows-msvc"},
+    {"name": "linux-ninja", "configurePreset": "linux-ninja"},
+    {"name": "developer-fast", "configurePreset": "developer-fast"},
+    {"name": "conversion-kernel", "configurePreset": "conversion-kernel"},
+    {"name": "native-product-smoke", "configurePreset": "native-product-smoke"},
+    {"name": "low-memory", "configurePreset": "low-memory"}
   ],
   "testPresets": [
     {
@@ -55,6 +210,29 @@
     {
       "name": "windows-msvc-release",
       "configurePreset": "windows-msvc-release",
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "developer-fast",
+      "configurePreset": "developer-fast",
+      "output": {"outputOnFailure": true},
+      "environment": {"QT_QPA_PLATFORM": "offscreen"}
+    },
+    {
+      "name": "conversion-kernel",
+      "configurePreset": "conversion-kernel",
+      "output": {"outputOnFailure": true},
+      "environment": {"QT_QPA_PLATFORM": "offscreen"}
+    },
+    {
+      "name": "native-product-smoke",
+      "configurePreset": "native-product-smoke",
+      "output": {"outputOnFailure": true},
+      "environment": {"QT_QPA_PLATFORM": "offscreen"}
+    },
+    {
+      "name": "low-memory",
+      "configurePreset": "low-memory",
       "output": {"outputOnFailure": true}
     }
   ]

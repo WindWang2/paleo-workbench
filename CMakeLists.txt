@@ -17,6 +17,14 @@ if(MSVC)
     add_compile_options(/utf-8 /EHsc /W3 /bigobj)
 endif()
 
+# ------------------------------------------------------------ feature graph --
+# Every PWB_* switch is declared here (once, before any add_subdirectory can
+# read it), the implied/required edges are expanded to a fixpoint, and the
+# resolved graph is validated. The per-slice option()/set() calls further down
+# still work: they now only restate what this table already resolved.
+include(cmake/PwbFeatures.cmake)
+pwb_resolve_feature_dependencies()
+
 # ---------------------------------------------------------------- options ----
 option(PWB_BUILD_PLATFORM "Build the CPP-A platform (QGIS app shell)" ON)
 option(PWB_BUILD_DATA "Link the CPP-B data/project modules (fails when absent)" OFF)
@@ -259,7 +267,7 @@ endif()
 option(PWB_BUILD_CONV_09
     "Build the CONV-09 well_science DTW kernel (M8 first slice)" OFF)
 if(PWB_BUILD_CONV_09)
-    add_subdirectory(libs/well_science)
+    pwb_add_subdirectory_once(libs/well_science)
 endif()
 # END CONV-09
 # BEGIN CONV-11
@@ -274,7 +282,7 @@ if(PWB_BUILD_CONV_11)
             "delivered on this branch")
     endif()
     if(NOT TARGET pwb_well_science)
-        add_subdirectory(libs/well_science)
+        pwb_add_subdirectory_once(libs/well_science)
     endif()
 endif()
 # END CONV-11
@@ -449,3 +457,14 @@ if(PWB_BUILD_CONV_16)
     endif()
 endif()
 # END CONV-16
+
+# ----------------------------------------------------------------- summary ---
+# Print what is actually ON, and why (declared vs implied-by:<feature>).
+pwb_feature_summary()
+
+# ---------------------------------------------------------------- packaging --
+# Opt-in native packaging skeleton (branch cpp-build-packaging-hardening).
+# Included LAST so it never alters a configure where PWB_ENABLE_PACKAGING=OFF
+# (it registers zero install rules in that case; the other worktrees are
+# unaffected). When ON, the module self-activates (pwb_install_all).
+include(cmake/PwbInstall.cmake)
