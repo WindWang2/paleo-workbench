@@ -678,6 +678,10 @@ if(PWB_BUILD_PLATFORM)
     # (map canvas panel, work-area widget, layer tree, document/chrome
     # panels, dock manager, constrained mapping-page shell).
     add_subdirectory(libs/ui_map)
+    # UI-08 — qt-mapedit slice: map-edit page cluster (scene/view/toolbar,
+    # attribute/topology/reference/boundary panels, factor shelf, inspector)
+    # over the ui_data_core edit stack.
+    add_subdirectory(libs/ui_pages_mapedit)
     add_subdirectory(apps/paleo_workbench_platform)
     if(BUILD_TESTING)
         enable_testing()
