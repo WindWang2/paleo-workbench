@@ -377,6 +377,9 @@ private:
     QDockWidget* seismic_dock_ = nullptr;
     pwb::seismic_viewer::SeismicSliceWidget* slice_widget_ = nullptr;
     std::uint64_t slice_revision_ = 0;
+    // BEGIN VIZ-D — advanced-display host alias for the menu install.
+    pwb::seismic_viewer::SeismicSliceWidget* viz_d_seismic_host_ = nullptr;
+    // END VIZ-D
 #endif
 #if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
     // Native tiled volume service: catalog PWBVOL1 versions open through

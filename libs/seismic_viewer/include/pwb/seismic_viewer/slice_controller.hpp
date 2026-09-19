@@ -28,6 +28,15 @@
 //     (epoch, axis, index) with a small LRU cap set at construction; the
 //     cache never holds more planes than that cap and never copies the
 //     whole volume.
+//   * Prefetch: after the worker delivers a successful inline/crossline
+//     request and no newer work is queued or in flight, it opportunistically
+//     warms the plane cache with the +1/-1/+2/-2 neighbour planes (the
+//     Python SliceReadWorker offsets), skipping out-of-extent and
+//     already-cached planes. Prefetch is worker-thread-only cache warming:
+//     it never emits sink results, goes through the same LRU put path, and
+//     is abandoned the moment new work (submit/set_source) or shutdown
+//     arrives. Sample (time) slices are never prefetched; the pass can be
+//     disabled with set_prefetch_enabled(false).
 
 #include <cstdint>
 #include <functional>
@@ -69,6 +78,8 @@ struct ControllerStats {
     std::uint64_t read_failures{0};      // read_slice returned 0
     std::uint64_t degenerate_results{0};
     std::size_t cache_planes_peak{0};    // high-water mark of cached planes
+    std::uint64_t prefetch_reads{0};     // prefetch plane reads (cache warming)
+    std::uint64_t prefetch_abandoned{0}; // prefetch passes cut short by new work/shutdown
 };
 
 class SliceController {
@@ -97,6 +108,13 @@ public:
     // Stops the worker and disables the sink; idempotent. The destructor
     // calls it, so hosts normally never need to.
     void request_shutdown();
+
+    // Toggles opportunistic neighbour prefetch (default on, mirroring the
+    // Python SliceReadWorker). With prefetch off the controller behaves
+    // exactly as if the prefetch pass did not exist. Thread-safe vs
+    // submit(); never blocks on I/O.
+    void set_prefetch_enabled(bool enabled);
+    [[nodiscard]] bool prefetch_enabled() const;
 
     [[nodiscard]] ControllerStats stats() const;
     [[nodiscard]] std::uint64_t epoch() const;

@@ -4,6 +4,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFile>
+#include <QFileDialog>
 #include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QImage>
@@ -22,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace pwb::seismic_viewer {
@@ -110,8 +113,9 @@ std::string format_value(double value, const std::string& unit) {
 } // namespace
 
 // ---------------------------------------------------------------------------
-// SliceCanvas: raster painting of the indexed8 slice with zoom/pan. No moc,
-// no signals: interaction results are pushed through SeismicSliceWidget.
+// SliceCanvas: raster painting of the indexed8 slice with zoom/pan, plus the
+// VIZ-D wiggle renderer and horizon pick markers. No moc, no signals:
+// interaction results are pushed through SeismicSliceWidget.
 // ---------------------------------------------------------------------------
 class SliceCanvas final : public QWidget {
 public:
@@ -128,6 +132,23 @@ public:
         }
         update();
     }
+
+    void set_wiggle(const display::WiggleGeometry* wiggle) {
+        wiggle_ = wiggle;
+        update();
+    }
+
+    void set_pick_markers(const std::vector<QPointF>* markers) {
+        pick_markers_ = markers;
+        update();
+    }
+
+    void set_display_mode(DisplayMode mode) {
+        mode_ = mode;
+        update();
+    }
+
+    void set_picking(bool picking) { picking_ = picking; }
 
     void fit_to_image() {
         if (image_ == nullptr || image_->isNull() || width() <= 0 || height() <= 0) {
@@ -163,10 +184,25 @@ public:
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
-        painter.fillRect(rect(), QColor(24, 24, 24));
-        if (image_ != nullptr && !image_->isNull()) {
-            painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
-            painter.drawImage(rect(), *image_, source_rect());
+        if (mode_ == DisplayMode::wiggle && wiggle_ != nullptr) {
+            paint_wiggle(painter);
+        } else {
+            painter.fillRect(rect(), QColor(24, 24, 24));
+            if (image_ != nullptr && !image_->isNull()) {
+                painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+                painter.drawImage(rect(), *image_, source_rect());
+            }
+        }
+        if (mode_ != DisplayMode::wiggle && pick_markers_ != nullptr) {
+            // Horizon picks: 3 px amber dots with a dark rim, in IMAGE pixel
+            // coordinates mapped through the current zoom/pan transform.
+            painter.setRenderHint(QPainter::Antialiasing, true);
+            for (const QPointF& marker : *pick_markers_) {
+                const QPointF centre = image_to_widget(marker);
+                painter.setPen(QPen(QColor(30, 30, 30), 1.5));
+                painter.setBrush(QColor(255, 210, 0));
+                painter.drawEllipse(centre, 3.0, 3.0);
+            }
         }
         if (!overlay_.isEmpty()) {
             const QFontMetrics metrics = painter.fontMetrics();
@@ -185,9 +221,13 @@ protected:
         if (!user_moved_) {
             fit_to_image();
         }
+        owner_->rebuild_wiggle(width(), height());
     }
 
     void wheelEvent(QWheelEvent* event) override {
+        if (mode_ == DisplayMode::wiggle) {
+            return; // the wiggle source has no zoom (viewport-fit rendering)
+        }
         const QPointF anchor = widget_to_image(event->position());
         const double factor = event->angleDelta().y() > 0 ? 1.25 : 0.8;
         const double next = std::clamp(scale_ * factor, 1.0, 64.0);
@@ -200,6 +240,16 @@ protected:
     }
 
     void mousePressEvent(QMouseEvent* event) override {
+        if (picking_ && event->button() == Qt::RightButton) {
+            if (owner_->report_pick_context_menu(widget_to_image(event->position()))) {
+                return; // consumed by a pick deletion
+            }
+            return;
+        }
+        if (picking_ && event->button() == Qt::LeftButton) {
+            owner_->report_pick_press(widget_to_image(event->position()));
+            return;
+        }
         if (event->button() == Qt::LeftButton) {
             press_pos_ = event->position();
             last_pos_ = event->position();
@@ -208,6 +258,10 @@ protected:
     }
 
     void mouseMoveEvent(QMouseEvent* event) override {
+        if (picking_ && (event->buttons() & Qt::LeftButton)) {
+            owner_->report_pick_drag(widget_to_image(event->position()));
+            return;
+        }
         if ((event->buttons() & Qt::LeftButton) && !press_pos_.isNull()) {
             const QPointF delta = event->position() - last_pos_;
             if ((event->modifiers() & Qt::ShiftModifier) == 0) {
@@ -230,6 +284,10 @@ protected:
     }
 
     void mouseReleaseEvent(QMouseEvent* event) override {
+        if (picking_ && event->button() == Qt::LeftButton) {
+            owner_->report_pick_drag(widget_to_image(event->position()));
+            return;
+        }
         if (event->button() != Qt::LeftButton || press_pos_.isNull()) {
             return;
         }
@@ -248,6 +306,48 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent*) override { owner_->reset_view(); }
 
 private:
+    [[nodiscard]] QPointF image_to_widget(const QPointF& point) const {
+        return QPointF((point.x() - offset_x_) * scale_, (point.y() - offset_y_) * scale_);
+    }
+
+    // profile_wiggle paint pipeline parity: white background, antialias on,
+    // light-gray per-trace baselines, positive lobes filled black at alpha
+    // 200 as separate polygons (zero-crossing points already interpolated
+    // into the geometry), dark 1 px deflection polylines. Geometry comes
+    // precomputed (pure double math, oracle-testable) from the widget.
+    void paint_wiggle(QPainter& painter) {
+        painter.fillRect(rect(), QColor(255, 255, 255));
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen baseline_pen(QColor(230, 230, 230));
+        baseline_pen.setWidthF(1.0);
+        QPen wiggle_pen(QColor(30, 30, 30));
+        wiggle_pen.setWidthF(1.0);
+        QBrush fill_brush(QColor(0, 0, 0, 200));
+        for (const display::WiggleTrace& trace : wiggle_->traces) {
+            painter.setPen(baseline_pen);
+            painter.drawLine(QPointF(trace.centre_x, 0.0),
+                             QPointF(trace.centre_x, static_cast<double>(height())));
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(fill_brush);
+            for (const display::WiggleLobe& lobe : trace.lobes) {
+                QPolygonF polygon;
+                polygon.reserve(static_cast<std::size_t>(lobe.xs.size()));
+                for (std::size_t i = 0; i < lobe.xs.size(); ++i) {
+                    polygon.append(QPointF(lobe.xs[i], lobe.ys[i]));
+                }
+                painter.drawPolygon(polygon);
+            }
+            painter.setPen(wiggle_pen);
+            painter.setBrush(Qt::NoBrush);
+            QPolygonF polyline;
+            polyline.reserve(trace.xs.size());
+            for (std::size_t i = 0; i < trace.xs.size(); ++i) {
+                polyline.append(QPointF(trace.xs[i], trace.ys[i]));
+            }
+            painter.drawPolyline(polyline);
+        }
+    }
+
     [[nodiscard]] QRectF source_rect() const {
         // Visible widget area expressed in image pixels.
         return QRectF(offset_x_, offset_y_, width() / scale_, height() / scale_);
@@ -268,7 +368,11 @@ private:
 
     SeismicSliceWidget* owner_;
     const QImage* image_{nullptr};
+    const display::WiggleGeometry* wiggle_{nullptr};
+    const std::vector<QPointF>* pick_markers_{nullptr};
     QString overlay_;
+    DisplayMode mode_{DisplayMode::variable_density};
+    bool picking_{false};
     double scale_{1.0};
     double offset_x_{0};
     double offset_y_{0};
@@ -302,6 +406,34 @@ struct SeismicSliceWidget::Impl {
     const std::string origin = next_viewer_origin();
     bool updating_controls{false}; // suppress control echo during programmatic sets
 
+    // --- VIZ-D advanced display state ---
+    DisplayMode display_mode{DisplayMode::variable_density};
+    bool polarity_normal{true};
+    bool clip_pct_enabled{false};
+    double clip_pct{99.0};
+    double wiggle_gain{2.0};
+    bool picking{false};
+    horizon::HorizonPickSet picks;
+    std::string picks_note; // status line note (binding mismatch etc.)
+    std::optional<int> pick_drag_index; // pick being dragged (edit)
+    display::WiggleGeometry wiggle_cache;
+    bool wiggle_cache_valid{false};
+    // Percentile clip cache: reused across sibling slices of the same
+    // volume+axis (profile_vd #119 semantics); invalidated on volume swap,
+    // axis change and clip_pct change.
+    struct ClipCache {
+        bool valid{false};
+        double lo{0.0};
+        double hi{0.0};
+        std::string volume_key;
+        pwb::viz::VolumeAxis axis{pwb::viz::VolumeAxis::inline_};
+        std::int64_t rows{0};
+        std::int64_t cols{0};
+        double pct{99.0};
+    } clip_cache;
+    double displayed_lo{0.0};
+    double displayed_hi{0.0};
+
     // widgets
     SliceCanvas* canvas{nullptr};
     QComboBox* axis_combo{nullptr};
@@ -314,6 +446,44 @@ struct SeismicSliceWidget::Impl {
     QDoubleSpinBox* range_max_spin{nullptr};
     QPushButton* reset_button{nullptr};
     QLabel* status_label{nullptr};
+    // VIZ-D toolbar widgets
+    QComboBox* mode_combo{nullptr};
+    QCheckBox* polarity_check{nullptr};
+    QCheckBox* clip_check{nullptr};
+    QDoubleSpinBox* clip_spin{nullptr};
+    QDoubleSpinBox* gain_spin{nullptr};
+    QCheckBox* pick_check{nullptr};
+    QPushButton* clear_picks_button{nullptr};
+    QPushButton* save_picks_button{nullptr};
+    QPushButton* load_picks_button{nullptr};
+    ColorbarWidget* colorbar{nullptr};
+
+    [[nodiscard]] bool section_view() const {
+        // Wiggle needs the sample axis vertical (inline/crossline views).
+        return geometry.has_value() &&
+               plane_axes(*geometry, axis).row == VolumeAxis::sample;
+    }
+
+    [[nodiscard]] std::string clip_volume_key() const {
+        return identity.volume_id + ":" + std::to_string(volume_revision_value);
+    }
+
+    void invalidate_clip_cache() { clip_cache.valid = false; }
+
+    void refresh_wiggle() {
+        wiggle_cache_valid = false;
+        if (canvas != nullptr) {
+            canvas->update();
+        }
+    }
+
+    void sync_colorbar() {
+        if (colorbar == nullptr) {
+            return;
+        }
+        colorbar->set_colormap(color_map_name);
+        colorbar->set_range(displayed_lo, displayed_hi);
+    }
 
     void resubmit() {
         if (!controller || !geometry) {
@@ -395,7 +565,62 @@ struct SeismicSliceWidget::Impl {
             break;
         }
         canvas->set_image(image.isNull() ? nullptr : &image, overlay);
+        // VIZ-D overlay state follows every state change so the canvas never
+        // paints stale wiggle geometry or pick markers.
+        canvas->set_display_mode(display_mode);
+        canvas->set_picking(picking);
+        canvas->set_wiggle(display_mode == DisplayMode::wiggle && wiggle_cache_valid
+                               ? &wiggle_cache
+                               : nullptr);
+        canvas->set_pick_markers(&pick_marker_cache);
     }
+
+    // Re-projected pick markers for the CURRENT view (image pixel coords).
+    std::vector<QPointF> pick_marker_cache;
+
+    void refresh_pick_markers() {
+        pick_marker_cache.clear();
+        if (!geometry.has_value()) {
+            return;
+        }
+        for (const auto extent : geometry->shape) {
+            if (extent < 1) {
+                return; // zero-extent geometry: no valid projections
+            }
+        }
+        const PlaneAxes axes = plane_axes(*geometry, axis);
+        const auto value_to_index = [&](VolumeAxis a, double value) -> double {
+            const std::size_t ai = pwb::viz::axis_index(a);
+            const double step = geometry->step[ai];
+            if (step == 0.0) {
+                return 0.0;
+            }
+            const double idx = (value - geometry->origin[ai]) / step;
+            return std::clamp(idx, 0.0, static_cast<double>(geometry->shape[ai] - 1));
+        };
+        for (const horizon::HorizonPick& pick : picks.picks) {
+            double x = -1.0;
+            double y = -1.0;
+            switch (axis) {
+            case VolumeAxis::inline_:
+                x = value_to_index(VolumeAxis::crossline, pick.crossline_no);
+                y = value_to_index(VolumeAxis::sample, pick.time_value);
+                break;
+            case VolumeAxis::crossline:
+                x = value_to_index(VolumeAxis::inline_, pick.inline_no);
+                y = value_to_index(VolumeAxis::sample, pick.time_value);
+                break;
+            case VolumeAxis::sample:
+                x = value_to_index(VolumeAxis::crossline, pick.crossline_no);
+                y = value_to_index(VolumeAxis::inline_, pick.inline_no);
+                break;
+            }
+            if (axes.col_count > 0 && axes.row_count > 0) {
+                pick_marker_cache.emplace_back(x, y);
+            }
+        }
+    }
+
 };
 
 SeismicSliceWidget::SeismicSliceWidget(QWidget* parent) : QWidget(parent) {
@@ -419,7 +644,12 @@ SeismicSliceWidget::SeismicSliceWidget(QWidget* parent) : QWidget(parent) {
         impl_->cmap_combo->addItem(QString::fromUtf8(name.data(), static_cast<int>(name.size())));
     }
     impl_->updating_controls = true;
-    impl_->cmap_combo->setCurrentIndex(1); // match impl_->color_map_name ("seismic")
+    {
+        const int seismic_row = impl_->cmap_combo->findText(QStringLiteral("seismic"));
+        if (seismic_row >= 0) {
+            impl_->cmap_combo->setCurrentIndex(seismic_row); // match default name
+        }
+    }
     impl_->updating_controls = false;
     impl_->explicit_range_check = new QCheckBox(QStringLiteral("Explicit range"), this);
     impl_->range_min_spin = new QDoubleSpinBox(this);
@@ -430,6 +660,33 @@ SeismicSliceWidget::SeismicSliceWidget(QWidget* parent) : QWidget(parent) {
         spin->setEnabled(false);
     }
     impl_->reset_button = new QPushButton(QStringLiteral("Reset"), this);
+
+    // --- VIZ-D advanced display toolbar (profile_vd / profile_wiggle) -----
+    auto* mode_label = new QLabel(QStringLiteral("Mode"), this);
+    impl_->mode_combo = new QComboBox(this);
+    impl_->mode_combo->addItem(QStringLiteral("VD"));
+    impl_->mode_combo->addItem(QStringLiteral("Wiggle"));
+    impl_->polarity_check = new QCheckBox(QStringLiteral("Reverse polarity"), this);
+    impl_->clip_check = new QCheckBox(QStringLiteral("Clip %"), this);
+    impl_->clip_check->setToolTip(
+        QStringLiteral("Asymmetric P(100-p)..P(p) percentile clip (profile_vd)"));
+    impl_->clip_spin = new QDoubleSpinBox(this);
+    impl_->clip_spin->setRange(1.0, 99.0);
+    impl_->clip_spin->setDecimals(1);
+    impl_->clip_spin->setSingleStep(0.5);
+    impl_->clip_spin->setValue(impl_->clip_pct);
+    impl_->clip_spin->setEnabled(false);
+    impl_->gain_spin = new QDoubleSpinBox(this);
+    impl_->gain_spin->setRange(0.1, 100.0);
+    impl_->gain_spin->setDecimals(2);
+    impl_->gain_spin->setSingleStep(0.5);
+    impl_->gain_spin->setValue(impl_->wiggle_gain);
+    impl_->gain_spin->setToolTip(QStringLiteral("Wiggle deflection gain (default 2.0)"));
+    auto* gain_label = new QLabel(QStringLiteral("Gain"), this);
+    impl_->pick_check = new QCheckBox(QStringLiteral("Pick"), this);
+    impl_->clear_picks_button = new QPushButton(QStringLiteral("Clear picks"), this);
+    impl_->save_picks_button = new QPushButton(QStringLiteral("Save picks…"), this);
+    impl_->load_picks_button = new QPushButton(QStringLiteral("Load picks…"), this);
 
     auto* toolbar = new QHBoxLayout;
     toolbar->addWidget(axis_label);
@@ -444,12 +701,33 @@ SeismicSliceWidget::SeismicSliceWidget(QWidget* parent) : QWidget(parent) {
     toolbar->addWidget(impl_->range_max_spin);
     toolbar->addWidget(impl_->reset_button);
 
+    auto* vizd_toolbar = new QHBoxLayout;
+    vizd_toolbar->addWidget(mode_label);
+    vizd_toolbar->addWidget(impl_->mode_combo);
+    vizd_toolbar->addWidget(impl_->polarity_check);
+    vizd_toolbar->addWidget(impl_->clip_check);
+    vizd_toolbar->addWidget(impl_->clip_spin);
+    vizd_toolbar->addWidget(gain_label);
+    vizd_toolbar->addWidget(impl_->gain_spin);
+    vizd_toolbar->addWidget(impl_->pick_check);
+    vizd_toolbar->addWidget(impl_->clear_picks_button);
+    vizd_toolbar->addWidget(impl_->save_picks_button);
+    vizd_toolbar->addWidget(impl_->load_picks_button);
+    vizd_toolbar->addStretch(1);
+
     impl_->canvas = new SliceCanvas(this);
+    impl_->colorbar = new ColorbarWidget(this);
+    auto* canvas_row = new QHBoxLayout;
+    canvas_row->setContentsMargins(0, 0, 0, 0);
+    canvas_row->setSpacing(0);
+    canvas_row->addWidget(impl_->canvas, 1);
+    canvas_row->addWidget(impl_->colorbar, 0);
     impl_->status_label = new QLabel(QStringLiteral("no volume"), this);
 
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(toolbar);
-    layout->addWidget(impl_->canvas, 1);
+    layout->addLayout(vizd_toolbar);
+    layout->addLayout(canvas_row, 1);
     layout->addWidget(impl_->status_label);
     setLayout(layout);
     resize(640, 460);
@@ -509,6 +787,81 @@ SeismicSliceWidget::SeismicSliceWidget(QWidget* parent) : QWidget(parent) {
     connect(impl_->range_max_spin, &QDoubleSpinBox::valueChanged, this, range_edited);
     connect(impl_->reset_button, &QPushButton::clicked, this, [this] { reset_view(); });
 
+    // VIZ-D controls.
+    connect(impl_->mode_combo, &QComboBox::currentIndexChanged, this, [this](int row) {
+        if (impl_->updating_controls) {
+            return;
+        }
+        set_display_mode(row == 1 ? DisplayMode::wiggle : DisplayMode::variable_density);
+    });
+    connect(impl_->polarity_check, &QCheckBox::toggled, this, [this](bool checked) {
+        if (impl_->updating_controls) {
+            return;
+        }
+        set_polarity(!checked); // checked = flipped display polarity
+    });
+    connect(impl_->clip_check, &QCheckBox::toggled, this, [this](bool checked) {
+        if (impl_->updating_controls) {
+            return;
+        }
+        set_clip_percentile_enabled(checked);
+    });
+    connect(impl_->clip_spin, &QDoubleSpinBox::valueChanged, this, [this](double value) {
+        if (impl_->updating_controls) {
+            return;
+        }
+        set_clip_percentile(value);
+    });
+    connect(impl_->gain_spin, &QDoubleSpinBox::valueChanged, this, [this](double value) {
+        if (impl_->updating_controls) {
+            return;
+        }
+        set_wiggle_gain(value);
+    });
+    connect(impl_->pick_check, &QCheckBox::toggled, this, [this](bool checked) {
+        if (impl_->updating_controls) {
+            return;
+        }
+        enable_picking(checked);
+    });
+    connect(impl_->clear_picks_button, &QPushButton::clicked, this, [this] { clear_picks(); });
+    connect(impl_->save_picks_button, &QPushButton::clicked, this, [this] {
+        const QString path = QFileDialog::getSaveFileName(
+            this, tr("Save horizon picks"), QStringLiteral("horizon_picks.json"),
+            tr("Horizon picks (*.json)"));
+        if (path.isEmpty()) {
+            return;
+        }
+        std::string error;
+        if (!save_picks(path.toStdString(), error)) {
+            impl_->picks_note = tr("picks save failed: %1")
+                                    .arg(QString::fromStdString(error))
+                                    .toStdString();
+        } else {
+            impl_->picks_note = "picks saved";
+        }
+        impl_->canvas->update();
+    });
+    connect(impl_->load_picks_button, &QPushButton::clicked, this, [this] {
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Load horizon picks"), QString(), tr("Horizon picks (*.json)"));
+        if (path.isEmpty()) {
+            return;
+        }
+        std::string error;
+        const PicksLoadStatus status = load_picks(path.toStdString(), error);
+        if (status == PicksLoadStatus::error) {
+            impl_->picks_note = tr("picks load failed: %1")
+                                    .arg(QString::fromStdString(error))
+                                    .toStdString();
+        } else if (status == PicksLoadStatus::mismatched_volume) {
+            impl_->picks_note = "picks loaded (different source volume)";
+        } else {
+            impl_->picks_note = "picks loaded";
+        }
+        impl_->canvas->update();
+    });
+
     // Worker -> GUI bridge: queued invocation on this widget. Qt drops the
     // call if the widget is destroyed first; the widget destructor joins the
     // worker before QWidget teardown touches shared state.
@@ -533,8 +886,12 @@ void SeismicSliceWidget::set_volume(std::shared_ptr<pwb::viz::ISeismicVolume> vo
     impl_->geometry.reset();
     impl_->plane = SliceResult{};
     impl_->image = QImage();
-
+    impl_->invalidate_clip_cache(); // volume swap: no inherited P(100-p)/P(p)
+    impl_->wiggle_cache_valid = false;
     if (!volume) {
+        impl_->picks.picks.clear(); // picks without a source are meaningless
+        impl_->pick_drag_index.reset();
+        impl_->refresh_pick_markers();
         impl_->controller->set_source(nullptr);
         impl_->set_state(ViewerState::no_source, {});
         impl_->status_label->setText(QStringLiteral("no volume"));
@@ -570,12 +927,25 @@ void SeismicSliceWidget::set_volume(std::shared_ptr<pwb::viz::ISeismicVolume> vo
 void SeismicSliceWidget::clear_volume() { set_volume(nullptr, VolumeIdentity{}, 0); }
 
 void SeismicSliceWidget::set_axis(pwb::viz::VolumeAxis axis) {
+    if (impl_->geometry &&
+        impl_->geometry->shape[pwb::viz::axis_index(axis)] < 1) {
+        return; // zero-extent axis: nothing to show (clamp guard)
+    }
     if (axis == impl_->axis && impl_->geometry) {
         impl_->sync_axis_combo();
         return;
     }
     impl_->axis = axis;
     impl_->sync_axis_combo();
+    impl_->invalidate_clip_cache(); // sibling reuse is per volume + axis
+    if (impl_->display_mode == DisplayMode::wiggle && !impl_->section_view()) {
+        // Leaving the section views turns wiggle off (map view has no
+        // vertical sample axis to wiggle along).
+        impl_->display_mode = DisplayMode::variable_density;
+        impl_->updating_controls = true;
+        impl_->mode_combo->setCurrentIndex(0);
+        impl_->updating_controls = false;
+    }
     if (impl_->geometry) {
         const std::size_t a = pwb::viz::axis_index(axis);
         const std::int64_t extent = impl_->geometry->shape[a];
@@ -592,8 +962,8 @@ void SeismicSliceWidget::set_axis(pwb::viz::VolumeAxis axis) {
 }
 
 void SeismicSliceWidget::set_slice_index(std::int64_t index) {
-    if (!impl_->geometry) {
-        return;
+    if (!impl_->geometry || impl_->geometry->shape[pwb::viz::axis_index(impl_->axis)] < 1) {
+        return; // zero-extent axis: nothing to select (clamp guard)
     }
     const std::size_t a = pwb::viz::axis_index(impl_->axis);
     const std::int64_t clamped =
@@ -622,6 +992,7 @@ void SeismicSliceWidget::set_color_map(std::string_view name) {
         impl_->updating_controls = false;
     }
     impl_->apply_color_table();
+    impl_->sync_colorbar();
     impl_->canvas->update();
 }
 
@@ -887,20 +1258,444 @@ void SeismicSliceWidget::handle_result(const SliceResult& result) {
         const int height = static_cast<int>(axes.row_count);
         std::vector<std::uint8_t> display(
             static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
-        for (std::int64_t y = 0; y < axes.row_count; ++y) {
-            for (std::int64_t x = 0; x < axes.col_count; ++x) {
-                const std::int64_t flat =
-                    plane_flat_index(result.axis, result.cols, x, y);
-                display[static_cast<std::size_t>(y * axes.col_count + x)] =
-                    result.indexed[static_cast<std::size_t>(flat)];
+        if (impl_->clip_pct_enabled && !impl_->explicit_range) {
+            // VIZ-D parity path (profile_vd._renormalize). The degenerate
+            // pre-check runs on EVERY plane (before the cache), exactly like
+            // the Python dmax == dmin early return:
+            //   * constant finite plane -> all-zero indexes, NaN included
+            //     (Python bypasses ColormapManager entirely);
+            //   * all-invalid plane -> finite 0 / NaN centre via a NaN range
+            //     (NOT cached — deliberate deviation: the Python cache
+            //     would poison sibling slices with (nan, nan); C++
+            //     recomputes so the next good slice recovers).
+            bool have_finite = false;
+            double dmin = 0.0;
+            double dmax = 0.0;
+            for (const float value : result.values) {
+                if (std::isfinite(value)) {
+                    const double v = static_cast<double>(value);
+                    if (!have_finite) {
+                        dmin = dmax = v;
+                        have_finite = true;
+                    } else {
+                        dmin = std::min(dmin, v);
+                        dmax = std::max(dmax, v);
+                    }
+                }
             }
+            double lo = 0.0;
+            double hi = 0.0;
+            bool plain_zeros = false;
+            if (have_finite && dmin == dmax) {
+                plain_zeros = true; // constant plane: zeros, no NaN remap
+                lo = dmin;
+                hi = dmax;
+            } else if (have_finite) {
+                const std::string key = impl_->clip_volume_key();
+                if (!(impl_->clip_cache.valid && impl_->clip_cache.volume_key == key &&
+                      impl_->clip_cache.axis == result.axis &&
+                      impl_->clip_cache.rows == result.rows &&
+                      impl_->clip_cache.cols == result.cols &&
+                      impl_->clip_cache.pct == impl_->clip_pct)) {
+                    const display::ClipRange range =
+                        display::percentile_clip_range(result.values, impl_->clip_pct);
+                    impl_->clip_cache.valid = !range.degenerate;
+                    impl_->clip_cache.lo = range.lo;
+                    impl_->clip_cache.hi = range.hi;
+                    impl_->clip_cache.volume_key = key;
+                    impl_->clip_cache.axis = result.axis;
+                    impl_->clip_cache.rows = result.rows;
+                    impl_->clip_cache.cols = result.cols;
+                    impl_->clip_cache.pct = impl_->clip_pct;
+                }
+                if (impl_->clip_cache.valid) {
+                    lo = impl_->clip_cache.lo;
+                    hi = impl_->clip_cache.hi;
+                } else {
+                    lo = dmin;
+                    hi = dmax;
+                }
+            } else {
+                lo = std::numeric_limits<double>::quiet_NaN();
+                hi = std::numeric_limits<double>::quiet_NaN();
+            }
+            if (plain_zeros) {
+                // Constant plane: profile_vd's early return (NaN -> 0 too).
+                for (std::int64_t y = 0; y < axes.row_count; ++y) {
+                    for (std::int64_t x = 0; x < axes.col_count; ++x) {
+                        display[static_cast<std::size_t>(y * axes.col_count + x)] = 0;
+                    }
+                }
+            } else {
+                const int polarity = impl_->polarity_normal ? 1 : -1;
+                std::vector<float> display_values(result.values.size());
+                for (std::size_t i = 0; i < result.values.size(); ++i) {
+                    display_values[i] = polarity * result.values[i];
+                }
+                const std::vector<std::uint8_t> parity =
+                    display::normalize_to_index(display_values, lo, hi);
+                for (std::int64_t y = 0; y < axes.row_count; ++y) {
+                    for (std::int64_t x = 0; x < axes.col_count; ++x) {
+                        const std::int64_t flat =
+                            plane_flat_index(result.axis, result.cols, x, y);
+                        display[static_cast<std::size_t>(y * axes.col_count + x)] =
+                            parity[static_cast<std::size_t>(flat)];
+                    }
+                }
+            }
+            impl_->displayed_lo = lo;
+            impl_->displayed_hi = hi;
+        } else {
+            // Frozen v3 path: bytes straight from map_slice_to_indexed8
+            // (non-finite -> index 0). Kept byte-identical to the frozen v3
+            // contract; the colormap.py NaN-at-centre rule applies only to
+            // the percentile parity path above (declared in the ledger).
+            for (std::int64_t y = 0; y < axes.row_count; ++y) {
+                for (std::int64_t x = 0; x < axes.col_count; ++x) {
+                    const std::int64_t flat =
+                        plane_flat_index(result.axis, result.cols, x, y);
+                    display[static_cast<std::size_t>(y * axes.col_count + x)] =
+                        result.indexed[static_cast<std::size_t>(flat)];
+                }
+            }
+            impl_->displayed_lo = result.value_min;
+            impl_->displayed_hi = result.value_max;
         }
         QImage raw(display.data(), width, height, width, QImage::Format_Indexed8);
         impl_->image = raw.copy(); // own the bytes before the local buffer dies
         impl_->apply_color_table();
     }
+    impl_->refresh_wiggle();
+    rebuild_wiggle(impl_->canvas->width(), impl_->canvas->height());
+    impl_->refresh_pick_markers();
+    impl_->sync_colorbar();
     impl_->set_state(result.degenerate ? ViewerState::degenerate : ViewerState::ok,
                      result.diagnostic);
+}
+
+// --- VIZ-D advanced display ---------------------------------------------------
+
+void SeismicSliceWidget::set_display_mode(DisplayMode mode) {
+    if (mode == DisplayMode::wiggle && !impl_->section_view()) {
+        return; // wiggle is a section-view renderer (sample axis vertical)
+    }
+    if (mode == impl_->display_mode) {
+        return;
+    }
+    impl_->display_mode = mode;
+    impl_->updating_controls = true;
+    impl_->mode_combo->setCurrentIndex(mode == DisplayMode::wiggle ? 1 : 0);
+    impl_->updating_controls = false;
+    impl_->refresh_wiggle();
+    rebuild_wiggle(impl_->canvas->width(), impl_->canvas->height());
+    impl_->refresh_overlay();
+}
+
+DisplayMode SeismicSliceWidget::display_mode() const { return impl_->display_mode; }
+
+void SeismicSliceWidget::set_polarity(bool normal) {
+    if (normal == impl_->polarity_normal) {
+        return;
+    }
+    impl_->polarity_normal = normal;
+    impl_->updating_controls = true;
+    impl_->polarity_check->setChecked(!normal);
+    impl_->updating_controls = false;
+    if (impl_->clip_pct_enabled && !impl_->explicit_range && !impl_->plane.values.empty()) {
+        handle_result(impl_->plane); // re-normalize through the same range
+    }
+    impl_->refresh_wiggle();
+    rebuild_wiggle(impl_->canvas->width(), impl_->canvas->height());
+    impl_->refresh_overlay();
+}
+
+bool SeismicSliceWidget::polarity_normal() const { return impl_->polarity_normal; }
+
+void SeismicSliceWidget::set_clip_percentile_enabled(bool enabled) {
+    if (enabled == impl_->clip_pct_enabled) {
+        return;
+    }
+    impl_->clip_pct_enabled = enabled;
+    impl_->updating_controls = true;
+    impl_->clip_check->setChecked(enabled);
+    impl_->clip_spin->setEnabled(enabled);
+    impl_->updating_controls = false;
+    if (!impl_->plane.values.empty()) {
+        handle_result(impl_->plane); // re-map the retained plane
+    }
+    impl_->sync_colorbar();
+    impl_->refresh_overlay();
+}
+
+bool SeismicSliceWidget::clip_percentile_enabled() const {
+    return impl_->clip_pct_enabled;
+}
+
+void SeismicSliceWidget::set_clip_percentile(double pct) {
+    pct = std::clamp(pct, 1.0, 99.0);
+    if (std::abs(pct - impl_->clip_pct) < 0.01) {
+        return; // profile_vd set_clip_percentile dead zone
+    }
+    impl_->clip_pct = pct;
+    impl_->invalidate_clip_cache();
+    impl_->updating_controls = true;
+    impl_->clip_spin->setValue(pct);
+    impl_->updating_controls = false;
+    if (impl_->clip_pct_enabled && !impl_->plane.values.empty()) {
+        handle_result(impl_->plane);
+    }
+}
+
+double SeismicSliceWidget::clip_percentile() const { return impl_->clip_pct; }
+
+void SeismicSliceWidget::set_wiggle_gain(double gain) {
+    if (!(gain > 0.0) || !std::isfinite(gain)) {
+        return; // positive finite, else no-op (set_gain ValueError parity)
+    }
+    if (gain == impl_->wiggle_gain) {
+        return;
+    }
+    impl_->wiggle_gain = gain;
+    impl_->updating_controls = true;
+    impl_->gain_spin->setValue(gain);
+    impl_->updating_controls = false;
+    impl_->refresh_wiggle();
+    rebuild_wiggle(impl_->canvas->width(), impl_->canvas->height());
+}
+
+double SeismicSliceWidget::wiggle_gain() const { return impl_->wiggle_gain; }
+
+// --- VIZ-D horizon picking ----------------------------------------------------
+
+void SeismicSliceWidget::enable_picking(bool enabled) {
+    impl_->picking = enabled;
+    impl_->updating_controls = true;
+    impl_->pick_check->setChecked(enabled);
+    impl_->updating_controls = false;
+    impl_->canvas->set_picking(enabled);
+    impl_->canvas->update();
+}
+
+bool SeismicSliceWidget::picking_enabled() const { return impl_->picking; }
+
+void SeismicSliceWidget::add_pick(horizon::HorizonPick pick) {
+    if (impl_->picks.picks.empty()) {
+        // First pick stamps the source binding (stable identity for the
+        // save/reopen round trip).
+        impl_->picks.volume_id = impl_->identity.volume_id;
+        impl_->picks.volume_revision = impl_->volume_revision_value;
+        impl_->picks.axis_name = impl_->axis == VolumeAxis::inline_ ? "inline"
+                                  : impl_->axis == VolumeAxis::crossline ? "crossline"
+                                                                          : "sample";
+        impl_->picks.slice_index = impl_->index;
+        impl_->picks.time_unit = impl_->geometry ? impl_->geometry->unit : std::string();
+        impl_->picks_note.clear();
+    }
+    horizon::add_pick(impl_->picks, pick);
+    impl_->refresh_pick_markers();
+    impl_->refresh_overlay();
+}
+
+void SeismicSliceWidget::clear_picks() {
+    horizon::clear_picks(impl_->picks);
+    impl_->picks_note.clear();
+    impl_->pick_drag_index.reset();
+    impl_->refresh_pick_markers();
+    impl_->refresh_overlay();
+}
+
+const horizon::HorizonPickSet& SeismicSliceWidget::picks() const { return impl_->picks; }
+
+bool SeismicSliceWidget::save_picks(const std::string& path, std::string& error) {
+    if (impl_->picks.picks.empty() && impl_->identity.volume_id.empty() &&
+        impl_->picks.volume_id.empty()) {
+        error = "nothing to save (no picks, no binding)";
+        return false;
+    }
+    // Refresh the binding from the CURRENT viewer when one is bound; a
+    // viewer without a volume keeps the binding the set already carries
+    // (e.g. loaded from a file) instead of wiping it to empty.
+    if (!impl_->identity.volume_id.empty()) {
+        impl_->picks.volume_id = impl_->identity.volume_id;
+        impl_->picks.volume_revision = impl_->volume_revision_value;
+        impl_->picks.axis_name = impl_->axis == VolumeAxis::inline_ ? "inline"
+                                  : impl_->axis == VolumeAxis::crossline ? "crossline"
+                                                                          : "sample";
+        impl_->picks.slice_index = impl_->index;
+        impl_->picks.time_unit = impl_->geometry ? impl_->geometry->unit : std::string();
+    }
+    const std::string text = horizon::to_json(impl_->picks);
+    QFile file(QString::fromStdString(path));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        error = "cannot open file for writing";
+        return false;
+    }
+    if (file.write(text.data(), static_cast<qint64>(text.size())) !=
+        static_cast<qint64>(text.size())) {
+        error = "short write";
+        return false;
+    }
+    return true;
+}
+
+PicksLoadStatus SeismicSliceWidget::load_picks(const std::string& path, std::string& error) {
+    QFile file(QString::fromStdString(path));
+    if (!file.open(QIODevice::ReadOnly)) {
+        error = "cannot open file";
+        return PicksLoadStatus::error;
+    }
+    const QByteArray bytes = file.readAll();
+    const horizon::PickParseResult parsed =
+        horizon::from_json(std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size())));
+    if (!parsed.ok) {
+        error = parsed.error;
+        return PicksLoadStatus::error;
+    }
+    const bool mismatch = !impl_->identity.volume_id.empty() &&
+                          !parsed.set.volume_id.empty() &&
+                          parsed.set.volume_id != impl_->identity.volume_id;
+    impl_->picks = parsed.set;
+    impl_->pick_drag_index.reset();
+    impl_->refresh_pick_markers();
+    impl_->refresh_overlay();
+    return mismatch ? PicksLoadStatus::mismatched_volume : PicksLoadStatus::ok;
+}
+
+std::pair<double, double> SeismicSliceWidget::displayed_range() const {
+    if (impl_->image.isNull()) {
+        return {0.0, 0.0};
+    }
+    return {impl_->displayed_lo, impl_->displayed_hi};
+}
+
+std::vector<QPointF> SeismicSliceWidget::pick_markers() const {
+    return impl_->pick_marker_cache;
+}
+
+// Canvas click -> survey coordinates, dispatching per the slice type
+// (seismic_view._on_horizon_picked parity: position is the survey line
+// number of the shown slice; h/v map to the remaining axes).
+bool image_point_to_pick(const pwb::viz::VolumeGeometryV1& geometry, VolumeAxis axis,
+                         std::int64_t slice_index, double image_x, double image_y,
+                         horizon::HorizonPick& out) {
+    const PlaneAxes axes = plane_axes(geometry, axis);
+    const double h_value = geometry.axis_value(axes.col, static_cast<std::int64_t>(std::lround(image_x)));
+    const double v_value = geometry.axis_value(axes.row, static_cast<std::int64_t>(std::lround(image_y)));
+    const double position = geometry.axis_value(axis, slice_index);
+    switch (axis) {
+    case VolumeAxis::inline_:
+        out = {position, h_value, v_value};
+        return true;
+    case VolumeAxis::crossline:
+        out = {h_value, position, v_value};
+        return true;
+    case VolumeAxis::sample:
+        out = {v_value, h_value, position};
+        return true;
+    }
+    return false;
+}
+
+void SeismicSliceWidget::report_pick_press(const QPointF& image_point) {
+    if (!impl_->geometry) {
+        return;
+    }
+    // Near an existing marker (6 image px): begin an edit drag.
+    double best = 6.0;
+    std::optional<std::size_t> hit;
+    for (std::size_t i = 0; i < impl_->pick_marker_cache.size(); ++i) {
+        const double d = std::hypot(impl_->pick_marker_cache[i].x() - image_point.x(),
+                                    impl_->pick_marker_cache[i].y() - image_point.y());
+        if (d <= best) {
+            best = d;
+            hit = i;
+        }
+    }
+    if (hit.has_value()) {
+        impl_->pick_drag_index = hit;
+        return;
+    }
+    horizon::HorizonPick pick;
+    if (image_point_to_pick(*impl_->geometry, impl_->axis, impl_->index, image_point.x(),
+                            image_point.y(), pick)) {
+        add_pick(pick);
+    }
+}
+
+void SeismicSliceWidget::report_pick_drag(const QPointF& image_point) {
+    if (!impl_->geometry || !impl_->pick_drag_index.has_value()) {
+        return;
+    }
+    horizon::HorizonPick pick;
+    if (image_point_to_pick(*impl_->geometry, impl_->axis, impl_->index, image_point.x(),
+                            image_point.y(), pick)) {
+        static_cast<void>(
+            horizon::move_pick(impl_->picks, *impl_->pick_drag_index, pick));
+        impl_->refresh_pick_markers();
+        impl_->refresh_overlay();
+    }
+}
+
+bool SeismicSliceWidget::report_pick_context_menu(const QPointF& image_point) {
+    if (!impl_->geometry) {
+        return false;
+    }
+    double best = 6.0;
+    std::optional<std::size_t> hit;
+    for (std::size_t i = 0; i < impl_->pick_marker_cache.size(); ++i) {
+        const double d = std::hypot(impl_->pick_marker_cache[i].x() - image_point.x(),
+                                    impl_->pick_marker_cache[i].y() - image_point.y());
+        if (d <= best) {
+            best = d;
+            hit = i;
+        }
+    }
+    if (!hit.has_value()) {
+        return false;
+    }
+    // Delete by exact index of the hit marker (markers and picks are 1:1).
+    if (*hit < impl_->picks.picks.size()) {
+        impl_->picks.picks.erase(impl_->picks.picks.begin() +
+                                 static_cast<std::ptrdiff_t>(*hit));
+        impl_->pick_drag_index.reset();
+        impl_->refresh_pick_markers();
+        impl_->refresh_overlay();
+        return true;
+    }
+    return false;
+}
+
+void SeismicSliceWidget::rebuild_wiggle(int width, int height) {
+    if (impl_->display_mode != DisplayMode::wiggle || !impl_->geometry ||
+        impl_->plane.values.empty() || width < 2 || height < 2) {
+        impl_->wiggle_cache_valid = false;
+        return;
+    }
+    // The display orientation puts x = trace axis, y = sample for section
+    // views; the plane buffer itself is canonical (rows x cols), so build
+    // the (n_samples, n_traces) input the same way plane_point_at reads it.
+    const PlaneAxes axes = plane_axes(*impl_->geometry, impl_->plane.axis);
+    const std::int64_t n_samples = axes.row_count; // sample axis vertical
+    const std::int64_t n_traces = axes.col_count;
+    std::vector<float> section(static_cast<std::size_t>(n_samples * n_traces));
+    for (std::int64_t s = 0; s < n_samples; ++s) {
+        for (std::int64_t t = 0; t < n_traces; ++t) {
+            const std::int64_t flat =
+                plane_flat_index(impl_->plane.axis, impl_->plane.cols, t, s);
+            section[static_cast<std::size_t>(s * n_traces + t)] =
+                impl_->plane.values[static_cast<std::size_t>(flat)];
+        }
+    }
+    const int polarity = impl_->polarity_normal ? 1 : -1;
+    impl_->wiggle_cache = display::wiggle_geometry(
+        section, n_samples, n_traces, polarity, impl_->wiggle_gain, width, height);
+    impl_->wiggle_cache_valid = true;
+    impl_->canvas->set_wiggle(&impl_->wiggle_cache);
+    impl_->canvas->update();
+}
+
+const display::WiggleGeometry* SeismicSliceWidget::wiggle_geometry() const {
+    return impl_->wiggle_cache_valid ? &impl_->wiggle_cache : nullptr;
 }
 
 } // namespace pwb::seismic_viewer

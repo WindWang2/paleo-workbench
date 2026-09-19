@@ -72,6 +72,11 @@
 #include <pwb/application/adapters/volume_payload.hpp>
 #include <pwb/seismic_viewer/seismic_slice_widget.hpp>
 #include <pwb/viz/seismic_volume.hpp>
+
+// BEGIN VIZ-D — advanced seismic display install (menu affordances only;
+// the display/pick logic lives in libs/seismic_viewer).
+#include "viz_d_seismic_install.hpp"
+// END VIZ-D
 #endif
 
 #include <qgsfeatureiterator.h>
@@ -466,6 +471,12 @@ void MainWindow::buildUi() {
     seismic_dock_->setWidget(slice_widget_);
     addDockWidget(Qt::RightDockWidgetArea, seismic_dock_);
 #endif
+// BEGIN VIZ-D — remember the advanced-display host for the menu install
+// (the widget itself owns the VD/wiggle/polarity/clip/pick machinery).
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    viz_d_seismic_host_ = slice_widget_;
+#endif
+// END VIZ-D
 
     // Tools are canvas-parented; MapSession teardown unsets them first.
     pan_tool_ = new QgsMapToolPan(canvas_);
@@ -595,6 +606,17 @@ void MainWindow::buildMenusAndToolbar() {
                             &MainWindow::openVolumeDialog);
 #endif
 #endif
+// BEGIN VIZ-D — 地平线拾取 menu entries on the advanced seismic display.
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    if (seismic_menu == nullptr) {
+        seismic_menu = menuBar()->addMenu(tr("地震(&S)"));
+    }
+    if (viz_d_seismic_host_ != nullptr) {
+        pwb::viz_d::add_seismic_horizon_menu_actions(*seismic_menu,
+                                                     *viz_d_seismic_host_);
+    }
+#endif
+// END VIZ-D
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
     if (seismic_menu == nullptr) {
         seismic_menu = menuBar()->addMenu(tr("地震(&S)"));
@@ -2502,17 +2524,27 @@ void MainWindow::importSegyDialog() {
         return;
     }
 #endif
-#if defined(PWB_WITH_SEISMIC_VIEWER)
+#if defined(PWB_WITH_SEISMIC_VIEWER) && !defined(PWB_WITH_CONV_30)
+    // BEGIN VIZ-D build fix (pre-existing at f0af9d4e): the CONV-30 job path
+    // opens the viewer itself when the import job completes
+    // (importSegyProgressed); this fall-through only compiles for the
+    // synchronous branches above that declared `version_id` — without the
+    // !CONV_30 guard the CONV_30+VIEWER+IO+DATA configuration fails to
+    // compile on an undeclared identifier.
     const QString view_error = openVolumeVersion(version_id);
     if (!view_error.isEmpty()) {
         QMessageBox::warning(this, tr("导入 SEG-Y"), view_error);
         return;
     }
 #endif
+#ifndef PWB_WITH_CONV_30
+    // Job path: the completion callback owns the status message.
     statusBar()->showMessage(
         tr("SEG-Y 已导入：%1").arg(QString::fromStdString(version_id)),
         10000);
+#endif
 }
+// END VIZ-D build fix
 
 #ifdef PWB_WITH_CONV_30
 void MainWindow::submitSegyJob(const QString& path) {

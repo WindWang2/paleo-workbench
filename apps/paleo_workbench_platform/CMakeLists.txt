@@ -54,6 +54,9 @@ endif()
 if(TARGET Pwb::SeismicViewer)
     target_link_libraries(pwb-platform PRIVATE Pwb::SeismicViewer)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_VIEWER=1)
+    # BEGIN VIZ-D — advanced seismic display install (menu affordances).
+    target_sources(pwb-platform PRIVATE viz_d_seismic_install.cpp)
+    # END VIZ-D
 endif()
 if(TARGET Pwb::SeismicAttributes AND TARGET Pwb::Data
         AND TARGET Pwb::Science AND TARGET Pwb::Workflow)
