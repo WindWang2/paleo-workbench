@@ -11,7 +11,7 @@
 - 统一 data/style/layout 修订 + saved 基线 + dirty state；不可变文档快照（active layer / extent / style / input_version_ids / provenance refs，深拷贝稳定）。
 - service 门面（MapDocumentService / CompositionDocumentService）给 UI/Composer/Workflow。
 
-范围外（明确归类）：`native_edit_session.py` / `edit_session_set.py` / `edit_gesture_manager.py`（QGIS 桥编辑域）、`vector_layer.py` VectorEditSession、`edit_delta.py`（矢量会话派生物）、`map_document_snapshot.py`（渲染适配器）——见 27-decisions D-27-01。
+范围外（明确归类）：`native_edit_session.py` / `edit_session_set.py` / `edit_gesture_manager.py`（QGIS 桥编辑域）、`vector_layer.py` VectorEditSession、`edit_delta.py`（矢量会话派生物）、`map_document_snapshot.py`（渲染适配器）——见 27b-decisions D-27-01。
 
 ## C++ targets
 
@@ -57,7 +57,7 @@ Local verification completed; online CI is not required or awaited for this task
 
 ## Known limitations
 
-- 组/回滚、会话级 set_paper/title/metadata、文档会话历史语义、文件恢复表为 C++ 契约（无 Python 真值），已在 27-decisions 记录依据。
+- 组/回滚、会话级 set_paper/title/metadata、文档会话历史语义、文件恢复表为 C++ 契约（无 Python 真值），已在 27b-decisions 记录依据。
 - `normalize_line` 非数组坐标的病态 Python 行为不移植（F-27-06）。
 - registry/样式默认值数据不移植（CONV-02 D-10 延续），由 SpecProvider seam 注入。
 

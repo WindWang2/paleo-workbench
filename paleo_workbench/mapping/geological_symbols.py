@@ -23,6 +23,10 @@ the ``RendererBinding.style_id`` vocabulary declared by
 Coexistence with :mod:`.geological_style_library`: the V1 library keeps its
 12 entries untouched; :func:`register_symbols_into_style_library` registers
 V2 symbols into it on demand (explicit, idempotent, reversible).
+
+C++ port: libs/cartography (CONV-27) — frozen against this module as
+oracle; legacy fallback. Optional dispatch seam:
+mapping.cartography_native (HAS_CPP).
 """
 
 from __future__ import annotations

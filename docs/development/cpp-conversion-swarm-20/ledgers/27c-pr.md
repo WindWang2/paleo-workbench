@@ -1,0 +1,119 @@
+# CONV-27 PR — cartography style/template/symbol/ramp registry
+
+Branch: `feat/cpp-cartography-style-template-registry` (base: origin/main `ff67dcf3`).
+Commits: registry port (`33fae549`), pybind wiring + legacy annotations
+(`43c0c573`), review A/B/C fixes (`4e1f8f90`).
+
+## Scope
+
+Early-excluded cartography style surfaces → C++: the Qt-free
+`libs/cartography` (`pwb::cartography` / `Pwb::Cartography`) with the color
+ramp registry, style value types, scalar classification, geological symbol
+V2 registry, style library V1, componentized map template library, the QGIS
+render bridge payload adapter and the product API facade. Layout/PDF export
+explicitly out of scope (branch mandate).
+
+## Python surfaces replaced
+
+| Python surface | Status after this branch |
+|---|---|
+| `mapping/color_ramps.py` | replaced by `pwb::cartography::color_ramps` (registry + evaluate/evaluate_value/sample_table + JSON contract); module → oracle/legacy |
+| `mapping/map_styles.py` | value types + 8 presets + tolerant from_dict replaced (`vector_style`); `style_dict_revision` = documented stable-token deviation (D-6); module → oracle/legacy |
+| `mapping/scalar_style.py` (host half) | spec + classification replaced (`scalar_style`); renderer XML stays authored by QGIS in the C++ bridge (unchanged); module → oracle/legacy |
+| `mapping/geological_symbols.py` | V2 registry (15 symbols), bindings, validation, V1 registration seam replaced; module → oracle/legacy |
+| `mapping/geological_style_library.py` | V1 library (12 entries) + apply semantics replaced; module → oracle/legacy |
+| `mapping/qgis_style.py` (payload model) | `QgisStylePayload` replaced (`qgis_adapter`); XML generation already C++; module → oracle/legacy |
+| `mapping/geological_pipeline/templates.py` | factor map factory Python-parity + 4 C++-authored variants (facies/prediction/constraint/comprehensive) from shared components; module → oracle/legacy for the factor factory |
+| `mapping/map_render_backend._flatten_qgis_style` | ported as `flatten_qgis_style` (promotion + px→pt / halo→buffer conversions); rest of the module out of scope |
+| `mapping/renderers.py`, `facies_renderer_xml.py`, `facies_taxonomy.py`, `facies_patterns.py` | kept Python-only by decision (D-9 / findings) — the QGIS backend is the product render path; classified, not silently dropped |
+
+## C++ targets
+
+`libs/cartography` (new): headers under `include/pwb/cartography/`
+(color_ramps, vector_style, scalar_style, geological_symbols, style_library,
+templates, qgis_adapter, cartography facade), sources under `src/` incl. the
+numpy-exact `numpy_math` (PCG64 + SeedSequence + Floyd choice + Fisher-Jenks
+pairwise sums, verified draw-for-draw against numpy 2.5.3). Build gate
+`PWB_BUILD_CONV_27C` (implies `PWB_BUILD_DATA` + `PWB_BUILD_CONV_02`);
+append-only root CMake blocks.
+
+## Product wiring
+
+- C++ product chain: the library is authoritative — registries, template
+  factories and the bridge payload adapter run without Python.
+- Optional pybind facade `pwb_cartography`
+  (`PWB_BUILD_CONV_27_BIND`, off by default, never in the integrated gate;
+  vendored pybind11 reused from CONV-20) + the `HAS_CPP` dispatch seam
+  `paleo_workbench/mapping/cartography_native.py` (CONV-20 pattern).
+  Live C++-vs-Python parity verified (ramps / symbols / classification /
+  flatten / factor template) and pinned by `tests/test_cartography_native_bind.py`.
+- QGIS realization stays in `native/qgis_render_bridge` (C++, untouched);
+  `qgis_adapter` emits its inputs (scalar payload, spec dicts, flattened
+  styles, symbol categories).
+
+## Remaining Python (honest)
+
+- Oracle tooling: `tools/oracle/generate_cartography_fixtures.py` imports the
+  real modules (sanctioned oracle use).
+- Legacy fallback surfaces listed above stay importable and are annotated
+  (docstring notes + `mapping/CPP_EXTENSION.md`); no C++ product code
+  invokes Python (no subprocess shells).
+- `renderers.py` SVG fallback / `facies_renderer_xml.py` / `facies_taxonomy`
+  remain Python-only by scope decision; removal candidates for a later
+  default-entry-switch round, not this branch.
+
+## Local build & test
+
+- Configure: `cmake -G Ninja -DPWB_BUILD_CONV_27C=ON -DPWB_BUILD_PLATFORM=OFF`
+  (platform/QGIS app shell not buildable on this Linux box; not needed — the
+  branch is Qt-free).
+- Build: `cmake --build build/cpp-cartography --parallel 3` (hard -j3 cap;
+  the only heavy target was the static lib + test binaries; no OOM events).
+- Tests: `ctest` 30/30 ×2 (8 new `cartography.*` executables + the existing
+  data/document/kernel suites on this configure).
+- Oracle: fixtures frozen from the real Python modules
+  (numpy 2.5.3 + PySide6 venv); error-path cases freeze exact ValueError /
+  KeyError / TypeError messages; the negative self-check perturbs every
+  fixture and asserts `json_semantic_diff` fires.
+- Optional bind: with `PWB_BUILD_CONV_27_BIND=ON` against a local venv,
+  module imports and `tests/test_cartography_native_bind.py` passes 6/6
+  (live parity). Without the extension the same file skips cleanly, and the
+  default CONV-27 configure needs no Python at all.
+
+## -j3 resource note
+
+All builds ran `--parallel 3` (max), targeted at `pwb_cartography` and its
+tests; the shared-slot discipline (`scripts/cpp-migration/invoke-resource-gate.sh`)
+was not required (no concurrent heavy build on this box), but the cap was
+honored throughout. No OOM; no parallelism escalation.
+
+## Known limitations
+
+- `style_dict_revision` is a stable FNV-1a-64, not Python's salted `hash()`
+  (D-6 — change token only, never persisted semantically).
+- NaN-carrying JSON specs are unreadable by the C++ JSON layer (nlohmann vs
+  stdlib NaN literals) — both sides raise, in kind (findings §deviations).
+- `legacy_style_for_symbol` keyword overrides cover scalar fields + `labels`;
+  `categories`/`fill_patterns` keyword overrides are not exposed.
+- `cartography_native.list_templates` returns the 5-entry C++ catalog with
+  the extension vs the factor-only fallback without (disclosed in the seam
+  docstring).
+- The QGIS XML realization is NOT exercised on this box (vendored QGIS not
+  built under -j3); the adapter payloads are schema-pinned against the
+  bridge's `VectorLayerSpec` wire and unit-frozen against Python.
+- `cpp-build-packaging-hardening` follow-up: register `PWB_BUILD_CONV_27C`
+  in that branch's `cmake/PwbFeatures.cmake` feature table when it lands.
+
+## Parallel-branch interaction
+
+Touched-file intersection with open PRs #1346/#1348/#1349 and
+`cpp-build-packaging-hardening` is root `CMakeLists.txt` only; both CONV-27
+blocks are strictly append-only (`BEGIN/END CONV-27` markers). Read-only
+merge-tree trials: #1346/#1349/packaging auto-merge clean; #1348 has one
+trivial adjacent-hunk conflict (CONV-26 block abuts the CONV-27 insert —
+keep-both). No shared source files.
+
+## No-online-CI statement
+
+Local verification completed; online CI is not required or awaited for this
+task.

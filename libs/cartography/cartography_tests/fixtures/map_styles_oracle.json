@@ -1,0 +1,526 @@
+{
+  "presets": {
+    "facies": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "facies",
+        "size": 9.0,
+        "color": "#1f2937",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "well": {
+      "fill": "#22b8a7",
+      "stroke": "#182431",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "well",
+      "marker_size": 7.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "name",
+        "size": 9.0,
+        "color": "#1f2937",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "contour": {
+      "fill": "transparent",
+      "stroke": "#f08c46",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "",
+        "size": 8.0,
+        "color": "#ffd8a8",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#182431",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "formation_boundary": {
+      "fill": "transparent",
+      "stroke": "#e8590c",
+      "stroke_width": 2.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "name",
+        "size": 9.0,
+        "color": "#e8590c",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "fault": {
+      "fill": "transparent",
+      "stroke": "#e03131",
+      "stroke_width": 2.0,
+      "line_pattern": "fault",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "name",
+        "size": 9.0,
+        "color": "#c92a2a",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "line": {
+      "fill": "transparent",
+      "stroke": "#f08c46",
+      "stroke_width": 2.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "annotation": {
+      "fill": "#eff3f8",
+      "stroke": "#182431",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 4.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "text",
+        "size": 10.0,
+        "color": "#f8f9fa",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#182431",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "rotation",
+        "size_field": "font_size",
+        "color_field": "color",
+        "buffer_color": ""
+      }
+    },
+    "label": {
+      "fill": "#eff3f8",
+      "stroke": "#182431",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 4.0,
+      "renderer": "single",
+      "field": ""
+    }
+  },
+  "default_style_for": {
+    "facies": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "facies",
+        "size": 9.0,
+        "color": "#1f2937",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "well": {
+      "fill": "#22b8a7",
+      "stroke": "#182431",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "well",
+      "marker_size": 7.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "name",
+        "size": 9.0,
+        "color": "#1f2937",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "line": {
+      "fill": "transparent",
+      "stroke": "#f08c46",
+      "stroke_width": 2.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "label": {
+      "fill": "#eff3f8",
+      "stroke": "#182431",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 4.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "annotation": {
+      "fill": "#eff3f8",
+      "stroke": "#182431",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 4.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "text",
+        "size": 10.0,
+        "color": "#f8f9fa",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#182431",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "rotation",
+        "size_field": "font_size",
+        "color_field": "color",
+        "buffer_color": ""
+      }
+    },
+    "grid": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "facies",
+        "size": 9.0,
+        "color": "#1f2937",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "contour": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "facies",
+        "size": 9.0,
+        "color": "#1f2937",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "unknown_kind": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "facies",
+        "size": 9.0,
+        "color": "#1f2937",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#f8f9fa",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    }
+  },
+  "dash_pattern": {
+    "solid": [],
+    "dash": [
+      4.0,
+      2.0
+    ],
+    "dot": [
+      1.0,
+      2.0
+    ],
+    "dash_dot": [
+      4.0,
+      2.0,
+      1.0,
+      2.0
+    ],
+    "fault": [
+      6.0,
+      2.0
+    ],
+    "boundary": []
+  },
+  "vector_style_from_dict": {
+    "flat": {
+      "fill": "#101010",
+      "stroke": "#eeeeee",
+      "stroke_width": 2.5,
+      "line_pattern": "fault",
+      "marker": "square",
+      "marker_size": 9.0,
+      "renderer": "categorized",
+      "field": "facies_name",
+      "categories": [
+        [
+          "sand",
+          "#f2d38a",
+          "砂岩"
+        ],
+        [
+          "mud",
+          "#9aa7b5",
+          ""
+        ]
+      ],
+      "ranges": [
+        [
+          0.0,
+          0.5,
+          "#c9b8d8",
+          "低"
+        ],
+        [
+          0.5,
+          1.0,
+          "#7fbf9e",
+          "高"
+        ]
+      ],
+      "fill_patterns": {
+        "sand": "sandstone",
+        "mud": "mudstone"
+      },
+      "labels": {
+        "field": "name",
+        "size": 11.0,
+        "color": "#f8f9fa",
+        "font_family": "",
+        "bold": true,
+        "halo_color": "#182431",
+        "halo_width": 1.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    },
+    "qgis_map_categories": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "categories": [
+        [
+          "sand",
+          "#f2d38a",
+          ""
+        ],
+        [
+          "mud",
+          "#9aa7b5",
+          ""
+        ]
+      ]
+    },
+    "invalid_numbers": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "unknown_patterns": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "not_mapping": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "empty": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "labels_partial": {
+      "fill": "#6c8ebf",
+      "stroke": "#26364d",
+      "stroke_width": 1.0,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": "",
+      "labels": {
+        "field": "",
+        "size": 9.0,
+        "color": "#f8f9fa",
+        "font_family": "",
+        "bold": false,
+        "halo_color": "#182431",
+        "halo_width": 2.0,
+        "visible": true,
+        "rotation_field": "",
+        "size_field": "",
+        "color_field": "",
+        "buffer_color": ""
+      }
+    }
+  },
+  "text_style_from_dict": {
+    "field": "well_name",
+    "size": 12.0,
+    "color": "#000000",
+    "font_family": "",
+    "bold": true,
+    "halo_color": "#182431",
+    "halo_width": 1.0,
+    "visible": true,
+    "rotation_field": "deg",
+    "size_field": "",
+    "color_field": "",
+    "buffer_color": ""
+  },
+  "text_style_default": {
+    "field": "",
+    "size": 9.0,
+    "color": "#f8f9fa",
+    "font_family": "",
+    "bold": false,
+    "halo_color": "#182431",
+    "halo_width": 1.0,
+    "visible": true,
+    "rotation_field": "",
+    "size_field": "",
+    "color_field": "",
+    "buffer_color": ""
+  }
+}

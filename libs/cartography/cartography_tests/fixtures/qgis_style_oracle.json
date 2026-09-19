@@ -1,0 +1,49 @@
+{
+  "valid": {
+    "schema_version": 1,
+    "renderer_xml": "<renderer-v2 type=\"singleSymbol\"/>",
+    "labeling_xml": "",
+    "name": "fault style",
+    "tags": [
+      "fault",
+      "v2"
+    ],
+    "revision": 1
+  },
+  "bumped": {
+    "schema_version": 1,
+    "renderer_xml": "<renderer-v2 type=\"singleSymbol\"/>",
+    "labeling_xml": "",
+    "name": "fault style",
+    "tags": [
+      "fault",
+      "v2"
+    ],
+    "revision": 2
+  },
+  "roundtrip": {
+    "schema_version": 1,
+    "renderer_xml": "<renderer-v2 type=\"singleSymbol\"/>",
+    "labeling_xml": "",
+    "name": "fault style",
+    "tags": [
+      "fault",
+      "v2"
+    ],
+    "revision": 1
+  },
+  "from_missing": null,
+  "from_empty_dict": null,
+  "blank_renderer": {
+    "error": "ValueError",
+    "message": "renderer_xml payload is required"
+  },
+  "minimal": {
+    "schema_version": 1,
+    "renderer_xml": "<renderer-v2/>",
+    "labeling_xml": "",
+    "name": "",
+    "tags": [],
+    "revision": 1
+  }
+}

@@ -1,4 +1,8 @@
-"""Standard Geological Factor Map cartographic templates for Map Composer."""
+"""Standard Geological Factor Map cartographic templates for Map Composer.
+C++ port: libs/cartography (CONV-27) — frozen against this module as
+oracle; legacy fallback. Optional dispatch seam:
+mapping.cartography_native (HAS_CPP).
+"""
 
 from __future__ import annotations
 

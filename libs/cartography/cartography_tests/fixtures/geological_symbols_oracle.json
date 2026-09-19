@@ -1,0 +1,1219 @@
+{
+  "schema_version": 2,
+  "library": {
+    "schema_version": 2,
+    "symbols": [
+      {
+        "symbol_id": "fault_v2",
+        "version": 2,
+        "title": "断层（按性质分类 + 置信度分级）",
+        "category": "fault",
+        "applicable_roles": [
+          "fault_constraint"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#c0392b",
+          "stroke_width": 1.6,
+          "line_pattern": "fault",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "categorized",
+          "field": "fault_type",
+          "categories": [
+            [
+              "normal",
+              "#c0392b",
+              "正断层"
+            ],
+            [
+              "reverse",
+              "#a93226",
+              "逆断层"
+            ],
+            [
+              "thrust",
+              "#7b241c",
+              "冲断断层"
+            ],
+            [
+              "strike_slip",
+              "#d35400",
+              "走滑断层"
+            ],
+            [
+              "unclassified",
+              "#95a5a6",
+              "未分类断层"
+            ]
+          ]
+        },
+        "renderer_hint": {
+          "renderer_kind": "categorized",
+          "field": "fault_type",
+          "rules": [
+            {
+              "value": "normal",
+              "stroke": "#c0392b",
+              "stroke_width": 1.6,
+              "line_pattern": "fault",
+              "label": "正断层"
+            },
+            {
+              "value": "reverse",
+              "stroke": "#a93226",
+              "stroke_width": 1.6,
+              "line_pattern": "fault",
+              "label": "逆断层"
+            },
+            {
+              "value": "thrust",
+              "stroke": "#7b241c",
+              "stroke_width": 2.0,
+              "line_pattern": "fault",
+              "label": "冲断断层"
+            },
+            {
+              "value": "strike_slip",
+              "stroke": "#d35400",
+              "stroke_width": 1.4,
+              "line_pattern": "fault",
+              "label": "走滑断层"
+            },
+            {
+              "value": "unclassified",
+              "stroke": "#95a5a6",
+              "stroke_width": 1.2,
+              "line_pattern": "fault",
+              "label": "未分类断层"
+            }
+          ],
+          "confidence": {
+            "field": "confidence",
+            "mechanism": "data_defined",
+            "applies_to": [
+              "stroke_width",
+              "stroke_alpha",
+              "line_pattern"
+            ],
+            "levels": {
+              "inferred": {
+                "line_pattern": "dash",
+                "stroke_width": 0.8,
+                "stroke_alpha": 0.55
+              },
+              "interpreted": {
+                "line_pattern": "fault",
+                "stroke_width": 1.6,
+                "stroke_alpha": 0.85
+              },
+              "verified": {
+                "line_pattern": "fault",
+                "stroke_width": 2.2,
+                "stroke_alpha": 1.0
+              }
+            }
+          }
+        },
+        "metadata": {
+          "legend_label": "断层",
+          "symbol_layers": "fault_type controls the categorized base symbol (hanging-wall decorations realised via renderer XML); confidence drives the data-defined gradations in renderer_hint.confidence",
+          "confidence_semantics": {
+            "inferred": "dashed, thinnest, 55% alpha — 仅供推断",
+            "interpreted": "fault long-dash, standard weight — 解释成果",
+            "verified": "fault long-dash, heaviest, opaque — 已验证"
+          }
+        }
+      },
+      {
+        "symbol_id": "fault_normal_v2",
+        "version": 2,
+        "title": "正断层",
+        "category": "fault",
+        "applicable_roles": [
+          "fault_constraint"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#c0392b",
+          "stroke_width": 1.6,
+          "line_pattern": "fault",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "正断层",
+          "fault_type": "normal"
+        }
+      },
+      {
+        "symbol_id": "fault_reverse_v2",
+        "version": 2,
+        "title": "逆断层",
+        "category": "fault",
+        "applicable_roles": [
+          "fault_constraint"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#a93226",
+          "stroke_width": 1.6,
+          "line_pattern": "fault",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "逆断层",
+          "fault_type": "reverse"
+        }
+      },
+      {
+        "symbol_id": "fault_thrust_v2",
+        "version": 2,
+        "title": "冲断断层",
+        "category": "fault",
+        "applicable_roles": [
+          "fault_constraint"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#7b241c",
+          "stroke_width": 2.0,
+          "line_pattern": "fault",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "冲断断层",
+          "fault_type": "thrust"
+        }
+      },
+      {
+        "symbol_id": "fault_strike_slip_v2",
+        "version": 2,
+        "title": "走滑断层",
+        "category": "fault",
+        "applicable_roles": [
+          "fault_constraint"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#d35400",
+          "stroke_width": 1.4,
+          "line_pattern": "fault",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "走滑断层",
+          "fault_type": "strike_slip"
+        }
+      },
+      {
+        "symbol_id": "fault_inferred_v2",
+        "version": 2,
+        "title": "推断断层（虚线）",
+        "category": "fault",
+        "applicable_roles": [
+          "fault_constraint"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#d98880",
+          "stroke_width": 0.8,
+          "line_pattern": "dash",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "推断断层",
+          "confidence_level": "inferred",
+          "note": "inferred confidence faults render dashed at reduced weight; fault_v2 realises this via renderer_hint.confidence"
+        }
+      },
+      {
+        "symbol_id": "facies_v2",
+        "version": 2,
+        "title": "沉积相分类填充（9 类印刷色板）",
+        "category": "facies",
+        "applicable_roles": [
+          "factor_classification",
+          "initial_facies_draft",
+          "initial_facies_source",
+          "integrated_facies"
+        ],
+        "geometry_kind": "polygon",
+        "legacy_fallback": {
+          "fill": "#b0bec5",
+          "stroke": "#26364d",
+          "stroke_width": 0.6,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "categorized",
+          "field": "facies_name",
+          "categories": [
+            [
+              "alluvial_fan",
+              "#c47f4e",
+              "冲积扇"
+            ],
+            [
+              "fluvial",
+              "#e8c46b",
+              "河流"
+            ],
+            [
+              "lacustrine",
+              "#8fc7c2",
+              "湖泊"
+            ],
+            [
+              "delta",
+              "#d9a066",
+              "三角洲"
+            ],
+            [
+              "shoreline",
+              "#eae2b0",
+              "岸线带"
+            ],
+            [
+              "shallow_marine",
+              "#6fb3b8",
+              "浅海"
+            ],
+            [
+              "deep_marine",
+              "#3d6b8e",
+              "深海"
+            ],
+            [
+              "volcanic",
+              "#9b6b9e",
+              "火山岩"
+            ],
+            [
+              "other",
+              "#b0bec5",
+              "其他"
+            ]
+          ],
+          "fill_patterns": {
+            "alluvial_fan": "alluvial_fan",
+            "fluvial": "fluvial",
+            "lacustrine": "lacustrine",
+            "delta": "delta",
+            "shoreline": "shoreface",
+            "shallow_marine": "shallow_marine",
+            "deep_marine": "deep_marine"
+          }
+        },
+        "renderer_hint": {
+          "renderer_kind": "categorized",
+          "field": "facies_name",
+          "rules": [
+            {
+              "value": "alluvial_fan",
+              "fill": "#c47f4e",
+              "label": "冲积扇",
+              "pattern": "alluvial_fan"
+            },
+            {
+              "value": "fluvial",
+              "fill": "#e8c46b",
+              "label": "河流",
+              "pattern": "fluvial"
+            },
+            {
+              "value": "lacustrine",
+              "fill": "#8fc7c2",
+              "label": "湖泊",
+              "pattern": "lacustrine"
+            },
+            {
+              "value": "delta",
+              "fill": "#d9a066",
+              "label": "三角洲",
+              "pattern": "delta"
+            },
+            {
+              "value": "shoreline",
+              "fill": "#eae2b0",
+              "label": "岸线带",
+              "pattern": "shoreface"
+            },
+            {
+              "value": "shallow_marine",
+              "fill": "#6fb3b8",
+              "label": "浅海",
+              "pattern": "shallow_marine"
+            },
+            {
+              "value": "deep_marine",
+              "fill": "#3d6b8e",
+              "label": "深海",
+              "pattern": "deep_marine"
+            },
+            {
+              "value": "volcanic",
+              "fill": "#9b6b9e",
+              "label": "火山岩"
+            },
+            {
+              "value": "other",
+              "fill": "#b0bec5",
+              "label": "其他"
+            }
+          ]
+        },
+        "metadata": {
+          "legend_label": "沉积相",
+          "legend_groups": [
+            {
+              "label": "陆相 (Continental)",
+              "classes": [
+                "alluvial_fan",
+                "fluvial",
+                "lacustrine"
+              ]
+            },
+            {
+              "label": "过渡相 (Transitional)",
+              "classes": [
+                "delta",
+                "shoreline"
+              ]
+            },
+            {
+              "label": "海相 (Marine)",
+              "classes": [
+                "shallow_marine",
+                "deep_marine"
+              ]
+            },
+            {
+              "label": "其他 (Other)",
+              "classes": [
+                "volcanic",
+                "other"
+              ]
+            }
+          ],
+          "palette": "print-safe geological fills; hierarchy groups drive composer legend grouping"
+        }
+      },
+      {
+        "symbol_id": "facies_hatch_v2",
+        "version": 2,
+        "title": "沉积相纹理（图例 hatching 变体）",
+        "category": "facies",
+        "applicable_roles": [
+          "factor_classification",
+          "initial_facies_draft",
+          "initial_facies_source",
+          "integrated_facies"
+        ],
+        "geometry_kind": "polygon",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#26364d",
+          "stroke_width": 0.3,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "categorized",
+          "field": "facies_name",
+          "categories": [
+            [
+              "alluvial_fan",
+              "transparent",
+              "冲积扇"
+            ],
+            [
+              "fluvial",
+              "transparent",
+              "河流"
+            ],
+            [
+              "lacustrine",
+              "transparent",
+              "湖泊"
+            ],
+            [
+              "delta",
+              "transparent",
+              "三角洲"
+            ],
+            [
+              "shoreline",
+              "transparent",
+              "岸线带"
+            ],
+            [
+              "shallow_marine",
+              "transparent",
+              "浅海"
+            ],
+            [
+              "deep_marine",
+              "transparent",
+              "深海"
+            ],
+            [
+              "volcanic",
+              "transparent",
+              "火山岩"
+            ],
+            [
+              "other",
+              "transparent",
+              "其他"
+            ]
+          ]
+        },
+        "renderer_hint": {
+          "renderer_kind": "categorized",
+          "field": "facies_name",
+          "rules": [
+            {
+              "value": "alluvial_fan",
+              "fill": "#c47f4e",
+              "label": "冲积扇"
+            },
+            {
+              "value": "fluvial",
+              "fill": "#e8c46b",
+              "label": "河流"
+            },
+            {
+              "value": "lacustrine",
+              "fill": "#8fc7c2",
+              "label": "湖泊"
+            },
+            {
+              "value": "delta",
+              "fill": "#d9a066",
+              "label": "三角洲"
+            },
+            {
+              "value": "shoreline",
+              "fill": "#eae2b0",
+              "label": "岸线带"
+            },
+            {
+              "value": "shallow_marine",
+              "fill": "#6fb3b8",
+              "label": "浅海"
+            },
+            {
+              "value": "deep_marine",
+              "fill": "#3d6b8e",
+              "label": "深海"
+            },
+            {
+              "value": "volcanic",
+              "fill": "#9b6b9e",
+              "label": "火山岩"
+            },
+            {
+              "value": "other",
+              "fill": "#b0bec5",
+              "label": "其他"
+            }
+          ]
+        },
+        "metadata": {
+          "legend_label": "沉积相（纹理）",
+          "hatch": {
+            "style": "line_pattern_fill",
+            "line_color": "#26364d",
+            "line_width": 0.3,
+            "spacing_mm": 1.2,
+            "background": "transparent",
+            "per_class_angle_deg": {
+              "alluvial_fan": 45.0,
+              "fluvial": 90.0,
+              "lacustrine": 0.0,
+              "delta": 30.0,
+              "shoreline": 60.0,
+              "shallow_marine": 135.0,
+              "deep_marine": 160.0,
+              "volcanic": -45.0,
+              "other": 120.0
+            },
+            "note": "declaration only — realised as QGIS LinePatternFill symbol layers via renderer XML; composer legend textures read these parameters directly"
+          }
+        }
+      },
+      {
+        "symbol_id": "provenance_line_v1",
+        "version": 1,
+        "title": "物源线（箭头装饰）",
+        "category": "provenance",
+        "applicable_roles": [
+          "provenance_line"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#2f6fab",
+          "stroke_width": 1.6,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "物源线",
+          "decorations": [
+            {
+              "kind": "arrow",
+              "placement": "line_end",
+              "size": 6.0,
+              "color": "#2f6fab"
+            }
+          ],
+          "note": "arrow decorations realised as QGIS line-decoration symbol layers via renderer XML"
+        }
+      },
+      {
+        "symbol_id": "provenance_direction_v1",
+        "version": 1,
+        "title": "物源方向（中点方向箭头 + 方位角标注）",
+        "category": "provenance",
+        "applicable_roles": [
+          "provenance_direction"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#2b6777",
+          "stroke_width": 1.2,
+          "line_pattern": "dash",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "azimuth_deg",
+            "size": 8.0,
+            "color": "#f8f9fa",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#182431",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "物源方向",
+          "decorations": [
+            {
+              "kind": "direction_arrow",
+              "placement": "line_midpoint",
+              "rotation_field": "azimuth_deg",
+              "size": 8.0,
+              "color": "#2b6777"
+            }
+          ],
+          "labels": {
+            "field": "azimuth_deg",
+            "format": "{:.0f}°"
+          }
+        }
+      },
+      {
+        "symbol_id": "distribution_line_v1",
+        "version": 1,
+        "title": "沉积体系展布线",
+        "category": "provenance",
+        "applicable_roles": [
+          "distribution_line"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#8a7136",
+          "stroke_width": 1.8,
+          "line_pattern": "dash",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "展布线"
+        }
+      },
+      {
+        "symbol_id": "shoreline_v2",
+        "version": 2,
+        "title": "古岸线",
+        "category": "boundary",
+        "applicable_roles": [
+          "paleo_shoreline"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#1f78b4",
+          "stroke_width": 1.8,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "古岸线"
+        }
+      },
+      {
+        "symbol_id": "facies_boundary_v2",
+        "version": 2,
+        "title": "相带边界",
+        "category": "boundary",
+        "applicable_roles": [
+          "facies_boundary",
+          "integrated_boundary"
+        ],
+        "geometry_kind": "line",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#333f48",
+          "stroke_width": 1.4,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "相带边界"
+        }
+      },
+      {
+        "symbol_id": "interpolation_boundary_v2",
+        "version": 2,
+        "title": "插值限制边界（成图范围）",
+        "category": "boundary",
+        "applicable_roles": [
+          "interpolation_boundary"
+        ],
+        "geometry_kind": "polygon",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#7f8c8d",
+          "stroke_width": 1.2,
+          "line_pattern": "dash",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "插值限制边界"
+        }
+      },
+      {
+        "symbol_id": "map_extent",
+        "version": 2,
+        "title": "成图范围/图框边界",
+        "category": "boundary",
+        "applicable_roles": [
+          "base_reference",
+          "interpolation_boundary",
+          "map_reference"
+        ],
+        "geometry_kind": "polygon",
+        "legacy_fallback": {
+          "fill": "transparent",
+          "stroke": "#1c2833",
+          "stroke_width": 2.4,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "renderer_hint": {
+          "renderer_kind": "single",
+          "field": null,
+          "rules": []
+        },
+        "metadata": {
+          "legend_label": "成图范围"
+        }
+      }
+    ]
+  },
+  "aliases": {
+    "facies_v1": "facies_v2",
+    "shoreline_v1": "shoreline_v2",
+    "facies_boundary_v1": "facies_boundary_v2",
+    "interpolation_boundary_v1": "interpolation_boundary_v2",
+    "fault_v2": "fault_v2",
+    "nope": "nope"
+  },
+  "validate_binding": {
+    "ok_fault": [
+      true,
+      "ok"
+    ],
+    "ok_polygon_carry": [
+      true,
+      "ok"
+    ],
+    "wrong_role": [
+      false,
+      "symbol 'fault_v2' (category 'fault') does not apply to role 'paleo_shoreline'"
+    ],
+    "wrong_geometry": [
+      false,
+      "symbol 'fault_v2' expects 'line' geometry; got 'polygon'"
+    ],
+    "unknown_symbol": [
+      false,
+      "unknown symbol 'ghost'"
+    ],
+    "unknown_role": [
+      false,
+      "unknown role 'not_a_role'"
+    ],
+    "alias_ok": [
+      true,
+      "ok"
+    ]
+  },
+  "binding_records": {
+    "fault_v2": {
+      "symbol_id": "fault_v2",
+      "symbol_version": 2,
+      "category": "fault",
+      "field": "fault_type",
+      "classes": [
+        "normal",
+        "reverse",
+        "thrust",
+        "strike_slip",
+        "unclassified"
+      ],
+      "source": "geological-symbols-v2/fault_v2",
+      "confidence_field": "confidence"
+    },
+    "facies_v2": {
+      "symbol_id": "facies_v2",
+      "symbol_version": 2,
+      "category": "facies",
+      "field": "facies_name",
+      "classes": [
+        "alluvial_fan",
+        "fluvial",
+        "lacustrine",
+        "delta",
+        "shoreline",
+        "shallow_marine",
+        "deep_marine",
+        "volcanic",
+        "other"
+      ],
+      "source": "geological-symbols-v2/facies_v2"
+    },
+    "shoreline_v2": {
+      "symbol_id": "shoreline_v2",
+      "symbol_version": 2,
+      "category": "boundary",
+      "field": null,
+      "classes": [],
+      "source": "geological-symbols-v2/shoreline_v2"
+    },
+    "map_extent": {
+      "symbol_id": "map_extent",
+      "symbol_version": 2,
+      "category": "boundary",
+      "field": null,
+      "classes": [],
+      "source": "geological-symbols-v2/map_extent"
+    }
+  },
+  "binding_record_field_values": {
+    "symbol_id": "fault_v2",
+    "symbol_version": 2,
+    "category": "fault",
+    "field": "fault_type",
+    "classes": [
+      "normal",
+      "reverse",
+      "thrust",
+      "strike_slip",
+      "unclassified"
+    ],
+    "source": "geological-symbols-v2/fault_v2",
+    "confidence_field": "confidence",
+    "field_values": {
+      "fault_type": [
+        "normal",
+        "reverse"
+      ]
+    }
+  },
+  "legacy_styles": {
+    "plain": {
+      "fill": "transparent",
+      "stroke": "#1f78b4",
+      "stroke_width": 1.8,
+      "line_pattern": "solid",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "overrides": {
+      "fill": "transparent",
+      "stroke": "#ff0000",
+      "stroke_width": 3.0,
+      "line_pattern": "dash",
+      "marker": "circle",
+      "marker_size": 6.0,
+      "renderer": "single",
+      "field": ""
+    },
+    "bad_override": {
+      "error": "TypeError",
+      "message": "VectorStyle.__init__() got an unexpected keyword argument 'not_a_field'"
+    },
+    "bad_pattern": {
+      "error": "ValueError",
+      "message": "'zzz' is not a valid LinePattern"
+    }
+  },
+  "style_entries": {
+    "fault_v2": {
+      "key": "fault_v2",
+      "category": "fault",
+      "title": "断层（按性质分类 + 置信度分级）",
+      "style": {
+        "fill": "transparent",
+        "stroke": "#c0392b",
+        "stroke_width": 1.6,
+        "line_pattern": "fault",
+        "marker": "circle",
+        "marker_size": 6.0,
+        "renderer": "categorized",
+        "field": "fault_type",
+        "categories": [
+          [
+            "normal",
+            "#c0392b",
+            "正断层"
+          ],
+          [
+            "reverse",
+            "#a93226",
+            "逆断层"
+          ],
+          [
+            "thrust",
+            "#7b241c",
+            "冲断断层"
+          ],
+          [
+            "strike_slip",
+            "#d35400",
+            "走滑断层"
+          ],
+          [
+            "unclassified",
+            "#95a5a6",
+            "未分类断层"
+          ]
+        ]
+      },
+      "binding": {
+        "symbol_id": "fault_v2",
+        "symbol_version": 2,
+        "category": "fault",
+        "field": "fault_type",
+        "classes": [
+          "normal",
+          "reverse",
+          "thrust",
+          "strike_slip",
+          "unclassified"
+        ],
+        "source": "geological-symbols-v2/fault_v2",
+        "confidence_field": "confidence"
+      },
+      "legend_label": "断层",
+      "opacity_hint": null
+    },
+    "facies_v2": {
+      "key": "facies_v2",
+      "category": "facies_fills",
+      "title": "沉积相分类填充（9 类印刷色板）",
+      "style": {
+        "fill": "#b0bec5",
+        "stroke": "#26364d",
+        "stroke_width": 0.6,
+        "line_pattern": "solid",
+        "marker": "circle",
+        "marker_size": 6.0,
+        "renderer": "categorized",
+        "field": "facies_name",
+        "categories": [
+          [
+            "alluvial_fan",
+            "#c47f4e",
+            "冲积扇"
+          ],
+          [
+            "fluvial",
+            "#e8c46b",
+            "河流"
+          ],
+          [
+            "lacustrine",
+            "#8fc7c2",
+            "湖泊"
+          ],
+          [
+            "delta",
+            "#d9a066",
+            "三角洲"
+          ],
+          [
+            "shoreline",
+            "#eae2b0",
+            "岸线带"
+          ],
+          [
+            "shallow_marine",
+            "#6fb3b8",
+            "浅海"
+          ],
+          [
+            "deep_marine",
+            "#3d6b8e",
+            "深海"
+          ],
+          [
+            "volcanic",
+            "#9b6b9e",
+            "火山岩"
+          ],
+          [
+            "other",
+            "#b0bec5",
+            "其他"
+          ]
+        ],
+        "fill_patterns": {
+          "alluvial_fan": "alluvial_fan",
+          "fluvial": "fluvial",
+          "lacustrine": "lacustrine",
+          "delta": "delta",
+          "shoreline": "shoreface",
+          "shallow_marine": "shallow_marine",
+          "deep_marine": "deep_marine"
+        }
+      },
+      "binding": {
+        "symbol_id": "facies_v2",
+        "symbol_version": 2,
+        "category": "facies",
+        "field": "facies_name",
+        "classes": [
+          "alluvial_fan",
+          "fluvial",
+          "lacustrine",
+          "delta",
+          "shoreline",
+          "shallow_marine",
+          "deep_marine",
+          "volcanic",
+          "other"
+        ],
+        "source": "geological-symbols-v2/facies_v2"
+      },
+      "legend_label": "沉积相",
+      "opacity_hint": null
+    },
+    "provenance_line_v1": {
+      "key": "provenance_line_v1",
+      "category": "provenance",
+      "title": "物源线（箭头装饰）",
+      "style": {
+        "fill": "transparent",
+        "stroke": "#2f6fab",
+        "stroke_width": 1.6,
+        "line_pattern": "solid",
+        "marker": "circle",
+        "marker_size": 6.0,
+        "renderer": "single",
+        "field": ""
+      },
+      "binding": {
+        "symbol_id": "provenance_line_v1",
+        "symbol_version": 1,
+        "category": "provenance",
+        "field": null,
+        "classes": [],
+        "source": "geological-symbols-v2/provenance_line_v1"
+      },
+      "legend_label": "物源线",
+      "opacity_hint": null
+    }
+  },
+  "symbols_for_role": {
+    "factor_classification": [
+      "facies_v2",
+      "facies_hatch_v2"
+    ],
+    "initial_facies_draft": [
+      "facies_v2",
+      "facies_hatch_v2"
+    ],
+    "initial_facies_source": [
+      "facies_v2",
+      "facies_hatch_v2"
+    ],
+    "fault_constraint": [
+      "fault_v2",
+      "fault_normal_v2",
+      "fault_reverse_v2",
+      "fault_thrust_v2",
+      "fault_strike_slip_v2",
+      "fault_inferred_v2"
+    ],
+    "integrated_facies": [
+      "facies_v2",
+      "facies_hatch_v2"
+    ]
+  },
+  "unknown_symbol_error": {
+    "error": "KeyError",
+    "message": "unknown geological symbol 'ghost'; available: ['distribution_line_v1', 'facies_boundary_v2', 'facies_hatch_v2', 'facies_v2', 'fault_inferred_v2', 'fault_normal_v2', 'fault_reverse_v2', 'fault_strike_slip_v2', 'fault_thrust_v2', 'fault_v2', 'interpolation_boundary_v2', 'map_extent', 'provenance_direction_v1', 'provenance_line_v1', 'shoreline_v2']"
+  },
+  "library_from_dict": {
+    "ok": 15,
+    "bad_version": {
+      "error": "ValueError",
+      "message": "symbol library schema 99 unsupported; expected 2"
+    }
+  },
+  "v1_registration": {
+    "added": [
+      "fault.fault_v2",
+      "fault.fault_normal_v2",
+      "fault.fault_reverse_v2",
+      "fault.fault_thrust_v2",
+      "fault.fault_strike_slip_v2",
+      "fault.fault_inferred_v2",
+      "facies_fills.facies_v2",
+      "facies_fills.facies_hatch_v2",
+      "provenance.provenance_line_v1",
+      "provenance.provenance_direction_v1",
+      "provenance.distribution_line_v1",
+      "boundary.shoreline_v2",
+      "boundary.facies_boundary_v2",
+      "boundary.interpolation_boundary_v2",
+      "boundary.map_extent"
+    ],
+    "removed": [
+      "fault.fault_v2",
+      "fault.fault_normal_v2",
+      "fault.fault_reverse_v2",
+      "fault.fault_thrust_v2",
+      "fault.fault_strike_slip_v2",
+      "fault.fault_inferred_v2",
+      "facies_fills.facies_v2",
+      "facies_fills.facies_hatch_v2",
+      "provenance.provenance_line_v1",
+      "provenance.provenance_direction_v1",
+      "provenance.distribution_line_v1",
+      "boundary.shoreline_v2",
+      "boundary.facies_boundary_v2",
+      "boundary.interpolation_boundary_v2",
+      "boundary.map_extent"
+    ],
+    "residual": [],
+    "entry_sample": {}
+  }
+}

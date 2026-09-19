@@ -8,6 +8,11 @@ the RENDERER XML itself is produced by QGIS through the bridge
 by QGIS's own serializer — never hand-rolled XML that could drift from the
 vendored QGIS version.  Without the bridge there is no honest scalar QGIS
 path; callers must then use the RGBA mirror and disclose the degradation.
+
+
+C++ port (host half): libs/cartography (CONV-27) — frozen against this
+module as oracle; legacy fallback. Optional dispatch seam:
+mapping.cartography_native (HAS_CPP).
 """
 
 from __future__ import annotations

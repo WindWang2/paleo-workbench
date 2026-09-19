@@ -1,0 +1,72 @@
+{
+  "legacy_only": {
+    "fill": "#6c8ebf",
+    "stroke": "#26364d",
+    "stroke_width": 1.0,
+    "line_pattern": "solid",
+    "marker": "circle",
+    "marker_size": 6.0,
+    "renderer": "single",
+    "field": "",
+    "labels": {
+      "field": "name",
+      "size": 6.75,
+      "color": "#f8f9fa",
+      "font_family": "",
+      "bold": false,
+      "halo_color": "#f8f9fa",
+      "halo_width": 1.0,
+      "visible": true,
+      "rotation_field": "",
+      "size_field": "",
+      "color_field": "",
+      "buffer_color": "#f8f9fa",
+      "buffer": 0.26458333333333334
+    }
+  },
+  "promoted": {
+    "fill": "#6c8ebf",
+    "stroke": "#26364d",
+    "labels": {
+      "field": "name",
+      "size": 6.75,
+      "color": "#f8f9fa",
+      "font_family": "",
+      "bold": false,
+      "halo_color": "#f8f9fa",
+      "halo_width": 1.0,
+      "visible": true,
+      "rotation_field": "",
+      "size_field": "",
+      "color_field": "",
+      "buffer_color": "#f8f9fa",
+      "buffer": 0.26458333333333334
+    },
+    "renderer_xml": "<renderer-v2 type=\"categorizedSymbol\"/>"
+  },
+  "label_units": {
+    "labels": {
+      "size": 9.0,
+      "halo_width": 2.0,
+      "halo_color": "#101010",
+      "buffer": 0.5291666666666667,
+      "buffer_color": "#101010"
+    },
+    "renderer_xml": "<renderer-v2/>"
+  },
+  "explicit_buffer_kept": {
+    "labels": {
+      "size": 7.5,
+      "buffer": 0.5,
+      "buffer_color": "#ffffff",
+      "halo_width": 3.0
+    }
+  },
+  "no_labels": {
+    "fill": "#000000"
+  },
+  "non_mapping": {
+    "error": "ValueError",
+    "message": "dictionary update sequence element #0 has length 1; 2 is required"
+  }
+}

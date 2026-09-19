@@ -1,4 +1,4 @@
-# 27-decisions — CONV-27 mapping_document 行为层（edit session / undo-redo / snapshot / IO）
+# 27b-decisions — CONV-27 mapping_document 行为层（edit session / undo-redo / snapshot / IO）
 
 每条记录：选择、被否的备选、理由。歧义裁定原则：对用户流程更诚实、更少抽象。
 

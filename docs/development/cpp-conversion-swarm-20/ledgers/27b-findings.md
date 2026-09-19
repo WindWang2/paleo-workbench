@@ -1,4 +1,4 @@
-# 27-findings — CONV-27 mapping_document 行为层
+# 27b-findings — CONV-27 mapping_document 行为层
 
 盘点与移植过程中发现的事实记录。
 
@@ -43,5 +43,5 @@ Python `min((e.z_index ...), default=0)` 的 default 仅对**空**集合生效�
 - 已修（P0/P1/P2）：Python 标注改为注释（原 RST note 破坏 import 链）；apply_features 空 coordinates 数组的 UB（Python len==0 → MISSING，len==1 → INVALID+partial x）；GroupCommand undo/redo 按**嵌套命令逐个**通知 observer（混合 kind 组正确 bump 各计数器，与 rollback 对称）；create_document 默认 id 生成器缺失；bind_template 空 fields 列表不过滤（Python `if fields:` falsy）；configure 校验顺序（locked 先于 properties 检查）；coerce_ring 非数值标量 → throw（整条 feature 跳过，Python ValueError 路径——`_is_point` 只排除容器不验证数值，实测确认）；normalize_line 标量元素 throw、字符串元素按字符展开（Python list(p) 语义）；StdFileStore replace 失败无条件 bak→main 回滚 + tmp 清理；语义级损坏（JSON 合法但 kernel 契约失败）同样走隔离/还原（manager.py ValidationError 分支）；隔离文件名加进程内序号（秒级时间戳防碰撞）；FeatureIdGenerator 拷贝共享计数器（shared_ptr，无悬垂 lambda）；service 禁用拷贝/移动（session 持文档指针）；会话 move 契约文档化（仅限空历史 rebind）；observer 契约（不得抛出）+ 栈内吞异常保护；rollback 先 revert 后通知（与 run 一致）；GroupCommand 补 id；getpid POSIX 守卫；_is_point 布尔坐标（Python bool 是 int）；py_isclose inf 分支。
 - 文档化（P3）：clear_history 对 open group 不回滚（手势历史复位语义）；会话单线程契约（edit_command.hpp / document_service.hpp）。
 
-- 本分支只新增 libs/mapping_document 文件 + CMakeLists 的 CONV-27 块 + 顶层 CMakeLists 的 CONV-27 option 块 + tools/oracle 新生成器 + ledgers/27-*。与 open PR #1346（data/workspace）、#1348（workflow）、#1349（prediction）、#1347（build/packaging）无共享文件冲突。
+- 本分支只新增 libs/mapping_document 文件 + CMakeLists 的 CONV-27 块 + 顶层 CMakeLists 的 CONV-27 option 块 + tools/oracle 新生成器 + ledgers/27b-*。与 open PR #1346（data/workspace）、#1348（workflow）、#1349（prediction）、#1347（build/packaging）无共享文件冲突。
 - 顶层 CMakeLists.txt 的插入点（# END CONV-02 之后）为机械追加块，冲突风险低。
