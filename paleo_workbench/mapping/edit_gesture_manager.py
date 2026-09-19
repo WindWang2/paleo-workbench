@@ -118,3 +118,9 @@ class EditGestureManager:
             }
             for record in self._gestures
         ]
+
+
+# C++ migration (CONV-27d): GestureRecord + EditGestureManager are ported
+# to libs/mapping_document edit_gesture_manager (pwb::mapping_document),
+# oracle-frozen (gesture_cases). Python side stays as oracle/legacy
+# reference.

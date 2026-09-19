@@ -241,3 +241,7 @@ Python module status after CONV-27 (module docstrings carry the same note):
 C++ library is authoritative for the product runtime. `renderers.py`
 (SVG fallback), `facies_renderer_xml.py` (hand-rolled XML) and
 `facies_taxonomy.py` stay Python-only by scope decision (CONV-27 D-9).
+
+## CONV-27d — bridge edit domain
+
+`edit_session_set.py`, `edit_gesture_manager.py`, `native_edit_session.py` and `map_document_snapshot.py` (the legacy-document render adapter) are ported to `libs/mapping_document` (`edit_session_set`, `edit_gesture_manager`, `native_edit_session`, `render_snapshot`; Qt-free, oracle-frozen via `tools/oracle/generate_map_document_bridge_fixtures.py`). The duck-typed bridge stack is the abstract `NativeEditBridgeStack` seam (legacy bridges honestly degrade via capability defaults); the committed-delta consumer is the `ICommittedDeltaSink` seam. `vector_layer.py` / `edit_delta.py` cores were already ported by UI-13 (`libs/ui_composite/vector_layer`) and are NOT duplicated here. `edit_delta.ZeroCopyEventBus` stays Python-only: it is the numpy consumer face of the already-native `native/qgis_render_bridge` event ring. These Python modules remain as oracle/legacy reference.

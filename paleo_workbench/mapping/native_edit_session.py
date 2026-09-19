@@ -466,3 +466,11 @@ class NativeEditSessionController:
         if gesture_id and ok:
             self.gestures.mark_redone(gesture_id)
         return ok
+
+
+# C++ migration (CONV-27d): NativeEditSessionController is ported to
+# libs/mapping_document native_edit_session (pwb::mapping_document); the
+# duck-typed stack is the abstract NativeEditBridgeStack seam and the
+# VectorLayer consumer is the ICommittedDeltaSink seam. Oracle-frozen
+# (native_cases incl. the all-or-nothing commit + compensation matrix).
+# Python side stays as oracle/legacy reference.
