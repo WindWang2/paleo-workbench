@@ -5,6 +5,7 @@
 #include <iterator>
 
 #include "pwb/ingest/preview/document_parsers.hpp"
+#include "pwb/ingest/preview/las_preview.hpp"
 #include "pwb/ingest/preview/office.hpp"
 #include "pwb/ingest/preview/spreadsheetml.hpp"
 #include "pwb/ingest/preview/text_parsers.hpp"
@@ -218,10 +219,10 @@ PreviewResult build_preview(const ResourceRef& asset_in,
         r.revision = stat_revision(file);
         return r;
     }
+    // BEGIN VIZ-A: LAS preview routes through the WLE-backed preview core
+    // (injected provider; honest capability-unavailable without the SDK).
     if (in_las_formats(fmt)) {
-        std::string msg = "LAS \xE9\xA2\x84\xE8\xA7\x88\xE5\xA4\xB1\xE8\xB4\xA5: "
-                          "ModuleNotFoundError";  // LAS 预览失败:
-        PreviewResult las_r = message_result(asset, msg, asset.status);
+        PreviewResult las_r = las_preview_result(asset, file.bytes, settings);
         las_r.revision = stat_revision(file);
         return las_r;
     }
@@ -233,12 +234,13 @@ PreviewResult build_preview(const ResourceRef& asset_in,
                 return *xml_log;
             }
         }
-        std::string msg = "LAS \xE9\xA2\x84\xE8\xA7\x88\xE5\xA4\xB1\xE8\xB4\xA5: "
-                          "ModuleNotFoundError";  // las fallback (geoviz absent)
-        PreviewResult las_r = message_result(asset, msg, asset.status);
+        // Python registry falls back to las_preview for non-parseable XML
+        // well logs (classified as missing curve definitions there).
+        PreviewResult las_r = las_preview_result(asset, file.bytes, settings);
         las_r.revision = stat_revision(file);
         return las_r;
     }
+    // END VIZ-A
     if (in_segy_formats(fmt) || asset.type == "seismic") {
         // segyio unavailable: the dependency-missing message (D8)
         PreviewResult segy_r = message_result(

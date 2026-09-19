@@ -31082,8 +31082,8 @@
     "format": "las",
     "status": "indexed",
     "type_label": "well_log",
-    "message": "LAS 预览失败: ModuleNotFoundError",
-    "warning": "LAS 预览失败: ModuleNotFoundError",
+    "message": "LAS 预览不可用：WLE LAS 解析内核未接入",
+    "warning": "LAS 预览不可用：WLE LAS 解析内核未接入",
     "text": "",
     "truncated": false,
     "rich_html": "",
@@ -31105,7 +31105,8 @@
       3
      ]
     ]
-   }
+   },
+   "cpp_adjudication": "VIZ-A: honest capability message replaces the fabricated ModuleNotFoundError (generator carries the same override)"
   },
   {
    "name": "geotiff_dep_missing",
@@ -31863,8 +31864,8 @@
     "format": "las",
     "status": "indexed",
     "type_label": "well_log",
-    "message": "LAS 预览失败: ModuleNotFoundError",
-    "warning": "LAS 预览失败: ModuleNotFoundError",
+    "message": "LAS 预览不可用：WLE LAS 解析内核未接入",
+    "warning": "LAS 预览不可用：WLE LAS 解析内核未接入",
     "text": "",
     "truncated": false,
     "rich_html": "",
@@ -31886,7 +31887,8 @@
       9
      ]
     ]
-   }
+   },
+   "cpp_adjudication": "VIZ-A: honest capability message replaces the fabricated ModuleNotFoundError (generator carries the same override)"
   },
   {
    "name": "project_root_escape_rejected",

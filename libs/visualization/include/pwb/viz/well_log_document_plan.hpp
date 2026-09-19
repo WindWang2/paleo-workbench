@@ -40,6 +40,12 @@
 
 namespace pwb::viz {
 
+// BEGIN VIZ-A — the vendored facies color table (frozen Python
+// FACIES_COLORS, order significant for longest-substring tie-breaks).
+// Shared with well_log_patterns.hpp so the table is not duplicated.
+const std::vector<std::pair<std::string, std::string>>& facies_colors();
+// END VIZ-A
+
 // Deterministic UUIDv5 for Workbench-owned business entities (oracle:
 // stable_entity_id). Parts are stripped and joined with "|".
 [[nodiscard]] std::string

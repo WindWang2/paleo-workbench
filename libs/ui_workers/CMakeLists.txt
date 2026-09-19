@@ -51,6 +51,22 @@ target_compile_features(pwb_ui_workers PUBLIC cxx_std_20)
 target_link_libraries(pwb_ui_workers PUBLIC
     Pwb::JobRuntime Pwb::Domain Pwb::GeoModel)
 
+# BEGIN VIZ-A: production WLE load for the well_log seam. Only when the SDK
+# participates in the build (science_suite adds well-log-engine before this
+# directory); otherwise the seam keeps reporting the engine as unavailable.
+if(TARGET WellLog::IO)
+    add_library(pwb_ui_workers_wle_load STATIC
+        src/wle_load.cpp)
+    add_library(Pwb::UiWorkersWleLoad ALIAS pwb_ui_workers_wle_load)
+    target_include_directories(pwb_ui_workers_wle_load PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_compile_features(pwb_ui_workers_wle_load PUBLIC cxx_std_20)
+    target_link_libraries(pwb_ui_workers_wle_load
+        PUBLIC Pwb::UiWorkers
+        PRIVATE WellLog::IO)
+endif()
+# END VIZ-A
+
 if(BUILD_TESTING)
     add_subdirectory(ui_workers_tests)
 endif()

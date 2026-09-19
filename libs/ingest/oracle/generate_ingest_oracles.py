@@ -1190,6 +1190,20 @@ reg_case(
     resource_path="../outside/secret.txt",
     project_files={"keep.txt": b"root file"},
 )
+# BEGIN VIZ-A adjudication: the C++ registry LAS branch (no WLE provider
+# installed) reports the honest capability message "LAS 预览不可用：WLE LAS
+# 解析内核未接入" instead of the Python geoviz-absent parity message
+# "LAS 预览失败: ModuleNotFoundError" — the fabricated Python dependency
+# error is exactly what the VIZ-A line removes (the real preview lands with
+# the provider installed; see docs/development/cpp-viz-a/reconciliation.md).
+# The frozen expectation is patched to the C++ contract and flagged.
+_CPP_LAS_UNAVAILABLE = "LAS 预览不可用：WLE LAS 解析内核未接入"
+for case in reg_cases:
+    if case["format"] == "las" and isinstance(case["expected"], dict):
+        if case["expected"].get("message") == "LAS 预览失败: ModuleNotFoundError":
+            case["expected"]["message"] = _CPP_LAS_UNAVAILABLE
+            case["expected"]["warning"] = _CPP_LAS_UNAVAILABLE
+            case["cpp_adjudication"] = "VIZ-A: honest capability message replaces the fabricated ModuleNotFoundError"
 out["registry"] = reg_cases
 
 # ---------------------------------------------------------------------------
