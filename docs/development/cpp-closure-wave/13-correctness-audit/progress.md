@@ -64,3 +64,13 @@ findings → next step. Latest round last.
 - ASan+UBSan post-fix on the 4 instrumented test/source pairs: all clean.
 - TSan (#1391.4 locking) not run — see acceptance.md.
 - Next: independent review pass → commit → push → PR.
+
+## Round 5 — review fixes + delivery (2026-09-19)
+- Independent review (subagent_explore, full diff): no high-severity
+  findings; 3 actionable items fixed (falsy-payload no-op, whitespace set
+  completion, non-ASCII casefold sort coverage) + doc drift corrected.
+- Rebuilt + re-ran touched tests under gate: 2/2 PASS.
+- Committed 8cbfc6f1 on base 06211541 (origin/main unchanged at push
+  time); pushed branch; PR #1416 opened against main.
+- Remaining recorded limitations: TSan not run; disk-full fault injection
+  not simulated; final-sigma str.lower() context rule; see findings.md.
