@@ -721,6 +721,9 @@ if(PWB_BUILD_PLATFORM)
     # attribute/topology/reference/boundary panels, factor shelf, inspector)
     # over the ui_data_core edit stack.
     add_subdirectory(libs/ui_pages_mapedit)
+    # UI-12 — workstation shell slice: dock composition frame + panel
+    # widgets over the UI-01 shell substrate (pages stay injected).
+    add_subdirectory(libs/ui_workstation)
     add_subdirectory(apps/paleo_workbench_platform)
     if(BUILD_TESTING)
         enable_testing()
