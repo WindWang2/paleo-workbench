@@ -1,0 +1,76 @@
+{
+  "tool": "pwb-bench",
+  "format_version": 1,
+  "environment": {
+    "sysname": "Linux",
+    "release": "7.2.5-1-cachyos",
+    "machine": "x86_64",
+    "nodename": "cachyos-x8664",
+    "cpu_count": 40,
+    "cxx_compiler": "gcc 16.2",
+    "build_flavor": "ndebug",
+    "thread_env": {
+      "OMP_NUM_THREADS": "",
+      "OPENBLAS_NUM_THREADS": "",
+      "MKL_NUM_THREADS": "",
+      "CMAKE_BUILD_PARALLEL_LEVEL": "",
+      "CTEST_PARALLEL_LEVEL": ""
+    },
+    "pid": 133328
+  },
+  "scenarios": {
+    "project": {
+      "features": 4000,
+      "save": {
+        "samples_ms": [
+          323.848625,
+          629.809569,
+          708.100676,
+          696.126027,
+          1179.928131
+        ],
+        "median_ms": 696.126027,
+        "p95_ms": 1179.928131,
+        "min_ms": 323.848625,
+        "max_ms": 1179.928131,
+        "first_ms": 323.848625,
+        "sample_count": 5,
+        "alloc_calls": 2781167,
+        "alloc_bytes": 422690426,
+        "io_read_bytes": 0,
+        "io_write_bytes": 129433600,
+        "io_rchar": 103540321,
+        "io_wchar": 129424155,
+        "io_syscr": 108,
+        "io_syscw": 5,
+        "peak_rss_mib": 113.0390625,
+        "bytes_written": 25884831,
+        "file_bytes": 25884831
+      },
+      "load": {
+        "samples_ms": [
+          524.784095,
+          485.354875,
+          491.149776,
+          491.176258,
+          488.477206
+        ],
+        "median_ms": 491.149776,
+        "p95_ms": 524.784095,
+        "min_ms": 485.354875,
+        "max_ms": 524.784095,
+        "first_ms": 524.784095,
+        "sample_count": 5,
+        "alloc_calls": 7144465,
+        "alloc_bytes": 795319295,
+        "io_read_bytes": 0,
+        "io_write_bytes": 0,
+        "io_rchar": 129424271,
+        "io_wchar": 0,
+        "io_syscr": 15812,
+        "io_syscw": 0,
+        "peak_rss_mib": 113.0390625
+      }
+    }
+  }
+}

@@ -990,7 +990,14 @@ PredictionPipelineResult run_prediction_pipeline(
     tiled.progress = options.progress;
     result.stats = run_tiled_inference(package.artifact_path, preprocessed,
                                        session, tiled, classmap, probmap);
-    result.binding = check_onnx_model_file(package.artifact_path);
+    // Perf (line 14, measured): the session already gated and hashed the
+    // artifact in open_file — re-running check_onnx_model_file here paid a
+    // second full-file SHA-256 (~400 ms per 64 MiB) for identical values.
+    // The session's identity is also strictly the model that actually ran.
+    result.binding.model_file =
+        detail::path_from_utf8(package.artifact_path).filename().string();
+    result.binding.model_bytes = session.model_info().model_bytes;
+    result.binding.model_sha256 = session.model_info().model_sha256;
     result.compatibility_warnings = compatibility.warnings;
 
     Json provenance = Json::object();

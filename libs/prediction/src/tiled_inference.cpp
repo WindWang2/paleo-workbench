@@ -23,6 +23,7 @@
 #include <limits>
 #include <thread>
 #include <typeinfo>
+#include <unordered_set>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -369,6 +370,12 @@ void run_tile_group(const VolumeReader& reader, InferenceSession& session,
         }
     }
 
+    // Perf (line 14, measured): the per-class scratch used to be a
+    // std::vector constructed inside the voxel loop — one heap allocation
+    // per voxel (~105M allocs / 6.1 GB requested on a 21M-voxel run, 5
+    // samples). It is fully rewritten every iteration, so hoisting it out
+    // of the loops is behavior-identical buffer reuse.
+    std::vector<float> values(static_cast<std::size_t>(prob_channels));
     for (std::size_t b = 0; b < group.size(); ++b) {
         const auto& crop = crops[b];
         const float* probs_base =
@@ -381,9 +388,8 @@ void run_tile_group(const VolumeReader& reader, InferenceSession& session,
                          + static_cast<std::size_t>(a1))
                             * static_cast<std::size_t>(out.w)
                         + static_cast<std::size_t>(a2);
-                    std::vector<float> values(prob_channels);
                     for (int c = 0; c < prob_channels; ++c) {
-                        values[c] = probs_base[static_cast<std::size_t>(c) * plane + voxel];
+                        values[static_cast<std::size_t>(c)] = probs_base[static_cast<std::size_t>(c) * plane + voxel];
                     }
                     int argmax = 0;
                     float max_prob = 0.0f;
@@ -501,8 +507,15 @@ void validate_softmax_budget(int batch, int classes, const Tile3& tile) {
     }
 }
 
-ModelBinding check_onnx_model_file(const std::string& model_path) {
-    const fs::path path = utf8_path(model_path);
+namespace {
+
+// #1176 gate without the provenance digest. run_tiled_inference
+// re-validates the model file per run but discards the binding — hashing
+// there paid a full-file SHA-256 (~400 ms per 64 MiB model, measured) that
+// no consumer ever read. The digest stays in check_onnx_model_file for
+// callers that actually keep the binding.
+long long validate_onnx_model_file(const fs::path& path,
+                                   const std::string& model_path) {
     std::error_code ec;
     const fs::file_status status = fs::status(path, ec);
     const bool regular = !ec && status.type() == fs::file_type::regular;
@@ -538,7 +551,14 @@ ModelBinding check_onnx_model_file(const std::string& model_path) {
             + " bytes, above the " + std::to_string(cap)
             + "-byte load cap (PALEO_ONNX_MAX_MODEL_BYTES overrides)");
     }
+    return size;
+}
 
+}  // namespace
+
+ModelBinding check_onnx_model_file(const std::string& model_path) {
+    const fs::path path = utf8_path(model_path);
+    const long long size = validate_onnx_model_file(path, model_path);
     ModelBinding binding;
     binding.model_file = path.filename().string();
     binding.model_bytes = size;
@@ -555,7 +575,7 @@ TiledRunStats run_tiled_inference(const std::string& model_path,
     if (!fs::is_regular_file(utf8_path(model_path))) {
         throw TiledInferenceError("ONNX model not found: " + model_path);
     }
-    (void)check_onnx_model_file(model_path);
+    (void)validate_onnx_model_file(utf8_path(model_path), model_path);
 
     const Tile3 tile = options.tile;
     if (tile[0] <= 0 || tile[1] <= 0 || tile[2] <= 0) {
@@ -617,15 +637,18 @@ TiledRunStats run_tiled_inference(const std::string& model_path,
             for (std::size_t k = 0; k < starts[2].size(); ++k)
                 tiles.push_back({i, j, k});
 
-    std::vector<std::string> completed;
+    // Perf (line 14, measured): membership is queried once per tile, so a
+    // std::vector + std::find scan is O(tiles x done) — ~847 ms for a pure
+    // 20k-tile completed-scan, growing quadratically. The marker set is
+    // membership-only (order never observed), so an unordered_set keeps
+    // semantics identical at O(1) per lookup.
+    std::unordered_set<std::string> completed;
     for (const auto& entry : fs::directory_iterator(done_dir)) {
         const std::string name = entry.path().filename().string();
-        if (name.rfind("t_", 0) == 0) completed.push_back(name);
+        if (name.rfind("t_", 0) == 0) completed.insert(name);
     }
     const auto is_completed = [&](const std::array<std::size_t, 3>& t) {
-        const std::string key = tile_key(t);
-        return std::find(completed.begin(), completed.end(), key)
-               != completed.end();
+        return completed.find(tile_key(t)) != completed.end();
     };
 
     TiledRunStats stats;

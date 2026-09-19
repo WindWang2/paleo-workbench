@@ -1,0 +1,102 @@
+{
+  "tool": "pwb-bench",
+  "format_version": 1,
+  "environment": {
+    "sysname": "Linux",
+    "release": "7.2.5-1-cachyos",
+    "machine": "x86_64",
+    "nodename": "cachyos-x8664",
+    "cpu_count": 40,
+    "cxx_compiler": "gcc 16.2",
+    "build_flavor": "ndebug",
+    "thread_env": {
+      "OMP_NUM_THREADS": "",
+      "OPENBLAS_NUM_THREADS": "",
+      "MKL_NUM_THREADS": "",
+      "CMAKE_BUILD_PARALLEL_LEVEL": "",
+      "CTEST_PARALLEL_LEVEL": ""
+    },
+    "pid": 133038
+  },
+  "scenarios": {
+    "catalog-list": {
+      "assets": 100000,
+      "limit": 500,
+      "offset": 0,
+      "doc_name": {
+        "samples_ms": [
+          382.031639,
+          365.123665,
+          365.809427
+        ],
+        "median_ms": 365.809427,
+        "p95_ms": 382.031639,
+        "min_ms": 365.123665,
+        "max_ms": 382.031639,
+        "first_ms": 382.031639,
+        "sample_count": 3,
+        "alloc_calls": 2854793,
+        "alloc_bytes": 191929985,
+        "io_read_bytes": 0,
+        "io_write_bytes": 0,
+        "io_rchar": 100,
+        "io_wchar": 0,
+        "io_syscr": 2,
+        "io_syscw": 0,
+        "peak_rss_mib": 207.0703125,
+        "page_rows": 500,
+        "digest": "409542645217192479"
+      },
+      "doc_modified": {
+        "samples_ms": [
+          439.496503,
+          430.827159,
+          424.699554
+        ],
+        "median_ms": 430.827159,
+        "p95_ms": 439.496503,
+        "min_ms": 424.699554,
+        "max_ms": 439.496503,
+        "first_ms": 439.496503,
+        "sample_count": 3,
+        "alloc_calls": 2854793,
+        "alloc_bytes": 191929985,
+        "io_read_bytes": 0,
+        "io_write_bytes": 0,
+        "io_rchar": 100,
+        "io_wchar": 0,
+        "io_syscr": 2,
+        "io_syscw": 0,
+        "peak_rss_mib": 207.0703125,
+        "page_rows": 500,
+        "digest": "10391575517663678567"
+      },
+      "sql_name": {
+        "samples_ms": [
+          8.274787,
+          7.367887,
+          7.328121,
+          7.251155,
+          7.266509
+        ],
+        "median_ms": 7.328121,
+        "p95_ms": 8.274787,
+        "min_ms": 7.251155,
+        "max_ms": 8.274787,
+        "first_ms": 8.274787,
+        "sample_count": 5,
+        "alloc_calls": 355305,
+        "alloc_bytes": 27078440,
+        "io_read_bytes": 0,
+        "io_write_bytes": 0,
+        "io_rchar": 663652,
+        "io_wchar": 0,
+        "io_syscr": 164,
+        "io_syscw": 0,
+        "peak_rss_mib": 207.0703125,
+        "page_rows": 500,
+        "digest": "409542645217192479"
+      }
+    }
+  }
+}

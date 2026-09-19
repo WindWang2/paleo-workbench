@@ -226,6 +226,22 @@ if(PWB_BUILD_PREDICTION_RUNTIME)
 endif()
 # END PREDICTION-RUNTIME
 
+# BEGIN LINE-14 — pwb-bench: Qt-free native benchmark harness
+# (tools/pwb-bench) for the performance-audit line. Measures the merged
+# native user-flow cores (catalog load/page, tiled inference + model gate,
+# seismic slice/tile-cache, project save/reopen) with fixed samples,
+# median/p95, peak RSS, /proc/self/io deltas and a heap-allocation counter.
+# Implies the library closure it links; the ONNX Runtime stays a runtime
+# discovery — the bench never fabricates a session it cannot open.
+option(PWB_BUILD_BENCH
+    "Build the pwb-bench native benchmark tool (implies PWB_BUILD_DATA + CONV-13 + SEISMIC_IO)" OFF)
+if(PWB_BUILD_BENCH)
+    set(PWB_BUILD_DATA ON)
+    set(PWB_BUILD_CONV_13 ON)
+    set(PWB_BUILD_SEISMIC_IO ON)
+endif()
+# END LINE-14
+
 # BEGIN CONV-29 — composer/layout/export C++ closure: the Qt-free
 # layout-export behavior kernel (build_layout_spec, hybrid classification,
 # legend mirror gates, pixel budget, report, screen/export parity) in
@@ -730,6 +746,20 @@ if(PWB_BUILD_CONV_19)
     endif()
 endif()
 # END CONV-19
+# BEGIN LINE-14 — mount the bench tool only when its library closure
+# resolved (fail-closed like the D/E gates; never a stub bench).
+if(PWB_BUILD_BENCH)
+    if(TARGET Pwb::Prediction AND TARGET Pwb::Catalog
+       AND TARGET Pwb::SeismicIo AND TARGET Pwb::Project)
+        add_subdirectory(tools/pwb-bench)
+    else()
+        message(FATAL_ERROR
+            "PWB_BUILD_BENCH=ON but the bench library closure is missing "
+            "(needs Pwb::Prediction + Pwb::Catalog + Pwb::SeismicIo + "
+            "Pwb::Project)")
+    endif()
+endif()
+# END LINE-14
 # BEGIN CONV-GEO3D
 # Added after the CONV-12 geomodel kernels and the CONV-19 ingest cores so
 # the sibling targets exist and the lib's standalone guards all skip.
