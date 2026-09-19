@@ -67,6 +67,15 @@ public:
         ui_shell::LayoutPersistence* persistence = nullptr);
     ~ReviewExportPage() override;
 
+    // CLOSURE-REVIEW (line 09): late provider binding for hosts that
+    // install the real project backend after page construction (the
+    // closure installer). Replacing the constructor-passed provider is the
+    // whole contract — an empty std::function restores the unbound state.
+    void set_actions_provider(
+        std::function<IReviewActions*()> provider) {
+        actions_provider_ = std::move(provider);
+    }
+
     // set_project(project) parity — nullptr unbinds (run/finalize guard
     // "未绑定工程"; export falls back to the cached reports).
     void set_project_bound(bool bound);

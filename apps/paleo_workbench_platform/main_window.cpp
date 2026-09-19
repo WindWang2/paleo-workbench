@@ -33,6 +33,13 @@
 #endif
 // END VIZ-E
 
+// BEGIN CLOSURE-REVIEW — line 09: the 审核治理/可验证发布 install (the
+// review page's real IReviewActions backend over the AppContext store).
+#ifdef PWB_WITH_CLOSURE_REVIEW
+#include "closure_review_install.hpp"
+#endif
+// END CLOSURE-REVIEW
+
 #include <fstream>
 
 // CONV-PS platform services.
@@ -404,6 +411,12 @@ void MainWindow::buildUi() {
     app_shell_ = new AppShell(this);
     app_shell_->install_canvas(canvas_);
     setCentralWidget(app_shell_);
+// BEGIN CLOSURE-REVIEW
+#ifdef PWB_WITH_CLOSURE_REVIEW
+    pwb::app::closure_review::install_review_actions(app_shell_,
+                                                     &context_);
+#endif
+// END CLOSURE-REVIEW
 #else
     setCentralWidget(canvas_);
 #endif
@@ -1174,6 +1187,15 @@ QString MainWindow::openProject(const QString& project_file) {
     }
 #endif
 // END VIZ-B
+// BEGIN CLOSURE-REVIEW — the review page re-binds to the live document
+// (project_bound + reports/documents/artifacts refresh). Placed on the
+// SUCCESS tail only: every earlier failure return leaves the page in its
+// pre-open state instead of a stale bound state.
+#ifdef PWB_WITH_CLOSURE_REVIEW
+    pwb::app::closure_review::notify_project_store_changed(app_shell_,
+                                                           &context_);
+#endif
+// END CLOSURE-REVIEW
     return QString();
 }
 #endif  // PWB_WITH_DATA_INTEGRATION

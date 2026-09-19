@@ -61,6 +61,24 @@ public:
         return impl_->repository.export_manifest(
             pwb::project::catalog_manifest_for(project_file()));
     }
+    // CLOSURE-REVIEW (line 09 lease): persist the LIVE document sections
+    // through this store's own ProjectManager — the single save seam for
+    // document-level mutations (QC reports, version sets, export
+    // artifacts; no production save handler existed before — main_window
+    // recorded save_project_requested as deferred). Going through
+    // impl_->manager keeps the stale-write baseline invariant: a second
+    // ProjectManager over the same path would start with a fresh baseline
+    // and refuse the store's own next save. Read-only / stale-on-disk
+    // documents refuse here so callers never ack an unpersisted mutation.
+    pwb::domain::DataError save_document() {
+        const auto stats = impl_->manager.save(impl_->document);
+        if (!stats.is_ok()) {
+            return stats.error();
+        }
+        // Domain convention: a default DataError carries Unknown — success
+        // must be constructed explicitly (see errors.hpp).
+        return pwb::domain::DataError(domain::ErrorCode::Ok, "");
+    }
     // Fresh zero-write snapshot of the underlying project.
     pwb::domain::Result<pwb::data::ProjectSnapshotV1> snapshot() const {
         return pwb::data::DataFacade(project_file()).open_snapshot();

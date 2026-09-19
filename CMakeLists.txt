@@ -901,6 +901,39 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-11
 
+# BEGIN CLOSURE-REVIEW — line 09 (审核治理、质量规则与可验证发布):
+# libs/closure_review carries the Qt-free QC/versioning/export cores over
+# the portable project JSON tree plus the ProjectReviewActions backend
+# (ui_review::IReviewActions). Joins platform configures that already
+# resolved the review page cluster (Pwb::UiReview — the UI-11 block above),
+# the project document stack (Pwb::Project via PWB_BUILD_DATA) and the
+# geometry kernels it delegates to (Pwb::UiDataCore validate_ring,
+# Pwb::MappingKernel centroid). The app-side install is gated separately in
+# apps/paleo_workbench_platform (PWB_WITH_CLOSURE_REVIEW).
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::UiReview AND TARGET Pwb::Project
+   AND TARGET Pwb::UiDataCore AND TARGET Pwb::MappingKernel)
+    add_subdirectory(libs/closure_review)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "CLOSURE-REVIEW: libs/closure_review skipped — needs Pwb::UiReview "
+        "(UI-11 block) + Pwb::Project (PWB_BUILD_DATA) + Pwb::UiDataCore + "
+        "Pwb::MappingKernel; the review page keeps its honest unbound state")
+endif()
+
+# App-side install wiring: this runs after add_subdirectory(apps/...), so
+# the guard sees the backend target resolved above (post-hoc target_sources
+# like the VIZ-A block). The installer joins the app link closure and turns
+# the main_window named blocks on; without the backend the app compiles
+# with the review page's honest unbound state.
+if(TARGET Pwb::ClosureReview AND TARGET pwb-platform)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/closure_review_install.cpp
+        apps/paleo_workbench_platform/closure_review_install.hpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::ClosureReview)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_REVIEW=1)
+endif()
+# END CLOSURE-REVIEW
+
 # BEGIN UI-10 — sequence/factor/visualization pages cluster
 # (libs/ui_seqviz): Qt-free page state/view models + Qt Widgets shells for
 # the 16 taskbook pages. Binds the UI-04 worker contracts (libs/ui_workers)
@@ -1082,6 +1115,50 @@ if(TARGET pwb-platform
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
             TIMEOUT 300)
+
+        # BEGIN CLOSURE-REVIEW (line 09)
+        # Review/publish closure install battery: the real MainWindow +
+        # AppShell path WITH the closure installer compiled in
+        # (PWB_WITH_CLOSURE_REVIEW turns the main_window named blocks on),
+        # plus the document save seam and a reopen traceability round.
+        # Needs the project-data closure (Pwb::Data) for the store.
+        if(TARGET Pwb::ClosureReview AND TARGET Pwb::Data)
+            add_executable(platform_closure_review_install
+                tests/cpp/platform/test_closure_review_install.cpp
+                apps/paleo_workbench_platform/main_window.cpp
+                apps/paleo_workbench_platform/app_context.cpp
+                apps/paleo_workbench_platform/diagnostics.cpp
+                apps/paleo_workbench_platform/app_shell.cpp
+                apps/paleo_workbench_platform/closure_review_install.cpp)
+            if(COMMAND pwb_link_job_runtime)
+                pwb_link_job_runtime(platform_closure_review_install)
+            endif()
+            set_target_properties(platform_closure_review_install
+                PROPERTIES AUTOMOC ON)
+            target_compile_features(platform_closure_review_install
+                PRIVATE cxx_std_20)
+            target_include_directories(platform_closure_review_install PRIVATE
+                tests/cpp/platform
+                apps/paleo_workbench_platform
+                ${CMAKE_BINARY_DIR}/generated)
+            target_link_libraries(platform_closure_review_install PRIVATE
+                Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+                Pwb::PlatformServices Pwb::Data Pwb::ClosureReview
+                Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+            target_compile_definitions(platform_closure_review_install PRIVATE
+                PWB_WITH_APP_SHELL=1
+                PWB_WITH_CLOSURE_REVIEW=1
+                PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+            add_test(NAME platform.closure_review_install
+                     COMMAND platform_closure_review_install)
+            set_tests_properties(platform.closure_review_install PROPERTIES
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+                TIMEOUT 300)
+        endif()
+        # END CLOSURE-REVIEW
     endif()
 elseif(PWB_BUILD_PLATFORM AND TARGET pwb-platform)
     message(STATUS
