@@ -28,11 +28,17 @@ PreviewResult PreviewProvider::preview(const AssetObjectData* asset) const {
 
 PreviewResult PreviewProvider::preview_summary(
     const AssetObjectData* asset) const {
+    if (summary_fn_) {
+        return summary_fn_(asset, settings_);
+    }
     return preview(asset);
 }
 
 PreviewResult PreviewProvider::preview_visualization(
     const AssetObjectData* asset) const {
+    if (visualization_fn_) {
+        return visualization_fn_(asset, settings_);
+    }
     if (asset == nullptr) {
         return preview(nullptr);
     }
