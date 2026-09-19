@@ -1,3 +1,11 @@
+# 当前进度入口 — C++ 全面转换收尾
+
+当前执行日志：[C++ progress](docs/development/cpp-conversion-planning/progress.md)；
+计划：[task_plan](docs/development/cpp-conversion-planning/task_plan.md)。
+以下保留 #1302 Python 工作台历史，旧阶段完成不代表当前 C++ 收尾完成。
+
+---
+
 # Progress — Paleo UI Workbench
 
 ## Session 2026-09-14
