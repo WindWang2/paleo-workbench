@@ -121,6 +121,22 @@ if(PWB_BUILD_CONV_24)
     set(PWB_BUILD_CONV_08 ON)
 endif()
 # END CONV-24
+# BEGIN CONV-33 (option block — declared BEFORE the CONV-26B block so the
+# runtime closure's own implied switches (DATA / MAPPING_KERNEL / CONV-07/
+# 08/25) cascade from it; the slice adds no new subdirectory: its TUs are
+# appended to the EXISTING libs/workflow_engine + libs/workflow_runtime +
+# libs/project targets — CONV-32 incremental-TU precedent).
+# Workflow top-level orchestration slice: recipe (portable
+# *.paleo-workflow.json), service/orchestrator (home step-status authority
+# + headless cursor), qc + map_qa_rules (basic & extended QA), versioning
+# (expert finalize) + the project version-lifecycle models it builds on.
+option(PWB_BUILD_CONV_33
+    "Build the CONV-33 workflow orchestration surfaces (increments libs/workflow_engine + libs/workflow_runtime + libs/project; implies CONV-26B + CONV-06)" OFF)
+if(PWB_BUILD_CONV_33)
+    set(PWB_BUILD_CONV_06 ON)
+    set(PWB_BUILD_CONV_26B ON)
+endif()
+# END CONV-33
 # BEGIN CONV-26 — workflow runtime closure (M7 tail): freshness /
 # current-context, recompute planning + executor, constraint version
 # lifecycle, provenance graph, node adapter bridge + resource model, and

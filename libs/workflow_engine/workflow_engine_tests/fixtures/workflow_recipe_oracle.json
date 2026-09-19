@@ -1,0 +1,1402 @@
+{
+ "python": {
+  "generator": "tools/oracle/generate_workflow_recipe_fixtures.py",
+  "modules": [
+   "paleo_workbench.workflow.recipe",
+   "paleo_workbench.workflow.dag.model",
+   "paleo_workbench.workflow.dag.validation"
+  ],
+  "recipe_schema_version": "1.0"
+ },
+ "spec": {
+  "workflow_id": "wf-recipe-parity",
+  "name": "Recipe Parity Spec",
+  "description": "CONV-33 recipe oracle spec",
+  "max_concurrency": 2,
+  "schema_version": "1.0",
+  "slots": [
+   {
+    "name": "horizon",
+    "schema": {
+     "type": "string"
+    },
+    "required": true,
+    "default": "H1",
+    "description": "target horizon"
+   },
+   {
+    "name": "grid_n",
+    "schema": {
+     "type": "integer",
+     "minimum": 4
+    },
+    "required": false,
+    "default": 8,
+    "description": ""
+   }
+  ],
+  "nodes": [
+   {
+    "node_id": "extract",
+    "action_id": "map.extract_factors",
+    "parameters": {
+     "factor_name": "gr",
+     "target_horizon": "$slot:horizon",
+     "nested": {
+      "k": [
+       1,
+       2.5,
+       "ü"
+      ]
+     }
+    },
+    "depends_on": [],
+    "condition": null,
+    "retry": {
+     "max_attempts": 2,
+     "backoff_seconds": 0.5
+    },
+    "description": "extract points"
+   },
+   {
+    "node_id": "interp",
+    "action_id": "map.interpolate_idw",
+    "parameters": {
+     "samples": {
+      "$ref": "extract",
+      "key": "points"
+     },
+     "grid_n": "$slot:grid_n"
+    },
+    "depends_on": [
+     "extract"
+    ],
+    "condition": {
+     "kind": "node_succeeded",
+     "node": "extract"
+    },
+    "retry": {
+     "max_attempts": 1,
+     "backoff_seconds": 0.0
+    },
+    "description": ""
+   }
+  ]
+ },
+ "spec_hash": "ab67ec0a9f404da30db59e425d81c2d278f05391782813dc12b3f0d2dcff5160",
+ "run_spec": {
+  "workflow_id": "wf.from-run",
+  "name": "From-Run Spec",
+  "description": "slot promotion spec",
+  "max_concurrency": 3,
+  "schema_version": "1.0",
+  "slots": [
+   {
+    "name": "horizon",
+    "schema": {
+     "type": "string"
+    },
+    "required": true,
+    "default": "H1",
+    "description": "target horizon"
+   },
+   {
+    "name": "grid_n",
+    "schema": {
+     "type": "integer",
+     "minimum": 4
+    },
+    "required": false,
+    "default": 8,
+    "description": ""
+   },
+   {
+    "name": "note",
+    "schema": {
+     "type": "string"
+    },
+    "required": false,
+    "default": null,
+    "description": "free note"
+   }
+  ],
+  "nodes": [
+   {
+    "node_id": "extract",
+    "action_id": "map.extract_factors",
+    "parameters": {
+     "factor_name": "gr"
+    },
+    "depends_on": [],
+    "condition": null,
+    "retry": {
+     "max_attempts": 1,
+     "backoff_seconds": 0.0
+    },
+    "description": ""
+   }
+  ]
+ },
+ "run_spec_hash": "fac8976f7150bc98cfd4328501d08d1dc1578ed798345dc838bfcaa105bc8053",
+ "registry": {
+  "map.extract_factors": "compute",
+  "map.interpolate_idw": "compute",
+  "test.noop": "compute"
+ },
+ "fixed_clock": 1712345678.5,
+ "second_clock": 1712345699.25,
+ "case01_roundtrip": {
+  "filename": "wf-recipe-parity.paleo-workflow.json",
+  "recipe_to_dict": {
+   "recipe_schema_version": "1.0",
+   "recipe_id": "wf-recipe-parity",
+   "name": "Recipe Parity Spec",
+   "description": "round-trip recipe",
+   "created_at": 1712345678.5,
+   "source_run_id": null,
+   "tags": [
+    "demo",
+    "parity"
+   ],
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-recipe-parity",
+    "name": "Recipe Parity Spec",
+    "description": "CONV-33 recipe oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   }
+  },
+  "bytes": "{\n \"recipe_schema_version\": \"1.0\",\n \"recipe_id\": \"wf-recipe-parity\",\n \"name\": \"Recipe Parity Spec\",\n \"description\": \"round-trip recipe\",\n \"created_at\": 1712345678.5,\n \"source_run_id\": null,\n \"tags\": [\n  \"demo\",\n  \"parity\"\n ],\n \"workflow\": {\n  \"schema_version\": \"1.0\",\n  \"workflow_id\": \"wf-recipe-parity\",\n  \"name\": \"Recipe Parity Spec\",\n  \"description\": \"CONV-33 recipe oracle spec\",\n  \"max_concurrency\": 2,\n  \"slots\": [\n   {\n    \"name\": \"horizon\",\n    \"schema\": {\n     \"type\": \"string\"\n    },\n    \"required\": true,\n    \"default\": \"H1\",\n    \"description\": \"target horizon\"\n   },\n   {\n    \"name\": \"grid_n\",\n    \"schema\": {\n     \"type\": \"integer\",\n     \"minimum\": 4\n    },\n    \"required\": false,\n    \"default\": 8,\n    \"description\": \"\"\n   }\n  ],\n  \"nodes\": [\n   {\n    \"node_id\": \"extract\",\n    \"action_id\": \"map.extract_factors\",\n    \"parameters\": {\n     \"factor_name\": \"gr\",\n     \"target_horizon\": \"$slot:horizon\",\n     \"nested\": {\n      \"k\": [\n       1,\n       2.5,\n       \"ü\"\n      ]\n     }\n    },\n    \"depends_on\": [],\n    \"condition\": null,\n    \"retry\": {\n     \"max_attempts\": 2,\n     \"backoff_seconds\": 0.5\n    },\n    \"description\": \"extract points\"\n   },\n   {\n    \"node_id\": \"interp\",\n    \"action_id\": \"map.interpolate_idw\",\n    \"parameters\": {\n     \"samples\": {\n      \"$ref\": \"extract\",\n      \"key\": \"points\"\n     },\n     \"grid_n\": \"$slot:grid_n\"\n    },\n    \"depends_on\": [\n     \"extract\"\n    ],\n    \"condition\": {\n     \"kind\": \"node_succeeded\",\n     \"node\": \"extract\"\n    },\n    \"retry\": {\n     \"max_attempts\": 1,\n     \"backoff_seconds\": 0.0\n    },\n    \"description\": \"\"\n   }\n  ]\n }\n}",
+  "bytes_sha": "104ea3b38a7b512ed373a95ad546feb538c80f890e0dd6c69d9e7894a8f3cbe5",
+  "loaded_to_dict": {
+   "recipe_schema_version": "1.0",
+   "recipe_id": "wf-recipe-parity",
+   "name": "Recipe Parity Spec",
+   "description": "round-trip recipe",
+   "created_at": 1712345678.5,
+   "source_run_id": null,
+   "tags": [
+    "demo",
+    "parity"
+   ],
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-recipe-parity",
+    "name": "Recipe Parity Spec",
+    "description": "CONV-33 recipe oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   }
+  },
+  "loaded_hash": "1c45f370f1d8808c0297439bdafb3ff0856b61a719dac950988b2683033d6254",
+  "nested_rel": "sub/dir/nested.paleo-workflow.json",
+  "nested_bytes": "{\n \"recipe_schema_version\": \"1.0\",\n \"recipe_id\": \"wf-recipe-parity\",\n \"name\": \"Recipe Parity Spec\",\n \"description\": \"round-trip recipe\",\n \"created_at\": 1712345678.5,\n \"source_run_id\": null,\n \"tags\": [\n  \"demo\",\n  \"parity\"\n ],\n \"workflow\": {\n  \"schema_version\": \"1.0\",\n  \"workflow_id\": \"wf-recipe-parity\",\n  \"name\": \"Recipe Parity Spec\",\n  \"description\": \"CONV-33 recipe oracle spec\",\n  \"max_concurrency\": 2,\n  \"slots\": [\n   {\n    \"name\": \"horizon\",\n    \"schema\": {\n     \"type\": \"string\"\n    },\n    \"required\": true,\n    \"default\": \"H1\",\n    \"description\": \"target horizon\"\n   },\n   {\n    \"name\": \"grid_n\",\n    \"schema\": {\n     \"type\": \"integer\",\n     \"minimum\": 4\n    },\n    \"required\": false,\n    \"default\": 8,\n    \"description\": \"\"\n   }\n  ],\n  \"nodes\": [\n   {\n    \"node_id\": \"extract\",\n    \"action_id\": \"map.extract_factors\",\n    \"parameters\": {\n     \"factor_name\": \"gr\",\n     \"target_horizon\": \"$slot:horizon\",\n     \"nested\": {\n      \"k\": [\n       1,\n       2.5,\n       \"ü\"\n      ]\n     }\n    },\n    \"depends_on\": [],\n    \"condition\": null,\n    \"retry\": {\n     \"max_attempts\": 2,\n     \"backoff_seconds\": 0.5\n    },\n    \"description\": \"extract points\"\n   },\n   {\n    \"node_id\": \"interp\",\n    \"action_id\": \"map.interpolate_idw\",\n    \"parameters\": {\n     \"samples\": {\n      \"$ref\": \"extract\",\n      \"key\": \"points\"\n     },\n     \"grid_n\": \"$slot:grid_n\"\n    },\n    \"depends_on\": [\n     \"extract\"\n    ],\n    \"condition\": {\n     \"kind\": \"node_succeeded\",\n     \"node\": \"extract\"\n    },\n    \"retry\": {\n     \"max_attempts\": 1,\n     \"backoff_seconds\": 0.0\n    },\n    \"description\": \"\"\n   }\n  ]\n }\n}",
+  "nested_created": true
+ },
+ "case02_forbidden_keys": [
+  {
+   "data": {
+    "workflow": {
+     "parameters": {
+      "api_key": "k-123"
+     }
+    }
+   },
+   "problems": [
+    "recipe.workflow.parameters.api_key: forbidden recipe key (api_key)"
+   ]
+  },
+  {
+   "data": {
+    "sql": {
+     "query_x": 1,
+     "token": "t"
+    }
+   },
+   "problems": [
+    "recipe.sql.token: forbidden recipe key (token)"
+   ]
+  },
+  {
+   "data": {
+    "nodes": [
+     {
+      "parameters": {
+       " ApiKey ": "v"
+      }
+     }
+    ]
+   },
+   "problems": [
+    "recipe.nodes[0].parameters. ApiKey : forbidden recipe key (apikey)"
+   ]
+  },
+  {
+   "data": {
+    "a": [
+     0,
+     {
+      "Code": "print(1)"
+     }
+    ]
+   },
+   "problems": [
+    "recipe.a[1].Code: forbidden recipe key (code)"
+   ]
+  },
+  {
+   "data": {
+    "tokens_total": 3,
+    "source_dir": "data",
+    "pass": 1
+   },
+   "problems": []
+  },
+  {
+   "data": {
+    "secret": {
+     "public": "ok"
+    }
+   },
+   "problems": []
+  },
+  {
+   "data": {
+    "tags": [
+     "ok",
+     {
+      "password": "p"
+     }
+    ]
+   },
+   "problems": [
+    "recipe.tags[1].password: forbidden recipe key (password)"
+   ]
+  }
+ ],
+ "case02_validate_recipe": {
+  "recipe_workflow_id": "wf-recipe-parity",
+  "problems": [
+   "node 'extract': unknown action 'no.such.action'"
+  ]
+ },
+ "case03_absolute_paths": [
+  {
+   "data": {
+    "out": "/etc/passwd"
+   },
+   "problems": [
+    "recipe.out: absolute path '/etc/passwd' — recipes are portable; use workspace-relative paths or slot bindings"
+   ]
+  },
+  {
+   "data": {
+    "out": "\\\\server\\share\\data"
+   },
+   "problems": [
+    "recipe.out: absolute path '\\\\\\\\server\\\\share\\\\data' — recipes are portable; use workspace-relative paths or slot bindings"
+   ]
+  },
+  {
+   "data": {
+    "out": "C:\\data\\wells"
+   },
+   "problems": [
+    "recipe.out: absolute path 'C:\\\\data\\\\wells' — recipes are portable; use workspace-relative paths or slot bindings"
+   ]
+  },
+  {
+   "data": {
+    "out": "D:/abs/path"
+   },
+   "problems": [
+    "recipe.out: absolute path 'D:/abs/path' — recipes are portable; use workspace-relative paths or slot bindings"
+   ]
+  },
+  {
+   "data": {
+    "out": "$/mnt/seismic"
+   },
+   "problems": []
+  },
+  {
+   "data": {
+    "out": "$C:\\kept"
+   },
+   "problems": []
+  },
+  {
+   "data": {
+    "out": "data/out.json"
+   },
+   "problems": []
+  },
+  {
+   "data": {
+    "out": " /leading-space"
+   },
+   "problems": [
+    "recipe.out: absolute path ' /leading-space' — recipes are portable; use workspace-relative paths or slot bindings"
+   ]
+  },
+  {
+   "data": {
+    "out": "\\single"
+   },
+   "problems": []
+  },
+  {
+   "data": {
+    "parameters": {
+     "path": "/abs"
+    }
+   },
+   "problems": [
+    "recipe.parameters.path: absolute path '/abs' — recipes are portable; use workspace-relative paths or slot bindings"
+   ]
+  },
+  {
+   "data": {
+    "list": [
+     "/abs",
+     "ok"
+    ]
+   },
+   "problems": [
+    "recipe.list[0]: absolute path '/abs' — recipes are portable; use workspace-relative paths or slot bindings"
+   ]
+  }
+ ],
+ "case04_corrupt_json": [
+  {
+   "filename": "broken1.paleo-workflow.json",
+   "raw": "{corrupted",
+   "message": "recipe 'broken1.paleo-workflow.json' is not valid JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+  },
+  {
+   "filename": "broken2.paleo-workflow.json",
+   "raw": "{\"recipe_id\": \"x\",}",
+   "message": "recipe 'broken2.paleo-workflow.json' is not valid JSON: Illegal trailing comma before end of object: line 1 column 18 (char 17)"
+  },
+  {
+   "filename": "broken3.paleo-workflow.json",
+   "raw": "{\"a\":1",
+   "message": "recipe 'broken3.paleo-workflow.json' is not valid JSON: Expecting ',' delimiter: line 1 column 7 (char 6)"
+  },
+  {
+   "filename": "broken4.paleo-workflow.json",
+   "raw": "{} trailing",
+   "message": "recipe 'broken4.paleo-workflow.json' is not valid JSON: Extra data: line 1 column 4 (char 3)"
+  },
+  {
+   "filename": "broken5.paleo-workflow.json",
+   "raw": "{\n \"recipe_id\": \"x\",\n \"tags\": [1 2]\n}",
+   "message": "recipe 'broken5.paleo-workflow.json' is not valid JSON: Expecting ',' delimiter: line 3 column 13 (char 33)"
+  },
+  {
+   "filename": "broken6.paleo-workflow.json",
+   "raw": "{\"recipe_id\": \"unc",
+   "message": "recipe 'broken6.paleo-workflow.json' is not valid JSON: Unterminated string starting at: line 1 column 15 (char 14)"
+  },
+  {
+   "filename": "broken7.paleo-workflow.json",
+   "raw": "corrupted{}",
+   "message": "recipe 'broken7.paleo-workflow.json' is not valid JSON: Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+   "filename": "broken8.paleo-workflow.json",
+   "raw": "",
+   "message": "recipe 'broken8.paleo-workflow.json' is not valid JSON: Expecting value: line 1 column 1 (char 0)"
+  }
+ ],
+ "case05_migrate": [
+  {
+   "data": {
+    "recipe_schema_version": "1.0",
+    "workflow": {
+     "schema_version": "9.9"
+    }
+   },
+   "migrated": {
+    "recipe_schema_version": "1.0",
+    "workflow": {
+     "schema_version": "9.9"
+    }
+   }
+  },
+  {
+   "data": {
+    "recipe_schema_version": "1.0",
+    "recipe_id": "r",
+    "name": "n"
+   },
+   "migrated": {
+    "recipe_schema_version": "1.0",
+    "recipe_id": "r",
+    "name": "n",
+    "workflow": {
+     "schema_version": "1.0"
+    }
+   }
+  },
+  {
+   "data": {
+    "recipe_schema_version": "1.0",
+    "workflow": {
+     "workflow_id": "w",
+     "schema_version": "1.0"
+    }
+   },
+   "migrated": {
+    "recipe_schema_version": "1.0",
+    "workflow": {
+     "workflow_id": "w",
+     "schema_version": "1.0"
+    }
+   }
+  },
+  {
+   "data": {
+    "recipe_id": "r"
+   },
+   "migrated": {
+    "recipe_id": "r",
+    "workflow": {
+     "schema_version": "1.0"
+    }
+   }
+  }
+ ],
+ "case05_migrate_refusals": [
+  {
+   "data": {
+    "recipe_schema_version": "1.1"
+   },
+   "message": "recipe schema version '1.1' is newer than this build supports (1.0) — upgrade paleo-workbench"
+  },
+  {
+   "data": {
+    "recipe_schema_version": 2.0
+   },
+   "message": "recipe schema version '2.0' is newer than this build supports (1.0) — upgrade paleo-workbench"
+  },
+  {
+   "data": {
+    "recipe_schema_version": null
+   },
+   "message": "recipe schema version 'None' is newer than this build supports (1.0) — upgrade paleo-workbench"
+  }
+ ],
+ "case06_suffix_rewrite": [
+  {
+   "given": "plain.json",
+   "returned": "plain.paleo-workflow.json",
+   "expected": "plain.paleo-workflow.json",
+   "exists": true
+  },
+  {
+   "given": "dot.name.json",
+   "returned": "dot.name.paleo-workflow.json",
+   "expected": "dot.name.paleo-workflow.json",
+   "exists": true
+  },
+  {
+   "given": "already.paleo-workflow.json",
+   "returned": "already.paleo-workflow.json",
+   "expected": "already.paleo-workflow.json",
+   "exists": true
+  },
+  {
+   "given": "notes.txt",
+   "returned": "notes.txt",
+   "expected": "notes.txt",
+   "exists": true
+  },
+  {
+   "given": "noext",
+   "returned": "noext",
+   "expected": "noext",
+   "exists": true
+  }
+ ],
+ "case07_clone": {
+  "original_to_dict": {
+   "recipe_schema_version": "1.0",
+   "recipe_id": "wf-recipe-parity",
+   "name": "Recipe Parity Spec",
+   "description": "clone me",
+   "created_at": 1712345678.5,
+   "source_run_id": "run-abcd1234ef567890",
+   "tags": [
+    "t1"
+   ],
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-recipe-parity",
+    "name": "Recipe Parity Spec",
+    "description": "CONV-33 recipe oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   }
+  },
+  "default": {
+   "recipe_schema_version": "1.0",
+   "recipe_id": "wf-recipe-parity-clone",
+   "name": "Recipe Parity Spec",
+   "description": "clone me",
+   "created_at": 1712345699.25,
+   "source_run_id": null,
+   "tags": [
+    "t1"
+   ],
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-recipe-parity",
+    "name": "Recipe Parity Spec",
+    "description": "CONV-33 recipe oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   }
+  },
+  "named": {
+   "recipe_schema_version": "1.0",
+   "recipe_id": "custom-id",
+   "name": "Recipe Parity Spec",
+   "description": "clone me",
+   "created_at": 1712345699.25,
+   "source_run_id": null,
+   "tags": [
+    "t1"
+   ],
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-recipe-parity",
+    "name": "Recipe Parity Spec",
+    "description": "CONV-33 recipe oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   }
+  },
+  "empty_id_falls_back": "wf-recipe-parity-clone",
+  "independent_workflow": true
+ },
+ "case07_clone_empty_name": {
+  "cloned_name": "Recipe Parity Spec",
+  "to_dict": {
+   "recipe_schema_version": "1.0",
+   "recipe_id": "empty-name-clone",
+   "name": "Recipe Parity Spec",
+   "description": "CONV-33 recipe oracle spec",
+   "created_at": 1712345699.25,
+   "source_run_id": null,
+   "tags": [],
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-recipe-parity",
+    "name": "Recipe Parity Spec",
+    "description": "CONV-33 recipe oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   }
+  }
+ },
+ "case08_diff": {
+  "changed": {
+   "nodes_added": [
+    "report"
+   ],
+   "nodes_changed": {
+    "interp": [
+     "description",
+     "retry"
+    ]
+   },
+   "slots_added": [
+    "extra"
+   ],
+   "slots_changed": [
+    "grid_n"
+   ],
+   "max_concurrency": [
+    2,
+    4
+   ]
+  },
+  "slot_removed": {
+   "slots_removed": [
+    "grid_n"
+   ]
+  },
+  "reverse_changed": {
+   "nodes_removed": [
+    "report"
+   ],
+   "nodes_changed": {
+    "interp": [
+     "description",
+     "retry"
+    ]
+   },
+   "slots_removed": [
+    "extra"
+   ],
+   "slots_changed": [
+    "grid_n"
+   ],
+   "max_concurrency": [
+    4,
+    2
+   ]
+  },
+  "empty": {}
+ },
+ "case09_inspect": {
+  "recipe_id": "wf-recipe-parity",
+  "name": "Recipe Parity Spec",
+  "description": "inspect me",
+  "schema_version": "1.0",
+  "source_run_id": "run-1234567890abcdef",
+  "tags": [
+   "a",
+   "b"
+  ],
+  "workflow_id": "wf-recipe-parity",
+  "nodes": [
+   {
+    "node_id": "extract",
+    "action_id": "map.extract_factors",
+    "depends_on": [],
+    "description": "extract points"
+   },
+   {
+    "node_id": "interp",
+    "action_id": "map.interpolate_idw",
+    "depends_on": [
+     "extract"
+    ],
+    "description": ""
+   }
+  ],
+  "slots": [
+   {
+    "name": "horizon",
+    "schema": {
+     "type": "string"
+    },
+    "required": true,
+    "default": "H1",
+    "description": "target horizon"
+   },
+   {
+    "name": "grid_n",
+    "schema": {
+     "type": "integer",
+     "minimum": 4
+    },
+    "required": false,
+    "default": 8,
+    "description": ""
+   }
+  ],
+  "max_concurrency": 2
+ },
+ "case10_from_run": {
+  "run_id": "run-ff00ff00ff00ff00",
+  "slot_values": {
+   "horizon": "H9",
+   "unknown_slot": 42
+  },
+  "recipe_to_dict": {
+   "recipe_schema_version": "1.0",
+   "recipe_id": "wf.from-run",
+   "name": "From-Run Spec",
+   "description": "slot promotion spec",
+   "created_at": 1712345678.5,
+   "source_run_id": "run-ff00ff00ff00ff00",
+   "tags": [
+    "from-run"
+   ],
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf.from-run",
+    "name": "From-Run Spec",
+    "description": "slot promotion spec",
+    "max_concurrency": 3,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H9",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     },
+     {
+      "name": "note",
+      "schema": {
+       "type": "string"
+      },
+      "required": false,
+      "default": null,
+      "description": "free note"
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr"
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   }
+  },
+  "slots": [
+   {
+    "name": "horizon",
+    "schema": {
+     "type": "string"
+    },
+    "required": true,
+    "default": "H9",
+    "description": "target horizon"
+   },
+   {
+    "name": "grid_n",
+    "schema": {
+     "type": "integer",
+     "minimum": 4
+    },
+    "required": false,
+    "default": 8,
+    "description": ""
+   },
+   {
+    "name": "note",
+    "schema": {
+     "type": "string"
+    },
+    "required": false,
+    "default": null,
+    "description": "free note"
+   }
+  ]
+ },
+ "case11_from_spec": {
+  "default_id": "wf-recipe-parity",
+  "default_created_at": 1712345678.5,
+  "custom_id": "Custom ID!!",
+  "empty_id_falls_back": "wf-recipe-parity",
+  "desc_fallback": "CONV-33 recipe oracle spec",
+  "explicit_desc": "explicit",
+  "unicode_slug": "wf.-nicode-2024",
+  "unicode_desc_fallback": "fallback description",
+  "tags": [
+   "x"
+  ],
+  "workflow_carried": true
+ },
+ "case12_refusal_gates": {
+  "save_structural_message": "recipe.workflow.nodes[0].parameters.api_key: forbidden recipe key (api_key); recipe.workflow.nodes[1].parameters.output_path: absolute path '/etc/passwd' — recipes are portable; use workspace-relative paths or slot bindings",
+  "save_structural_wrote_nothing": true,
+  "save_registry_message": "node 'extract': unknown action 'no.such.action'",
+  "save_registry_wrote_nothing": true,
+  "save_no_registry_ok": true,
+  "save_no_registry_validates": true,
+  "load_missing_message": "recipe file 'ghost.paleo-workflow.json' does not exist",
+  "load_structural_message": "recipe.workflow.nodes[0].parameters.token: forbidden recipe key (token)"
+ },
+ "case13_from_dict": {
+  "input": {
+   "recipe_id": "coerce",
+   "workflow": {
+    "workflow_id": "wf-recipe-parity",
+    "name": "Recipe Parity Spec",
+    "description": "CONV-33 recipe oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ],
+    "schema_version": "1.0"
+   }
+  },
+  "name_fallback": "Recipe Parity Spec",
+  "description": "",
+  "created_at": null,
+  "source_run_id": null,
+  "tags": [],
+  "schema_version": "1.0",
+  "workflow_schema_version": "1.0",
+  "to_dict": {
+   "recipe_schema_version": "1.0",
+   "recipe_id": "coerce",
+   "name": "Recipe Parity Spec",
+   "description": "",
+   "created_at": null,
+   "source_run_id": null,
+   "tags": [],
+   "workflow": {
+    "schema_version": "1.0",
+    "workflow_id": "wf-recipe-parity",
+    "name": "Recipe Parity Spec",
+    "description": "CONV-33 recipe oracle spec",
+    "max_concurrency": 2,
+    "slots": [
+     {
+      "name": "horizon",
+      "schema": {
+       "type": "string"
+      },
+      "required": true,
+      "default": "H1",
+      "description": "target horizon"
+     },
+     {
+      "name": "grid_n",
+      "schema": {
+       "type": "integer",
+       "minimum": 4
+      },
+      "required": false,
+      "default": 8,
+      "description": ""
+     }
+    ],
+    "nodes": [
+     {
+      "node_id": "extract",
+      "action_id": "map.extract_factors",
+      "parameters": {
+       "factor_name": "gr",
+       "target_horizon": "$slot:horizon",
+       "nested": {
+        "k": [
+         1,
+         2.5,
+         "ü"
+        ]
+       }
+      },
+      "depends_on": [],
+      "condition": null,
+      "retry": {
+       "max_attempts": 2,
+       "backoff_seconds": 0.5
+      },
+      "description": "extract points"
+     },
+     {
+      "node_id": "interp",
+      "action_id": "map.interpolate_idw",
+      "parameters": {
+       "samples": {
+        "$ref": "extract",
+        "key": "points"
+       },
+       "grid_n": "$slot:grid_n"
+      },
+      "depends_on": [
+       "extract"
+      ],
+      "condition": {
+       "kind": "node_succeeded",
+       "node": "extract"
+      },
+      "retry": {
+       "max_attempts": 1,
+       "backoff_seconds": 0.0
+      },
+      "description": ""
+     }
+    ]
+   }
+  }
+ }
+}
