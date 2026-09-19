@@ -134,6 +134,30 @@ target_link_libraries(PwbQgis::Sdk INTERFACE
     PwbQgis::Core PwbQgis::Gui PwbQgis::Analysis
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::Svg Qt6::PrintSupport)
 
+# BEGIN CONV-27
+# Generated ui_*.h (e.g. ui_qgsrendererpropsdialogbase.h pulled by the
+# symbology dialogs) live in the vendor build's src/ui autogen dir.
+target_include_directories(PwbQgis::Sdk INTERFACE
+    "${PALEO_QGIS_BUILD_DIR}/src/ui")
+# QGIS headers include their bundled/external dependencies unqualified
+# (nlohmann/json_fwd.hpp from qgsabstractgeometry.h, qwt from gui headers,
+# spatialindex from analysis headers, geos_c.h from geometry headers). The
+# vendored QGIS build carried these as -isystem; the imported SDK must too
+# or every consumer TU fails at the first core header. geos/gdal headers
+# come from the same deps prefix the vendor build resolved against
+# (PWB_QGIS_DEPS_PREFIX, cache/env overridable).
+pwb_sdk_path(PWB_QGIS_DEPS_PREFIX "/home/kevin/pwb-sdks/root/usr")
+file(GLOB _pwb_qwt_dir "${PALEO_QGIS_SOURCE_DIR}/external/qwt-*")
+target_include_directories(PwbQgis::Sdk INTERFACE
+    "${PALEO_QGIS_SOURCE_DIR}/external/nlohmann"
+    "${PALEO_QGIS_SOURCE_DIR}/external/spatialindex/include"
+    "${PWB_QGIS_DEPS_PREFIX}/include")
+if(_pwb_qwt_dir)
+    list(GET _pwb_qwt_dir 0 _pwb_qwt_first)
+    target_include_directories(PwbQgis::Sdk INTERFACE "${_pwb_qwt_first}")
+endif()
+# END CONV-27
+
 if(WIN32)
     # Runtime closure location for tests/apps (PATH prepend + prefix path).
     set(PALEO_QGIS_RUNTIME "${PALEO_QGIS_SDK_DIR}/bin" CACHE INTERNAL "QGIS runtime DLL dir")

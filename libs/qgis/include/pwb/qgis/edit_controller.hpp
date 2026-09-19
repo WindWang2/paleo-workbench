@@ -68,6 +68,13 @@ public:
                             int vertex_index, double x, double y);
     std::string add_feature_geojson(const std::string& layer_id,
                                     const std::string& geojson_feature);
+    // BEGIN CONV-27
+    // Deletes the layer's current selection (one undoable command; the
+    // selection itself is QGIS-authoritative). deleted_count is optional
+    // telemetry for status surfaces.
+    std::string delete_selected(const std::string& layer_id,
+                                int* deleted_count = nullptr);
+    // END CONV-27
 
     std::string undo(const std::string& layer_id);
     std::string redo(const std::string& layer_id);

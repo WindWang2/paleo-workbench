@@ -508,6 +508,20 @@ if(PWB_BUILD_CONV_16)
 endif()
 # END CONV-16
 
+# BEGIN CONV-27
+# Task UI closure (feat/cpp-qgis-ui-workbench-closure): three-stage
+# workflow dock, domain layer tree, edit tool lifecycle, native layer
+# properties, constraint panel, layout persistence. The slice lives in
+# libs/ui (+ a small EditController addition in libs/qgis); the app wires
+# it under PWB_WITH_CONV_27.
+option(PWB_BUILD_CONV_27 "Build conv-27 QGIS workbench UI closure" OFF)
+if(PWB_BUILD_CONV_27)
+    if(NOT PWB_BUILD_PLATFORM)
+        message(FATAL_ERROR "PWB_BUILD_CONV_27=ON requires PWB_BUILD_PLATFORM=ON")
+    endif()
+endif()
+# END CONV-27
+
 # ----------------------------------------------------------------- summary ---
 # Print what is actually ON, and why (declared vs implied-by:<feature>).
 pwb_feature_summary()

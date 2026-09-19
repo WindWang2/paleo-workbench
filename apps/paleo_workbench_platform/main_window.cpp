@@ -18,6 +18,14 @@
 #include "factor_stats_dock.hpp"
 #endif
 
+#ifdef PWB_WITH_CONV_27
+#include <qgsproject.h>
+#include <qgsvectorlayer.h>
+
+#include <pwb/tool_policy/layer_roles.hpp>
+#include <pwb/ui/layer_properties.hpp>
+#endif
+
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -266,8 +274,23 @@ void MainWindow::buildUi() {
 
     auto* dock = new QDockWidget(tr("图层"), this);
     dock->setObjectName(QStringLiteral("layer-tree-dock"));
+#ifdef PWB_WITH_CONV_27
+    // Domain-aware tree panel: join-key active-layer sync (no row-index
+    // mapping), native group/rename/context menu, edit indicators.
+    layer_panel_ = new pwb::ui::LayerTreePanel(
+        session_->map(), canvas_, [this](const std::string& id) {
+            const auto it = facts_.find(id);
+            return it == facts_.end()
+                ? std::optional<pwb::application::DomainLayerFacts>{}
+                : std::optional<pwb::application::DomainLayerFacts>(
+                      it->second);
+        }, this);
+    dock->setWidget(layer_panel_);
+    tree_ = layer_panel_->view();
+#else
     tree_ = session_->map().createLayerTree(dock);
     dock->setWidget(tree_);
+#endif
     addDockWidget(Qt::LeftDockWidgetArea, dock);
 
     status_label_ = new QLabel(QStringLiteral("ready"), this);
@@ -307,8 +330,13 @@ void MainWindow::buildUi() {
 
     connect(canvas_, &QgsMapCanvas::mapToolSet, this,
             [this]() { onCanvasMapToolChanged(); });
+#ifndef PWB_WITH_CONV_27
     connect(tree_->selectionModel(), &QItemSelectionModel::currentChanged, this,
             [this]() { onActiveLayerChanged(); });
+#endif
+#ifdef PWB_WITH_CONV_27
+    install_conv27_surface();
+#endif
 }
 
 void MainWindow::buildMenusAndToolbar() {
@@ -340,6 +368,18 @@ void MainWindow::buildMenusAndToolbar() {
          QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)},
         {"map_export", QT_TRANSLATE_NOOP("MainWindow", "导出布局…"),
          QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P)},
+#ifdef PWB_WITH_CONV_27
+        {"select", QT_TRANSLATE_NOOP("MainWindow", "选择要素"),
+         QKeySequence()},
+        {"add_point", QT_TRANSLATE_NOOP("MainWindow", "添加点"),
+         QKeySequence()},
+        {"add_line", QT_TRANSLATE_NOOP("MainWindow", "添加线"),
+         QKeySequence()},
+        {"add_polygon", QT_TRANSLATE_NOOP("MainWindow", "添加面"),
+         QKeySequence()},
+        {"delete_selected", QT_TRANSLATE_NOOP("MainWindow", "删除所选"),
+         QKeySequence(Qt::Key_Delete)},
+#endif
 #ifdef PWB_WITH_CONV_01
         {"factor_workbench", QT_TRANSLATE_NOOP("MainWindow", "地质因子图…"),
          QKeySequence(Qt::CTRL | Qt::Key_G)},
@@ -387,6 +427,10 @@ void MainWindow::buildMenusAndToolbar() {
     view_menu->addAction(actions_.action("full_extent"));
     view_menu->addSeparator();
     view_menu->addAction(actions_.action("refresh"));
+#ifdef PWB_WITH_CONV_27
+    view_menu->addSeparator();
+    view_menu->addAction(tr("重置布局"), this, &MainWindow::resetLayoutState);
+#endif
 
 #if defined(PWB_WITH_SEISMIC_IO) || defined(PWB_WITH_SEISMIC_VIEWER)
     QMenu* seismic_menu = nullptr;
@@ -427,6 +471,14 @@ void MainWindow::buildMenusAndToolbar() {
     toolbar->addSeparator();
     toolbar->addAction(actions_.action("toggle_editing"));
     toolbar->addAction(actions_.action("vertex"));
+#ifdef PWB_WITH_CONV_27
+    toolbar->addAction(actions_.action("select"));
+    toolbar->addAction(actions_.action("add_point"));
+    toolbar->addAction(actions_.action("add_line"));
+    toolbar->addAction(actions_.action("add_polygon"));
+    toolbar->addAction(actions_.action("delete_selected"));
+    toolbar->addSeparator();
+#endif
     toolbar->addAction(actions_.action("undo"));
     toolbar->addAction(actions_.action("redo"));
     toolbar->addAction(actions_.action("save_edits"));
@@ -456,6 +508,13 @@ void MainWindow::connectActions() {
     wire("save_edits", &MainWindow::saveEdits);
     wire("rollback", &MainWindow::rollBackEdits);
     wire("map_export", &MainWindow::exportLayoutDialog);
+#ifdef PWB_WITH_CONV_27
+    wire("select", [this]() { edit_tools_->arm("select"); });
+    wire("add_point", [this]() { edit_tools_->arm("add_point"); });
+    wire("add_line", [this]() { edit_tools_->arm("add_line"); });
+    wire("add_polygon", [this]() { edit_tools_->arm("add_polygon"); });
+    wire("delete_selected", &MainWindow::deleteSelectedFeatures);
+#endif
 #ifdef PWB_WITH_CONV_01
     wire("factor_workbench", &MainWindow::geologicalFactorMapDialog);
 #endif
@@ -465,6 +524,17 @@ void MainWindow::refreshActionStates() {
     const auto availability = pwb::tool_policy::evaluate_all(session_->snapshot());
     actions_.apply(availability);
     setStatusFromPolicy(availability);
+#ifdef PWB_WITH_CONV_27
+    // Edit tools retarget the canvas current layer on every active change.
+    if (edit_tools_ != nullptr && session_->active_layer().has_value()) {
+        edit_tools_->set_active_layer(session_->active_layer()->layer_id);
+    }
+    if (layer_panel_ != nullptr) layer_panel_->refresh_indicators();
+    refresh_constraint_panel();
+    // Readiness is a pure kernel pass over session state — keep it fresh
+    // on layer/selection/edit changes, not only on stage switches.
+    refresh_readiness();
+#endif
 }
 
 void MainWindow::setStatusFromPolicy(
@@ -489,6 +559,11 @@ QString MainWindow::openVectorLayer(const QString& path) {
     QgsVectorLayer* layer = session_->map().addVectorLayer(
         path.toStdString(), layer_id.toStdString(), binding, &error);
     if (layer == nullptr) return QString::fromStdString(error);
+#ifdef PWB_WITH_CONV_27
+    // Style sidecar written next to the layer's data file (QGIS QML
+    // convention) — re-apply so styling survives reopen.
+    pwb::ui::layer_style::apply_style_sidecar(layer, layer->source());
+#endif
 
     pwb::application::DomainLayerFacts facts;
     facts.layer_id = layer_id.toStdString();
@@ -744,6 +819,12 @@ QString MainWindow::openProject(const QString& project_file) {
         std::string add_error;
         QgsVectorLayer* layer = session_->map().addVectorLayer(
             working.string(), binding.layer_id, qbinding, &add_error);
+#ifdef PWB_WITH_CONV_27
+        if (layer != nullptr) {
+            pwb::ui::layer_style::apply_style_sidecar(
+                layer, layer->source());
+        }
+#endif
         if (layer == nullptr) {
             if (first_error.empty()) first_error = add_error;
             ++skipped;
@@ -1164,6 +1245,13 @@ void MainWindow::onCanvasMapToolChanged() {
     else if (tool == zoom_in_tool_) tool_id = "zoom_in";
     else if (tool == zoom_out_tool_) tool_id = "zoom_out";
     else if (tool == vertex_tool_) tool_id = "vertex";
+#ifdef PWB_WITH_CONV_27
+    else if (edit_tools_ != nullptr
+             && pwb::ui::EditToolController::handles_tool(
+                 edit_tools_->tool_id_of(tool))) {
+        tool_id = edit_tools_->tool_id_of(tool);
+    }
+#endif
     session_->set_current_tool(tool_id);
     refreshActionStates();
 }
@@ -1218,6 +1306,13 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             if (active.has_value()) session_->edit().roll_back(active->layer_id);
         }
     }
+#ifdef PWB_WITH_CONV_27
+    // UI layout only; business state lives in the store/catalog round.
+    // A pending reset must NOT be overwritten by this close.
+    if (layout_store_ != nullptr && !layout_reset_pending_) {
+        layout_store_->save(*this);
+    }
+#endif
     // Contract teardown order: session (edit -> canvas detach -> layers ->
     // project) before widget children die with the window.
     session_->close();
@@ -1637,6 +1732,252 @@ void MainWindow::showFactorStatistics(
     factor_dock_->setStatistics(factor_name, stats);
     factor_dock_->show();
     factor_dock_->raise();
+}
+#endif
+
+#ifdef PWB_WITH_CONV_27
+namespace {
+// Polygon-bearing output roles: factor products (CONV-01) and integrated
+// interpretation count as "initial facies present" evidence for stage 1.
+// Vocabulary constants come from layer_roles.hpp (single role registry).
+bool facies_polygon_role(const std::string& role) {
+    using namespace pwb::tool_policy::layer_role;
+    return role == kFactorClassification || role == kIntegratedFacies
+        || role == kInitialFaciesDraft || role == kFaciesBoundary;
+}
+}  // namespace
+
+void MainWindow::install_conv27_surface() {
+    // Stage dock: three-stage workflow switcher + readiness checklist.
+    stage_dock_ = new pwb::ui::StageDock(this);
+    addDockWidget(Qt::LeftDockWidgetArea, stage_dock_);
+    connect(stage_dock_, &pwb::ui::StageDock::stage_change_requested, this,
+            [this](const QString& value) {
+                applyStageValue(value.toStdString());
+            });
+
+    // Constraint stage summary panel (read-side navigation).
+    constraint_dock_ = new pwb::ui::ConstraintPanel(
+        [this](const std::string& id) {
+            const auto it = facts_.find(id);
+            return it == facts_.end()
+                ? std::optional<pwb::application::DomainLayerFacts>{}
+                : std::optional<pwb::application::DomainLayerFacts>(
+                      it->second);
+        }, this);
+    addDockWidget(Qt::RightDockWidgetArea, constraint_dock_);
+    connect(constraint_dock_, &pwb::ui::ConstraintPanel::activate_layer_requested,
+            this, [this](const QString& layer_id) {
+                const auto it = facts_.find(layer_id.toStdString());
+                if (it == facts_.end()) return;
+                session_->set_active_layer(it->second);
+                if (layer_panel_ != nullptr) {
+                    layer_panel_->set_active_layer(it->first);
+                }
+                refreshActionStates();
+            });
+
+    // Edit tools: QGIS select + digitize, applied through the one edit
+    // authority.
+    edit_tools_ = new pwb::ui::EditToolController(canvas_, session_.get(),
+                                                  this);
+    connect(edit_tools_, &pwb::ui::EditToolController::feature_committed,
+            this, [this](const QString&) { refreshActionStates(); });
+    connect(edit_tools_, &pwb::ui::EditToolController::edit_error, this,
+            [this](const QString& message) {
+                // Non-modal: a blocking dialog here wedges offscreen hosts
+                // (and interrupt-driven capture); the status bar carries
+                // the message instead.
+                qWarning("edit tool error: %s", message.toUtf8().constData());
+                statusBar()->showMessage(message, 10000);
+            });
+
+    // Layer tree panel signals (join-key domain ids).
+    connect(layer_panel_, &pwb::ui::LayerTreePanel::active_layer_changed, this,
+            &MainWindow::onActiveLayerIdChanged);
+    connect(layer_panel_,
+            &pwb::ui::LayerTreePanel::layer_properties_requested, this,
+            [this](const QString&) { openActiveLayerProperties(); });
+
+    // Live selection/edit state drives the enablement matrix: wire the
+    // QGIS authorities (per-layer signals) to the one refresh path.
+    connect(session_->map().project(), &QgsProject::layersAdded, this,
+            [this](const QList<QgsMapLayer*>& layers) {
+              for (QgsMapLayer* layer : layers) {
+                auto* vector_layer = qobject_cast<QgsVectorLayer*>(layer);
+                if (vector_layer == nullptr) continue;
+                // layersAdded fires once per layer, so these connect once
+                // (UniqueConnection is not valid for functor slots — it
+                // asserts in debug builds).
+                connect(vector_layer, &QgsVectorLayer::selectionChanged,
+                        this, [this]() { refreshActionStates(); });
+                connect(vector_layer, &QgsVectorLayer::editingStarted,
+                        this, [this]() { refreshActionStates(); });
+                connect(vector_layer, &QgsVectorLayer::editingStopped,
+                        this, [this]() { refreshActionStates(); });
+              }
+            });
+
+    // Layout persistence: restore a same-version layout if present.
+    layout_store_ = std::make_unique<pwb::ui::WorkbenchLayout>();
+    layout_store_->restore(*this);
+
+    // Default the session to stage 1 and show its readiness.
+    applyStageValue("facies_calibration");
+}
+
+void MainWindow::onActiveLayerIdChanged(const QString& layer_id) {
+    const auto it = facts_.find(layer_id.toStdString());
+    if (it == facts_.end()) return;
+    session_->set_active_layer(it->second);
+    refreshActionStates();
+}
+
+void MainWindow::applyStageValue(const std::string& value) {
+    const auto stage = pwb::tool_policy::stage_from_value(value);
+    if (!stage.has_value()) return;
+    // Canonicalize: the session string feeds the evaluator's stage
+    // whitelist comparisons, which speak canonical values only.
+    session_->set_mapping_stage(pwb::tool_policy::stage_value(*stage));
+    if (stage_dock_ != nullptr) stage_dock_->set_current_stage(*stage);
+    refreshActionStates();
+    refresh_readiness();
+}
+
+pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {
+    pwb::ui::ReadinessInputs in;
+    // CRS straight from the map authority.
+    in.project_crs = session_->map().project()->crs().authid().toStdString();
+    // Horizon: the store document's stratigraphy section when open.
+#ifdef PWB_WITH_DATA_INTEGRATION
+    if (project_store_ != nullptr) {
+        const pwb::project::ProjectDocument& document =
+            project_store_->document();
+        const pwb::domain::Json* stratigraphy =
+            document.find_section("stratigraphy");
+        if (stratigraphy != nullptr && stratigraphy->contains("target_horizon")) {
+            const pwb::domain::Json& horizon =
+                (*stratigraphy)["target_horizon"];
+            if (horizon.is_string()) {
+                in.target_horizon = horizon.get<std::string>();
+            }
+        }
+        const pwb::domain::Json* workarea =
+            document.find_section("workarea");
+        if (workarea != nullptr && workarea->contains("boundary")) {
+            const pwb::domain::Json& boundary = (*workarea)["boundary"];
+            if (boundary.is_array()) {
+                for (const auto& vertex : boundary) {
+                    if (vertex.is_array() && vertex.size() >= 2
+                        && vertex[0].is_number() && vertex[1].is_number()) {
+                        ++in.workarea_boundary_vertices;
+                    }
+                }
+            }
+        }
+    }
+#endif  // PWB_WITH_DATA_INTEGRATION
+    // Layer-derived facts from the live session (join-key iteration).
+    for (const std::string& layer_id : session_->map().layerIdsTopFirst()) {
+        const auto it = facts_.find(layer_id);
+        const std::string role =
+            it != facts_.end() ? it->second.role : std::string();
+        QgsVectorLayer* layer =
+            session_->map().vectorLayerById(layer_id);
+        if (layer == nullptr) continue;
+        if (facies_polygon_role(role)) {
+            // Python counts Polygon/MultiPolygon FEATURES (not layers):
+            // filter by geometry type; skip unknown counts (-1).
+            if (layer->geometryType() == Qgis::GeometryType::Polygon
+                && layer->featureCount() > 0) {
+                in.facies_polygon_count +=
+                    static_cast<int>(layer->featureCount());
+                in.facies_polygons_loaded = true;
+            }
+        }
+        // One factor run = one task: the pipeline emits a contour layer
+        // per run (classification/grid layers are its siblings).
+        if (role == pwb::tool_policy::layer_role::kFactorContour) {
+            ++in.factor_tasks_complete;
+            ++in.factor_tasks_total;
+        }
+        if (role == pwb::tool_policy::layer_role::kInitialFaciesDraft
+            && layer->featureCount() > 0) {
+            ++in.facies_draft_layers;
+        }
+        if (role == pwb::tool_policy::layer_role::kIntegratedFacies
+            || role == pwb::tool_policy::layer_role::kIntegratedBoundary) {
+            ++in.integrated_draft_layers;
+        }
+        if (pwb::tool_policy::layer_role::is_line_role(role)) {
+            QgsFeatureIterator feat = layer->getFeatures();
+            QgsFeature feature;
+            while (feat.nextFeature(feature)) {
+                if (!feature.hasGeometry()) continue;
+                if (feature.geometry().type()
+                    == Qgis::GeometryType::Line) {
+                    ++in.constraint_lines;
+                }
+            }
+        }
+    }
+    return in;
+}
+
+void MainWindow::refresh_readiness() {
+    if (stage_dock_ == nullptr) return;
+    const pwb::ui::ReadinessInputs inputs = readiness_inputs();
+    for (const pwb::tool_policy::MappingStage stage :
+         pwb::tool_policy::kStageOrder) {
+        stage_dock_->set_readiness(
+            stage, pwb::ui::evaluate_stage_readiness(stage, inputs));
+    }
+}
+
+void MainWindow::refresh_constraint_panel() {
+    if (constraint_dock_ != nullptr) constraint_dock_->refresh(*session_);
+}
+
+void MainWindow::deleteSelectedFeatures() {
+    const auto active = session_->active_layer();
+    if (!active.has_value()) return;
+    int deleted = 0;
+    const std::string error =
+        session_->edit().delete_selected(active->layer_id, &deleted);
+    if (!error.empty()) {
+        QMessageBox::warning(this, tr("删除所选"),
+                             QString::fromStdString(error));
+        return;
+    }
+    session_->map().refreshCanvases();
+    statusBar()->showMessage(tr("已删除 %1 个要素").arg(deleted), 6000);
+    refreshActionStates();
+}
+
+void MainWindow::openActiveLayerProperties() {
+    const auto active = session_->active_layer();
+    if (!active.has_value()) return;
+    QgsVectorLayer* layer =
+        session_->map().vectorLayerById(active->layer_id);
+    if (layer == nullptr) return;
+    // Native QGIS renderer dialog applies on OK.
+    pwb::ui::layer_style::open_renderer_properties(layer, canvas_, this);
+    // Persist the configured style next to the layer's data file so it
+    // survives reopen (QML sidecar, the QGIS convention).
+    pwb::ui::layer_style::save_style_sidecar(
+        layer, layer->source());
+    refreshActionStates();
+}
+
+void MainWindow::saveLayoutState() {
+    if (layout_store_ != nullptr) layout_store_->save(*this);
+    statusBar()->showMessage(tr("布局已保存"), 4000);
+}
+
+void MainWindow::resetLayoutState() {
+    if (layout_store_ != nullptr) layout_store_->reset();
+    layout_reset_pending_ = true;
+    statusBar()->showMessage(tr("布局已重置（下次启动恢复默认）"), 6000);
 }
 #endif
 
