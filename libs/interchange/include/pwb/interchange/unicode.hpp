@@ -23,6 +23,10 @@ std::string codepoints_to_utf8(const std::u32string& cps);
 // Number of code points in a UTF-8 string (Python len(str) semantics).
 std::size_t codepoint_length(std::string_view text);
 
+// Strict UTF-8 validation (Python bytes.decode('utf-8') semantics: overlong
+// forms, surrogates and code points above U+10FFFF are invalid).
+bool strict_utf8_valid(std::string_view text);
+
 std::u32string nfc_normalize(const std::u32string& cps);
 std::u32string casefold(const std::u32string& cps);
 

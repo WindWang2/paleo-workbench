@@ -264,4 +264,40 @@ std::string casefold_utf8(std::string_view text) {
     return codepoints_to_utf8(casefold(utf8_to_codepoints(text)));
 }
 
+bool strict_utf8_valid(std::string_view text) {
+    std::size_t i = 0;
+    while (i < text.size()) {
+        const unsigned char b = static_cast<unsigned char>(text[i]);
+        unsigned int cp = 0;
+        std::size_t continuation = 0;
+        if (b < 0x80) {
+            i += 1;
+            continue;
+        } else if (b >= 0xC2 && b <= 0xDF) {
+            continuation = 1;
+            cp = b & 0x1F;
+        } else if (b >= 0xE0 && b <= 0xEF) {
+            continuation = 2;
+            cp = b & 0x0F;
+        } else if (b >= 0xF0 && b <= 0xF4) {
+            continuation = 3;
+            cp = b & 0x07;
+        } else {
+            return false;
+        }
+        if (i + continuation >= text.size()) return false;
+        for (std::size_t k = 1; k <= continuation; ++k) {
+            const unsigned char cb = static_cast<unsigned char>(text[i + k]);
+            if ((cb & 0xC0) != 0x80) return false;
+            cp = (cp << 6) | (cb & 0x3F);
+        }
+        if (continuation == 1 && cp < 0x80) return false;    // overlong
+        if (continuation == 2 && cp < 0x800) return false;   // overlong
+        if (cp >= 0xD800 && cp <= 0xDFFF) return false;      // surrogate
+        if (cp > 0x10FFFF) return false;
+        i += continuation + 1;
+    }
+    return true;
+}
+
 }  // namespace pwb::interchange
