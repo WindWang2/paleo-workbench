@@ -170,6 +170,22 @@ if(PWB_BUILD_CONV_25)
     add_subdirectory(libs/workflow_graph)
 endif()
 # END CONV-25
+# BEGIN CLOSURE-SCIENCE — line-03 science/prediction product loop: the
+# catalog payload source + envelope publisher for the science services, the
+# native inference job service (run lifecycle + provider dispatch), the
+# demo/tiled-ONNX providers, the prediction task journal, and the Qt
+# binding that installs the production hooks into the ui_wellseis
+# prediction pages. Implies CONV-28 (science service layer) +
+# PREDICTION_RUNTIME (native ONNX runtime), so a standalone
+# -DPWB_BUILD_CLOSURE_SCIENCE=ON configure really builds the loop.
+option(PWB_BUILD_CLOSURE_SCIENCE
+    "Build the line-03 science/prediction product closure (libs/closure_science; implies CONV-28 + PREDICTION_RUNTIME)" OFF)
+if(PWB_BUILD_CLOSURE_SCIENCE)
+    set(PWB_BUILD_CONV_28 ON)
+    set(PWB_BUILD_PREDICTION_RUNTIME ON)
+endif()
+# END CLOSURE-SCIENCE
+
 # BEGIN CONV-28 — native science service layer (science closure direction):
 # typed + cancelable + resource-guarded service envelopes over the frozen
 # Qt-free kernels (mapping extract/normalize/interpolate/constrained-IDW/
@@ -1091,6 +1107,31 @@ elseif(PWB_BUILD_PLATFORM AND TARGET pwb-platform)
         "Pwb::UiWellseisQt; the direct-canvas shell remains")
 endif()
 # END UI-17
+
+# BEGIN CLOSURE-SCIENCE — line-03 assembly (runs after UI-17 so the app
+# target and every page target exist). Adds libs/closure_science (+Qt
+# binding) and installs the production prediction-page binding into the
+# platform binary via the main_window BEGIN/END CLOSURE-SCIENCE block.
+# Write lease: 03-line.json named_block_leases (12 assembles).
+if(PWB_BUILD_CLOSURE_SCIENCE)
+    if(NOT TARGET pwb_closure_science)
+        add_subdirectory(libs/closure_science)
+    endif()
+    if(TARGET pwb-platform AND TARGET pwb_closure_science_qt
+       AND TARGET Pwb::UiWellseisQt)
+        target_link_libraries(pwb-platform PRIVATE Pwb::ClosureScienceQt)
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_CLOSURE_SCIENCE=1)
+    endif()
+    if(BUILD_TESTING AND TARGET pwb_closure_science_qt
+       AND TARGET platform_app_shell)
+        target_link_libraries(platform_app_shell PRIVATE
+            Pwb::ClosureScienceQt)
+        target_compile_definitions(platform_app_shell PRIVATE
+            PWB_WITH_CLOSURE_SCIENCE=1)
+    endif()
+endif()
+# END CLOSURE-SCIENCE
 
 # BEGIN VIZ-A — line-A (LAS/WLE convergence + well-log drawing
 # differentials). This block runs after science_suite (:327), the platform

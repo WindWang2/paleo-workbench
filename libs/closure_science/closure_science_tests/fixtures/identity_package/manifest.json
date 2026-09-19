@@ -1,0 +1,44 @@
+{
+  "model_id": "facies-tiled-onnx-demo",
+  "model_version": "1.0.0",
+  "model_name": "地震相带预测（原生 ONNX，测试包）",
+  "capability": "facies_prediction",
+  "provider": "tiled_onnx",
+  "artifact": "model.onnx",
+  "checksum": "36f1a110c491f99b6b488692c81c041f796b4d6c94b03b8cd8b02b4fd3351ed7",
+  "runtime": "onnxruntime",
+  "preprocessing_version": "prediction-runtime-fixture-v1",
+  "input_schema": {
+    "required_asset_types": [
+      "seismic"
+    ]
+  },
+  "output_schema": {
+    "spatial_output_type": "CLASSIFIED_RASTER",
+    "class_names": [
+      "background",
+      "facies"
+    ]
+  },
+  "metadata": {
+    "prediction_runtime": {
+      "classes": 2,
+      "class_names": [
+        "background",
+        "facies"
+      ],
+      "tile": [
+        6,
+        8,
+        5
+      ],
+      "overlap": 0,
+      "batch": 1
+    }
+  },
+  "provenance": {
+    "source": "generate_prediction_runtime_fixtures.py"
+  },
+  "deterministic": true,
+  "scientific": true
+}

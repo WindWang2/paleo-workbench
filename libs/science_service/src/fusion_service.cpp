@@ -1,6 +1,7 @@
 // pwb::science_service — factor fusion service implementation.
 
 #include <pwb/science_service/fusion_service.hpp>
+#include <pwb/science_service/legacy_grid_codec.hpp>
 
 #include <pwb/mapping/factor_grid_io.hpp>
 
