@@ -45,6 +45,11 @@ public:
     void popup();
     void dismiss();
 
+    // Pre-fills the query text (Python parity: host-driven palette
+    // injection — the workstation command line routes non-agent
+    // commands here before popping the palette).
+    void set_filter_text(const QString& text);
+
 protected:
     bool eventFilter(QObject* source, QEvent* event) override;
 

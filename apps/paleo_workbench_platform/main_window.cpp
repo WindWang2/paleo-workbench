@@ -97,6 +97,10 @@
 
 #include "app_context.hpp"
 #include "diagnostics.hpp"
+#ifdef PWB_WITH_APP_SHELL
+#include "app_shell.hpp"
+#include <pwb/ui_shell/status_bar.hpp>
+#endif
 
 #ifdef PWB_WITH_CONV_01
 #include <QComboBox>
@@ -349,6 +353,12 @@ MainWindow::~MainWindow() {
     // doing it here keeps the ordering explicit and testable).
     if (job_center_ != nullptr) job_center_->shutdown_workers(1000);
 #endif
+#ifdef PWB_WITH_APP_SHELL
+    // Page workers stop before the session/canvas teardown (the composite
+    // document's canvas is the session canvas — Python shutdown_workers
+    // parity; idempotent).
+    if (app_shell_ != nullptr) app_shell_->shutdown_workers();
+#endif
     // Ordered teardown must run while every member the signal paths touch
     // (actions_, status label, canvas) is still alive: member destruction
     // would otherwise kill the action set before the session, and
@@ -361,7 +371,16 @@ MainWindow::~MainWindow() {
 
 void MainWindow::buildUi() {
     canvas_ = context_.session().map().createCanvas(this);
+#ifdef PWB_WITH_APP_SHELL
+    // W5/UI-17 — the page-navigation shell hosts the composite document;
+    // the session canvas is its central canvas (same widget, reparented —
+    // the session's attachCanvas pointer stays valid).
+    app_shell_ = new AppShell(this);
+    app_shell_->install_canvas(canvas_);
+    setCentralWidget(app_shell_);
+#else
     setCentralWidget(canvas_);
+#endif
     context_.session().attachCanvas(canvas_);
 
     auto* dock = new QDockWidget(tr("图层"), this);
@@ -484,7 +503,54 @@ void MainWindow::buildUi() {
 #ifdef PWB_WITH_CONV_27
     install_conv27_surface();
 #endif
+#ifdef PWB_WITH_APP_SHELL
+    wire_app_shell();
+#endif
 }
+
+#ifdef PWB_WITH_APP_SHELL
+void MainWindow::wire_app_shell() {
+    // 主状态条入宿主原生槽位（Python dock_host=QMainWindow parity:
+    // AppShell parks its StatusBar on the window's statusBar, stretch 1).
+    statusBar()->addWidget(app_shell_->status_bar(), 1);
+
+    connect(app_shell_, &AppShell::status_message, this,
+            [this](const QString& message) {
+                if (status_label_ != nullptr) status_label_->setText(message);
+            });
+    connect(app_shell_, &AppShell::about_requested, this,
+            [this] { showAboutDialog(); });
+#ifdef PWB_WITH_DATA_INTEGRATION
+    connect(app_shell_, &AppShell::new_project_requested, this,
+            [this] { newProjectDialog(); });
+    connect(app_shell_, &AppShell::open_project_requested, this,
+            [this] { openProjectDialog(); });
+#endif
+    connect(app_shell_, &AppShell::theme_requested, this,
+            [this](const QString& value) {
+                if (theme_service_ != nullptr) {
+                    theme_service_->set_theme(
+                        pwb::platform_services::theme_from_string(
+                            value.toStdString()));
+                }
+            });
+    connect(app_shell_, &AppShell::density_requested, this,
+            [this](const QString& value) {
+                if (theme_service_ == nullptr) return;
+                if (value.isEmpty()) {
+                    theme_service_->toggle_density();
+                } else {
+                    theme_service_->set_density(
+                        pwb::platform_services::density_from_string(
+                            value.toStdString()));
+                }
+            });
+    // Deferred request surfaces (no production handler yet — recorded in
+    // the integration ledger, never silently faked):
+    //   save_project_requested / open_sample_project_requested /
+    //   properties_requested / preview_settings_requested.
+}
+#endif
 
 void MainWindow::buildMenusAndToolbar() {
     // Actions materialize from the policy vocabulary; labels/shortcuts are

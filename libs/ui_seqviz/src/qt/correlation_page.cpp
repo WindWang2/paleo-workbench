@@ -427,7 +427,7 @@ void StratigraphyCorrelationPage::on_backend_combo(int index) {
 void StratigraphyCorrelationPage::probe_engine() {
     engine_error_.clear();
     engine_binding_installed_ = engine_.view_factory != nullptr;
-    const EngineProbeResult probe = probe_engine(
+    const EngineProbeResult probe = ui_seqviz::probe_engine(
         engine_.has_submit_multi_well_section,
         engine_binding_installed_);
     engine_error_ = probe.error;
@@ -769,6 +769,15 @@ void StratigraphyCorrelationPage::run_dtw() {
         };
     }
 
+    // Progress mailbox — the worker thread publishes raw done/total
+    // counts; the bridge ProgressFn hop drains them on the GUI thread.
+    auto prog_box = std::make_shared<
+        std::pair<std::mutex, std::pair<int, int>>>();
+    input.on_progress = [prog_box](int done, int total) {
+        const std::lock_guard lock(prog_box->first);
+        prog_box->second = {done, total};
+    };
+
     job::JobSpec spec = ui_workers::make_dtw_propagation_job_spec(
         std::move(input));
     dtw_btn_->setEnabled(false);
@@ -811,8 +820,16 @@ void StratigraphyCorrelationPage::run_dtw() {
                 return;
             }
         },
-        [this](double done, double total) {
-            on_dtw_progress(done, total);
+        [this, prog_box](double, const QString&) {
+            // The bridge ProgressFn carries (ratio, message); the worker
+            // reports raw done/total counts through input.on_progress —
+            // the mailbox keeps the "done/total 井" status text intact.
+            std::pair<int, int> counts;
+            {
+                const std::lock_guard lock(prog_box->first);
+                counts = prog_box->second;
+            }
+            on_dtw_progress(counts.first, counts.second);
         });
 }
 

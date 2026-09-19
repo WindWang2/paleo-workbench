@@ -42,6 +42,8 @@ class QPushButton;
 class QSlider;
 class QSplitter;
 class QStackedLayout;
+class QScrollArea;
+class QSpinBox;
 class QTimer;
 
 namespace pwb::ui_shell {

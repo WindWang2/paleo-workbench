@@ -68,6 +68,15 @@ if(TARGET Qt6::Widgets)
         src/qt/factor_panels.cpp
         src/qt/viz_panels.cpp
         src/qt/dialogs.cpp
+        # composition_panel.cpp deferred — it references mapping_document
+        # composition APIs and helpers (composition_history_state,
+        # schema_editor_descriptors, element_geometry_state) that do not
+        # exist; the agent-authored file never compiled. Re-add once the
+        # composition editor core is ported.
+        src/qt/correlation_page.cpp
+        src/qt/preview_controller.cpp
+        src/qt/visualization_page.cpp
+        src/qt/viz_workspace.cpp
         # Q_OBJECT headers must be listed as sources — AUTOMOC does not
         # scan the separate include/ tree on its own.
         include/pwb/ui_seqviz/qt/sequence_panels.hpp
@@ -76,6 +85,10 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_seqviz/qt/factor_panels.hpp
         include/pwb/ui_seqviz/qt/viz_panels.hpp
         include/pwb/ui_seqviz/qt/dialogs.hpp
+        include/pwb/ui_seqviz/qt/correlation_page.hpp
+        include/pwb/ui_seqviz/qt/preview_controller.hpp
+        include/pwb/ui_seqviz/qt/visualization_page.hpp
+        include/pwb/ui_seqviz/qt/viz_workspace.hpp
     )
     add_library(Pwb::UiSeqvizQt ALIAS pwb_ui_seqviz_qt)
     set_target_properties(pwb_ui_seqviz_qt PROPERTIES AUTOMOC ON)
@@ -85,7 +98,7 @@ if(TARGET Qt6::Widgets)
     target_link_libraries(pwb_ui_seqviz_qt
         PUBLIC Pwb::UiSeqviz Pwb::UiShellQt Pwb::UiWidgets Pwb::JobQt
                Qt6::Widgets
-        PRIVATE Qt6::Gui)
+        PRIVATE Pwb::UiWorkers Pwb::UiDataCore Qt6::Gui)
 endif()
 
 if(BUILD_TESTING)

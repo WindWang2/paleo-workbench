@@ -76,6 +76,11 @@ void CommandPalette::dismiss() {
     filter_input_->clear();
 }
 
+void CommandPalette::set_filter_text(const QString& text) {
+    // setText → textChanged → apply_filter (the input's own wiring).
+    filter_input_->setText(text);
+}
+
 void CommandPalette::rebuild_commands() {
     // Commands come from ui.command_registry (pages/theme/density/preset/
     // panels); the registry is the single source — nothing to cache here.

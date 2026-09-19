@@ -6,6 +6,7 @@
 // 重复注册（只告警不阻断）。Command Palette 从这里取 shortcut 展示文案。
 
 #include <QKeySequence>
+#include <QPointer>
 #include <QShortcut>
 #include <functional>
 #include <map>
@@ -47,7 +48,10 @@ private:
     void warn_conflicts(const ShortcutSpec& spec) const;
 
     std::map<std::string, ShortcutSpec> registry_;
-    std::map<std::string, QShortcut*> shortcuts_;
+    // QPointer auto-nulls when the parent widget tree destroys the
+    // shortcut (shell teardown) — re-registration must never touch a
+    // dangling pointer.
+    std::map<std::string, QPointer<QShortcut>> shortcuts_;
 };
 
 // Current focus inside a text-input widget (guard's unified type list):

@@ -80,6 +80,9 @@ namespace pwb::app {
 
 class VertexMoveMapTool;
 class AppContext;
+#ifdef PWB_WITH_APP_SHELL
+class AppShell;
+#endif
 #ifdef PWB_WITH_CONV_16
 class FactorStatsDock;
 #endif
@@ -113,6 +116,12 @@ public:
     // The map/edit session owned by the context (out-of-line: AppContext is
     // forward-declared here).
     pwb::application::ProjectSession* session() const;
+#ifdef PWB_WITH_APP_SHELL
+    // The page-navigation shell (W5/UI-17): workstation frame + composite
+    // document hosting the session canvas + hub page stack. Null when the
+    // UI slice targets are not in the build closure.
+    AppShell* appShell() const { return app_shell_; }
+#endif
 
     // Test/automation entry points for the wired operations (same code the
     // actions trigger; no parallel logic).
@@ -267,6 +276,11 @@ private:
     void buildUi();
     void buildMenusAndToolbar();
     void connectActions();
+#ifdef PWB_WITH_APP_SHELL
+    // W5/UI-17 — AppShell signal wiring (project actions, theme/density
+    // requests, status messages) onto the window-level handlers.
+    void wire_app_shell();
+#endif
 
     // CONV-PS platform services: settings/theme/recent/diagnostics wiring
     // (设置 menu + 帮助 menu + File/recent-projects MRU + close-time layout
@@ -351,6 +365,11 @@ private:
     AppContext& context_;
     pwb::ui::ToolActionSet actions_;
     QgsMapCanvas* canvas_ = nullptr;
+#ifdef PWB_WITH_APP_SHELL
+    // Central shell: owns the composite document that reparents canvas_.
+    // The session's attachCanvas pointer stays valid across the reparent.
+    AppShell* app_shell_ = nullptr;
+#endif
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;
 #ifdef PWB_WITH_CONV_27
