@@ -15,6 +15,7 @@
 
 #include <QAction>
 #include <QDockWidget>
+#include <QMainWindow>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMenu>
