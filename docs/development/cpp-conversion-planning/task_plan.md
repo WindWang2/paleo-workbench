@@ -1,127 +1,109 @@
 # Task Plan — C++ 全面转换收尾
 
-> 当前协调计划；旧根目录三文件的 Python 工作台记录仅作历史。
-> 最后核对：2026-09-19 16:11 +08:00。
-> main 基线：`7290f72728c0b6ff04c33a573cb0e964e3b5ff58`。
-> 当前阶段：P0 基线与规划已整理；派发文件就绪检查 R0 待处理，P1 开发待认领。
-> 本任务未派发 ZCode 作业，其他工具或用户自行派发的情况未确认。
+> 当前协调计划，更新时间：2026-09-19 20:53 +08:00。
+> 代码基线：`349a0ba8eb350218caca2f72115a7580b2510c0e`。
+> 当前阶段：P1/P2/P3 并行推进；A/B/C 已有开放 PR，不能重复派发。
+> 这是基于远端证据的协调状态，不表示本任务亲自运行了开发或产品测试。
 
-## 目标与范围
+## 目标、入口和状态规则
 
-以真实用户流程验收 C++ 产品：工程与资产 → 计算/编辑 → 发布/保存 → 显示 →
-导出 → 重开恢复。已有实现（包括开放 PR）不重新开发；区分代码、合并、接线和验收。
-本轮文档准备不等于开发完成，也不授权自动切换默认入口或自动合并 PR。
+验收真实用户流程：工程与资产→计算/编辑→发布/保存→显示→导出→重开恢复。
+已有代码（包括开放 PR）从新增开发范围扣除；merged 不等于 wired/verified。
 
-- 发现与证据：[findings.md](findings.md)
-- 执行与验证：[progress.md](progress.md)
-- 完整评估/59 个迁移 PR：[评估报告](../cpp-status-2026-09-19-7290f727.md)
-- Geo-Viz 五份开发 prompt：前序会话已撰写，当前文件缺失，见 R0 和下方文件登记。
-- 远端主计划：[cpp-conversion-main-plan](https://github.com/WindWang2/paleo-workbench/blob/7290f727/docs/development/cpp-conversion-main-plan.md)
-- 远端 UI 分区：[UI taskbook](https://github.com/WindWang2/paleo-workbench/blob/7290f727/docs/development/cpp-ui-swarm/taskbook.md)
+- [最新评估](../cpp-status-2026-09-19-349a0ba8.md)
+- [此前评估（历史）](../cpp-status-2026-09-19-7290f727.md)
+- [事实与决策](findings.md)
+- [执行日志](progress.md)
+- [UI 任务书/UI-17](https://github.com/WindWang2/paleo-workbench/blob/349a0ba8/docs/development/cpp-ui-swarm/taskbook.md)
 
-## 状态与事实源
+执行状态：pending / in_progress / blocked / complete；同时记录实现/合并/接线/验收四层。
+GitHub 为 PR/issue 状态真源，表格为带时间的快照。
+“执行负责人”是逻辑职责；已经存在的分支由原开发任务继续，不擅自接管。
+协调者维护本目录，子代理只改自身 ledger，不让所有并行 PR 争写总计划。
 
-执行状态只用：`pending`、`in_progress`、`blocked`、`complete`。
-“blocked”必须有具体外部依赖与恢复条件，等待资源锁只是排队。
-另维护交付状态：代码是否已有 / PR 是否 merged / 主程序是否 wired / 验收 SHA 与环境。
-PR merged 不自动使工作项 complete；开放 PR 已有代码不回退为“待实现”。
+## 最新变化：替代 16:11 快照
 
-GitHub 是 issue/PR 状态真源；本目录是规划、证据索引和执行快照。
-状态更新必须记录查询时间。计划负责人是角色分配，不代表已实际启动代理。
-五条线的协调任务由协调者维护本目录；开发代理只写自己 worktree 中的独占 ledger，
-避免五个 PR 同时修改总计划。
+- #1378 已 merged：R1 不再解冲突或重写 RunEngine，转标准 CMake/消费者验收。
+- #1398 已 merged：catalog 31b 已有深核实现，D31 改为验收/生产适配与已披露差量。
+- UI-10/11/12/14/15/16 已合并；加上 UI-01..09，共 15/16 原编号切片有交付 PR。
+  这不是 93.75% 产品完成率；UI-13 未见对应完整交付，UI-17 是新增接线任务。
+- A=#1404、B=#1400、C=#1402 均 open，代码已存在；B 查询时 CONFLICTING。
+- C 的 PR 已包含 #1380/#1381 修复和 #1399 编译问题修复声明，但未合入主线。
+- D/E 尚未检索到对应新 PR，实际是否运行未知；先定位原任务，禁止盲目重复派发。
 
 ## 阶段
 
-| 阶段 | 状态 | 出口条件 |
+| 阶段 | 状态 | 出口 |
 |---|---|---|
-| P0 基线与规划 | in_progress | 基线/净差量/本三文件已完成；R0 定位或恢复五份派发文件后关闭 |
-| P1 正确性与接口 | pending | R1、R2、A/E 的关键前置修复有回归；跨线 API/所有权明确 |
-| P2 功能与服务 | pending | A–E、D31、S1、X1 的各自用户流程通过；不重复现有内核 |
-| P3 UI 与产品装配 | pending | U1/U2/U3 的净差量落地；W5 接线有真实数据和取消/重开验收 |
-| P4 统一验收 | pending | 同一候选 SHA 的 Linux/Windows、GL、部署和关键回归矩阵合格 |
-| P5 入口切换评审 | pending | 证据完整、兼容/回退方案明确，形成可审查决策；实际切换另行授权 |
+| P0 基线与执行记录 | in_progress | 本轮基线完成；R0 仍需确认 D/E 实际任务与材料位置 |
+| P1 正确性/接口 | in_progress | C/E/审查修复合流验证；接口与所有权明确 |
+| P2 可视化与服务 | in_progress | A–E 净功能、服务/交换差量在真实链路验收 |
+| P3 UI 装配 | in_progress | UI-13 净差量与 UI-17 完成，真实生产服务注入 |
+| P4 统一验收 | pending | 同一候选 SHA 的完整配置/双平台/GL/部署矩阵 |
+| P5 入口切换评审 | pending | 能力/证据/兼容与回滚材料完备；实际切换另行授权 |
 
-P1–P3 可按各工作项依赖并行，不要求整个前一阶段结束后才开始。
-代码准备可以先行；会触发已知内存/并发缺陷的用户链不能跳过前置修复验收。
+## 工作项与当前下一步
 
-## 可执行工作项
+| ID | 状态 | 已有交付 / 归属 | 下一步与完成条件 |
+|---|---|---|---|
+| R0 执行登记 | in_progress | A/B/C 可由 PR 确认；原五份 prompt 目录缺失 | 定位 D/E 任务、worktree、head 和实际材料，不重新派发 A/B/C |
+| R1 工作流合流 | in_progress | #1378 merged，RunEngine/store/receipt/解释域已实现 | 在标准 CMake 配置验证并消费新执行器；scheduler/cache-run catalog 剩余路径不得忽略 |
+| R2 审查修复 | pending | #1380–#1392 全部仍 OPEN | #1384–#1392 净问题先复现后修；排除 C/E 所有修复；#1387 轨道模板归 A、诊断报告归 R2 |
+| A 测井 | in_progress | [#1404](https://github.com/WindWang2/paleo-workbench/pull/1404)，codex/viz-a-welllog-convergence | 复核 LAS 三路桥接/专用门禁后合流；XML worker 未桥接、app 迟到守卫仅编译覆盖等需裁决 |
+| B 连井/标定 | in_progress | [#1400](https://github.com/WindWang2/paleo-workbench/pull/1400)，codex/viz-b-crosswell-welltie | 解决冲突，接 A 的真实 LAS 通路；#1399 修复合流后验证完整 app，不重写已实现模型/标定/导出 |
+| C 联合 3D | in_progress | [#1402](https://github.com/WindWang2/paleo-workbench/pull/1402)，codex/viz-c-joint3d | 审核锁/项目身份后合流；复验 #1380/#1381/#1399；GUI 冷 tile 读仍需异步化或明确验收裁决 |
+| D 地震显示 | pending | 未见对应提交 PR；运行状态未确认 | 先定位原任务；仅补高级显示差量与当前属性注册断言过期问题 |
+| E 图表/预览 | pending | 未见对应提交 PR；运行状态未确认 | 先定位原任务；charts + P-A + #1382/#1383，与 UI-17 划分总装配边界 |
+| D31 catalog 验收 | in_progress | [#1398](https://github.com/WindWang2/paleo-workbench/pull/1398) 已合并 | 不再开发 DirtySet/CAS/WC/lease/模型注册；标准 CMake 回归、生产调用、Transaction::commit 错误传播遗留 |
+| S1 服务消费 | pending | 预测/科学/workflow/catalog 实现均存在 | 真 catalog adapters→服务→版本/provenance→地图/UI；消费现有 UiControllers，不再写第二套控制器 |
+| U1 业务页面接线 | pending | UI-10/11 已合并 #1396/#1395 | 绑定真实服务；PreparationPage 等 deferred 差量逐项裁决，进入 UI-17 |
+| U2 工作站/控制器装配 | pending | UI-12/14/15 已合并 #1397/#1401/#1405 | UI-13 净差量仍需实现；其余集中到 UI-17，消费现有 shell/controller/canvas |
+| U3 视觉验收 | pending | UI-16 已合并 #1403 | 不再移植 QA 框架；将 fake/unbound probe 切换成真实装配产品，保存截图和失败证据 |
+| X1 交换/provider | pending | #1360/#1365 既有实现 | 格式/交付/动态加载/生产调用净差量，先裁定必要能力再实现 |
+| G1 最终门禁 | pending | 构建/部署骨架已有 | 刷新能力清单，同 SHA 全功能 CMake/CTest、GL、双平台和部署/soak |
 
-| ID / 计划负责人 | 净任务 | 状态 | 依赖与边界 | 完成证据 |
-|---|---|---|---|---|
-| R0 / 协调者 | 定位或按前序会话恢复五份 prompt，确认实际派发记录 | pending | 当前原目录为空；不把未知原因的文件移除自行当作需要回滚的改动 | 真实文件位置/内容校验、可用链接；有派发则记录执行者与 worktree |
-| R1 / 工作流合流负责人，待认领 | #1378 解冲突、标准 CMake/CTest、旧新引擎消费关系 | pending | 复用已写的 RunEngine 等代码，不重写；合并需遵循仓库流程 | PR head/base、冲突解决、两遍核心回归、实际调用清单 |
-| R2 / 正确性审查负责人，待认领 | #1384–#1392 剩余问题净审查与修复 | pending | 排除 C 所有 #1380/81、E 所有 #1382/83；#1387 轨道模板归 A，诊断报告归 R2 | 各 issue 可复现测试、修复 SHA、无损回归；不得仅凭标签判通过 |
-| A / 测井线 | LAS/WLE bridge + 已确认绘制差量 + P-B viewer 专用门禁 | pending | 不重写 WLE；preview 总装配归 E；加载取消复用 worker；轨道模板短写归 A | 两路 LAS 一致、真实轨道与导出、viewer gate |
-| B / 连井标定线 | 多井剖面、picks/tops 持久化、标定与报告 | pending | 复用 DTW/服务/现有 WLE，多井开发不空等 A；不重写已迁编辑器/对话框 | 编辑保存重开、标定 oracle、真实报告 |
-| C / 联合 3D 线 | 联合场景/配准/fence/probe/时深转换 + #1380/#1381 | pending | 独占共享 store 并发修复，先提交独立修复 commit；复用 geo3d/tiled service | 确定性交错回归、联合场景、真实 GL + 降级 |
-| D / 地震显示线 | VD/wiggle/horizon/crossplot、色表/stratal 净差量 | pending | 复用现有 IO/cache/job；store 发布依赖 C，纯只读显示可先开发 | 真实图像、层位编辑重开、数据/坐标对账 |
-| E / 图表预览线 | charts/surface/factor 呈现 + P-A 数据/预览页装配 + #1382/#1383 | pending | 独占总预览 dispatcher 与资产生命周期修复；接 A/B/D 专用 presenter | 资产→加载→图表→导出真实 E2E、所有权回归 |
-| D31 / 数据服务负责人，待认领 | catalog 31b 净差量：通用事务/DirtySet/CAS、深层服务/working-copy/lease 等 | pending | 先扣除 #1346/#1370；复用 C 的线程纪律，不能再建竞争写通路 | 错误注入、并发/恢复、兼容旧工程、真实 repository 验收 |
-| S1 / 服务集成负责人，待认领 | 科学/预测/workflow 真实 catalog adapters、调用、发布与 UI 控制器连接 | pending | 复用 #1352/#1349/#1348/#1378；依据需要消费 R1/D31/C；与 UI-14 单一负责人协调 | 真工程输入→执行→版本/provenance→地图/页面→重开 |
-| U1 / 业务页面负责人，待认领 | UI-10/11 净差量与 W5 业务页面接线 | pending | 图表归 E、连井/地震专用面归 B/D；先扣除 #1394 等已有壳 | 真实服务操作、状态/dirty/cancel/错误提示，不以控件构造算完成 |
-| U2 / 工作站集成负责人，待认领 | UI-12..15 净差量、统一命令/文档/视图协调及 W5 总体合流 | pending | 不抢 A–E 的专用安装点；消费 S1；对公共 MainWindow 仅做可审查适配 | 命令→服务→视图闭环、工程切换、撤销/保存、无回环泄漏 |
-| U3 / 验收工具负责人，待认领 | UI-16 迁移/退役裁决、截图/视觉验证与可追踪证据 | pending | Python QA 工具不必逐行重写；产品行为须被真实测试覆盖 | 能运行的视觉矩阵、声明容差、失败可定位 |
-| X1 / 交换/provider 负责人，待认领 | 剩余格式 adapter、交付编排、provider 动态/生产调用净差量 | pending | 扣除 #1360/#1365；先裁定必需能力，复用 WLE/GDAL/QGIS | 包/格式读写回读、失败回滚、生产调用与能力报告一致 |
-| G1 / 交付负责人，待认领 | 能力与迁移清单刷新、全功能配置、依赖部署、双平台/GL/soak | pending | 测试配置可先准备；最终验证须钉住合流候选 SHA | 见下方统一验收矩阵；历史 PR 测试不能拼成 main 全绿 |
+UI-17 属总体接线，不另开通用 UI 库。MainWindow/AppContext 修改由协调者划分：
+E 负责数据/预览/图表；A/B/C/D 负责各自专用安装点；U2 负责全局导航/命令/文档/视图协调；
+S1 负责生产服务适配。不能多人重写相同入口。
 
-A–E 的完整 prompt 已在前序会话撰写；本轮检查原目录为空，以下只是历史文件登记，
-不是可用下载链接。**曾经 prepared 不等于当前文件可用，也不等于 dispatched**。
+## 开放 PR 的验收边界
 
-| 线 | 原文件名（原目录：docs/development/cpp-geoviz-zcode-parallel） | 当前状态 |
+| PR/head（查询快照） | 已有证据（PR 声明，非本轮重跑） | 不能据此宣告完成 |
 |---|---|---|
-| A LAS/WLE | 01-zcode-welllog-convergence.md | 文件待定位/恢复 |
-| B 连井/标定 | 02-zcode-crosswell-welltie.md | 文件待定位/恢复 |
-| C 联合 3D | 03-zcode-joint3d.md | 文件待定位/恢复 |
-| D 地震显示 | 04-zcode-seismic-display.md | 文件待定位/恢复 |
-| E 图表/预览 | 05-zcode-charts-preview.md | 文件待定位/恢复 |
+| A #1404 / 0d7c1e6f | 6 类测试，三路 LAS 一致、专用两遍门禁/ON-OFF | XML worker、真实 app 迟到路径；图案为声明近似 |
+| B #1400 / fb1f6940 | 6 测试×2 + MALLOC，连井/标定/真实 dock | 整个 app 曾被 #1399 阻断；LAS 仍需 A 合流；当前合并冲突 |
+| C #1402 / f41a222e | 64 受影响测试×2；Mesa llvmpipe 真实软件 GL 截图 | 全树 111 中 109 过，2 失败；硬件 GL 未测；冷 tile 在 GUI 读取 |
 
-内容恢复依据为本对话前序完整 prompt；若用户已转交 ZCode，以实际工作任务/PR
-登记为准，不重复派发。文件缺失原因尚未确定，本次没有回写这些可能被用户移走的文件。
+UNKNOWN mergeability 不等于可无冲突合并。PR 更新或 base 变化后重新查询并钉住验收 SHA。
 
-## 并行与资源协议
+## 公共缺陷与合流纪律
 
-1. 每项独立 worktree/分支，基于执行时最新 origin/main；禁止覆盖共享主工作区的用户修改。
-2. A–E 的 subagent 数量/调用次数不设人为上限；同一文件只能有一个写入负责人。
-3. 同机共享 Git common-dir 重型锁，configure/build/test/大型 oracle/渲染压测入同一队列。
-   jobs≤2，可用内存≥8 GiB，BLAS/OMP 等为 1，链接/大内存/GL 串行。
-4. 使用现有 resource gate；exit 75 退避，不能 Probe 后绕锁、另 clone 绕锁、
-   删除活动锁或降低内存门限。SDK 只读复用，重编也须经过协调的同一重型锁。
-5. C 的并发修复、E 的资产修复优先独立提交，供依赖者明确引用 SHA/PR；
-   不各自复制补丁。新增跨线依赖登记后，以明确 stacked PR 或合流测试处理。
-6. 公共 CMake/feature/capability/MainWindow 改动保持独立命名小块。
-   A–E prompt 的文件归属优先；未来 S1/U2 不得同时改写这些块。
-7. prompt 已授权开发代理 commit/push/create PR；本规划任务本身只完善文档，不启动开发、
-   不提交外部消息、不自动合并或切换入口。
+- C 独占 #1380/#1381：已有修复 PR，不再作为“待写实现”；合并和验证前仍是主线风险。
+  特别复核导入开始/完成时工程切换的语义，不能只凭“加锁”视为数据身份安全。
+- E 独占 #1382/#1383：仍 OPEN，未见其修复 PR，先确认 E 状态。
+- #1399 已由 C 声明修复；主线 issue 仍 OPEN，B 的完整 app 验收依赖该修复。
+- 不替用户关闭 issue，不自动 merge PR；文档中的“验收通过”要有真实日志，不引用 closes 文案作证。
 
-## 统一验收矩阵
+## 资源与工作区
 
-| 门 | 必需内容 | 当前状态 |
-|---|---|---|
-| E0 来源与构建 | 候选 SHA、PR head/base、SDK/工具链、真实开关与调用链 | 待建立最终候选 |
-| E1 语义 | 真 Python/WLE oracle、异常/NaN/单位/CRS、negative self-check | 分支级已有部分证据；全候选待验 |
-| E2 生命周期 | 并发写、取消、迟到、关窗/换工程、失败不假成功、保存短写 | 已知问题待修复验收 |
-| E3 主程序 | 真数据→服务→持久化→显示→导出→重开；无空 seam 冒充可用 | 基础流程已有；全功能待验 |
-| E4 构建 | CMake ON/OFF、目标真正生成、CTest 非 0/non-skip；关键两遍 | 最新候选待验 |
-| E5 环境 | Linux + Windows 完整产品；真实 GL 与 GL-less 分开 | 仅有部分历史证据 |
-| E6 交付 | 干净部署运行时闭包、Python-free 原生链审计、soak/资源预算 | 开发部署骨架已有；正式候选待验 |
-| E7 状态一致 | PR/ledger/能力表/迁移清单一致；未实现能力诚实显示 | 清单需刷新 |
+每项独立 worktree，已有任务沿自身分支继续；不覆盖用户主工作区修改。
+A–E subagent 数量/调用次数不设人为上限，同文件独占写入。
+共享 Git common-dir 重型锁，configure/build/test/大型 oracle/GL 压测统一入场；
+jobs≤2、可用内存≥8 GiB、BLAS/OMP=1，链接/GL/大内存串行。
+exit 75 退避，不 Probe 后绕锁、不删活动锁、不另 clone 绕锁，SDK 只读复用。
+公共 CMake/capability/MainWindow 仅独立命名小块；生产链无 Python 回退伪装成功。
 
-## 下一次会话恢复
+## 完成门
 
-1. 读本文件、findings、progress；不要从旧根目录的 Python 约束恢复。
-2. 查询远端 main、开放 PR/各工作项关联 issue；记录当前时间与 SHA，不覆盖历史证据。
-3. 选择 pending 的无硬依赖任务，登记实际执行者、worktree、分支、范围后改 in_progress。
-4. 先比对新 PR 是否已实现任务，缩减净范围，再执行。
-5. 每个重要发现/决策进 findings，每轮实际执行/失败/验证进 progress；状态只在本计划改。
-6. 结束前留下：已做、未做、下一条命令、阻塞与解除条件、PR/证据位置。
+1. 每个能力分别证明 implemented / merged / wired / verified，按真实用户流程。
+2. 真参考 oracle + negative self-check；关键回归两遍、CMake ON/OFF，非 0 tests/全 skip。
+3. 并发写、项目切换、取消/迟到、短写/磁盘满、恢复重开都有失败路径验证。
+4. 真实 GL 与降级分开；软件 GL 有效但不能冒充硬件路径验收。
+5. 同一最终 SHA 的 Linux/Windows 产品配置、运行时部署、Python-free 原生入口审计及 soak。
+6. 能力表/迁移清单/PR/ledger 一致；Python 默认入口切换另行评审。
 
-## 本次文档工作的完成条件
+## 恢复步骤
 
-- [x] 三文件建立并有明确职责、基线和恢复步骤。
-- [x] 五线范围/原文件名/就绪状态有登记，文件归属、公共修复和共享资源不冲突。
-- [x] 明确五线之外的剩余工作，不把它们算进 Geo-Viz 已覆盖范围。
-- [x] 开放 PR、审查债务、构建/GL 验收缺口可追踪。
-- [x] 根目录历史保留并添加当前入口；内部链接检查通过。
-- [ ] 五份 prompt 当前文件可用、实际派发情况已确认（R0，独立于本次三文件整理）。
-- [ ] 开发执行和产品切换完成（这是后续目标，绝不能因规划完成打勾）。
+读本三文件→刷新 main/open PR/issue→核对已有实现→定位原执行任务→按净差量继续。
+每轮发现写 findings、实际命令/结果写 progress、阶段/下一步写本文件。
+本次只更新和发布规划，不运行开发测试，不把所有 in_progress 改为 complete。
