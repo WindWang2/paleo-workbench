@@ -1,5 +1,13 @@
 #include "geo3d_dock.hpp"
 
+#ifdef PWB_WITH_UI_WELLSEIS
+#include <QMainWindow>
+#include <QMetaType>
+
+#include "job_center.hpp"
+#include "viz_c_joint_host.hpp"
+#endif
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
@@ -217,3 +225,25 @@ void Geo3DDock::sync_clip_ui() {
         clip_invert_[i]->setChecked(it->second.invert);
     }
 }
+
+#ifdef PWB_WITH_UI_WELLSEIS
+// VIZ-C — joint host composition root. The JobCenter arrives through the
+// MainWindow (the dock is parented to it); the host shares this dock's
+// viewport/controller so joint objects and geomodel objects render in one
+// scene graph.
+pwb::app::viz_c::VizCJointHost* Geo3DDock::joint_host() {
+    if (joint_host_ != nullptr) return joint_host_.get();
+    // The owning MainWindow exposes its JobCenter through the dynamic
+    // property set in init_shell (typed includes stay out of the dock
+    // header). A standalone dock (tests) has no JobCenter and no joint
+    // host — tests construct the host directly with their own center.
+    auto* center = property("pwb_job_center").value<pwb::app::JobCenter*>();
+    if (center == nullptr) return nullptr;
+    joint_host_ = std::make_unique<pwb::app::viz_c::VizCJointHost>(
+        *center, controller_.get(), viewport_, this);
+    connect(joint_host_.get(),
+            &pwb::app::viz_c::VizCJointHost::scene_updated, this,
+            &Geo3DDock::refresh_objects);
+    return joint_host_.get();
+}
+#endif

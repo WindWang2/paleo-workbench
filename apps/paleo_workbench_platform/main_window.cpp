@@ -133,6 +133,12 @@
 #include <pwb/viz/well_log_host_widget.hpp>
 #endif
 
+#ifdef PWB_WITH_GEO3D_VIZ
+// VIZ-C: JobCenter* travels through a dynamic property; QVariant needs
+// the metatype declared at global scope (outside namespace pwb::app).
+Q_DECLARE_METATYPE(pwb::app::JobCenter*)
+#endif
+
 namespace pwb::app {
 
 pwb::application::ProjectSession* MainWindow::session() const {
@@ -410,6 +416,11 @@ void MainWindow::buildUi() {
             [this](const QString& well) {
                 statusBar()->showMessage(tr("3D 选中井: %1").arg(well), 5000);
             });
+    // VIZ-C: expose the JobCenter so the dock's joint host (created
+    // lazily on first use) can submit volume-load jobs.
+    setProperty("pwb_job_center",
+                QVariant::fromValue(static_cast<pwb::app::JobCenter*>(
+                    job_center_.get())));
 #endif
 // END CONV-GEO3D
 

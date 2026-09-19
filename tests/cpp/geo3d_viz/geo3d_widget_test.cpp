@@ -21,6 +21,7 @@
 #undef KeyRelease
 #undef FocusIn
 #undef FocusOut
+#undef None  // Xlib's None macro collides with enum names in pwb headers
 #endif
 
 #include <pwb/geo3d_viz/geo3d_viewport_widget.hpp>

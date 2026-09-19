@@ -197,3 +197,22 @@ if(TARGET Pwb::Geo3DViz)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_GEO3D_VIZ=1)
 endif()
 # END CONV-GEO3D
+
+# BEGIN VIZ-C
+# Joint well-seismic 3D (plan V4): the WellSeismicScene core lives in
+# Pwb::Geo3DViz (joint/ subtree); these are the platform bridges — the
+# tiled-volume adapter + mesh builders, the 2D time map and the REAL
+# #1394 JointHostController host. The host needs the ui_wellseis seam
+# types; both slices degrade out independently (fail-closed configure,
+# never a fake host).
+if(TARGET Pwb::Geo3DViz AND TARGET Pwb::SeismicService)
+    target_sources(pwb-platform PRIVATE
+        viz_c_joint_volume.cpp
+        viz_c_time_map.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicService)
+    # viz_c_joint_host.cpp + PWB_WITH_UI_WELLSEIS are wired from the root
+    # VIZ-C block: libs/ui_wellseis joins the build AFTER this app
+    # subdirectory, so a target-existence check here would silently skip
+    # the host (never a fake seam).
+endif()
+# END VIZ-C

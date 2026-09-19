@@ -9,6 +9,10 @@
 // geological_modeling_3d_page.py) lives in the controller; this dock is
 // product wiring only. Selection of wells is re-broadcast through
 // well_selected() — the 2D map synchronization seam.
+//
+// VIZ-C (plan V4): the dock is also the composition root of the joint
+// well-seismic host — the #1394 JointHostController seam over the
+// WellSeismicScene core, sharing this viewport and controller.
 
 #include <QDockWidget>
 
@@ -16,6 +20,15 @@
 
 #include <pwb/geo3d_viz/geo3d_viewport_widget.hpp>
 #include <pwb/geo3d_viz/workspace_controller.hpp>
+
+#ifdef PWB_WITH_UI_WELLSEIS
+namespace pwb::app {
+class JobCenter;
+}
+namespace pwb::app::viz_c {
+class VizCJointHost;
+}
+#endif
 
 class QListWidget;
 class QLabel;
@@ -35,6 +48,14 @@ public:
     pwb::geo3d_viz::Geo3DWorkspaceController* controller() const {
         return controller_.get();
     }
+
+#ifdef PWB_WITH_UI_WELLSEIS
+    // VIZ-C: the joint well-seismic host (WellSeismicScene + JobCenter
+    // volume loading + the SceneTransform seam). Lazily created once per
+    // dock; the JobCenter must outlive the dock (it does — see
+    // MainWindow member ordering).
+    pwb::app::viz_c::VizCJointHost* joint_host();
+#endif
 
 signals:
     // 2D map synchronization seam (selected well name).
@@ -57,4 +78,7 @@ private:
     QSlider* clip_slider_[3] = {nullptr, nullptr, nullptr};
     QCheckBox* clip_invert_[3] = {nullptr, nullptr, nullptr};
     QComboBox* measure_combo_ = nullptr;
+#ifdef PWB_WITH_UI_WELLSEIS
+    std::unique_ptr<pwb::app::viz_c::VizCJointHost> joint_host_;
+#endif
 };

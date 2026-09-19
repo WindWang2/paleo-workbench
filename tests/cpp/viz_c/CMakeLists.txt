@@ -25,3 +25,44 @@ endfunction()
 
 viz_c_test(viz_c_store_concurrency store_concurrency_test.cpp
     viz_c.store_concurrency)
+
+# Joint well-seismic core (plan V4) — needs the geo3d joint scene + the
+# seismic service closure; degrades out when those slices are absent.
+if(TARGET Pwb::Geo3DViz AND TARGET Pwb::SeismicIo)
+    add_executable(viz_c_joint_oracle joint_oracle_test.cpp test_main.cpp)
+    target_link_libraries(viz_c_joint_oracle PRIVATE
+        Pwb::Geo3DViz Pwb::Domain)
+    target_include_directories(viz_c_joint_oracle PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(viz_c_joint_oracle PRIVATE
+        VIZ_C_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+    if(MSVC)
+        target_compile_options(viz_c_joint_oracle PRIVATE /utf-8 /W4 /permissive-)
+    else()
+        target_compile_options(viz_c_joint_oracle PRIVATE
+            -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME viz_c.joint_oracle COMMAND viz_c_joint_oracle)
+    set_tests_properties(viz_c.joint_oracle PROPERTIES TIMEOUT 300
+        ENVIRONMENT "MALLOC_CHECK_=3")
+
+    # Behavior test also compiles the platform bridge TU (tiled adapter +
+    # mesh builders) — the composition layer without a window.
+    add_executable(viz_c_joint_scene joint_scene_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../apps/paleo_workbench_platform/viz_c_joint_volume.cpp
+        test_main.cpp)
+    target_link_libraries(viz_c_joint_scene PRIVATE
+        Pwb::Geo3DViz Pwb::SeismicService Pwb::Visualization Pwb::Domain)
+    target_include_directories(viz_c_joint_scene PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../apps/paleo_workbench_platform)
+    if(MSVC)
+        target_compile_options(viz_c_joint_scene PRIVATE /utf-8 /W4 /permissive-)
+    else()
+        target_compile_options(viz_c_joint_scene PRIVATE
+            -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME viz_c.joint_scene COMMAND viz_c_joint_scene)
+    set_tests_properties(viz_c.joint_scene PROPERTIES TIMEOUT 300
+        ENVIRONMENT "MALLOC_CHECK_=3")
+endif()

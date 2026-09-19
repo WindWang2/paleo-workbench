@@ -17,3 +17,13 @@
 
 - `integration.attribute_chain`（tests/cpp/integration/test_attribute_chain.cpp:249 `registered_ids.size() == 4`）：纯净 origin/main 同样失败（属性注册计数断言过期，注册数已被 #1369 扩到 10+）。归 seismic/属性线（D）。
 - 本机 X 服务器 :1 GLX 损坏（glxinfo 同样 BadValue）；软件 GL 经 Wayland+Mesa llvmpipe 可用（OpenGL 4.6 core, renderer llvmpipe），geo3d.widget_test 真实软件 GL 11/11 通过。
+| 3 | V4 联合核 11 组件（joint_types/depth_transform/survey/registration/well_geometry/volume_access/fence/probe/color_scales/joint_scene/segy_survey）+ 平台桥（TiledVolumeAccess/mesh builders/time map/JointHostController host）+ geo3d_dock joint_host 组合根 + viz_c_joint_example；oracle 生成器跑真实 Python @08851951 冻结 12KB fixture | viz_c.joint_oracle 9/9（含 tampered 检出 + >200 次比较守卫）；viz_c.joint_scene 7/7；全树 111 测试中 109 过（唯二失败 integration.attribute_chain=origin/main 预存、ui_pages_preview.qt_widgets_smoke=#1394 记录的预存环境问题，均与本线零文件交集）；受影响面 38/38×2 轮全绿；MALLOC_CHECK_=3 viz_c+platform 20/20 + data+geo3d 50/50 | 通过 | 三轮审核 |
+| 4 | GL 双路径：offscreen GL-less 诚实降级（无截图+场景状态完整+drain）；Wayland+llvmpipe 真软件 GL 截图 1000x750，关键像素：seismic 蓝 3.9%/红 3.9%（对称标尺）、井黄 (242,204,20) 0.28%、41 distinct colors；快照 n_inline=4/n_crossline=4/active 2ms；井间 fence 帘幕+活动切片+双井全部在一致 render 空间 | viz_c_joint_example 两种平台各运行通过（exit 0） | 通过 | 审核+提交 |
+
+## 验证证据汇总（截至第 4 轮）
+
+- 构建：全闭包 554→增量（resource gate -j2，flock 全程；等待期多次 RESOURCE_BUSY 退避 30–240s 重试）
+- viz_c.store_concurrency 3/3（MALLOC_CHECK_=3）；viz_c.joint_oracle 9/9；viz_c.joint_scene 7/7
+- data.* 23、geo3d.* 3、seismic_io.* 3、seismic_service.service、platform.attribute_ui 全过
+- GL：软件 GL=Wayland+Mesa llvmpipe（OpenGL 4.6 core）；GLX 损坏主机经 X 错误处理器软失败
+- 资源锁竞争记录：与 viz-b（pid 1293096 等）多次互斥等待，均按退避协议处理
