@@ -38,6 +38,7 @@
 - OFF 配置（PWB_BUILD_VIZ_B=OFF）：configure 成功，viz 目标不出现。
 - 集成配置（全开关 ON + VIZ_B=ON, Release，QGIS SDK 只读复用主工作区 + PWB_QGIS_DEPS_PREFIX=gdal-vendored）：本线闭包构建 + `ctest -R viz_b` 两遍 + `MALLOC_CHECK_=3` 审计 = **3×100%（6 测试）**。
 - pwb-platform 完整二进制被主线既有 bug 阻断（issue #1399，非本线）；dock 的编译/链接/运行证据由 `viz_b.dock_smoke`（真实 dock + 真实 JobCenter）承担。
+- 受影响旧测试回归（集成树）：`well_science.dtw` + `ui_workers.oracle` + `ui_workers.lifecycle` 两遍 100%（DTW 既有 oracle 证据）。
 - 脚本：`docs/development/cpp-viz-b/verify-integrated.sh`（资源门禁全程包装）。
 
 ## 外部依赖记录
@@ -45,3 +46,9 @@
 - geo-viz-engine submodule：gitlink 08851951（与主工作区检出一致，`git clone --shared` 本地初始化）。
 - QGIS SDK（主程序验证用，只读）：`/home/kevin/projects/paleo_project/main/native/qgis_render_bridge/build/qgis-vendor/output`。
 - Python oracle 环境：`/home/kevin/projects/paleo_project/main/.venv/bin/python`（numpy 2.5.2 + PySide6）。
+
+## 完成状态
+
+- 分支：`codex/viz-b-crosswell-welltie`，基线 origin/main@7290f727，提交 9aa4b342 + 本账本更新。
+- PR：#1400（base main，非 stacked——对 A 线无代码依赖，LAS 接通走既有 seam）。
+- 硬门全部满足或如实记录阻塞（pwb-platform 完整二进制：上游 #1399）。
