@@ -70,4 +70,6 @@
     （implies-providers 链经 resolver 生效，审查项 #1 关闭）。
   - Build 全目标链接成功；Test 连续两遍 `100% tests passed out of 7`
     （session 66 checks，executor 36 checks）。
-- 提交/推送/PR：见下。
+- 提交 22ae60b178b987e66c2efd9a171739aba11f0767（单提交，base=06211541），
+  推送分支 codex/cpp-close-11-agent-harness-20260920，
+  PR: https://github.com/WindWang2/paleo-workbench/pull/1420（指向当前 main，未合并）。
