@@ -38,3 +38,28 @@
 - XML 加载构造 WLE document（WellLogDocumentBuilder + SamplingAxis + Curve），与 LAS 路径同一载荷类型 WleDocumentPayload，消费者无差别——真加载而非旁路数据结构。
 - 识别语义严格对齐 Python is_well_log_xml（WITSML 三件套 log/curveinfo/logdata 或 witsml 根 + 两件套，或具名工作表），不放宽；非井 XML 保持诚实消息。
 - oracle：XML 解析对冻结 Python（stdlib ElementTree 转录 well_log_xml.py 识别语义）生成 fixture，含负面自检（非井 XML 必须不识别）。
+
+## 实现后补充发现（审查轮 + 门禁轮）
+
+1. **B 线遗留产品缺陷（已修，本线文件）**：viz_b_cross_well_dock 的 DTW 提交从未绑定
+   `correlate_fn`，真实作业路径恒抛 "kernel unavailable: geoviz DTWEngine.correlate"。
+   B 线集成测试直接调 `compute_dtw_propagation(scnee…, dtw_engine_correlate, …)` 绕过了
+   dock 的作业路径，因此从未暴露。修复 = dock 注入真核 `dtw_engine_correlate`
+  （seam 语义不变，仍可注入替身测试）。门禁证据：well.dock_lifecycle 真实 DTW 产出拾取。
+2. **JobOwner 双重所有权契约**：JobCenter 持 `unique_ptr<JobOwner>` 且 owner 的 QObject
+   父是传入的 parent——生产靠「JobCenter 是 MainWindow 成员、dock 是 QObject 子」的析构序
+   保证安全。dock 在窗口关闭前被独立销毁的路径会双重删除（12 的 JobCenter 契约，本线不改，
+   测试按生产序书写并注释）。
+3. **预览/加载分歧登记（04 文件，不越线）**：`libs/ingest/preview/well_log_xml_preview.cpp`
+   SpreadsheetML 分支不处理 `ss:Index` 列偏移（冻结 Python xml_preview.py L87-97 处理）；
+   同一文件预览列可能与加载列错位。修复建议：Cell 循环加 Index 填充（对齐本线
+   well_log_xml_data.cpp worksheet_rows 的实现）。
+4. **Oracle 模式声明**：本机无 numpy/pip/PySide6，`generate_well_xml_fixtures.py` 模式 A
+   （真实冻结 Python 实测）不可执行；交付口径为模式 B（冻结源行号级转录 + 比较器负检 +
+   输入篡改负检）。具备 numpy 的环境运行生成器即自动切模式 A 复核。
+5. **主机关联（登记于协调文件）**：cmake/ninja 二进制缺失（用户级安装于 ~/tools）、
+   QGIS SDK 依赖 sibling-main 布局（本机用 PALEO_QGIS_* 环境变量指向主工作区只读复用）、
+   shell 的 ninja/make alias 注入 -j40 且指向不存在二进制——并行各线均需绕开。
+6. **主窗口 05 钩子**：main_window.cpp 的 `BEGIN 05 … END 05` 标记块
+   （well_presenters::install + qWarning 重复注册）+ 根 CMakeLists 的 `BEGIN 05 … END 05`
+   块为 05 线唯一公共文件触点（租约登记于协调文件）。
