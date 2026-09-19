@@ -422,6 +422,27 @@ if(PWB_BUILD_CONV_01)
     endif()
 endif()
 # END CONV-01
+# BEGIN UI-10-IMPLY — the UI-10 sequence/factor/visualization pages cluster
+# (libs/ui_seqviz) binds the composition document/session kernels
+# (CONV-02 mapping_document), the composition template cartography
+# (CONV-27C), the layout-export kernel (CONV-29) and the well-curve
+# operation kernels (CONV-11 well_science). UI slices carry no per-slice
+# option — they gate under PWB_BUILD_PLATFORM (taskbook §2: no new
+# option(), no flag preemption) — so a platform+data configure implies the
+# kernel closure the pages need, exactly like the UI-04 block implies
+# CONV-22 for libs/ui_workers.
+if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
+    foreach(_ui10_kernel CONV_02 CONV_27C CONV_29 CONV_11)
+        if(NOT PWB_BUILD_${_ui10_kernel})
+            set(PWB_BUILD_${_ui10_kernel} ON)
+            message(STATUS
+                "UI-10: implying PWB_BUILD_${_ui10_kernel}=ON — "
+                "libs/ui_seqviz binds the seqviz page kernels")
+        endif()
+    endforeach()
+endif()
+# END UI-10-IMPLY
+
 # BEGIN CONV-02
 # Qt-free MapDocument / MapCompositionDocument JSON kernel (swarm
 # cpp-conv-02): data-contract port of mapping/layers.py +
@@ -560,6 +581,22 @@ if(PWB_BUILD_CONV_11)
     endif()
 endif()
 # END CONV-11
+# BEGIN UI-04-IMPLY — the UI-04 page-worker ports (libs/ui_workers) bind
+# the CONV-22 geomodel contract cores (advisor rules, V2 exporters,
+# DomainObject). UI slices carry no per-slice option — they gate under
+# PWB_BUILD_PLATFORM (taskbook §2: no new option(), no flag preemption) —
+# so a platform configure implies the kernel closure they need, exactly
+# like CONV-28 / CONV-GEO3D imply CONV-22 for their consumers. DATA is
+# part of the implication because CONV-22 links Pwb::Domain. Kernel-only
+# configures (conversion-kernel) set -DPWB_BUILD_CONV_22=ON directly;
+# configures without DATA keep the Python workers as the production path.
+if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA AND NOT PWB_BUILD_CONV_22)
+    set(PWB_BUILD_CONV_22 ON)
+    message(STATUS
+        "UI-04: implying PWB_BUILD_CONV_22=ON — libs/ui_workers binds "
+        "the geomodel contract cores (advisor/export/DomainObject)")
+endif()
+# END UI-04-IMPLY
 # BEGIN CONV-22 — geomodel contract/writer cores (M8): domain object
 # contracts, QC ladder + export gate, the five export writers + read-back
 # validators + provenance sidecars, advisor rules, lithology tables, and the
@@ -694,6 +731,22 @@ if(PWB_BUILD_PLATFORM)
     add_subdirectory(libs/application)
     add_subdirectory(libs/ui)
     add_subdirectory(libs/platform_services)
+    add_subdirectory(libs/ui_widgets)
+    add_subdirectory(libs/ui_shell)
+    add_subdirectory(libs/ui_data_core)
+    # UI-05 — qgs-map slice: QGIS-backed map surfaces + Qt panels
+    # (map canvas panel, work-area widget, layer tree, document/chrome
+    # panels, dock manager, constrained mapping-page shell).
+    add_subdirectory(libs/ui_map)
+    add_subdirectory(libs/ui_pages_preview)
+    add_subdirectory(libs/ui_pages_data)
+    # UI-08 — qt-mapedit slice: map-edit page cluster (scene/view/toolbar,
+    # attribute/topology/reference/boundary panels, factor shelf, inspector)
+    # over the ui_data_core edit stack.
+    add_subdirectory(libs/ui_pages_mapedit)
+    # UI-12 — workstation shell slice: dock composition frame + panel
+    # widgets over the UI-01 shell substrate (pages stay injected).
+    add_subdirectory(libs/ui_workstation)
     add_subdirectory(apps/paleo_workbench_platform)
     if(BUILD_TESTING)
         enable_testing()
@@ -704,6 +757,96 @@ if(PWB_BUILD_PLATFORM)
         endif()
     endif()
 endif()
+
+# BEGIN UI-04 — core page-worker ports (libs/ui_workers): the Qt-free C++
+# halves of the seven PySide6 worker modules in paleo_workbench/ui/pages.
+# No new switch: the library joins every configuration that resolves the
+# kernels the ports bind — under PWB_BUILD_PLATFORM whenever the CONV-22
+# geomodel contracts, Pwb::Domain and the CONV-30 job runtime are present
+# (the platform/native-product and kernel closures pull them in), and in
+# kernel-closure configures like conversion-kernel so the oracle replay
+# tests run without the QGIS weight. Configs without those slices keep
+# the Python workers as the production path.
+if(PWB_BUILD_CONV_22 AND TARGET Pwb::GeoModel AND TARGET Pwb::Domain
+   AND TARGET Pwb::JobRuntime)
+    add_subdirectory(libs/ui_workers)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-04: libs/ui_workers skipped — enable PWB_BUILD_CONV_22 "
+        "(geomodel contracts) for the worker ports; the Python workers "
+        "remain the production path")
+endif()
+# END UI-04
+
+# BEGIN UI-09 — qt-well-seismic slice (libs/ui_wellseis): Qt-free semantic
+# cores + thin Qt Widgets shells + the QGIS well-map surface for the
+# well/seismic page cluster. Same gating model as UI-04: no per-slice
+# option; the library joins platform configures that already resolved
+# Pwb::UiWorkers (the CONV-22 implication above) and pulls in the CONV-11
+# well_science leaf (depth-unit vocabulary for the cursor gates) when the
+# kernel slices left it out. The QGIS surface target only exists where
+# Pwb::Qgis was admitted; the Qt target needs Qt6::Widgets from the
+# platform block. Configures without those keep the Python pages as the
+# production path.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::UiWorkers AND TARGET Qt6::Widgets)
+    if(NOT TARGET pwb_well_science)
+        pwb_add_subdirectory_once(libs/well_science)
+    endif()
+    add_subdirectory(libs/ui_wellseis)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-09: libs/ui_wellseis skipped — needs Pwb::UiWorkers "
+        "(PWB_BUILD_DATA + implied PWB_BUILD_CONV_22) and Qt6::Widgets; "
+        "the Python pages remain the production path")
+endif()
+# END UI-09
+
+# BEGIN UI-11 — qt-review-gov slice (libs/ui_review): Qt-free semantic
+# cores + thin Qt Widgets shells for the review/governance cluster
+# (review export page, governance metadata, catalog health, lineage
+# explorer, impact preview, version workbench, ingest plan, relink,
+# AI-check advisor, QC issue table, workflow contract panel) plus the
+# non-production composite prototype on the _qgis target. Same gating
+# model as UI-09: no per-slice option; the library joins platform
+# configures that already resolved the data closure (Pwb::Data —
+# PWB_BUILD_DATA, which also supplies Pwb::Catalog via libs/data_suite)
+# and the CONV-30 job runtime's Qt bridge (Pwb::JobQt — worker-backed
+# dialogs). CONV-23's workflow_contracts leaf is pulled in when the
+# kernel slices left it out (UI-09 well_science precedent).
+# task_panel_base / prediction_evidence / prediction_task panels are NOT
+# re-ported — hosts reuse UI-09's pwb::ui_wellseis::qt widgets.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::Data AND TARGET Pwb::JobQt
+   AND TARGET Qt6::Widgets)
+    if(NOT TARGET Pwb::WorkflowContracts)
+        pwb_add_subdirectory_once(libs/workflow_contracts)
+    endif()
+    add_subdirectory(libs/ui_review)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-11: libs/ui_review skipped — needs Pwb::Data "
+        "(PWB_BUILD_DATA) + Pwb::JobQt (PWB_BUILD_CONV_30) + "
+        "Qt6::Widgets; the Python pages remain the production path")
+endif()
+# END UI-11
+
+# BEGIN UI-10 — sequence/factor/visualization pages cluster
+# (libs/ui_seqviz): Qt-free page state/view models + Qt Widgets shells for
+# the 16 taskbook pages. Binds the UI-04 worker contracts (libs/ui_workers)
+# plus the UI-03 preview/data core, the CONV-30 job runtime, the
+# mapping-document composition session and the well-science curve kernels.
+# Joins every configuration that resolves those targets; configs without
+# them keep the Python pages as the production path.
+if(TARGET Pwb::UiWorkers AND TARGET Pwb::UiDataCore
+   AND TARGET Pwb::MappingDocument AND TARGET Pwb::WellScience
+   AND TARGET Pwb::JobRuntime AND TARGET Pwb::Domain)
+    add_subdirectory(libs/ui_seqviz)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-10: libs/ui_seqviz skipped — enable PWB_BUILD_CONV_22 "
+        "(worker ports) plus the platform/data/mapping/well slices for "
+        "the seqviz pages; the Python pages remain the production path")
+endif()
+# END UI-10
 
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and

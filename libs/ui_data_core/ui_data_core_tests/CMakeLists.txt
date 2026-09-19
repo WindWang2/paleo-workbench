@@ -1,0 +1,5 @@
+add_executable(ui_data_core.smoke smoke_test.cpp)
+target_compile_features(ui_data_core.smoke PRIVATE cxx_std_20)
+target_link_libraries(ui_data_core.smoke PRIVATE Pwb::UiDataCore)
+add_test(NAME ui_data_core.smoke COMMAND ui_data_core.smoke)
+set_tests_properties(ui_data_core.smoke PROPERTIES TIMEOUT 120)
