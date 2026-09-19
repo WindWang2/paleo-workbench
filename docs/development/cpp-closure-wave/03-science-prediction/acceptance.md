@@ -19,7 +19,8 @@
 | 生产服务注入（well/seismic 预测页） | `closure_science.qt_hooks`：页面真实入口 on_demo() 驱动全链（demo 种子→run→worker→provider→catalog 结果版本→任务物化+journal），无工程/无生产模型走诚实守卫；`main_window.cpp wire_app_shell` 命名块装配（12 可收口） | ✅ |
 | 无 fake provider 生产交付 | provider 注册表仅 demo（demo_only 诚实标注）/ tiled_onnx（真 ONNX）；未知名 fail-closed；http 未接入 → 显式失败 | ✅ |
 | 科学服务 catalog 闭环（CONV-28 缺口收口） | CatalogPayloadSource（table 解码+fail-closed）+ CatalogEnvelopePublisher（envelope.json 目录契约 + run+DERIVED 版本+lineage）经 TaskRuntime e2e | ✅ |
-| 受影响回归集 | ctest -r "closure_science\|science_service\|prediction\|ui_wellseis\|app_shell\|platform.project_session\|data.catalog\|workflow"（资源门内，跑两遍） | ⏳ 执行中 |
+| 受影响回归集 | 门内 ctest（closure_science/science_service/prediction/ui_wellseis/app_shell/project_session/catalog_service/workflow_runtime/workflow_engine）：**23/23 两遍全绿**（build/close-03，Release） | ✅ |
+| 独立审查 | reviewer C 一轮：FAIL（P0×2 并发/线程析构 + P1×7）→ 全部修复 → 复验全绿；P2 遗留如实记录于 findings/progress | ✅ |
 
 已知限制（如实）：
 - geoviz_online（线上单井预测）与 local_asset（GR 启发式）无原生执行器——显式报错，不伪造。

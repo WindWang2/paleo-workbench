@@ -22,3 +22,5 @@
 - B1 volume store 注册（class/prob raw → catalog DERIVED 版本行）未移植：产物经 envelope output_descriptor 路径引用，目录在 artifacts/intermediate。
 - local_asset 模型被播种但无原生执行器：运行时显式失败（选择器可见性留给 12/产品决策）。
 - coerce_seed 对数字字符串回退 0（Python int("5")=5）——注释已声明。
+| R4' | 同上 | 221b0ae3 | 门内 Build（no work to do，全量干净）+ 受影响集两遍：**23/23 ×2 全绿**（closure_science.core/qt_hooks、science_service.*、prediction.*、ui_wellseis.*、platform.app_shell、project_session、catalog_service、workflow_*） | 0 | 验收成立 |
+| R6 | 同上 | 221b0ae3 | git commit 221b0ae3 + push + PR #1418（base main） | 0 | https://github.com/WindWang2/paleo-workbench/pull/1418 |
