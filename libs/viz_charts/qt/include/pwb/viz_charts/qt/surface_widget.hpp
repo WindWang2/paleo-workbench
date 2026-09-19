@@ -85,6 +85,9 @@ public:
 
     void export_svg(const QString& filepath);
     void export_pdf(const QString& filepath);
+    // Explicit-canvas variants (see plot_widget.h).
+    void export_svg(const QString& filepath, QSize canvas);
+    void export_pdf(const QString& filepath, QSize canvas);
     void render_surface(QPainter* painter, int width, int height);
 
 signals:

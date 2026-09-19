@@ -86,6 +86,11 @@ public:
     // -- export / direct painting -------------------------------------------
     void export_svg(const QString& filepath);
     void export_pdf(const QString& filepath);
+    // Explicit-canvas variants for hosts whose widget never became
+    // visible (hidden stack pages / headless export): render at `canvas`
+    // instead of the live widget size.
+    void export_svg(const QString& filepath, QSize canvas);
+    void export_pdf(const QString& filepath, QSize canvas);
     void render_plot(QPainter* painter, int width, int height);
 
     // -- hover snapping -------------------------------------------------------

@@ -412,6 +412,12 @@ private:
     // surfaces it supervises.
     std::unique_ptr<JobCenter> job_center_;
 #endif
+
+    // BEGIN VIZ-E — the mounted data-page dock (plan P-A).
+#if defined(PWB_WITH_VIZ_E) && defined(PWB_WITH_CONV_30)
+    QDockWidget* viz_e_data_dock_ = nullptr;
+#endif
+    // END VIZ-E
 };
 
 }  // namespace pwb::app

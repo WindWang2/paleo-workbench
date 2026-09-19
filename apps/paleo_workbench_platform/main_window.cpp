@@ -27,6 +27,12 @@
 #endif
 // END CONV-30
 
+// BEGIN VIZ-E — data/preview page assembly (plan P-A + V6).
+#if defined(PWB_WITH_VIZ_E) && defined(PWB_WITH_CONV_30)
+#include "viz_e_install.hpp"
+#endif
+// END VIZ-E
+
 #include <fstream>
 
 // CONV-PS platform services.
@@ -466,6 +472,14 @@ void MainWindow::buildUi() {
     seismic_dock_->setWidget(slice_widget_);
     addDockWidget(Qt::RightDockWidgetArea, seismic_dock_);
 #endif
+
+    // BEGIN VIZ-E — data page dock (asset selection → preview/chart →
+    // export loop; the page composes ui_pages_data + viz_charts hosts).
+#if defined(PWB_WITH_VIZ_E) && defined(PWB_WITH_CONV_30)
+    viz_e_data_dock_ =
+        pwb::viz_e::install_data_dock(this, job_center_.get());
+#endif
+    // END VIZ-E
 
     // Tools are canvas-parented; MapSession teardown unsets them first.
     pan_tool_ = new QgsMapToolPan(canvas_);
@@ -2502,16 +2516,24 @@ void MainWindow::importSegyDialog() {
         return;
     }
 #endif
-#if defined(PWB_WITH_SEISMIC_VIEWER)
+// The CONV-30 job path returned above (the job's completion drives the
+// view), so this synchronous view step belongs to the non-job branches
+// that declared `version_id` — the previous unguarded form fails to
+// compile under CONV_30 + SEISMIC_VIEWER.
+#if defined(PWB_WITH_SEISMIC_VIEWER) && !defined(PWB_WITH_CONV_30)
     const QString view_error = openVolumeVersion(version_id);
     if (!view_error.isEmpty()) {
         QMessageBox::warning(this, tr("导入 SEG-Y"), view_error);
         return;
     }
 #endif
+#if !defined(PWB_WITH_CONV_30)
+    // The synchronous branches declared `version_id`; the CONV-30 job path
+    // returned early and reports through the job's completion.
     statusBar()->showMessage(
         tr("SEG-Y 已导入：%1").arg(QString::fromStdString(version_id)),
         10000);
+#endif
 }
 
 #ifdef PWB_WITH_CONV_30

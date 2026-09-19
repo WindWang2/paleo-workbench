@@ -84,3 +84,14 @@
 - **文档化等价替换**：scipy cKDTree → 像素空间线性扫描（= Python 无 scipy 回退分支语义）；surface 提取缓存键以（数据指针+尺寸+levels+colormap）替代 id()+内容哈希（失效面等价）；`f"{v:.1f}"` → snprintf。
 - **以冻结源为准的行为裁定**（任务文本与 Python 冲突处）：SurfaceWidget autofit 无 5% pad；控制点/断层线只存不画；CrossPlot 无 hover 十字线；deprecated `point_selected` 信号不存在（Python 从不发射）。
 - 导出：export_svg（QSvgGenerator，标题 "GeoViz Plot - …"）/export_pdf（QPrinter A4 HighResolution 全页）与 Python 同构；Python 无 PNG 导出，C++ 同样不提供（页面级导出走主程序导出服务）。
+| 5 | P-A 装配：VizEDataPage（ui_pages_data×viz_charts hosts×JobCenter）+ viz_e_install 主程序挂载 + presenter 注册契约 + dat 解析 oracle + E2E | viz_e.pa_flow 86 检查 ×2 + MALLOC；ctest viz_e/viz_charts/ui_pages_data/ui_data_core 6/6；全量 617 目标构建 | 通过 | 提交本轮；ON/OFF + 全量门禁 |
+
+## P-A 装配记录（第 5 轮）
+
+- **dispatch 扩展**：`kPreviewModes`/`preview_target` 增加 `xy_scatter→xy_scatter_chart`、`surface→surface_chart`（本线对 ui_pages_data 的唯一实质接触，BEGIN/END VIZ-E 块）。
+- **挂载**：根 CMake VIZ-E 块（闭包齐全时 target_sources+PWB_WITH_VIZ_E），main_window 仅 include+install_data_dock 调用（QMainWindow* 签名保持可测性）。
+- **presenter 契约**：`register_external_presenter({kind, supports, create, note})` 进程级注册表（首注册胜出，重复注册响亮失败）；A(.las)/B(time_depth)/D(seismic) 经此接入；未注册时不可用消息如实列出依赖状态。
+- **actor 修正**：JobOwner 不再以页面为 QObject 父（JobCenter unique_ptr 独占所有权）——原双重所有权在页面先于 JobCenter 析构时 double-delete（"pure virtual method called"复现）。
+- **主线潜在缺陷顺带修复**（如实声明）：main_window.cpp importSegyDialog 在 CONV_30+SEISMIC_VIEWER 组合下 `version_id` 未声明即编译失败（CONV-30 分支提前 return，尾随同步视图代码无卫）——门禁配置从未同时启用两开关故未暴露；本线 CONV_30 必开故加 `!defined(PWB_WITH_CONV_30)` 卫（行为不变：该路径本就不可达）。
+- **导出健壮性**：PlotWidget/SurfaceWidget 增加显式画布 export_svg/export_pdf 重载；隐藏栈页/无头导出的退化 0 尺寸回退 900×600（可见 widget 仍用实时尺寸，Python 语义不变）。
+- **dat 解析 oracle**：generate_viz_e_dat_fixtures.py 冻结真实 Python 后端输出（记录/CRS/UWI/跳过行/horizon 轴决策），provenance SHA 校验 + 8 族负检。
