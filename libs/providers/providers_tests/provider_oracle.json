@@ -1,0 +1,3434 @@
+{
+ "generator": "tools/oracle/generate_provider_fixtures.py",
+ "typed_refs": [
+  "DataVersionRef",
+  "FactorDatasetRef",
+  "FactorGridRef",
+  "GeologicalFactorDataset",
+  "MapDocument",
+  "MapDocumentRef",
+  "PathRef",
+  "SeismicVolumeRef",
+  "WellRef"
+ ],
+ "cases": [
+  {
+   "id": "params.valid.minimal",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "out/thumb.png"
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.valid.full",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "out/a.png",
+    "width": 640,
+    "height": 480,
+    "mode": "精细",
+    "ratio": 0.5,
+    "tags": [
+     "a",
+     "b"
+    ],
+    "nested": {
+     "depth": 2
+    },
+    "maybe": null
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.empty-params-missing-required",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {},
+   "label": "parameters",
+   "problems": [
+    "parameters.output_path: required"
+   ]
+  },
+  {
+   "id": "params.empty-schema-empty-params",
+   "fn": "validate_parameters",
+   "schema": {},
+   "parameters": {},
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.wrong-type-integer",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": 12
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.output_path: expected string, got int"
+   ]
+  },
+  {
+   "id": "params.bool-not-integer",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "width": true
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.width: expected integer, got boolean"
+   ]
+  },
+  {
+   "id": "params.bool-not-number",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "ratio": false
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.ratio: expected number, got boolean"
+   ]
+  },
+  {
+   "id": "params.below-minimum",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "width": 63
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.width: 63 < minimum 64"
+   ]
+  },
+  {
+   "id": "params.above-maximum",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "height": 4097
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.height: 4097 > maximum 4096"
+   ]
+  },
+  {
+   "id": "params.boundary-minimum-equal",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "width": 64
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.boundary-maximum-equal",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "width": 4096
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.float-against-integer-minimum",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "width": 63.5
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.width: expected integer, got float"
+   ]
+  },
+  {
+   "id": "params.not-in-enum",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "mode": "BALANCED"
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.mode: 'BALANCED' not in enum ['fast', 'quality', '精细']"
+   ]
+  },
+  {
+   "id": "params.enum-unicode-member",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "mode": "精细"
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.number-maximum-violated",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "ratio": 1.5
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.ratio: 1.5 > maximum 1.0"
+   ]
+  },
+  {
+   "id": "params.array-too-short",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "tags": []
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.tags: 0 items < minItems 1"
+   ]
+  },
+  {
+   "id": "params.array-too-long",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "tags": [
+     "a",
+     "b",
+     "c",
+     "d"
+    ]
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.tags: 4 items > maxItems 3"
+   ]
+  },
+  {
+   "id": "params.array-item-wrong-type",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "tags": [
+     "a",
+     3
+    ]
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.tags[1]: expected string, got int"
+   ]
+  },
+  {
+   "id": "params.array-items-boundary-ok",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "tags": [
+     "x"
+    ]
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.nested-missing-required",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "nested": {}
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.nested.depth: required"
+   ]
+  },
+  {
+   "id": "params.nested-additional-property",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "nested": {
+     "depth": 1,
+     "extra": true
+    }
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.nested.extra: not declared and additionalProperties false"
+   ]
+  },
+  {
+   "id": "params.nested-below-minimum",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "nested": {
+     "depth": -1
+    }
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.nested.depth: -1 < minimum 0"
+   ]
+  },
+  {
+   "id": "params.union-null-ok",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "maybe": null
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.union-string-ok",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "maybe": "x"
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.union-rejected",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "maybe": 5
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.maybe: expected one of ['string', 'null'], got int"
+   ]
+  },
+  {
+   "id": "params.union-all-unknown",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "wild": "x"
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.wild: expected one of ['barnum', 'whodunit'] (no known JSON type in union), got str"
+   ]
+  },
+  {
+   "id": "params.unknown-single-type",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "loose": "x"
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.loose: unknown type 'floatly'"
+   ]
+  },
+  {
+   "id": "params.additional-top-level",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": "a.png",
+    "surprise": 1
+   },
+   "label": "parameters",
+   "problems": [
+    "parameters.surprise: not declared and additionalProperties false"
+   ]
+  },
+  {
+   "id": "params.empty-string-output",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": {
+    "output_path": ""
+   },
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.top-level-not-object",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object",
+    "properties": {
+     "output_path": {
+      "type": "string"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 4096
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "fast",
+       "quality",
+       "精细"
+      ]
+     },
+     "ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 3
+     },
+     "nested": {
+      "type": "object",
+      "properties": {
+       "depth": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "depth"
+      ],
+      "additionalProperties": false
+     },
+     "maybe": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "wild": {
+      "type": [
+       "barnum",
+       "whodunit"
+      ]
+     },
+     "loose": {
+      "type": "floatly"
+     }
+    },
+    "required": [
+     "output_path"
+    ],
+    "additionalProperties": false
+   },
+   "parameters": [
+    "not",
+    "an",
+    "object"
+   ],
+   "label": "parameters",
+   "problems": [
+    "parameters: expected object"
+   ]
+  },
+  {
+   "id": "params.top-level-string-label",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "object"
+   },
+   "parameters": "nope",
+   "label": "arguments",
+   "problems": [
+    "arguments: expected object"
+   ]
+  },
+  {
+   "id": "params.string-type-toplevel-nonobject",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "string"
+   },
+   "parameters": 42,
+   "label": "parameters",
+   "problems": [
+    "parameters: expected string, got int"
+   ]
+  },
+  {
+   "id": "params.int-toplevel-valid",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "integer"
+   },
+   "parameters": 7,
+   "label": "parameters",
+   "problems": []
+  },
+  {
+   "id": "params.array-schema-nested-paths",
+   "fn": "validate_parameters",
+   "schema": {
+    "type": "array",
+    "items": {
+     "type": "object",
+     "properties": {
+      "v": {
+       "type": "number",
+       "minimum": 0
+      }
+     },
+     "required": [
+      "v"
+     ]
+    }
+   },
+   "parameters": [
+    {
+     "v": 1.5
+    },
+    {
+     "v": -2
+    }
+   ],
+   "label": "parameters",
+   "problems": [
+    "parameters[1].v: -2 < minimum 0"
+   ]
+  },
+  {
+   "id": "descriptor.valid",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": []
+  },
+  {
+   "id": "descriptor.empty-id",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "provider_id '' must match ^[a-z0-9][a-z0-9._-]{1,63}$"
+   ]
+  },
+  {
+   "id": "descriptor.uppercase-id",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "Geology.Stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "provider_id 'Geology.Stats' must match ^[a-z0-9][a-z0-9._-]{1,63}$"
+   ]
+  },
+  {
+   "id": "descriptor.leading-dot-id",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": ".geology",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "provider_id '.geology' must match ^[a-z0-9][a-z0-9._-]{1,63}$"
+   ]
+  },
+  {
+   "id": "descriptor.short-id",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "a",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "provider_id 'a' must match ^[a-z0-9][a-z0-9._-]{1,63}$"
+   ]
+  },
+  {
+   "id": "descriptor.too-long-id",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "provider_id 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' must match ^[a-z0-9][a-z0-9._-]{1,63}$"
+   ]
+  },
+  {
+   "id": "descriptor.id-max-length-ok",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": []
+  },
+  {
+   "id": "descriptor.bad-version-empty",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "version '' must be numeric dotted (e.g. 1.0.0)"
+   ]
+  },
+  {
+   "id": "descriptor.bad-version-alpha",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.x",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "version '1.0.x' must be numeric dotted (e.g. 1.0.0)"
+   ]
+  },
+  {
+   "id": "descriptor.version-four-segments-ok",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.2.3.4",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": []
+  },
+  {
+   "id": "descriptor.version-five-segments",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.2.3.4.5",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "version '1.2.3.4.5' must be numeric dotted (e.g. 1.0.0)"
+   ]
+  },
+  {
+   "id": "descriptor.whitespace-display-name",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "   ",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "display_name must be a non-empty string"
+   ]
+  },
+  {
+   "id": "descriptor.schema-not-object",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": "nope",
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "parameters_schema must be a dict (JSON schema)"
+   ]
+  },
+  {
+   "id": "descriptor.schema-wrong-top-type",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "string"
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "parameters_schema must describe an object at the top level"
+   ]
+  },
+  {
+   "id": "descriptor.schema-top-type-null-ok",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": null
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": []
+  },
+  {
+   "id": "descriptor.schema-properties-not-dict",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "properties": []
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "parameters_schema.properties must be a dict"
+   ]
+  },
+  {
+   "id": "descriptor.schema-required-not-list",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "required": "width"
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "parameters_schema.required must be a list"
+   ]
+  },
+  {
+   "id": "descriptor.unknown-input-ref",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "BogusRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "input_types entry 'BogusRef' is not a known typed ref ['DataVersionRef', 'FactorDatasetRef', 'FactorGridRef', 'GeologicalFactorDataset', 'MapDocument', 'MapDocumentRef', 'PathRef', 'SeismicVolumeRef', 'WellRef']"
+   ]
+  },
+  {
+   "id": "descriptor.unknown-output-ref",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "BogusRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "output_types entry 'BogusRef' is not a known typed ref ['DataVersionRef', 'FactorDatasetRef', 'FactorGridRef', 'GeologicalFactorDataset', 'MapDocument', 'MapDocumentRef', 'PathRef', 'SeismicVolumeRef', 'WellRef']"
+   ]
+  },
+  {
+   "id": "descriptor.bad-threading-model",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "main_loop",
+    "build_identity": null
+   },
+   "problems": [
+    "threading_model 'main_loop' invalid"
+   ]
+  },
+  {
+   "id": "descriptor.threading-any-ok",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "any",
+    "build_identity": null
+   },
+   "problems": []
+  },
+  {
+   "id": "descriptor.cpu-cores-zero",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 0.0,
+     "estimated_ram_bytes": 0,
+     "estimated_vram_bytes": 0,
+     "io_weight": 1.0,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "resource_profile.estimated_cpu_cores must be > 0"
+   ]
+  },
+  {
+   "id": "descriptor.io-weight-negative",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [
+     "factor_stats"
+    ],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "resource_profile": {
+     "estimated_cpu_cores": 1.0,
+     "estimated_ram_bytes": 0,
+     "estimated_vram_bytes": 0,
+     "io_weight": -0.1,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": [
+    "resource_profile.io_weight must be >= 0"
+   ]
+  },
+  {
+   "id": "descriptor.deterministic-false-ok",
+   "fn": "validate_descriptor",
+   "descriptor": {
+    "provider_id": "geology.factor_stats",
+    "family": "interpolation",
+    "version": "1.0.0",
+    "display_name": "地质因子统计摘要",
+    "description": "",
+    "capabilities": [],
+    "input_types": [
+     "GeologicalFactorDataset",
+     "FactorDatasetRef"
+    ],
+    "output_types": [
+     "PathRef"
+    ],
+    "parameters_schema": {},
+    "resource_profile": {
+     "estimated_cpu_cores": 0.5,
+     "estimated_ram_bytes": 67108864,
+     "estimated_vram_bytes": 0,
+     "io_weight": 0.2,
+     "category": "background.compute"
+    },
+    "supports_cancel": false,
+    "supports_resume": false,
+    "deterministic": true,
+    "threading_model": "worker_thread",
+    "build_identity": null
+   },
+   "problems": []
+  }
+ ]
+}
