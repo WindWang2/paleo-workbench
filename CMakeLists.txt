@@ -674,6 +674,10 @@ if(PWB_BUILD_PLATFORM)
     add_subdirectory(libs/ui_widgets)
     add_subdirectory(libs/ui_shell)
     add_subdirectory(libs/ui_data_core)
+    # UI-05 — qgs-map slice: QGIS-backed map surfaces + Qt panels
+    # (map canvas panel, work-area widget, layer tree, document/chrome
+    # panels, dock manager, constrained mapping-page shell).
+    add_subdirectory(libs/ui_map)
     add_subdirectory(apps/paleo_workbench_platform)
     if(BUILD_TESTING)
         enable_testing()
