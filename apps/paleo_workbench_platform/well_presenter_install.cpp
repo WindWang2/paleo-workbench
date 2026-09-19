@@ -168,8 +168,16 @@ QWidget* make_time_depth_page(const QString& asset_path) {
         data.pairs.emplace_back(table->depths_m[i], table->twt_ms[i]);
     }
     auto* page = new TimeDepthPreviewPage(std::move(data));
-    // 探针绑定标定核（CheckshotTable → WellTieCalibration 插值）。
-    page->set_probe([table](double md) { return table->interpolate_twt(md); });
+    // 探针绑定标定核（CheckshotTable → WellTieCalibration 插值）。表值
+    // 按值捕获：页面生命周期长于本函数，绝不悬垂引用局部 SeismicTie
+    //（P0-2 教训）；插值语义仍是权威核。
+    auto depths = table->depths_m;
+    auto twts = table->twt_ms;
+    page->set_probe([depths = std::move(depths),
+                     twts = std::move(twts)](double md) {
+        return pwb::viz::well_tie::WellTieCalibration(depths, twts)
+            .depth_to_twt(md);
+    });
     return page;
 #else
     // viz-B 核不在本构建：诚实诊断页（不伪造校准数据）。
@@ -214,9 +222,24 @@ bool install() {
         pwb::viz_e::ExternalPresenter presenter;
         presenter.kind = "time_depth";
         presenter.note = "05 线 time-depth presenter（SeismicTie CSV + 标定核探针）";
+        // 内容探针而非扩展名抢占：仅当该 CSV 真能按 checkshot 表解析出
+        // ≥2 对时接手，否则放行给通用表格预览（P1-4：任何 .csv 都吃下
+        // 会把分层/导出 CSV 劫持成诊断页）。
         presenter.supports = [](const QString& path) {
-            return path.endsWith(QLatin1String(".csv"),
-                                 Qt::CaseInsensitive);
+            if (!path.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive)) {
+                return false;
+            }
+            pwb::viz::cross_well::SeismicTie probe;
+            if (!probe.load_csv(path.toStdString())) return false;
+            for (const auto* table :
+                 {probe.table_for_well(probe.well_names().empty()
+                                           ? std::string()
+                                           : probe.well_names().front())}) {
+                if (table != nullptr && table->depths_m.size() >= 2) {
+                    return true;
+                }
+            }
+            return false;
         };
         presenter.create = [](const QString& path, QWidget* parent) {
             QWidget* page = make_time_depth_page(path);

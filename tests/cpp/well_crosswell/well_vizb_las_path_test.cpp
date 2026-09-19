@@ -52,7 +52,7 @@ int main() {
         if (well.name == "Well B") well_b = &well;
     }
     CHECK(well_a != nullptr);
-    CHECK(well_a->curves.size() == 2);
+    CHECK(well_a->curves.size() == 4);  // GR+DT+AC+DEN 真曲线
     for (const auto& curve : well_a->curves) {
         CHECK(curve.depths.size() == curve.values.size());
         for (double v : curve.values) {

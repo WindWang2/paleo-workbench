@@ -82,7 +82,7 @@ void WellLogPreviewPage::paintEvent(QPaintEvent* /*event*/) {
         return;
     }
 
-    const int margin_left = 56;
+    const int margin_left = 12;  // 纵轴改为每列自身值域标注（无共享标尺）
     const int margin_top = 28;
     const int margin_bottom = 34;
     const int margin_right = 10;
@@ -90,36 +90,13 @@ void WellLogPreviewPage::paintEvent(QPaintEvent* /*event*/) {
                                        -margin_bottom);
     if (plot.width() < 40 || plot.height() < 40) return;
 
-    double depth_lo = data_.top_depth;
-    double depth_hi = data_.bottom_depth;
-    if (!finite(depth_lo) || !finite(depth_hi) || depth_lo > depth_hi) {
-        depth_lo = depth_hi = 0.0;
-    }
-    const double depth_span = depth_hi - depth_lo;
-
     const int drawn = static_cast<int>(
         std::min<std::size_t>(data_.curves.size(), kMaxDrawnCurves));
     const double column_w =
         static_cast<double>(plot.width()) / static_cast<double>(drawn);
 
-    // 深度标尺（左侧，5 刻度）。
-    painter.setPen(QColor(0x44, 0x44, 0x44));
-    for (int i = 0; i <= 4; ++i) {
-        const double depth = depth_lo + depth_span * i / 4.0;
-        const int y = plot.top() +
-                      static_cast<int>(static_cast<double>(plot.height()) *
-                                       static_cast<double>(i) / 4.0);
-        painter.drawLine(plot.left() - 4, y, plot.left(), y);
-        painter.drawText(QRect(0, y - 8, plot.left() - 6, 16),
-                         Qt::AlignRight | Qt::AlignVCenter,
-                         QStringLiteral("%1").arg(depth, 0, 'f', 1));
-    }
-    painter.drawText(QRect(0, plot.bottom() + 4, plot.left() + 40, 16),
-                     Qt::AlignRight,
-                     QStringLiteral("深度/%1")
-                         .arg(data_.depth_unit.empty()
-                                  ? QStringLiteral("未声明")
-                                  : QString::fromStdString(data_.depth_unit)));
+    // 纵轴是每列自己的值轴（P2-12：曲线 Y 编码曲线值，不是共享深度），
+    // 深度包络只在摘要行陈述——不画全局"深度标尺"误导读图。
 
     static const QColor kColors[kMaxDrawnCurves] = {
         QColor(0x1d, 0x4e, 0xd8), QColor(0x15, 0x80, 0x3d),
@@ -192,7 +169,7 @@ void WellLogPreviewPage::paintEvent(QPaintEvent* /*event*/) {
         painter.setPen(QPen(kColors[c], 1.2));
         painter.drawPath(path);
 
-        // 列头：曲线名 + 单位。
+        // 列头：曲线名 + 单位；列底/列顶：该列值域（诚实值轴）。
         painter.setPen(QColor(0x22, 0x22, 0x22));
         const QString label =
             QString::fromStdString(curve.name) +
@@ -202,6 +179,14 @@ void WellLogPreviewPage::paintEvent(QPaintEvent* /*event*/) {
                        QString::fromStdString(curve.unit)));
         painter.drawText(QRect(column.left(), 2, column.width(), 24),
                          Qt::AlignHCenter | Qt::AlignVCenter, label);
+        painter.setPen(QColor(0x55, 0x55, 0x55));
+        painter.drawText(QRect(column.left(), plot.top(), column.width(), 12),
+                         Qt::AlignHCenter | Qt::AlignTop,
+                         QStringLiteral("%1").arg(v_hi, 0, 'g', 4));
+        painter.drawText(
+            QRect(column.left(), plot.bottom() - 12, column.width(), 12),
+            Qt::AlignHCenter | Qt::AlignBottom,
+            QStringLiteral("%1").arg(v_lo, 0, 'g', 4));
     }
 
     if (data_.curves.size() > static_cast<std::size_t>(kMaxDrawnCurves)) {

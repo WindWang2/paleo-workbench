@@ -158,6 +158,7 @@
 #endif
 #ifdef PWB_WITH_WELL_PRESENTERS
 #include "well_presenter_install.hpp"
+#include <QDebug>
 #endif
 
 #ifdef PWB_WITH_GEO3D_VIZ
@@ -537,7 +538,10 @@ void MainWindow::buildUi() {
 // BEGIN 05 — well/time-depth external presenters into the viz-e data page
 // registry (05→04 contract; body lives in well_presenter_install.cpp).
 #if defined(PWB_WITH_WELL_PRESENTERS)
-    well_presenters::install();
+    if (!well_presenters::install()) {
+        qWarning() << "well presenters: duplicate kind registration "
+                      "(wiring bug — first registration kept)";
+    }
 #endif
 // END 05
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)

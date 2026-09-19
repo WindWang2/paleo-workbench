@@ -262,46 +262,63 @@ void store_sheet(std::vector<SheetData>* sheets, SheetData sheet) {
 }  // namespace
 
 bool is_well_log_xml_bytes(std::string_view bytes) {
-    std::unique_ptr<XmlNode> root;
-    try {
-        // defusedxml 优先语义：实体禁止。
-        root = pwb::ingest::xml_parse(bytes, /*forbid_entities=*/true);
-    } catch (const std::exception&) {
-        return false;
-    }
+    // 流式有界扫描（Python root.iter() 的 200k 上限语义）：Start 事件
+    // 即判定，绝不全量物化元素树（内存 O(1)，P1-2 教训）。实体禁止 =
+    // defusedxml 优先语义。
+    pwb::ingest::XmlScanner scanner(/*forbid_entities=*/true);
+    pwb::ingest::XmlScanner::Attributes attrs;
+    const pwb::ingest::XmlNode* end_node = nullptr;
     constexpr std::size_t kMaxElements = 200000;
-    std::vector<const XmlNode*> elements;
-    root->iter(elements);
     bool has_log_element = false;
     bool has_log_curve_info = false;
     bool has_log_data = false;
     bool has_named_sheet = false;
-    bool witsml_in_tags = false;
+    bool witsml_tag_exact = false;
+    std::string root_tag;
     std::size_t index = 0;
-    for (const XmlNode* element : elements) {
-        if (index >= kMaxElements) break;
-        ++index;
-        const std::string tag = local_name_casefold(element->tag);
-        has_log_element = has_log_element || tag == "log";
-        has_log_curve_info =
-            has_log_curve_info || tag == "logcurveinfo" || tag == "curveinfo";
-        has_log_data = has_log_data || tag == "logdata";
-        witsml_in_tags =
-            witsml_in_tags || tag.find("witsml") != std::string::npos;
-        if (tag == "worksheet") {
-            for (const auto& [key, value] : element->attrib) {
-                (void)key;
-                const std::string name = local_name_casefold(value);
-                if (name == "测井曲线" || name == "welllog" ||
-                    name == "well log" || name == "log curves") {
-                    has_named_sheet = true;
+    bool malformed = false;
+    scanner.feed(bytes);
+    while (true) {
+        pwb::ingest::XmlScanner::Event event;
+        if (!scanner.next(event, attrs, end_node)) {
+            malformed = scanner.failed();
+            break;
+        }
+        if (event == pwb::ingest::XmlScanner::Event::Start) {
+            if (index == 0) root_tag = local_name_casefold(attrs.tag);
+            const std::string tag = local_name_casefold(attrs.tag);
+            ++index;
+            has_log_element = has_log_element || tag == "log";
+            has_log_curve_info = has_log_curve_info ||
+                                 tag == "logcurveinfo" ||
+                                 tag == "curveinfo";
+            has_log_data = has_log_data || tag == "logdata";
+            witsml_tag_exact = witsml_tag_exact || tag == "witsml";
+            if (tag == "worksheet") {
+                for (const auto& [key, value] : attrs.attrib) {
+                    (void)key;
+                    const std::string name = local_name_casefold(value);
+                    if (name == "测井曲线" || name == "welllog" ||
+                        name == "well log" || name == "log curves") {
+                        has_named_sheet = true;
+                    }
                 }
             }
+            if (index >= kMaxElements) break;  // 语义扫描有界（Python 同）
         }
     }
-    const std::string root_tag = local_name_casefold(root->tag);
-    const bool is_witsml = root_tag.find("witsml") != std::string::npos ||
-                           witsml_in_tags;
+    // 良构性覆盖整个文档（Python ET.parse 全量解析语义）：语义已足或
+    // 达到元素上限后仍排空到 EOF，尾部畸形一律 false。
+    if (!malformed) {
+        scanner.mark_end();
+        pwb::ingest::XmlScanner::Event event;
+        while (scanner.next(event, attrs, end_node)) {
+        }
+        malformed = scanner.failed();
+    }
+    if (malformed) return false;
+    const bool is_witsml =
+        root_tag.find("witsml") != std::string::npos || witsml_tag_exact;
     return (has_log_element && has_log_curve_info && has_log_data) ||
            (is_witsml && has_log_curve_info && has_log_data) ||
            has_named_sheet;
@@ -370,6 +387,11 @@ WellLogXmlData parse_well_log_xml(std::string_view bytes,
                                   const std::string& path_name,
                                   int max_curves,
                                   std::size_t max_samples) {
+    if (max_samples == 0) {
+        // Python 参考在此为 ZeroDivisionError（stride 除零）；worker 边界
+        // 一律按 ValueError 语义失败，绝不静默全量。
+        throw std::invalid_argument("max_samples 必须为正");
+    }
     std::unique_ptr<XmlNode> root;
     try {
         root = pwb::ingest::xml_parse(bytes, /*forbid_entities=*/false);
@@ -435,12 +457,14 @@ WellLogXmlData parse_well_log_xml(std::string_view bytes,
             std::string hs = pwb::ingest::py_strip(h);
             if (!hs.empty()) headers.push_back(std::move(hs));
         }
-        const auto& raw_rows = *source_rows;
+        // Python: raw_rows = curve_sheet_rows[1:] —— 井名列扫描只看数据行
+        //（含表头行会把字面 "井号" 当井名，P0-1 教训）。
         if (!headers.empty()) {
             const std::string& first = headers.front();
             if (first == "井号" || first == "Well" ||
                 first == "WELL_NAME" || first == "WELL") {
-                for (const auto& r : raw_rows) {
+                for (std::size_t ri = 1; ri < source_rows->size(); ++ri) {
+                    const auto& r = (*source_rows)[ri];
                     if (!r.empty() && !r[0].empty()) {
                         data.well_name = r[0];
                         break;
@@ -448,11 +472,11 @@ WellLogXmlData parse_well_log_xml(std::string_view bytes,
                 }
             }
         }
-        for (std::size_t r = 1; r < raw_rows.size(); ++r) {
-            rows.emplace_back(raw_rows[r].begin(),
-                              raw_rows[r].begin() +
-                                  std::min(raw_rows[r].size(),
-                                           headers.size()));
+        for (std::size_t r = 1; r < source_rows->size(); ++r) {
+            rows.emplace_back(
+                source_rows->at(r).begin(),
+                source_rows->at(r).begin() +
+                    std::min(source_rows->at(r).size(), headers.size()));
         }
     }
 
@@ -673,16 +697,24 @@ WellLogXmlData parse_well_log_xml(std::string_view bytes,
                     if (in_row(bot_i, row) && !cell(bot_i, row).empty()) {
                         if (!py_float(cell(bot_i, row), &b)) continue;
                     }
-                    if (t >= b) continue;
-                    if (in_row(form_i, row) &&
-                        !pwb::ingest::py_strip(cell(form_i, row)).empty()) {
-                        data.formation.push_back(
-                            {t, b, pwb::ingest::py_strip(cell(form_i, row))});
-                    }
-                    if (in_row(facies_i, row) &&
-                        !pwb::ingest::py_strip(cell(facies_i, row)).empty()) {
-                        data.facies.push_back(
-                            {t, b, pwb::ingest::py_strip(cell(facies_i, row))});
+                    // Python: `if t_val < b_val:` 包住两条入列 —— NaN
+                    // 比较恒假 → 丢弃（正向守卫，与 t>=b continue 在
+                    // NaN 上语义相反，P1-3 教训）。
+                    if (t < b) {
+                        if (in_row(form_i, row) &&
+                            !pwb::ingest::py_strip(cell(form_i, row))
+                                 .empty()) {
+                            data.formation.push_back(
+                                {t, b,
+                                 pwb::ingest::py_strip(cell(form_i, row))});
+                        }
+                        if (in_row(facies_i, row) &&
+                            !pwb::ingest::py_strip(cell(facies_i, row))
+                                 .empty()) {
+                            data.facies.push_back(
+                                {t, b,
+                                 pwb::ingest::py_strip(cell(facies_i, row))});
+                        }
                     }
                 }
             }
@@ -753,9 +785,10 @@ WellLogXmlData parse_well_log_xml(std::string_view bytes,
 }  // namespace pwb::ui_workers
 
 // 与冻结参考的容许分歧（逐条，均已在用例层锁定或按构造不可达）：
-//  * float 解析自实现 Python 语法（下划线/inf/nan）；stod 溢出按
-//    ValueError 处理（Python 是 OverflowError——worker 边界都呈失败，
-//    类名差异限于日志文本，不改变载荷）。
+//  * float 解析自实现 Python 语法（下划线/inf/nan）。溢出字面量
+//   （"1e999"）：Python float() 返回 inf（字符串解析不溢出），本实现
+//    stod 抛出后按"不可解析"处理——深度值则跳行、曲线值落 NaN。真实
+//    交付不含 ≥1e308 的字面量；如出现，差异由本声明锁定。
 //  * int(ss:Index) 不接受数字间下划线（strtol；真实交付不含此形状）。
 //  * casefold 以 ASCII lower 实现：参与比较的键集（ASCII + 中文键）不
 //    受 Unicode 大小写折叠特例影响。

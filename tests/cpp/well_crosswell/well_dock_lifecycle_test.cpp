@@ -11,7 +11,7 @@
 //      切回 → 原状态逐值恢复；
 //   5. 标定数值可复现：同一井两次标定读数逐字符一致。
 
-#include <QCoreApplication>
+#include <QApplication>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
@@ -68,7 +68,9 @@ QString tie_readout_text(QWidget* root) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    QCoreApplication app(argc, argv);
+    // QWidget 家族（dock/进度对话框）要求 QApplication；offscreen 平台由
+    // CMake 测试属性注入。
+    QApplication app(argc, argv);
     const std::string dir = PWB_WELL_FIXTURE_DIR;
     const QString las_a = QString::fromStdString(dir + "/las/well_a_metric.las");
     const QString las_b =

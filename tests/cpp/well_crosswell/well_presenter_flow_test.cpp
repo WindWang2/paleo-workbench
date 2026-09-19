@@ -6,7 +6,7 @@
 //   * 非井 .xml 资产 → 诚实诊断页（不伪造曲线，不假装失败缺失）；
 //   * 注册表合同：first-wins，重复注册被响亮拒绝。
 
-#include <QCoreApplication>
+#include <QApplication>
 #include <QEventLoop>
 #include <QPixmap>
 #include <QTimer>
@@ -78,7 +78,9 @@ struct Counter : public QObject {
 }  // namespace
 
 int main(int argc, char** argv) {
-    QCoreApplication app(argc, argv);
+    // VizEDataPage 是 QWidget 家族：必须 QApplication（offscreen 由 CMake
+    // 测试属性注入）。
+    QApplication app(argc, argv);
     const std::string dir = PWB_WELL_FIXTURE_DIR;
 
     pwb::viz_e::reset_external_presenters_for_tests();
@@ -118,7 +120,7 @@ int main(int argc, char** argv) {
     if (well_page != nullptr) {
         CHECK(well_page->data().diagnostic.empty());   // 不是诊断降级
         CHECK(well_page->data().well_name == "Well A");
-        CHECK(well_page->data().curves.size() == 2);   // GR + DT 真曲线
+        CHECK(well_page->data().curves.size() == 4);   // GR+DT+AC+DEN 真曲线
         // 渲染非空 smoke（offscreen grab 不崩溃、非空尺寸）。
         well_page->resize(480, 320);
         const QPixmap snapshot = well_page->grab();

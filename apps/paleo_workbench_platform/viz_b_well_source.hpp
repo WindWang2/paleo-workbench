@@ -44,6 +44,8 @@ struct VizBLasSourceResult {
     pwb::domain::Json coords = pwb::domain::Json::array();
     // 逐文件的失败原因（路径 + 原因），加载部分成功时用户可见。
     QStringList errors;
+    // 取消检查点命中（文件边界）——与失败区分，调用方按取消处理。
+    bool cancelled = false;
 };
 
 // 单个已解析文档 → 连井列。无可用曲线（全部缺测/无样本）→ nullopt。
@@ -51,10 +53,11 @@ std::optional<pwb::viz::cross_well::WellColumnData> well_column_from_document(
     const welllog::WellLogDocument& document,
     const std::string& well_name);
 
-// 批量加载：每路径经 load_fn（取消令牌恒 false——dock 同步路径）；逐
-// 文件失败记入结果，全部失败/零井 → wells 为空。
+// 批量加载：每路径经 load_fn；is_cancelled（可空）在文件间检查——解析
+// 单文件本身不可中断（WLE 单调用，Python 同语义），取消发生在下一个
+// 文件边界。逐文件失败记入结果，全部失败/零井 → wells 为空。
 VizBLasSourceResult load_wells_from_las(
-    const QStringList& paths,
-    const pwb::ui_workers::WellLogLoadFn& load_fn);
+    const QStringList& paths, const pwb::ui_workers::WellLogLoadFn& load_fn,
+    const std::function<bool()>& is_cancelled = {});
 
 }  // namespace pwb::app

@@ -104,6 +104,13 @@ class VizBCrossWellDock : public QDockWidget {
     // 清空工作区（工程切换到无 sidecar 的新工程时——绝不带着上一个工程
     // 的井/拾取显示）。
     void reset_workspace();
+    // LAS 加载结果统一落账（同步路径与 JobCenter 异步路径共用）：井列、
+    // 坐标、逐文件错误 → 状态 + 身份注册 + 来源显示 + 持久化调度。
+    void apply_las_wells(const QStringList& paths,
+                         const std::vector<
+                             pwb::viz::cross_well::WellColumnData>& wells,
+                         const pwb::domain::Json& coords,
+                         const QStringList& errors);
     // 共享井身份（05 线）：井列加载成功后按名注册；结果来源显示引用。
     void register_well_identities();
     // 数据/结果来源显示（用户可见的出处：井文件来源 + 最近计算结果）。

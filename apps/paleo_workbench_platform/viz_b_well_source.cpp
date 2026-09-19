@@ -2,6 +2,7 @@
 
 #include "viz_b_well_source.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include <QObject>
@@ -56,7 +57,8 @@ std::optional<pwb::viz::cross_well::WellColumnData> well_column_from_document(
 }
 
 VizBLasSourceResult load_wells_from_las(
-    const QStringList& paths, const pwb::ui_workers::WellLogLoadFn& load_fn) {
+    const QStringList& paths, const pwb::ui_workers::WellLogLoadFn& load_fn,
+    const std::function<bool()>& is_cancelled) {
     VizBLasSourceResult result;
     if (!load_fn) {
         result.errors.append(
@@ -64,23 +66,29 @@ VizBLasSourceResult load_wells_from_las(
         return result;
     }
     const std::function<bool()> never_cancelled = [] { return false; };
+    const std::function<bool()>& cancelled =
+        is_cancelled != nullptr ? is_cancelled : never_cancelled;
     for (const QString& path : paths) {
+        if (cancelled()) {
+            result.cancelled = true;
+            return result;
+        }
         const std::string path_std = path.toStdString();
         std::optional<pwb::ui_workers::LoadedWellLog> loaded;
-        bool cancelled = false;
+        bool was_cancelled = false;
         try {
-            loaded = load_fn(path_std, never_cancelled);
+            loaded = load_fn(path_std, cancelled);
         } catch (const pwb::ui_workers::WellLogLoadCancelled&) {
-            cancelled = true;
+            was_cancelled = true;
         } catch (const std::exception& exc) {
             result.errors.append(
                 QObject::tr("%1：解析异常 %2")
                     .arg(path, QString::fromLocal8Bit(exc.what())));
             continue;
         }
-        if (cancelled) {
-            result.errors.append(QObject::tr("%1：已取消").arg(path));
-            continue;
+        if (was_cancelled || cancelled()) {
+            result.cancelled = true;
+            return result;
         }
         if (!loaded || !loaded->data.has_value()) {
             result.errors.append(

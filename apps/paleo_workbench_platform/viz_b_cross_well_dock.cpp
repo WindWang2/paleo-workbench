@@ -313,8 +313,12 @@ bool VizBCrossWellDock::load_wells_from_las(const QStringList& paths,
         return false;
     }
 #if defined(PWB_WITH_VIZ_B_LAS)
-    const auto result = pwb::app::load_wells_from_las(
-        paths, pwb::ui_workers::make_wle_load_fn());
+    const auto result =
+        pwb::app::load_wells_from_las(paths, pwb::ui_workers::make_wle_load_fn());
+    if (result.cancelled) {
+        if (error != nullptr) *error = tr("LAS 加载已取消");
+        return false;
+    }
     if (result.wells.empty()) {
         if (error != nullptr) {
             *error = result.errors.isEmpty()
@@ -323,25 +327,12 @@ bool VizBCrossWellDock::load_wells_from_las(const QStringList& paths,
         }
         return false;
     }
-    wells_ = result.wells;
-    last_wells_path_.clear();
-    last_las_paths_.clear();
-    for (const QString& path : paths) {
-        last_las_paths_.append(QFileInfo(path).absoluteFilePath());
-    }
-    well_coords_cache_ = result.coords;  // LAS 无坐标：诚实空数组
-    canvas_->set_wells(wells_);
-    tie_well_selector_->clear();
-    for (const WellColumnData& well : wells_) {
-        tie_well_selector_->addItem(QString::fromStdString(well.name));
-    }
-    register_well_identities();
-    update_source_label();
+    apply_las_wells(paths, result.wells, result.coords, result.errors);
     QString status = tr("已从 LAS 加载 %1 口井")
                          .arg(static_cast<int>(wells_.size()));
     if (!result.errors.isEmpty()) {
-        status += QStringLiteral("；") + result.errors.join(
-                                               QLatin1String("; "));
+        status += QStringLiteral("；") +
+                  result.errors.join(QLatin1String("; "));
     }
     emit status_message(status);
     return true;
@@ -356,15 +347,112 @@ bool VizBCrossWellDock::load_wells_from_las(const QStringList& paths,
 #endif
 }
 
+void VizBCrossWellDock::apply_las_wells(
+    const QStringList& paths,
+    const std::vector<pwb::viz::cross_well::WellColumnData>& wells,
+    const pwb::domain::Json& coords, const QStringList& errors) {
+    wells_ = wells;
+    last_wells_path_.clear();
+    last_las_paths_.clear();
+    for (const QString& path : paths) {
+        last_las_paths_.append(QFileInfo(path).absoluteFilePath());
+    }
+    well_coords_cache_ = coords;  // LAS 无坐标：诚实空数组
+    canvas_->set_wells(wells_);
+    tie_well_selector_->clear();
+    for (const WellColumnData& well : wells_) {
+        tie_well_selector_->addItem(QString::fromStdString(well.name));
+    }
+    register_well_identities();
+    update_source_label();
+}
+
 void VizBCrossWellDock::on_load_las() {
     const QStringList paths = QFileDialog::getOpenFileNames(
         this, tr("加载井数据（LAS）"), QString(),
         tr("Well LAS (*.las);;All files (*.*)"));
     if (paths.isEmpty()) return;
+#if defined(PWB_WITH_VIZ_B_LAS)
+    if (job_center_ == nullptr) {
+        emit status_message(tr("作业中心不可用"));
+        return;
+    }
+    // 用户触发的 LAS 加载走 JobCenter（P1-1：多 MB 文件不冻结 GUI）；
+    // 进度对话框是取消面；结果经队列 GUI hop + 会话代际守卫落账
+    //（迟到/换工程/销毁一律丢弃）。
+    auto* progress =
+        new QProgressDialog(tr("LAS 解析中…"), tr("取消"), 0, 100, this);
+    progress->setWindowModality(Qt::WindowModal);
+    progress->setMinimumDuration(0);
+    progress->setValue(1);
+    const std::uint64_t generation = session_generation_;
+
+    pwb::job::JobSpec spec;
+    spec.kind = "io";
+    spec.title = "cross_well.load_las";
+    spec.run = [paths](pwb::job::JobContext& ctx) -> std::any {
+        return std::any(pwb::app::load_wells_from_las(
+            paths, pwb::ui_workers::make_wle_load_fn(),
+            [&ctx] { return ctx.token().is_cancelled(); }));
+    };
+    auto& owner = job_center_->make_owner(this);
+    QObject::connect(progress, &QProgressDialog::canceled, &owner,
+                     &pwb::job::qtbridge::JobOwner::cancel);
+    owner.start(
+        job_center_->scheduler(), std::move(spec),
+        [this, generation, progress, paths](
+            const pwb::job::qtbridge::JobOutcome& outcome) {
+            progress->deleteLater();
+            if (generation != session_generation_) {
+                return;  // 换工程/关闭在飞 —— 丢弃
+            }
+            if (outcome.state == pwb::job::JobState::cancelled) {
+                emit status_message(tr("LAS 加载已取消"));
+                return;
+            }
+            if (outcome.state == pwb::job::JobState::failed) {
+                QMessageBox::warning(nullptr, tr("加载 LAS"),
+                                     QString::fromStdString(outcome.error));
+                return;
+            }
+            const auto* result =
+                std::any_cast<pwb::app::VizBLasSourceResult>(&outcome.result);
+            if (result == nullptr) {
+                emit status_message(tr("LAS 加载结果类型异常"));
+                return;
+            }
+            if (result->cancelled) {
+                emit status_message(tr("LAS 加载已取消"));
+                return;
+            }
+            if (result->wells.empty()) {
+                QMessageBox::warning(
+                    this, tr("加载失败"),
+                    result->errors.isEmpty()
+                        ? tr("LAS 井数据为空")
+                        : result->errors.join(QLatin1String("; ")));
+                return;
+            }
+            apply_las_wells(paths, result->wells, result->coords,
+                            result->errors);
+            QString status = tr("已从 LAS 加载 %1 口井")
+                                 .arg(static_cast<int>(wells_.size()));
+            if (!result->errors.isEmpty()) {
+                status += QStringLiteral("；") +
+                          result->errors.join(QLatin1String("; "));
+            }
+            emit status_message(status);
+        },
+        [progress](double ratio, const QString&) {
+            progress->setValue(
+                std::max(1, static_cast<int>(ratio * 100.0)));
+        });
+#else
     QString error;
     if (!load_wells_from_las(paths, &error)) {
         QMessageBox::warning(this, tr("加载失败"), error);
     }
+#endif
 }
 
 void VizBCrossWellDock::register_well_identities() {
@@ -1019,6 +1107,11 @@ void VizBCrossWellDock::restore_state(const Json& state) {
         if (!paths.isEmpty()) {
             QString error;
             load_wells_from_las(paths, &error);
+            if (!error.isEmpty()) {
+                // 重开重载失败必须可见（P2-8：静默零井最伤审计）。
+                emit status_message(
+                    tr("LAS 井来源重载失败：%1").arg(error));
+            }
         }
     }
     if (state.contains("top_meta") && state.at("top_meta").is_object()) {

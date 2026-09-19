@@ -90,7 +90,8 @@ if(TARGET Pwb::VizChartsQt AND TARGET Pwb::UiPagesDataQt
     target_compile_definitions(well.presenter_flow PRIVATE
         PWB_WELL_FIXTURE_DIR="${PWB_WELL_FIXTURE_DIR}"
         PWB_WITH_CONV_30=1
-        PWB_WELL_PRESENTERS_HAVE_WLE=1)
+        PWB_WELL_PRESENTERS_HAVE_WLE=1
+        PWB_WELL_PRESENTERS_HAVE_TIE=1)
     add_test(NAME well.presenter_flow COMMAND well.presenter_flow)
     set_tests_properties(well.presenter_flow PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"

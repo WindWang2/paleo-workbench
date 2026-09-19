@@ -99,8 +99,10 @@ bool case_matches(const pwb::domain::Json& expected,
     }
     if (expected.contains("total_rows") &&
         expected.at("total_rows").is_number() &&
+        expected.at("total_rows").get<long>() > 0 &&
         expected.at("total_rows").get<long>() !=
             static_cast<long>(data.total_rows)) {
+        // total_rows==0：模式 A（真实冻结 Python）不外露行数，跳过比较。
         return fail("total_rows");
     }
     if (!close_enough(expected.at("top_depth").get<double>(), data.top_depth,

@@ -48,7 +48,7 @@ int main() {
             std::any_cast<WleDocumentPayload>(&loaded->data);
         CHECK(payload != nullptr && payload->document != nullptr);
         CHECK(loaded->well_name == "Well A");
-        CHECK(payload->document->curves().size() == 2);
+        CHECK(payload->document->curves().size() == 4);  // GR+DT+AC+DEN
         CHECK(!payload->document->sampling_axes().empty());
         const auto& axis = payload->document->sampling_axes().front();
         // 深度单位贯通（~C DEPT.M → 轴单位含 m，大小写随文件头）。

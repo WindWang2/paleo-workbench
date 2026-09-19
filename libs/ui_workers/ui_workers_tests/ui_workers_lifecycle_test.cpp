@@ -18,7 +18,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -110,19 +113,30 @@ int main() {
     }
 
     // 2) resolve_well_log：取消是抛（不是假消息）；不可解析是消息
-    //    payload（不是异常）；成功是 well_log 载荷。
+    //    payload（不是异常）；成功是 well_log 载荷。路径必须真实存在，
+    //    否则存在性门先拦（load_fn 永不触达）——临时真文件。
     {
+        const std::string las_path =
+            (std::filesystem::temp_directory_path() /
+             "ui_workers_lifecycle_well.las")
+                .string();
+        {
+            std::ofstream las(las_path, std::ios::binary | std::ios::trunc);
+            las << "~VERSION INFORMATION\nVERS. 2.0:\n~WELL INFORMATION\n"
+                   "WELL. W-OK:\n~CURVE INFORMATION\nDEPT.M :\nGR.GAPI :\n"
+                   "~ASCII\n1.0 10.0\n2.0 11.0\n";
+        }
         std::vector<pwb::ui_workers::ResourceSlice> resources;
         pwb::ui_workers::ResourceSlice resource;
         resource.id = "r1";
-        resource.path = "well.las";
+        resource.path = las_path;
         resource.type = "well_log";
         resource.format = "las";
         resources.push_back(resource);
         pwb::ui_workers::VizRefSlice ref;
         ref.kind = "well_log";
         ref.id = "r1";
-        ref.path = "well.las";
+        ref.path = las_path;
 
         const WellLogLoadFn cancelling =
             [](const std::string&, const std::function<bool()>& check)
@@ -159,6 +173,8 @@ int main() {
         CHECK(ok_payload.kind == "well_log");
         CHECK(ok_payload.well_names.size() == 1);
         CHECK(ok_payload.well_names.front() == "W-OK");
+        std::error_code remove_ec;
+        std::filesystem::remove(las_path, remove_ec);
     }
 
     // 3) DTW worker：start 后取消 → cancelled 终态、on_cancel 恰一次、
