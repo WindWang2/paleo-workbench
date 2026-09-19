@@ -905,6 +905,33 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-14
 
+# BEGIN UI-16 — visual-QA slice (libs/ui_visualqa): Qt-free check/state/
+# snapshot cores + thin Qt Widgets shells for the visual_qa_v{6..11}.py
+# harness semantics + the non-production dual-volume overlay prototype.
+# Same gating model as UI-09..14: no per-slice option; the library joins
+# platform configures that already resolved the widget libraries the V11
+# builders reuse (Pwb::UiShellQt command palette, Pwb::UiWellseisQt task/
+# seismic panels, Pwb::UiWorkstationQt inspector/task center,
+# Pwb::UiWidgets state surfaces, Pwb::PlatformServices theme service) —
+# the Python harness remains the production path without them. Heavy
+# host surfaces (AppShell / DataPage / MappingStageBar+Panel) stay
+# injected seams — the slice never fakes them.
+if(PWB_BUILD_PLATFORM AND TARGET Qt6::Widgets
+   AND TARGET Pwb::UiShellQt AND TARGET Pwb::UiWellseisQt
+   AND TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiWidgets
+   AND TARGET Pwb::PlatformServices AND TARGET Pwb::ToolPolicy
+   AND TARGET Pwb::Domain)
+    add_subdirectory(libs/ui_visualqa)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-16: libs/ui_visualqa skipped — needs Qt6::Widgets + "
+        "Pwb::UiShellQt + Pwb::UiWellseisQt + Pwb::UiWorkstationQt + "
+        "Pwb::UiWidgets + Pwb::PlatformServices + Pwb::ToolPolicy + "
+        "Pwb::Domain; the Python visual-QA harness remains the "
+        "production path")
+endif()
+# END UI-16
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared
