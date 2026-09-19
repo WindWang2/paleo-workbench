@@ -1166,6 +1166,44 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
 endif()
 # END VIZ-C-host
 
+# BEGIN VIZ-E — charts drawing kernel + Qt widgets (libs/viz_charts), plan
+# V6 of docs/development/cpp-geoviz-completion-plan.md: the geoviz_plots
+# drawing half (chart/surface/fence/analytics/factor presentation) with a
+# Qt-free core and QPainter widget layer. Joins platform configures (Qt6
+# comes from the platform block's find_package); the Qt-free core carries
+# its own oracle replay test.
+if(PWB_BUILD_PLATFORM)
+    add_subdirectory(libs/viz_charts)
+endif()
+
+# VIZ-E app wiring (plan P-A): the data/preview page assembly mounts into
+# the platform app when the full closure is present — viz_charts Qt layer,
+# UI-06 data pages, and the CONV-30 job runtime (surface previews compute
+# through the product JobCenter). Configures without one of those keep the
+# Python pages as the production path (guard stays off, main_window hook
+# compiles out).
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
+   AND TARGET Pwb::UiPagesDataQt AND TARGET Pwb::UiWorkers
+   AND TARGET Pwb::MappingKernel AND TARGET Pwb::JobQt
+   AND PWB_BUILD_CONV_30)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/viz_e_dat_preview.cpp
+        apps/paleo_workbench_platform/viz_e_factor_preview.cpp
+        apps/paleo_workbench_platform/viz_e_hosts.cpp
+        apps/paleo_workbench_platform/viz_e_install.cpp
+        apps/paleo_workbench_platform/viz_e_dat_preview.hpp
+        apps/paleo_workbench_platform/viz_e_factor_preview.hpp
+        apps/paleo_workbench_platform/viz_e_hosts.hpp
+        apps/paleo_workbench_platform/viz_e_install.hpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::MappingKernel)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_E=1)
+    if(BUILD_TESTING)
+        add_subdirectory(tests/cpp/viz_e)
+    endif()
+endif()
+# END VIZ-E
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared

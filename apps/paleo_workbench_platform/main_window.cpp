@@ -27,6 +27,12 @@
 #endif
 // END CONV-30
 
+// BEGIN VIZ-E — data/preview page assembly (plan P-A + V6).
+#if defined(PWB_WITH_VIZ_E) && defined(PWB_WITH_CONV_30)
+#include "viz_e_install.hpp"
+#endif
+// END VIZ-E
+
 #include <fstream>
 
 // CONV-PS platform services.
@@ -539,6 +545,14 @@ void MainWindow::buildUi() {
     viz_d_seismic_host_ = slice_widget_;
 #endif
 // END VIZ-D
+
+    // BEGIN VIZ-E — data page dock (asset selection → preview/chart →
+    // export loop; the page composes ui_pages_data + viz_charts hosts).
+#if defined(PWB_WITH_VIZ_E) && defined(PWB_WITH_CONV_30)
+    viz_e_data_dock_ =
+        pwb::viz_e::install_data_dock(this, job_center_.get());
+#endif
+    // END VIZ-E
 
     // Tools are canvas-parented; MapSession teardown unsets them first.
     pan_tool_ = new QgsMapToolPan(canvas_);

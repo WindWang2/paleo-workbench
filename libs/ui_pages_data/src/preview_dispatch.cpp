@@ -20,6 +20,11 @@ std::string_view preview_target(const std::string& mode) {
         {"json_tree", "json_tree_preview"},
         {"geotiff", "geotiff_preview"},
         {"media", "media_preview"},
+        // BEGIN VIZ-E — chart/surface preview modes (plan V6): the targets
+        // are the viz_charts hosts registered by the viz_e assembly.
+        {"xy_scatter", "xy_scatter_chart"},
+        {"surface", "surface_chart"},
+        // END VIZ-E
     };
     for (const auto& [k, v] : kMap)
         if (k == mode) return v;
