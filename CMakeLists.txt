@@ -118,6 +118,37 @@ if(PWB_BUILD_CONV_25)
     add_subdirectory(libs/workflow_graph)
 endif()
 # END CONV-25
+# BEGIN CONV-28 — native science service layer (science closure direction):
+# typed + cancelable + resource-guarded service envelopes over the frozen
+# Qt-free kernels (mapping extract/normalize/interpolate/constrained-IDW/
+# layer products/representative facies, well curve ops + DTW, factor fusion,
+# geomodel build/section/fault/export), IAlgorithm adapters for TaskRuntime,
+# and the local-persistence envelope publisher — inside libs/science_service,
+# frozen against tools/oracle/generate_science_service_fixtures.py. Turning
+# it on implies every kernel slice it composes (link targets resolve at
+# generate time; the flags must land before the subdirectory blocks below).
+option(PWB_BUILD_CONV_28
+    "Build the CONV-28 native science service layer (libs/science_service)" OFF)
+if(PWB_BUILD_CONV_28)
+    set(PWB_BUILD_DATA ON)
+    set(PWB_BUILD_MAPPING_KERNEL ON)
+    set(PWB_BUILD_CONV_05 ON)   # constrained IDW engine
+    set(PWB_BUILD_CONV_10 ON)   # representative facies / point-to-surface
+    set(PWB_BUILD_CONV_17 ON)   # crs_contract + geometry_units
+    set(PWB_BUILD_CONV_18 ON)   # factor grid envelope codec
+    set(PWB_BUILD_CONV_08 ON)   # factor host (fingerprints)
+    set(PWB_BUILD_CONV_24 ON)   # factor fusion + units
+    set(PWB_BUILD_CONV_09 ON)   # well science (DTW + curve ops)
+    set(PWB_BUILD_CONV_22 ON)   # geomodel contracts (implies 12 + 19)
+    if(NOT TARGET pwb_science)
+        add_subdirectory(libs/algorithms)
+    endif()
+    if(NOT TARGET pwb_workflow)
+        add_subdirectory(libs/workflow)
+    endif()
+    add_subdirectory(libs/science_service)
+endif()
+# END CONV-28
 
 # BEGIN PREDICTION-RUNTIME — native prediction runtime closure (M9): the
 # production ONNX Runtime session (dynamic loading), the model package /
