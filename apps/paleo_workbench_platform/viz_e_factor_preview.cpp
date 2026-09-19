@@ -105,4 +105,36 @@ FactorPreviewOutcome compute_factor_preview(const FactorPreviewRequest& request,
     }
 }
 
+SurfaceHost::SurfaceData surface_data_from_factor_task(
+    const std::vector<double>& grid_x, const std::vector<double>& grid_y,
+    const std::vector<double>& grid_z, const std::string& factor_name,
+    const std::string& method, const std::string& crs,
+    const std::string& unit, const std::string& source_identity) {
+    SurfaceHost::SurfaceData data;
+    data.grid_x = grid_x;
+    data.grid_y = grid_y;
+    // Worker grids are row-major (ny × nx) with NaN nodata — the surface
+    // widget consumes the same layout.
+    data.grid_z.assign(grid_z.begin(), grid_z.end());
+    double vmin = std::numeric_limits<double>::infinity();
+    double vmax = -std::numeric_limits<double>::infinity();
+    for (const double v : grid_z) {
+        if (std::isfinite(v)) {
+            vmin = std::min(vmin, v);
+            vmax = std::max(vmax, v);
+        }
+    }
+    data.levels = preview_levels(vmin, vmax);
+    data.title = QString::fromStdString(factor_name + " — 因子任务曲面");
+    std::ostringstream provenance;
+    provenance << "因子: " << factor_name << "\n"
+               << "方法: " << (method.empty() ? "未声明" : method) << "\n"
+               << "单位: " << (unit.empty() ? "未声明" : unit) << "\n"
+               << "CRS: " << (crs.empty() ? "未声明" : crs) << "\n"
+               << "网格: " << grid_x.size() << " × " << grid_y.size() << "\n"
+               << "来源: " << source_identity;
+    data.provenance = QString::fromStdString(provenance.str());
+    return data;
+}
+
 }  // namespace pwb::viz_e

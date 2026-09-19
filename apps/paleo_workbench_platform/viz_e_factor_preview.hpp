@@ -59,4 +59,22 @@ FactorPreviewOutcome compute_factor_preview(const FactorPreviewRequest& request,
 // geoviz surface preview's level cadence); empty when no finite values.
 std::vector<double> preview_levels(double vmin, double vmax, int count = 6);
 
+// ---------------------------------------------------------------------------
+// ui_workers result → presentation adapters (the presentation端 of the
+// contour_draft/factor_prepare workers). Both consume the REAL worker
+// output structures — no recompute, metadata transits verbatim.
+// ---------------------------------------------------------------------------
+
+struct FactorTaskSlice;   // pwb::ui_workers (worker_common.hpp)
+struct ContourDraftSlice; // pwb::ui_workers (contour_draft.hpp)
+
+// A factor_prepare task result (grid + metadata) → surface presentation
+// with provenance from the task's own fields (factor name/method/unit/CRS
+// only when the task declared them — never guessed).
+SurfaceHost::SurfaceData surface_data_from_factor_task(
+    const std::vector<double>& grid_x, const std::vector<double>& grid_y,
+    const std::vector<double>& grid_z, const std::string& factor_name,
+    const std::string& method, const std::string& crs,
+    const std::string& unit, const std::string& source_identity);
+
 }  // namespace pwb::viz_e

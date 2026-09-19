@@ -95,3 +95,4 @@
 - **主线潜在缺陷顺带修复**（如实声明）：main_window.cpp importSegyDialog 在 CONV_30+SEISMIC_VIEWER 组合下 `version_id` 未声明即编译失败（CONV-30 分支提前 return，尾随同步视图代码无卫）——门禁配置从未同时启用两开关故未暴露；本线 CONV_30 必开故加 `!defined(PWB_WITH_CONV_30)` 卫（行为不变：该路径本就不可达）。
 - **导出健壮性**：PlotWidget/SurfaceWidget 增加显式画布 export_svg/export_pdf 重载；隐藏栈页/无头导出的退化 0 尺寸回退 900×600（可见 widget 仍用实时尺寸，Python 语义不变）。
 - **dat 解析 oracle**：generate_viz_e_dat_fixtures.py 冻结真实 Python 后端输出（记录/CRS/UWI/跳过行/horizon 轴决策），provenance SHA 校验 + 8 族负检。
+| 6 | contour_draft/factor_prepare 呈现端：surface_data_from_factor_task 适配器 + present_factor_surface 页面入口 + worker 全链路测试（真 mapping_kernel→真 make_contour_draft_job_spec（viz_charts 作 extract seam）→页面呈现+provenance） | viz_e.pa_flow 96 检查 ×2 + MALLOC | 通过 | ON/OFF + 全量门禁 |

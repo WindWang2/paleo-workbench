@@ -301,6 +301,18 @@ void VizEDataPage::present_horizon(const QString& path,
                  });
 }
 
+void VizEDataPage::present_factor_surface(
+    const SurfaceHost::SurfaceData& data) {
+    surface_host_->show_surface(data);
+    active_target_ = QStringLiteral("surface");
+    updqt::PreviewResultView result;
+    result.mode = "surface";
+    result.title = data.title.toStdString();
+    result.path = data.provenance.toStdString();
+    workspace_->reader_panel()->render(result);
+    Q_EMIT preview_rendered(QStringLiteral("surface"));
+}
+
 void VizEDataPage::deliver_surface(
     std::uint64_t generation, const pwb::viz_e::FactorPreviewOutcome& outcome) {
     if (generation != surface_generation_) {

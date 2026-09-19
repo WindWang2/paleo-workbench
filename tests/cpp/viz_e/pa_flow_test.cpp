@@ -6,6 +6,10 @@
 // presenter registration contract with a real presenter.
 #include "job_center.hpp"
 #include "viz_e_dat_preview.hpp"
+
+#include <pwb/ui_workers/contour_draft.hpp>
+#include <pwb/ui_workers/worker_common.hpp>
+#include <pwb/viz_charts/marching_squares.hpp>
 #include "viz_e_hosts.hpp"
 #include "viz_e_install.hpp"
 
@@ -466,6 +470,120 @@ int main(int argc, char** argv) {
                 if (checked >= 12) break;
             }
             CHECK(checked > 0);
+        }
+        jobs.shutdown_workers(500);
+    }
+
+    // ------------------------------------------------------------------
+    // 4c) contour_draft worker → presentation: REAL mapping_kernel grid →
+    // REAL make_contour_draft_job_spec (viz_charts kernel as the extract
+    // seam) → drafts surface in the page via present_factor_surface.
+    // ------------------------------------------------------------------
+    {
+        using pwb::ui_workers::ContourDraftInput;
+        using pwb::ui_workers::ContourDraftResult;
+        using pwb::ui_workers::FactorTaskSlice;
+        using pwb::ui_workers::Grid2D;
+        using pwb::ui_workers::make_contour_draft_job_spec;
+
+        // Real interpolation kernel (the worker's compute half).
+        std::vector<pwb::mapping::SamplePoint> samples;
+        for (const auto& xyz : std::vector<std::array<double, 3>>{
+                 {0, 0, 1000}, {10, 0, 1010}, {20, 0, 1022.5},
+                 {0, 10, 1020}, {10, 10, 1032}, {20, 10, 1041.5},
+                 {0, 20, 1035}, {10, 20, 1046}, {20, 20, 1058}}) {
+            samples.push_back({xyz[0], xyz[1], xyz[2], "ok"});
+        }
+        pwb::mapping::InterpolateOptions options;
+        options.method = "idw";
+        options.grid_n = 25;
+        const pwb::mapping::FactorGrid grid =
+            pwb::mapping::interpolate_factor(samples, options);
+
+        FactorTaskSlice task;
+        task.id = "ft-1";
+        task.name = "砂岩含量";
+        task.factor_type = "砂岩含量";
+        task.method = "IDW";
+        task.status = "complete";  // only_complete filter in the compile path
+        task.grid_x = grid.grid_x;
+        task.grid_y = grid.grid_y;
+        Grid2D g;
+        g.rows = grid.grid_y.size();
+        g.cols = grid.grid_x.size();
+        g.data.assign(grid.grid_z.begin(), grid.grid_z.end());
+        task.grid_z = std::move(g);
+
+        ContourDraftInput input;
+        input.factor_map_tasks = {task};
+        // The C++ replacement for the geoviz contourpy seam.
+        input.extract_lines_fn =
+            [](const std::vector<double>& gx, const std::vector<double>& gy,
+               const Grid2D& gz, const std::vector<double>& levels,
+               const pwb::job::CancellationToken& token) {
+                std::map<double, std::vector<std::vector<std::pair<double, double>>>>
+                    out;
+                auto lines = pwb::viz_charts::extract_contour_lines(
+                    gx, gy, gz.data, levels,
+                    [&token]() { return token.is_cancelled(); });
+                if (!lines.has_value()) {
+                    throw std::runtime_error("cancelled");
+                }
+                for (auto& [level, plines] : *lines) {
+                    auto& dst = out[level];
+                    dst.reserve(plines.size());
+                    for (auto& pl : plines) {
+                        std::vector<std::pair<double, double>> pts;
+                        pts.reserve(pl.xs.size());
+                        for (std::size_t i = 0; i < pl.xs.size(); ++i) {
+                            pts.push_back({pl.xs[i], pl.ys[i]});
+                        }
+                        dst.push_back(std::move(pts));
+                    }
+                }
+                return out;
+            };
+
+        pwb::app::JobCenter jobs;
+        ContourDraftResult result;
+        bool failed = false;
+        auto spec = make_contour_draft_job_spec(
+            std::move(input),
+            [&result](const ContourDraftResult& r) { result = r; },
+            [&failed](const std::string&) { failed = true; });
+        auto& owner = jobs.make_owner(nullptr);
+        owner.start(jobs.scheduler(), std::move(spec), {});
+        for (int i = 0; i < 3000 && result.count() == 0 && !failed; ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        CHECK(!failed);
+        CHECK(result.count() >= 1);
+        if (result.count() >= 1) {
+            const auto& draft = result.drafts.front();
+            CHECK(!draft.levels.empty());
+            CHECK(!draft.segments.empty());
+            // draft segment levels within the source value range
+            CHECK(draft.source_value_range.second > draft.source_value_range.first);
+
+            // presentation side: worker result → page surface
+            VizEDataPage page(nullptr, &jobs);
+            Counter rendered;
+            rendered.track(&page, &VizEDataPage::preview_rendered);
+            const SurfaceHost::SurfaceData data = surface_data_from_factor_task(
+                *task.grid_x, *task.grid_y,
+                std::vector<double>(grid.grid_z.begin(), grid.grid_z.end()),
+                task.name, task.method,
+                /*crs=*/"", /*unit=*/"", "factor_prepare:ft-1");
+            page.present_factor_surface(data);
+            CHECK(rendered.count >= 1);
+            CHECK(page.active_target() == QStringLiteral("surface"));
+            CHECK(page.surface_host()->provenance().contains(
+                QStringLiteral("砂岩含量")));
+            CHECK(page.surface_host()->provenance().contains(
+                QStringLiteral("factor_prepare:ft-1")));
+            CHECK(page.surface_host()->provenance().contains(
+                QStringLiteral("未声明")));  // CRS/unit undeclared, honestly
         }
         jobs.shutdown_workers(500);
     }

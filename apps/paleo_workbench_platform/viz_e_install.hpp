@@ -104,6 +104,12 @@ public:
     // changed drives). Public for the E2E flow test.
     void preview_asset(const pwb::ui_pages_data::AssetRow& row);
 
+    // Present a worker-produced factor/contour result (factor_prepare /
+    // contour_draft outputs adapted via surface_data_from_factor_task).
+    // Routes to the surface host through the same reader-panel render path
+    // as asset-driven previews.
+    void present_factor_surface(const SurfaceHost::SurfaceData& data);
+
     pwb::ui_pages_data::qt::DataWorkspace* workspace() const { return workspace_; }
     XyScatterHost* xy_host() const { return xy_host_; }
     SurfaceHost* surface_host() const { return surface_host_; }

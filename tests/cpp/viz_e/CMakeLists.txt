@@ -23,7 +23,7 @@ target_sources(viz_e.pa_flow PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/viz_e_install.hpp
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/job_center.hpp)
 target_link_libraries(viz_e.pa_flow PRIVATE
-    Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::MappingKernel
+    Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::MappingKernel Pwb::UiWorkers
     Pwb::JobQt Pwb::Domain Qt6::Widgets)
 set_target_properties(viz_e.pa_flow PROPERTIES AUTOMOC ON)
 target_compile_definitions(viz_e.pa_flow PRIVATE
