@@ -1,0 +1,748 @@
+{
+ "artifact_policy_fallback": {
+  "artifact_class": "intermediate",
+  "data_stage": "intermediate",
+  "must_register": true,
+  "rationale": "未登记 kind 'brand_new_kind'——按 INTERMEDIATE 兜底（请补 KNOWN_ARTIFACT_POLICIES）",
+  "retention_class": "recomputable"
+ },
+ "artifact_policy_registered": [
+  true,
+  false,
+  true
+ ],
+ "artifact_policy_table": {
+  "atomic_write_tmp": {
+   "artifact_class": "ephemeral",
+   "data_stage": null,
+   "must_register": false,
+   "rationale": "任务/会话期存续，结束即弃（渲染临时体、预览缓存）",
+   "retention_class": ""
+  },
+  "constraint_group": {
+   "artifact_class": "derived",
+   "data_stage": "derived",
+   "must_register": true,
+   "rationale": "具科学语义的衍生成果（解释、属性体）",
+   "retention_class": "user"
+  },
+  "curve_interpretation": {
+   "artifact_class": "derived",
+   "data_stage": "derived",
+   "must_register": true,
+   "rationale": "具科学语义的衍生成果（解释、属性体）",
+   "retention_class": "user"
+  },
+  "export": {
+   "artifact_class": "output",
+   "data_stage": "output",
+   "must_register": true,
+   "rationale": "用户认可的最终成果（成图产品、导出件）",
+   "retention_class": "user"
+  },
+  "factor_map_grid": {
+   "artifact_class": "intermediate",
+   "data_stage": "intermediate",
+   "must_register": true,
+   "rationale": "科学过程正式中间成果（因子格网、预测中间体）",
+   "retention_class": "recomputable"
+  },
+  "fault_interpretation": {
+   "artifact_class": "derived",
+   "data_stage": "derived",
+   "must_register": true,
+   "rationale": "具科学语义的衍生成果（解释、属性体）",
+   "retention_class": "user"
+  },
+  "geomodel": {
+   "artifact_class": "derived",
+   "data_stage": "derived",
+   "must_register": true,
+   "rationale": "具科学语义的衍生成果（解释、属性体）",
+   "retention_class": "user"
+  },
+  "horizon_interpretation": {
+   "artifact_class": "derived",
+   "data_stage": "derived",
+   "must_register": true,
+   "rationale": "具科学语义的衍生成果（解释、属性体）",
+   "retention_class": "user"
+  },
+  "interchange_workdir": {
+   "artifact_class": "ephemeral",
+   "data_stage": null,
+   "must_register": false,
+   "rationale": "任务/会话期存续，结束即弃（渲染临时体、预览缓存）",
+   "retention_class": ""
+  },
+  "map_compile": {
+   "artifact_class": "output",
+   "data_stage": "output",
+   "must_register": true,
+   "rationale": "用户认可的最终成果（成图产品、导出件）",
+   "retention_class": "user"
+  },
+  "map_product": {
+   "artifact_class": "output",
+   "data_stage": "output",
+   "must_register": true,
+   "rationale": "用户认可的最终成果（成图产品、导出件）",
+   "retention_class": "user"
+  },
+  "north_arrow_cache": {
+   "artifact_class": "cache",
+   "data_stage": null,
+   "must_register": false,
+   "rationale": "可由上游重算的本地缓存；删除无损（指北针 SVG、缩放金字塔）",
+   "retention_class": ""
+  },
+  "prediction_intermediate": {
+   "artifact_class": "intermediate",
+   "data_stage": "intermediate",
+   "must_register": true,
+   "rationale": "科学过程正式中间成果（因子格网、预测中间体）",
+   "retention_class": "recomputable"
+  },
+  "preview_cache": {
+   "artifact_class": "cache",
+   "data_stage": null,
+   "must_register": false,
+   "rationale": "可由上游重算的本地缓存；删除无损（指北针 SVG、缩放金字塔）",
+   "retention_class": ""
+  },
+  "qc_report": {
+   "artifact_class": "output",
+   "data_stage": "output",
+   "must_register": true,
+   "rationale": "用户认可的最终成果（成图产品、导出件）",
+   "retention_class": "user"
+  },
+  "render_temp_svg": {
+   "artifact_class": "ephemeral",
+   "data_stage": null,
+   "must_register": false,
+   "rationale": "任务/会话期存续，结束即弃（渲染临时体、预览缓存）",
+   "retention_class": ""
+  },
+  "seismic_attribute": {
+   "artifact_class": "derived",
+   "data_stage": "derived",
+   "must_register": true,
+   "rationale": "具科学语义的衍生成果（解释、属性体）",
+   "retention_class": "user"
+  },
+  "seismic_attribute_temp": {
+   "artifact_class": "ephemeral",
+   "data_stage": null,
+   "must_register": false,
+   "rationale": "任务/会话期存续，结束即弃（渲染临时体、预览缓存）",
+   "retention_class": ""
+  },
+  "workflow_checkpoint": {
+   "artifact_class": "ephemeral",
+   "data_stage": null,
+   "must_register": false,
+   "rationale": "任务/会话期存续，结束即弃（渲染临时体、预览缓存）",
+   "retention_class": ""
+  }
+ },
+ "audit": {
+  "checked": {
+   "assets": 3,
+   "runs": 1,
+   "tags": 3,
+   "versions": 5
+  },
+  "issues": [
+   {
+    "detail": "parent_version_id ver_missing does not exist",
+    "kind": "broken_lineage",
+    "ref_id": "ver_d3",
+    "severity": "medium"
+   },
+   {
+    "detail": "run run_r1 (factor_map) consumed 1 input(s) but the output version has no matching parent edge",
+    "kind": "run_lineage_divergence",
+    "ref_id": "ver_e4",
+    "severity": "low"
+   },
+   {
+    "detail": "payload not found: {ROOT}/demo.artifacts/raw/asset_a/ver_a1/a.sgy",
+    "kind": "payload_missing",
+    "ref_id": "ver_a1",
+    "severity": "high"
+   },
+   {
+    "detail": "payload not found: {ROOT}/demo.artifacts/raw/asset_a/ver_a2/a.sgy",
+    "kind": "payload_missing",
+    "ref_id": "ver_a2",
+    "severity": "high"
+   },
+   {
+    "detail": "external payload not found: {ROOT}/gone.las",
+    "kind": "external_path_missing",
+    "ref_id": "ver_b5",
+    "severity": "medium"
+   },
+   {
+    "detail": "payload not found: {ROOT}/demo.artifacts/derived/asset_d/ver_d3/d.npy",
+    "kind": "payload_missing",
+    "ref_id": "ver_d3",
+    "severity": "high"
+   },
+   {
+    "detail": "payload not found: {ROOT}/demo.artifacts/outputs/asset_d/ver_e4/e.png",
+    "kind": "payload_missing",
+    "ref_id": "ver_e4",
+    "severity": "high"
+   }
+  ],
+  "ok": false
+ },
+ "checksum_file": "14465e7a6ef9656bc2126ea9e53fe42088087237795d1cd431d90475ddcf9778",
+ "checksum_file_streamed": "14465e7a6ef9656bc2126ea9e53fe42088087237795d1cd431d90475ddcf9778",
+ "checksum_text": [
+  "f729ae0cbcc8241ebb6918af712a88d5ca2c13f7fbe08f809aa297bfdf99fbe4",
+  "fd0c9c5475cd36d1be03583949f5cec593a3271d1b05cba99dd6dc5c186f375d"
+ ],
+ "explain_ver_e4": {
+  "asset_id": "asset_d",
+  "asset_name": "Derived D",
+  "asset_type": "seismic_attribute",
+  "bundle": false,
+  "created_at": "2024-01-05T00:00:00+00:00",
+  "deletable": false,
+  "delete_blockers": [
+   "retention_class=user",
+   "pinned"
+  ],
+  "downstream_run_ids": [],
+  "downstream_version_ids": [],
+  "entities": [],
+  "generator": "pwb 0.2",
+  "input_ports": [
+   {
+    "entity_id": "",
+    "entity_type": "",
+    "note": "",
+    "ordinal": 0,
+    "required": true,
+    "role": "seismic_volume",
+    "version_id": "ver_a1"
+   }
+  ],
+  "integrity_status": "unknown",
+  "member_count": 0,
+  "model_ref": null,
+  "operation": "factor_map",
+  "output_ports": [
+   {
+    "entity_id": "",
+    "entity_type": "",
+    "note": "",
+    "ordinal": 0,
+    "required": true,
+    "role": "factor_grid",
+    "version_id": "ver_d3"
+   },
+   {
+    "entity_id": "",
+    "entity_type": "",
+    "note": "",
+    "ordinal": 1,
+    "required": true,
+    "role": "factor_grid",
+    "version_id": "ver_e4"
+   }
+  ],
+  "parameters": {
+   "factor": "paleo"
+  },
+  "parent_version_ids": [
+   "ver_d3"
+  ],
+  "pinned": true,
+  "producing_run_id": "run_r1",
+  "regenerable": true,
+  "stage": "output",
+  "stale": true,
+  "stale_reason": "上游 asset_a 已演进（ver_a1 → ver_a2），本版本仍基于旧输入该下游版本被 pin 固定在旧输入。",
+  "typed_lineage": true,
+  "version_id": "ver_e4"
+ },
+ "governance_display_rows": [
+  [
+   "来源",
+   "野外"
+  ],
+  [
+   "学科方向",
+   "地震"
+  ],
+  [
+   "可信等级",
+   "高"
+  ]
+ ],
+ "governance_keys": [
+  "source",
+  "region",
+  "creator",
+  "discipline",
+  "confidence",
+  "review_status"
+ ],
+ "governance_normalize": [
+  {
+   "key": "discipline",
+   "ok": "well_log",
+   "value": "welllog"
+  },
+  {
+   "err": "学科方向(discipline) 的值 '地层对比' 不在受控词表中: seismic、well_log、horizon、interpretation、correlation、fault、factor_map、prediction、paleomap、qc、export、modeling、general",
+   "key": "discipline",
+   "ok": null,
+   "value": "  地层对比 "
+  },
+  {
+   "key": "confidence",
+   "ok": "high",
+   "value": "H"
+  },
+  {
+   "key": "review_status",
+   "ok": "approved",
+   "value": "已通过"
+  },
+  {
+   "key": "source",
+   "ok": "野外 2023 队",
+   "value": " 野外  2023  队 "
+  },
+  {
+   "err": "可信等级(confidence) 的值 'super' 不在受控词表中: high、medium、low",
+   "key": "confidence",
+   "ok": null,
+   "value": "super"
+  },
+  {
+   "err": "unknown governance field: 'bogus'",
+   "key": "bogus",
+   "ok": null,
+   "value": "x"
+  }
+ ],
+ "governance_patch_reserved": "字段 'format' 是目录内部保留键，不能通过治理信息修改",
+ "impact_delete": {
+  "broken_lineage_edges": 2,
+  "cascade_advice": [
+   "1 个下游成果将基于残缺 lineage：建议先重算或固定（pin）这些下游版本，再执行删除。",
+   "1 个下游版本已 pin：删除不会改变其科学结论标记，但 lineage 解析将显示缺失上游。",
+   "1 个 run 以其为输入（历史溯源保留，不阻塞删除）。"
+  ],
+  "live_descendants": [
+   {
+    "classification": "stale",
+    "direct": true,
+    "nearest": [],
+    "pinned": false,
+    "reason": "删除目标位于其上游依赖链（距离 1）",
+    "reproducible": true,
+    "stage": "derived",
+    "version_id": "ver_d3"
+   },
+   {
+    "classification": "pinned",
+    "direct": false,
+    "nearest": [],
+    "pinned": true,
+    "reason": "删除目标位于其上游依赖链（距离 2）",
+    "reproducible": true,
+    "stage": "output",
+    "version_id": "ver_e4"
+   }
+  ],
+  "runs_consuming": [
+   "run_r1"
+  ],
+  "runs_producing": [],
+  "target_asset_ids": [
+   "asset_a"
+  ],
+  "target_version_ids": [
+   "ver_a1"
+  ]
+ },
+ "impact_downstream": [
+  {
+   "classification": "stale",
+   "direct": true,
+   "nearest": [
+    "asset_a",
+    "ver_a1",
+    "ver_a2"
+   ],
+   "pinned": false,
+   "reason": "上游 asset_a 已从 ver_a1 演进到 ver_a2，本版本仍基于旧输入",
+   "reproducible": true,
+   "stage": "derived",
+   "version_id": "ver_d3"
+  }
+ ],
+ "impact_downstream_trashed": [
+  {
+   "classification": "stale",
+   "direct": true,
+   "nearest": [
+    "asset_a",
+    "ver_a1",
+    "ver_a2"
+   ],
+   "pinned": false,
+   "reason": "上游 asset_a 已从 ver_a1 演进到 ver_a2，本版本仍基于旧输入",
+   "reproducible": true,
+   "stage": "derived",
+   "version_id": "ver_d3"
+  }
+ ],
+ "impact_is_stale": [
+  true,
+  "上游 asset_a 已演进（ver_a1 → ver_a2），本版本仍基于旧输入"
+ ],
+ "impact_upstream": {
+  "ancestor_asset_ids": [
+   "asset_a",
+   "asset_d"
+  ],
+  "ancestor_version_ids": [
+   "ver_a1",
+   "ver_d3"
+  ],
+  "missing_ancestors": [
+   "ver_missing"
+  ],
+  "runs_involved": [
+   "run_r1"
+  ],
+  "trashed_ancestors": []
+ },
+ "lineage_bad_direction": "direction must be 'ancestors' or 'descendants', got 'sideways'",
+ "lineage_chain_ver_e4": {
+  "node_count": 3,
+  "root": {
+   "asset_name": "Derived D",
+   "children": [
+    {
+     "asset_name": "Derived D",
+     "children": [
+      {
+       "asset_name": "Seismic A",
+       "children": [],
+       "depth": 2,
+       "run_operation": null,
+       "tags": [],
+       "version_id": "ver_a1"
+      }
+     ],
+     "depth": 1,
+     "run_operation": "factor_map",
+     "tags": [
+      "QC"
+     ],
+     "version_id": "ver_d3"
+    }
+   ],
+   "depth": 0,
+   "run_operation": "factor_map",
+   "tags": [],
+   "version_id": "ver_e4"
+  },
+  "truncated": false
+ },
+ "lineage_summaries": {
+  "ver_a1": {
+   "broken": false,
+   "has_parents": false,
+   "to_raw": 0
+  },
+  "ver_a2": {
+   "broken": false,
+   "has_parents": false,
+   "to_raw": 0
+  },
+  "ver_b5": {
+   "broken": false,
+   "has_parents": false,
+   "to_raw": 0
+  },
+  "ver_d3": {
+   "broken": true,
+   "has_parents": true,
+   "to_raw": 1
+  },
+  "ver_e4": {
+   "broken": false,
+   "has_parents": true,
+   "to_raw": 2
+  }
+ },
+ "migration": {
+  "assets": [
+   {
+    "id": "res_1",
+    "legacy": "res_1"
+   },
+   {
+    "id": "asset_619a6da26d34",
+    "legacy": "../evil"
+   }
+  ],
+  "migrated": 2,
+  "skipped": 1,
+  "versions": [
+   {
+    "asset": "res_1",
+    "has_stat": true,
+    "id": "ver_res_1",
+    "managed": false,
+    "path": "{ROOT}/data/old.sgy",
+    "stage": "raw"
+   },
+   {
+    "asset": "asset_619a6da26d34",
+    "has_stat": false,
+    "id": "ver_asset_619a6da26d34",
+    "managed": false,
+    "path": "{ROOT}/y",
+    "stage": "raw"
+   }
+  ],
+  "warnings": [
+   "resource ../evil: file not found at {ROOT}/y",
+   "resource ../evil: id unsafe as storage path segment; migrated under sanitized asset id asset_619a6da26d34"
+  ]
+ },
+ "model_gates": [
+  {
+   "case": "ok",
+   "ok": true,
+   "reason": "ok"
+  },
+  {
+   "case": "demo",
+   "ok": false,
+   "reason": "provider 'Demo' is not promotable to production"
+  },
+  {
+   "case": "local",
+   "ok": false,
+   "reason": "input_schema is required for production promotion (H5-b)"
+  },
+  {
+   "case": "heuristic",
+   "ok": false,
+   "reason": "model_type 'HEURISTIC' is not promotable to production"
+  },
+  {
+   "case": "demo_only",
+   "ok": false,
+   "reason": "demo_only model versions cannot be promoted to production"
+  },
+  {
+   "case": "sci_false",
+   "ok": false,
+   "reason": "model metadata marks scientific=False"
+  },
+  {
+   "case": "ver_sci_false",
+   "ok": false,
+   "reason": "version metadata marks scientific=False (H4-3b)"
+  },
+  {
+   "case": "no_schema",
+   "ok": false,
+   "reason": "input_schema is required for production promotion (H5-b)"
+  },
+  {
+   "case": "no_schema_read",
+   "ok": true,
+   "reason": "ok"
+  },
+  {
+   "case": "lookup_error",
+   "ok": false,
+   "reason": "'get_model failed: no row'"
+  }
+ ],
+ "port_roles_display": {
+  "": "",
+  "faults": "断层",
+  "foreign_role": "foreign_role",
+  "manual_edit": "人工修改",
+  "sonic": "曲线",
+  "well_logs": "测井曲线"
+ },
+ "queries_find_assets_by_tag": [
+  "asset_a"
+ ],
+ "queries_integrity_ver_b5": {
+  "ver_b5": "missing"
+ },
+ "sources_missing": [
+  {
+   "recorded_path": "demo.artifacts/raw/asset_a/ver_a1/a.sgy",
+   "relinkable": false,
+   "scanned": 5,
+   "version_id": "ver_a1"
+  },
+  {
+   "recorded_path": "demo.artifacts/raw/asset_a/ver_a2/a.sgy",
+   "relinkable": false,
+   "scanned": 5,
+   "version_id": "ver_a2"
+  },
+  {
+   "recorded_path": "{ROOT}/gone.las",
+   "relinkable": true,
+   "scanned": 5,
+   "version_id": "ver_b5"
+  },
+  {
+   "recorded_path": "demo.artifacts/derived/asset_d/ver_d3/d.npy",
+   "relinkable": false,
+   "scanned": 5,
+   "version_id": "ver_d3"
+  },
+  {
+   "recorded_path": "demo.artifacts/outputs/asset_d/ver_e4/e.png",
+   "relinkable": false,
+   "scanned": 5,
+   "version_id": "ver_e4"
+  }
+ ],
+ "tags_add": {
+  "display": "实验 Zone",
+  "id": "tag_82bb73de68aa",
+  "name": "实验 zone"
+ },
+ "tags_pruned": [],
+ "tags_rename": {
+  "display": "quality control",
+  "name": "quality control"
+ },
+ "tags_search": [
+  "quality control"
+ ],
+ "tags_usage_names": {
+  "batch": [
+   0,
+   2
+  ],
+  "quality control": [
+   1,
+   1
+  ],
+  "实验 zone": [
+   1,
+   0
+  ]
+ },
+ "v11_eligibility_ver_d3": {
+  "blockers": [
+   "retention_class=user",
+   "downstream_versions=1"
+  ],
+  "downstream_count": 1,
+  "eligible": false,
+  "retention_class": "user",
+  "version_id": "ver_d3"
+ },
+ "v11_eligibility_ver_e4": {
+  "blockers": [
+   "retention_class=user",
+   "pinned"
+  ],
+  "downstream_count": 0,
+  "eligible": false,
+  "retention_class": "user",
+  "version_id": "ver_e4"
+ },
+ "v11_lifecycle_ver_e4": {
+  "asset_id": "asset_d",
+  "bundle": false,
+  "dependent_run_count": 0,
+  "downstream_count": 0,
+  "live_working_copy": false,
+  "member_count": 0,
+  "pinned": true,
+  "producing_operation": "factor_map",
+  "producing_run_id": "run_r1",
+  "recomputable": true,
+  "retention_class": "user",
+  "stage": "output",
+  "trashed": false,
+  "version_id": "ver_e4"
+ },
+ "v11_migrate_ports": {
+  "ports_added": 2,
+  "runs_annotated": 1
+ },
+ "v11_ports_after_backfill": [
+  {
+   "entity_id": "",
+   "entity_type": "",
+   "note": "",
+   "ordinal": 0,
+   "required": true,
+   "role": "factor_grid",
+   "version_id": "ver_d3"
+  },
+  {
+   "entity_id": "",
+   "entity_type": "",
+   "note": "",
+   "ordinal": 1,
+   "required": true,
+   "role": "factor_grid",
+   "version_id": "ver_e4"
+  }
+ ],
+ "v11_ports_for_run": {
+  "input": [
+   {
+    "entity_id": "",
+    "entity_type": "",
+    "note": "",
+    "ordinal": 0,
+    "required": true,
+    "role": "seismic_volume",
+    "version_id": "ver_a1"
+   }
+  ],
+  "output": [
+   {
+    "entity_id": "",
+    "entity_type": "",
+    "note": "",
+    "ordinal": 0,
+    "required": true,
+    "role": "output",
+    "version_id": "ver_d3"
+   },
+   {
+    "entity_id": "",
+    "entity_type": "",
+    "note": "",
+    "ordinal": 0,
+    "required": true,
+    "role": "output",
+    "version_id": "ver_e4"
+   }
+  ]
+ },
+ "v11_retention": [
+  "retain",
+  "user",
+  "user"
+ ]
+}

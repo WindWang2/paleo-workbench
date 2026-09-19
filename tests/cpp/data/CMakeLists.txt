@@ -47,6 +47,7 @@ pwb_data_test(data_project_roundtrip project_roundtrip_test.cpp
 pwb_data_test(data_project_recovery project_recovery_test.cpp
     data.project_recovery)
 pwb_data_test(data_catalog_write catalog_write_test.cpp data.catalog_write)
+pwb_data_test(data_catalog_domain catalog_domain_test.cpp data.catalog_domain)
 pwb_data_test(data_commit_coordinator commit_coordinator_test.cpp
     data.commit_coordinator)
 pwb_data_test(data_commit_recovery commit_recovery_test.cpp
