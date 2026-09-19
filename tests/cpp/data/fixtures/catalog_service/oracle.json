@@ -1,0 +1,2793 @@
+{
+ "batch_save_body_failure": {
+  "memory_reloaded": true,
+  "raised": true,
+  "revision_restored": true,
+  "serial_kept": true,
+  "store_untouched": true
+ },
+ "batch_save_nested": {
+  "inner_exit_no_flush": true,
+  "outer_flushed_once": true,
+  "store_matches": true,
+  "store_row_landed": true
+ },
+ "batch_save_timing": {
+  "revision_after_exit": 2,
+  "revision_frozen": true,
+  "serial_after_exit": 2,
+  "serial_in_batch": 2,
+  "store_revision_after_exit": 2,
+  "store_revision_frozen": true,
+  "store_row_landed": true,
+  "store_row_not_landed": true
+ },
+ "bundle_budget_reject": {
+  "error": "Bundle exceeds member budget (70 > 64); split the directory or import as separate assets",
+  "no_new_version_dirs": true,
+  "source_intact": true,
+  "versions_unchanged": true
+ },
+ "bundle_naming_pool": {
+  "bare_vs_rel": [
+   [
+    "data.csv",
+    "data.csv"
+   ],
+   [
+    "sub/data.csv",
+    "sub/data.csv"
+   ]
+  ],
+  "duplicate_spec_names_error": "Duplicate member name 'same' in specs",
+  "interleaved": [
+   [
+    "a.txt",
+    "a.txt"
+   ],
+   [
+    "n.txt",
+    "keep.txt"
+   ],
+   [
+    "n.txt~2",
+    "n.txt"
+   ],
+   [
+    "sub/n.txt",
+    "sub/n.txt"
+   ]
+  ],
+  "interleaved_ordinals": [
+   0,
+   0,
+   2,
+   3
+  ]
+ },
+ "bundle_register_roundtrip": {
+  "aggregate_matches_recompute": true,
+  "members": [
+   {
+    "member_role": "",
+    "name": "a.txt",
+    "ordinal": 0,
+    "rel_path": "a.txt",
+    "required": true,
+    "sha256": "cb1ad2119d8fafb69566510ee712661f9f14b83385006ef92aec47f523a38358",
+    "size_bytes": 3
+   },
+   {
+    "member_role": "index",
+    "name": "custom-b",
+    "ordinal": 7,
+    "rel_path": "sub/b.txt",
+    "required": false,
+    "sha256": "dcdb704109a454784b81229d2b05f368692e758bfa33cb61d04c1b93791b0273",
+    "size_bytes": 3
+   },
+   {
+    "member_role": "",
+    "name": "c.txt",
+    "ordinal": 2,
+    "rel_path": "sub/deep/c.txt",
+    "required": true,
+    "sha256": "8c55ff95a660f37cb05e644e7691e6c66593f453cb2cbaa4d64aa59b40ae8032",
+    "size_bytes": 3
+   },
+   {
+    "member_role": "",
+    "name": "z.csv",
+    "ordinal": 3,
+    "rel_path": "z.csv",
+    "required": true,
+    "sha256": "71f3e86c42376ed1c9583f0117fad889f5139926594992b3f573e17939cb038f",
+    "size_bytes": 3
+   }
+  ],
+  "metadata": {
+   "k": "v"
+  },
+  "path": "bd1.artifacts/derived/asset_g1/ver_g2",
+  "path_is_layout_dir": true,
+  "size_sum": 12,
+  "source_consumed": false,
+  "source_uri": "{ROOT}/bd1/src"
+ },
+ "bundle_relpath_guard": {
+  "literal_dots_accepted": [
+   "dots-file",
+   "ok.bin"
+  ],
+  "rejects": [
+   {
+    "err": "Member specs reference missing files: ['.']",
+    "rel": "",
+    "static_err": "Unsafe member rel_path '': must stay inside the version payload directory"
+   },
+   {
+    "err": "Unsafe member rel_path '../outside.shp': must stay inside the version payload directory",
+    "rel": "../outside.shp",
+    "static_err": "Unsafe member rel_path '../outside.shp': must stay inside the version payload directory"
+   },
+   {
+    "err": "Unsafe member rel_path 'a/../../x': must stay inside the version payload directory",
+    "rel": "a/../../x",
+    "static_err": "Unsafe member rel_path 'a/../../x': must stay inside the version payload directory"
+   },
+   {
+    "err": "Unsafe member rel_path '/abs/x': must stay inside the version payload directory",
+    "rel": "/abs/x",
+    "static_err": "Unsafe member rel_path '/abs/x': must stay inside the version payload directory"
+   }
+  ]
+ },
+ "bundle_verify_tampered": {
+  "actual_matches_tampered": true,
+  "members": [
+   {
+    "actual_sha256": "9b38b8f5877f2395b4361c1f68c059078ee9c0c8b0cbb22c97d2906e011e40a3",
+    "name": "a.txt",
+    "status": "modified"
+   },
+   {
+    "name": "custom-b",
+    "status": "verified"
+   },
+   {
+    "name": "c.txt",
+    "status": "verified"
+   },
+   {
+    "name": "z.csv",
+    "status": "missing"
+   }
+  ],
+  "status": "missing"
+ },
+ "bundle_verify_verified": {
+  "bundle": true,
+  "members": [
+   {
+    "name": "a.txt",
+    "rel_path": "a.txt",
+    "status": "verified"
+   },
+   {
+    "name": "custom-b",
+    "rel_path": "sub/b.txt",
+    "status": "verified"
+   },
+   {
+    "name": "c.txt",
+    "rel_path": "sub/deep/c.txt",
+    "status": "verified"
+   },
+   {
+    "name": "z.csv",
+    "rel_path": "z.csv",
+    "status": "verified"
+   }
+  ],
+  "status": "verified"
+ },
+ "bundle_wc_cycle": {
+  "edited_sha": true,
+  "members_copied": [
+   "a.txt",
+   "b.txt",
+   "sub"
+  ],
+  "new_version_number": 3,
+  "original_members_intact": true,
+  "parent": [
+   "ver_g3"
+  ],
+  "reuse_same_dir": true,
+  "rows_after": [],
+  "source_dir_consumed": true,
+  "wc_dir": "{ROOT}/bd5/bd5.artifacts/working/ver_g3"
+ },
+ "bundle_wc_new_asset": {
+  "asset_name": "Fresh Bundle Asset",
+  "distinct_asset": true,
+  "parent": [
+   "ver_g4"
+  ]
+ },
+ "db_aggregates": {
+  "all": {
+   "review_status": {
+    "approved": 1
+   },
+   "stages": {
+    "derived": 1,
+    "output": 1,
+    "raw": 5
+   },
+   "tags": {
+    "QC": 1,
+    "disp": 1,
+    "zone": 2
+   },
+   "total": 7,
+   "types": {
+    "grid": 2,
+    "seismic": 4,
+    "well_log": 1
+   }
+  },
+  "live": {
+   "review_status": {
+    "approved": 1
+   },
+   "stages": {
+    "derived": 1,
+    "output": 1,
+    "raw": 3
+   },
+   "tags": {
+    "QC": 1,
+    "disp": 1,
+    "zone": 1
+   },
+   "total": 5,
+   "types": {
+    "grid": 2,
+    "seismic": 2,
+    "well_log": 1
+   }
+  }
+ },
+ "db_apply_cas_apply_variant": {
+  "asset_name_unchanged": "Ay",
+  "assets_rows": 2,
+  "error": "数据目录元数据已被其他实例修改（事务内比对失败）；为避免覆盖他人提交，本次保存已中止。请重新打开工程后重试。",
+  "error_type": "CatalogStaleWriteError",
+  "revision_after": 9
+ },
+ "db_apply_cas_missing_key": {
+  "error": "数据目录元数据已被其他实例修改（事务内比对失败）；为避免覆盖他人提交，本次保存已中止。请重新打开工程后重试。",
+  "error_type": "CatalogStaleWriteError"
+ },
+ "db_apply_delete_cascade": {
+  "asset_tags_rows": 0,
+  "assets": [
+   "as_keep",
+   "as_t"
+  ],
+  "cover_run_io_after_version_delete": 1,
+  "lineage_edges": [
+   "v_rv_in->v_rv_out",
+   "vk_parent->vk_child"
+  ],
+  "members_cleared": 0,
+  "ports_cleared": 0,
+  "revision": 3,
+  "run_io_after_run_delete": 0,
+  "tags_rows": 0,
+  "version_tags_rows": 0,
+  "versions_of_deleted_asset": 2
+ },
+ "db_apply_rowid_order": {
+  "order": [
+   "d1",
+   "a1",
+   "b1",
+   "c1"
+  ]
+ },
+ "db_apply_success_stamp": {
+  "new_version_row": true,
+  "revision": 6,
+  "sync_state": {
+   "catalog_revision": "6",
+   "index_schema_version": "5",
+   "schema_version": "1"
+  }
+ },
+ "db_degraded_missing_store": {
+  "catalog_aggregates": {},
+  "find_external_by_path": null,
+  "find_managed_raw": null,
+  "get_asset_model": null,
+  "is_fresh": false,
+  "list_asset_models": [],
+  "load_document": null,
+  "revision": null,
+  "search_assets": []
+ },
+ "db_dirty_set": {
+  "assets_order": [
+   "a2",
+   "a1",
+   "a3"
+  ],
+  "empty_after_tag_owner": false,
+  "empty_then": true,
+  "is_empty_while_marked": false,
+  "versions_order": [
+   "v1"
+  ]
+ },
+ "db_find_external_by_path": {
+  "hit": "ver_b1",
+  "managed_excluded": null,
+  "trashed_excluded": null,
+  "unknown": null
+ },
+ "db_find_managed_raw": {
+  "external_excluded": null,
+  "hit": "ver_a1",
+  "sha_mismatch": null,
+  "stage_excluded": null,
+  "trashed_excluded": null,
+  "uri_mismatch": null
+ },
+ "db_for_tag_normalization": {
+  "assets_qc_case": [
+   "asset_a"
+  ],
+  "assets_qc_space": [
+   "asset_a"
+  ],
+  "assets_unknown": [],
+  "versions_ZONE": [
+   "ver_b1"
+  ]
+ },
+ "db_is_fresh_gates": {
+  "all_ok": true,
+  "index_layout_old": false,
+  "revision_mismatch": false,
+  "schema_version_missing": false
+ },
+ "db_lazy_all_versions": {
+  "lazy": [
+   {
+    "asset_id": "asset_a",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_a1",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/raw/asset_a/ver_a1/a.sgy",
+    "run_id": null,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size_bytes": null,
+    "source_uri": "/import/a.sgy",
+    "stage": "raw",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 1
+   },
+   {
+    "asset_id": "asset_a",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_a2",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [
+     "ver_a1"
+    ],
+    "path": "core.artifacts/derived/asset_a/ver_a2/a.npy",
+    "run_id": "run_r1",
+    "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "size_bytes": null,
+    "source_uri": "/import/a2.npy",
+    "stage": "derived",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 2
+   },
+   {
+    "asset_id": "asset_b",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_b1",
+    "managed": false,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "{ROOT}/core/ext.las",
+    "run_id": null,
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "size_bytes": null,
+    "source_uri": "/import/ext.las",
+    "stage": "raw",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 1
+   },
+   {
+    "asset_id": "asset_c",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_c1",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/outputs/asset_c/ver_c1/c.png",
+    "run_id": null,
+    "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "size_bytes": null,
+    "source_uri": null,
+    "stage": "output",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 1
+   },
+   {
+    "asset_id": "asset_g",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_g1",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/raw/asset_g/ver_g1/g.bin",
+    "run_id": null,
+    "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "size_bytes": null,
+    "source_uri": "/import/g.bin",
+    "stage": "raw",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 1
+   },
+   {
+    "asset_id": "asset_s",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_s1",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/raw/asset_s/ver_s1/s.bin",
+    "run_id": null,
+    "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "size_bytes": null,
+    "source_uri": "/import/s.bin",
+    "stage": "raw",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 1
+   },
+   {
+    "asset_id": "asset_h",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_h1",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/raw/asset_h/ver_h1/h.bin",
+    "run_id": null,
+    "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "size_bytes": null,
+    "source_uri": "/import/h.bin",
+    "stage": "raw",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 1
+   },
+   {
+    "asset_id": "asset_t",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_t1",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/raw/asset_t/ver_t1/t.bin",
+    "run_id": null,
+    "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "size_bytes": null,
+    "source_uri": "/import/t.bin",
+    "stage": "raw",
+    "trashed": true,
+    "trashed_at": null,
+    "version_number": 1
+   },
+   {
+    "asset_id": "asset_t",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_t2",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/derived/asset_t/ver_t2/t2.bin",
+    "run_id": null,
+    "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+    "size_bytes": null,
+    "source_uri": null,
+    "stage": "derived",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 2
+   },
+   {
+    "asset_id": "asset_t",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_tx",
+    "managed": false,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "/gone/tx.las",
+    "run_id": null,
+    "sha256": null,
+    "size_bytes": null,
+    "source_uri": null,
+    "stage": "raw",
+    "trashed": true,
+    "trashed_at": "2024-06-01T00:00:00+00:00",
+    "version_number": 3
+   },
+   {
+    "asset_id": "asset_a",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_bun",
+    "managed": true,
+    "members": [
+     {
+      "member_role": "",
+      "name": "m1",
+      "ordinal": 0,
+      "rel_path": "m1.bin",
+      "required": true,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size_bytes": 10
+     },
+     {
+      "member_role": "",
+      "name": "m2",
+      "ordinal": 1,
+      "rel_path": "d/m2.bin",
+      "required": true,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size_bytes": 20
+     }
+    ],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/intermediate/asset_a/ver_bun",
+    "run_id": null,
+    "sha256": null,
+    "size_bytes": null,
+    "source_uri": null,
+    "stage": "intermediate",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 0
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_batch_chunking": {
+  "first_seen_order_head": [
+   "b0000",
+   "b0037",
+   "b0074",
+   "b0111",
+   "b0148",
+   "b0185",
+   "b0222",
+   "b0259",
+   "b0296",
+   "b0333",
+   "b0370",
+   "b0407"
+  ],
+  "order_matches_request_dedup": true,
+  "returned_keys": 520,
+  "total": 520
+ },
+ "db_lazy_children": {
+  "lazy": [
+   {
+    "asset_id": "asset_a",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_a2",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [
+     "ver_a1"
+    ],
+    "path": "core.artifacts/derived/asset_a/ver_a2/a.npy",
+    "run_id": "run_r1",
+    "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "size_bytes": null,
+    "source_uri": "/import/a2.npy",
+    "stage": "derived",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 2
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_get_asset": {
+  "lazy": {
+   "created_at": "2024-01-01T00:00:00+00:00",
+   "current_version_id": "ver_a2",
+   "description": "",
+   "id": "asset_a",
+   "legacy_resource_id": "res_1",
+   "metadata": {
+    "flag": true,
+    "review_status": "approved"
+   },
+   "name": "Seismic A",
+   "trashed": false,
+   "trashed_at": null,
+   "type": "seismic",
+   "updated_at": "2024-01-01T00:00:00+00:00"
+  },
+  "matches_eager": true
+ },
+ "db_lazy_get_asset_missing": {
+  "lazy": null,
+  "matches_eager": true
+ },
+ "db_lazy_get_assets_batch": {
+  "keys_order": [
+   "asset_b",
+   "asset_a",
+   "asset_h"
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_get_run": {
+  "lazy": {
+   "created_at": "2024-01-01T00:00:00+00:00",
+   "generator": "",
+   "id": "run_r1",
+   "input_ports": [
+    {
+     "entity_id": "",
+     "entity_type": "volume",
+     "note": "",
+     "ordinal": 0,
+     "required": true,
+     "role": "seismic_volume",
+     "version_id": "ver_a1"
+    }
+   ],
+   "input_version_ids": [
+    "ver_a1"
+   ],
+   "model_ref": null,
+   "operation": "factor_map",
+   "output_ports": [
+    {
+     "entity_id": "",
+     "entity_type": "",
+     "note": "",
+     "ordinal": 0,
+     "required": true,
+     "role": "attribute_grid",
+     "version_id": "ver_a2"
+    }
+   ],
+   "output_version_ids": [
+    "ver_a2"
+   ],
+   "parameters": {
+    "factor": "paleo"
+   },
+   "status": "completed"
+  },
+  "matches_eager": true
+ },
+ "db_lazy_get_version": {
+  "lazy": {
+   "asset_id": "asset_a",
+   "created_at": "2024-01-01T00:00:00+00:00",
+   "format": "",
+   "id": "ver_bun",
+   "managed": true,
+   "members": [
+    {
+     "member_role": "",
+     "name": "m1",
+     "ordinal": 0,
+     "rel_path": "m1.bin",
+     "required": true,
+     "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "size_bytes": 10
+    },
+    {
+     "member_role": "",
+     "name": "m2",
+     "ordinal": 1,
+     "rel_path": "d/m2.bin",
+     "required": true,
+     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "size_bytes": 20
+    }
+   ],
+   "metadata": {},
+   "parent_version_ids": [],
+   "path": "core.artifacts/intermediate/asset_a/ver_bun",
+   "run_id": null,
+   "sha256": null,
+   "size_bytes": null,
+   "source_uri": null,
+   "stage": "intermediate",
+   "trashed": false,
+   "trashed_at": null,
+   "version_number": 0
+  },
+  "matches_eager": true
+ },
+ "db_lazy_identity_rows_all": {
+  "lazy": [
+   [
+    "asset_a",
+    "Seismic A",
+    "res_1"
+   ],
+   [
+    "asset_b",
+    "beta map",
+    ""
+   ],
+   [
+    "asset_c",
+    "Grünfeld 数据",
+    ""
+   ],
+   [
+    "asset_g",
+    "gam%ma",
+    ""
+   ],
+   [
+    "asset_s",
+    "delta_snake",
+    ""
+   ],
+   [
+    "asset_h",
+    "Hidden One",
+    ""
+   ],
+   [
+    "asset_t",
+    "Tagged",
+    ""
+   ]
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_identity_rows_default": {
+  "lazy": [
+   [
+    "asset_a",
+    "Seismic A",
+    "res_1"
+   ],
+   [
+    "asset_b",
+    "beta map",
+    ""
+   ],
+   [
+    "asset_c",
+    "Grünfeld 数据",
+    ""
+   ],
+   [
+    "asset_g",
+    "gam%ma",
+    ""
+   ],
+   [
+    "asset_s",
+    "delta_snake",
+    ""
+   ]
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_list_assets_all": {
+  "lazy": [
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_a2",
+    "description": "",
+    "id": "asset_a",
+    "legacy_resource_id": "res_1",
+    "metadata": {
+     "flag": true,
+     "review_status": "approved"
+    },
+    "name": "Seismic A",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "seismic",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_b1",
+    "description": "",
+    "id": "asset_b",
+    "legacy_resource_id": null,
+    "metadata": {
+     "n": 5
+    },
+    "name": "beta map",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "well_log",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_c1",
+    "description": "",
+    "id": "asset_c",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "Grünfeld 数据",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "seismic",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_g1",
+    "description": "",
+    "id": "asset_g",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "gam%ma",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "grid",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_s1",
+    "description": "",
+    "id": "asset_s",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "delta_snake",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "grid",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_h1",
+    "description": "",
+    "id": "asset_h",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "Hidden One",
+    "trashed": true,
+    "trashed_at": "2024-06-01T00:00:00+00:00",
+    "type": "seismic",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_t1",
+    "description": "",
+    "id": "asset_t",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "Tagged",
+    "trashed": true,
+    "trashed_at": "2024-06-01T00:00:00+00:00",
+    "type": "seismic",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_list_assets_live": {
+  "lazy": [
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_a2",
+    "description": "",
+    "id": "asset_a",
+    "legacy_resource_id": "res_1",
+    "metadata": {
+     "flag": true,
+     "review_status": "approved"
+    },
+    "name": "Seismic A",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "seismic",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_b1",
+    "description": "",
+    "id": "asset_b",
+    "legacy_resource_id": null,
+    "metadata": {
+     "n": 5
+    },
+    "name": "beta map",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "well_log",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_c1",
+    "description": "",
+    "id": "asset_c",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "Grünfeld 数据",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "seismic",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_g1",
+    "description": "",
+    "id": "asset_g",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "gam%ma",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "grid",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_s1",
+    "description": "",
+    "id": "asset_s",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "delta_snake",
+    "trashed": false,
+    "trashed_at": null,
+    "type": "grid",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_list_assets_trashed": {
+  "lazy": [
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_h1",
+    "description": "",
+    "id": "asset_h",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "Hidden One",
+    "trashed": true,
+    "trashed_at": "2024-06-01T00:00:00+00:00",
+    "type": "seismic",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   },
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "current_version_id": "ver_t1",
+    "description": "",
+    "id": "asset_t",
+    "legacy_resource_id": null,
+    "metadata": {},
+    "name": "Tagged",
+    "trashed": true,
+    "trashed_at": "2024-06-01T00:00:00+00:00",
+    "type": "seismic",
+    "updated_at": "2024-01-01T00:00:00+00:00"
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_list_runs": {
+  "lazy": [
+   {
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "generator": "",
+    "id": "run_r1",
+    "input_ports": [
+     {
+      "entity_id": "",
+      "entity_type": "volume",
+      "note": "",
+      "ordinal": 0,
+      "required": true,
+      "role": "seismic_volume",
+      "version_id": "ver_a1"
+     }
+    ],
+    "input_version_ids": [
+     "ver_a1"
+    ],
+    "model_ref": null,
+    "operation": "factor_map",
+    "output_ports": [
+     {
+      "entity_id": "",
+      "entity_type": "",
+      "note": "",
+      "ordinal": 0,
+      "required": true,
+      "role": "attribute_grid",
+      "version_id": "ver_a2"
+     }
+    ],
+    "output_version_ids": [
+     "ver_a2"
+    ],
+    "parameters": {
+     "factor": "paleo"
+    },
+    "status": "completed"
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_list_tags": {
+  "lazy": [
+   {
+    "display_name": "QC",
+    "id": "tag_qc",
+    "metadata": {},
+    "name": "qc"
+   },
+   {
+    "display_name": null,
+    "id": "tag_zone",
+    "metadata": {},
+    "name": "zone"
+   },
+   {
+    "display_name": "",
+    "id": "tag_disp",
+    "metadata": {},
+    "name": "disp"
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_tag_ids_for_asset": {
+  "lazy": [
+   "tag_qc",
+   "tag_zone"
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_tags_for_version": {
+  "lazy": [
+   {
+    "display_name": "QC",
+    "id": "tag_qc",
+    "metadata": {},
+    "name": "qc"
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_versions_for_asset": {
+  "lazy": [
+   {
+    "asset_id": "asset_a",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_a1",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/raw/asset_a/ver_a1/a.sgy",
+    "run_id": null,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size_bytes": null,
+    "source_uri": "/import/a.sgy",
+    "stage": "raw",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 1
+   },
+   {
+    "asset_id": "asset_a",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_a2",
+    "managed": true,
+    "members": [],
+    "metadata": {},
+    "parent_version_ids": [
+     "ver_a1"
+    ],
+    "path": "core.artifacts/derived/asset_a/ver_a2/a.npy",
+    "run_id": "run_r1",
+    "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "size_bytes": null,
+    "source_uri": "/import/a2.npy",
+    "stage": "derived",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 2
+   },
+   {
+    "asset_id": "asset_a",
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "format": "",
+    "id": "ver_bun",
+    "managed": true,
+    "members": [
+     {
+      "member_role": "",
+      "name": "m1",
+      "ordinal": 0,
+      "rel_path": "m1.bin",
+      "required": true,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size_bytes": 10
+     },
+     {
+      "member_role": "",
+      "name": "m2",
+      "ordinal": 1,
+      "rel_path": "d/m2.bin",
+      "required": true,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size_bytes": 20
+     }
+    ],
+    "metadata": {},
+    "parent_version_ids": [],
+    "path": "core.artifacts/intermediate/asset_a/ver_bun",
+    "run_id": null,
+    "sha256": null,
+    "size_bytes": null,
+    "source_uri": null,
+    "stage": "intermediate",
+    "trashed": false,
+    "trashed_at": null,
+    "version_number": 0
+   }
+  ],
+  "matches_eager": true
+ },
+ "db_lazy_weird_direction_bucket": {
+  "input_roles": [
+   "seismic_volume",
+   "r"
+  ],
+  "output_roles": [
+   "attribute_grid"
+  ]
+ },
+ "db_lineage_edges": {
+  "ver_a1": {
+   "children": [
+    "ver_a2"
+   ],
+   "parents": []
+  },
+  "ver_a2": {
+   "children": [],
+   "parents": [
+    "ver_a1"
+   ]
+  }
+ },
+ "db_list_versions_order": {
+  "lazy_by_rowid": [
+   "ver_a1",
+   "ver_a2",
+   "ver_bun"
+  ],
+  "service_sorted": [
+   "ver_bun",
+   "ver_a1",
+   "ver_a2"
+  ],
+  "sql_by_number": [
+   "ver_bun",
+   "ver_a1",
+   "ver_a2"
+  ]
+ },
+ "db_rebuild_equivalence": {
+  "dump": {
+   "asset_tags": [],
+   "assets": [
+    [
+     "ea1",
+     "Ee2",
+     "ee2",
+     "unknown",
+     "",
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null
+    ]
+   ],
+   "lineage": [],
+   "model_versions": [],
+   "models": [],
+   "run_inputs": [],
+   "run_outputs": [],
+   "run_ports": [],
+   "runs": [],
+   "sync_state": [
+    [
+     "catalog_revision",
+     "4"
+    ],
+    [
+     "index_schema_version",
+     "5"
+    ],
+    [
+     "schema_version",
+     "1"
+    ]
+   ],
+   "tags": [],
+   "version_members": [],
+   "version_tags": [],
+   "versions": [
+    [
+     "ev1",
+     "ea1",
+     1,
+     "raw",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "ev2",
+     "ea1",
+     2,
+     "derived",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "ev3",
+     "ea1",
+     3,
+     "derived",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "ev4",
+     "ea1",
+     4,
+     "derived",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ]
+   ]
+  },
+  "equal": true
+ },
+ "db_reconcile_cas_sync_variant": {
+  "error": "数据目录元数据已被其他实例修改（事务内比对失败）；为避免覆盖他人提交，本次同步已中止。请重新打开工程后重试。",
+  "error_type": "CatalogStaleWriteError"
+ },
+ "db_reconcile_drift": {
+  "after_rebuild": {
+   "asset_tags": [],
+   "assets": [
+    [
+     "ra1",
+     "One-changed",
+     "one-changed",
+     "unknown",
+     "",
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null
+    ],
+    [
+     "ra2",
+     "Two",
+     "two",
+     "unknown",
+     "",
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null
+    ]
+   ],
+   "lineage": [],
+   "model_versions": [
+    [
+     "rmv1",
+     "m-logical",
+     "1",
+     "",
+     null,
+     "{}",
+     "{}",
+     "",
+     "",
+     1,
+     0,
+     "demo",
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "{}"
+    ]
+   ],
+   "models": [
+    [
+     "rm1",
+     "m-logical",
+     "M",
+     "unknown",
+     "",
+     "",
+     "demo",
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "{}"
+    ]
+   ],
+   "run_inputs": [
+    [
+     "rr1",
+     "rv1"
+    ]
+   ],
+   "run_outputs": [],
+   "run_ports": [],
+   "runs": [
+    [
+     "rr1",
+     "op",
+     "{}",
+     "",
+     "completed",
+     null,
+     "2024-01-01T00:00:00+00:00"
+    ]
+   ],
+   "sync_state": [
+    [
+     "catalog_revision",
+     "5"
+    ],
+    [
+     "index_schema_version",
+     "5"
+    ],
+    [
+     "schema_version",
+     "1"
+    ]
+   ],
+   "tags": [
+    [
+     "rt1",
+     "qc",
+     null,
+     "{}"
+    ]
+   ],
+   "version_members": [
+    [
+     "rv_bundle",
+     "m",
+     "m.bin",
+     "",
+     0,
+     1,
+     "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     9
+    ]
+   ],
+   "version_tags": [],
+   "versions": [
+    [
+     "rv1",
+     "ra1",
+     1,
+     "raw",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "rv2",
+     "ra1",
+     2,
+     "raw",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "rv_bundle",
+     "ra1",
+     3,
+     "intermediate",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "rv_new",
+     "ra1",
+     4,
+     "raw",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ]
+   ]
+  },
+  "after_reconcile": {
+   "asset_tags": [],
+   "assets": [
+    [
+     "ra1",
+     "One-changed",
+     "one-changed",
+     "unknown",
+     "",
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null
+    ],
+    [
+     "ra2",
+     "Two",
+     "two",
+     "unknown",
+     "",
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null
+    ]
+   ],
+   "lineage": [
+    [
+     "rv1",
+     "rv2"
+    ]
+   ],
+   "model_versions": [
+    [
+     "rmv1",
+     "m-logical",
+     "1",
+     "",
+     null,
+     "{}",
+     "{}",
+     "",
+     "",
+     1,
+     0,
+     "demo",
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "{}"
+    ]
+   ],
+   "models": [
+    [
+     "rm1",
+     "m-logical",
+     "M",
+     "unknown",
+     "",
+     "",
+     "demo",
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     "{}"
+    ]
+   ],
+   "run_inputs": [
+    [
+     "rr1",
+     "rv1"
+    ]
+   ],
+   "run_outputs": [],
+   "run_ports": [],
+   "runs": [
+    [
+     "rr1",
+     "op",
+     "{}",
+     "",
+     "completed",
+     null,
+     "2024-01-01T00:00:00+00:00"
+    ]
+   ],
+   "sync_state": [
+    [
+     "catalog_revision",
+     "5"
+    ],
+    [
+     "index_schema_version",
+     "5"
+    ],
+    [
+     "schema_version",
+     "1"
+    ]
+   ],
+   "tags": [
+    [
+     "rt1",
+     "qc",
+     null,
+     "{}"
+    ]
+   ],
+   "version_members": [
+    [
+     "rv_bundle",
+     "m",
+     "m.bin",
+     "",
+     0,
+     1,
+     "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     9
+    ]
+   ],
+   "version_tags": [],
+   "versions": [
+    [
+     "rv1",
+     "ra1",
+     1,
+     "raw",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "rv2",
+     "ra1",
+     2,
+     "raw",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "rv_bundle",
+     "ra1",
+     3,
+     "intermediate",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ],
+    [
+     "rv_new",
+     "ra1",
+     4,
+     "raw",
+     1,
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "{}",
+     "2024-01-01T00:00:00+00:00",
+     0,
+     null,
+     "[]"
+    ]
+   ]
+  },
+  "equal": false,
+  "lineage_known_divergence": true,
+  "revision": 5
+ },
+ "db_reconcile_empty_stamp": {
+  "is_fresh": true,
+  "sync_state": {
+   "catalog_revision": "6",
+   "index_schema_version": "5",
+   "schema_version": "1"
+  }
+ },
+ "db_search_dual_path": [
+  {
+   "case": {
+    "text": "ALPHA"
+   },
+   "equal": true,
+   "scan": [],
+   "sql": [],
+   "sql_unfiltered": []
+  },
+  {
+   "case": {
+    "text": "seismic a"
+   },
+   "equal": true,
+   "scan": [
+    "asset_a"
+   ],
+   "sql": [
+    "asset_a"
+   ],
+   "sql_unfiltered": [
+    "asset_a"
+   ]
+  },
+  {
+   "case": {
+    "text": "grünfeld"
+   },
+   "equal": true,
+   "scan": [
+    "asset_c"
+   ],
+   "sql": [
+    "asset_c"
+   ],
+   "sql_unfiltered": [
+    "asset_c"
+   ]
+  },
+  {
+   "case": {
+    "text": "GRÜNFELD"
+   },
+   "equal": true,
+   "scan": [
+    "asset_c"
+   ],
+   "sql": [
+    "asset_c"
+   ],
+   "sql_unfiltered": [
+    "asset_c"
+   ]
+  },
+  {
+   "case": {
+    "text": "m%m"
+   },
+   "equal": true,
+   "scan": [
+    "asset_g"
+   ],
+   "sql": [
+    "asset_g"
+   ],
+   "sql_unfiltered": [
+    "asset_g"
+   ]
+  },
+  {
+   "case": {
+    "text": "a_s"
+   },
+   "equal": true,
+   "scan": [
+    "asset_s"
+   ],
+   "sql": [
+    "asset_s"
+   ],
+   "sql_unfiltered": [
+    "asset_s"
+   ]
+  },
+  {
+   "case": {
+    "stage": "DataStage.RAW"
+   },
+   "equal": true,
+   "scan": [
+    "asset_a",
+    "asset_b",
+    "asset_g",
+    "asset_s"
+   ],
+   "sql": [
+    "asset_a",
+    "asset_b",
+    "asset_g",
+    "asset_s"
+   ],
+   "sql_unfiltered": [
+    "asset_a",
+    "asset_b",
+    "asset_g",
+    "asset_h",
+    "asset_s",
+    "asset_t"
+   ]
+  },
+  {
+   "case": {
+    "tag": "QC"
+   },
+   "equal": true,
+   "scan": [
+    "asset_a"
+   ],
+   "sql": [
+    "asset_a"
+   ],
+   "sql_unfiltered": [
+    "asset_a"
+   ]
+  },
+  {
+   "case": {
+    "tag_op": "and",
+    "tags": "[' QC ', '', 'zone']"
+   },
+   "equal": true,
+   "scan": [
+    "asset_a"
+   ],
+   "sql": [
+    "asset_a"
+   ],
+   "sql_unfiltered": [
+    "asset_a"
+   ]
+  },
+  {
+   "case": {
+    "tag_op": "or",
+    "tags": "['qc', 'zone']"
+   },
+   "equal": true,
+   "scan": [
+    "asset_a"
+   ],
+   "sql": [
+    "asset_a"
+   ],
+   "sql_unfiltered": [
+    "asset_a",
+    "asset_h"
+   ]
+  },
+  {
+   "case": {
+    "tag_op": "or",
+    "tags": "['qc', 'nope']"
+   },
+   "equal": true,
+   "scan": [
+    "asset_a"
+   ],
+   "sql": [
+    "asset_a"
+   ],
+   "sql_unfiltered": [
+    "asset_a"
+   ]
+  },
+  {
+   "case": {
+    "type": "grid"
+   },
+   "equal": true,
+   "scan": [
+    "asset_g",
+    "asset_s"
+   ],
+   "sql": [
+    "asset_g",
+    "asset_s"
+   ],
+   "sql_unfiltered": [
+    "asset_g",
+    "asset_s"
+   ]
+  },
+  {
+   "case": {
+    "metadata": "{'review_status': 'approved'}"
+   },
+   "equal": true,
+   "scan": [
+    "asset_a"
+   ],
+   "sql": [
+    "asset_a"
+   ],
+   "sql_unfiltered": [
+    "asset_a"
+   ]
+  },
+  {
+   "case": {
+    "metadata": "{'flag': True}"
+   },
+   "equal": true,
+   "scan": [],
+   "sql": [],
+   "sql_unfiltered": []
+  },
+  {
+   "case": {
+    "metadata": "{'n': 5}"
+   },
+   "equal": true,
+   "scan": [
+    "asset_b"
+   ],
+   "sql": [
+    "asset_b"
+   ],
+   "sql_unfiltered": [
+    "asset_b"
+   ]
+  },
+  {
+   "case": {
+    "text": "Hidden"
+   },
+   "equal": true,
+   "scan": [],
+   "sql": [],
+   "sql_unfiltered": [
+    "asset_h"
+   ]
+  },
+  {
+   "case": {
+    "include_trashed": "True",
+    "text": "Hidden"
+   },
+   "equal": true,
+   "scan": [
+    "asset_h"
+   ],
+   "sql": [
+    "asset_h"
+   ],
+   "sql_unfiltered": [
+    "asset_h"
+   ]
+  },
+  {
+   "case": {
+    "db_layer": "metadata flag raw True"
+   },
+   "equal": null,
+   "scan": null,
+   "sql": [
+    "asset_a"
+   ],
+   "sql_unfiltered": null
+  }
+ ],
+ "db_sync_selfheal": {
+  "assets_after_heal": 1,
+  "cas_passthrough": {
+   "store_untouched_revision": 77,
+   "type": "CatalogStaleWriteError"
+  },
+  "corrupt_selfhealed": true,
+  "drift_returns_true": true,
+  "fresh_returns_false": false,
+  "revision_after_heal": 4,
+  "revision_after_sync": 4
+ },
+ "db_write_all_baseline": {
+  "assets_rowid_order": [
+   "d1",
+   "a1"
+  ],
+  "revision": 5,
+  "sync_state": {
+   "catalog_revision": "5",
+   "index_schema_version": "5",
+   "schema_version": "1"
+  }
+ },
+ "find_production_model": {
+  "newest_wins": {
+   "created_at": "2024-03-01T00:00:00+00:00",
+   "model_id": "find-b",
+   "model_version": "2"
+  },
+  "no_match": null,
+  "tie_doc_order_first": "2"
+ },
+ "flush_stale_precheck": {
+  "error": "数据目录元数据已被其他实例修改；为避免覆盖他人提交，本次保存已中止。请重新打开工程后重试。",
+  "revision_unchanged": true,
+  "serial_advanced": true,
+  "type": "CatalogStaleWriteError"
+ },
+ "manifest_load_absent": {
+  "empty": true,
+  "revision": 0
+ },
+ "manifest_load_bak_repromote": {
+  "bak_consumed": true,
+  "canonical_back": true,
+  "revision": 1
+ },
+ "manifest_load_both_corrupt_error": {
+  "error": "Catalog file and its backup are both corrupt: {ROOT}/mf6/mf6.artifacts/metadata/catalog.json (backup error: Expecting value: line 1 column 2 (char 1))",
+  "isolated_count": 1,
+  "type": "CatalogError"
+ },
+ "manifest_load_corrupt_isolated": {
+  "bak_consumed": true,
+  "canonical_back": true,
+  "revision": 1
+ },
+ "manifest_load_no_backup_error": {
+  "error": "Catalog file is corrupt and no backup is available: {ROOT}/mf5/mf5.artifacts/metadata/catalog.json (Expecting value: line 1 column 1 (char 0))",
+  "isolated_count": 1,
+  "type": "CatalogError"
+ },
+ "manifest_load_ok": {
+  "asset_names": [
+   "Manifest Asset"
+  ],
+  "canonical_exists": true,
+  "revision": 1
+ },
+ "manifest_save_rotation": {
+  "bak_matches_previous": true,
+  "canonical_is_rev2": true
+ },
+ "manifest_save_seed": {
+  "bak_exists": true,
+  "digests_equal": true
+ },
+ "manifest_save_unchanged_skip": {
+  "bak_mtime_unchanged": true,
+  "canonical_mtime_unchanged": true,
+  "external_edit_rewrites": true
+ },
+ "maps_build_snapshot": {
+  "assets": [
+   "m_a1",
+   "m_a2",
+   "m_a3",
+   "m_a4"
+  ],
+  "children": {
+   "mv_r1": [
+    "mv_kid"
+   ]
+  },
+  "external": {
+   "/e/x.las": "mv_e1"
+  },
+  "legacy": {
+   "m_a1": "m_a1",
+   "m_a2": "m_a2",
+   "m_a3": "m_a3",
+   "m_a4": "m_a4",
+   "res_8": "m_a4",
+   "res_9": "m_a1"
+  },
+  "managed_raw": {
+   "/s/u.bin|0101010101010101010101010101010101010101010101010101010101010101": "mv_r1"
+  },
+  "versions_by_asset": {
+   "m_a1": [
+    "mv_r1",
+    "mv_r2"
+   ],
+   "m_a2": [
+    "mv_e1",
+    "mv_e2"
+   ],
+   "m_a3": [
+    "mv_kid"
+   ]
+  }
+ },
+ "maps_incremental_dedup": {
+  "add_last_wins": {
+   "/s/u.bin|0101010101010101010101010101010101010101010101010101010101010101": "mv_r3"
+  },
+  "drop_non_owner_keeps": {
+   "/s/u.bin|0101010101010101010101010101010101010101010101010101010101010101": "mv_r3"
+  },
+  "drop_owner_removes": {}
+ },
+ "maps_rebridge": {
+  "m_a2": "m_a2",
+  "m_a3": "m_a3",
+  "m_a4": "m_a4",
+  "res_8": "m_a4",
+  "res_9": "m_a2"
+ },
+ "maps_remove_buckets": {
+  "bulk_drops_empty": true,
+  "single_keeps_empty": true
+ },
+ "model_register_initial": {
+  "capability": "facies_prediction",
+  "metadata": {
+   "scientific": true
+  },
+  "model_id": "facies-net",
+  "model_name": "Facies Net",
+  "model_type": "cnn",
+  "provenance": {
+   "extra": "b",
+   "src": "a"
+  },
+  "provider": "pwb",
+  "status": "demo"
+ },
+ "model_register_refresh": {
+  "blank_never_wipes": {
+   "capability": "facies_prediction",
+   "metadata": {
+    "scientific": true
+   },
+   "model_id": "facies-net",
+   "model_name": "Facies Net",
+   "model_type": "cnn",
+   "provenance": {
+    "extra": "b",
+    "src": "a"
+   },
+   "provider": "pwb",
+   "status": "demo"
+  },
+  "blank_noop_no_save": true,
+  "force_status_replaces": {
+   "capability": "facies_prediction",
+   "metadata": {
+    "forced": true
+   },
+   "model_id": "facies-net",
+   "model_name": "Facies Net v2",
+   "model_type": "cnn",
+   "provenance": {
+    "extra": "b",
+    "src": "a"
+   },
+   "provider": "pwb",
+   "status": "production"
+  },
+  "name_refresh_provenance_merge": {
+   "capability": "facies_prediction",
+   "metadata": {
+    "scientific": true
+   },
+   "model_id": "facies-net",
+   "model_name": "Facies Net v2",
+   "model_type": "cnn",
+   "provenance": {
+    "extra": "b",
+    "src": "a"
+   },
+   "provider": "pwb",
+   "status": "demo"
+  },
+  "noop_no_save": true
+ },
+ "model_register_requires_ids": "register_model requires model_id and model_name",
+ "model_version_registration": {
+  "checksum_derived": true,
+  "default": {
+   "artifact_uri": "",
+   "checksum": null,
+   "demo_only": false,
+   "input_schema": {
+    "curves": [
+     "dt"
+    ]
+   },
+   "model_id": "facies-net",
+   "model_version": "1",
+   "status": "demo"
+  },
+  "duplicate_error": "ModelVersion facies-net@1 already registered",
+  "missing_artifact_checksum": null,
+  "production_rejected": "register_model_version cannot set status=production; register as demo then call promote_model()"
+ },
+ "promote_gate_matrix": [
+  {
+   "case": "demo_only",
+   "err": "Cannot promote to production: demo_only model versions cannot be promoted to production"
+  },
+  {
+   "case": "provider_demo",
+   "err": "Cannot promote to production: provider 'Demo' is not promotable to production"
+  },
+  {
+   "case": "provider_local_asset_spaced",
+   "err": "Cannot promote to production: provider ' LOCAL_ASSET ' is not promotable to production"
+  },
+  {
+   "case": "provider_local_asset_hyphen_slips",
+   "err": null,
+   "promoted": {
+    "artifact_uri": "",
+    "checksum": null,
+    "demo_only": false,
+    "input_schema": {
+     "x": []
+    },
+    "model_id": "gate-3",
+    "model_version": "1",
+    "status": "production"
+   }
+  },
+  {
+   "case": "model_type_heuristic",
+   "err": "Cannot promote to production: model_type 'heuristic' is not promotable to production"
+  },
+  {
+   "case": "model_scientific_false",
+   "err": "Cannot promote to production: model metadata marks scientific=False"
+  },
+  {
+   "case": "version_scientific_false",
+   "err": "Cannot promote to production: version metadata marks scientific=False (H4-3b)"
+  },
+  {
+   "case": "input_schema_required",
+   "err": "Cannot promote to production: input_schema is required for production promotion (H5-b)"
+  },
+  {
+   "case": "unknown_model",
+   "err": "Unknown model: nope"
+  },
+  {
+   "case": "version_not_registered",
+   "err": "ModelVersion facies-net@42 not registered"
+  }
+ ],
+ "promote_success": {
+  "model_status": "production",
+  "single_save": true,
+  "version": {
+   "artifact_uri": "",
+   "checksum": null,
+   "demo_only": false,
+   "input_schema": {
+    "curves": []
+   },
+   "model_id": "ok-net",
+   "model_version": "1",
+   "status": "production"
+  }
+ },
+ "promote_version_realloc": {
+  "distinct": true,
+  "numbers": [
+   1,
+   2,
+   3,
+   4
+  ]
+ },
+ "promote_version_shape": {
+  "current_advanced": true,
+  "metadata": {
+   "note": null,
+   "promoted_from": "ver_g5",
+   "reviewed_by": "kevin"
+  },
+  "new_number": 3,
+  "numbers_after": [
+   1,
+   2,
+   3
+  ],
+  "numbers_before": [
+   1,
+   2
+  ],
+  "parents": [
+   "ver_g5"
+  ],
+  "path": "pv.artifacts/outputs/asset_g6/ver_g7/v2.dat",
+  "run": {
+   "inputs": [
+    "ver_g5"
+   ],
+   "operation": "promote",
+   "outputs": [
+    "ver_g7"
+   ],
+   "parameters": {
+    "note": null,
+    "reviewed_by": "kevin",
+    "to_stage": "output"
+   }
+  },
+  "sha_copied": true,
+  "source_payload_intact": true,
+  "stage": "output"
+ },
+ "purge_refcount_blob": {
+  "blob_unlinked_at_last_ref": true,
+  "first": {
+   "asset_b1_alive": true,
+   "asset_tags_zombie_removed": true,
+   "blob_survives_shared": true,
+   "dead_version_gone": true,
+   "live_version_kept": true,
+   "mixed_untrashed_kept": true,
+   "pending_protected": true,
+   "removed": 3,
+   "zombie_gone": true
+  },
+  "second_removed": 1,
+  "zombie_not_counted": true
+ },
+ "purge_save_failure_rollback": {
+  "asset_back": true,
+  "error": "purge boom",
+  "store_version_rows": 1,
+  "tag_map_back": true,
+  "version_back": true
+ },
+ "resolve_path_ladder": [
+  {
+   "case": "managed_join_missing",
+   "resolved": "{ROOT}/rs/rs.artifacts/raw/a/v/gone.sgy"
+  },
+  {
+   "case": "external_absolute",
+   "resolved": "{ROOT}/rs/inproj.las"
+  },
+  {
+   "case": "project_relative",
+   "resolved": "{ROOT}/rs/inproj.las"
+  },
+  {
+   "case": "reanchor_first_occurrence",
+   "resolved": "/media/resolve/resolve/data/named.las"
+  },
+  {
+   "case": "sha_gate_basename_pass",
+   "resolved": "{ROOT}/rs/relocated.bin"
+  },
+  {
+   "case": "size_gate_two_segments",
+   "resolved": "{ROOT}/rs/deep/lastwo.bin"
+  },
+  {
+   "case": "sha_gate_mismatch_falls_through",
+   "resolved": "/gone/dir/same_name.las"
+  },
+  {
+   "case": "no_identity_fail_closed",
+   "resolved": "/gone/dir/no_identity.dat"
+  },
+  {
+   "case": "all_rungs_miss",
+   "resolved": "/gone/fully/absent.las"
+  }
+ ],
+ "restore_w1_inplace": {
+  "current_points_back": true,
+  "equals_original": true,
+  "file_restored": true,
+  "path": "tr3.artifacts/raw/asset_g8/ver_g9/source.dat",
+  "tombstone_cleared": true
+ },
+ "restore_w2_probe": {
+  "equals_original": true,
+  "file_restored": true,
+  "restored_path": "tr3.artifacts/raw/asset_g8/ver_g9/source.dat",
+  "store_path_stale_after_crash": true,
+  "tombstone_cleared": true,
+  "trash_dir_empty": true
+ },
+ "save_failure_semantics": {
+  "error": "boom",
+  "later_save_persists": true,
+  "method_rolls_back_metadata": true,
+  "revision_rolled_back": true,
+  "serial_advanced": true,
+  "store_row_unchanged": true
+ },
+ "service_open_absent_init": {
+  "empty_doc": true,
+  "health": "canonical",
+  "manifest_exists": false,
+  "revision": 0
+ },
+ "service_open_canonical": {
+  "asset_names": [
+   "Opened"
+  ],
+  "doc_revision": 1,
+  "flushed_matches": true,
+  "health": "canonical",
+  "maps_built": true,
+  "revision": 1
+ },
+ "service_open_corrupt_rebuild": {
+  "asset_names": [
+   "Corrupt Survivor"
+  ],
+  "health": "canonical",
+  "isolated_count": 1,
+  "revision": 2
+ },
+ "service_open_legacy_migration": {
+  "asset_names": [
+   "Legacy Asset"
+  ],
+  "doc_revision": 3,
+  "health": "canonical",
+  "manifest_mtime_recorded": true,
+  "revision": 3
+ },
+ "service_open_manifest_adoption": {
+  "equal_ignored": {
+   "asset_names": [
+    "Foreign Wins"
+   ],
+   "revision": 5
+  },
+  "newer_adopted": {
+   "asset_names": [
+    "Foreign Wins"
+   ],
+   "revision": 5
+  }
+ },
+ "service_open_unreadable_error": {
+  "error": "Canonical catalog store exists but is unreadable: {ROOT}/op5/op5.artifacts/metadata/catalog.sqlite. Not overwriting it with the manifest; resolve the read failure (close other instances, retry) and reopen.",
+  "health": "error",
+  "type": "CatalogError"
+ },
+ "trash_blob_backed": {
+  "blob_exists": true,
+  "meta": {
+   "original_path": "tr2.artifacts/blobs/30/3016356488b9d860f6ae86daf3338bc6750246b5c28cac78d482035da40f79b6",
+   "original_stage": "raw",
+   "reason": "blob",
+   "trashed_at": "2024-06-01T00:00:00+00:00"
+  },
+  "path_unchanged": true
+ },
+ "trash_external_metadata_only": {
+  "file_untouched": true,
+  "path_unchanged": true,
+  "saves_used": 1,
+  "trashed": true
+ },
+ "trash_tombstone_shape": {
+  "current_reallocated_to": "ver_g10",
+  "idempotent_second_saves": true,
+  "import_source_kept": true,
+  "managed_original_gone": true,
+  "new_path": "tr1.artifacts/trash/ver_g11/v2.dat",
+  "saves_used": 2,
+  "trash_file_exists": true,
+  "trash_meta": {
+   "original_path": "tr1.artifacts/derived/asset_g12/ver_g11/v2.dat",
+   "original_stage": "derived",
+   "reason": "cleanup",
+   "trashed_at": "2024-06-01T00:00:00+00:00"
+  },
+  "trashed_at": "2024-06-01T00:00:00+00:00",
+  "trashed_flag": true
+ },
+ "update_asset_metadata_pipeline": {
+  "final_metadata": {
+   "confidence": "high",
+   "custom": "keep",
+   "discipline": "correlation",
+   "format": "sgy",
+   "freeform": {
+    "n": [
+     1,
+     2
+    ]
+   },
+   "review_status": "pending_review",
+   "source": "ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab"
+  },
+  "steps": [
+   {
+    "meta": "correlation",
+    "patch": "discipline=stratigraphy"
+   },
+   {
+    "meta": "high",
+    "patch": "confidence=高"
+   },
+   {
+    "meta": "pending_review",
+    "patch": "review_status=pending"
+   },
+   {
+    "folded": true,
+    "len": 200,
+    "patch": "source=truncate"
+   },
+   {
+    "deleted": true,
+    "patch": "region cleared"
+   },
+   {
+    "patch": "passthrough",
+    "value": {
+     "n": [
+      1,
+      2
+     ]
+    }
+   },
+   {
+    "patch": "noop",
+    "serial_unchanged": true
+   },
+   {
+    "err": "字段 'format' 是目录内部保留键，不能通过治理信息修改",
+    "patch": "reserved"
+   },
+   {
+    "err": "学科方向(discipline) 的值 'bogus' 不在受控词表中: seismic、well_log、horizon、interpretation、correlation、fault、factor_map、prediction、paleomap、qc、export、modeling、general",
+    "patch": "bad vocab"
+   }
+  ],
+  "updated_at_clock": true
+ },
+ "v11_ports_backfill": {
+  "after": {
+   "input": [
+    {
+     "entity_id": "",
+     "entity_type": "",
+     "note": "",
+     "ordinal": 0,
+     "required": true,
+     "role": "input",
+     "version_id": "pvin"
+    }
+   ],
+   "output": [
+    {
+     "entity_id": "",
+     "entity_type": "",
+     "note": "",
+     "ordinal": 0,
+     "required": true,
+     "role": "factor_grid",
+     "version_id": "pvout"
+    }
+   ]
+  },
+  "before_anonymous": {
+   "input": [
+    {
+     "entity_id": "",
+     "entity_type": "",
+     "note": "",
+     "ordinal": 0,
+     "required": true,
+     "role": "input",
+     "version_id": "pvin"
+    }
+   ],
+   "output": [
+    {
+     "entity_id": "",
+     "entity_type": "",
+     "note": "",
+     "ordinal": 0,
+     "required": true,
+     "role": "output",
+     "version_id": "pvout"
+    }
+   ]
+  },
+  "idempotent": {
+   "ports_added": 0,
+   "runs_annotated": 0
+  },
+  "migrate_result": {
+   "ports_added": 1,
+   "runs_annotated": 1
+  },
+  "store_run_ports": [
+   [
+    "pr1",
+    "output",
+    "factor_grid",
+    "pvout",
+    0,
+    1,
+    "",
+    "",
+    ""
+   ]
+  ],
+  "unknown_operation_untouched": [
+   {
+    "entity_id": "",
+    "entity_type": "",
+    "note": "",
+    "ordinal": 0,
+    "required": true,
+    "role": "input",
+    "version_id": "pvin"
+   }
+  ]
+ },
+ "wc_commit_failure_rollback": {
+  "assets_unchanged": true,
+  "error": "commit boom",
+  "payload_restored": true,
+  "row_state": "dirty",
+  "store_versions": 2,
+  "versions_unchanged": true
+ },
+ "wc_commit_success": {
+  "asset_name": "Committed Asset",
+  "assets_added": 1,
+  "new_version_number": 1,
+  "parents": [
+   "ver_g13"
+  ],
+  "path": "wc2.artifacts/derived/asset_g14/ver_g15/source.dat",
+  "rows_after": [],
+  "sha_matches_edit": true,
+  "store_versions": 2,
+  "working_file_consumed": true
+ },
+ "wc_create_reuse_replace": {
+  "display_name": "source.dat",
+  "path": "{ROOT}/wc1/wc1.artifacts/working/ver_g16/source.dat",
+  "registered": true,
+  "replaced_bytes_intact": true,
+  "reuse_same_path_untouched": true,
+  "rows_after_replace": [
+   {
+    "display_name": "source.dat",
+    "path": "wc1.artifacts/working/ver_g16/source.dat",
+    "source_version_id": "ver_g16",
+    "state": "checked_out",
+    "working_id": "wc-g17"
+   }
+  ],
+  "source_version": "ver_g16",
+  "state": "checked_out"
+ },
+ "wc_dirty_hint": {
+  "committing_never_flags": false,
+  "mtime_drift": true,
+  "restored": true
+ },
+ "wc_discard_guard": {
+  "committing_error": "工作副本正在提交中，不能丢弃；请等待提交完成或重启后恢复。",
+  "file_gone": true,
+  "normal_discard": true,
+  "nothing": false,
+  "rows_after": [],
+  "stray_gone": true,
+  "type": "CatalogError",
+  "unregistered_file": true
+ },
+ "wc_recover_matrix": {
+  "back_reverted_file_intact": true,
+  "final_rows": [
+   {
+    "display_name": "a.dat",
+    "path": "wc3.artifacts/working/ver_kept1/a.dat",
+    "source_version_id": "ver_kept1",
+    "state": "checked_out",
+    "working_id": "wc-g18"
+   },
+   {
+    "display_name": "b.dat",
+    "path": "wc3.artifacts/working/ver_kept2/b.dat",
+    "source_version_id": "ver_kept2",
+    "state": "dirty",
+    "working_id": "wc-g19"
+   },
+   {
+    "display_name": "d.dat",
+    "path": "wc3.artifacts/working/ver_back/d.dat",
+    "source_version_id": "ver_back",
+    "state": "dirty",
+    "working_id": "wc-g20"
+   }
+  ],
+  "kept1_exists": true,
+  "surviving_paths": [
+   "{ROOT}/wc3/wc3.artifacts/working/ver_kept1/a.dat",
+   "{ROOT}/wc3/wc3.artifacts/working/ver_kept2/b.dat",
+   "{ROOT}/wc3/wc3.artifacts/working/ver_back/d.dat"
+  ],
+  "surviving_states": [
+   "checked_out",
+   "dirty",
+   "dirty"
+  ]
+ }
+}

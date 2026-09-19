@@ -4,8 +4,10 @@
 #include "pwb/domain/sha256.hpp"
 #include "pwb/project/paths.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <optional>
 #include <set>
 
 #if !defined(_WIN32)
@@ -501,6 +503,211 @@ Result<PlacedFile> place_managed_file(const fs::path& source,
         fs::relative(target, dir, ec));
     placed.size_bytes = size;
     placed.sha256 = hex;
+    return placed;
+}
+
+// ---- place_managed_tree (storage.py 542-615; conv-31b Wave2-A8) --------------
+// V11 bundle placement. Branch ladder order IS the contract (R8 ① T1-T8):
+// safe-id gate before any directory exists → ensure layout (all seven
+// dirs, Python ensure_catalog_layout parity — trash.cpp's artifacts_root
+// only creates the root, tree placement keeps the full layout here) → a
+// NON-EMPTY existing target is refused while an empty one is tolerated →
+// source-not-a-directory AFTER the target mkdir (bare-call shape; the
+// register_bundle_version orchestrator pre-checks it) → per-member atomic
+// placement → empty result ("only subdirectories") refuses → keep_source
+// =false consumes the source only after every member landed (copy-then-
+// delete, P1-2). Any mid-loop failure rmtree's the target tree — never a
+// partial bundle. Bundle members NEVER enter the CAS blob store and there
+// is no caller-digest fast path (the place_managed_file divergences).
+
+namespace {
+
+// storage.py ensure_catalog_layout (70-82). Stage→directory mapping single
+// source of truth: models.hpp kStageDirs — the same table place_managed_file
+// indexes above (findings §C-8; no third literal list is introduced).
+fs::path ensure_catalog_layout(const fs::path& project_path) {
+    const fs::path root = pwb::project::artifact_dir_for(project_path);
+    std::error_code ec;
+    for (const char* stage_dir : kStageDirs) {
+        fs::create_directories(root / stage_dir, ec);
+    }
+    for (const char* extra : {"working", "metadata", "trash"}) {
+        fs::create_directories(root / extra, ec);
+    }
+    return root;
+}
+
+struct TreeMemberSource {
+    fs::path source_path;             // file under source_dir
+    fs::path relative;                // lexical source_dir-relative path
+    std::vector<std::string> parts;   // Python sorted(Path) key (B-30)
+};
+
+// storage.py `sorted(p for p in source_dir.rglob("*") if p.is_file())`:
+// every regular file (file symlinks count — is_file follows; directory
+// symlinks are neither descended nor selected). Sort key is the component
+// VECTOR (findings B-30: ("a", "b") < ("a.txt",) because "a" < "a.txt"),
+// never the native string order. An unreadable subdirectory stops the walk
+// (Python's rglob skips it and continues — declared bounded divergence,
+// unreachable in the managed-tree envelope).
+std::vector<TreeMemberSource> collect_tree_members(const fs::path& source_dir) {
+    std::vector<TreeMemberSource> files;
+    std::error_code walk_ec;
+    for (fs::recursive_directory_iterator it(source_dir,
+                                             fs::directory_options::none,
+                                             walk_ec),
+             end;
+         !walk_ec && it != end; it.increment(walk_ec)) {
+        if (walk_ec) break;
+        std::error_code file_ec;
+        if (!fs::is_regular_file(it->path(), file_ec) || file_ec) continue;
+        TreeMemberSource member;
+        member.source_path = it->path();
+        member.relative = fs::relative(member.source_path, source_dir, file_ec);
+        if (file_ec) continue;
+        for (const auto& part : member.relative) {
+            member.parts.push_back(part.generic_string());
+        }
+        files.push_back(std::move(member));
+    }
+    std::sort(files.begin(), files.end(),
+              [](const TreeMemberSource& a, const TreeMemberSource& b) {
+                  return a.parts < b.parts;  // lexicographic component tuple
+              });
+    return files;
+}
+
+}  // namespace
+
+Result<std::vector<PlacedTreeMember>> place_managed_tree(
+    const fs::path& source_dir, const fs::path& project_path,
+    domain::DataStage stage, const std::string& asset_id,
+    const std::string& version_id, bool keep_source) {
+    // T1 — #1175 safe-id gate, before ANY directory is created (same
+    // message/precedent as place_managed_file above).
+    auto safe_or_fail = [&](const char* role,
+                            const std::string& id) -> std::optional<DataError> {
+        if (!is_safe_entity_id_python_parity(id)) {
+            return DataError(
+                ErrorCode::UnsafeId,
+                "Unsafe " + std::string(role) + " id " + python_repr(id)
+                    + ": only [A-Za-z0-9._-] allowed");
+        }
+        return std::nullopt;
+    };
+    if (auto error = safe_or_fail("asset", asset_id)) return *error;
+    if (auto error = safe_or_fail("version", version_id)) return *error;
+
+    const int stage_index = static_cast<int>(stage);
+    if (stage_index < 0 || stage_index > 3) {
+        return DataError(ErrorCode::InvalidArgument, "unknown data stage");
+    }
+    // T2 — the full seven-directory layout (mkdir -p, errors swallowed into
+    // the per-member failure below exactly like a Python mkdir OSError).
+    const fs::path root = ensure_catalog_layout(project_path);
+    const fs::path target_dir =
+        root / kStageDirs[static_cast<std::size_t>(stage_index)]
+        / fs::path(asset_id) / fs::path(version_id);
+    std::error_code ec;
+    // T3 / T3b — an existing NON-EMPTY target refuses (FileExistsError →
+    // place_managed_file's ImmutableVersion precedent, message byte-equal);
+    // an existing EMPTY directory is tolerated below.
+    if (fs::exists(target_dir, ec) && !fs::is_empty(target_dir, ec)) {
+        return DataError(ErrorCode::ImmutableVersion,
+                         "Managed payload already exists: "
+                         + pwb::project::path_to_u8(target_dir));
+    }
+    fs::create_directories(target_dir, ec);
+    // T4 — source check comes AFTER the target mkdir (storage.py 571-573);
+    // on this refusal the freshly created empty target dir is NOT cleaned
+    // (bare-call fidelity; through the service orchestrator the source was
+    // already verified in Phase A so this is unreachable there).
+    if (!fs::is_directory(source_dir, ec)) {
+        return DataError(ErrorCode::NotFound,
+                         "Bundle source directory not found: "
+                         + pwb::project::path_to_u8(source_dir));
+    }
+
+    const fs::path dir = project_dir(project_path);
+    std::vector<PlacedTreeMember> placed;
+    // T5 — per-member atomic placement: mkstemp ".place-" in the member's
+    // parent → streaming copy+hash → fsync → rename → dir fsync →
+    // read-only (chmod AFTER the rename, like Python). Returns the error
+    // (temp already removed) instead of raising so T6 can roll the whole
+    // tree back first.
+    auto place_one = [&](const TreeMemberSource& member,
+                         PlacedTreeMember* landed) -> std::optional<DataError> {
+        const fs::path member_target = target_dir / member.relative;
+        fs::create_directories(member_target.parent_path(), ec);
+        const fs::path temp = reserve_temp(member_target.parent_path(), ".place-");
+        pwb::domain::Sha256 digest;
+        std::int64_t size = 0;
+        {
+            std::ifstream in(member.source_path, std::ios::binary);
+            std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+            if (!in.good() || !out.good()) {
+                fs::remove(temp, ec);
+                return io_error("payload source unreadable: "
+                                + member.source_path.generic_string());
+            }
+            std::string buffer(kChunkSize, '\0');
+            while (in) {
+                in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+                const auto got = in.gcount();
+                if (got > 0) {
+                    digest.update(buffer.data(), static_cast<std::size_t>(got));
+                    size += static_cast<std::int64_t>(got);
+                    out.write(buffer.data(), got);
+                }
+            }
+            const bool read_failed = in.bad();
+            out.flush();
+            const bool write_failed = !out.good();
+            if (read_failed || write_failed) {
+                fs::remove(temp, ec);
+                return io_error(read_failed
+                                    ? "payload source read failed: "
+                                          + member.source_path.generic_string()
+                                    : "payload temp write failed: "
+                                          + temp.generic_string());
+            }
+        }
+        fsync_path_best_effort(temp);
+        fs::rename(temp, member_target, ec);
+        if (ec) {
+            fs::remove(temp, ec);
+            return io_error("payload rename failed: " + ec.message());
+        }
+        fsync_path_best_effort(member_target.parent_path());
+        make_read_only(member_target);
+        landed->rel_path = pwb::project::path_to_u8(
+            fs::relative(member_target, dir, ec));
+        landed->size_bytes = size;
+        landed->sha256 = digest.hex_digest();
+        return std::nullopt;
+    };
+    for (const TreeMemberSource& member : collect_tree_members(source_dir)) {
+        PlacedTreeMember landed;
+        if (auto error = place_one(member, &landed)) {
+            // T6 — all members or nothing: any mid-loop failure rmtree's
+            // the target tree (ignore_errors) and re-raises.
+            fs::remove_all(target_dir, ec);
+            return *error;
+        }
+        placed.push_back(std::move(landed));
+    }
+    // T7 — only subdirectories / no regular files: refuse and clean up.
+    if (placed.empty()) {
+        fs::remove_all(target_dir, ec);
+        return DataError(ErrorCode::InvalidArgument,
+                         "Bundle source directory is empty: "
+                         + pwb::project::path_to_u8(source_dir));
+    }
+    // T8 — keep_source=false removes the source directory only after every
+    // file landed (move semantics, ignore_errors).
+    if (!keep_source) {
+        fs::remove_all(source_dir, ec);
+    }
     return placed;
 }
 

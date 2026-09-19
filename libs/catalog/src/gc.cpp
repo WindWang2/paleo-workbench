@@ -184,6 +184,37 @@ std::set<std::string> active_staging_targets(const CatalogDocument& document,
     return targets;
 }
 
+// CONV-31b (A5, findings §F-2 R-leak fix): the live read Python actually
+// performs (db.py 1289-1308 queries sqlite; it never consults the loaded
+// document). A lease acquired after the caller's document snapshot loaded
+// — exactly the lease guarding in-flight registration bytes — is invisible
+// to the snapshot form above, so plan/sweep must use this one.
+std::set<std::string> active_staging_targets_live(Database& database,
+                                                  const std::string& cutoff_iso) {
+    std::set<std::string> targets;
+    if (!database.is_open()) return targets;
+    if (!database.table_exists("staging_leases")) return targets;
+    Statement statement = database.prepare(
+        "SELECT DISTINCT target FROM staging_leases WHERE heartbeat_at > ?");
+    if (!statement.is_valid()) return targets;
+    statement.bind(1, cutoff_iso);
+    while (statement.step()) {
+        targets.insert(statement.text(0));
+    }
+    return targets;
+}
+
+std::set<std::string> active_staging_targets_live(
+    const fs::path& project_path, const std::string& cutoff_iso) {
+    auto opened = Database::open(
+        pwb::project::catalog_sqlite_for(project_path),
+        SqliteOpenMode::ReadOnly);
+    if (!opened.is_ok()) {
+        return {};  // missing/unreadable store: no leases (swallow parity)
+    }
+    return active_staging_targets_live(opened.value(), cutoff_iso);
+}
+
 std::string default_lease_cutoff() {
     const auto now = std::chrono::system_clock::now()
         - std::chrono::seconds(3600);  // db.py STAGING_LEASE_TTL_SECONDS
@@ -207,8 +238,11 @@ GcReport plan_gc(const GcContext& context, bool explicit_plan) {
     const fs::path stage_root = artifacts_root(context);
     static_assert(std::size(pwb::catalog::kStageDirs) == 4);
     const std::set<std::string> referenced = referenced_paths(document);
+    // CONV-31b: live sqlite lease read (the document snapshot cannot see a
+    // lease acquired after the caller loaded it — findings §F-2).
     const std::set<std::string> leased =
-        active_staging_targets(document, default_lease_cutoff());
+        active_staging_targets_live(context.project_path,
+                                    default_lease_cutoff());
 
     auto classify_temp_and_empty = [&](GcReport& into) {
         for (const fs::path& path : walk_files(stage_root)) {
@@ -317,8 +351,11 @@ GcReport sweep_gc(const GcContext& context, bool dry_run,
     const fs::path dir = project_root(context);
     const CatalogDocument& document = *context.document;
     const std::set<std::string> referenced = referenced_paths(document);
+    // CONV-31b: re-validation also uses the live lease read (db.py 1289-1308
+    // parity; the snapshot form misses in-flight leases — findings §F-2).
     const std::set<std::string> leased =
-        active_staging_targets(document, default_lease_cutoff());
+        active_staging_targets_live(context.project_path,
+                                    default_lease_cutoff());
 
     GcReport removed;
     for (const GcItem& item : candidates.items) {
