@@ -95,6 +95,15 @@ bool has_las_extension(const std::string& path) {
     return ext == "LAS";
 }
 
+#if PWB_UI_WORKERS_HAVE_XML_LOAD
+bool has_xml_extension(const std::string& path) {
+    auto dot = path.find_last_of('.');
+    if (dot == std::string::npos || dot + 4 != path.size()) return false;
+    auto ext = upper_ascii(std::string_view(path).substr(dot + 1));
+    return ext == "XML";
+}
+#endif
+
 }  // namespace
 
 WellLogLoadFn make_wle_load_fn() {
@@ -104,8 +113,23 @@ WellLogLoadFn make_wle_load_fn() {
         if (is_cancelled && is_cancelled()) {
             throw WellLogLoadCancelled{};
         }
-        // WLE has no XML source adapter; non-LAS resources stay on the
-        // honest message path instead of a fabricated parse.
+#if PWB_UI_WORKERS_HAVE_XML_LOAD
+        // XML 走 05 线的井曲线识别+解析核（真加载，载荷与 LAS 同型）。
+        const bool is_las = has_las_extension(path);
+        if (!is_las && !has_xml_extension(path)) {
+            return std::nullopt;
+        }
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return std::nullopt;
+        std::string bytes((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+        if (in.bad()) return std::nullopt;
+        if (!is_las) {
+            return load_well_log_xml(bytes, path, is_cancelled);
+        }
+#else
+        // 无 ingest 的核闭包配置：XML 保持 05 前的诚实消息路径
+        //（Python 生产路径不受影响；见 ui_workers/CMakeLists 头注）。
         if (!has_las_extension(path)) {
             return std::nullopt;
         }
@@ -114,7 +138,7 @@ WellLogLoadFn make_wle_load_fn() {
         std::string bytes((std::istreambuf_iterator<char>(in)),
                           std::istreambuf_iterator<char>());
         if (in.bad()) return std::nullopt;
-
+#endif
         welllog::BufferSourceReference source;
         source.uri = path;
         auto result =

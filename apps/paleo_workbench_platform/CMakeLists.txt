@@ -204,6 +204,16 @@ if(TARGET Pwb::VisualizationCrossWellQt AND TARGET Pwb::VisualizationWellTieQt
 endif()
 # END VIZ-B
 
+# BEGIN 05 — viz_b real LAS path: joins the dock when the VIZ-A WLE load
+# bridge participates in this configure. Without it the dock keeps the
+# honest "LAS 解析内核未接入" path (fail-closed, never a fake load).
+if(TARGET Pwb::UiWorkersWleLoad AND TARGET Pwb::IngestLasWle)
+    target_sources(pwb-platform PRIVATE viz_b_well_source.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::UiWorkersWleLoad)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_B_LAS=1)
+endif()
+# END 05
+
 # BEGIN CONV-GEO3D
 # Native 3D geomodel viewer dock (Qt6 viewport + workspace controller, no
 # Python). Joins the link closure only when the PWB_BUILD_GEO3D_VIZ slice

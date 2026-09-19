@@ -1220,6 +1220,37 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
 endif()
 # END VIZ-E
 
+# BEGIN 05 — well/time-depth external presenters (05→04 contract): the
+# data page previews .las/.xml well assets and time-depth CSVs through the
+# 05 pages + the production well-log load seam. Requires the viz-e
+# registry closure; the WLE half degrades honestly when the VIZ-A bridge
+# is absent, the time-depth half needs the viz-B cross-well core.
+if(TARGET pwb-platform AND TARGET Pwb::VizChartsQt
+   AND TARGET Pwb::UiPagesDataQt AND TARGET Pwb::UiPagesPreviewQt
+   AND TARGET Pwb::UiWorkers AND TARGET Pwb::MappingKernel
+   AND TARGET Pwb::JobQt)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/well_presenter_install.cpp
+        apps/paleo_workbench_platform/well_presenter_install.hpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::UiPagesPreviewQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_WELL_PRESENTERS=1)
+    if(TARGET Pwb::UiWorkersWleLoad)
+        target_link_libraries(pwb-platform PRIVATE Pwb::UiWorkersWleLoad)
+        target_compile_definitions(pwb-platform
+            PRIVATE PWB_WELL_PRESENTERS_HAVE_WLE=1)
+    endif()
+    if(TARGET Pwb::VisualizationCrossWell)
+        target_link_libraries(pwb-platform PRIVATE Pwb::VisualizationCrossWell)
+        target_compile_definitions(pwb-platform
+            PRIVATE PWB_WELL_PRESENTERS_HAVE_TIE=1)
+    endif()
+    if(BUILD_TESTING AND TARGET Pwb::VisualizationCrossWell
+       AND TARGET Pwb::UiPagesDataQt)
+        add_subdirectory(tests/cpp/well_crosswell)
+    endif()
+endif()
+# END 05
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared

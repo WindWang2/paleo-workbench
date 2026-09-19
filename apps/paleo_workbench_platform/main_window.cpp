@@ -156,6 +156,9 @@
 #ifdef PWB_WITH_VIZ_A
 #include "viz_a_install.hpp"
 #endif
+#ifdef PWB_WITH_WELL_PRESENTERS
+#include "well_presenter_install.hpp"
+#endif
 
 #ifdef PWB_WITH_GEO3D_VIZ
 // VIZ-C: JobCenter* travels through a dynamic property; QVariant needs
@@ -531,6 +534,12 @@ void MainWindow::buildUi() {
 #endif
     // END VIZ-A
 #endif
+// BEGIN 05 — well/time-depth external presenters into the viz-e data page
+// registry (05→04 contract; body lives in well_presenter_install.cpp).
+#if defined(PWB_WITH_WELL_PRESENTERS)
+    well_presenters::install();
+#endif
+// END 05
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     // D's slice host in a dock (moc-free widget like the WLE host).
     seismic_dock_ = new QDockWidget(tr("地震视图"), this);

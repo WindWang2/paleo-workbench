@@ -41,7 +41,8 @@ add_library(pwb_ui_workers STATIC
     src/well_log_load.cpp
     src/geomodel_primitives.cpp
     src/stratal.cpp
-    src/geological_modeling.cpp)
+    src/geological_modeling.cpp
+    src/well_identity.cpp)
 add_library(Pwb::UiWorkers ALIAS pwb_ui_workers)
 target_include_directories(pwb_ui_workers PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -51,12 +52,28 @@ target_compile_features(pwb_ui_workers PUBLIC cxx_std_20)
 target_link_libraries(pwb_ui_workers PUBLIC
     Pwb::JobRuntime Pwb::Domain Pwb::GeoModel)
 
+# BEGIN 05: XML well-log load core. The bounded XML scanner lives in
+# pwb_ingest (already present in every DATA/PLATFORM/SCIENCE configure);
+# kernel-closure configs without ingest keep the pre-05 seam honestly
+# (no XML load, no partial compile).
+if(TARGET pwb_ingest)
+    target_sources(pwb_ui_workers PRIVATE src/well_log_xml_data.cpp)
+    target_link_libraries(pwb_ui_workers PUBLIC pwb_ingest)
+endif()
+# END 05
+
 # BEGIN VIZ-A: production WLE load for the well_log seam. Only when the SDK
 # participates in the build (science_suite adds well-log-engine before this
 # directory); otherwise the seam keeps reporting the engine as unavailable.
 if(TARGET WellLog::IO)
     add_library(pwb_ui_workers_wle_load STATIC
         src/wle_load.cpp)
+    if(TARGET pwb_ingest)
+        # 05 线：XML 分派后端（识别+解析核在 pwb_ui_workers）。
+        target_sources(pwb_ui_workers_wle_load PRIVATE src/wle_xml_load.cpp)
+        target_compile_definitions(pwb_ui_workers_wle_load
+            PRIVATE PWB_UI_WORKERS_HAVE_XML_LOAD=1)
+    endif()
     add_library(Pwb::UiWorkersWleLoad ALIAS pwb_ui_workers_wle_load)
     target_include_directories(pwb_ui_workers_wle_load PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)

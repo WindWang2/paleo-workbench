@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PlacemarkCollection>
+  <Placemark>
+    <name>人民公园</name>
+    <Point><coordinates>116.40,39.90</coordinates></Point>
+  </Placemark>
+  <PointRecord>
+    <name>站点A</name>
+    <x>500000.0</x>
+    <y>3500000.0</y>
+  </PointRecord>
+</PlacemarkCollection>

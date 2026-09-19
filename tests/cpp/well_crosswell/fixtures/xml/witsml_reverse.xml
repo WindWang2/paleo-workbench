@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<logs version="1.4.1.1">
+  <log>
+    <nameWell>W-REV</nameWell>
+    <logCurveInfo>
+      <mnemonic>DEPTH</mnemonic>
+    </logCurveInfo>
+    <logCurveInfo>
+      <mnemonic>GR</mnemonic>
+    </logCurveInfo>
+    <logData>
+      <data> 200.0 61.25
+      199.0 58.90
+      198.0 55.40
+      197.0 53.10
+      196.0 49.85
+      195.0 45.70
+      </data>
+    </logData>
+  </log>
+</logs>
