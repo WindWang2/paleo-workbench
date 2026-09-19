@@ -17,7 +17,12 @@ add_library(pwb_interchange STATIC
     src/contracts.cpp
     src/zip_archive.cpp
     src/atomic_file.cpp
-    src/package_runtime.cpp)
+    src/package_runtime.cpp
+    # CPP-CLOSE-10: delivery/batch/dependency-audit services (I13/I14/I15/I16
+    # ports). delivery/audit only need the catalog seams; batch/closure need
+    # the native model-adapter service and follow its GeoModel gating below.
+    src/dependency_audit.cpp
+    src/delivery.cpp)
 add_library(Pwb::Interchange ALIAS pwb_interchange)
 target_include_directories(pwb_interchange PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -35,6 +40,9 @@ target_link_libraries(pwb_interchange PUBLIC Pwb::Domain ZLIB::ZLIB)
 # keep configuring unchanged without the geomodel half on.
 if(TARGET Pwb::GeoModel)
     target_sources(pwb_interchange PRIVATE src/model_adapters.cpp src/service.cpp)
+    # CPP-CLOSE-10: batch orchestration rides on the native model-adapter
+    # service.
+    target_sources(pwb_interchange PRIVATE src/batch.cpp)
     target_link_libraries(pwb_interchange PUBLIC Pwb::GeoModel)
 else()
     message(STATUS
@@ -44,4 +52,13 @@ endif()
 
 if(BUILD_TESTING)
     add_subdirectory(interchange_tests)
+endif()
+
+# CPP-CLOSE-10: the closure_interchange_* composition additionally needs the
+# provider plugin runtime (pwb::providers::PluginLoader). Kept optional like
+# the geomodel half above so the pure path-safety/preflight/packaging
+# kernel keeps configuring without providers on.
+if(TARGET Pwb::GeoModel AND TARGET Pwb::Providers)
+    target_sources(pwb_interchange PRIVATE src/closure.cpp)
+    target_link_libraries(pwb_interchange PUBLIC Pwb::Providers)
 endif()

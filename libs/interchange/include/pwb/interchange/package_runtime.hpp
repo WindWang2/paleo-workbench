@@ -145,6 +145,9 @@ struct CatalogVersionRef {
     std::string format;
     std::string path;  // catalog-relative payload path
     Json metadata = Json::object();
+    // Recorded content checksum ("" = none, Python None). link_external
+    // never records one; managed copies do. Read by the dependency auditor.
+    std::string sha256;
 };
 
 struct CatalogRunRef {
