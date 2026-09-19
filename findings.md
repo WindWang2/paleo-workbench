@@ -1,3 +1,11 @@
+# 当前发现入口 — C++ 全面转换收尾
+
+当前事实与决策：[C++ findings](docs/development/cpp-conversion-planning/findings.md)；
+计划：[task_plan](docs/development/cpp-conversion-planning/task_plan.md)。
+以下保留 #1302 Python 工作台历史发现，不能作为当前 C++ 转换基线。
+
+---
+
 # Findings — Paleo UI Workbench (feat/paleo-ui-workbench)
 
 ## Environment

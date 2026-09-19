@@ -1,0 +1,2282 @@
+{
+ "kind_cases": [
+  {
+   "id": "kind_0_fault",
+   "input": "fault",
+   "resolved_kind": "fault",
+   "engine_kind": "barrier"
+  },
+  {
+   "id": "kind_1_source_direction",
+   "input": "source_direction",
+   "resolved_kind": "source_direction",
+   "engine_kind": "direction"
+  },
+  {
+   "id": "kind_2_paleo_shoreline",
+   "input": "paleo_shoreline",
+   "resolved_kind": "paleo_shoreline",
+   "engine_kind": "boundary_mask"
+  },
+  {
+   "id": "kind_3_mask",
+   "input": "mask",
+   "resolved_kind": "mask",
+   "engine_kind": "boundary_mask"
+  },
+  {
+   "id": "kind_4_trend_line",
+   "input": "trend_line",
+   "resolved_kind": "trend_line",
+   "engine_kind": "direction"
+  },
+  {
+   "id": "kind_5_not-a-kind",
+   "input": "not-a-kind",
+   "resolved_kind": null,
+   "engine_kind": null
+  },
+  {
+   "id": "kind_6_empty",
+   "input": "",
+   "resolved_kind": null,
+   "engine_kind": null
+  },
+  {
+   "id": "kind_7_FAULT",
+   "input": "FAULT",
+   "resolved_kind": "fault",
+   "engine_kind": "barrier"
+  },
+  {
+   "id": "kind_8_ fault ",
+   "input": " fault ",
+   "resolved_kind": "fault",
+   "engine_kind": "barrier"
+  },
+  {
+   "id": "kind_9_faults",
+   "input": "faults",
+   "resolved_kind": null,
+   "engine_kind": null
+  },
+  {
+   "id": "every_geo_kind_maps",
+   "inputs": [
+    {
+     "id": "all_source_direction",
+     "input": "source_direction",
+     "resolved_kind": "source_direction",
+     "engine_kind": "direction"
+    },
+    {
+     "id": "all_provenance_line",
+     "input": "provenance_line",
+     "resolved_kind": "provenance_line",
+     "engine_kind": "direction"
+    },
+    {
+     "id": "all_distribution_line",
+     "input": "distribution_line",
+     "resolved_kind": "distribution_line",
+     "engine_kind": "direction"
+    },
+    {
+     "id": "all_paleo_shoreline",
+     "input": "paleo_shoreline",
+     "resolved_kind": "paleo_shoreline",
+     "engine_kind": "boundary_mask"
+    },
+    {
+     "id": "all_facies_boundary",
+     "input": "facies_boundary",
+     "resolved_kind": "facies_boundary",
+     "engine_kind": "boundary_mask"
+    },
+    {
+     "id": "all_fault",
+     "input": "fault",
+     "resolved_kind": "fault",
+     "engine_kind": "barrier"
+    },
+    {
+     "id": "all_interpolation_boundary",
+     "input": "interpolation_boundary",
+     "resolved_kind": "interpolation_boundary",
+     "engine_kind": "boundary_mask"
+    },
+    {
+     "id": "all_mask",
+     "input": "mask",
+     "resolved_kind": "mask",
+     "engine_kind": "boundary_mask"
+    },
+    {
+     "id": "all_exclusion_area",
+     "input": "exclusion_area",
+     "resolved_kind": "exclusion_area",
+     "engine_kind": "boundary_mask"
+    },
+    {
+     "id": "all_trend_line",
+     "input": "trend_line",
+     "resolved_kind": "trend_line",
+     "engine_kind": "direction"
+    }
+   ]
+  }
+ ],
+ "crs_cases": [
+  {
+   "id": "mismatch",
+   "factor_crs": "EPSG:32650",
+   "constraint_crs": "EPSG:4326",
+   "context": "",
+   "note": "",
+   "error": "constraint CRS 'EPSG:4326' differs from factor CRS 'EPSG:32650' — reproject the constraint group before interpolation (mixed coordinates are never silently mixed)"
+  },
+  {
+   "id": "mismatch_with_context",
+   "factor_crs": "EPSG:32650",
+   "constraint_crs": "EPSG:4326",
+   "context": "T1 制图",
+   "note": "",
+   "error": "[T1 制图] constraint CRS 'EPSG:4326' differs from factor CRS 'EPSG:32650' — reproject the constraint group before interpolation (mixed coordinates are never silently mixed)"
+  },
+  {
+   "id": "factor_only",
+   "factor_crs": "EPSG:32650",
+   "constraint_crs": "",
+   "context": "",
+   "note": "constraint CRS undeclared — interpreted in factor CRS 'EPSG:32650'",
+   "error": null
+  },
+  {
+   "id": "factor_none_constraint_only",
+   "factor_crs": null,
+   "constraint_crs": "EPSG:4326",
+   "context": "",
+   "note": "factor CRS undeclared — constraints assumed 'EPSG:4326'",
+   "error": null
+  },
+  {
+   "id": "both_undeclared",
+   "factor_crs": "",
+   "constraint_crs": "",
+   "context": "",
+   "note": "both CRSs undeclared — coordinates assumed consistent (unverified)",
+   "error": null
+  },
+  {
+   "id": "both_none",
+   "factor_crs": null,
+   "constraint_crs": null,
+   "context": "",
+   "note": "both CRSs undeclared — coordinates assumed consistent (unverified)",
+   "error": null
+  },
+  {
+   "id": "equal",
+   "factor_crs": "EPSG:32650",
+   "constraint_crs": "EPSG:32650",
+   "context": "",
+   "note": "",
+   "error": null
+  },
+  {
+   "id": "equal_after_strip",
+   "factor_crs": " EPSG:32650\t",
+   "constraint_crs": "EPSG:32650",
+   "context": "",
+   "note": "",
+   "error": null
+  },
+  {
+   "id": "factor_only_with_context",
+   "factor_crs": "EPSG:32650",
+   "constraint_crs": null,
+   "context": "T1 制图",
+   "note": "[T1 制图] constraint CRS undeclared — interpreted in factor CRS 'EPSG:32650'",
+   "error": null
+  }
+ ],
+ "product_cases": [
+  {
+   "id": "projection_no_catalog",
+   "document": {
+    "constraint_layers": [
+     {
+      "id": "cg_1",
+      "name": "T1 约束",
+      "target_horizon": "T1",
+      "crs": "EPSG:32650",
+      "lines": [
+       {
+        "id": "l1",
+        "name": "断层F1",
+        "role": "break",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          2.0,
+          2.0
+         ]
+        ],
+        "properties": {
+         "constraint_kind": "fault",
+         "strength": 0.8,
+         "confidence": "high"
+        }
+       },
+       {
+        "id": "l2",
+        "name": "古岸线",
+        "role": "boundary",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ],
+        "properties": {
+         "constraint_kind": "paleo_shoreline"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "group": {
+    "id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "crs": "EPSG:32650",
+    "lines": [
+     {
+      "id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        2.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "fault",
+       "strength": 0.8,
+       "confidence": "high"
+      }
+     },
+     {
+      "id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        0.0,
+        1.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "paleo_shoreline"
+      }
+     }
+    ]
+   },
+   "catalog": null,
+   "expect": {
+    "constraint_id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "kinds": [
+     "fault",
+     "paleo_shoreline"
+    ],
+    "engine_kinds": [
+     "barrier",
+     "boundary_mask"
+    ],
+    "crs": "EPSG:32650",
+    "crs_declared": true,
+    "lines": [
+     {
+      "line_id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "geo_kind": "fault",
+      "active": true,
+      "n_points": 3,
+      "strength": 0.8,
+      "strength_declared": true,
+      "confidence": "high",
+      "content_fingerprint": ""
+     },
+     {
+      "line_id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "geo_kind": "paleo_shoreline",
+      "active": true,
+      "n_points": 5,
+      "strength": 1.0,
+      "strength_declared": false,
+      "confidence": "unknown",
+      "content_fingerprint": ""
+     }
+    ],
+    "n_active": 2,
+    "committed_version_id": "",
+    "committed_content_hash": "",
+    "content_hash": "2af4fbd90a0d82297f79e674646c1ed86c8ab325bd7c2e04d4510f35e786617c",
+    "maturity": "draft",
+    "staleness": "uncommitted",
+    "staleness_detail": "约束组从未提交——无版本链，内容以 live 文档为准",
+    "source": "user",
+    "validity": ""
+   },
+   "has_uncommitted": false,
+   "document_products_len": 1
+  },
+  {
+   "id": "empty_catalog_draft",
+   "document": {
+    "constraint_layers": [
+     {
+      "id": "cg_1",
+      "name": "T1 约束",
+      "target_horizon": "T1",
+      "crs": "EPSG:32650",
+      "lines": [
+       {
+        "id": "l1",
+        "name": "断层F1",
+        "role": "break",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          2.0,
+          2.0
+         ]
+        ],
+        "properties": {
+         "constraint_kind": "fault",
+         "strength": 0.8,
+         "confidence": "high"
+        }
+       },
+       {
+        "id": "l2",
+        "name": "古岸线",
+        "role": "boundary",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ],
+        "properties": {
+         "constraint_kind": "paleo_shoreline"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "group": {
+    "id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "crs": "EPSG:32650",
+    "lines": [
+     {
+      "id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        2.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "fault",
+       "strength": 0.8,
+       "confidence": "high"
+      }
+     },
+     {
+      "id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        0.0,
+        1.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "paleo_shoreline"
+      }
+     }
+    ]
+   },
+   "catalog": {
+    "kind": "empty"
+   },
+   "expect": {
+    "constraint_id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "kinds": [
+     "fault",
+     "paleo_shoreline"
+    ],
+    "engine_kinds": [
+     "barrier",
+     "boundary_mask"
+    ],
+    "crs": "EPSG:32650",
+    "crs_declared": true,
+    "lines": [
+     {
+      "line_id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "geo_kind": "fault",
+      "active": true,
+      "n_points": 3,
+      "strength": 0.8,
+      "strength_declared": true,
+      "confidence": "high",
+      "content_fingerprint": ""
+     },
+     {
+      "line_id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "geo_kind": "paleo_shoreline",
+      "active": true,
+      "n_points": 5,
+      "strength": 1.0,
+      "strength_declared": false,
+      "confidence": "unknown",
+      "content_fingerprint": ""
+     }
+    ],
+    "n_active": 2,
+    "committed_version_id": "",
+    "committed_content_hash": "",
+    "content_hash": "2af4fbd90a0d82297f79e674646c1ed86c8ab325bd7c2e04d4510f35e786617c",
+    "maturity": "draft",
+    "staleness": "uncommitted",
+    "staleness_detail": "约束组从未提交——无版本链，内容以 live 文档为准",
+    "source": "user",
+    "validity": ""
+   },
+   "has_uncommitted": false,
+   "document_products_len": 1
+  },
+  {
+   "id": "invalid_strength_confidence",
+   "document": {
+    "constraint_layers": [
+     {
+      "id": "cg_2",
+      "name": "x",
+      "target_horizon": "",
+      "crs": null,
+      "lines": [
+       {
+        "id": "l",
+        "name": "bad",
+        "role": "break",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ]
+        ],
+        "properties": {
+         "strength": "not-a-number",
+         "confidence": "superb"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "group": {
+    "id": "cg_2",
+    "name": "x",
+    "target_horizon": "",
+    "crs": null,
+    "lines": [
+     {
+      "id": "l",
+      "name": "bad",
+      "role": "break",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ]
+      ],
+      "properties": {
+       "strength": "not-a-number",
+       "confidence": "superb"
+      }
+     }
+    ]
+   },
+   "catalog": null,
+   "expect": {
+    "constraint_id": "cg_2",
+    "name": "x",
+    "target_horizon": "",
+    "kinds": [],
+    "engine_kinds": [
+     "barrier"
+    ],
+    "crs": "",
+    "crs_declared": false,
+    "lines": [
+     {
+      "line_id": "l",
+      "name": "bad",
+      "role": "break",
+      "geo_kind": "",
+      "active": true,
+      "n_points": 2,
+      "strength": 1.0,
+      "strength_declared": false,
+      "confidence": "unknown",
+      "content_fingerprint": ""
+     }
+    ],
+    "n_active": 1,
+    "committed_version_id": "",
+    "committed_content_hash": "",
+    "content_hash": "9b59d8f73b15fb42ba46bb3a297ad7facf75da291ced034b21242bce0deb4fdf",
+    "maturity": "draft",
+    "staleness": "uncommitted",
+    "staleness_detail": "约束组从未提交——无版本链，内容以 live 文档为准",
+    "source": "user",
+    "validity": ""
+   },
+   "has_uncommitted": false,
+   "document_products_len": 1
+  },
+  {
+   "id": "committed_current",
+   "document": {
+    "constraint_layers": [
+     {
+      "id": "cg_1",
+      "name": "T1 约束",
+      "target_horizon": "T1",
+      "crs": "EPSG:32650",
+      "lines": [
+       {
+        "id": "l1",
+        "name": "断层F1",
+        "role": "break",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          2.0,
+          2.0
+         ]
+        ],
+        "properties": {
+         "constraint_kind": "fault",
+         "strength": 0.8,
+         "confidence": "high"
+        }
+       },
+       {
+        "id": "l2",
+        "name": "古岸线",
+        "role": "boundary",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ],
+        "properties": {
+         "constraint_kind": "paleo_shoreline"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "group": {
+    "id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "crs": "EPSG:32650",
+    "lines": [
+     {
+      "id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        2.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "fault",
+       "strength": 0.8,
+       "confidence": "high"
+      }
+     },
+     {
+      "id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        0.0,
+        1.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "paleo_shoreline"
+      }
+     }
+    ]
+   },
+   "catalog": {
+    "kind": "commit"
+   },
+   "expect": {
+    "constraint_id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "kinds": [
+     "fault",
+     "paleo_shoreline"
+    ],
+    "engine_kinds": [
+     "barrier",
+     "boundary_mask"
+    ],
+    "crs": "EPSG:32650",
+    "crs_declared": true,
+    "lines": [
+     {
+      "line_id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "geo_kind": "fault",
+      "active": true,
+      "n_points": 3,
+      "strength": 0.8,
+      "strength_declared": true,
+      "confidence": "high",
+      "content_fingerprint": ""
+     },
+     {
+      "line_id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "geo_kind": "paleo_shoreline",
+      "active": true,
+      "n_points": 5,
+      "strength": 1.0,
+      "strength_declared": false,
+      "confidence": "unknown",
+      "content_fingerprint": ""
+     }
+    ],
+    "n_active": 2,
+    "committed_version_id": null,
+    "committed_content_hash": "2af4fbd90a0d82297f79e674646c1ed86c8ab325bd7c2e04d4510f35e786617c",
+    "content_hash": "2af4fbd90a0d82297f79e674646c1ed86c8ab325bd7c2e04d4510f35e786617c",
+    "maturity": "committed",
+    "staleness": "current",
+    "staleness_detail": "pinned commit is latest",
+    "source": "user",
+    "validity": ""
+   },
+   "has_uncommitted": false,
+   "document_products_len": 1,
+   "group_committed": {
+    "id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "crs": "EPSG:32650",
+    "lines": [
+     {
+      "id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        2.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "fault",
+       "strength": 0.8,
+       "confidence": "high"
+      }
+     },
+     {
+      "id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        0.0,
+        1.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "paleo_shoreline"
+      }
+     }
+    ]
+   },
+   "commit_actor": "geologist-a",
+   "commit_notes": "初版"
+  },
+  {
+   "id": "committed_then_edit",
+   "document": {
+    "constraint_layers": [
+     {
+      "id": "cg_1",
+      "name": "T1 约束",
+      "target_horizon": "T1",
+      "crs": "EPSG:32650",
+      "lines": [
+       {
+        "id": "l1",
+        "name": "断层F1",
+        "role": "break",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          2.0,
+          2.0
+         ],
+         [
+          3.0,
+          3.0
+         ]
+        ],
+        "properties": {
+         "constraint_kind": "fault",
+         "strength": 0.8,
+         "confidence": "high"
+        }
+       },
+       {
+        "id": "l2",
+        "name": "古岸线",
+        "role": "boundary",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ],
+        "properties": {
+         "constraint_kind": "paleo_shoreline"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "group": {
+    "id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "crs": "EPSG:32650",
+    "lines": [
+     {
+      "id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        2.0
+       ],
+       [
+        3.0,
+        3.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "fault",
+       "strength": 0.8,
+       "confidence": "high"
+      }
+     },
+     {
+      "id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        0.0,
+        1.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "paleo_shoreline"
+      }
+     }
+    ]
+   },
+   "catalog": {
+    "kind": "commit"
+   },
+   "expect": {
+    "constraint_id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "kinds": [
+     "fault",
+     "paleo_shoreline"
+    ],
+    "engine_kinds": [
+     "barrier",
+     "boundary_mask"
+    ],
+    "crs": "EPSG:32650",
+    "crs_declared": true,
+    "lines": [
+     {
+      "line_id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "geo_kind": "fault",
+      "active": true,
+      "n_points": 4,
+      "strength": 0.8,
+      "strength_declared": true,
+      "confidence": "high",
+      "content_fingerprint": ""
+     },
+     {
+      "line_id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "geo_kind": "paleo_shoreline",
+      "active": true,
+      "n_points": 5,
+      "strength": 1.0,
+      "strength_declared": false,
+      "confidence": "unknown",
+      "content_fingerprint": ""
+     }
+    ],
+    "n_active": 2,
+    "committed_version_id": null,
+    "committed_content_hash": "2af4fbd90a0d82297f79e674646c1ed86c8ab325bd7c2e04d4510f35e786617c",
+    "content_hash": "954ce31857dddd133f5141f927756c4447e42716cf28652a820993192c1defce",
+    "maturity": "committed",
+    "staleness": "current",
+    "staleness_detail": "pinned commit is latest",
+    "source": "user",
+    "validity": "存在未提交编辑（live 内容 ≠ 最新提交）"
+   },
+   "has_uncommitted": true,
+   "document_products_len": 1,
+   "group_committed": {
+    "id": "cg_1",
+    "name": "T1 约束",
+    "target_horizon": "T1",
+    "crs": "EPSG:32650",
+    "lines": [
+     {
+      "id": "l1",
+      "name": "断层F1",
+      "role": "break",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        2.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "fault",
+       "strength": 0.8,
+       "confidence": "high"
+      }
+     },
+     {
+      "id": "l2",
+      "name": "古岸线",
+      "role": "boundary",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        0.0,
+        1.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ],
+      "properties": {
+       "constraint_kind": "paleo_shoreline"
+      }
+     }
+    ]
+   },
+   "commit_actor": "geologist-a",
+   "commit_notes": "初版"
+  },
+  {
+   "id": "hash_failure_tolerance",
+   "document": {
+    "constraint_layers": [
+     {
+      "id": "cg_bad",
+      "name": "坏",
+      "target_horizon": "T1",
+      "crs": null,
+      "lines": [
+       {
+        "id": "l9",
+        "name": "坏坐标",
+        "role": "break",
+        "active": true,
+        "target_horizon": "",
+        "coordinates": [
+         [
+          "oops",
+          1.0
+         ]
+        ],
+        "properties": {}
+       }
+      ]
+     }
+    ]
+   },
+   "group": {
+    "id": "cg_bad",
+    "name": "坏",
+    "target_horizon": "T1",
+    "crs": null,
+    "lines": [
+     {
+      "id": "l9",
+      "name": "坏坐标",
+      "role": "break",
+      "active": true,
+      "target_horizon": "",
+      "coordinates": [
+       [
+        "oops",
+        1.0
+       ]
+      ],
+      "properties": {}
+     }
+    ]
+   },
+   "catalog": null,
+   "expect": {
+    "constraint_id": "cg_bad",
+    "name": "坏",
+    "target_horizon": "T1",
+    "kinds": [],
+    "engine_kinds": [
+     "barrier"
+    ],
+    "crs": "",
+    "crs_declared": false,
+    "lines": [
+     {
+      "line_id": "l9",
+      "name": "坏坐标",
+      "role": "break",
+      "geo_kind": "",
+      "active": true,
+      "n_points": 1,
+      "strength": 1.0,
+      "strength_declared": false,
+      "confidence": "unknown",
+      "content_fingerprint": ""
+     }
+    ],
+    "n_active": 1,
+    "committed_version_id": "",
+    "committed_content_hash": "",
+    "content_hash": "",
+    "maturity": "draft",
+    "staleness": "",
+    "staleness_detail": "",
+    "source": "user",
+    "validity": ""
+   },
+   "has_uncommitted": false,
+   "document_products_len": 1
+  }
+ ],
+ "revision_chain": {
+  "id": "revision_chain",
+  "document_in": {
+   "interpretation_revisions": []
+  },
+  "layer_before": {
+   "features": [
+    {
+     "id": "f0",
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         1.0,
+         0.0
+        ],
+        [
+         1.0,
+         1.0
+        ],
+        [
+         0.0,
+         0.0
+        ]
+       ]
+      ]
+     },
+     "properties": {
+      "class": "三角洲"
+     }
+    }
+   ]
+  },
+  "layer_after": {
+   "features": [
+    {
+     "id": "f0",
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         1.0,
+         0.0
+        ],
+        [
+         1.0,
+         1.0
+        ],
+        [
+         0.0,
+         0.0
+        ]
+       ]
+      ]
+     },
+     "properties": {
+      "class": "三角洲"
+     }
+    },
+    {
+     "id": "f1",
+     "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         2.0,
+         2.0
+        ],
+        [
+         3.0,
+         2.0
+        ],
+        [
+         3.0,
+         3.0
+        ],
+        [
+         2.0,
+         2.0
+        ]
+       ]
+      ]
+     },
+     "properties": {
+      "class": "湖泊"
+     }
+    }
+   ]
+  },
+  "calls": [
+   {
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L1",
+    "actor": "geologist-a",
+    "now": "t1",
+    "base_kind": "fusion",
+    "base_version_id": "ver_fusion_1",
+    "evidence_refs": [
+     "factor:t1:ver_1",
+     "constraints:current"
+    ],
+    "layer": "before"
+   },
+   {
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L1",
+    "now": "t2",
+    "layer": "before"
+   },
+   {
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L1",
+    "actor": "geologist-b",
+    "now": "t3",
+    "layer": "after"
+   }
+  ],
+  "ids": [
+   "irev_aaaaaaaaaaaa",
+   "irev_bbbbbbbbbbbb"
+  ],
+  "expect_results": [
+   {
+    "revision_id": "irev_aaaaaaaaaaaa",
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L1",
+    "interpretation_id": "",
+    "parent_revision_id": "",
+    "base_kind": "fusion",
+    "base_version_id": "ver_fusion_1",
+    "evidence_refs": [
+     "factor:t1:ver_1",
+     "constraints:current"
+    ],
+    "actor": "geologist-a",
+    "created_at": "t1",
+    "content_fingerprint": "7804bda937caece31d6fabec6313e3a6f7dca711dce56f5c3e1e74b64d3284e9",
+    "delta": {
+     "features": 1,
+     "vertices": 4
+    },
+    "note": ""
+   },
+   null,
+   {
+    "revision_id": "irev_bbbbbbbbbbbb",
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L1",
+    "interpretation_id": "",
+    "parent_revision_id": "irev_aaaaaaaaaaaa",
+    "base_kind": "manual",
+    "base_version_id": "",
+    "evidence_refs": [],
+    "actor": "geologist-b",
+    "created_at": "t3",
+    "content_fingerprint": "be15d502303bb18d8ca595d18c980b8e45d5b68452712b3926d9fbad9b20e939",
+    "delta": {
+     "features": 1,
+     "vertices": 4
+    },
+    "note": ""
+   }
+  ],
+  "expect_document": {
+   "interpretation_revisions": [
+    {
+     "revision_id": "irev_aaaaaaaaaaaa",
+     "target_kind": "integrated_facies",
+     "target_layer_id": "L1",
+     "interpretation_id": "",
+     "parent_revision_id": "",
+     "base_kind": "fusion",
+     "base_version_id": "ver_fusion_1",
+     "evidence_refs": [
+      "factor:t1:ver_1",
+      "constraints:current"
+     ],
+     "actor": "geologist-a",
+     "created_at": "t1",
+     "content_fingerprint": "7804bda937caece31d6fabec6313e3a6f7dca711dce56f5c3e1e74b64d3284e9",
+     "delta": {
+      "features": 1,
+      "vertices": 4
+     },
+     "note": ""
+    },
+    {
+     "revision_id": "irev_bbbbbbbbbbbb",
+     "target_kind": "integrated_facies",
+     "target_layer_id": "L1",
+     "interpretation_id": "",
+     "parent_revision_id": "irev_aaaaaaaaaaaa",
+     "base_kind": "manual",
+     "base_version_id": "",
+     "evidence_refs": [],
+     "actor": "geologist-b",
+     "created_at": "t3",
+     "content_fingerprint": "be15d502303bb18d8ca595d18c980b8e45d5b68452712b3926d9fbad9b20e939",
+     "delta": {
+      "features": 1,
+      "vertices": 4
+     },
+     "note": ""
+    }
+   ]
+  },
+  "chain_ids": [
+   "irev_aaaaaaaaaaaa",
+   "irev_bbbbbbbbbbbb"
+  ],
+  "latest_id": "irev_bbbbbbbbbbbb"
+ },
+ "fingerprint_cases": [
+  {
+   "id": "stability_layer_a",
+   "layer": {
+    "features": [
+     {
+      "id": "f0",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "class": "三角洲"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "digest": "7804bda937caece31d6fabec6313e3a6f7dca711dce56f5c3e1e74b64d3284e9",
+    "features": 1,
+    "vertices": 4
+   },
+   "equal_to": null
+  },
+  {
+   "id": "stability_layer_b",
+   "layer": {
+    "features": [
+     {
+      "id": "f0",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "class": "三角洲"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "digest": "7804bda937caece31d6fabec6313e3a6f7dca711dce56f5c3e1e74b64d3284e9",
+    "features": 1,
+    "vertices": 4
+   },
+   "equal_to": "stability_layer_a"
+  },
+  {
+   "id": "nine_dp_list_attribute",
+   "layer": {
+    "features": [
+     {
+      "id": "f0",
+      "geometry": {},
+      "attributes": {
+       "m": [
+        1.0,
+        2.0
+       ]
+      }
+     }
+    ]
+   },
+   "expect": {
+    "digest": "afc83b561c0eaffd5860b3ff6d7674933051402b39bf064b69ba5e9a95dd74d1",
+    "features": 1,
+    "vertices": 0
+   },
+   "equal_to": null
+  },
+  {
+   "id": "nine_dp_list_attribute_rounded",
+   "layer": {
+    "features": [
+     {
+      "id": "f0",
+      "geometry": {},
+      "attributes": {
+       "m": [
+        1.000000000001,
+        2.0
+       ]
+      }
+     }
+    ]
+   },
+   "expect": {
+    "digest": "afc83b561c0eaffd5860b3ff6d7674933051402b39bf064b69ba5e9a95dd74d1",
+    "features": 1,
+    "vertices": 0
+   },
+   "equal_to": "nine_dp_list_attribute"
+  },
+  {
+   "id": "geometry_verbatim_base",
+   "layer": {
+    "features": [
+     {
+      "id": "f0",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "class": "三角洲"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "digest": "7804bda937caece31d6fabec6313e3a6f7dca711dce56f5c3e1e74b64d3284e9",
+    "features": 1,
+    "vertices": 4
+   },
+   "equal_to": null
+  },
+  {
+   "id": "geometry_verbatim_long",
+   "layer": {
+    "features": [
+     {
+      "id": "f0",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.000000000001,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "class": "三角洲"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "digest": "f9c74e72808a4d95866c012aaa52585e994e2ddbc0356c24143c71edcaa852ba",
+    "features": 1,
+    "vertices": 4
+   },
+   "equal_to": null
+  },
+  {
+   "id": "integer_coordinates",
+   "layer": {
+    "features": [
+     {
+      "id": "i0",
+      "geometry": {
+       "type": "LineString",
+       "coordinates": [
+        [
+         2,
+         3
+        ],
+        [
+         4,
+         5
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "expect": {
+    "digest": "2978e6c95d2c4d0031bb54c5411ccdcd45486f8f300297e8b53ac039f5a2f724",
+    "features": 1,
+    "vertices": 2
+   },
+   "equal_to": null
+  },
+  {
+   "id": "attributes_and_feature_id",
+   "layer": {
+    "features": [
+     {
+      "feature_id": "fa1",
+      "id": "ignored",
+      "geometry": {
+       "type": "Point",
+       "coordinates": [
+        1.5,
+        2.5
+       ]
+      },
+      "attributes": {
+       "b": 2,
+       "a": 1,
+       "m": [
+        0,
+        1
+       ]
+      }
+     }
+    ]
+   },
+   "expect": {
+    "digest": "c02ebdb781821a7f6d9dce158704c5e4c1b48ce5d8dbdbb267f074ff9aee324c",
+    "features": 1,
+    "vertices": 1
+   },
+   "equal_to": null
+  },
+  {
+   "id": "empty_layer",
+   "layer": {
+    "features": []
+   },
+   "expect": {
+    "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "features": 0,
+    "vertices": 0
+   },
+   "equal_to": null
+  }
+ ],
+ "from_dict_cases": [
+  {
+   "id": "roundtrip",
+   "input": {
+    "revision_id": "irev_0123456789ab",
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L1",
+    "interpretation_id": "iint_abc123def456",
+    "parent_revision_id": "irev_ffffffffffff",
+    "base_kind": "fusion",
+    "base_version_id": "ver_fusion_1",
+    "evidence_refs": [
+     "factor:t1:ver_1",
+     "constraints:current"
+    ],
+    "actor": "geologist-a",
+    "created_at": "2026-09-19T10:00:00",
+    "content_fingerprint": "abababababababababababababababababababababababababababababababab",
+    "delta": {
+     "features": 1,
+     "vertices": 4
+    },
+    "note": "初稿"
+   },
+   "expect": {
+    "revision_id": "irev_0123456789ab",
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L1",
+    "interpretation_id": "iint_abc123def456",
+    "parent_revision_id": "irev_ffffffffffff",
+    "base_kind": "fusion",
+    "base_version_id": "ver_fusion_1",
+    "evidence_refs": [
+     "factor:t1:ver_1",
+     "constraints:current"
+    ],
+    "actor": "geologist-a",
+    "created_at": "2026-09-19T10:00:00",
+    "content_fingerprint": "abababababababababababababababababababababababababababababababab",
+    "delta": {
+     "features": 1,
+     "vertices": 4
+    },
+    "note": "初稿"
+   }
+  },
+  {
+   "id": "empty",
+   "input": {},
+   "expect": {
+    "revision_id": "",
+    "target_kind": "",
+    "target_layer_id": "",
+    "interpretation_id": "",
+    "parent_revision_id": "",
+    "base_kind": "manual",
+    "base_version_id": "",
+    "evidence_refs": [],
+    "actor": "",
+    "created_at": "",
+    "content_fingerprint": "",
+    "delta": {},
+    "note": ""
+   }
+  },
+  {
+   "id": "coercions",
+   "input": {
+    "revision_id": 7,
+    "target_kind": null,
+    "target_layer_id": "L7",
+    "parent_revision_id": 0,
+    "base_kind": "",
+    "evidence_refs": [
+     1,
+     "a",
+     true,
+     2.5
+    ],
+    "actor": 0,
+    "content_fingerprint": 0,
+    "delta": null,
+    "note": false
+   },
+   "expect": {
+    "revision_id": "7",
+    "target_kind": "",
+    "target_layer_id": "L7",
+    "interpretation_id": "",
+    "parent_revision_id": "",
+    "base_kind": "manual",
+    "base_version_id": "",
+    "evidence_refs": [
+     "1",
+     "a",
+     "True",
+     "2.5"
+    ],
+    "actor": "",
+    "created_at": "",
+    "content_fingerprint": "",
+    "delta": {},
+    "note": ""
+   }
+  },
+  {
+   "id": "delta_non_object",
+   "source": "cpp_contract",
+   "input": {
+    "revision_id": "irev_x",
+    "delta": 5
+   },
+   "expect": {
+    "revision_id": "irev_x",
+    "target_kind": "",
+    "target_layer_id": "",
+    "interpretation_id": "",
+    "parent_revision_id": "",
+    "base_kind": "manual",
+    "base_version_id": "",
+    "evidence_refs": [],
+    "actor": "",
+    "created_at": "",
+    "content_fingerprint": "",
+    "delta": {},
+    "note": ""
+   }
+  }
+ ],
+ "summary_cases": [
+  {
+   "id": "empty",
+   "document": {
+    "interpretation_revisions": []
+   },
+   "layer_id": "L0",
+   "expect": {
+    "layer_id": "L0",
+    "revisions": 0,
+    "detail": "无修订记录（未保存或旧工程）"
+   }
+  },
+  {
+   "id": "populated",
+   "document": {
+    "interpretation_revisions": [
+     {
+      "revision_id": "irev_aaaaaaaaaaaa",
+      "target_kind": "integrated_facies",
+      "target_layer_id": "L1",
+      "interpretation_id": "",
+      "parent_revision_id": "",
+      "base_kind": "fusion",
+      "base_version_id": "ver_fusion_1",
+      "evidence_refs": [
+       "factor:t1:ver_1",
+       "constraints:current"
+      ],
+      "actor": "geologist-a",
+      "created_at": "t1",
+      "content_fingerprint": "7804bda937caece31d6fabec6313e3a6f7dca711dce56f5c3e1e74b64d3284e9",
+      "delta": {
+       "features": 1,
+       "vertices": 4
+      },
+      "note": ""
+     },
+     {
+      "revision_id": "irev_bbbbbbbbbbbb",
+      "target_kind": "integrated_facies",
+      "target_layer_id": "L1",
+      "interpretation_id": "",
+      "parent_revision_id": "irev_aaaaaaaaaaaa",
+      "base_kind": "manual",
+      "base_version_id": "",
+      "evidence_refs": [],
+      "actor": "geologist-b",
+      "created_at": "t3",
+      "content_fingerprint": "be15d502303bb18d8ca595d18c980b8e45d5b68452712b3926d9fbad9b20e939",
+      "delta": {
+       "features": 1,
+       "vertices": 4
+      },
+      "note": ""
+     }
+    ]
+   },
+   "layer_id": "L1",
+   "expect": {
+    "layer_id": "L1",
+    "revisions": 2,
+    "first_revision_id": "irev_aaaaaaaaaaaa",
+    "latest_revision_id": "irev_bbbbbbbbbbbb",
+    "latest_actor": "geologist-b",
+    "latest_created_at": "t3",
+    "base_kind": "manual",
+    "base_version_id": "",
+    "evidence_refs": [],
+    "delta": {
+     "features": 1,
+     "vertices": 4
+    }
+   }
+  }
+ ],
+ "integrated_link": {
+  "id": "integrated_link",
+  "document_in": {
+   "integrated_interpretations": [
+    {
+     "interpretation_id": "iint_0123456789ab",
+     "name": "综合解释",
+     "input_set_id": "ciset_1",
+     "layer_id": "L9",
+     "fusion_version_id": "ver_seed",
+     "latest_fusion_version_id": "",
+     "run_id": "",
+     "committed_version_id": "",
+     "class_schema": [],
+     "confidence_summary": {},
+     "uncertainty_summary": {},
+     "conflicts": {},
+     "revision_ids": [],
+     "last_committed_revision_id": "",
+     "qa_report_ref": "",
+     "maturity": "draft",
+     "created_at": "",
+     "created_by": "",
+     "committed_at": "",
+     "active": true
+    }
+   ],
+   "interpretation_revisions": []
+  },
+  "layers": {
+   "L9": {
+    "features": [
+     {
+      "id": "f0",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "class": "三角洲"
+      }
+     },
+     {
+      "id": "f1",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "class": "三角洲"
+      }
+     }
+    ]
+   },
+   "L8": {
+    "features": [
+     {
+      "id": "f0",
+      "geometry": {
+       "type": "Polygon",
+       "coordinates": [
+        [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ]
+       ]
+      },
+      "properties": {
+       "class": "三角洲"
+      }
+     }
+    ]
+   }
+  },
+  "calls": [
+   {
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L9",
+    "actor": "expert",
+    "now": "t1",
+    "interpretation_id": "iint_0123456789ab",
+    "layer": "L9"
+   },
+   {
+    "target_kind": "phase1_draft",
+    "target_layer_id": "L8",
+    "actor": "expert",
+    "now": "t2",
+    "layer": "L8"
+   }
+  ],
+  "ids": [
+   "irev_cccccccccccc",
+   "irev_dddddddddddd"
+  ],
+  "expect_results": [
+   {
+    "revision_id": "irev_cccccccccccc",
+    "target_kind": "integrated_facies",
+    "target_layer_id": "L9",
+    "interpretation_id": "iint_0123456789ab",
+    "parent_revision_id": "",
+    "base_kind": "manual",
+    "base_version_id": "",
+    "evidence_refs": [],
+    "actor": "expert",
+    "created_at": "t1",
+    "content_fingerprint": "46306d30928c598863a4b94908edfd7fa6350b37ab314358c75473b9a1a89689",
+    "delta": {
+     "features": 2,
+     "vertices": 8
+    },
+    "note": ""
+   },
+   {
+    "revision_id": "irev_dddddddddddd",
+    "target_kind": "phase1_draft",
+    "target_layer_id": "L8",
+    "interpretation_id": "",
+    "parent_revision_id": "",
+    "base_kind": "manual",
+    "base_version_id": "",
+    "evidence_refs": [],
+    "actor": "expert",
+    "created_at": "t2",
+    "content_fingerprint": "7804bda937caece31d6fabec6313e3a6f7dca711dce56f5c3e1e74b64d3284e9",
+    "delta": {
+     "features": 1,
+     "vertices": 4
+    },
+    "note": ""
+   }
+  ],
+  "expect_document": {
+   "integrated_interpretations": [
+    {
+     "interpretation_id": "iint_0123456789ab",
+     "name": "综合解释",
+     "input_set_id": "ciset_1",
+     "layer_id": "L9",
+     "fusion_version_id": "ver_seed",
+     "latest_fusion_version_id": "",
+     "run_id": "",
+     "committed_version_id": "",
+     "class_schema": [],
+     "confidence_summary": {},
+     "uncertainty_summary": {},
+     "conflicts": {},
+     "revision_ids": [
+      "irev_cccccccccccc"
+     ],
+     "last_committed_revision_id": "",
+     "qa_report_ref": "",
+     "maturity": "draft",
+     "created_at": "",
+     "created_by": "",
+     "committed_at": "",
+     "active": true
+    }
+   ],
+   "interpretation_revisions": [
+    {
+     "revision_id": "irev_cccccccccccc",
+     "target_kind": "integrated_facies",
+     "target_layer_id": "L9",
+     "interpretation_id": "iint_0123456789ab",
+     "parent_revision_id": "",
+     "base_kind": "manual",
+     "base_version_id": "",
+     "evidence_refs": [],
+     "actor": "expert",
+     "created_at": "t1",
+     "content_fingerprint": "46306d30928c598863a4b94908edfd7fa6350b37ab314358c75473b9a1a89689",
+     "delta": {
+      "features": 2,
+      "vertices": 8
+     },
+     "note": ""
+    },
+    {
+     "revision_id": "irev_dddddddddddd",
+     "target_kind": "phase1_draft",
+     "target_layer_id": "L8",
+     "interpretation_id": "",
+     "parent_revision_id": "",
+     "base_kind": "manual",
+     "base_version_id": "",
+     "evidence_refs": [],
+     "actor": "expert",
+     "created_at": "t2",
+     "content_fingerprint": "7804bda937caece31d6fabec6313e3a6f7dca711dce56f5c3e1e74b64d3284e9",
+     "delta": {
+      "features": 1,
+      "vertices": 4
+     },
+     "note": ""
+    }
+   ]
+  }
+ }
+}
