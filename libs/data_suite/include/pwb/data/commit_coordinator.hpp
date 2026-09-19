@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -200,9 +201,20 @@ public:
     };
 
     // Fault injection for recovery tests: return an error to abort the
-    // commit right AFTER the given phase became durable.
+    // commit right AFTER the given phase became durable. Test-only; invoked
+    // INSIDE the serialization mutex (see mutex_).
     using FaultHook =
         std::function<std::optional<domain::DataError>(JournalPhase)>;
+
+    // Cross-thread write discipline (#1380/#1381): every public method takes
+    // mutex_ for its whole body, so GUI commits, SEG-Y import publishes and
+    // TaskRuntime attribute publishes that share one coordinator (through
+    // PwbDataStore) are serialized regardless of the calling thread. The
+    // mutex is recursive because the public methods read each other
+    // (register_run -> run_state, commit -> find_journal -> load_journals,
+    // recover -> load_journals, ...). Callers must never call a public
+    // method while holding a CatalogRepository lock (lock order is always
+    // CommitCoordinator -> CatalogRepository).
 
     CommitCoordinator(project::ProjectManager& manager,
                       catalog::CatalogRepository& repository,
@@ -282,6 +294,9 @@ private:
     fs::path journal_dir_;
     FaultHook fault_hook_;
     std::map<std::string, CommitReceiptV1> receipts_;
+    // Serializes every public method (see the cross-thread write discipline
+    // note above). Recursive: public methods call each other.
+    mutable std::recursive_mutex mutex_;
 };
 
 }  // namespace pwb::data

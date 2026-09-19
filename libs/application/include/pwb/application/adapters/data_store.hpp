@@ -69,8 +69,11 @@ public:
 
 private:
     struct Impl {
-        Impl(pwb::project::ProjectManager m,
-             pwb::catalog::CatalogRepository r,
+        // The repository is constructed in place from its sqlite path —
+        // CatalogRepository is not movable since #1380/#1381 (it owns a
+        // serialization mutex). PwbDataStore::open pre-validates
+        // writability on a throwaway probe before constructing.
+        Impl(pwb::project::ProjectManager m, std::filesystem::path sqlite_path,
              pwb::project::ProjectDocument d);
         pwb::project::ProjectManager manager;
         pwb::catalog::CatalogRepository repository;

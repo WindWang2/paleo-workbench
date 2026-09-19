@@ -29,8 +29,12 @@ class Geo3DDock : public QDockWidget {
 public:
     explicit Geo3DDock(QWidget* parent = nullptr);
 
-    Geo3DViewportWidget* viewport() const { return viewport_; }
-    Geo3DWorkspaceController* controller() const { return controller_.get(); }
+    pwb::geo3d_viz::Geo3DViewportWidget* viewport() const {
+        return viewport_;
+    }
+    pwb::geo3d_viz::Geo3DWorkspaceController* controller() const {
+        return controller_.get();
+    }
 
 signals:
     // 2D map synchronization seam (selected well name).
@@ -44,8 +48,9 @@ private:
     void build_toolbar(QWidget* toolbar);
     void sync_clip_ui();
 
-    Geo3DViewportWidget* viewport_ = nullptr;
-    std::unique_ptr<Geo3DWorkspaceController> controller_;
+    pwb::geo3d_viz::Geo3DViewportWidget* viewport_ = nullptr;
+    std::unique_ptr<pwb::geo3d_viz::Geo3DWorkspaceController>
+        controller_;
     QListWidget* object_list_ = nullptr;
     QLabel* status_label_ = nullptr;
     QCheckBox* clip_enabled_[3] = {nullptr, nullptr, nullptr};

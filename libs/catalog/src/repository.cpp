@@ -223,6 +223,7 @@ CatalogRepository::CatalogRepository(std::filesystem::path sqlite_path)
     : sqlite_path_(std::move(sqlite_path)) {}
 
 StoreStatus CatalogRepository::status() const {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     StoreStatus status;
     std::error_code ec;
     if (!std::filesystem::is_regular_file(sqlite_path_, ec)) {
@@ -480,6 +481,7 @@ Result<CatalogDocument> CatalogRepository::load_document_from(
 
 DataError CatalogRepository::export_manifest(
     const std::filesystem::path& manifest_path) const {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto opened = Database::open(sqlite_path_, SqliteOpenMode::ReadOnly);
     if (!opened.is_ok()) return opened.error();
     Database db = std::move(opened.value());
@@ -564,7 +566,13 @@ DataError CatalogRepository::export_manifest(
     return DataError(ErrorCode::Ok, "");
 }
 
+void CatalogRepository::close() {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
+    db_.close();
+}
+
 Result<CatalogDocument> CatalogRepository::open_read_write() {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto status_result = status();
     if (status_result.health == StoreHealth::Corrupt ||
         status_result.health == StoreHealth::Unreadable) {
@@ -594,6 +602,7 @@ Result<CatalogDocument> CatalogRepository::open_read_write() {
 }
 
 Result<CatalogDocument> CatalogRepository::open_read_only() const {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto status_result = status();
     if (status_result.health == StoreHealth::Corrupt ||
         status_result.health == StoreHealth::Unreadable) {
@@ -845,6 +854,7 @@ DataError CatalogRepository::bump_revision() {
 }
 
 DataError CatalogRepository::upsert_asset(const DataAsset& asset) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     auto error = upsert_asset_in_transaction(asset);
     if (error.code != ErrorCode::Ok) return error;
@@ -854,6 +864,7 @@ DataError CatalogRepository::upsert_asset(const DataAsset& asset) {
 }
 
 DataError CatalogRepository::upsert_version(const DataVersion& version) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     auto error = upsert_version_rows(version);
     if (error.code != ErrorCode::Ok) return error;
@@ -863,6 +874,7 @@ DataError CatalogRepository::upsert_version(const DataVersion& version) {
 }
 
 DataError CatalogRepository::upsert_run(const DataRun& run) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     auto error = upsert_run_rows(run);
     if (error.code != ErrorCode::Ok) return error;
@@ -874,6 +886,7 @@ DataError CatalogRepository::upsert_run(const DataRun& run) {
 DataError CatalogRepository::set_current_version(
     const domain::AssetId& asset_id, const domain::VersionId& version_id,
     const std::string& updated_at) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     Statement statement = db_.prepare(
         "UPDATE assets SET current_version_id = ?, updated_at = ? "
@@ -888,6 +901,7 @@ DataError CatalogRepository::set_current_version(
 }
 
 DataError CatalogRepository::insert_working_copy(const WorkingCopy& copy) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     Statement statement = db_.prepare(
         "INSERT OR REPLACE INTO working_copies (working_id, "
@@ -919,6 +933,7 @@ DataError CatalogRepository::insert_working_copy(const WorkingCopy& copy) {
 
 DataError CatalogRepository::remove_working_copy(
     const std::string& working_id) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     Statement statement = db_.prepare(
         "DELETE FROM working_copies WHERE working_id = ?");
@@ -931,6 +946,7 @@ DataError CatalogRepository::remove_working_copy(
 
 DataError CatalogRepository::set_working_copy_state(
     const std::string& working_id, const std::string& state) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     Statement statement = db_.prepare(
         "UPDATE working_copies SET state = ? WHERE working_id = ?");
@@ -945,6 +961,7 @@ DataError CatalogRepository::set_working_copy_state(
 DataError CatalogRepository::commit_version_transaction(
     const DataVersion& version, const domain::AssetId& asset_id,
     const std::optional<domain::RunId>& run_id) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     auto error = upsert_version_rows(version);
     if (error.code != ErrorCode::Ok) return error;
@@ -971,6 +988,7 @@ DataError CatalogRepository::commit_version_transaction(
 DataError CatalogRepository::publish_result_transaction(
     const std::optional<DataAsset>& new_asset, const DataVersion& version,
     const domain::RunId& run_id) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     if (new_asset.has_value()) {
         auto error = upsert_asset_in_transaction(*new_asset);
@@ -997,6 +1015,7 @@ DataError CatalogRepository::publish_result_transaction(
 
 DataError CatalogRepository::import_raw_transaction(const DataAsset& asset,
                                                     const DataVersion& version) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     auto error = upsert_asset_in_transaction(asset);
     if (error.code != ErrorCode::Ok) return error;
@@ -1015,6 +1034,7 @@ DataError CatalogRepository::import_raw_transaction(const DataAsset& asset,
 }
 
 int CatalogRepository::rebase_artifact_paths() {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     // The staged catalog belongs to the target before its project JSON
     // lands (service.py rebase_artifact_paths): an interruption after the
     // JSON replace must never leave a valid target project pointing at
@@ -1112,6 +1132,7 @@ int CatalogRepository::rebase_artifact_paths() {
 DataError CatalogRepository::finish_run_transaction(
     const domain::RunId& run_id, const std::string& status,
     const domain::Json& extra_parameters) {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     Transaction transaction(db_);
     Json merged;
     {
@@ -1143,6 +1164,7 @@ DataError CatalogRepository::finish_run_transaction(
 }
 
 int CatalogRepository::current_revision() const {
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto status_result = status();
     return status_result.catalog_revision;
 }

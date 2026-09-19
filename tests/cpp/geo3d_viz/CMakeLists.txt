@@ -21,6 +21,13 @@ add_executable(geo3d.widget_test geo3d_widget_test.cpp)
 target_compile_features(geo3d.widget_test PRIVATE cxx_std_20)
 target_link_libraries(geo3d.widget_test PRIVATE Pwb::Geo3DViz Qt6::Core
                                                 Qt6::Gui Qt6::Widgets)
+if(UNIX AND NOT APPLE)
+    # VIZ-C: the widget test installs an X error handler so broken-GLX
+    # hosts fail softly into the honest GL-less degradation path instead
+    # of dying inside QOpenGLContext creation.
+    find_package(X11 REQUIRED)
+    target_link_libraries(geo3d.widget_test PRIVATE X11::X11)
+endif()
 add_test(NAME geo3d.widget_test COMMAND geo3d.widget_test)
 set_tests_properties(geo3d.widget_test PROPERTIES TIMEOUT 300
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_LOGGING_RULES=qt.*=false")

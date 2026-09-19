@@ -3,6 +3,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDir>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -111,7 +112,7 @@ void Geo3DDock::build_toolbar(QWidget* tools) {
             show_status(tr("截图不可用（无 GL 上下文）"));
             return;
         }
-        const QString path = QTemporaryDir::tempPath() + "/geo3d-" +
+        const QString path = QDir::tempPath() + "/geo3d-" +
                              QDateTime::currentDateTime().toString(
                                  "yyyyMMdd-HHmmss") +
                              ".png";

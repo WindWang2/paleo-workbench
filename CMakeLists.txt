@@ -711,6 +711,14 @@ if(PWB_BUILD_PLATFORM)
     endif()
 endif()
 
+# BEGIN VIZ-C — joint well-seismic 3D (#1366 V4) + store concurrency
+# regression (#1380/#1381). Tests degrade out when the store closure is
+# absent (kernel-only configure); never a hard dependency.
+if(BUILD_TESTING AND TARGET Pwb::Application)
+    add_subdirectory(tests/cpp/viz_c)
+endif()
+# END VIZ-C
+
 # BEGIN UI-04 — core page-worker ports (libs/ui_workers): the Qt-free C++
 # halves of the seven PySide6 worker modules in paleo_workbench/ui/pages.
 # No new switch: the library joins every configuration that resolves the
