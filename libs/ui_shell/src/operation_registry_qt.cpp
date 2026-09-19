@@ -14,8 +14,14 @@ OperationRegistryQt::OperationRegistryQt(QObject* parent)
 
 OperationRegistryQt* OperationRegistryQt::bind_to_shell(QObject* shell) {
     // Parented to the shell: records and jump callbacks die with it and
-    // never leak into the next project.
-    return new OperationRegistryQt(shell);
+    // never leak into the next project. Python parity: the shell-bound
+    // instance takes over the process-global registry reference.
+    auto* wrapper = new OperationRegistryQt(shell);
+    bind_registry_to_shell(&wrapper->registry());
+    QObject::connect(wrapper, &QObject::destroyed, shell, [] {
+        bind_registry_to_shell(nullptr);  // rebind the lazy fallback
+    });
+    return wrapper;
 }
 
 }  // namespace pwb::ui_shell

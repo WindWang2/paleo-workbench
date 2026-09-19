@@ -14,7 +14,7 @@ namespace {
 constexpr int kPaletteWidth = 360;
 constexpr int kPaletteHeight = 320;
 constexpr int kSpace2 = 8;
-constexpr int kMenuBarHeight = 28;
+constexpr int kMenuBarHeight = 40;  // tokens.MENU_BAR_HEIGHT
 constexpr int kFindLimit = 300;
 
 QString qstr(const std::string& s) {

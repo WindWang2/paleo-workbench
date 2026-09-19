@@ -71,7 +71,6 @@ public:
 private:
     void apply(QWidget* widget);
     void unregister(QWidget* widget);
-    void refresh_min_heights();
 
     pwb::platform_services::ThemeService* theme_ = nullptr;
     QMetaObject::Connection theme_conn_;

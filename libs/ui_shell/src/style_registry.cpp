@@ -37,7 +37,6 @@ void StyleRegistry::bind_theme_service(
         connect(theme_, &pwb::platform_services::ThemeService::theme_changed,
                 this, [this](const QString&, const QString&) {
                     repolish_all();
-                    refresh_min_heights();
                 });
 }
 
@@ -156,11 +155,6 @@ void StyleRegistry::apply(QWidget* widget) {
 void StyleRegistry::unregister(QWidget* widget) {
     registry_.erase(widget);
     guards_.erase(widget);
-}
-
-void StyleRegistry::refresh_min_heights() {
-    // bind_metrics entries re-run their apply callbacks via repolish_all
-    // (theme_conn_ above calls both) — nothing extra needed here.
 }
 
 StyleRegistry& style_registry() {

@@ -120,4 +120,16 @@ private:
     std::deque<std::string> terminal_order_;
 };
 
+// Process-level lazy registry (Python module-global `operation_registry()`
+// parity). A new shell's bind_registry_to_shell replaces what this
+// returns — long-lived holders keep their shell-side reference instead
+// of re-calling.
+OperationRegistry& operation_registry();
+
+// Python bind_registry_to_shell parity: register a shell-owned registry
+// as the process-global one. The caller keeps ownership (the Qt side
+// parents the registry object to the shell); shell teardown rebinds a
+// fresh default via the destructor hook.
+void bind_registry_to_shell(OperationRegistry* shell_registry);
+
 }  // namespace pwb::ui_shell

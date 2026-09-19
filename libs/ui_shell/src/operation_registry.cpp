@@ -231,4 +231,30 @@ void OperationRegistry::evict_terminals() {
     }
 }
 
+namespace {
+
+OperationRegistry& fallback_registry() {
+    static OperationRegistry fallback;
+    return fallback;
+}
+
+OperationRegistry*& current_registry() {
+    static OperationRegistry* current = &fallback_registry();
+    return current;
+}
+
+}  // namespace
+
+OperationRegistry& operation_registry() {
+    return *current_registry();
+}
+
+void bind_registry_to_shell(OperationRegistry* shell_registry) {
+    // The global slot forwards to whatever registry the current shell
+    // bound; nullptr rebinds the lazy fallback (shell teardown path).
+    current_registry() = shell_registry != nullptr
+                             ? shell_registry
+                             : &fallback_registry();
+}
+
 }  // namespace pwb::ui_shell

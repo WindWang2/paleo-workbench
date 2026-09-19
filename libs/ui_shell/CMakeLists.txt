@@ -11,6 +11,7 @@ add_library(pwb_ui_shell STATIC
     src/layout_presets.cpp
     src/operation_registry.cpp
     src/deferred_page_bindings.cpp
+    src/screen_inventory.cpp
 )
 add_library(Pwb::UiShell ALIAS pwb_ui_shell)
 target_include_directories(pwb_ui_shell PUBLIC
@@ -36,7 +37,6 @@ if(TARGET Qt6::Widgets)
         src/status_bar.cpp
         src/map_status_bar.cpp
         src/crs_guidance.cpp
-        src/screen_inventory.cpp
         src/adaptive_page_stack.cpp
         src/command_palette.cpp
         src/operation_registry_qt.cpp
