@@ -774,6 +774,10 @@ if(PWB_BUILD_PLATFORM)
     # UI-12 — workstation shell slice: dock composition frame + panel
     # widgets over the UI-01 shell substrate (pages stay injected).
     add_subdirectory(libs/ui_workstation)
+    # UI-13 — workstation-composite slice: Qt-free composite-editor
+    # cores (vector layers/edit sessions, topology, merge, CRS gate,
+    # snapping, map tools, controller) + Qt/QGIS shells as they land.
+    add_subdirectory(libs/ui_composite)
     add_subdirectory(apps/paleo_workbench_platform)
     if(BUILD_TESTING)
         enable_testing()
