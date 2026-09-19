@@ -71,8 +71,13 @@ if(TARGET Qt6::Widgets)
         src/qt/new_project_wizard.cpp
         src/qt/home_page.cpp
         # preparation_page.cpp / data_page.cpp deferred — the two largest
-        # page composites (377 / 3154 Python lines); the preparation_page
-        # seam header stays for AUTOMOC, see ledgers/ui-06-findings.md.
+        # page composites (377 / 3154 Python lines), see ledgers/ui-06-findings.md.
+        # NOTE: preparation_page.hpp is intentionally NOT listed below —
+        # its Q_OBJECT moc output embeds a default-ctor thunk for
+        # PreparationPage(QWidget* = nullptr), which is unbindable while
+        # the .cpp is deferred and breaks every consumer that pulls the
+        # mocs_compilation TU (found by ui_review.qt_widgets_smoke).
+        # Re-add the header when preparation_page.cpp lands.
         # Q_OBJECT headers must be listed as sources — AUTOMOC does not
         # scan the separate include/ tree on its own.
         include/pwb/ui_pages_data/qt/cards.hpp
@@ -93,7 +98,6 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_pages_data/qt/tag_widgets.hpp
         include/pwb/ui_pages_data/qt/new_project_wizard.hpp
         include/pwb/ui_pages_data/qt/home_page.hpp
-        include/pwb/ui_pages_data/qt/preparation_page.hpp
     )
     add_library(Pwb::UiPagesDataQt ALIAS pwb_ui_pages_data_qt)
     set_target_properties(pwb_ui_pages_data_qt PROPERTIES AUTOMOC ON)

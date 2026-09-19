@@ -754,6 +754,34 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-09
 
+# BEGIN UI-11 — qt-review-gov slice (libs/ui_review): Qt-free semantic
+# cores + thin Qt Widgets shells for the review/governance cluster
+# (review export page, governance metadata, catalog health, lineage
+# explorer, impact preview, version workbench, ingest plan, relink,
+# AI-check advisor, QC issue table, workflow contract panel) plus the
+# non-production composite prototype on the _qgis target. Same gating
+# model as UI-09: no per-slice option; the library joins platform
+# configures that already resolved the data closure (Pwb::Data —
+# PWB_BUILD_DATA, which also supplies Pwb::Catalog via libs/data_suite)
+# and the CONV-30 job runtime's Qt bridge (Pwb::JobQt — worker-backed
+# dialogs). CONV-23's workflow_contracts leaf is pulled in when the
+# kernel slices left it out (UI-09 well_science precedent).
+# task_panel_base / prediction_evidence / prediction_task panels are NOT
+# re-ported — hosts reuse UI-09's pwb::ui_wellseis::qt widgets.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::Data AND TARGET Pwb::JobQt
+   AND TARGET Qt6::Widgets)
+    if(NOT TARGET Pwb::WorkflowContracts)
+        pwb_add_subdirectory_once(libs/workflow_contracts)
+    endif()
+    add_subdirectory(libs/ui_review)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-11: libs/ui_review skipped — needs Pwb::Data "
+        "(PWB_BUILD_DATA) + Pwb::JobQt (PWB_BUILD_CONV_30) + "
+        "Qt6::Widgets; the Python pages remain the production path")
+endif()
+# END UI-11
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared
