@@ -251,6 +251,9 @@ public:
     std::optional<JournalRecord> find_journal(
         const domain::OperationId& operation_id) const;
 
+    // Test-only; set BEFORE concurrent use (the hook runs inside the
+    // serialization mutex, so swapping it while writers are active is a
+    // data race).
     void set_fault_hook(FaultHook hook) { fault_hook_ = std::move(hook); }
 
 private:

@@ -166,18 +166,25 @@ void WellSeismicScene::restore_orthogonal_slice_state(
 void WellSeismicScene::set_orthogonal_slice_indices(
     std::optional<std::int64_t> inline_index,
     std::optional<std::int64_t> crossline_index) {
-    std::int64_t il =
-        inline_index.has_value() ? *inline_index
-                                 : slice_state_.inline_index.value_or(0);
-    std::int64_t xl =
-        crossline_index.has_value() ? *crossline_index
-                                    : slice_state_.crossline_index.value_or(0);
+    // An absent argument keeps the current value (which may itself be
+    // absent — reconcile() then seeds the middle line, Python parity).
+    std::optional<std::int64_t> il =
+        inline_index.has_value() ? inline_index
+                                 : slice_state_.inline_index;
+    std::optional<std::int64_t> xl =
+        crossline_index.has_value() ? crossline_index
+                                    : slice_state_.crossline_index;
     if (registration_.has_value()) {
-        il = std::max<std::int64_t>(0,
-                                    std::min(registration_->n_inline() - 1,
-                                             il));
-        xl = std::max<std::int64_t>(
-            0, std::min(registration_->n_crossline() - 1, xl));
+        if (il.has_value()) {
+            il = std::max<std::int64_t>(0,
+                                        std::min(
+                                            registration_->n_inline() - 1,
+                                            *il));
+        }
+        if (xl.has_value()) {
+            xl = std::max<std::int64_t>(
+                0, std::min(registration_->n_crossline() - 1, *xl));
+        }
     }
     replace_slice_state(il, xl, std::nullopt, std::nullopt, std::nullopt);
 }
@@ -358,7 +365,9 @@ const TimeSliceState* WellSeismicScene::find_time_slice(
 bool WellSeismicScene::same_time(std::optional<double> left,
                                  std::optional<double> right) {
     if (!left.has_value() || !right.has_value()) return false;
-    return std::fabs(*left - *right) <= 1e-7;  // np.isclose(atol=1e-7)
+    // np.isclose(atol=1e-7) keeps the default rtol=1e-5 term.
+    return std::fabs(*left - *right) <=
+           1e-7 + 1e-5 * std::fabs(*right);
 }
 
 double WellSeismicScene::snap_time_ms(double time_ms) const {
@@ -762,10 +771,13 @@ void WellSeismicScene::rescale_slice_indices(
         static_cast<double>(slice_state_.inline_index.value_or(0)),
         static_cast<double>(slice_state_.crossline_index.value_or(0)));
     const auto [vi, vx] = new_reg->il_xl_to_volume_idx(il_num, xl_num);
-    const std::int64_t il = static_cast<std::int64_t>(std::llround(
-        std::max(0.0, std::min(static_cast<double>(new_shape[0] - 1), vi))));
-    const std::int64_t xl = static_cast<std::int64_t>(std::llround(
-        std::max(0.0, std::min(static_cast<double>(new_shape[1] - 1), vx))));
+    // Python round() = half-to-even (nearbyint); round, then clamp.
+    const std::int64_t il = static_cast<std::int64_t>(
+        std::max(0.0, std::min(static_cast<double>(new_shape[0] - 1),
+                               std::nearbyint(vi))));
+    const std::int64_t xl = static_cast<std::int64_t>(
+        std::max(0.0, std::min(static_cast<double>(new_shape[1] - 1),
+                               std::nearbyint(vx))));
     slice_state_ = OrthogonalSliceState(
         il, xl, slice_state_.time_slices, slice_state_.active_time_ms,
         slice_state_.time_opacity);

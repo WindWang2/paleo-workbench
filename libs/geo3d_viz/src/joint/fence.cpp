@@ -134,14 +134,21 @@ FenceExtraction extract_fence_strip(
         const auto [x, y] = samples_xy[static_cast<std::size_t>(i)];
         std::int64_t ii = 0;
         std::int64_t xi = 0;
+        // Python round() = half-to-even (nearbyint); round first, then
+        // clamp to the loaded bounds (fence.py:114-121 order).
+        auto round_clamp = [](double v, std::int64_t hi) {
+            const double rounded = std::nearbyint(v);
+            const double bounded =
+                rounded < 0 ? 0
+                           : (rounded > static_cast<double>(hi - 1)
+                                  ? static_cast<double>(hi - 1)
+                                  : rounded);
+            return static_cast<std::int64_t>(bounded);
+        };
         if (registration != nullptr) {
             const auto [vi, vx] = registration->xy_to_volume_idx(x, y);
-            ii = static_cast<std::int64_t>(
-                std::llround(std::max(0.0, std::min(static_cast<double>(ni - 1),
-                                                    vi))));
-            xi = static_cast<std::int64_t>(
-                std::llround(std::max(0.0, std::min(static_cast<double>(nx - 1),
-                                                    vx))));
+            ii = round_clamp(vi, ni);
+            xi = round_clamp(vx, nx);
         } else {
             const auto [il, xl] = survey.xy_to_il_xl(x, y);
             const double il_step =
@@ -151,12 +158,12 @@ FenceExtraction extract_fence_strip(
                 survey.xline_step != 0
                     ? static_cast<double>(survey.xline_step)
                     : 1.0;
-            ii = static_cast<std::int64_t>(std::llround(
-                (il - static_cast<double>(survey.iline_start)) / il_step));
-            xi = static_cast<std::int64_t>(std::llround(
-                (xl - static_cast<double>(survey.xline_start)) / xl_step));
-            ii = std::max<std::int64_t>(0, std::min(ni - 1, ii));
-            xi = std::max<std::int64_t>(0, std::min(nx - 1, xi));
+            ii = round_clamp(
+                (il - static_cast<double>(survey.iline_start)) / il_step,
+                ni);
+            xi = round_clamp(
+                (xl - static_cast<double>(survey.xline_start)) / xl_step,
+                nx);
         }
         float* row = extraction.amplitude.data() +
                      static_cast<std::size_t>(i * nt);

@@ -2,16 +2,17 @@
 
 // VIZ-C — the REAL joint 3D host behind the #1394 JointHostController
 // seam: a WellSeismicScene (plan V4 joint core) driving the geo3d_viz
-// viewport. Volume opens run through the JobCenter (tiled service reads
-// on the single background worker; GUI assembles meshes), the
-// CONV-GEO3D SceneTransform seam is installed from the scene's
-// world↔render maps, and the joint state persists as version-compatible
-// JSON under its own key (the Geo3DWorkspaceState seven-key schema is
-// untouched).
+// viewport. Volume OPEN runs through the JobCenter (metadata-only
+// inspect on the worker); slice reads happen on the GUI thread — the
+// single reader for the volume's lifetime. The CONV-GEO3D
+// SceneTransform seam is installed from the scene's world↔render maps,
+// and the joint state persists as version-compatible JSON under its own
+// key (the Geo3DWorkspaceState seven-key schema is untouched).
 #ifdef PWB_WITH_UI_WELLSEIS
 
 #include <memory>
 
+#include <QPointer>
 #include <QObject>
 #include <QString>
 
@@ -114,8 +115,10 @@ private:
     std::string engine_error_;
     std::vector<std::string> loaded_paths_;
     std::uint64_t volume_generation_ = 0;
-    VizCTimeSliceMap* time_map_ = nullptr;
-    std::optional<pwb::job::qtbridge::JobOwner*> volume_owner_;
+    // QPointer: the map/owner are QObjects owned by parent trees that can
+    // die independently of this host — nulls itself on either side.
+    QPointer<VizCTimeSliceMap> time_map_;
+    QPointer<pwb::job::qtbridge::JobOwner> volume_owner_;
 };
 
 }  // namespace pwb::app::viz_c

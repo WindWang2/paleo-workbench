@@ -2630,8 +2630,7 @@ void MainWindow::submitSegyJob(const QString& path) {
                 const std::string detail =
                     result != nullptr && !result->error.empty()
                         ? result->error
-                        : (result != nullptr ? result->error
-                                             : outcome.error);
+                        : outcome.error;
                 QMessageBox::warning(
                     this, tr("导入 SEG-Y"),
                     QString::fromStdString(
@@ -2843,6 +2842,12 @@ pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {
     // CRS straight from the map authority.
     in.project_crs = context_.session().map().project()->crs().authid().toStdString();
     // Horizon: the store document's stratigraphy section when open.
+    // NOTE (#1380 audit, review B): this GUI-side document() read is
+    // unsynchronized against worker publishes that carry rebind_layer
+    // (they mutate the document under the coordinator lock). No current
+    // publish path sets rebind_layer, so today the GUI is the sole
+    // writer; adding one requires routing this read through a locked
+    // projection first.
 #ifdef PWB_WITH_DATA_INTEGRATION
     if (context_.projectStore() != nullptr) {
         const pwb::project::ProjectDocument& document =

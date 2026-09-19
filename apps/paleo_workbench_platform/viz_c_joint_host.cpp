@@ -45,7 +45,13 @@ VizCJointHost::VizCJointHost(
       dock_controller_(dock_controller),
       viewport_(viewport) {}
 
-VizCJointHost::~VizCJointHost() = default;
+VizCJointHost::~VizCJointHost() {
+    // The time map can be reparented into a consuming page (different
+    // parent tree); it must never keep a dangling scene pointer.
+    if (time_map_ != nullptr) {
+        time_map_->set_scene(nullptr);
+    }
+}
 
 bool VizCJointHost::open_volume(
     const std::shared_ptr<SeismicVolumeService>& service,
@@ -72,8 +78,13 @@ bool VizCJointHost::open_volume(
     pwb::job::JobSpec spec;
     spec.kind = "background.io";
     spec.title = "井震联合体打开";
-    // compute(worker): O(1) open + first slice warm-up through the tiled
-    // service (byte-budget tile cache). No GUI, no store.
+    // compute(worker): metadata-only inspect through the tiled service
+    // (O(1) open, no sample reads). No GUI, no store. All SLICE reads for
+    // this volume happen afterwards on the GUI thread — one single
+    // reader for the volume's lifetime, which is the tiled backend's
+    // single-reader discipline in spirit (its cache is thread-safe
+    // anyway); moving them to jobs is future work with prepared-slice
+    // injection (VizCTimeSliceMap::set_prepared_slice is the seam).
     spec.run = [service, path](pwb::job::JobContext& ctx) -> std::any {
         auto staged = std::make_shared<StagedOpen>();
         ctx.check_cancelled();
@@ -94,18 +105,28 @@ bool VizCJointHost::open_volume(
     owner.start(
         job_center_.scheduler(), std::move(spec),
         [this, generation, path](const pwb::job::qtbridge::JobOutcome& outcome) {
-            volume_owner_.reset();
+            // Only the owner this callback belongs to may clear the slot
+            // (a superseded open may already have installed a new one).
+            if (volume_owner_ != nullptr && generation == volume_generation_) {
+                volume_owner_ = nullptr;
+            }
             if (outcome.state == pwb::job::JobState::cancelled ||
                 generation != volume_generation_) {
                 // Superseded or cancelled: nothing was wired into the
                 // scene; the late/cancelled result is dropped honestly.
                 return;
             }
+            // Pointer form: a failed outcome carries an empty any (a
+            // value-form cast would throw on the GUI thread).
             const auto staged =
-                std::any_cast<std::shared_ptr<StagedOpen>>(outcome.result);
-            if (staged == nullptr || staged->volume == nullptr) {
+                std::any_cast<std::shared_ptr<StagedOpen>>(
+                    &outcome.result);
+            if (staged == nullptr || *staged == nullptr ||
+                (*staged)->volume == nullptr) {
                 engine_error_ =
-                    staged != nullptr ? staged->error : outcome.error;
+                    staged != nullptr && *staged != nullptr
+                        ? (*staged)->error
+                        : outcome.error;
                 emit_status(tr("联合体打开失败：%1")
                                 .arg(QString::fromStdString(engine_error_)));
                 return;
@@ -116,11 +137,11 @@ bool VizCJointHost::open_volume(
                 // survey (never metres-as-milliseconds).
                 joint::SurveySpec survey =
                     joint::survey_from_volume_descriptor(
-                        staged->descriptor);
+                        (*staged)->descriptor);
                 scene_.set_survey(std::move(survey));
                 scene_.set_volume_access(
-                    std::make_shared<TiledVolumeAccess>(staged->volume,
-                                                        staged->lifetime));
+                    std::make_shared<TiledVolumeAccess>((*staged)->volume,
+                                                        (*staged)->lifetime));
                 loaded_paths_.clear();
                 loaded_paths_.push_back(path.generic_string());
             } catch (const std::exception& ex) {
@@ -171,9 +192,9 @@ void VizCJointHost::restore_state() {
 // ---- JointHostController -------------------------------------------------
 
 bool VizCJointHost::shutdown(int wait_ms) {
-    if (volume_owner_.has_value() && *volume_owner_ != nullptr) {
-        const bool drained = (*volume_owner_)->shutdown(wait_ms);
-        volume_owner_.reset();
+    if (volume_owner_ != nullptr) {
+        const bool drained = volume_owner_->shutdown(wait_ms);
+        volume_owner_ = nullptr;
         return drained;
     }
     return true;
@@ -528,9 +549,8 @@ bool VizCJointHost::focus_position(int il, int xl,
         vt = registration->time_ms_to_sample_idx(*twt);
     }
     if (viewport_ == nullptr) return false;
-    auto& camera = const_cast<pwb::geo3d_viz::OrbitCamera&>(
-        viewport_->camera());
-    camera.set_center({vi, vx, vt});
+    viewport_->camera().set_center({vi, vx, vt});
+    viewport_->update();
     return true;
 }
 

@@ -15,8 +15,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
-#if defined(Q_OS_UNIX)
+#if defined(Q_OS_UNIX) && defined(VIZ_C_HAVE_X11)
 #include <X11/Xlib.h>
 // Broken/absent GLX hosts die inside QOpenGLContext creation before the
 // honest GL-less degradation can report; ignore X protocol errors so the
@@ -81,7 +82,7 @@ int main(int argc, char** argv) {
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
         qputenv("QT_QPA_PLATFORM", "offscreen");
     }
-#if defined(Q_OS_UNIX)
+#if defined(Q_OS_UNIX) && defined(VIZ_C_HAVE_X11)
     XSetErrorHandler([](Display*, XErrorEvent*) -> int { return 0; });
 #endif
     QApplication app(argc, argv);
@@ -98,8 +99,16 @@ int main(int argc, char** argv) {
     Geo3DWorkspaceController controller(
         [&viewport]() { return &viewport.scene_manager(); });
     controller.set_viewport(&viewport);
-    pwb::app::JobCenter job_center;
-    pwb::app::viz_c::VizCJointHost host(job_center, &controller, &viewport);
+    // Destruction order (review C): JobOwner is dual-owned (JobCenter
+    // unique_ptr + QObject parent on the host), so the JobCenter must be
+    // destroyed BEFORE the host — the unique_ptr declaration order below
+    // reproduces the MainWindow member ordering (job_center_ declared
+    // last, destroyed first).
+    std::unique_ptr<pwb::app::viz_c::VizCJointHost> host;
+    auto job_center = std::make_unique<pwb::app::JobCenter>();
+    host = std::make_unique<pwb::app::viz_c::VizCJointHost>(
+        *job_center, &controller, &viewport);
+    pwb::app::viz_c::VizCJointHost& host_ref = *host;
 
     // Wells are placed FROM the volume's real survey (bin-grid corners +
     // TWT extent) so head/bottom sit inside the bin grid — registration
@@ -140,36 +149,35 @@ int main(int argc, char** argv) {
     ex2.id = "ex2";
     const TimeDepthTable td("EX", {0.0, tmax / 2, tmax},
                             {0.0, 500.0, 1000.0});
-    host.set_wells({ex1, ex2}, {{"EX-1", td}, {"EX-2", td}});
-    host.add_time_slice(tmax / 2);
+    host_ref.set_wells({ex1, ex2}, {{"EX-1", td}, {"EX-2", td}});
+    host_ref.add_time_slice(tmax / 2);
 
     QString error;
-    if (!host.open_volume(service, volume, &error)) {
+    if (!host_ref.open_volume(service, volume, &error)) {
         return report("open_volume refused: " + error.toStdString());
     }
 
     viewport.resize(800, 600);
     viewport.show();
 
-    int exit_code = 0;
     QTimer::singleShot(1500, [&]() {
-        report(describe_host(&host));
+        report(describe_host(&host_ref));
 
         // Well-to-well fence through the real seam (two piercing wells).
-        host.add_well_to_well_fence("ex1", "ex2");
+        host_ref.add_well_to_well_fence("ex1", "ex2");
         // Probe on the active fence.
-        const auto snapshot = host.scene_snapshot();
+        const auto snapshot = host_ref.scene_snapshot();
         if (snapshot.n_inline > 1 && snapshot.n_crossline > 1) {
             report("seam: apply_slice_line_numbers ok=" +
                    std::to_string(
-                       host.apply_slice_line_numbers(
+                       host_ref.apply_slice_line_numbers(
                            0.0, 0.0)
                            ? 1
                            : 0));
         }
         report("seam: set_vertical_domain(depth) refused=" +
                std::to_string(
-                   host.set_vertical_domain("depth") ? 0 : 1));
+                   host_ref.set_vertical_domain("depth") ? 0 : 1));
 
         // Frame the joint objects (wells + slice + curtain) so the
         // screenshot is a meaningful key-pixel artifact, then grab after
@@ -191,10 +199,10 @@ int main(int argc, char** argv) {
                        std::to_string(image.height()));
             }
             // Shutdown drains the job center (close protocol parity).
-            const bool drained = host.shutdown(400);
+            const bool drained = host_ref.shutdown(400);
             report(std::string("shutdown drained=") +
                    (drained ? "true" : "false"));
-            app.exit(exit_code);
+            app.exit(0);
         });
     });
     return app.exec();

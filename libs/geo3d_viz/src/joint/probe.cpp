@@ -11,7 +11,7 @@ namespace pwb::geo3d_viz::joint {
 std::array<std::int64_t, 3> ProbeState::slice_indices(
     const SurveySpec* survey) const {
     if (survey == nullptr) {
-        return {0, 0, static_cast<std::int64_t>(std::llround(z))};
+        return {0, 0, static_cast<std::int64_t>(std::nearbyint(z))};
     }
     const double il_step = survey->iline_step != 0
                                ? static_cast<double>(survey->iline_step)
@@ -19,16 +19,17 @@ std::array<std::int64_t, 3> ProbeState::slice_indices(
     const double xl_step = survey->xline_step != 0
                                ? static_cast<double>(survey->xline_step)
                                : 1.0;
-    const std::int64_t il_idx = static_cast<std::int64_t>(std::llround(
+    // Python round() = half-to-even (nearbyint).
+    const std::int64_t il_idx = static_cast<std::int64_t>(std::nearbyint(
         (il - static_cast<double>(survey->iline_start)) / il_step));
-    const std::int64_t xl_idx = static_cast<std::int64_t>(std::llround(
+    const std::int64_t xl_idx = static_cast<std::int64_t>(std::nearbyint(
         (xl - static_cast<double>(survey->xline_start)) / xl_step));
     std::int64_t t_idx = 0;
     if (survey->dt_ms > 0 && domain == "time") {
         t_idx = static_cast<std::int64_t>(
-            std::llround((z - survey->t0_ms) / survey->dt_ms));
+            std::nearbyint((z - survey->t0_ms) / survey->dt_ms));
     } else {
-        t_idx = static_cast<std::int64_t>(std::llround(z));
+        t_idx = static_cast<std::int64_t>(std::nearbyint(z));
     }
     return {std::max<std::int64_t>(0,
                                    std::min(survey->n_inlines - 1, il_idx)),

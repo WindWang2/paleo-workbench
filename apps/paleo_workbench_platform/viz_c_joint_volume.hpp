@@ -3,10 +3,12 @@
 // VIZ-C joint scene bridges: the tiled seismic service volume exposed as a
 // joint IVolumeAccess, plus the mesh builders that turn joint-scene data
 // (well trajectories, fence extraction, active time slice) into geo3d_viz
-// SceneObjects. Pure composition code — no window state; the job runtime
-// runs these on its single background worker (the ISeismicVolume
-// single-reader-thread contract), the GUI thread only assembles the
-// resulting objects.
+// SceneObjects. Pure composition code — no window state. Threading
+// reality (review B): the open job inspects metadata only; every
+// read_slice for a joint volume runs on the GUI thread, making the GUI
+// the single reader for the volume's lifetime (the tiled backend's
+// single-reader discipline in spirit; its tile cache is independently
+// thread-safe).
 
 #include <array>
 #include <cstdint>

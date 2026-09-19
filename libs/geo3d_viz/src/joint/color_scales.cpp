@@ -88,8 +88,13 @@ std::vector<std::uint8_t> colorize_amplitude(
     for (float v : amplitude) {
         if (std::isfinite(v)) finite.push_back(std::fabs(static_cast<double>(v)));
     }
+    // Python computes the percentile over a float32 array, so the limit
+    // itself carries float32 quantization; reproduce it exactly.
     double limit =
-        finite.empty() ? 1.0 : percentile_linear(finite, 98.0);
+        finite.empty()
+            ? 1.0
+            : static_cast<double>(static_cast<float>(
+                  percentile_linear(finite, 98.0)));
     if (!std::isfinite(limit) || limit <= 1e-12) limit = 1.0;
 
     const std::vector<RgbStop>& stops = seismic_color_scale(color_scale);

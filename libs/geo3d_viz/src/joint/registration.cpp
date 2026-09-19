@@ -156,6 +156,12 @@ std::pair<double, double> VolumeRegistration::volume_idx_to_il_xl(
 std::array<std::int64_t, 3> VolumeRegistration::clamp_indices(
     double il_idx, double xl_idx, double t_idx) const {
     auto clamp = [](double v, std::int64_t hi) {
+        // Python round() raises on non-finite input; fail closed the
+        // same way instead of producing an unspecified integer.
+        if (!std::isfinite(v)) {
+            throw std::invalid_argument(
+                "cannot round a non-finite index value");
+        }
         // Python round() is half-to-even; nearbyint under the default
         // FE_TONEAREST mode matches it exactly (llround would not).
         const double rounded = std::nearbyint(v);

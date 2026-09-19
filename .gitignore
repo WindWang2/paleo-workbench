@@ -103,3 +103,4 @@ scratch_wt_batched*
 # that are not part of the tree. `build/` above is the actual CMake output.
 .workbuddy/
 
+a.out

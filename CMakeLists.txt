@@ -780,6 +780,7 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
     set(VIZ_C_EXAMPLE_VOLUME
         "${CMAKE_CURRENT_SOURCE_DIR}/libs/seismic_io/seismic_io_tests/fixtures/io_oracle_bins.sgy")
     if(EXISTS "${VIZ_C_EXAMPLE_VOLUME}")
+        message(STATUS "VIZ-C: joint example volume fixture found")
         add_executable(viz_c_joint_example
             apps/paleo_workbench_platform/examples/viz_c_joint_example.cpp
             apps/paleo_workbench_platform/viz_c_joint_host.cpp
@@ -787,8 +788,14 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
             apps/paleo_workbench_platform/viz_c_joint_volume.cpp
             apps/paleo_workbench_platform/viz_c_time_map.cpp)
         if(UNIX AND NOT APPLE)
-            find_package(X11 REQUIRED)
-            target_link_libraries(viz_c_joint_example PRIVATE X11::X11)
+            # Soft X11 probe (broken-GLX hosts install an X error guard);
+            # a missing SDK only drops that guard, never the build.
+            find_package(X11)
+            if(X11_FOUND)
+                target_link_libraries(viz_c_joint_example PRIVATE X11::X11)
+                target_compile_definitions(viz_c_joint_example PRIVATE
+                    VIZ_C_HAVE_X11=1)
+            endif()
         endif()
         set_target_properties(viz_c_joint_example PROPERTIES AUTOMOC ON)
         target_compile_features(viz_c_joint_example PRIVATE cxx_std_20)

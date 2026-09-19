@@ -13,7 +13,7 @@
 #include <cmath>
 #include <cstdio>
 
-#if defined(Q_OS_UNIX)
+#if defined(Q_OS_UNIX) && defined(PWB_GEO3D_HAVE_X11)
 #include <X11/Xlib.h>
 // Xlib defines these as macros; Qt's QEvent::Type enumerators use the
 // same names.
@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
         qputenv("QT_QPA_PLATFORM", "offscreen");
     }
-#if defined(Q_OS_UNIX)
+#if defined(Q_OS_UNIX) && defined(PWB_GEO3D_HAVE_X11)
     // VIZ-C: hosts with a broken/absent GLX extension kill the process
     // with a fatal X error inside QOpenGLContext creation — before Qt can
     // report the failure and the test can exercise the honest GL-less

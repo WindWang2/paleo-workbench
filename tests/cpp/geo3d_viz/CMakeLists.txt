@@ -25,8 +25,15 @@ if(UNIX AND NOT APPLE)
     # VIZ-C: the widget test installs an X error handler so broken-GLX
     # hosts fail softly into the honest GL-less degradation path instead
     # of dying inside QOpenGLContext creation.
-    find_package(X11 REQUIRED)
-    target_link_libraries(geo3d.widget_test PRIVATE X11::X11)
+    find_package(X11)
+    if(X11_FOUND)
+        target_link_libraries(geo3d.widget_test PRIVATE X11::X11)
+        target_compile_definitions(geo3d.widget_test PRIVATE
+            PWB_GEO3D_HAVE_X11=1)
+    else()
+        message(STATUS "geo3d.widget_test: X11 not found — the X error "
+                       "guard is disabled (broken-GLX hosts may abort)")
+    endif()
 endif()
 add_test(NAME geo3d.widget_test COMMAND geo3d.widget_test)
 set_tests_properties(geo3d.widget_test PROPERTIES TIMEOUT 300

@@ -244,6 +244,9 @@ pwb::app::viz_c::VizCJointHost* Geo3DDock::joint_host() {
     connect(joint_host_.get(),
             &pwb::app::viz_c::VizCJointHost::scene_updated, this,
             &Geo3DDock::refresh_objects);
+    // Product restore path: the persisted joint state (own QSettings
+    // key; version-gated, per-entry degradation) comes back alive here.
+    joint_host_->restore_state();
     return joint_host_.get();
 }
 #endif

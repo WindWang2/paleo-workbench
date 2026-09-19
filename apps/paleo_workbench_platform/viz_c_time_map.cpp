@@ -44,6 +44,8 @@ void VizCTimeSliceMap::refresh() {
     image_ = nullptr;
     caption_.clear();
     if (scene_ == nullptr) {
+        // Unbound (host teardown): the honest empty state, never a
+        // dangling dereference.
         update();
         return;
     }
