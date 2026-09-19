@@ -5275,7 +5275,7 @@
    "id": "20_well_empty_last",
    "file": "tests/cpp/viz_a/fixtures/las/20_well_empty_last.las",
    "sha256": "eae4c2d23986d6bac1c86cf484682eeda11ad3b23e087bd3b1eb793820155459",
-   "adjudication": "",
+   "adjudication": "R16",
    "wle_verdict": "accepted",
    "python_result": {
     "mode": "well_log",

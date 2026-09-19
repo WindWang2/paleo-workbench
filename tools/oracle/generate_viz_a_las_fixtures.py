@@ -77,7 +77,7 @@ ADJUDICATIONS = {
     "17_null_tolerance": "R4",     # (relisted below for order)
     "18_inline_comment": "R15",    # inline '#': SDK truncates, Python keeps
     "19_well_last_wins": "",       # both last-wins now (fixed to Python)
-    "20_well_empty_last": "",      # empty last WELL. -> stem (Python parity)
+    "20_well_empty_last": "R16",   # empty last WELL. -> stem (Python parity)
     "21_bad_curve_line_mixed": "R18",  # SDK rejects whole doc; Python skips
     "22_only_bad_curves": "",      # both take missing-curve-definition branch
     "a1_real": "",

@@ -158,37 +158,41 @@ int main() {
             }
         }
 
-        // Negative self-check: flip one data byte at a time in a TEMP COPY
-        // (the registry re-reads the file from disk); the preview must
-        // diverge from the frozen expectation for at least one flip —
-        // proving the fixture bytes are load-bearing.
-        std::string corrupted = bytes;
-        const auto marker = corrupted.find("~A");
+        // Negative self-check: flip one byte at a time across the WHOLE
+        // file in a TEMP COPY (the registry re-reads from disk); the
+        // preview must diverge for at least one flip — for rejected/no-curve
+        // cases the load-bearing bytes live in the HEADER (well name, ~C),
+        // not only after ~A.
+        const fs::path corrupt_dir = fs::temp_directory_path() / "viz_a_corrupt";
+        fs::create_directories(corrupt_dir);
+        const fs::path corrupt_path = corrupt_dir / path.filename();
         bool diverged = false;
-        if (marker != std::string::npos) {
-            const fs::path corrupt_dir =
-                fs::temp_directory_path() / "viz_a_corrupt";
-            fs::create_directories(corrupt_dir);
-            const fs::path corrupt_path = corrupt_dir / path.filename();
-            for (std::size_t i = marker + 1; i < corrupted.size() && !diverged; ++i) {
-                const char original = corrupted[i];
-                if (original == '\n' || original == ' ' || original == '\t') continue;
-                corrupted[i] = static_cast<char>(original == '5' ? '6' : '5');
-                std::ofstream out(corrupt_path, std::ios::binary | std::ios::trunc);
-                out.write(corrupted.data(), static_cast<std::streamsize>(corrupted.size()));
-                out.close();
-                const PreviewResult corrupt_result = preview_of(
-                    corrupt_dir.parent_path().string(),
-                    (corrupt_dir.filename() / path.filename()).string(), name);
-                if (!pwb::domain::json_semantic_diff(
-                         actual, project(corrupt_result)).equal) {
-                    diverged = true;
-                }
-                corrupted[i] = original;
+        for (std::size_t i = 0; i < bytes.size() && !diverged; ++i) {
+            const char original = bytes[i];
+            if (original == '\n' || original == ' ' || original == '\t' ||
+                original == '\r') {
+                continue;
             }
-            std::error_code ec;
-            fs::remove(corrupt_path, ec);
+            std::string corrupted = bytes;
+            corrupted[i] = static_cast<char>(original == '5' ? '6' : '5');
+            if (corrupted == bytes) continue;
+            {
+                std::ofstream out(corrupt_path,
+                                  std::ios::binary | std::ios::trunc);
+                out.write(corrupted.data(),
+                          static_cast<std::streamsize>(corrupted.size()));
+            }
+            const PreviewResult corrupt_result = preview_of(
+                corrupt_dir.parent_path().string(),
+                (corrupt_dir.filename() / path.filename()).string(), name);
+            if (!pwb::domain::json_semantic_diff(actual,
+                                                 project(corrupt_result))
+                     .equal) {
+                diverged = true;
+            }
         }
+        std::error_code ec;
+        fs::remove(corrupt_path, ec);
         if (!diverged) {
             fail(id + ": tampering did not change the preview (frozen "
                      "expectation not load-bearing)");

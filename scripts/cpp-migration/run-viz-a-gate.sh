@@ -79,7 +79,7 @@ echo "== [1/7] Configure build/viz-a (viewer ON, jobs=$JOBS) =="
 must Configure -s "$REPO_ROOT" -b "$BUILD_DIR" -c Release -a "$VIZ_A_ARGS"
 
 echo "== [2/7] Build the line-A closure =="
-must Build -b "$BUILD_DIR" -t "pwb_ingest;pwb_ingest_las_wle;pwb_ui_workers;pwb_ui_workers_wle_load;pwb_visualization_well_log;viz_a.las_preview_core;viz_a.las_preview_wle;viz_a.wle_load;viz_a.consistency;viz_a.viewer_flow;viz_a.patterns;ingest.parsers;ui_workers.oracle;ui_workers.lifecycle"
+must Build -b "$BUILD_DIR" -t "pwb_ingest;pwb_ingest_las_wle;pwb_ui_workers;pwb_ui_workers_wle_load;pwb_visualization_well_log;viz_a.las_preview_core;viz_a.las_preview_wle;viz_a.wle_load;viz_a.consistency;viz_a.viewer_flow;viz_a.patterns;ingest.parsers;ui_workers.oracle;ui_workers.lifecycle;science.viewer.well_log_plan;science.viewer.well_log_native_host;science.viewer.well_log"
 
 echo "== [3/7] Tests, pass 1 of 2 (green x2 rule) =="
 must Test -b "$BUILD_DIR" -r "$VIZ_A_REGEX"

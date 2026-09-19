@@ -138,7 +138,14 @@ int main() {
     check(r.warning.empty(), "no truncation warning below the cap");
 
     // Unicode path stem (path_stem parity with Python Path.stem on
-    // non-ASCII names).
+    // non-ASCII names) — empty well name forces the stem fallback.
+    set_las_preview_provider([](const std::string&,
+                                const std::string&) -> std::optional<LasPreviewData> {
+        LasPreviewData data;
+        data.well_name = "";
+        data.curves = {{"DEPT", "M", "d"}};
+        return data;
+    });
     asset.path = "/data/\xE4\xBB\x95/\xE5\x9C\xB0\xE8\xb4\xA8\xE4\xBA\x95.las";  // 地质井.las
     r = las_preview_result(asset, "", settings);
     check_eq("\xE5\x9C\xB0\xE8\xb4\xA8\xE4\xBA\x95", r.summary_rows[0].second,
