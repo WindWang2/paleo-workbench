@@ -695,6 +695,7 @@ if(PWB_BUILD_PLATFORM)
     # panels, dock manager, constrained mapping-page shell).
     add_subdirectory(libs/ui_map)
     add_subdirectory(libs/ui_pages_preview)
+    add_subdirectory(libs/ui_pages_data)
     add_subdirectory(apps/paleo_workbench_platform)
     if(BUILD_TESTING)
         enable_testing()
