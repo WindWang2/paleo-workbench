@@ -46,6 +46,12 @@ public:
 
     PreviewSettingsStore* store() const { return store_; }
 
+    // UI-15: PreviewSettingsDialog wraps this panel modally and accepts on
+    // Apply only (reset keeps the dialog open — Python apply_btn.clicked
+    // parity).
+    QPushButton* apply_button() const { return apply_btn_; }
+    QPushButton* reset_button() const { return reset_btn_; }
+
 signals:
     void settings_applied(const pwb::ui_pages_preview::PreviewSettings& s);
 

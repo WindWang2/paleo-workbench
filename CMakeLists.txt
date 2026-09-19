@@ -878,6 +878,34 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-14
 
+# BEGIN UI-15 — root-canvas slice (libs/ui_canvas): Qt-free semantic
+# cores (render-backend contract/helpers, layer scene, layer tree,
+# properties payload, symbology request/result, export spec, snapshot
+# encoder) + Qt Widgets shells (UnifiedMapCanvas, NativeMapCanvas +
+# raster controller, NativeLayerTree, properties dialog, export worker,
+# preview dialog) + the QGIS-coupled surfaces (snapshot codec,
+# QgisSnapshotRenderBackend, symbology bridge over the vendored bridge
+# TUs). Same gating model as UI-09/10/11/14: no per-slice option; the
+# library joins platform configures that already resolved the map/
+# widgets/preview/job closures. The CONV-27C cartography leaf is pulled
+# in when the kernel slices left it out (UI-09 well_science precedent).
+# The application shell stays unwired — the targets only expose the
+# seams it binds.
+if(PWB_BUILD_PLATFORM AND TARGET Pwb::UiMap AND TARGET Pwb::UiWidgets
+   AND TARGET Pwb::UiPagesPreviewQt AND TARGET Pwb::JobQt)
+    if(NOT TARGET Pwb::Cartography)
+        pwb_add_subdirectory_once(libs/cartography)
+    endif()
+    add_subdirectory(libs/ui_canvas)
+elseif(PWB_BUILD_PLATFORM)
+    message(STATUS
+        "UI-15: libs/ui_canvas skipped — needs Pwb::UiMap + "
+        "Pwb::UiWidgets + Pwb::UiPagesPreviewQt + Pwb::JobQt "
+        "(PWB_BUILD_CONV_30); the Python canvases remain the "
+        "production path")
+endif()
+# END UI-15
+
 # BEGIN CONV-04
 # Task 04 (feat/cpp-conv-04-ring-clip-repair): bounded ring clip and
 # closure/orientation repair kernel slice without shapely. Option declared
