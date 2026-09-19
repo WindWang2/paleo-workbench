@@ -1,0 +1,425 @@
+{
+  "schema": "pwb.job_policy_oracle/1",
+  "source": "paleo_workbench/runtime/task_categories.py + runtime/task_scheduler.py (aging + #1224 supersede)",
+  "aging_interval_s": 5.0,
+  "aging_step": 5,
+  "aging_max_boost": 50,
+  "policies": [
+    {
+      "category": "interactive.render",
+      "base_priority": 100,
+      "interactive": true,
+      "io_weight": 1.0,
+      "default_cpu_cores": 1.0
+    },
+    {
+      "category": "interactive.query",
+      "base_priority": 90,
+      "interactive": true,
+      "io_weight": 1.0,
+      "default_cpu_cores": 0.5
+    },
+    {
+      "category": "preview",
+      "base_priority": 70,
+      "interactive": true,
+      "io_weight": 1.0,
+      "default_cpu_cores": 0.5
+    },
+    {
+      "category": "background.io",
+      "base_priority": 30,
+      "interactive": false,
+      "io_weight": 2.0,
+      "default_cpu_cores": 1.0
+    },
+    {
+      "category": "background.compute",
+      "base_priority": 30,
+      "interactive": false,
+      "io_weight": 1.0,
+      "default_cpu_cores": 1.0
+    },
+    {
+      "category": "seismic.transcode",
+      "base_priority": 45,
+      "interactive": false,
+      "io_weight": 4.0,
+      "default_cpu_cores": 1.0
+    },
+    {
+      "category": "seismic.attribute",
+      "base_priority": 50,
+      "interactive": false,
+      "io_weight": 1.0,
+      "default_cpu_cores": 1.0
+    },
+    {
+      "category": "prediction.inference",
+      "base_priority": 50,
+      "interactive": false,
+      "io_weight": 1.0,
+      "default_cpu_cores": 1.0
+    },
+    {
+      "category": "export",
+      "base_priority": 40,
+      "interactive": false,
+      "io_weight": 2.0,
+      "default_cpu_cores": 1.0
+    },
+    {
+      "category": "indexing",
+      "base_priority": 20,
+      "interactive": false,
+      "io_weight": 2.0,
+      "default_cpu_cores": 1.0
+    },
+    {
+      "category": "maintenance",
+      "base_priority": 10,
+      "interactive": false,
+      "io_weight": 1.0,
+      "default_cpu_cores": 1.0
+    }
+  ],
+  "kind_mappings": [
+    {
+      "kind": "interactive.render",
+      "category": "interactive.render"
+    },
+    {
+      "kind": "interactive.query",
+      "category": "interactive.query"
+    },
+    {
+      "kind": "render.frame",
+      "category": "interactive.render"
+    },
+    {
+      "kind": "query.catalog",
+      "category": "interactive.query"
+    },
+    {
+      "kind": "preview.waveform",
+      "category": "preview"
+    },
+    {
+      "kind": "seismic.transcode",
+      "category": "seismic.transcode"
+    },
+    {
+      "kind": "seismic.attribute",
+      "category": "seismic.attribute"
+    },
+    {
+      "kind": "prediction.inference",
+      "category": "prediction.inference"
+    },
+    {
+      "kind": "inference.tile",
+      "category": "prediction.inference"
+    },
+    {
+      "kind": "export.map",
+      "category": "export"
+    },
+    {
+      "kind": "verify.catalog",
+      "category": "indexing"
+    },
+    {
+      "kind": "scan.volume",
+      "category": "indexing"
+    },
+    {
+      "kind": "index.documents",
+      "category": "indexing"
+    },
+    {
+      "kind": "maintenance.gc",
+      "category": "maintenance"
+    },
+    {
+      "kind": "background.compute",
+      "category": "background.io"
+    },
+    {
+      "kind": "background.io",
+      "category": "background.io"
+    },
+    {
+      "kind": "io",
+      "category": "background.io"
+    },
+    {
+      "kind": "transcode",
+      "category": "background.io"
+    },
+    {
+      "kind": "seismic.slice",
+      "category": "background.io"
+    },
+    {
+      "kind": "RENDER",
+      "category": "interactive.render"
+    },
+    {
+      "kind": "Seismic.Attribute",
+      "category": "seismic.attribute"
+    },
+    {
+      "kind": "prediction",
+      "category": "background.io"
+    },
+    {
+      "kind": "unknown.kind",
+      "category": "background.io"
+    },
+    {
+      "kind": "",
+      "category": "background.io"
+    }
+  ],
+  "aging": [
+    {
+      "base_priority": 0,
+      "wait_s": 0.0,
+      "effective": 0
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 2.5,
+      "effective": 0
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 4.999,
+      "effective": 0
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 5.0,
+      "effective": 5
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 5.001,
+      "effective": 5
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 9.999,
+      "effective": 5
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 10.0,
+      "effective": 10
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 30.0,
+      "effective": 30
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 59.999,
+      "effective": 50
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 60.0,
+      "effective": 50
+    },
+    {
+      "base_priority": 0,
+      "wait_s": 100.0,
+      "effective": 50
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 0.0,
+      "effective": 10
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 2.5,
+      "effective": 10
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 4.999,
+      "effective": 10
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 5.0,
+      "effective": 15
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 5.001,
+      "effective": 15
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 9.999,
+      "effective": 15
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 10.0,
+      "effective": 20
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 30.0,
+      "effective": 40
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 59.999,
+      "effective": 60
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 60.0,
+      "effective": 60
+    },
+    {
+      "base_priority": 10,
+      "wait_s": 100.0,
+      "effective": 60
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 0.0,
+      "effective": 40
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 2.5,
+      "effective": 40
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 4.999,
+      "effective": 40
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 5.0,
+      "effective": 45
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 5.001,
+      "effective": 45
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 9.999,
+      "effective": 45
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 10.0,
+      "effective": 50
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 30.0,
+      "effective": 70
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 59.999,
+      "effective": 90
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 60.0,
+      "effective": 90
+    },
+    {
+      "base_priority": 40,
+      "wait_s": 100.0,
+      "effective": 90
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 0.0,
+      "effective": 100
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 2.5,
+      "effective": 100
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 4.999,
+      "effective": 100
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 5.0,
+      "effective": 105
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 5.001,
+      "effective": 105
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 9.999,
+      "effective": 105
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 10.0,
+      "effective": 110
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 30.0,
+      "effective": 130
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 59.999,
+      "effective": 150
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 60.0,
+      "effective": 150
+    },
+    {
+      "base_priority": 100,
+      "wait_s": 100.0,
+      "effective": 150
+    }
+  ],
+  "supersede": [
+    {
+      "active_state": "queued",
+      "decision": "supersede",
+      "old_terminal": "cancelled",
+      "unwinds_on_cancel": true,
+      "message": ""
+    },
+    {
+      "active_state": "running",
+      "decision": "reject",
+      "message": "task with key 'k' 正在运行且尚未退出（已请求取消的旧任务需先实际结束）"
+    },
+    {
+      "active_state": "cancelling",
+      "decision": "reject",
+      "message": "task with key 'k' is already queued or running"
+    }
+  ]
+}

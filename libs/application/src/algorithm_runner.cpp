@@ -190,4 +190,14 @@ AlgorithmRunner::Outcome AlgorithmRunner::outcome(
     return outcome;
 }
 
+// BEGIN CONV-30
+bool AlgorithmRunner::cancel(const std::string& request_id) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    const auto it = pending_.find(request_id);
+    if (it == pending_.end()) return false;
+    it->second.handle.cancel();
+    return true;
+}
+// END CONV-30
+
 }  // namespace pwb::application

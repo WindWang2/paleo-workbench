@@ -19,6 +19,7 @@
 #include <QMainWindow>
 
 #include <pwb/application/project_session.hpp>
+#include <pwb/domain/json.hpp>
 #include <pwb/ui/tool_actions.hpp>
 #ifdef PWB_WITH_CONV_27
 // CONV-27 workbench surface: stage dock, domain layer tree, edit tools,
@@ -58,7 +59,13 @@ class FactorStatsDock;
 namespace pwb::application {
 class AlgorithmRunner;
 class PwbDataStore;
+struct MapPipelineOutcome;
 }
+#ifdef PWB_WITH_CONV_30
+namespace pwb::app {
+class JobCenter;
+}
+#endif
 namespace pwb::seismic_viewer {
 class SeismicSliceWidget;
 }
@@ -124,6 +131,24 @@ public:
     // an attribute input and viewable in the seismic dock.
     std::string importSegy(const QString& path, std::string* error);
 #endif
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+    // CONV-30 — the import body with phase safe points (read → payload →
+    // register → publish): the sync entry passes inert callbacks, the job
+    // path (CONV_30) threads the token/progress through. Declared under
+    // the feature guard ONLY (not under CONV_30) so the CONV_30=OFF
+    // configuration — where importSegy delegates here — still compiles.
+    std::string importSegyProgressed(
+        const QString& path, std::string* error,
+        const std::function<bool()>& cancelled,
+        const std::function<void(double, const QString&)>& progress);
+#endif
+#ifdef PWB_WITH_CONV_30
+#if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+    // Non-modal import: wires importSegyProgressed into the job runtime
+    // with a cancellable progress dialog (window-close and app-quit safe).
+    void submitSegyJob(const QString& path);
+#endif
+#endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
 
@@ -182,6 +207,16 @@ public:
                                    const std::string& factor_name,
                                    const std::string& method, int grid_n,
                                    const std::string& target_horizon);
+    // CONV-30 split: collection (GUI thread, QgsVectorLayer iteration) and
+    // layer application (GUI thread) are separable from the Qt-free
+    // compute so the dialog can run the pipeline as a job.
+    QString collectFactorMapInputs(const QString& layer_id,
+                                   const std::string& factor_name,
+                                   pwb::domain::Json* records,
+                                   std::string* crs);
+    QString applyFactorMapOutcome(
+        const pwb::application::MapPipelineOutcome& outcome,
+        const std::string& factor_name, const std::string& crs);
 #endif
 #ifdef PWB_WITH_CONV_27
     // ---- CONV-27 workbench surface (test/automation entry points; the
@@ -275,8 +310,24 @@ private:
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     void runAttributeDialog();
 #endif
+#if defined(PWB_WITH_CONV_30) && defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+    // CONV-30 — non-modal supervision of one attribute run: polls the
+    // runner outcome on a scheduler job, reports progress to the dialog
+    // and propagates cooperative cancel into the run.
+    void superviseAttributeRun(const std::string& request_id);
+#endif
 #ifdef PWB_WITH_CONV_01
     void geologicalFactorMapDialog();
+#endif
+#ifdef PWB_WITH_CONV_01
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — non-modal factor map: the kernel compute runs as a job on
+    // the scheduler; layer application stays on the GUI thread.
+    void submitFactorMapJob(
+        const QString& layer_id, const std::string& factor_name,
+        const std::string& method, int grid_n,
+        const std::string& target_horizon);
+#endif
 #endif
 
     // The composition root's service layer. When the window embeds its own
@@ -312,9 +363,6 @@ private:
 #ifdef PWB_WITH_GEO3D_VIZ
     Geo3DDock* geo3d_dock_ = nullptr;
 #endif
-    // The B store opened by openProject (null in module-only mode); the
-    // attribute runner and volume viewer resolve catalog versions here.
-    std::shared_ptr<pwb::application::PwbDataStore> project_store_;
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     QDockWidget* seismic_dock_ = nullptr;
     pwb::seismic_viewer::SeismicSliceWidget* slice_widget_ = nullptr;
@@ -341,6 +389,12 @@ private:
     QMenu* recent_projects_menu_ = nullptr;
     QAction* theme_actions_[3] = {nullptr, nullptr, nullptr};
     QAction* density_action_ = nullptr;
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 — product job runtime: bounded scheduler + page ownership
+    // (close protocol) + app-quit drain. Declared last so it outlives the
+    // surfaces it supervises.
+    std::unique_ptr<JobCenter> job_center_;
+#endif
 };
 
 }  // namespace pwb::app

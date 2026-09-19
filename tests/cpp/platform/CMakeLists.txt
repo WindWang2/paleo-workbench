@@ -42,6 +42,24 @@ if(PWB_GDAL_DRIVER_PATH)
 endif()
 # END CONV-27
 
+# CONV-30 — any target compiling main_window.cpp MUST call
+# pwb_link_job_runtime(<target>) so it builds the real product
+# configuration (job runtime wired). A new target that forgets the call
+# compiles in CONV_30-OFF mode — a silent downgrade — so keep this call
+# next to the main_window.cpp source line.
+function(pwb_link_job_runtime tgt)
+    if(PWB_BUILD_CONV_30)
+        if(NOT TARGET Pwb::JobQt)
+            message(FATAL_ERROR
+                "PWB_BUILD_CONV_30=ON requires Pwb::JobQt (libs/job_runtime)")
+        endif()
+        target_sources(${tgt} PRIVATE
+            ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/job_center.cpp)
+        target_link_libraries(${tgt} PRIVATE Pwb::JobQt)
+        target_compile_definitions(${tgt} PRIVATE PWB_WITH_CONV_30=1)
+    endif()
+endfunction()
+
 function(pwb_add_platform_test name)
     add_executable(platform_${name} ${ARGN})
     target_compile_features(platform_${name} PRIVATE cxx_std_20)
@@ -98,6 +116,7 @@ endif()
 # UI wiring test compiles the real MainWindow (moc included) next to the app.
 add_executable(platform_ui_wiring test_ui_wiring.cpp
     ${PWB_APP_SERVICE_SOURCES})
+pwb_link_job_runtime(platform_ui_wiring)
 set_target_properties(platform_ui_wiring PROPERTIES AUTOMOC ON)
 target_compile_features(platform_ui_wiring PRIVATE cxx_std_20)
 target_include_directories(platform_ui_wiring PRIVATE
@@ -118,6 +137,7 @@ set_tests_properties(platform.ui_wiring PROPERTIES
 if(PWB_BUILD_DATA)
     add_executable(platform_project_session test_project_session.cpp
         ${PWB_APP_SERVICE_SOURCES})
+    pwb_link_job_runtime(platform_project_session)
     set_target_properties(platform_project_session PROPERTIES AUTOMOC ON)
     target_compile_features(platform_project_session PRIVATE cxx_std_20)
     target_include_directories(platform_project_session PRIVATE
@@ -143,6 +163,7 @@ if(PWB_BUILD_DATA AND PWB_BUILD_SEISMIC_VIEWER
         AND PWB_BUILD_SEISMIC_ATTRIBUTES)
     add_executable(platform_attribute_ui test_attribute_ui.cpp
         ${PWB_APP_SERVICE_SOURCES})
+    pwb_link_job_runtime(platform_attribute_ui)
     set_target_properties(platform_attribute_ui PROPERTIES AUTOMOC ON)
     target_compile_features(platform_attribute_ui PRIVATE cxx_std_20)
     target_include_directories(platform_attribute_ui PRIVATE
@@ -268,12 +289,14 @@ set_tests_properties(platform.services PROPERTIES
 # Services UI wiring: real MainWindow + menus/recent/layout persistence on
 # an injected temp-file settings store.
 add_executable(platform_ui_services test_ui_services.cpp
-    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+    ${PWB_APP_SERVICE_SOURCES})
+pwb_link_job_runtime(platform_ui_services)
 set_target_properties(platform_ui_services PROPERTIES AUTOMOC ON)
 target_compile_features(platform_ui_services PRIVATE cxx_std_20)
 target_include_directories(platform_ui_services PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
+    ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(platform_ui_services PRIVATE
     Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy Pwb::PlatformServices)
 add_test(NAME platform.ui_services COMMAND platform_ui_services)
@@ -292,6 +315,7 @@ set_tests_properties(platform.ui_services PROPERTIES
 if(PWB_BUILD_CONV_01)
     add_executable(platform_map_pipeline map_pipeline_test.cpp
         ${PWB_APP_SERVICE_SOURCES})
+    pwb_link_job_runtime(platform_map_pipeline)
     set_target_properties(platform_map_pipeline PROPERTIES AUTOMOC ON)
     target_compile_features(platform_map_pipeline PRIVATE cxx_std_20)
     target_include_directories(platform_map_pipeline PRIVATE
@@ -328,12 +352,14 @@ set_tests_properties(platform.stage_readiness PROPERTIES
 
 # Workbench closure integration test (real MainWindow + CONV-27 surface).
 add_executable(platform_ui_closure test_ui_closure.cpp
-        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/main_window.cpp)
+        ${PWB_APP_SERVICE_SOURCES})
+    pwb_link_job_runtime(platform_ui_closure)
     set_target_properties(platform_ui_closure PROPERTIES AUTOMOC ON)
     target_compile_features(platform_ui_closure PRIVATE cxx_std_20)
     target_include_directories(platform_ui_closure PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
+        ${CMAKE_BINARY_DIR}/generated)
     target_link_libraries(platform_ui_closure PRIVATE
         Pwb::UiWorkbench Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy)
     target_compile_definitions(platform_ui_closure PRIVATE
