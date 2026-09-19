@@ -1,3 +1,13 @@
+# 当前任务入口 — C++ 全面转换收尾
+
+当前计划：[C++ task_plan](docs/development/cpp-conversion-planning/task_plan.md)；
+证据：[findings](docs/development/cpp-conversion-planning/findings.md)；
+进度：[progress](docs/development/cpp-conversion-planning/progress.md)。
+以下为已完成的 #1302 Python 工作台历史，其 subagent/C++ 构建约束仅适用于旧任务，
+不应用于当前 C++ 五线开发。
+
+---
+
 # Task Plan — Paleo UI Workbench (feat/paleo-ui-workbench)
 
 ## Goal
