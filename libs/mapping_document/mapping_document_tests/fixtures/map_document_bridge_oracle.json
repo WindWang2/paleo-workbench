@@ -1,0 +1,7334 @@
+{
+  "schema": "pwb.mapping_document.bridge_oracle/1",
+  "session_set_cases": [
+    {
+      "name": "lifecycle_join_growth_and_close",
+      "stack_names": [
+        "pub",
+        "other"
+      ],
+      "results": [
+        {
+          "op": {
+            "op": "allows_crs_change"
+          },
+          "allowed": true,
+          "reason": "",
+          "state": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "open",
+            "layer_id": "draft-1",
+            "crs": "EPSG:4326",
+            "stack": "pub"
+          },
+          "state": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "allows_crs_change"
+          },
+          "allowed": false,
+          "reason": "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑",
+          "state": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "allows_schema_change",
+            "layer_id": "draft-1"
+          },
+          "allowed": false,
+          "reason": "图层「draft-1」正在编辑会话中——字段结构变更被拒绝，请先保存或回滚编辑",
+          "state": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "allows_schema_change",
+            "layer_id": "other"
+          },
+          "allowed": true,
+          "reason": "",
+          "state": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "request_join",
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "raw-1"
+            ],
+            "gate": {
+              "accepted": [
+                "draft-2"
+              ],
+              "reason": {
+                "raw-1": "图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑"
+              }
+            }
+          },
+          "decisions": [
+            {
+              "layer_id": "draft-1",
+              "accepted": true,
+              "reason": ""
+            },
+            {
+              "layer_id": "draft-2",
+              "accepted": true,
+              "reason": ""
+            },
+            {
+              "layer_id": "raw-1",
+              "accepted": false,
+              "reason": "图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑"
+            }
+          ],
+          "state": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "active_layer_ids",
+            "stack": "pub"
+          },
+          "active_layer_ids": [
+            "draft-1",
+            "draft-2"
+          ],
+          "state": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "active_layer_ids",
+            "stack": "other"
+          },
+          "active_layer_ids": [],
+          "state": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "discard",
+            "layer_id": "draft-2"
+          },
+          "state": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "discard",
+            "layer_id": "draft-1"
+          },
+          "state": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "allows_crs_change"
+          },
+          "allowed": true,
+          "reason": "",
+          "state": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "open",
+            "layer_id": "draft-3",
+            "crs": "EPSG:3857",
+            "stack": "pub"
+          },
+          "state": {
+            "layer_ids": [
+              "draft-3"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:3857",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "close"
+          },
+          "closed_layers": [
+            "draft-3"
+          ],
+          "state": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "allows_crs_change"
+          },
+          "allowed": true,
+          "reason": "",
+          "state": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "crs_mismatch_mutex_messages",
+      "stack_names": [
+        "pub"
+      ],
+      "results": [
+        {
+          "op": {
+            "op": "open",
+            "layer_id": "a",
+            "crs": "EPSG:4326",
+            "stack": "pub"
+          },
+          "state": {
+            "layer_ids": [
+              "a"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "allows_schema_change",
+            "layer_id": "a"
+          },
+          "allowed": false,
+          "reason": "图层「a」正在编辑会话中——字段结构变更被拒绝，请先保存或回滚编辑",
+          "state": {
+            "layer_ids": [
+              "a"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "discard",
+            "layer_id": "ghost"
+          },
+          "state": {
+            "layer_ids": [
+              "a"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "close"
+          },
+          "closed_layers": [
+            "a"
+          ],
+          "state": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ungated_join_accepts_everything",
+      "stack_names": [
+        "pub"
+      ],
+      "results": [
+        {
+          "op": {
+            "op": "open",
+            "layer_id": "a",
+            "crs": "",
+            "stack": "pub"
+          },
+          "state": {
+            "layer_ids": [
+              "a"
+            ],
+            "is_open": true,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "request_join",
+            "layer_ids": [
+              "b",
+              "c",
+              "b"
+            ]
+          },
+          "decisions": [
+            {
+              "layer_id": "b",
+              "accepted": true,
+              "reason": ""
+            },
+            {
+              "layer_id": "c",
+              "accepted": true,
+              "reason": ""
+            },
+            {
+              "layer_id": "b",
+              "accepted": true,
+              "reason": ""
+            }
+          ],
+          "state": {
+            "layer_ids": [
+              "a",
+              "b",
+              "c"
+            ],
+            "is_open": true,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": {
+            "op": "close"
+          },
+          "closed_layers": [
+            "a",
+            "b",
+            "c"
+          ],
+          "state": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "gesture_cases": [
+    {
+      "name": "finish_dedup_undo_reverse_redo_forward",
+      "results": [
+        {
+          "op": {
+            "op": "undo_plan"
+          },
+          "plan": [],
+          "audit": []
+        },
+        {
+          "op": {
+            "op": "redo_plan"
+          },
+          "plan": [],
+          "audit": []
+        },
+        {
+          "op": {
+            "op": "finish",
+            "gesture_id": "g1",
+            "undo_text": "移动顶点",
+            "layer_ids": [
+              "l1",
+              "l2",
+              "l1",
+              "l3"
+            ]
+          },
+          "record": {
+            "gesture_id": "g1",
+            "undo_text": "移动顶点",
+            "layer_ids": [
+              "l1",
+              "l2",
+              "l3"
+            ],
+            "undone": false
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "current_gesture_id"
+          },
+          "gesture_id": "g1",
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "undo_plan"
+          },
+          "plan": [
+            "l3",
+            "l2",
+            "l1"
+          ],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_undone",
+            "gesture_id": "g1"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_undone",
+            "gesture_id": "g1"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "undo_plan"
+          },
+          "plan": [],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "redo_plan"
+          },
+          "plan": [
+            "l1",
+            "l2",
+            "l3"
+          ],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "current_gesture_id"
+          },
+          "gesture_id": "g1",
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_redone",
+            "gesture_id": "g1"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_redone",
+            "gesture_id": "g1"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "redo_plan"
+          },
+          "plan": [],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "undo_plan"
+          },
+          "plan": [
+            "l3",
+            "l2",
+            "l1"
+          ],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "current_gesture_id"
+          },
+          "gesture_id": "g1",
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_undone",
+            "gesture_id": "ghost"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_redone",
+            "gesture_id": "ghost"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "移动顶点",
+              "layer_ids": [
+                "l1",
+                "l2",
+                "l3"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "clear"
+          },
+          "audit": []
+        },
+        {
+          "op": {
+            "op": "undo_plan"
+          },
+          "plan": [],
+          "audit": []
+        },
+        {
+          "op": {
+            "op": "redo_plan"
+          },
+          "plan": [],
+          "audit": []
+        },
+        {
+          "op": {
+            "op": "current_gesture_id"
+          },
+          "gesture_id": "",
+          "audit": []
+        }
+      ]
+    },
+    {
+      "name": "two_gestures_lifo_redo_and_stale_queue_prune",
+      "results": [
+        {
+          "op": {
+            "op": "finish",
+            "gesture_id": "g1",
+            "undo_text": "一",
+            "layer_ids": [
+              "a"
+            ]
+          },
+          "record": {
+            "gesture_id": "g1",
+            "undo_text": "一",
+            "layer_ids": [
+              "a"
+            ],
+            "undone": false
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "finish",
+            "gesture_id": "g2",
+            "undo_text": "二",
+            "layer_ids": [
+              "b",
+              "c"
+            ]
+          },
+          "record": {
+            "gesture_id": "g2",
+            "undo_text": "二",
+            "layer_ids": [
+              "b",
+              "c"
+            ],
+            "undone": false
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "undo_plan"
+          },
+          "plan": [
+            "c",
+            "b"
+          ],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_undone",
+            "gesture_id": "g2"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "undo_plan"
+          },
+          "plan": [
+            "a"
+          ],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_undone",
+            "gesture_id": "g1"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "current_gesture_id"
+          },
+          "gesture_id": "g1",
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "redo_plan"
+          },
+          "plan": [
+            "a"
+          ],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_redone",
+            "gesture_id": "g1"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "redo_plan"
+          },
+          "plan": [
+            "b",
+            "c"
+          ],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "mark_redone",
+            "gesture_id": "g2"
+          },
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "op": {
+            "op": "redo_plan"
+          },
+          "plan": [],
+          "audit": [
+            {
+              "gesture_id": "g1",
+              "undo_text": "一",
+              "layer_ids": [
+                "a"
+              ]
+            },
+            {
+              "gesture_id": "g2",
+              "undo_text": "二",
+              "layer_ids": [
+                "b",
+                "c"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "native_cases": [
+    {
+      "name": "open_gate_and_capability_matrix",
+      "stack_names": [
+        "attrs",
+        "bridge",
+        "old",
+        "probe"
+      ],
+      "build": [
+        {
+          "kind": "stack",
+          "name": "bridge"
+        },
+        {
+          "kind": "stack",
+          "name": "old",
+          "shape": "old"
+        },
+        {
+          "kind": "stack",
+          "name": "attrs",
+          "shape": "attrs"
+        },
+        {
+          "kind": "stack",
+          "name": "probe",
+          "shape": "dirty",
+          "mirror": {
+            "draft-p": [
+              {
+                "id": "p1",
+                "geometry": {
+                  "type": "Point",
+                  "coordinates": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "p1"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "layer",
+          "name": "raw",
+          "layer_id": "raw-1"
+        },
+        {
+          "kind": "layer",
+          "name": "draft",
+          "layer_id": "draft-1",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "probe_layer",
+          "layer_id": "draft-p",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "nomirror",
+          "layer_id": "draft-2",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "mismatch",
+          "layer_id": "draft-x",
+          "crs": "EPSG:3857"
+        },
+        {
+          "kind": "gate",
+          "name": "reject_raw",
+          "reason": "图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑"
+        },
+        {
+          "kind": "gate",
+          "name": "allow_all",
+          "allow_all": true
+        }
+      ],
+      "results": [
+        {
+          "op": "bridge_supports",
+          "args": {
+            "op": "bridge_supports",
+            "stack": "bridge"
+          },
+          "supported": true,
+          "bridge_calls": {
+            "bridge": [],
+            "old": [],
+            "attrs": [],
+            "probe": []
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "bridge_supports",
+          "args": {
+            "op": "bridge_supports",
+            "stack": "old"
+          },
+          "supported": false,
+          "bridge_calls": {
+            "bridge": [],
+            "old": [],
+            "attrs": [],
+            "probe": []
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "raw",
+            "gate": "reject_raw"
+          },
+          "ok": false,
+          "reason": "图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑",
+          "sessions": [],
+          "bridge_editing": [],
+          "bridge_calls": {
+            "bridge": [],
+            "old": [],
+            "attrs": [],
+            "probe": []
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "old",
+            "layer": "draft",
+            "gate": "allow_all"
+          },
+          "ok": false,
+          "reason": "当前 QGIS 桥不支持原生编辑（需重建桥扩展）",
+          "sessions": [],
+          "bridge_editing": [],
+          "bridge_calls": {
+            "bridge": [],
+            "old": [],
+            "attrs": [],
+            "probe": []
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1"
+          ],
+          "bridge_editing": [
+            "draft-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": []
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1"
+          ],
+          "bridge_editing": [
+            "draft-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": []
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "nomirror",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_editing": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": []
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "mismatch",
+            "gate": "allow_all"
+          },
+          "ok": false,
+          "reason": "图层「draft-x」CRS 与编辑会话不一致——该图层不参与本次会话",
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_editing": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": []
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "probe",
+            "layer": "probe_layer",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1",
+            "draft-2",
+            "draft-p"
+          ],
+          "bridge_editing": [
+            "draft-p"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "pending_changes",
+          "args": {
+            "op": "pending_changes",
+            "layer_id": "draft-1"
+          },
+          "pending": null,
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "pending_changes",
+          "args": {
+            "op": "pending_changes",
+            "layer_id": "draft-p"
+          },
+          "pending": false,
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "pending_changes",
+          "args": {
+            "op": "pending_changes",
+            "layer_id": "ghost"
+          },
+          "pending": false,
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "set_feature_attributes",
+          "args": {
+            "op": "set_feature_attributes",
+            "layer_id": "ghost",
+            "feature_ids": [
+              "f1"
+            ],
+            "attributes": {
+              "a": 1
+            }
+          },
+          "ok": false,
+          "reason": "该图层没有进行中的原生编辑会话",
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "set_feature_attributes",
+          "args": {
+            "op": "set_feature_attributes",
+            "layer_id": "draft-1",
+            "feature_ids": [
+              "f1"
+            ],
+            "attributes": {
+              "a": 1
+            }
+          },
+          "ok": false,
+          "reason": "当前 QGIS 桥不支持编辑期属性写入（需重建 qgis_render_bridge）",
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "set_feature_attributes",
+          "args": {
+            "op": "set_feature_attributes",
+            "layer_id": "draft-1",
+            "feature_ids": [],
+            "attributes": {
+              "a": 1
+            }
+          },
+          "ok": false,
+          "reason": "当前 QGIS 桥不支持编辑期属性写入（需重建 qgis_render_bridge）",
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "set_feature_attributes",
+          "args": {
+            "op": "set_feature_attributes",
+            "layer_id": "draft-1",
+            "feature_ids": [
+              "f1"
+            ],
+            "attributes": {}
+          },
+          "ok": false,
+          "reason": "当前 QGIS 桥不支持编辑期属性写入（需重建 qgis_render_bridge）",
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "set_feature_attributes",
+          "args": {
+            "op": "set_feature_attributes",
+            "layer_id": "draft-1",
+            "feature_ids": [
+              "f1",
+              "f2"
+            ],
+            "attributes": {
+              "facies": "sand"
+            }
+          },
+          "ok": false,
+          "reason": "当前 QGIS 桥不支持编辑期属性写入（需重建 qgis_render_bridge）",
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "rollback",
+          "args": {
+            "op": "rollback",
+            "layer_id": "ghost"
+          },
+          "ok": false,
+          "reason": "该图层没有进行中的原生编辑会话",
+          "sessions": [
+            "draft-1",
+            "draft-2",
+            "draft-p"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-p"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "rollback",
+          "args": {
+            "op": "rollback",
+            "layer_id": "draft-p"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ],
+              [
+                "rollback",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "pending_changes",
+          "args": {
+            "op": "pending_changes",
+            "layer_id": "draft-p"
+          },
+          "pending": false,
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ],
+              [
+                "rollback",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "rollback",
+          "args": {
+            "op": "rollback",
+            "layer_id": "draft-1"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-1"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ],
+              [
+                "rollback",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "compensations",
+          "args": {
+            "op": "compensations"
+          },
+          "compensations": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-1"
+              ]
+            ],
+            "old": [],
+            "attrs": [],
+            "probe": [
+              [
+                "start",
+                "draft-p"
+              ],
+              [
+                "rollback",
+                "draft-p"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "raw": [],
+            "draft": [],
+            "probe_layer": [],
+            "nomirror": [],
+            "mismatch": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "readback_normalization_and_committed_delta",
+      "stack_names": [
+        "bridge"
+      ],
+      "build": [
+        {
+          "kind": "stack",
+          "name": "bridge",
+          "mirror": {
+            "draft-1": [
+              {
+                "id": "geom-id",
+                "geometry": {
+                  "type": "Point",
+                  "coordinates": [
+                    1,
+                    2
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "fid-9",
+                  "k": "v"
+                }
+              },
+              {
+                "id": "id-only",
+                "geometry": {
+                  "type": "Point",
+                  "coordinates": [
+                    3,
+                    4
+                  ]
+                },
+                "properties": {}
+              },
+              {
+                "geometry": null
+              },
+              "junk"
+            ]
+          },
+          "pending_delta": {
+            "draft-1": {
+              "geometry_changes": [
+                {
+                  "feature_id": "f1",
+                  "geometry": {
+                    "type": "Point",
+                    "coordinates": [
+                      5.0,
+                      6.0
+                    ]
+                  }
+                }
+              ],
+              "attribute_changes": [
+                {
+                  "feature_id": "f1",
+                  "changes": {
+                    "facies": "clay"
+                  }
+                }
+              ],
+              "removed": [
+                "f2"
+              ],
+              "added": [
+                {
+                  "id": "new-1",
+                  "geometry": {
+                    "type": "Point",
+                    "coordinates": [
+                      7.0,
+                      8.0
+                    ]
+                  },
+                  "properties": {
+                    "__pwb_fid": "fid-new",
+                    "name": "n"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "kind": "layer",
+          "name": "draft",
+          "layer_id": "draft-1",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "gate",
+          "name": "allow_all",
+          "allow_all": true
+        }
+      ],
+      "results": [
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1"
+          ],
+          "bridge_editing": [
+            "draft-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "readback_features",
+          "args": {
+            "op": "readback_features",
+            "stack": "bridge",
+            "layer_id": "draft-1"
+          },
+          "records": [
+            {
+              "feature_id": "fid-9",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  1,
+                  2
+                ]
+              },
+              "attributes": {
+                "__pwb_fid": "fid-9",
+                "k": "v"
+              }
+            },
+            {
+              "feature_id": "id-only",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  3,
+                  4
+                ]
+              },
+              "attributes": {}
+            }
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "readback_features",
+          "args": {
+            "op": "readback_features",
+            "stack": "bridge",
+            "layer_id": "ghost"
+          },
+          "records": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "allow_all",
+            "observe_committed": true
+          },
+          "ok": true,
+          "reason": "",
+          "on_committed": [
+            "draft-1"
+          ],
+          "sessions": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft": [
+              {
+                "delta": {
+                  "geometry_changes": [
+                    {
+                      "feature_id": "f1",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          5.0,
+                          6.0
+                        ]
+                      }
+                    }
+                  ],
+                  "attribute_changes": [
+                    {
+                      "feature_id": "f1",
+                      "changes": {
+                        "facies": "clay"
+                      }
+                    }
+                  ],
+                  "removed": [
+                    "f2"
+                  ],
+                  "added": [
+                    {
+                      "id": "new-1",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          7.0,
+                          8.0
+                        ]
+                      },
+                      "properties": {
+                        "__pwb_fid": "fid-new",
+                        "name": "n"
+                      }
+                    }
+                  ],
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ]
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "undo_gesture",
+          "args": {
+            "op": "undo_gesture"
+          },
+          "ok": false,
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft": [
+              {
+                "delta": {
+                  "geometry_changes": [
+                    {
+                      "feature_id": "f1",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          5.0,
+                          6.0
+                        ]
+                      }
+                    }
+                  ],
+                  "attribute_changes": [
+                    {
+                      "feature_id": "f1",
+                      "changes": {
+                        "facies": "clay"
+                      }
+                    }
+                  ],
+                  "removed": [
+                    "f2"
+                  ],
+                  "added": [
+                    {
+                      "id": "new-1",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          7.0,
+                          8.0
+                        ]
+                      },
+                      "properties": {
+                        "__pwb_fid": "fid-new",
+                        "name": "n"
+                      }
+                    }
+                  ],
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ]
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "redo_gesture",
+          "args": {
+            "op": "redo_gesture"
+          },
+          "ok": false,
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft": [
+              {
+                "delta": {
+                  "geometry_changes": [
+                    {
+                      "feature_id": "f1",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          5.0,
+                          6.0
+                        ]
+                      }
+                    }
+                  ],
+                  "attribute_changes": [
+                    {
+                      "feature_id": "f1",
+                      "changes": {
+                        "facies": "clay"
+                      }
+                    }
+                  ],
+                  "removed": [
+                    "f2"
+                  ],
+                  "added": [
+                    {
+                      "id": "new-1",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          7.0,
+                          8.0
+                        ]
+                      },
+                      "properties": {
+                        "__pwb_fid": "fid-new",
+                        "name": "n"
+                      }
+                    }
+                  ],
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ]
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "compensations",
+          "args": {
+            "op": "compensations"
+          },
+          "compensations": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft": [
+              {
+                "delta": {
+                  "geometry_changes": [
+                    {
+                      "feature_id": "f1",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          5.0,
+                          6.0
+                        ]
+                      }
+                    }
+                  ],
+                  "attribute_changes": [
+                    {
+                      "feature_id": "f1",
+                      "changes": {
+                        "facies": "clay"
+                      }
+                    }
+                  ],
+                  "removed": [
+                    "f2"
+                  ],
+                  "added": [
+                    {
+                      "id": "new-1",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          7.0,
+                          8.0
+                        ]
+                      },
+                      "properties": {
+                        "__pwb_fid": "fid-new",
+                        "name": "n"
+                      }
+                    }
+                  ],
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ]
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "commit_gates_block_whole_set",
+      "stack_names": [
+        "bridge"
+      ],
+      "build": [
+        {
+          "kind": "stack",
+          "name": "bridge",
+          "mirror": {
+            "draft-1": [
+              {
+                "id": "f1",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        2.0,
+                        0.0
+                      ],
+                      [
+                        2.0,
+                        2.0
+                      ],
+                      [
+                        0.0,
+                        2.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "f1",
+                  "name": "f"
+                }
+              }
+            ],
+            "draft-2": [
+              {
+                "id": "g1",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        10.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "g1",
+                  "name": "f"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "layer",
+          "name": "draft1",
+          "layer_id": "draft-1",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "draft2",
+          "layer_id": "draft-2",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "raw",
+          "layer_id": "raw-1"
+        },
+        {
+          "kind": "gate",
+          "name": "reject_draft2",
+          "reason": "图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑"
+        },
+        {
+          "kind": "gate",
+          "name": "allow_all",
+          "allow_all": true
+        },
+        {
+          "kind": "topology",
+          "name": "topo_bridge",
+          "checker_issues": [
+            {
+              "layer_id": "draft-2",
+              "feature_id": "g1",
+              "message": "重叠"
+            },
+            {
+              "layer_id": "draft-2",
+              "feature_id": "g1",
+              "message": "悬挂"
+            },
+            {
+              "layer_id": "draft-1",
+              "feature_id": "f1",
+              "message": "伪节点"
+            },
+            {
+              "layer_id": "draft-1",
+              "feature_id": "f1",
+              "message": "四"
+            }
+          ]
+        },
+        {
+          "kind": "topology",
+          "name": "topo_fallback",
+          "validate_issues": {
+            "draft-2": 1
+          }
+        },
+        {
+          "kind": "geology",
+          "name": "geo_error",
+          "violations": [
+            {
+              "layer_id": "draft-1",
+              "code": "G-1",
+              "message": "海相缺失",
+              "severity": "error"
+            },
+            {
+              "layer_id": "draft-2",
+              "code": "G-2",
+              "message": "警告项",
+              "severity": "warning"
+            }
+          ]
+        }
+      ],
+      "results": [
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "raw",
+            "gate": "reject_draft2"
+          },
+          "ok": false,
+          "reason": "图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑",
+          "sessions": [],
+          "bridge_editing": [],
+          "bridge_calls": {
+            "bridge": []
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft1",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1"
+          ],
+          "bridge_editing": [
+            "draft-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft2",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_editing": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "reject_draft2"
+          },
+          "ok": false,
+          "reason": "图层「draft-1」图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑（全部编辑未提交）",
+          "on_committed": [],
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "allow_all",
+            "topology": "topo_bridge"
+          },
+          "ok": false,
+          "reason": "图层「draft-2」4 个要素未通过拓扑检查：g1：重叠；g1：悬挂；f1：伪节点（另有 1 个问题）（全部编辑未提交）",
+          "on_committed": [],
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "validations": [
+            [
+              "draft-1",
+              2
+            ],
+            [
+              "draft-2",
+              2
+            ]
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "allow_all",
+            "topology": "topo_fallback"
+          },
+          "ok": false,
+          "reason": "图层「draft-2」1 个要素未通过拓扑检查：bad-0：err（全部编辑未提交）",
+          "on_committed": [],
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "validations": [
+            [
+              "draft-1",
+              0
+            ],
+            [
+              "draft-2",
+              1
+            ]
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "allow_all",
+            "geology": "geo_error"
+          },
+          "ok": false,
+          "reason": "地质不变量校验未通过（draft-1）：G-1：海相缺失——共 1 个 error 级违规（全部编辑未提交）",
+          "on_committed": [],
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "on_committed": [],
+          "sessions": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [
+              {
+                "delta": {
+                  "doc_id": "draft-2"
+                },
+                "session_id": "native-draft-2",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "compensations",
+          "args": {
+            "op": "compensations"
+          },
+          "compensations": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [
+              {
+                "delta": {
+                  "doc_id": "draft-2"
+                },
+                "session_id": "native-draft-2",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "raw": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "join_order_not_id_order_governs_commit",
+      "stack_names": [
+        "bridge"
+      ],
+      "build": [
+        {
+          "kind": "stack",
+          "name": "bridge",
+          "mirror": {
+            "zeta-9": [
+              {
+                "id": "f9",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        40.0,
+                        0.0
+                      ],
+                      [
+                        42.0,
+                        0.0
+                      ],
+                      [
+                        42.0,
+                        2.0
+                      ],
+                      [
+                        40.0,
+                        2.0
+                      ],
+                      [
+                        40.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "f9",
+                  "name": "f"
+                }
+              }
+            ],
+            "alpha-1": [
+              {
+                "id": "f1",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        50.0,
+                        0.0
+                      ],
+                      [
+                        52.0,
+                        0.0
+                      ],
+                      [
+                        52.0,
+                        2.0
+                      ],
+                      [
+                        50.0,
+                        2.0
+                      ],
+                      [
+                        50.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "f1",
+                  "name": "f"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "layer",
+          "name": "zeta",
+          "layer_id": "zeta-9",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "alpha",
+          "layer_id": "alpha-1",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "gate",
+          "name": "allow_all",
+          "allow_all": true
+        },
+        {
+          "kind": "gate",
+          "name": "reject_alpha",
+          "reason": "图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑"
+        }
+      ],
+      "results": [
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "zeta",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "zeta-9"
+          ],
+          "bridge_editing": [
+            "zeta-9"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "zeta-9"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "zeta": [],
+            "alpha": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "zeta-9"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "alpha",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "zeta-9",
+            "alpha-1"
+          ],
+          "bridge_editing": [
+            "alpha-1",
+            "zeta-9"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "zeta-9"
+              ],
+              [
+                "start",
+                "alpha-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "zeta": [],
+            "alpha": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "zeta-9",
+              "alpha-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "reject_alpha"
+          },
+          "ok": false,
+          "reason": "图层「zeta-9」图层角色为「原始相图（RAW）」——不可直接编辑；请创建 DERIVED 草稿后编辑（全部编辑未提交）",
+          "on_committed": [],
+          "sessions": [
+            "zeta-9",
+            "alpha-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "zeta-9"
+              ],
+              [
+                "start",
+                "alpha-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "zeta": [],
+            "alpha": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "zeta-9",
+              "alpha-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "allow_all",
+            "observe_committed": true
+          },
+          "ok": true,
+          "reason": "",
+          "on_committed": [
+            "zeta-9",
+            "alpha-1"
+          ],
+          "sessions": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "zeta-9"
+              ],
+              [
+                "start",
+                "alpha-1"
+              ],
+              [
+                "commit",
+                "zeta-9"
+              ],
+              [
+                "commit",
+                "alpha-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "zeta": [
+              {
+                "delta": {
+                  "doc_id": "zeta-9"
+                },
+                "session_id": "native-zeta-9",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "alpha": [
+              {
+                "delta": {
+                  "doc_id": "alpha-1"
+                },
+                "session_id": "native-alpha-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ]
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "commit_success_with_topology_off_and_warning_geology",
+      "stack_names": [
+        "bridge"
+      ],
+      "build": [
+        {
+          "kind": "stack",
+          "name": "bridge",
+          "mirror": {
+            "draft-1": [
+              {
+                "id": "f1",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        2.0,
+                        0.0
+                      ],
+                      [
+                        2.0,
+                        2.0
+                      ],
+                      [
+                        0.0,
+                        2.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "f1",
+                  "name": "f"
+                }
+              }
+            ],
+            "draft-2": [
+              {
+                "id": "g1",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        10.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "g1",
+                  "name": "f"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "layer",
+          "name": "draft1",
+          "layer_id": "draft-1",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "draft2",
+          "layer_id": "draft-2",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "gate",
+          "name": "allow_all",
+          "allow_all": true
+        },
+        {
+          "kind": "topology",
+          "name": "topo_off",
+          "enabled": false
+        },
+        {
+          "kind": "geology",
+          "name": "geo_warn_only",
+          "violations": [
+            {
+              "layer_id": "draft-2",
+              "code": "G-2",
+              "message": "警告项",
+              "severity": "warning"
+            }
+          ]
+        }
+      ],
+      "results": [
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft1",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1"
+          ],
+          "bridge_editing": [
+            "draft-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft2",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_editing": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "allow_all",
+            "topology": "topo_off",
+            "geology": "geo_warn_only",
+            "observe_committed": true
+          },
+          "ok": true,
+          "reason": "",
+          "on_committed": [
+            "draft-1",
+            "draft-2"
+          ],
+          "sessions": [],
+          "validations": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [
+              {
+                "delta": {
+                  "doc_id": "draft-2"
+                },
+                "session_id": "native-draft-2",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ]
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "compensations",
+          "args": {
+            "op": "compensations"
+          },
+          "compensations": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [
+              {
+                "delta": {
+                  "doc_id": "draft-2"
+                },
+                "session_id": "native-draft-2",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ]
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "mid_commit_failure_compensates_committed_layers",
+      "stack_names": [
+        "bridge"
+      ],
+      "build": [
+        {
+          "kind": "stack",
+          "name": "bridge",
+          "shape": "restorable",
+          "mirror": {
+            "draft-1": [
+              {
+                "id": "f1",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        2.0,
+                        0.0
+                      ],
+                      [
+                        2.0,
+                        2.0
+                      ],
+                      [
+                        0.0,
+                        2.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "f1",
+                  "name": "f"
+                }
+              }
+            ],
+            "draft-2": [
+              {
+                "id": "g1",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        10.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "g1",
+                  "name": "f"
+                }
+              }
+            ],
+            "draft-3": [
+              {
+                "id": "h1",
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        20.0,
+                        0.0
+                      ],
+                      [
+                        22.0,
+                        0.0
+                      ],
+                      [
+                        22.0,
+                        2.0
+                      ],
+                      [
+                        20.0,
+                        2.0
+                      ],
+                      [
+                        20.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                },
+                "properties": {
+                  "__pwb_fid": "h1",
+                  "name": "f"
+                }
+              }
+            ]
+          },
+          "fail_commit": [
+            "draft-2"
+          ]
+        },
+        {
+          "kind": "layer",
+          "name": "draft1",
+          "layer_id": "draft-1",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "draft2",
+          "layer_id": "draft-2",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "layer",
+          "name": "draft3",
+          "layer_id": "draft-3",
+          "crs": "EPSG:4326"
+        },
+        {
+          "kind": "gate",
+          "name": "allow_all",
+          "allow_all": true
+        }
+      ],
+      "results": [
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft1",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1"
+          ],
+          "bridge_editing": [
+            "draft-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft2",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_editing": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "open",
+          "args": {
+            "op": "open",
+            "stack": "bridge",
+            "layer": "draft3",
+            "gate": "allow_all"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1",
+            "draft-2",
+            "draft-3"
+          ],
+          "bridge_editing": [
+            "draft-1",
+            "draft-2",
+            "draft-3"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "start",
+                "draft-3"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2",
+              "draft-3"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "commit_all",
+          "args": {
+            "op": "commit_all",
+            "gate": "allow_all"
+          },
+          "ok": false,
+          "reason": "图层「draft-2」提交失败：simulated commit failure（其后图层已回滚，已提交层已补偿恢复）",
+          "on_committed": [],
+          "sessions": [
+            "draft-1",
+            "draft-2"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "start",
+                "draft-3"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit-failed",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-3"
+              ],
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "restore",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "compensations",
+          "args": {
+            "op": "compensations"
+          },
+          "compensations": [
+            "draft-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "start",
+                "draft-3"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit-failed",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-3"
+              ],
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "restore",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "undo_gesture",
+          "args": {
+            "op": "undo_gesture"
+          },
+          "ok": true,
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "start",
+                "draft-3"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit-failed",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-3"
+              ],
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "restore",
+                "draft-1"
+              ],
+              [
+                "undo",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1",
+              "draft-2"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "rollback",
+          "args": {
+            "op": "rollback",
+            "layer_id": "draft-2"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [
+            "draft-1"
+          ],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "start",
+                "draft-3"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit-failed",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-3"
+              ],
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "restore",
+                "draft-1"
+              ],
+              [
+                "undo",
+                "draft-1"
+              ],
+              [
+                "rollback",
+                "draft-2"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [
+              "draft-1"
+            ],
+            "is_open": true,
+            "frozen_crs": "EPSG:4326",
+            "allows_crs_change": [
+              false,
+              "编辑会话进行中——CRS 已冻结，请先保存或回滚编辑"
+            ]
+          }
+        },
+        {
+          "op": "rollback",
+          "args": {
+            "op": "rollback",
+            "layer_id": "draft-1"
+          },
+          "ok": true,
+          "reason": "",
+          "sessions": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "start",
+                "draft-3"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit-failed",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-3"
+              ],
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "restore",
+                "draft-1"
+              ],
+              [
+                "undo",
+                "draft-1"
+              ],
+              [
+                "rollback",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        },
+        {
+          "op": "rollback",
+          "args": {
+            "op": "rollback",
+            "layer_id": "draft-3"
+          },
+          "ok": false,
+          "reason": "该图层没有进行中的原生编辑会话",
+          "sessions": [],
+          "bridge_calls": {
+            "bridge": [
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "start",
+                "draft-2"
+              ],
+              [
+                "start",
+                "draft-3"
+              ],
+              [
+                "commit",
+                "draft-1"
+              ],
+              [
+                "commit-failed",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-3"
+              ],
+              [
+                "start",
+                "draft-1"
+              ],
+              [
+                "restore",
+                "draft-1"
+              ],
+              [
+                "undo",
+                "draft-1"
+              ],
+              [
+                "rollback",
+                "draft-2"
+              ],
+              [
+                "rollback",
+                "draft-1"
+              ]
+            ]
+          },
+          "layer_calls": {
+            "draft1": [
+              {
+                "delta": {
+                  "doc_id": "draft-1"
+                },
+                "session_id": "native-draft-1",
+                "source_tool": "native",
+                "gestures": []
+              }
+            ],
+            "draft2": [],
+            "draft3": []
+          },
+          "session_set": {
+            "layer_ids": [],
+            "is_open": false,
+            "frozen_crs": "",
+            "allows_crs_change": [
+              true,
+              ""
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "snapshot_cases": [
+    {
+      "name": "grouped_layers_without_mutating_document",
+      "document_id": "map_1",
+      "document": {
+        "id": "map_1",
+        "facies_style": {
+          "fill_color": "#c8b28e"
+        },
+        "layer_state": {
+          "vector_layers": [
+            {
+              "kind": "facies",
+              "id": "map_1:facies",
+              "style": {
+                "stroke_width": 0.8
+              },
+              "labels": {
+                "show": true
+              }
+            },
+            {
+              "kind": "line",
+              "id": "map_1:line",
+              "style": {
+                "stroke_color": "#123456"
+              },
+              "labels": {}
+            }
+          ]
+        },
+        "facies_polygons": [
+          {
+            "id": "poly-1",
+            "name": "sand",
+            "facies": "sand",
+            "probability": 0.8,
+            "region_id": "r1",
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    4.0,
+                    0.0
+                  ],
+                  [
+                    4.0,
+                    4.0
+                  ],
+                  [
+                    0.0,
+                    4.0
+                  ],
+                  [
+                    0.0,
+                    0.0
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    1.0
+                  ],
+                  [
+                    2.0,
+                    1.0
+                  ],
+                  [
+                    2.0,
+                    2.0
+                  ],
+                  [
+                    1.0,
+                    2.0
+                  ],
+                  [
+                    1.0,
+                    1.0
+                  ]
+                ]
+              ]
+            },
+            "properties": {
+              "kept": true
+            }
+          },
+          {
+            "id": "poly-bad",
+            "kind": "facies",
+            "name": "no-geometry"
+          },
+          {
+            "id": "poly-multi",
+            "name": "multi",
+            "kind": "facies",
+            "topology_status": "checked",
+            "geometry": {
+              "type": "MultiPolygon",
+              "coordinates": [
+                [
+                  [
+                    [
+                      10.0,
+                      0.0
+                    ],
+                    [
+                      12.0,
+                      0.0
+                    ],
+                    [
+                      12.0,
+                      2.0
+                    ],
+                    [
+                      10.0,
+                      2.0
+                    ],
+                    [
+                      10.0,
+                      0.0
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    [
+                      14.0,
+                      0.0
+                    ],
+                    [
+                      16.0,
+                      0.0
+                    ],
+                    [
+                      16.0,
+                      2.0
+                    ],
+                    [
+                      14.0,
+                      2.0
+                    ],
+                    [
+                      14.0,
+                      0.0
+                    ]
+                  ]
+                ]
+              ]
+            }
+          }
+        ],
+        "well_overlays": [
+          {
+            "id": "w-1",
+            "name": "well-1",
+            "x": 1.5,
+            "y": 2.5,
+            "lng": 1.5,
+            "lat": 2.5
+          },
+          {
+            "id": "w-bad",
+            "name": "well-bad",
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "w-status",
+            "name": "kept-status",
+            "x": 9.0,
+            "y": 9.0,
+            "coordinate_status": "INVALID"
+          }
+        ],
+        "line_features": [
+          {
+            "id": "ln-1",
+            "name": "shore",
+            "coordinates": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                1.0
+              ],
+              [
+                2.0,
+                0.5
+              ]
+            ]
+          },
+          {
+            "id": "ln-short",
+            "name": "one-point",
+            "coordinates": [
+              [
+                1.0,
+                1.0
+              ]
+            ]
+          },
+          {
+            "id": "ln-mixed",
+            "name": "mixed",
+            "coordinates": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                "x",
+                "y"
+              ],
+              [
+                5.0,
+                5.0
+              ]
+            ]
+          }
+        ],
+        "label_features": [
+          {
+            "id": "lb-1",
+            "text": "Alpha",
+            "anchor": [
+              3.0,
+              3.0
+            ]
+          },
+          {
+            "id": "lb-default",
+            "name": "BetaName",
+            "anchor": [
+              4.0,
+              4.0
+            ]
+          }
+        ]
+      },
+      "project_crs": "EPSG:4326",
+      "visibility": null,
+      "records": null,
+      "data_revisions": null,
+      "layer_revisions": null,
+      "style_defaults": {
+        "facies": {
+          "fill": "#6c8ebf",
+          "stroke": "#26364d",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "facies",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "well": {
+          "fill": "#22b8a7",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "well",
+          "marker_size": 7.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "name",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "line": {
+          "fill": "transparent",
+          "stroke": "#f08c46",
+          "stroke_width": 2.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "label": {
+          "fill": "#eff3f8",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 4.0,
+          "renderer": "single",
+          "field": ""
+        }
+      },
+      "layers": [
+        {
+          "id": "map_1:facies",
+          "name": "Facies",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            16.0,
+            4.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [
+            {
+              "id": "poly-1",
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                  [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      4.0,
+                      0.0
+                    ],
+                    [
+                      4.0,
+                      4.0
+                    ],
+                    [
+                      0.0,
+                      4.0
+                    ],
+                    [
+                      0.0,
+                      0.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0
+                    ],
+                    [
+                      1.0,
+                      2.0
+                    ],
+                    [
+                      1.0,
+                      1.0
+                    ]
+                  ]
+                ]
+              },
+              "properties": {
+                "kept": true,
+                "name": "sand",
+                "facies": "sand"
+              }
+            },
+            {
+              "id": "poly-bad",
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": []
+              },
+              "properties": {
+                "name": "no-geometry",
+                "facies": "no-geometry"
+              }
+            },
+            {
+              "id": "poly-multi",
+              "geometry": {
+                "type": "MultiPolygon",
+                "coordinates": [
+                  [
+                    [
+                      [
+                        10.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        0.0
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      [
+                        14.0,
+                        0.0
+                      ],
+                      [
+                        16.0,
+                        0.0
+                      ],
+                      [
+                        16.0,
+                        2.0
+                      ],
+                      [
+                        14.0,
+                        2.0
+                      ],
+                      [
+                        14.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                ]
+              },
+              "properties": {
+                "name": "multi",
+                "facies": "multi"
+              }
+            }
+          ],
+          "style": {
+            "fill": "#6c8ebf",
+            "stroke": "#26364d",
+            "stroke_width": 0.8,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "show": true
+            },
+            "fill_color": "#c8b28e"
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:well",
+          "name": "Wells",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            9.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [
+            {
+              "id": "w-1",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  1.5,
+                  2.5
+                ]
+              },
+              "properties": {
+                "name": "well-1"
+              }
+            },
+            {
+              "id": "w-bad",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  0.0,
+                  0.0
+                ]
+              },
+              "properties": {
+                "name": "well-bad"
+              }
+            },
+            {
+              "id": "w-status",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  9.0,
+                  9.0
+                ]
+              },
+              "properties": {
+                "name": "kept-status"
+              }
+            }
+          ],
+          "style": {
+            "fill": "#22b8a7",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "well",
+            "marker_size": 7.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "field": "name",
+              "size": 9.0,
+              "color": "#1f2937",
+              "font_family": "",
+              "bold": false,
+              "halo_color": "#f8f9fa",
+              "halo_width": 1.0,
+              "visible": true,
+              "rotation_field": "",
+              "size_field": "",
+              "color_field": "",
+              "buffer_color": ""
+            }
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:line",
+          "name": "Lines",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            5.0,
+            5.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [
+            {
+              "id": "ln-1",
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.0
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ]
+              },
+              "properties": {
+                "name": "shore"
+              }
+            },
+            {
+              "id": "ln-mixed",
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    5.0,
+                    5.0
+                  ]
+                ]
+              },
+              "properties": {
+                "name": "mixed"
+              }
+            }
+          ],
+          "style": {
+            "fill": "transparent",
+            "stroke": "#f08c46",
+            "stroke_width": 2.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": "",
+            "stroke_color": "#123456"
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:label",
+          "name": "Labels",
+          "layer_type": "vector",
+          "extent": [
+            3.0,
+            3.0,
+            4.0,
+            4.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [
+            {
+              "id": "lb-1",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  3.0,
+                  3.0
+                ]
+              },
+              "properties": {
+                "name": "Alpha",
+                "text": "Alpha"
+              }
+            },
+            {
+              "id": "lb-default",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  4.0,
+                  4.0
+                ]
+              },
+              "properties": {
+                "name": "BetaName",
+                "text": "BetaName"
+              }
+            }
+          ],
+          "style": {
+            "fill": "#eff3f8",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 4.0,
+            "renderer": "single",
+            "field": ""
+          },
+          "visible": true,
+          "opacity": 1.0
+        }
+      ],
+      "full_extent": [
+        0.0,
+        0.0,
+        16.0,
+        9.0
+      ]
+    },
+    {
+      "name": "visibility_records_override_and_revisions",
+      "document_id": "map_1",
+      "document": {
+        "id": "map_1",
+        "facies_style": {
+          "fill_color": "#c8b28e"
+        },
+        "layer_state": {
+          "vector_layers": [
+            {
+              "kind": "facies",
+              "id": "map_1:facies",
+              "style": {
+                "stroke_width": 0.8
+              },
+              "labels": {
+                "show": true
+              }
+            },
+            {
+              "kind": "line",
+              "id": "map_1:line",
+              "style": {
+                "stroke_color": "#123456"
+              },
+              "labels": {}
+            }
+          ]
+        },
+        "facies_polygons": [
+          {
+            "id": "poly-1",
+            "name": "sand",
+            "facies": "sand",
+            "probability": 0.8,
+            "region_id": "r1",
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    4.0,
+                    0.0
+                  ],
+                  [
+                    4.0,
+                    4.0
+                  ],
+                  [
+                    0.0,
+                    4.0
+                  ],
+                  [
+                    0.0,
+                    0.0
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    1.0
+                  ],
+                  [
+                    2.0,
+                    1.0
+                  ],
+                  [
+                    2.0,
+                    2.0
+                  ],
+                  [
+                    1.0,
+                    2.0
+                  ],
+                  [
+                    1.0,
+                    1.0
+                  ]
+                ]
+              ]
+            },
+            "properties": {
+              "kept": true
+            }
+          },
+          {
+            "id": "poly-bad",
+            "kind": "facies",
+            "name": "no-geometry"
+          },
+          {
+            "id": "poly-multi",
+            "name": "multi",
+            "kind": "facies",
+            "topology_status": "checked",
+            "geometry": {
+              "type": "MultiPolygon",
+              "coordinates": [
+                [
+                  [
+                    [
+                      10.0,
+                      0.0
+                    ],
+                    [
+                      12.0,
+                      0.0
+                    ],
+                    [
+                      12.0,
+                      2.0
+                    ],
+                    [
+                      10.0,
+                      2.0
+                    ],
+                    [
+                      10.0,
+                      0.0
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    [
+                      14.0,
+                      0.0
+                    ],
+                    [
+                      16.0,
+                      0.0
+                    ],
+                    [
+                      16.0,
+                      2.0
+                    ],
+                    [
+                      14.0,
+                      2.0
+                    ],
+                    [
+                      14.0,
+                      0.0
+                    ]
+                  ]
+                ]
+              ]
+            }
+          }
+        ],
+        "well_overlays": [
+          {
+            "id": "w-1",
+            "name": "well-1",
+            "x": 1.5,
+            "y": 2.5,
+            "lng": 1.5,
+            "lat": 2.5
+          },
+          {
+            "id": "w-bad",
+            "name": "well-bad",
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "w-status",
+            "name": "kept-status",
+            "x": 9.0,
+            "y": 9.0,
+            "coordinate_status": "INVALID"
+          }
+        ],
+        "line_features": [
+          {
+            "id": "ln-1",
+            "name": "shore",
+            "coordinates": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                1.0
+              ],
+              [
+                2.0,
+                0.5
+              ]
+            ]
+          },
+          {
+            "id": "ln-short",
+            "name": "one-point",
+            "coordinates": [
+              [
+                1.0,
+                1.0
+              ]
+            ]
+          },
+          {
+            "id": "ln-mixed",
+            "name": "mixed",
+            "coordinates": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                "x",
+                "y"
+              ],
+              [
+                5.0,
+                5.0
+              ]
+            ]
+          }
+        ],
+        "label_features": [
+          {
+            "id": "lb-1",
+            "text": "Alpha",
+            "anchor": [
+              3.0,
+              3.0
+            ]
+          },
+          {
+            "id": "lb-default",
+            "name": "BetaName",
+            "anchor": [
+              4.0,
+              4.0
+            ]
+          }
+        ]
+      },
+      "project_crs": "EPSG:3857",
+      "visibility": {
+        "facies": false,
+        "label": false
+      },
+      "records": [
+        {
+          "id": "live-1",
+          "kind": "facies",
+          "name": "live",
+          "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  20.0,
+                  20.0
+                ],
+                [
+                  22.0,
+                  20.0
+                ],
+                [
+                  22.0,
+                  22.0
+                ],
+                [
+                  20.0,
+                  22.0
+                ],
+                [
+                  20.0,
+                  20.0
+                ]
+              ]
+            ]
+          }
+        }
+      ],
+      "data_revisions": {
+        "facies": 7,
+        "well": 3,
+        "line": 3,
+        "label": 3
+      },
+      "layer_revisions": null,
+      "style_defaults": {
+        "facies": {
+          "fill": "#6c8ebf",
+          "stroke": "#26364d",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "facies",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "well": {
+          "fill": "#22b8a7",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "well",
+          "marker_size": 7.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "name",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "line": {
+          "fill": "transparent",
+          "stroke": "#f08c46",
+          "stroke_width": 2.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "label": {
+          "fill": "#eff3f8",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 4.0,
+          "renderer": "single",
+          "field": ""
+        }
+      },
+      "layers": [
+        {
+          "id": "map_1:facies",
+          "name": "Facies",
+          "layer_type": "vector",
+          "extent": [
+            20.0,
+            20.0,
+            22.0,
+            22.0
+          ],
+          "crs": "EPSG:3857",
+          "data_revision": 7,
+          "features": [
+            {
+              "id": "live-1",
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                  [
+                    [
+                      20.0,
+                      20.0
+                    ],
+                    [
+                      22.0,
+                      20.0
+                    ],
+                    [
+                      22.0,
+                      22.0
+                    ],
+                    [
+                      20.0,
+                      22.0
+                    ],
+                    [
+                      20.0,
+                      20.0
+                    ]
+                  ]
+                ]
+              },
+              "properties": {
+                "name": "live"
+              }
+            }
+          ],
+          "style": {
+            "fill": "#6c8ebf",
+            "stroke": "#26364d",
+            "stroke_width": 0.8,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "show": true
+            },
+            "fill_color": "#c8b28e"
+          },
+          "visible": false,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:well",
+          "name": "Wells",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:3857",
+          "data_revision": 3,
+          "features": [],
+          "style": {
+            "fill": "#22b8a7",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "well",
+            "marker_size": 7.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "field": "name",
+              "size": 9.0,
+              "color": "#1f2937",
+              "font_family": "",
+              "bold": false,
+              "halo_color": "#f8f9fa",
+              "halo_width": 1.0,
+              "visible": true,
+              "rotation_field": "",
+              "size_field": "",
+              "color_field": "",
+              "buffer_color": ""
+            }
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:line",
+          "name": "Lines",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:3857",
+          "data_revision": 3,
+          "features": [],
+          "style": {
+            "fill": "transparent",
+            "stroke": "#f08c46",
+            "stroke_width": 2.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": "",
+            "stroke_color": "#123456"
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:label",
+          "name": "Labels",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:3857",
+          "data_revision": 3,
+          "features": [],
+          "style": {
+            "fill": "#eff3f8",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 4.0,
+            "renderer": "single",
+            "field": ""
+          },
+          "visible": false,
+          "opacity": 1.0
+        }
+      ],
+      "full_extent": [
+        20.0,
+        20.0,
+        22.0,
+        22.0
+      ]
+    },
+    {
+      "name": "layer_revisions_prefix_bridge",
+      "document_id": "map_1",
+      "document": {
+        "id": "map_1",
+        "facies_style": {
+          "fill_color": "#c8b28e"
+        },
+        "layer_state": {
+          "vector_layers": [
+            {
+              "kind": "facies",
+              "id": "map_1:facies",
+              "style": {
+                "stroke_width": 0.8
+              },
+              "labels": {
+                "show": true
+              }
+            },
+            {
+              "kind": "line",
+              "id": "map_1:line",
+              "style": {
+                "stroke_color": "#123456"
+              },
+              "labels": {}
+            }
+          ]
+        },
+        "facies_polygons": [
+          {
+            "id": "poly-1",
+            "name": "sand",
+            "facies": "sand",
+            "probability": 0.8,
+            "region_id": "r1",
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    4.0,
+                    0.0
+                  ],
+                  [
+                    4.0,
+                    4.0
+                  ],
+                  [
+                    0.0,
+                    4.0
+                  ],
+                  [
+                    0.0,
+                    0.0
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    1.0
+                  ],
+                  [
+                    2.0,
+                    1.0
+                  ],
+                  [
+                    2.0,
+                    2.0
+                  ],
+                  [
+                    1.0,
+                    2.0
+                  ],
+                  [
+                    1.0,
+                    1.0
+                  ]
+                ]
+              ]
+            },
+            "properties": {
+              "kept": true
+            }
+          },
+          {
+            "id": "poly-bad",
+            "kind": "facies",
+            "name": "no-geometry"
+          },
+          {
+            "id": "poly-multi",
+            "name": "multi",
+            "kind": "facies",
+            "topology_status": "checked",
+            "geometry": {
+              "type": "MultiPolygon",
+              "coordinates": [
+                [
+                  [
+                    [
+                      10.0,
+                      0.0
+                    ],
+                    [
+                      12.0,
+                      0.0
+                    ],
+                    [
+                      12.0,
+                      2.0
+                    ],
+                    [
+                      10.0,
+                      2.0
+                    ],
+                    [
+                      10.0,
+                      0.0
+                    ]
+                  ]
+                ],
+                [
+                  [
+                    [
+                      14.0,
+                      0.0
+                    ],
+                    [
+                      16.0,
+                      0.0
+                    ],
+                    [
+                      16.0,
+                      2.0
+                    ],
+                    [
+                      14.0,
+                      2.0
+                    ],
+                    [
+                      14.0,
+                      0.0
+                    ]
+                  ]
+                ]
+              ]
+            }
+          }
+        ],
+        "well_overlays": [
+          {
+            "id": "w-1",
+            "name": "well-1",
+            "x": 1.5,
+            "y": 2.5,
+            "lng": 1.5,
+            "lat": 2.5
+          },
+          {
+            "id": "w-bad",
+            "name": "well-bad",
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "w-status",
+            "name": "kept-status",
+            "x": 9.0,
+            "y": 9.0,
+            "coordinate_status": "INVALID"
+          }
+        ],
+        "line_features": [
+          {
+            "id": "ln-1",
+            "name": "shore",
+            "coordinates": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                1.0
+              ],
+              [
+                2.0,
+                0.5
+              ]
+            ]
+          },
+          {
+            "id": "ln-short",
+            "name": "one-point",
+            "coordinates": [
+              [
+                1.0,
+                1.0
+              ]
+            ]
+          },
+          {
+            "id": "ln-mixed",
+            "name": "mixed",
+            "coordinates": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                "x",
+                "y"
+              ],
+              [
+                5.0,
+                5.0
+              ]
+            ]
+          }
+        ],
+        "label_features": [
+          {
+            "id": "lb-1",
+            "text": "Alpha",
+            "anchor": [
+              3.0,
+              3.0
+            ]
+          },
+          {
+            "id": "lb-default",
+            "name": "BetaName",
+            "anchor": [
+              4.0,
+              4.0
+            ]
+          }
+        ]
+      },
+      "project_crs": "EPSG:4326",
+      "visibility": null,
+      "records": null,
+      "data_revisions": null,
+      "layer_revisions": {
+        "map_1:facies": 11,
+        "other:well": 5
+      },
+      "style_defaults": {
+        "facies": {
+          "fill": "#6c8ebf",
+          "stroke": "#26364d",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "facies",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "well": {
+          "fill": "#22b8a7",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "well",
+          "marker_size": 7.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "name",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "line": {
+          "fill": "transparent",
+          "stroke": "#f08c46",
+          "stroke_width": 2.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "label": {
+          "fill": "#eff3f8",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 4.0,
+          "renderer": "single",
+          "field": ""
+        }
+      },
+      "layers": [
+        {
+          "id": "map_1:facies",
+          "name": "Facies",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            16.0,
+            4.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": 11,
+          "features": [
+            {
+              "id": "poly-1",
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                  [
+                    [
+                      0.0,
+                      0.0
+                    ],
+                    [
+                      4.0,
+                      0.0
+                    ],
+                    [
+                      4.0,
+                      4.0
+                    ],
+                    [
+                      0.0,
+                      4.0
+                    ],
+                    [
+                      0.0,
+                      0.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0
+                    ],
+                    [
+                      1.0,
+                      2.0
+                    ],
+                    [
+                      1.0,
+                      1.0
+                    ]
+                  ]
+                ]
+              },
+              "properties": {
+                "kept": true,
+                "name": "sand",
+                "facies": "sand"
+              }
+            },
+            {
+              "id": "poly-bad",
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": []
+              },
+              "properties": {
+                "name": "no-geometry",
+                "facies": "no-geometry"
+              }
+            },
+            {
+              "id": "poly-multi",
+              "geometry": {
+                "type": "MultiPolygon",
+                "coordinates": [
+                  [
+                    [
+                      [
+                        10.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        0.0
+                      ],
+                      [
+                        12.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        2.0
+                      ],
+                      [
+                        10.0,
+                        0.0
+                      ]
+                    ]
+                  ],
+                  [
+                    [
+                      [
+                        14.0,
+                        0.0
+                      ],
+                      [
+                        16.0,
+                        0.0
+                      ],
+                      [
+                        16.0,
+                        2.0
+                      ],
+                      [
+                        14.0,
+                        2.0
+                      ],
+                      [
+                        14.0,
+                        0.0
+                      ]
+                    ]
+                  ]
+                ]
+              },
+              "properties": {
+                "name": "multi",
+                "facies": "multi"
+              }
+            }
+          ],
+          "style": {
+            "fill": "#6c8ebf",
+            "stroke": "#26364d",
+            "stroke_width": 0.8,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "show": true
+            },
+            "fill_color": "#c8b28e"
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:well",
+          "name": "Wells",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            9.0,
+            9.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [
+            {
+              "id": "w-1",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  1.5,
+                  2.5
+                ]
+              },
+              "properties": {
+                "name": "well-1"
+              }
+            },
+            {
+              "id": "w-bad",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  0.0,
+                  0.0
+                ]
+              },
+              "properties": {
+                "name": "well-bad"
+              }
+            },
+            {
+              "id": "w-status",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  9.0,
+                  9.0
+                ]
+              },
+              "properties": {
+                "name": "kept-status"
+              }
+            }
+          ],
+          "style": {
+            "fill": "#22b8a7",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "well",
+            "marker_size": 7.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "field": "name",
+              "size": 9.0,
+              "color": "#1f2937",
+              "font_family": "",
+              "bold": false,
+              "halo_color": "#f8f9fa",
+              "halo_width": 1.0,
+              "visible": true,
+              "rotation_field": "",
+              "size_field": "",
+              "color_field": "",
+              "buffer_color": ""
+            }
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:line",
+          "name": "Lines",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            5.0,
+            5.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [
+            {
+              "id": "ln-1",
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    1.0,
+                    1.0
+                  ],
+                  [
+                    2.0,
+                    0.5
+                  ]
+                ]
+              },
+              "properties": {
+                "name": "shore"
+              }
+            },
+            {
+              "id": "ln-mixed",
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.0,
+                    0.0
+                  ],
+                  [
+                    5.0,
+                    5.0
+                  ]
+                ]
+              },
+              "properties": {
+                "name": "mixed"
+              }
+            }
+          ],
+          "style": {
+            "fill": "transparent",
+            "stroke": "#f08c46",
+            "stroke_width": 2.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": "",
+            "stroke_color": "#123456"
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_1:label",
+          "name": "Labels",
+          "layer_type": "vector",
+          "extent": [
+            3.0,
+            3.0,
+            4.0,
+            4.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [
+            {
+              "id": "lb-1",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  3.0,
+                  3.0
+                ]
+              },
+              "properties": {
+                "name": "Alpha",
+                "text": "Alpha"
+              }
+            },
+            {
+              "id": "lb-default",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  4.0,
+                  4.0
+                ]
+              },
+              "properties": {
+                "name": "BetaName",
+                "text": "BetaName"
+              }
+            }
+          ],
+          "style": {
+            "fill": "#eff3f8",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 4.0,
+            "renderer": "single",
+            "field": ""
+          },
+          "visible": true,
+          "opacity": 1.0
+        }
+      ],
+      "full_extent": [
+        0.0,
+        0.0,
+        16.0,
+        9.0
+      ]
+    },
+    {
+      "name": "empty_document_placeholder_extent",
+      "document_id": "map_empty",
+      "document": {
+        "id": "map_empty",
+        "facies_polygons": [],
+        "well_overlays": [],
+        "line_features": [],
+        "label_features": []
+      },
+      "project_crs": "EPSG:4326",
+      "visibility": null,
+      "records": null,
+      "data_revisions": null,
+      "layer_revisions": null,
+      "style_defaults": {
+        "facies": {
+          "fill": "#6c8ebf",
+          "stroke": "#26364d",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "facies",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "well": {
+          "fill": "#22b8a7",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "well",
+          "marker_size": 7.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "name",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "line": {
+          "fill": "transparent",
+          "stroke": "#f08c46",
+          "stroke_width": 2.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "label": {
+          "fill": "#eff3f8",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 4.0,
+          "renderer": "single",
+          "field": ""
+        }
+      },
+      "layers": [
+        {
+          "id": "map_empty:facies",
+          "name": "Facies",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [],
+          "style": {
+            "fill": "#6c8ebf",
+            "stroke": "#26364d",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "field": "facies",
+              "size": 9.0,
+              "color": "#1f2937",
+              "font_family": "",
+              "bold": false,
+              "halo_color": "#f8f9fa",
+              "halo_width": 1.0,
+              "visible": true,
+              "rotation_field": "",
+              "size_field": "",
+              "color_field": "",
+              "buffer_color": ""
+            }
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_empty:well",
+          "name": "Wells",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [],
+          "style": {
+            "fill": "#22b8a7",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "well",
+            "marker_size": 7.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "field": "name",
+              "size": 9.0,
+              "color": "#1f2937",
+              "font_family": "",
+              "bold": false,
+              "halo_color": "#f8f9fa",
+              "halo_width": 1.0,
+              "visible": true,
+              "rotation_field": "",
+              "size_field": "",
+              "color_field": "",
+              "buffer_color": ""
+            }
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_empty:line",
+          "name": "Lines",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [],
+          "style": {
+            "fill": "transparent",
+            "stroke": "#f08c46",
+            "stroke_width": 2.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": ""
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_empty:label",
+          "name": "Labels",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [],
+          "style": {
+            "fill": "#eff3f8",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 4.0,
+            "renderer": "single",
+            "field": ""
+          },
+          "visible": true,
+          "opacity": 1.0
+        }
+      ],
+      "full_extent": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "name": "degenerate_extent_padding",
+      "document_id": "map_thin",
+      "document": {
+        "id": "map_thin",
+        "facies_polygons": [
+          {
+            "id": "pt-like",
+            "kind": "facies",
+            "name": "thin",
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    2.0,
+                    3.0
+                  ],
+                  [
+                    2.0,
+                    3.0
+                  ],
+                  [
+                    2.0,
+                    3.0
+                  ],
+                  [
+                    2.0,
+                    3.0
+                  ]
+                ]
+              ]
+            }
+          }
+        ],
+        "well_overlays": [],
+        "line_features": [],
+        "label_features": []
+      },
+      "project_crs": "EPSG:4326",
+      "visibility": null,
+      "records": null,
+      "data_revisions": null,
+      "layer_revisions": null,
+      "style_defaults": {
+        "facies": {
+          "fill": "#6c8ebf",
+          "stroke": "#26364d",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "facies",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "well": {
+          "fill": "#22b8a7",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "well",
+          "marker_size": 7.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "name",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "line": {
+          "fill": "transparent",
+          "stroke": "#f08c46",
+          "stroke_width": 2.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "label": {
+          "fill": "#eff3f8",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 4.0,
+          "renderer": "single",
+          "field": ""
+        }
+      },
+      "layers": [
+        {
+          "id": "map_thin:facies",
+          "name": "Facies",
+          "layer_type": "vector",
+          "extent": [
+            1.999999997,
+            2.999999997,
+            2.000000003,
+            3.000000003
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [
+            {
+              "id": "pt-like",
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                  [
+                    [
+                      2.0,
+                      3.0
+                    ],
+                    [
+                      2.0,
+                      3.0
+                    ],
+                    [
+                      2.0,
+                      3.0
+                    ],
+                    [
+                      2.0,
+                      3.0
+                    ]
+                  ]
+                ]
+              },
+              "properties": {
+                "name": "thin",
+                "facies": "thin"
+              }
+            }
+          ],
+          "style": {
+            "fill": "#6c8ebf",
+            "stroke": "#26364d",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "field": "facies",
+              "size": 9.0,
+              "color": "#1f2937",
+              "font_family": "",
+              "bold": false,
+              "halo_color": "#f8f9fa",
+              "halo_width": 1.0,
+              "visible": true,
+              "rotation_field": "",
+              "size_field": "",
+              "color_field": "",
+              "buffer_color": ""
+            }
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_thin:well",
+          "name": "Wells",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [],
+          "style": {
+            "fill": "#22b8a7",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "well",
+            "marker_size": 7.0,
+            "renderer": "single",
+            "field": "",
+            "labels": {
+              "field": "name",
+              "size": 9.0,
+              "color": "#1f2937",
+              "font_family": "",
+              "bold": false,
+              "halo_color": "#f8f9fa",
+              "halo_width": 1.0,
+              "visible": true,
+              "rotation_field": "",
+              "size_field": "",
+              "color_field": "",
+              "buffer_color": ""
+            }
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_thin:line",
+          "name": "Lines",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [],
+          "style": {
+            "fill": "transparent",
+            "stroke": "#f08c46",
+            "stroke_width": 2.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 6.0,
+            "renderer": "single",
+            "field": ""
+          },
+          "visible": true,
+          "opacity": 1.0
+        },
+        {
+          "id": "map_thin:label",
+          "name": "Labels",
+          "layer_type": "vector",
+          "extent": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "crs": "EPSG:4326",
+          "data_revision": null,
+          "features": [],
+          "style": {
+            "fill": "#eff3f8",
+            "stroke": "#182431",
+            "stroke_width": 1.0,
+            "line_pattern": "solid",
+            "marker": "circle",
+            "marker_size": 4.0,
+            "renderer": "single",
+            "field": ""
+          },
+          "visible": true,
+          "opacity": 1.0
+        }
+      ],
+      "full_extent": [
+        1.999999997,
+        2.999999997,
+        2.000000003,
+        3.000000003
+      ]
+    },
+    {
+      "name": "null_document_empty_snapshot",
+      "document_id": "map",
+      "document": null,
+      "project_crs": "EPSG:4326",
+      "visibility": null,
+      "records": null,
+      "data_revisions": null,
+      "layer_revisions": null,
+      "style_defaults": {
+        "facies": {
+          "fill": "#6c8ebf",
+          "stroke": "#26364d",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "facies",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "well": {
+          "fill": "#22b8a7",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "well",
+          "marker_size": 7.0,
+          "renderer": "single",
+          "field": "",
+          "labels": {
+            "field": "name",
+            "size": 9.0,
+            "color": "#1f2937",
+            "font_family": "",
+            "bold": false,
+            "halo_color": "#f8f9fa",
+            "halo_width": 1.0,
+            "visible": true,
+            "rotation_field": "",
+            "size_field": "",
+            "color_field": "",
+            "buffer_color": ""
+          }
+        },
+        "line": {
+          "fill": "transparent",
+          "stroke": "#f08c46",
+          "stroke_width": 2.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 6.0,
+          "renderer": "single",
+          "field": ""
+        },
+        "label": {
+          "fill": "#eff3f8",
+          "stroke": "#182431",
+          "stroke_width": 1.0,
+          "line_pattern": "solid",
+          "marker": "circle",
+          "marker_size": 4.0,
+          "renderer": "single",
+          "field": ""
+        }
+      },
+      "layers": [],
+      "full_extent": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ]
+    }
+  ]
+}

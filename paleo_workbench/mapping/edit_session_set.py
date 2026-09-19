@@ -164,3 +164,11 @@ def reset_session_set() -> None:
     已死集合，停发窗口静默失效。
     """
     SESSION_SET.close()
+
+
+# C++ migration (CONV-27d): EditSessionSet + JoinDecision are ported to
+# libs/mapping_document edit_session_set (pwb::mapping_document), frozen
+# against the Python oracle via
+# tools/oracle/generate_map_document_bridge_fixtures.py
+# (session_set_cases). Python side stays as oracle/legacy reference;
+# the process-level SESSION_SET singleton is host-scoped in C++.

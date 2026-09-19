@@ -7,6 +7,11 @@
 # MapDocumentEditSession (undo/redo), revisions/dirty state, immutable
 # snapshots, document_io feature normalization and atomic file IO with
 # recovery. Frozen via tools/oracle/generate_map_document_edit_fixtures.py.
+#
+# CONV-27d — the bridge edit domain (still Qt-free): native edit session
+# controller + session set + gesture manager (topology-edit migration M0/M1
+# host logic) and the renderer-neutral legacy-document render snapshot
+# adapter. Frozen via tools/oracle/generate_map_document_bridge_fixtures.py.
 add_library(pwb_mapping_document STATIC
     src/map_document.cpp
     src/composition.cpp
@@ -15,7 +20,11 @@ add_library(pwb_mapping_document STATIC
     src/map_document_session.cpp
     src/map_document_snapshot.cpp
     src/document_io.cpp
-    src/document_service.cpp)
+    src/document_service.cpp
+    src/edit_session_set.cpp
+    src/edit_gesture_manager.cpp
+    src/native_edit_session.cpp
+    src/render_snapshot.cpp)
 add_library(Pwb::MappingDocument ALIAS pwb_mapping_document)
 target_include_directories(pwb_mapping_document PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
