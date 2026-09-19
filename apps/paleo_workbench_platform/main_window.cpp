@@ -15,6 +15,7 @@
 // BEGIN CONV-30 — product job runtime wiring (top-level: needed by the
 // ctor/dtor/closeEvent protocol and all migrated surfaces, independent of
 // CONV_01/SEISMIC_* guards)
+#include <QEventLoop>
 #include <QProgressDialog>
 #include <chrono>
 #ifdef PWB_WITH_CONV_30
@@ -113,15 +114,15 @@
 #endif
 
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <atomic>
+#include <optional>
+#include <thread>
+
+#include <pwb/application/adapters/volume_payload.hpp>
 #include <pwb/seismic_io/segy_reader.hpp>
 #endif
 #if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <QCoreApplication>
-#include <QProgressDialog>
-
-#include <atomic>
-#include <optional>
-#include <thread>
 
 #include <pwb/seismic_io/segy_layout.hpp>
 #endif
