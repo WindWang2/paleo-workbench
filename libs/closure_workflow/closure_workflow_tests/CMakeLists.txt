@@ -32,3 +32,13 @@ target_compile_features(closure_workflow_e2e_test PRIVATE cxx_std_20)
 target_link_libraries(closure_workflow_e2e_test
     PRIVATE Pwb::ClosureWorkflow Threads::Threads)
 add_test(NAME closure_workflow.e2e COMMAND closure_workflow_e2e_test)
+
+# V14-COMPILATION-PUBLISH — production fusion grid seams (decode / catalog
+# pin loading / live resolution) + the real fusion path through them.
+add_executable(closure_workflow_grid_seams_test grid_seams_test.cpp)
+target_compile_features(closure_workflow_grid_seams_test PRIVATE cxx_std_20)
+target_link_libraries(closure_workflow_grid_seams_test
+    PRIVATE Pwb::ClosureWorkflow Threads::Threads)
+add_test(NAME closure_workflow.grid_seams
+         COMMAND closure_workflow_grid_seams_test)
+set_tests_properties(closure_workflow.grid_seams PROPERTIES TIMEOUT 120)

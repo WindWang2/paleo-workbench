@@ -9,6 +9,8 @@ add_library(pwb_closure_workflow STATIC
     src/persistent_catalog.cpp
     src/map_product.cpp
     src/integrated_compilation.cpp
+    # V14-COMPILATION-PUBLISH — production fusion grid-loading seams.
+    src/grid_seams.cpp
     src/workflow_scheduler.cpp
     src/cache_run_rail.cpp
     src/host_bindings.cpp

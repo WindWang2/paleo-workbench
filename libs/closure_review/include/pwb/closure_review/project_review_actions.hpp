@@ -38,6 +38,11 @@ public:
         std::function<const CartographicQaDelegate*()> cartographic;
         // Clock injection for tests (empty → now_iso8601()).
         std::function<std::string()> clock;
+        // BEGIN V14-COMPILATION-PUBLISH — optional QC provenance registrar
+        // (the catalog qc-DataRun registration). Null ⇒ the QC report
+        // keeps its honest provenance_registered=false marker; the host
+        // binds a catalog-backed registrar when one is available.
+        std::function<std::string(const domain::Json& report)> provenance;
     };
 
     explicit ProjectReviewActions(Delegates delegates);

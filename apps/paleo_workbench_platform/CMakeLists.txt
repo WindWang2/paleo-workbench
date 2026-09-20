@@ -210,6 +210,14 @@ endif()
 if(TARGET Pwb::Cartography)
     target_link_libraries(pwb-platform PRIVATE Pwb::Cartography)
 endif()
+# The QC provenance registrar rides the workflow provenance rail when the
+# closure_workflow slice is in the build; otherwise the seam stays unbound
+# and the QC report keeps its honest provenance_registered=false marker.
+if(TARGET Pwb::ClosureWorkflow)
+    target_sources(pwb-platform PRIVATE closure_review_install.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::ClosureWorkflow)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_WORKFLOW=1)
+endif()
 # END V14-COMPILATION-PUBLISH
 
 # BEGIN CONV-29

@@ -1209,13 +1209,19 @@ if(TARGET pwb-platform
         # plus the document save seam and a reopen traceability round.
         # Needs the project-data closure (Pwb::Data) for the store.
         if(TARGET Pwb::ClosureReview AND TARGET Pwb::Data)
+            # BEGIN V14-COMPILATION-PUBLISH — baseline link fix (same shape
+            # as platform_closure_mapping above): main_window.cpp references
+            # shell_project_actions (12-line #1421) but this target's source
+            # list never carried the TU.
             add_executable(platform_closure_review_install
                 tests/cpp/platform/test_closure_review_install.cpp
                 apps/paleo_workbench_platform/main_window.cpp
                 apps/paleo_workbench_platform/app_context.cpp
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
+                apps/paleo_workbench_platform/shell_project_actions.cpp
                 apps/paleo_workbench_platform/closure_review_install.cpp)
+            # END V14-COMPILATION-PUBLISH
             if(COMMAND pwb_link_job_runtime)
                 pwb_link_job_runtime(platform_closure_review_install)
             endif()

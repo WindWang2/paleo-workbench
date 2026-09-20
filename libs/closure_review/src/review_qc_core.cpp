@@ -1134,7 +1134,8 @@ domain::Json cartographic_issues(const Json& root, const Json& map_document,
 
 domain::Result<domain::Json> run_map_qc_on_document(
     Json& root, const std::string& doc_id, const QcInputs& inputs,
-    const CartographicQaDelegate* cartographic, const std::string& iso_now) {
+    const CartographicQaDelegate* cartographic, const std::string& iso_now,
+    const std::function<std::string(const Json& report)>* provenance) {
     const Json* document = find_map_document(root, doc_id);
     if (document == nullptr) {
         return domain::DataError(domain::ErrorCode::NotFound,
@@ -1239,10 +1240,24 @@ domain::Result<domain::Json> run_map_qc_on_document(
     report["issues"] = issues;
     report["status"] = status;
     report["generated_at"] = iso_now;
-    // Provenance marker: the catalog qc-DataRun registration is the catalog
-    // line's surface; until it lands the report records the honest default
-    // instead of claiming a run that does not exist.
+    // Provenance marker (H14): false until the registration below
+    // succeeds. Python dumps the temp file before flipping the flag; the
+    // C++ registrar seam (V14-COMPILATION-PUBLISH) performs the catalog
+    // DataRun registration. A registrar that fails or is absent keeps the
+    // flag false — the report never claims a run that does not exist.
     report["provenance_registered"] = false;
+    if (provenance != nullptr) {
+        try {
+            const std::string run_id = (*provenance)(report);
+            if (!run_id.empty()) {
+                report["provenance_registered"] = true;
+                report["provenance_run_id"] = run_id;
+            }
+        } catch (...) {
+            // Python's broad except: a registration failure must never fail
+            // the QC run itself (the false flag makes the loss visible).
+        }
+    }
     report["rule_status"] = rule_status;
     report["coverage"] = Json{{"evaluated", evaluated}, {"skipped", skipped}};
 
