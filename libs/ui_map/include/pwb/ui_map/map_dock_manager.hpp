@@ -76,6 +76,14 @@ public:
                          std::function<void()> apply,
                          const std::string& float_key = "");
 
+    // BEGIN CLOSURE-MAPPING (08-line additive install seam — function
+    // lease registered in codex-coordination/cpp-close-wave/08-line.json)
+    // Repoint a registered panel entry at a replacement widget so rail /
+    // menu / float behavior keeps targeting the live widget. No-op when
+    // the key is unknown.
+    void adopt_panel_widget(const std::string& key, QWidget* widget);
+    // END CLOSURE-MAPPING
+
     void set_panel_visible(const std::string& key, bool visible);
     bool is_panel_visible(const std::string& key) const;
     QToolButton* panel_button(const std::string& key) const;

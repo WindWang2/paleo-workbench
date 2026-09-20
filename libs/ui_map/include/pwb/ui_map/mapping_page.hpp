@@ -101,6 +101,19 @@ public:
 
     // _apply_mode_ui: center index + preview canvas + bottom visibility.
     void apply_mode_ui();
+
+    // BEGIN CLOSURE-MAPPING (08-line additive install seam — function
+    // lease registered in codex-coordination/cpp-close-wave/08-line.json)
+    // Replace the four deferred-slice placeholders with the real 08-line
+    // widgets (ui_pages_mapedit scene/panels + ui_seqviz composition
+    // panel). Each adopt fixes up the dock/float registries so rails,
+    // menus and floating keep working; pure swaps, no behavior change
+    // until called.
+    void adopt_edit_view(QWidget* view);
+    void adopt_reference_panel(QWidget* panel);
+    void adopt_composition_panel(QWidget* panel);
+    void adopt_bottom_workbench(QWidget* panel);
+    // END CLOSURE-MAPPING
     // _saved_dock_splitter_sizes three-level fallback, exposed for tests.
     std::vector<int> saved_dock_splitter_sizes() const;
 
@@ -135,7 +148,7 @@ private:
     MapChromePanel* chrome_panel_ = nullptr;
     QWidget* reference_panel_ = nullptr;    // placeholder (other slice)
     QWidget* composition_panel_ = nullptr;  // placeholder (other slice)
-    QFrame* edit_view_ = nullptr;           // placeholder (other slice)
+    QWidget* edit_view_ = nullptr;          // placeholder (other slice)
     QWidget* bottom_workbench_ = nullptr;   // placeholder (other slice)
     QSplitter* mid_splitter_ = nullptr;
     pwb::ui_shell::MapStatusBar* status_bar_ = nullptr;

@@ -249,6 +249,13 @@ void AppShell::build_pages() {
     page_stack_->addWidget(visualization_page_);
 }
 
+// BEGIN CLOSURE-MAPPING (08-line adopt)
+void AppShell::adopt_preparation_page(QWidget* page) {
+    if (hub_mapping_ == nullptr || page == nullptr) return;
+    hub_mapping_->adopt_submodule("preparation", page);
+}
+// END CLOSURE-MAPPING
+
 void AppShell::wire_workstation() {
     // 功能页 dock: scroll-wrapped page stack (Python HubScrollArea parity
     // — a dock narrower than the page minimum scrolls instead of locking

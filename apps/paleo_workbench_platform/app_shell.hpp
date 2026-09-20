@@ -135,6 +135,13 @@ public:
         return geomodel_page_;
     }
     pwb::ui_map::MappingPage* mapping_page() const { return mapping_page_; }
+
+    // BEGIN CLOSURE-MAPPING (08-line function lease — registered in
+    // codex-coordination/cpp-close-wave/08-line.json; mirrors the 04-line
+    // adopt_data_page pattern) Swap the hub-3 preparation placeholder for
+    // the real page assembled by the closure installer.
+    void adopt_preparation_page(QWidget* page);
+    // END CLOSURE-MAPPING
     pwb::ui_review::qt::ReviewExportPage* review_page() const {
         return review_page_;
     }

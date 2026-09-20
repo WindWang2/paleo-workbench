@@ -1253,6 +1253,7 @@ elseif(PWB_BUILD_PLATFORM AND TARGET pwb-platform)
         "Pwb::UiMapQgis + Pwb::UiReviewQt + Pwb::UiSeqvizQt + "
         "Pwb::UiWellseisQt; the direct-canvas shell remains")
 endif()
+
 # END UI-17
 
 # BEGIN CLOSURE-SCIENCE — line-03 assembly (runs after UI-17 so the app
@@ -1491,6 +1492,68 @@ endif()
 if(PWB_BUILD_PLATFORM)
     add_subdirectory(libs/viz_charts)
 endif()
+
+# BEGIN CLOSURE-MAPPING (late) — 08-line closure battery. Registered after
+# the VIZ-E charts block so Pwb::VizCharts exists (the contour extraction
+# kernel the preparation seam binds). Guarded on the full closure; LayoutExport
+# (CONV-29, default OFF) is intentionally not required — the composition
+# export engine wiring is a registered follow-up.
+if(TARGET pwb-platform
+   AND TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt
+   AND TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt
+   AND TARGET Pwb::UiMapQgis AND TARGET Pwb::UiSeqvizQt
+   AND TARGET Pwb::UiWellseisQt AND TARGET Pwb::UiPagesMapedit
+   AND TARGET Pwb::Application AND TARGET Pwb::Project
+   AND TARGET Pwb::UiWorkers AND TARGET Pwb::MappingDocument
+   AND TARGET Pwb::VizCharts)
+    # Product wiring: the closure sources join pwb-platform (install call
+    # in main_window.cpp compiles under PWB_WITH_CLOSURE_MAPPING).
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/closure_mapping_document.cpp
+        apps/paleo_workbench_platform/closure_mapping_install.cpp)
+    target_include_directories(pwb-platform PRIVATE
+        apps/paleo_workbench_platform)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::UiPagesMapedit Pwb::UiSeqviz Pwb::UiSeqvizQt
+        Pwb::UiPagesDataQt Pwb::UiWellseis Pwb::UiWellseisQt
+        Pwb::UiWorkers Pwb::MappingDocument Pwb::Project
+        Pwb::VizCharts Pwb::Application)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_MAPPING=1)
+
+    add_executable(platform_closure_mapping tests/cpp/platform/test_closure_mapping.cpp
+        apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/main_window.cpp
+        apps/paleo_workbench_platform/app_context.cpp
+        apps/paleo_workbench_platform/diagnostics.cpp
+        apps/paleo_workbench_platform/closure_mapping_document.cpp
+        apps/paleo_workbench_platform/closure_mapping_install.cpp)
+    pwb_link_job_runtime(platform_closure_mapping)
+    set_target_properties(platform_closure_mapping PROPERTIES AUTOMOC ON)
+    target_compile_features(platform_closure_mapping PRIVATE cxx_std_20)
+    target_include_directories(platform_closure_mapping PRIVATE
+        tests/cpp/platform
+        apps/paleo_workbench_platform
+        ${CMAKE_BINARY_DIR}/generated)
+    target_link_libraries(platform_closure_mapping PRIVATE
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+        Pwb::PlatformServices Pwb::JobQt
+        Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+        Pwb::UiSeqvizQt Pwb::UiWellseisQt
+        Pwb::UiPagesMapedit Pwb::UiSeqviz Pwb::UiWellseis
+        Pwb::UiWorkers Pwb::MappingDocument Pwb::Project
+        Pwb::VizCharts)
+    target_compile_definitions(platform_closure_mapping PRIVATE
+        PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/platform"
+        PWB_WITH_APP_SHELL=1 PWB_WITH_CLOSURE_MAPPING=1)
+    add_test(NAME platform.closure_mapping
+             COMMAND platform_closure_mapping)
+    set_tests_properties(platform.closure_mapping PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+endif()
+# END CLOSURE-MAPPING (late)
 
 # VIZ-E app wiring (plan P-A): the data/preview page assembly mounts into
 # the platform app when the full closure is present — viz_charts Qt layer,

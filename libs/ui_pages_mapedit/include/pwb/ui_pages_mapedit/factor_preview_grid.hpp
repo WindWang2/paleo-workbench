@@ -69,4 +69,10 @@ private:
 
 }  // namespace pwb::ui_pages_mapedit
 
+// BEGIN CLOSURE-MAPPING (08-line compile-fix lease): shared guard with
+// libs/ui_map qt_meta.hpp — Json is one type; declare exactly once per TU.
+#ifndef PWB_JSON_METATYPE_DECLARED
+#define PWB_JSON_METATYPE_DECLARED
 Q_DECLARE_METATYPE(pwb::domain::Json)
+#endif
+// END CLOSURE-MAPPING

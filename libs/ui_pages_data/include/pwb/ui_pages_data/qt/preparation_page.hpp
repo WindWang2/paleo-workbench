@@ -158,6 +158,9 @@ Q_SIGNALS:
     void generate_requested(const QString& method);
 
 private:
+    int current_generation() const;
+    void* prepare_job_target() const;
+    void* contour_job_target() const;
     void set_generate_enabled(bool enabled);
     void refresh_well_table_view();
     void on_run_well_qc();
