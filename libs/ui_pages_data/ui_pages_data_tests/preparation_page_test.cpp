@@ -252,10 +252,14 @@ int main(int argc, char** argv) {
             emit_contour2 = std::move(completed);
         });
     task_panel.contour_btn_.click();
+    check(!task_panel.generate_btn()->isEnabled(),
+          "buttons disabled during contour run");
     emit_contour2(&payload);
     check(contour_updated.count() == 1, "empty contour does not emit");
     check(task_panel.summary_.text().contains("没有可提取"),
           "contour empty summary rendered");
+    check(task_panel.generate_btn()->isEnabled(),
+          "empty contour re-enables the buttons");
 
     // --- shutdown ------------------------------------------------------------
     check(page.shutdown_workers(100), "shutdown joins cleanly");

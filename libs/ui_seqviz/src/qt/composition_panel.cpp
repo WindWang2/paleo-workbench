@@ -365,8 +365,13 @@ void CompositionPanel::duplicate_selected() {
     if (!session_) return;
     const std::string eid = selected_element_id();
     if (eid.empty()) return;
-    const auto copy = session_->duplicate_element(eid);
-    if (!copy) return;  // missing / locked → no command (Python None)
+    std::optional<ComposerElement> copy;
+    try {
+        copy = session_->duplicate_element(eid);
+    } catch (const mapping_document::ComposerError&) {
+        return;  // locked → refused (Python catches ComposerError)
+    }
+    if (!copy) return;  // missing → no command (Python None)
     refresh_list();
     select_element(copy->id);
     refresh_preview();
@@ -483,13 +488,15 @@ void CompositionPanel::commit_schema_edits() {
         return;
     }
     // Python commits each dirty property as its own configure command
-    // (one undo step per property), not one merged patch.
-    for (const auto& name : schema_dirty_) {
+    // (one undo step per property), not one merged patch. Iterate a COPY:
+    // on_schema_value_changed erases from schema_dirty_.
+    const std::set<std::string> pending = schema_dirty_;
+    schema_dirty_.clear();
+    for (const auto& name : pending) {
         const auto it = schema_getters_.find(name);
         if (it == schema_getters_.end() || !it->second) continue;
         on_schema_value_changed(name, it->second());
     }
-    schema_dirty_.clear();
 }
 
 // -- selection -----------------------------------------------------------------
@@ -522,11 +529,12 @@ void CompositionPanel::on_element_menu(const QPoint& pos) {
     if (picked == toggle_act) {
         session_->set_element_visible(eid, !el->visible);
     } else if (picked == dup_act) {
-        const auto copy = session_->duplicate_element(eid);
-        if (!copy) return;  // locked → debug-refused (Python parity)
-        element_list_->setCurrentItem(item);
+        try {
+            if (!session_->duplicate_element(eid)) return;
+        } catch (const mapping_document::ComposerError&) {
+            return;  // locked → refused (Python parity, no selection change)
+        }
         refresh_all();
-        select_element(copy->id);
         emit composition_changed(session_->revision());
         return;
     } else if (picked == front_act) {
@@ -910,14 +918,15 @@ void CompositionPanel::load_json() {
     if (path.isEmpty()) return;
     auto store = mapping_document::make_std_file_store();
     mapping_document::DocumentIoDiagnostics diagnostics;
+    Composition loaded;
     const auto result = mapping_document::load_composition_file(
-        *store, path.toStdString(), *document_, &diagnostics);
+        *store, path.toStdString(), loaded, &diagnostics);
     if (result.status == mapping_document::LoadStatus::kUnreadable ||
         result.status == mapping_document::LoadStatus::kCorrupt) {
         QMessageBox::warning(this, "载入失败", qstr(result.error));
         return;
     }
-    set_document(*document_);
+    set_document(loaded);
     if (result.status ==
         mapping_document::LoadStatus::kRecoveredFromBackup) {
         QMessageBox::information(
@@ -927,7 +936,13 @@ void CompositionPanel::load_json() {
 }
 
 void CompositionPanel::do_export() {
-    if (!document_ || !seams_.export_fn) return;
+    if (!document_) return;
+    if (!seams_.export_fn) {
+        // No export engine wired into this host — honest refusal (never a
+        // silent no-op).
+        QMessageBox::information(this, "导出组图", "导出引擎不可用");
+        return;
+    }
     const QString fmt = export_combo_->currentText();
     const QString path = QFileDialog::getSaveFileName(
         this, "导出组图", {},

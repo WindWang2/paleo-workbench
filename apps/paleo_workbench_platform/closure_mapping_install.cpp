@@ -74,14 +74,31 @@ public:
 
     explicit WorkerHost(QObject* parent) : QObject(parent) {}
 
-    void run(Body body) {
+    // target mirrors Python OwnedWorkerJob.target: the page's guards
+    // compare it against the bound project so stale completions drop.
+    void run(void* target, Body body) {
         join();
+        target_ = target;
+        busy_.store(true);
+        cancelled_.store(false);
         thread_ = std::thread([body = std::move(body)]() { body(); });
     }
 
     void cancel() { cancelled_.store(true); }
     bool cancelled() const { return cancelled_.load(); }
-    void reset_cancel() { cancelled_.store(false); }
+
+    bool busy() const { return busy_.load(); }
+    void* target() const { return target_; }
+
+    // OwnedWorkerJob.shutdown parity: request cancellation, then join.
+    // A cooperative worker observes the flag; the join is unbounded (the
+    // terminal callbacks are marshalled, never joined from the GUI thread).
+    bool shutdown(int /*wait_ms*/) {
+        if (!thread_.joinable()) return true;
+        cancelled_.store(true);
+        join();
+        return !thread_.joinable();
+    }
 
     // Marshal a terminal callback onto the GUI thread. The callback owns
     // its captures (heap/shared payloads, never references into the thread
@@ -92,7 +109,12 @@ public:
     }
 
     void join() {
-        if (thread_.joinable()) thread_.join();
+        if (thread_.joinable()) {
+            cancelled_.store(true);  // cooperative stop request
+            thread_.join();
+            busy_.store(false);
+            target_ = nullptr;
+        }
     }
 
     ~WorkerHost() override { join(); }
@@ -100,6 +122,8 @@ public:
 private:
     std::thread thread_;
     std::atomic<bool> cancelled_{false};
+    std::atomic<bool> busy_{false};
+    void* target_ = nullptr;
 };
 
 namespace {
@@ -456,6 +480,17 @@ bool grid_from_task_parameters(const Json& task, std::vector<double>& grid_x,
 
 }  // namespace
 
+// Per-window install state — lives as a QObject child of the window so
+// notify_project_changed / save_documents can recover it by property.
+class ClosureContext : public QObject {
+    Q_OBJECT
+public:
+    explicit ClosureContext(QObject* parent) : QObject(parent) {}
+    Install install;
+    MapDocumentBank* bank = nullptr;
+    pwb::ui_pages_data::qt::PreparationPage* preparation = nullptr;
+};
+
 // ---------------------------------------------------------------------------
 // install
 // ---------------------------------------------------------------------------
@@ -549,9 +584,12 @@ bool install(const Install& install) {
 
     // ---- 2. document bank -------------------------------------------------
     auto* bank = new MapDocumentBank(scene, view, install.window);
+    auto* context = new ClosureContext(install.window);
+    context->install = Install{install.window, install.shell, store_getter};
+    context->bank = bank;
     install.window->setProperty(
-        "closure_mapping_bank",
-        QVariant::fromValue(static_cast<QObject*>(bank)));
+        "closure_mapping_context",
+        QVariant::fromValue(static_cast<QObject*>(context)));
     bank->set_persist_fn([store_getter, store](std::string*) -> bool {
         const auto persisted =
             store != nullptr ? store
@@ -587,31 +625,49 @@ bool install(const Install& install) {
 
     auto* host = new WorkerHost(install.window);
 
-    // Project document root seam — the page's void* project points at the
-    // live ProjectDocument root when a store is bound; unset seams keep
-    // the page honestly inert.
-    auto project_root_fn = [store_getter]() -> Json* {
-        const auto current = store_getter ? store_getter() : nullptr;
-        return current != nullptr ? &current->document().root() : nullptr;
+    // Project store seam — returns the STORE (shared_ptr), never a raw
+    // pointer into its document: every caller holds the store alive for
+    // its own use (review finding: a bare Json* outlived the local
+    // shared_ptr).
+    auto project_store_fn = [store_getter]()
+        -> std::shared_ptr<pwb::application::PwbDataStore> {
+        return store_getter ? store_getter() : nullptr;
     };
     preparation->set_factor_map_tasks_fn(
-        [project_root_fn](void*) -> Json {
-        Json* root = project_root_fn();
-        if (root == nullptr) return Json::array();
-        const auto it = root->find("factor_map_tasks");
-        return it != root->end() ? *it : Json::array();
+        [project_store_fn](void*) -> Json {
+        const auto store = project_store_fn();
+        if (store == nullptr) return Json::array();
+        const auto& root = store->document().root();
+        const auto it = root.find("factor_map_tasks");
+        return it != root.end() ? *it : Json::array();
     });
 
-    auto* generation = new int(0);
+    auto generation = std::make_shared<int>(0);
     preparation->set_generation_fns(
         [generation] { return ++*generation; },
         [generation] { return *generation; });
+
+    // OwnedWorkerJob seams — the page's running/target/cancel guards need
+    // a live job binding (review P1-7); WorkerHost owns the thread.
+    preparation->set_prepare_job(
+        pwb::ui_pages_data::qt::WorkerJobApi{
+            [host] { return host->busy(); },
+            [host](int wait_ms) { return host->shutdown(wait_ms); },
+            [host] { host->cancel(); },
+            [host]() -> void* { return host->target(); }});
+    preparation->set_contour_job(
+        pwb::ui_pages_data::qt::WorkerJobApi{
+            [host] { return host->busy(); },
+            [host](int wait_ms) { return host->shutdown(wait_ms); },
+            [host] { host->cancel(); },
+            [host]() -> void* { return host->target(); }});
     preparation->set_snapshot_task_count_fn(
-        [project_root_fn](void*, const std::string&, int) {
-            Json* root = project_root_fn();
-            if (root == nullptr) return 0;
-            const auto it = root->find("factor_map_tasks");
-            return it != root->end() && it->is_array()
+        [project_store_fn](void*, const std::string&, int) {
+            const auto store = project_store_fn();
+            if (store == nullptr) return 0;
+            const auto& root = store->document().root();
+            const auto it = root.find("factor_map_tasks");
+            return it != root.end() && it->is_array()
                        ? static_cast<int>(it->size())
                        : 0;
         });
@@ -630,9 +686,8 @@ bool install(const Install& install) {
                std::function<void(const QString&)>,
                std::function<void()> cancelled) {
         (void)project;
-        host->reset_cancel();
-        host->run([host, method, gen, progress, completed,
-                   cancelled]() {
+        host->run(project, [host, method, gen, progress, completed,
+                            cancelled]() {
             pwb::ui_pages_data::qt::PrepareProgressView start;
             start.generation = gen;
             start.phase = "classify";
@@ -672,14 +727,20 @@ bool install(const Install& install) {
     // viz_charts marching-squares extraction kernel over legacy parameter
     // grids. Without completed grids it honestly yields zero drafts.
     preparation->set_contour_worker_fn(
-        [host, project_root_fn](
-            void*, std::function<void(void*)> completed,
+        [host, project_store_fn](
+            void* project, std::function<void(void*)> completed,
             std::function<void(const QString&)> failed) {
-        host->reset_cancel();
-        host->run([host, completed = std::move(completed),
-                   failed = std::move(failed), project_root_fn]() {
+        // Keep the store alive for the whole worker run (captured on the
+        // GUI thread): the Json root pointer stays valid even if the user
+        // opens another project mid-run — the stale commit then writes to
+        // the captured (superseded) store and is dropped by the page
+        // guards on the GUI thread.
+        auto store = project_store_fn();
+        host->run(project, [host, completed = std::move(completed),
+                            failed = std::move(failed), store]() {
             try {
-                Json* root = project_root_fn();
+                Json* root = store != nullptr ? &store->document().root()
+                                              : nullptr;
                 // Shared result payload: the ledger JSON the GUI-thread
                 // commit writes back, plus the created-draft count.
                 auto payload = std::make_shared<Json>(Json::array());
@@ -784,18 +845,52 @@ bool install(const Install& install) {
     // The commit receives the shared Json payload pointer and writes the
     // compiled ledger into project.contour_drafts.
     preparation->set_commit_contour_fn(
-        [project_root_fn](void*, void* result) -> int {
+        [project_store_fn](void*, void* result) -> int {
             auto* payload = static_cast<Json*>(result);
             if (payload == nullptr) return 0;
-            Json* root = project_root_fn();
-            if (root != nullptr) {
-                (*root)["contour_drafts"] = *payload;
+            const auto store = project_store_fn();
+            if (store != nullptr) {
+                store->document().root()["contour_drafts"] = *payload;
             }
             return payload->is_array() ? static_cast<int>(payload->size()) : 0;
         });
 
+    context->preparation = preparation;
+
     install.shell->adopt_preparation_page(preparation);
+
+    // Bind whatever project is already open (review P0-1: the page's
+    // project guard stayed null forever, making the real contour kernel
+    // unreachable and QC lie about "工程未绑定").
+    notify_project_changed(install.window);
     return true;
+}
+
+void notify_project_changed(QMainWindow* window) {
+    if (window == nullptr) return;
+    const QVariant stored = window->property("closure_mapping_context");
+    auto* context = stored.value<QObject*>();
+    if (context == nullptr) return;
+    auto* self = dynamic_cast<ClosureContext*>(context);
+    if (self == nullptr) return;
+    const auto store =
+        self->install.store_getter ? self->install.store_getter() : nullptr;
+    void* project_root =
+        store != nullptr ? &store->document().root() : nullptr;
+    if (self->preparation != nullptr) {
+        self->preparation->set_project(project_root);
+    }
+    if (self->bank != nullptr) {
+        std::vector<Json> documents;
+        if (store != nullptr) {
+            const auto& root = store->document().root();
+            const auto section = root.find("paleomap_documents");
+            if (section != root.end() && section->is_array()) {
+                for (const auto& entry : *section) documents.push_back(entry);
+            }
+        }
+        self->bank->set_documents(std::move(documents), {}, window);
+    }
 }
 
 bool save_documents(QMainWindow* window, std::string* error) {
@@ -803,19 +898,19 @@ bool save_documents(QMainWindow* window, std::string* error) {
         if (error != nullptr) *error = "无宿主窗口";
         return false;
     }
-    const QVariant stored = window->property("closure_mapping_bank");
-    auto* bank = stored.value<QObject*>();
-    if (bank == nullptr) {
+    const QVariant stored = window->property("closure_mapping_context");
+    auto* context = stored.value<QObject*>();
+    auto* self = dynamic_cast<ClosureContext*>(context);
+    if (self == nullptr || self->bank == nullptr) {
         if (error != nullptr) *error = "编图文档库未安装";
         return false;
     }
     // Route through the bank's public save (persist seam included).
-    if (auto* mapped = dynamic_cast<MapDocumentBank*>(bank);
-        mapped != nullptr) {
-        return mapped->save_active(window);
+    if (!self->bank->save_active(window)) {
+        if (error != nullptr) *error = "编图文档保存失败（见页面诊断）";
+        return false;
     }
-    if (error != nullptr) *error = "编图文档库类型不符";
-    return false;
+    return true;
 }
 
 }  // namespace pwb::app::closure_mapping

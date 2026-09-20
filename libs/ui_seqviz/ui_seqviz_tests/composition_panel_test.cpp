@@ -8,6 +8,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QLineEdit>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
@@ -17,6 +18,7 @@
 #include <QTableWidget>
 #include <QToolButton>
 
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -42,6 +44,12 @@ void check(bool condition, const char* what) {
     } else {
         std::fprintf(stdout, "PASS %s\n", what);
     }
+}
+
+std::string selected_element_id_of(const qt::CompositionPanel& panel) {
+    auto* item = panel.element_list()->currentItem();
+    return item ? item->data(Qt::UserRole).toString().toStdString()
+                : std::string{};
 }
 
 QToolButton* button_by_text(QWidget* root, const QString& text) {
@@ -230,6 +238,28 @@ int main(int argc, char** argv) {
               "schema undo reverts the legend commit");
     }
 
+    // --- focus-out commits pending text edits (Python eventFilter) --------
+    {
+        // The title element carries the schema {text: str}; its single-line
+        // editor commits on FocusOut, not on every keystroke.
+        element_list->setCurrentRow(1);  // the title element
+        QApplication::processEvents();
+        auto* text_edit = panel.findChild<QLineEdit*>();
+        check(text_edit != nullptr, "str schema editor created");
+        if (text_edit != nullptr) {
+            text_edit->setText(QStringLiteral("新标题"));
+            QEvent focus_out(QEvent::FocusOut);
+            QApplication::sendEvent(text_edit, &focus_out);
+            QApplication::processEvents();
+            const auto& title_element = panel.document()->elements.front();
+            const auto text_it = title_element.properties.find("text");
+            check(text_it != title_element.properties.end() &&
+                      text_it->get<std::string>() == "新标题",
+                  "focus-out commit reaches session");
+        }
+    }
+
+
     // --- duplicate / lock through the buttons ------------------------------
     auto* duplicate_btn = button_by_text(&panel, "复制");
     check(duplicate_btn != nullptr, "duplicate button exists");
@@ -240,8 +270,32 @@ int main(int argc, char** argv) {
     }
     auto* front_btn = button_by_text(&panel, "置顶");
     if (front_btn != nullptr) {
+        const auto before = panel.document()->elements;
         front_btn->click();
-        check(true, "z-order command applied");
+        // bring_to_front lifts the selected element to the extreme z.
+        const auto& selected = panel.document()->elements.back();
+        double max_z = 0;
+        for (const auto& e : before) {
+            max_z = std::max(max_z, static_cast<double>(e.z_index));
+        }
+        check(selected.z_index >= max_z,
+              "z-order command lifts the selection");
+    }
+
+    // --- locked element: duplicate must refuse without crashing -----------
+    {
+        panel.session()->set_locked(selected_element_id_of(panel), true);
+        panel.refresh_all();
+        QApplication::processEvents();
+        const std::size_t size_before = panel.document()->elements.size();
+        auto* duplicate_btn2 = button_by_text(&panel, "复制");
+        check(duplicate_btn2 != nullptr, "duplicate button reachable");
+        if (duplicate_btn2 != nullptr) {
+            duplicate_btn2->click();  // locked → ComposerError swallowed
+            QApplication::processEvents();
+            check(panel.document()->elements.size() == size_before,
+                  "locked duplicate refused (no crash, no command)");
+        }
     }
 
     if (failures == 0) {

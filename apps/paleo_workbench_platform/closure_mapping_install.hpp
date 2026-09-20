@@ -49,6 +49,11 @@ struct Install {
 // once per window.
 bool install(const Install& install);
 
+// Rebinds the preparation page + document bank to the CURRENT project
+// store (call after openProject / project close). With no store bound the
+// page honestly unbinds (QC/contour report "请先打开或绑定工程。").
+void notify_project_changed(QMainWindow* window);
+
 // 12's global save routes here: save the active mapping document through
 // the bank (topology gate -> apply_features_to_document -> project
 // persist). Returns false + error when nothing is installed yet or the

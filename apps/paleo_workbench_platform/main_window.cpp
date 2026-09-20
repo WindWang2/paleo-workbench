@@ -1078,6 +1078,12 @@ QString MainWindow::openProject(const QString& project_file) {
 
     context_.session().set_store(store);
     context_.setProjectStore(store);
+// BEGIN CLOSURE-MAPPING — rebind the preparation page + mapping document
+// bank to the freshly opened project.
+#ifdef PWB_WITH_CLOSURE_MAPPING
+    pwb::app::closure_mapping::notify_project_changed(this);
+#endif
+// END CLOSURE-MAPPING
 
     // Materialize every bound GeoJSON layer as an explicit working copy —
     // the catalog payload file itself is read-only for the shell.
@@ -1085,6 +1091,9 @@ QString MainWindow::openProject(const QString& project_file) {
     if (!snapshot.is_ok()) {
         context_.session().set_store(nullptr);
         context_.setProjectStore(nullptr);
+#ifdef PWB_WITH_CLOSURE_MAPPING
+        pwb::app::closure_mapping::notify_project_changed(this);
+#endif
         return QString::fromStdString(snapshot.error().message);
     }
     std::map<std::string, const pwb::catalog::DataVersion*> versions;

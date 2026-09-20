@@ -101,24 +101,40 @@ void MapDocumentBank::bind_active() {
 bool MapDocumentBank::set_documents(std::vector<domain::Json> documents,
                                     const std::string& prefer_id,
                                     QWidget* guard_parent) {
+    // Capture the previous id BEFORE the move — list positions shift.
+    const std::string previous_id = active_id();
     documents_ = std::move(documents);
 
-    std::string prefer = prefer_id;
-    if (prefer.empty()) prefer = active_id();
+    std::string prefer = prefer_id.empty() ? previous_id : prefer_id;
     auto next = prefer.empty() ? std::nullopt : index_of(prefer);
     if (!next.has_value() && !documents_.empty()) next = std::size_t{0};
+    const std::string next_id =
+        next.has_value() ? document_id(documents_[*next]) : std::string{};
 
     const bool switch_required =
-        next != active_ &&
-        (active_.has_value() ? is_dirty() : false);
+        active_.has_value() && !documents_.empty() &&
+        next_id != previous_id && is_dirty();
     if (switch_required && !guard_active_) {
         // Guarded cross-document switch inside set_documents — resolve via
         // the same 保存/放弃/取消 contract, then apply.
         guard_active_ = true;
-        const bool applied = switch_to(document_id(documents_[*next]),
-                                       guard_parent);
+        const bool applied = switch_to(next_id, guard_parent);
         guard_active_ = false;
-        return applied;
+        if (!applied) {
+            // Cancelled (or save failed): keep the current binding. Re-map
+            // the active index into the NEW list by id — the old index may
+            // point at a different document now.
+            if (const auto keep = index_of(previous_id); keep.has_value()) {
+                active_ = keep;
+            } else {
+                // The dirty document was removed project-side; accept the
+                // incoming list without rebinding the scene content.
+                active_ = next;
+            }
+            emit active_changed(qstr(active_id()));
+            return false;
+        }
+        return true;
     }
     active_ = next;
     bind_active();
@@ -213,7 +229,6 @@ bool MapDocumentBank::save_active(QWidget* parent) {
 
     // Publish the normalized document back into the bank list and persist.
     documents_[*active_] = bound_;
-    saved_copy_ = bound_;
 
     bool persisted = true;
     std::string error;
@@ -233,6 +248,9 @@ bool MapDocumentBank::save_active(QWidget* parent) {
         return false;
     }
 
+    // Latch the pristine copy only after a successful persist — a failed
+    // save must keep the previous discard target (header contract).
+    saved_copy_ = bound_;
     last_warnings_ = diagnostics.warnings;
     scene_->set_dirty(false);
     emit dirty_changed(false);

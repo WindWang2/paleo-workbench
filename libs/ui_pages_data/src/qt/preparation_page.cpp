@@ -454,6 +454,7 @@ void PreparationPage::on_contour_completed(void* result) {
         // Async completions must not open a modal dialog (Python #897).
         task_panel_->summary_label()->setText(QString::fromStdString(
             contour_empty_label()));
+        clear_contour_job();
         return;
     }
     if (factor_map_tasks_fn_) {

@@ -69,3 +69,29 @@
   未接线 → 面板诚实失败；模板库未移植 → 面板以空白 A4 文档起步。
 - 12 的全局 save 路由：install 暴露 `save_documents(window, error)`，
   等 12 接线（UI-17 登记 save_project_requested 为 deferred 宿主动作）。
+
+## R6b（独立审查 + 修复轮）
+
+- 独立审查（第 3 个直接子代理，general-purpose）：总评"需修复"，3×P0 + 6×P1 + 若干 P2。
+- 修复落地（全部复验）：
+  - P0-1 install 从不绑定工程 → ClosureContext + notify_project_changed()，
+    install 末尾绑定 + main_window openProject 成功/回滚两个命名块钩子；
+    制备页/文档库现随工程开关真实重绑。
+  - P0-2 锁定元素"复制"抛 ComposerError 经 Qt 槽 terminate → 两处 try/catch
+    （Python 同款吞掉），新增锁定复制不崩测试。
+  - P0-3 commit_schema_edits 遍历中 erase 迭代器失效 → 迭代副本。
+  - P1-4 等值线 0 结果早退未清 job → 补 clear_contour_job()，按钮恢复有断言。
+  - P1-5 set_documents 旧索引跨列表语义 → id 重映射 + 取消路径契约修复。
+  - P1-6 project_root_fn 悬垂 Json* → project_store_fn 返回 shared_ptr，
+    worker 捕获 store 保活整轮。
+  - P1-7 job 缝未绑 → WorkerHost 增 busy/target/shutdown，prepare/contour
+    job 缝绑定（页面 supersede/cancel 守卫激活）。
+  - P1-8 saved_copy_ 提前写入 → 移到 persist 成功之后。
+  - P1-9 load_json 解引用空 document_ → 局部 Composition + set_document。
+  - P2-10/11/13：导出无引擎诚实提示；生成代计数 shared_ptr；~WorkerHost
+    协作取消；右键复制不选中克隆（Python parity）。
+  - P2-14：z-order 空断言改真断言；新增锁定复制/失焦提交/等值线空恢复用例。
+- 未修复（登记）：P2-12 外观偏差（%.17g、spin 量程、导出项顺序）；导出引擎
+  与预览渲染器接线（跨线依赖，PR 登记）；AppShell 关页时未显式调
+  shutdown_workers（窗口析构经 WorkerHost join 兜底，协作取消已加）。
+- 复验：受影响集 36/36 两遍（R6b 后），三个新测试单独全过。

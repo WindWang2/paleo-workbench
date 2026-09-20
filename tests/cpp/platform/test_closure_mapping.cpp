@@ -175,8 +175,10 @@ int install_battery() {
     window.show();
     AppShell* shell = window.appShell();
     PWB_CHECK_MSG(shell != nullptr, "AppShell missing");
-    PWB_CHECK(window.property("closure_mapping_bank").value<QObject*>()
-              != nullptr);
+    PWB_CHECK_MSG(
+        window.property("closure_mapping_context").value<QObject*>()
+            != nullptr,
+        "closure context not installed");
 
     // -- preparation: the placeholder is gone, the real page is in --------
     pwb::ui_pages_data::qt::HubPage* hub_mapping = nullptr;
