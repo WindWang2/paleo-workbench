@@ -76,6 +76,17 @@ if(TARGET Pwb::SeismicService AND TARGET Pwb::Data)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_SEISMIC_SERVICE=1)
 endif()
 
+# BEGIN CLOSURE-SEISMIC (07) — product binding: ui_wellseis prediction page
+# <-> real seismic viewer + volume service + E-line attribute kernels.
+if(TARGET Pwb::SeismicViewer AND TARGET Pwb::SeismicService
+        AND TARGET Pwb::SeismicAttributes AND TARGET Pwb::UiWellseisQt)
+    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicService
+                                               Pwb::SeismicAttributes)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_SEISMIC=1)
+    target_sources(pwb-platform PRIVATE closure_seismic_install.cpp)
+endif()
+# END CLOSURE-SEISMIC
+
 # BEGIN CONV-01
 # Swarm task 01: the 地质因子图 action compiles into the app when the slice
 # is built (libs/application carries the runner + kernel link).

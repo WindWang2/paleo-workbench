@@ -43,3 +43,33 @@ if(TARGET Pwb::UiPagesPreview)
     pwb_viz_d_test(viz_d.preview viz_d_preview_test.cpp)
     target_link_libraries(viz_d.preview PRIVATE Pwb::UiPagesPreview Pwb::Ingest)
 endif()
+
+# 07 line — the CLOSURE-SEISMIC product binding (page <-> real viewer +
+# volume service + attribute kernels). Compiles the app-layer installer
+# directly; honest skip when the closure dependency set is not configured.
+# NOTE: this directory is processed BEFORE libs/ui_wellseis (:853+ here) in
+# the root tree, so Pwb::UiWellseisQt / Pwb::UiWorkers cannot be TARGET-tested
+# here. The gate instead checks the exact conditions under which the UI
+# implication blocks are guaranteed to have created them: PLATFORM + DATA
+# imply CONV-22 (Pwb::UiWorkers), and the UI-09 block then creates
+# Pwb::UiWellseisQt (Qt6::Widgets comes from this file's own find_package).
+# The forward target_link_libraries reference to the alias resolves at
+# generate time and is then guaranteed to exist; any other configuration
+# skips this suite honestly.
+if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA AND TARGET Pwb::SeismicViewer
+        AND TARGET Pwb::SeismicService AND TARGET Pwb::SeismicAttributes)
+    pwb_viz_d_test(viz_d.closure closure_seismic_test.cpp)
+    target_sources(viz_d.closure PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../apps/paleo_workbench_platform/closure_seismic_install.cpp
+    )
+    target_include_directories(viz_d.closure PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../apps/paleo_workbench_platform
+    )
+    target_link_libraries(viz_d.closure PRIVATE
+        Pwb::SeismicService Pwb::SeismicAttributes Pwb::UiWellseisQt
+        Qt6::Widgets)
+    set_tests_properties(viz_d.closure PROPERTIES
+        ENVIRONMENT
+            "QT_QPA_PLATFORM=offscreen;VIZ_D_FIXTURES=${CMAKE_CURRENT_SOURCE_DIR}/fixtures;VIZ_D_CLOSURE_ARTIFACT_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    )
+endif()

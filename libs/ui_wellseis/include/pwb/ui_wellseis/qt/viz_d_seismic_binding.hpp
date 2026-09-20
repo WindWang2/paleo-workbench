@@ -29,6 +29,7 @@
 #include <string>
 #include <utility>
 
+#include <QPointer>
 #include <QWidget>
 
 #include <pwb/seismic_viewer/horizon_core.hpp>
@@ -109,7 +110,10 @@ public:
     [[nodiscard]] std::pair<double, double> displayed_range() const;
 
 private:
-    pwb::seismic_viewer::SeismicSliceWidget* widget_ = nullptr;  // Qt-owned
+    // QPointer: the panel reparents the widget into its stack (Qt-owned),
+    // so Qt may destroy it before this binding during parent teardown;
+    // a raw pointer would dangle in the destructor's parent() check.
+    QPointer<pwb::seismic_viewer::SeismicSliceWidget> widget_;
 };
 
 }  // namespace pwb::ui_wellseis::qt

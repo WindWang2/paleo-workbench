@@ -43,6 +43,7 @@ if(NOT TARGET Pwb::Visualization)
 endif()
 
 add_library(pwb_seismic_viewer
+    src/attribute_fusion_core.cpp
     src/color_maps.cpp
     src/colorbar_widget.cpp
     src/crossplot_core.cpp
@@ -50,7 +51,9 @@ add_library(pwb_seismic_viewer
     src/horizon_core.cpp
     src/isosurface_core.cpp
     src/slice_controller.cpp
+    src/slice_export.cpp
     src/seismic_slice_widget.cpp
+    src/view_state.cpp
 )
 add_library(Pwb::SeismicViewer ALIAS pwb_seismic_viewer)
 set_target_properties(pwb_seismic_viewer PROPERTIES
@@ -74,8 +77,16 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR AND NOT TARGET pwb_seismic
     set(PWB_SEISMIC_ATTRIBUTES_BUILD_TESTS OFF) # standalone: only the viewer's own tests
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../seismic_attributes seismic_attributes)
 endif()
+# 07 line: the view-state schema persists through the shared JSON conventions
+# (pwb::domain). The dependency is PRIVATE (view_state.cpp and the widget's
+# pick embed consume it); the guarded add works in both consumption modes —
+# in the root build later blocks (e.g. the VIZ-B guard) then see the target
+# as already defined and skip their own add.
+if(NOT TARGET Pwb::Domain)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../domain domain)
+endif()
 target_link_libraries(pwb_seismic_viewer
-    PUBLIC Pwb::Visualization Qt6::Widgets
+    PUBLIC Pwb::Visualization Qt6::Widgets Pwb::Domain
     PRIVATE pwb_seismic_attributes
 )
 if(MSVC)

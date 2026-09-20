@@ -25,6 +25,12 @@ pwb_seismic_viewer_test(seismic_viewer.contracts contracts_test.cpp)
 pwb_seismic_viewer_test(seismic_viewer.controller controller_test.cpp)
 pwb_seismic_viewer_test(seismic_viewer.render render_test.cpp)
 
+# 07 line — advanced display/export/persistence cores (Qt-free) and the
+# widget surface (attribute pinning, exports, view-state persistence).
+pwb_seismic_viewer_test(seismic_viewer.advanced_core advanced_core_test.cpp)
+pwb_seismic_viewer_test(seismic_viewer.advanced_widget advanced_widget_test.cpp)
+target_link_libraries(seismic_viewer.advanced_widget PRIVATE Qt6::Widgets)
+
 # The widget group needs a real QApplication (offscreen platform).
 pwb_seismic_viewer_test(seismic_viewer.widget widget_test.cpp)
 target_link_libraries(seismic_viewer.widget PRIVATE Qt6::Widgets)

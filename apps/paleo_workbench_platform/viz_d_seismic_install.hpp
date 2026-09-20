@@ -25,4 +25,13 @@ namespace pwb::viz_d {
 void add_seismic_horizon_menu_actions(QMenu& menu,
                                       pwb::seismic_viewer::SeismicSliceWidget& widget);
 
+// 07 line — 导出切片… (npy / csv / png from the displayed slice; png is a
+// real render of the canvas) plus 保存视图态… / 加载视图态… (the advanced
+// display state; a saved state of another volume is rejected loudly, never
+// applied). Every action forwards to the widget API — no duplicated state.
+void add_seismic_export_menu_actions(QMenu& menu,
+                                     pwb::seismic_viewer::SeismicSliceWidget& widget);
+void add_seismic_view_state_menu_actions(QMenu& menu,
+                                         pwb::seismic_viewer::SeismicSliceWidget& widget);
+
 } // namespace pwb::viz_d

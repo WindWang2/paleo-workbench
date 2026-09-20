@@ -41,12 +41,19 @@ const std::vector<std::string>& seismic_display_modes() {
 }
 
 const std::vector<SeismicAttributeGroup>& seismic_attribute_panel_groups() {
+    // 07 line (cpp-closure-wave): "RGB融合" moves out of 未实现 into a
+    // computable 多属性融合 group — the C++ display stack now actually
+    // computes it (attribute_fusion_core fuse_rgb + closure_seismic wiring).
+    // Deliberate divergence from the Python panel
+    // (seismic_attribute_panel.py:32 marks it 未实现); recorded in the
+    // 07 findings ledger and PR. 高斯曲率/最大曲率 stay 未实现.
     static const std::vector<SeismicAttributeGroup> groups = {
         {"振幅属性", {"包络", "RMS振幅", "相对阻抗"}},
         {"频率属性", {"瞬时频率", "瞬时相位", "甜点"}},
         {"连续性属性", {"相干(C3)"}},
         {"构造属性", {"Dip_IL", "Dip_XL", "方位角", "平均曲率"}},
-        {"未实现", {"高斯曲率", "最大曲率", "RGB融合"}},
+        {"多属性融合", {"RGB融合"}},
+        {"未实现", {"高斯曲率", "最大曲率"}},
     };
     return groups;
 }
@@ -65,6 +72,7 @@ computable_kernel_labels() {
         {"dip_xl", "Dip_XL"},
         {"dip_azimuth", "方位角"},
         {"curvature_mean", "平均曲率"},
+        {"rgb_fusion", "RGB融合"},
     };
     return labels;
 }

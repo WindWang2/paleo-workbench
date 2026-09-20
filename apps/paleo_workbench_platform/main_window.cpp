@@ -810,6 +810,19 @@ void MainWindow::buildMenusAndToolbar() {
         pwb::viz_d::add_seismic_horizon_menu_actions(*seismic_menu,
                                                      *viz_d_seismic_host_);
     }
+// BEGIN CLOSURE-SEISMIC (07) — dock-side menu entries: slice export +
+// view-state persistence for this dock's SeismicSliceWidget (actions forward
+// to the widget API). These ride the VIZ-D guard on purpose: the menus only
+// need Pwb::SeismicViewer (no closure-page service deps). The hub-2
+// prediction page's viewer keeps its own widget-level API via
+// closure_seismic_install — menu parity there is a recorded limitation.
+    if (viz_d_seismic_host_ != nullptr) {
+        pwb::viz_d::add_seismic_export_menu_actions(*seismic_menu,
+                                                    *viz_d_seismic_host_);
+        pwb::viz_d::add_seismic_view_state_menu_actions(*seismic_menu,
+                                                        *viz_d_seismic_host_);
+    }
+// END CLOSURE-SEISMIC
 #endif
 // END VIZ-D
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)

@@ -29,6 +29,12 @@
 #include <pwb/ui_shell/page_placeholder.hpp>
 #include <pwb/ui_shell/shortcut_registry.hpp>
 #include <pwb/ui_shell/status_bar.hpp>
+// BEGIN CLOSURE-SEISMIC (07) — real seismic display binding for hub 2.
+#if defined(PWB_WITH_CLOSURE_SEISMIC)
+#include "closure_seismic_install.hpp"
+#include <pwb/seismic_service/volume_service.hpp>
+#endif
+// END CLOSURE-SEISMIC
 #include <pwb/ui_wellseis/qt/engine_seams.hpp>
 #include <pwb/ui_wellseis/qt/geological_modeling_3d_page.hpp>
 #include <pwb/ui_wellseis/qt/seismic_prediction_page.hpp>
@@ -183,6 +189,16 @@ void AppShell::build_pages() {
     // JobCenter-backed volume/pipe reads); without it the page keeps the
     // honest deferred-backend placeholder.
     seismic_page_ = new ui_wellseis::qt::SeismicPredictionPage(page_stack_);
+// BEGIN CLOSURE-SEISMIC (07) — bind the prediction page's view panel to the
+// real seismic viewer stack (volume service + horizon-pick viewer). Without
+// the closure deps the panel keeps its honest empty-placeholder behavior.
+#if defined(PWB_WITH_CLOSURE_SEISMIC)
+    static pwb::seismic_service::SeismicVolumeService
+        closure_seismic_volume_service;
+    pwb::closure_seismic::install_seismic_page(
+        {seismic_page_, &closure_seismic_volume_service});
+#endif
+// END CLOSURE-SEISMIC
     if (joint_host_ == nullptr) {
         fallback_joint_host_ = std::make_unique<UnavailableJointHost>();
         joint_host_ = fallback_joint_host_.get();
