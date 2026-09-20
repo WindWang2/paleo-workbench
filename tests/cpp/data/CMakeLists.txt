@@ -164,3 +164,18 @@ target_link_libraries(data_catalog_closure PRIVATE
     Pwb::UiControllers Pwb::UiDataCore)
 endif()
 # END cpp-close-01
+
+# BEGIN PWB-V14-DATA-LINEAGE
+# V14 domain layer: role registry + entity↔asset link ordinals/read views +
+# remove/prune family; entity workspace read model (fake/throwing catalog
+# seam, slot assembly, stale attribution, honest degrade); manual-edit
+# provenance run assembly/completion + artifact lifecycle enforcement.
+pwb_data_test(data_entity_domain_ops entity_domain_ops_test.cpp
+    data.entity_domain_ops)
+pwb_data_test(data_entity_workspace entity_workspace_test.cpp
+    data.entity_workspace)
+pwb_data_test(data_manual_edit manual_edit_provenance_test.cpp
+    data.manual_edit)
+pwb_data_test(data_fabric_e2e data_fabric_e2e_test.cpp data.data_fabric_e2e)
+# END PWB-V14-DATA-LINEAGE
+

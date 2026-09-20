@@ -511,10 +511,12 @@ int remove_links_for_asset(domain::Json& project_root,
             link.value("asset_id", std::string()) == asset_id;
         if (!drop) kept.push_back(link);
     }
-    if (kept.size() != before) {
+    // Capture before the move: a moved-from nlohmann array is empty.
+    const std::size_t removed = before - kept.size();
+    if (removed != 0) {
         project_root["entity_asset_links"] = std::move(kept);
     }
-    return static_cast<int>(before - kept.size());
+    return static_cast<int>(removed);
 }
 
 LinkPruneResult remove_well_entity(domain::Json& project_root,
@@ -591,8 +593,8 @@ LinkPruneResult remove_asset_links_and_prune_reference_wells(
     }
     result.removed_links =
         static_cast<int>(links->size() - kept.size());
-    project_root["entity_asset_links"] = std::move(kept);
-
+    // Surviving-link scan BEFORE the move: a moved-from nlohmann array is
+    // empty, and an empty scan would orphan every touched reference well.
     std::set<std::string> still_linked_well_ids;
     for (const auto& link : kept) {
         if (!link.is_object()) continue;
@@ -601,6 +603,7 @@ LinkPruneResult remove_asset_links_and_prune_reference_wells(
                 link.value("entity_id", std::string()));
         }
     }
+    project_root["entity_asset_links"] = std::move(kept);
 
     std::set<std::string> orphan_ids;
     auto wells = project_root.find("wells");
