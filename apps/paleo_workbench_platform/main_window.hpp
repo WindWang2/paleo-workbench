@@ -33,6 +33,21 @@
 #include <pwb/ui/edit_tool_controller.hpp>
 #include <pwb/ui/layer_tree_panel.hpp>
 #include <pwb/ui/stage_dock.hpp>
+// BEGIN V14-QGIS-CONTROL
+// Native layer control plane: domain group controller + stage policy +
+// target model over the session map (docs/development/
+// qgis-v14-layer-control/02-architecture.md §D). Wiring scope: open-time
+// reconcile + stage switches + save-time user-edit adoption; real-time
+// tree-model signal write-back is the Prompt-2 integration point
+// (08-known-limitations §2).
+#include <pwb/qgis/layer_tree_stack.hpp>
+#include <pwb/ui_composite/layer_group_controller.hpp>
+#include <pwb/ui_composite/layer_presentation.hpp>
+#include <pwb/ui_composite/layer_stage_controller.hpp>
+#include <pwb/ui_composite/layer_targets.hpp>
+#include <pwb/workspace/state.hpp>
+#include <pwb/workspace/state_ops.hpp>
+// END V14-QGIS-CONTROL
 #include <pwb/ui/workbench_layout.hpp>
 #endif
 
@@ -476,6 +491,31 @@ private:
     // Domain facts per registered layer id (module-only authority: layers
     // opened by this shell carry write grants here until B bindings exist).
     std::map<std::string, pwb::application::DomainLayerFacts> facts_;
+
+    // BEGIN V14-QGIS-CONTROL
+public:
+    // Persist the live layer-control workspace state into the project
+    // document's mapping_workspace section (called by the save path
+    // before ProjectManager::prepare_save).
+    void syncLayerControlOnSave();
+
+private:
+    // Build/attach the control plane over the freshly opened project's
+    // live workspace state + session map, reconcile the desired tree and
+    // restore the stage view (openProject success path).
+    void applyLayerControlForOpen();
+    pwb::qgis::QgsLayerTreeStack* layerTreeStackForTest() {
+        return layer_tree_stack_.get();
+    }
+    std::unique_ptr<pwb::workspace::MappingWorkspaceState> layer_workspace_;
+    std::unique_ptr<pwb::qgis::QgsLayerTreeStack> layer_tree_stack_;
+    std::unique_ptr<pwb::ui_composite::LayerGroupController> layer_groups_;
+    std::unique_ptr<pwb::ui_composite::LayerStageController> layer_stage_;
+    std::unique_ptr<pwb::ui_composite::LayerTargets> layer_targets_;
+    // Last composition snapshots (drives the save-time re-reconcile that
+    // persists adopted user tree edits).
+    std::vector<pwb::ui_composite::LayerSnapshotInput> layer_snapshots_;
+    // END V14-QGIS-CONTROL
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;
     std::function<void(const QString&)> properties_responder_;
