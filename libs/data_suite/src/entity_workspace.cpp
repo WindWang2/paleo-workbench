@@ -35,9 +35,16 @@ const Json* find_array(const Json& root, const char* key) {
     return &*it;
 }
 
+// Null/type-safe string read: nlohmann's value(key, default) returns the
+// default only for an ABSENT key — a present-but-null (or non-string)
+// field would throw type_error out of a read API that must never throw.
 std::string json_string(const Json& node, const char* key,
                         const char* default_value = "") {
-    return node.value(key, std::string(default_value));
+    auto it = node.find(key);
+    if (it == node.end() || !it->is_string()) {
+        return std::string(default_value);
+    }
+    return it->get<std::string>();
 }
 
 }  // namespace
@@ -106,11 +113,13 @@ std::vector<EntityIndexEntry> EntityWorkspaceService::well_index(
         std::map<std::string, int> stale_by_asset;
         const std::vector<StaleLite> items = catalog_->downstream_stale_all();
         for (const auto& item : items) {
-            const std::string& asset = item.nearest_changed_ancestor_asset_id
-                                           .empty()
-                                           ? item.asset_id
-                                           : item.nearest_changed_ancestor_asset_id;
-            ++stale_by_asset[asset];
+            // entity_views.well_index attributes ONLY items that carry a
+            // nearest changed ancestor (impact.py drops the rest), so an
+            // ancestor-less item is skipped rather than charged to its own
+            // asset — otherwise a well could be flagged by a stale item
+            // whose trigger belongs to nobody.
+            if (item.nearest_changed_ancestor_asset_id.empty()) continue;
+            ++stale_by_asset[item.nearest_changed_ancestor_asset_id];
         }
         for (const auto& [asset, count] : stale_by_asset) {
             for (const auto& well_id : asset_to_wells[asset]) {
@@ -391,11 +400,23 @@ RepositoryWorkspaceSource::list_working_copies() {
         // dirty_hint: cheap drift check against the recorded fingerprint
         // (mtime_ns; a missing file counts as dirty — the edit is not where
         // the registry expects it).
+        //
+        // The registry stores the path PROJECT-ROOT-RELATIVE
+        // (working_copy.cpp registers posix_rel_under(target, dir)), so
+        // resolve it against the project dir exactly like the probe does —
+        // a bare relative path would resolve against the process CWD and
+        // mark every row dirty. The comparison uses the SAME clock basis
+        // as the registry write (catalog's mtime_ns_of / posix_shim
+        // stat_path), not raw last_write_time ticks (100 ns on Windows vs
+        // the recorded second-granular value).
+        std::filesystem::path payload(copy.path);
+        if (payload.is_relative()) {
+            payload = project_dir_ / payload;
+        }
         lite.dirty_hint = !copy.payload_mtime_ns.has_value();
         if (copy.payload_mtime_ns.has_value()) {
             std::error_code ec;
-            const auto mtime = std::filesystem::last_write_time(
-                std::filesystem::path(copy.path), ec);
+            const auto mtime = std::filesystem::last_write_time(payload, ec);
             if (ec) {
                 lite.dirty_hint = true;
             } else {

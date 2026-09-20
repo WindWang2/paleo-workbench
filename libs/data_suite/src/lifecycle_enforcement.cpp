@@ -13,6 +13,7 @@ LifecycleDecision lifecycle_for_artifact(std::string_view artifact_kind) {
         catalog::artifact_policy_for(artifact_kind);
     decision.known_kind =
         catalog::is_registered_artifact_kind(artifact_kind);
+    decision.artifact_kind = std::string(artifact_kind);
     decision.artifact_class = policy.artifact_class;
     decision.must_register = policy.must_register;
     decision.stage = policy.data_stage;
@@ -53,13 +54,20 @@ void stamp_lifecycle_metadata(domain::Json& version_metadata,
     }
     domain::Json lifecycle = domain::Json::object();
     lifecycle["class"] = decision.artifact_class;
-    lifecycle["artifact_kind_present"] = true;
+    lifecycle["artifact_kind"] = decision.artifact_kind;
     lifecycle["retention_class"] = decision.retention_class;
     lifecycle["known_kind"] = decision.known_kind;
     if (!decision.rationale.empty()) {
         lifecycle["rationale"] = decision.rationale;
     }
     version_metadata["lifecycle"] = std::move(lifecycle);
+    // Readers of the effective retention (cleanup_eligibility, the Python
+    // service_v11 policy path) look at the TOP-LEVEL key, so mirror it
+    // there too — the nested record alone would be inert.
+    if (!decision.retention_class.empty() &&
+        !version_metadata.contains("retention_class")) {
+        version_metadata["retention_class"] = decision.retention_class;
+    }
 }
 
 }  // namespace pwb::data

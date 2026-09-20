@@ -331,7 +331,13 @@ PWB_TEST(stamp_lifecycle_metadata_is_idempotent_and_existing_wins) {
     PWB_CHECK(metadata["lifecycle"].value("retention_class",
                                           std::string()) == "recomputable");
     PWB_CHECK(metadata["lifecycle"].value("known_kind", false));
-    PWB_CHECK(metadata["lifecycle"].value("artifact_kind_present", false));
+    // The kind string itself is recorded (not a bare boolean), and the
+    // effective retention is mirrored at the TOP level where readers of
+    // the policy look for it.
+    PWB_CHECK(metadata["lifecycle"].value("artifact_kind", std::string()) ==
+              "prediction_intermediate");
+    PWB_CHECK(metadata.value("retention_class", std::string()) ==
+              "recomputable");
 
     // An explicit pre-existing lifecycle object is never overwritten.
     pwb::domain::Json curated = pwb::domain::Json::object();

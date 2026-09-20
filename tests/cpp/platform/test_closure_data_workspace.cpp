@@ -456,6 +456,9 @@ void test_folder_ingest_e2e() {
         PWB_CHECK(lineage.rows.front().version_id == version_id);
         PWB_CHECK(lineage.rows.front().stage == "raw");
 
+        // The helper reads entity links from the project document itself,
+        // so a project that bound 2 links (asserted above) must surface
+        // them in the cascade advice.
         const auto impact =
             delete_impact_summary(project_file, version_id, {});
         PWB_CHECK_MSG(impact.ok, ("impact failed: " + impact.error).c_str());
@@ -463,8 +466,16 @@ void test_folder_ingest_e2e() {
         for (const auto& line : impact.lines)
             counted = counted || contains(line, "受影响版本");
         PWB_CHECK(counted);
-        PWB_CHECK(impact.linked_entities >= 0);
+        // delete_impact links only the entities bound to the DELETED
+        // version's own asset — assert the plumbing is exercised rather
+        // than a specific count (the imported version belongs to one
+        // asset; how many links point at it depends on the plan).
+        PWB_CHECK(impact.broken_edges >= 0);
         PWB_CHECK(impact.live_descendants >= 0);
+        bool entity_line = false;
+        for (const auto& line : impact.lines)
+            entity_line = entity_line || contains(line, "实体");
+        PWB_CHECK(entity_line);
     }
 
     std::error_code cleanup;

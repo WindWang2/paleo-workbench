@@ -174,6 +174,11 @@ pwb_data_test(data_entity_domain_ops entity_domain_ops_test.cpp
     data.entity_domain_ops)
 pwb_data_test(data_entity_workspace entity_workspace_test.cpp
     data.entity_workspace)
+# Scale / structural layer over the same read model: 10k wells + 100k links
+# with a throwing source (zero catalog reads, O(W+L) index ceiling), bounded
+# expand-one-well point lookups, project-switch isolation, snapshot guard.
+pwb_data_test(data_entity_workspace_scale entity_workspace_scale_test.cpp
+    data.entity_workspace_scale)
 pwb_data_test(data_manual_edit manual_edit_provenance_test.cpp
     data.manual_edit)
 pwb_data_test(data_fabric_e2e data_fabric_e2e_test.cpp data.data_fabric_e2e)

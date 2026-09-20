@@ -118,7 +118,6 @@ elseif(PWB_BUILD_CONV_22 AND TARGET Pwb::GeoModel
 endif()
 if(TARGET Pwb::Data AND TARGET Pwb::UiPagesDataQt AND PWB_V14_WELLSEIS)
     add_executable(platform_closure_data test_closure_data_workspace.cpp
-        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_data_workspace.cpp
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_data_workspace.cpp)
     set_target_properties(platform_closure_data PROPERTIES AUTOMOC ON)
     target_compile_features(platform_closure_data PRIVATE cxx_std_20)

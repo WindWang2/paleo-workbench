@@ -29,6 +29,7 @@
 #include <pwb/ui_wellseis/qt/well_detail_panel.hpp>
 
 #include <QApplication>
+#include <QPointer>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QVBoxLayout>
@@ -384,13 +385,31 @@ WorkspaceWiring install_data_workspace(updqt::DataWorkspace& workspace,
                                        std::function<void()> refresh_notify) {
     WorkspaceWiring wiring;
 
-    // Toolbar at the top of the workspace (the first production host of
-    // DataToolbar — its 计划导入 button drives the two-phase ingest).
+    // Toolbar at the top of the workspace's CENTER column (the first
+    // production host of DataToolbar — its 计划导入 button drives the
+    // two-phase ingest). The workspace's own layout is a QHBoxLayout over
+    // the main splitter; the center column is splitter index 1 and owns a
+    // QVBoxLayout, so walk that structure instead of casting the outer
+    // layout (which is horizontal and would never match).
     auto* toolbar = new updqt::DataToolbar(&workspace);
-    if (auto* layout = qobject_cast<QVBoxLayout*>(workspace.layout())) {
-        layout->insertWidget(0, toolbar);
-    } else {
-        toolbar->setParent(&workspace);  // honest fallback: owned, unplaced
+    bool toolbar_placed = false;
+    if (auto* outer = qobject_cast<QHBoxLayout*>(workspace.layout())) {
+        if (auto* splitter =
+                qobject_cast<QSplitter*>(outer->itemAt(0)->widget())) {
+            if (splitter->count() > 1) {
+                if (auto* center =
+                        qobject_cast<QWidget*>(splitter->widget(1))) {
+                    if (auto* center_layout =
+                            qobject_cast<QVBoxLayout*>(center->layout())) {
+                        center_layout->insertWidget(0, toolbar);
+                        toolbar_placed = true;
+                    }
+                }
+            }
+        }
+    }
+    if (!toolbar_placed) {
+        toolbar->setParent(&workspace);  // owned fallback (unplaced)
     }
     wiring.toolbar = toolbar;
 
@@ -413,10 +432,14 @@ WorkspaceWiring install_data_workspace(updqt::DataWorkspace& workspace,
     if (auto* tree = workspace.navigation_tree()) {
         QObject::connect(
             tree, &updqt::NavigationTree::entity_activated, tree,
-            [host](const QString& entity_id) {
+            [host, &workspace](const QString& entity_id) {
                 // Non-well entities (surveys/geological) honestly clear
                 // the panel — well_view() only resolves wells.
-                host->update(entity_id.toStdString());
+                if (host->update(entity_id.toStdString())) {
+                    // The detail lives on a hidden stack page until the
+                    // workspace switches to it (index 2).
+                    workspace.show_well_detail(true);
+                }
             });
     }
 
@@ -425,14 +448,20 @@ WorkspaceWiring install_data_workspace(updqt::DataWorkspace& workspace,
     // seam rebind to the CURRENT store document.
     if (bus != nullptr) {
         QObject::connect(
+            // QPointer, not a raw reference: the workspace can be adopted
+            // and reparented (viz_e_install) and may die before the
+            // shell-owned bus emits again — a dangling &workspace would
+            // crash the next refresh.
             bus, &updqt::AssetSelectionBus::assets_changed, bus,
-            [&workspace, host,
-             store](const std::vector<upd::AssetRow>& rows,
-                    const QString& project_id) {
+            [workspace_guard = QPointer<updqt::DataWorkspace>(&workspace),
+             host, store](const std::vector<upd::AssetRow>& rows,
+                          const QString& project_id) {
                 (void)rows;
                 (void)project_id;
+                auto* workspace = workspace_guard.data();
+                if (workspace == nullptr) return;
                 auto opened = store ? store() : nullptr;
-                auto* tree = workspace.navigation_tree();
+                auto* tree = workspace->navigation_tree();
                 if (opened == nullptr) {
                     if (tree != nullptr) tree->clear_project();
                     host->reconfigure(nullptr, {}, {});

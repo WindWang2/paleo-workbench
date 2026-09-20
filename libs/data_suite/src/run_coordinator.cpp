@@ -498,8 +498,13 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
     version.asset_id = target_asset;
     const LifecycleDecision lifecycle =
         lifecycle_for_artifact(request.artifact_kind);
-    version.stage =
+    // Resolve the stage ONCE: the policy stage for a known artifact kind
+    // wins over the caller's default, and BOTH the payload directory and
+    // the version row must agree (a row saying INTERMEDIATE over bytes
+    // parked under derived/ mis-attributes every stage-aware consumer).
+    const domain::DataStage effective_stage =
         resolve_publish_stage(request.artifact_kind, request.stage);
+    version.stage = effective_stage;
     version.managed = true;
     version.source_uri = pwb::project::path_to_u8(
         fs::weakly_canonical(staged.source_path));
@@ -549,7 +554,7 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
 
     // Phase 2: payload placement.
     auto placed = detail::place_payload(staged.source_path, manager_.path(),
-                                        request.stage, target_asset,
+                                        effective_stage, target_asset,
                                         version.id);
     if (!placed.is_ok()) {
         receipt.diagnostics.push_back(

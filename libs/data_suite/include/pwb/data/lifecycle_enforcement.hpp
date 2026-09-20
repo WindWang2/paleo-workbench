@@ -30,6 +30,7 @@ namespace pwb::data {
 struct LifecycleDecision {
     bool applies = false;  // artifact_kind was provided
     bool known_kind = true;
+    std::string artifact_kind;  // the requested kind (verbatim)
     std::string artifact_class;  // ephemeral|cache|intermediate|derived|output
     bool must_register = true;
     std::optional<domain::DataStage> stage;

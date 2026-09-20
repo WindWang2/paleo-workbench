@@ -784,8 +784,12 @@ std::vector<std::string> run_ids_touching_assets(
         }
         while (rows.step()) emit(rows.text(0));
     }
-    if (!result.empty()) return result;
-    // Fallback: pre-run_inputs stores keep the flat runs.run_id column.
+    // UNION (not fallback): pre-run_inputs stores keep the flat
+    // versions.run_id column, and runs registered WITHOUT typed ports
+    // (e.g. a context-free manual_edit run) appear only there. Python-
+    // written stores have no run_inputs/run_outputs tables at all, so
+    // treating this as an all-or-nothing backup would silently drop runs
+    // from the entity-workspace related-runs rollup.
     for (std::size_t begin = 0; begin < asset_ids.size(); begin += kChunk) {
         const std::size_t end =
             std::min(begin + kChunk, asset_ids.size());

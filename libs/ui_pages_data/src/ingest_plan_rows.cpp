@@ -52,11 +52,18 @@ void apply_plan_rows(pwb::data::IngestPlan& plan,
         if (row.plan_index >= plan.items.size()) continue;
         pwb::data::PlannedItem& item = plan.items[row.plan_index];
         item.role = row.role;
-        if (!row.include && row.decision == kPlanDecisionPending) {
-            item.decision = kPlanDecisionSkip;  // excluded → never executes
+        // An excluded row NEVER executes regardless of its decision
+        // string (the review model's include flag is the user's final
+        // word; validation() already accounts for it).
+        if (!row.include) {
+            item.decision = kPlanDecisionSkip;
         } else {
             item.decision = row.decision;
         }
+        // Carry the reviewed primary proposal back: the model's
+        // single-primary recomputation is the slot invariant the executor
+        // binds from, so dropping it would silently discard the preview.
+        item.primary = row.primary;
     }
 }
 

@@ -205,7 +205,8 @@ PWB_TEST(well_index_with_stale_attributes_through_nearest_ancestor) {
     FakeSource fake;
     // Two stale items descend from assets hanging off a1 (the changed
     // ancestor maps onto W1 through the link); one item has NO ancestor
-    // and maps by its own asset id a2 → W2; one maps nowhere.
+    // (impact.py drops those — attribution skips them); one maps to an
+    // asset no well links.
     fake.stale_all = {stale("v1", "a9", "a1"), stale("v2", "a10", "a1"),
                       stale("v3", "a2", ""), stale("v4", "a404", "zz")};
 
@@ -213,7 +214,7 @@ PWB_TEST(well_index_with_stale_attributes_through_nearest_ancestor) {
     const auto entries = service.well_index(true);
     PWB_CHECK(entries.size() == 3);
     PWB_CHECK(entries[0].stale_count == 2);  // via ancestor a1 → W1
-    PWB_CHECK(entries[1].stale_count == 1);  // own asset a2 → W2
+    PWB_CHECK(entries[1].stale_count == 0);  // ancestor-less item skipped
     PWB_CHECK(entries[2].stale_count == 0);  // unlinked well
     PWB_CHECK((entries[0].role_fill ==
                std::map<std::string, int>{{"well_log", 1}}));
