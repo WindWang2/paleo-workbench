@@ -240,6 +240,18 @@ std::uint64_t Pcg64::random_bounded_uint64(std::uint64_t rng) {
     if (rng == 0xFFFFFFFFFFFFFFFFull) return next_uint64();
     // bounded_lemire_uint64(rng): rng inclusive.
     const std::uint64_t rng_excl = rng + 1;
+#if defined(_MSC_VER)
+    // MSVC has no __uint128_t; _umul128 carries the same Lemire product.
+    unsigned long long hi = 0;
+    std::uint64_t leftover = _umul128(next_uint64(), rng_excl, &hi);
+    if (leftover < rng_excl) {
+        const std::uint64_t threshold = (0xFFFFFFFFFFFFFFFFull - rng) % rng_excl;
+        while (leftover < threshold) {
+            leftover = _umul128(next_uint64(), rng_excl, &hi);
+        }
+    }
+    return hi;
+#else
     __uint128_t m = static_cast<__uint128_t>(next_uint64()) * rng_excl;
     std::uint64_t leftover = static_cast<std::uint64_t>(m);
     if (leftover < rng_excl) {
@@ -250,6 +262,7 @@ std::uint64_t Pcg64::random_bounded_uint64(std::uint64_t rng) {
         }
     }
     return static_cast<std::uint64_t>(m >> 64);
+#endif
 }
 
 std::vector<std::size_t> choice_indices_without_replacement(

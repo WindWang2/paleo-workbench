@@ -407,7 +407,7 @@ PWB_TEST(data_fabric_full_loop) {
         PWB_CHECK(!view->stale_items.empty());
         PWB_CHECK(view->intermediate_count == 1);
         bool saw_intermediate_asset = false, saw_facies = false;
-        for (const auto& slot : view->slots) {
+        for (const auto& slot : view->role_slots) {
             for (const auto& member : slot.members) {
                 if (member.asset_id == intermediate_asset) {
                     saw_intermediate_asset = true;

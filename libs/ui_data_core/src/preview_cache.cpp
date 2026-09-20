@@ -20,10 +20,17 @@ long long preview_result_weight(const PreviewResult& value) {
 
 std::optional<std::pair<long long, long long>> safe_file_stat(
     const std::filesystem::path& path) {
+#if defined(_WIN32)
+    struct _stat64 st {};
+    if (_wstat64(path.c_str(), &st) != 0) {
+        return std::nullopt;
+    }
+#else
     struct stat st {};
     if (::stat(path.c_str(), &st) != 0) {
         return std::nullopt;
     }
+#endif
     long long mtime_ns;
 #ifdef st_mtime  // glibc macro → st_mtim.tv_sec
     mtime_ns = static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL +

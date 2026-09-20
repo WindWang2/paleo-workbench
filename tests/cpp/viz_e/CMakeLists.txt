@@ -16,7 +16,11 @@
 add_executable(viz_e.pa_flow pa_flow_test.cpp)
 target_compile_features(viz_e.pa_flow PRIVATE cxx_std_20)
 target_include_directories(viz_e.pa_flow PRIVATE
-    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
+    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
+    # PWB-V14-DATA-LINEAGE: the pa_flow assertions drive
+    # DataWorkspace::asset_table() (DataAssetTable); the workspace header
+    # only forward-declares it.
+    ${CMAKE_SOURCE_DIR}/libs/ui_pages_data/include)
 target_sources(viz_e.pa_flow PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/job_center.cpp
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/viz_e_dat_preview.cpp

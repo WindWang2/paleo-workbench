@@ -142,7 +142,7 @@ StaleLite stale(const std::string& version_id, const std::string& asset_id,
 }
 
 const RoleSlot* slot_for(const EntityDataView& view, const std::string& role) {
-    for (const auto& slot : view.slots) {
+    for (const auto& slot : view.role_slots) {
         if (slot.role == role) return &slot;
     }
     return nullptr;
@@ -307,15 +307,15 @@ PWB_TEST(well_view_assembles_slots_members_and_rollups) {
     PWB_CHECK(view->uwi == "100/1-1");
 
     // Slots in registry order (full well vocabulary, empty slots included).
-    PWB_CHECK(view->slots.size() == 9);
+    PWB_CHECK(view->role_slots.size() == 9);
     const std::vector<std::string> roles = {
         "well_head", "well_log", "trajectory", "tops", "time_depth", "core",
         "interpretation", "qc", "other"};
     for (std::size_t i = 0; i < roles.size(); ++i) {
-        PWB_CHECK(view->slots[i].role == roles[i]);
+        PWB_CHECK(view->role_slots[i].role == roles[i]);
     }
-    PWB_CHECK(view->slots[1].display == "测井曲线");
-    PWB_CHECK(view->slots[3].display == "分层顶");
+    PWB_CHECK(view->role_slots[1].display == "测井曲线");
+    PWB_CHECK(view->role_slots[3].display == "分层顶");
 
     // well_log members sorted (is_primary, ordinal, name): ordinal 1 wins
     // over the alphabetically-first name.
@@ -382,7 +382,7 @@ PWB_TEST(well_view_assembles_slots_members_and_rollups) {
 
     // with_stale defaults to false: no stale items were requested.
     PWB_CHECK(view->stale_items.empty());
-    PWB_CHECK(view->stale_count() == 0);
+    PWB_CHECK(view->stale_total() == 0);
 }
 
 PWB_TEST(well_view_unknown_id_and_survey_view) {
@@ -413,12 +413,12 @@ PWB_TEST(well_view_unknown_id_and_survey_view) {
     PWB_CHECK(view->name == "East 3D");
     PWB_CHECK(view->uwi.empty());
     // Full survey vocabulary in registry order.
-    PWB_CHECK(view->slots.size() == 7);
+    PWB_CHECK(view->role_slots.size() == 7);
     const std::vector<std::string> roles = {
         "seismic_volume", "geometry", "velocity", "horizon", "fault",
         "interpretation", "other"};
     for (std::size_t i = 0; i < roles.size(); ++i) {
-        PWB_CHECK(view->slots[i].role == roles[i]);
+        PWB_CHECK(view->role_slots[i].role == roles[i]);
     }
     const RoleSlot* volume_slot = slot_for(*view, "seismic_volume");
     PWB_CHECK(volume_slot != nullptr);
@@ -446,7 +446,7 @@ PWB_TEST(null_catalog_degrades_to_unresolved_placeholder_names) {
     const pwb::data::EntityWorkspaceService service(root, nullptr);
     const auto view = service.well_view("W1");
     PWB_CHECK(view.has_value());
-    PWB_CHECK(view->slots.size() == 9);
+    PWB_CHECK(view->role_slots.size() == 9);
 
     const RoleSlot* log_slot = slot_for(*view, "well_log");
     PWB_CHECK(log_slot != nullptr);

@@ -273,10 +273,10 @@ std::optional<EntityDataView> EntityWorkspaceService::entity_view(
     view.entity_id = entity_id;
     view.name = node.name;
     view.uwi = node.uwi;
-    view.slots = slots_for_entity(entity_type, entity_id);
+    view.role_slots = slots_for_entity(entity_type, entity_id);
 
     std::vector<std::string> member_asset_ids;
-    for (const auto& slot : view.slots) {
+    for (const auto& slot : view.role_slots) {
         for (const auto& member : slot.members) {
             member_asset_ids.push_back(member.asset_id);
             if (member.stage == "intermediate") ++view.intermediate_count;

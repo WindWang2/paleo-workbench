@@ -17,8 +17,14 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
+#if defined(_WIN32)
+#include <process.h>
+inline int pwb_test_pid() { return _getpid(); }
+#else
+#include <unistd.h>
+inline int pwb_test_pid() { return static_cast<int>(::getpid()); }
+#endif
 
 using pwb::domain::Json;
 using pwb::domain::JsonDiff;
@@ -382,10 +388,11 @@ AdapterSpec spec_from_stub(const Json& stub) {
             if (frozen.contains("metadata")) {
                 result.metadata = frozen["metadata"];
             }
-            for (const auto& w : frozen.value("warnings", Json::array())) {
+            const Json empty_array = Json::array();
+            for (const auto& w : frozen.value("warnings", empty_array)) {
                 result.warnings.push_back(w.get<std::string>());
             }
-            for (const auto& e : frozen.value("errors", Json::array())) {
+            for (const auto& e : frozen.value("errors", empty_array)) {
                 result.errors.push_back(e.get<std::string>());
             }
             return result;

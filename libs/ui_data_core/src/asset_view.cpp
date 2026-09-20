@@ -12,7 +12,12 @@
 #include <cstdio>
 #include <ctime>
 #include <stdexcept>
+#if !defined(_WIN32)
 #include <sys/stat.h>
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
 
 namespace pwb::ui_data_core {
 
@@ -318,10 +323,20 @@ std::string resource_type_display_label(std::string_view type,
 
 std::optional<StatNode> FsProbeCache::stat_node(
     const std::filesystem::path& path) const {
+    // PWB-V14-DATA-LINEAGE: MSVC has no wchar-capable ::stat; _wstat64
+    // carries the same fields (st_mtime is second-granular there, matching
+    // the #ifdef st_mtime fallback below).
+#if defined(_WIN32)
+    struct _stat64 st {};
+    if (_wstat64(path.c_str(), &st) != 0) {
+        return std::nullopt;
+    }
+#else
     struct stat st {};
     if (::stat(path.c_str(), &st) != 0) {
         return std::nullopt;
     }
+#endif
     StatNode node;
     node.size = static_cast<long long>(st.st_size);
     node.mtime = static_cast<double>(st.st_mtime);
@@ -332,8 +347,13 @@ std::optional<StatNode> FsProbeCache::stat_node(
     node.mtime_ns = static_cast<long long>(st.st_mtime) * 1000000000LL;
 #endif
     node.mode = static_cast<unsigned int>(st.st_mode);
+#if defined(_WIN32)
+    node.is_regular = (st.st_mode & _S_IFMT) == _S_IFREG;
+    node.is_directory = (st.st_mode & _S_IFMT) == _S_IFDIR;
+#else
     node.is_regular = S_ISREG(st.st_mode);
     node.is_directory = S_ISDIR(st.st_mode);
+#endif
     return node;
 }
 
@@ -383,9 +403,15 @@ bool path_is_dir_safe(const std::filesystem::path& path) {
 std::string format_mtime_minutes(double mtime_seconds) {
     const std::time_t t = static_cast<std::time_t>(mtime_seconds);
     std::tm tm_value {};
+#if defined(_WIN32)
+    if (localtime_s(&tm_value, &t) != 0) {
+        return "—";
+    }
+#else
     if (::localtime_r(&t, &tm_value) == nullptr) {
         return "—";
     }
+#endif
     char buf[32];
     if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm_value) == 0) {
         return "—";
@@ -446,6 +472,20 @@ AssetView asset_view_from_resource(const ResourceItem& resource,
         file_exists = path_exists_safe(path_obj);
         std::error_code ec;
         if (file_exists && std::filesystem::is_regular_file(path_obj, ec) && !ec) {
+            // PWB-V14-DATA-LINEAGE: _wstat64 on Windows (no wchar
+            // ::stat overload; st_mtime is second-granular there).
+#if defined(_WIN32)
+            struct _stat64 st {};
+            if (_wstat64(path_obj.c_str(), &st) == 0) {
+                transient.size = static_cast<long long>(st.st_size);
+                transient.mtime = static_cast<double>(st.st_mtime);
+                transient.mtime_ns =
+                    static_cast<long long>(st.st_mtime) * 1000000000LL;
+                transient.mode = st.st_mode;
+                transient.is_regular = true;
+                stat_node = &transient;
+            }
+#else
             struct stat st {};
             if (::stat(path_obj.c_str(), &st) == 0) {
                 transient.size = static_cast<long long>(st.st_size);
@@ -457,6 +497,7 @@ AssetView asset_view_from_resource(const ResourceItem& resource,
                 transient.is_regular = true;
                 stat_node = &transient;
             }
+#endif
         }
     }
 
@@ -550,8 +591,13 @@ AssetView asset_view_from_artifact(const ExportArtifact& artifact,
         file_exists = path_exists_safe(path_obj);
         std::error_code ec;
         if (file_exists && std::filesystem::is_regular_file(path_obj, ec) && !ec) {
+#if defined(_WIN32)
+            struct _stat64 st {};
+            if (_wstat64(path_obj.c_str(), &st) == 0) {
+#else
             struct stat st {};
             if (::stat(path_obj.c_str(), &st) == 0) {
+#endif
                 transient_artifact.size = static_cast<long long>(st.st_size);
                 transient_artifact.mtime = static_cast<double>(st.st_mtime);
                 transient_artifact.is_regular = true;

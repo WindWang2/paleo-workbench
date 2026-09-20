@@ -20,6 +20,10 @@
 
 #pragma once
 
+// PWB-V14-DATA-LINEAGE: std::string used below without its header
+// (g++ pulled it in transitively).
+#include <string>
+
 #include <functional>
 #include <memory>
 

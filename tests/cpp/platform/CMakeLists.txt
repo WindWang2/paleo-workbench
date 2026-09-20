@@ -100,6 +100,55 @@ pwb_add_platform_test(qgis_smoke test_qgis_smoke.cpp)
 pwb_add_platform_test(edit_cycle test_edit_cycle.cpp)
 pwb_add_platform_test(lifecycle_cycles test_lifecycle.cpp)
 pwb_add_platform_test(export_layout test_export.cpp)
+# BEGIN PWB-V14-DATA-LINEAGE (P4)
+# closure_data wiring battery: nav-tree population, ingest-plan review
+# model + dialog, well-detail slice/host, folder-ingest E2E + lineage/
+# impact helpers. Needs the data closure AND the data pages; ui_wellseis
+# joins the build from the root UI-09 block AFTER this directory, so the
+# guard mirrors its gate (CONV_22 + GeoModel + Domain + JobRuntime predict
+# Pwb::UiWorkers → Pwb::UiWellseisQt) and the link uses the PLAIN target
+# name pwb_ui_wellseis_qt (generate-time target resolution).
+set(PWB_V14_WELLSEIS OFF)
+if(TARGET Pwb::UiWellseisQt)
+    set(PWB_V14_WELLSEIS ON)
+elseif(PWB_BUILD_CONV_22 AND TARGET Pwb::GeoModel
+       AND TARGET Pwb::Domain AND TARGET Pwb::JobRuntime
+       AND TARGET Qt6::Widgets)
+    set(PWB_V14_WELLSEIS ON)
+endif()
+if(TARGET Pwb::Data AND TARGET Pwb::UiPagesDataQt AND PWB_V14_WELLSEIS)
+    add_executable(platform_closure_data test_closure_data_workspace.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_data_workspace.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_data_workspace.cpp)
+    set_target_properties(platform_closure_data PROPERTIES AUTOMOC ON)
+    target_compile_features(platform_closure_data PRIVATE cxx_std_20)
+    target_include_directories(platform_closure_data PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
+        ${CMAKE_SOURCE_DIR}/libs/application/include
+        ${CMAKE_SOURCE_DIR}/libs/domain/include
+        ${CMAKE_SOURCE_DIR}/libs/catalog/include
+        ${CMAKE_SOURCE_DIR}/libs/data_suite/include
+        ${CMAKE_SOURCE_DIR}/libs/project/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_pages_data/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_wellseis/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_data_core/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_pages_preview/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_seqviz/include
+        ${CMAKE_SOURCE_DIR}/libs/viz_charts/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_canvas/include
+        ${CMAKE_SOURCE_DIR}/libs/seismic_io/include
+        ${CMAKE_SOURCE_DIR}/libs/ingest/include)
+    target_link_libraries(platform_closure_data PRIVATE
+        Pwb::Data Pwb::Application Pwb::UiPagesData Pwb::UiPagesDataQt
+        Pwb::UiWellseis pwb_ui_wellseis_qt Qt6::Widgets)
+    add_test(NAME platform.closure_data COMMAND platform_closure_data)
+    set_tests_properties(platform.closure_data PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+endif()
+# END PWB-V14-DATA-LINEAGE
 # BEGIN CONV-29
 if(PWB_BUILD_CONV_29)
     pwb_add_platform_test(composition_export test_composition_export.cpp)

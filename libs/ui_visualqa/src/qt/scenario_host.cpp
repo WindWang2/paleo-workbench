@@ -41,6 +41,11 @@
 
 namespace pwb::ui_visualqa::qt {
 
+// PWB-V14-DATA-LINEAGE: this TU's scenario blocks reference shell:: —
+// the pwb::ui_shell short alias the Python-side scenario DSL used. Define
+// it locally (was an unresolved name on MSVC builds of this lib).
+namespace shell = pwb::ui_shell;
+
 namespace {
 
 QString qs(const std::string& s) {

@@ -25,6 +25,23 @@
 #include <string>
 #include <system_error>
 #include <vector>
+// PWB-V14-DATA-LINEAGE: setenv/unsetenv are POSIX-only; the MSVC CRT
+// equivalent (process environment) with the same semantics for tests.
+#if defined(_WIN32)
+#include <stdlib.h>
+inline int pwb_env_set(const char* name, const char* value, int overwrite) {
+    (void)overwrite;
+    return _putenv_s(name, value);
+}
+inline int pwb_env_unset(const char* name) { return _putenv_s(name, ""); }
+#else
+#include <stdlib.h>
+inline int pwb_env_set(const char* name, const char* value, int overwrite) {
+    return pwb_env_set(name, value, overwrite);
+}
+inline int pwb_env_unset(const char* name) { return pwb_env_unset(name); }
+#endif
+
 
 namespace {
 
@@ -266,7 +283,7 @@ void set_env_var(const char* name, const char* value) {
     std::string kv = std::string(name) + "=" + value;
     _putenv(kv.c_str());
 #else
-    setenv(name, value, 1);
+    pwb_env_set(name, value, 1);
 #endif
 }
 
@@ -274,7 +291,7 @@ void unset_env_var(const char* name) {
 #if defined(_WIN32)
     _putenv((std::string(name) + "=").c_str());
 #else
-    unsetenv(name);
+    pwb_env_unset(name);
 #endif
 }
 

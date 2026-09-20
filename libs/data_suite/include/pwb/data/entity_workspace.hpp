@@ -14,6 +14,7 @@
 // lookups only (500-id chunked SQL; never list_assets()).
 #pragma once
 
+
 #include "pwb/data/entity_identity.hpp"
 
 #include <filesystem>
@@ -108,12 +109,15 @@ struct EntityDataView {
     std::string entity_id;
     std::string name;
     std::string uwi;
-    std::vector<RoleSlot> slots;  // registry order; unknown roles appended
+    std::vector<RoleSlot> role_slots;  // registry order; unknown roles appended
     std::vector<StaleLite> stale_items;  // only when with_stale
     std::vector<std::string> missing_source_asset_ids;
     std::vector<WorkingCopyLite> uncommitted_edits;
     // Workspace IA rollups (V14 additions over the Python shape):
-    int stale_count() const { return static_cast<int>(stale_items.size()); }
+    // Named stale_total (not stale_count) so it can never be confused with
+    // EntityIndexEntry::stale_count — the field of the same name on the
+    // sibling struct.
+    int stale_total() const { return static_cast<int>(stale_items.size()); }
     int intermediate_count = 0;  // members whose current stage = intermediate
     int derived_count = 0;
     int output_count = 0;

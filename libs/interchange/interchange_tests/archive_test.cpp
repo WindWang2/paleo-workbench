@@ -28,8 +28,14 @@
 #include <map>
 #include <sstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
+#if defined(_WIN32)
+#include <process.h>
+inline int pwb_test_pid() { return _getpid(); }
+#else
+#include <unistd.h>
+inline int pwb_test_pid() { return static_cast<int>(::getpid()); }
+#endif
 
 using pwb::domain::Json;
 using pwb::domain::JsonDiff;
@@ -1161,13 +1167,35 @@ const ZipEntryInfo* reader_find_read(ZipReader& reader, const std::string& name)
 
 int main() {
     const Json oracle = load_oracle();
+#if defined(_WIN32)
+    // mkdtemp is POSIX-only; same contract (a fresh unique created
+    // directory) via the temp root + pid/suffix probe loop.
+    std::filesystem::path work;
+    for (unsigned attempt = 0; attempt < 512; ++attempt) {
+        const std::filesystem::path candidate =
+            std::filesystem::temp_directory_path() /
+            ("pwb_interchange_archive_" +
+             std::to_string(pwb_test_pid()) + "_" +
+             std::to_string(attempt));
+        std::error_code ec;
+        if (std::filesystem::create_directory(candidate, ec)) {
+            work = candidate;
+            break;
+        }
+    }
+    if (work.empty()) {
+        std::fprintf(stderr, "FAIL mkdtemp-equivalent\\n");
+        return 1;
+    }
+#else
     char template_path[] = "/tmp/pwb_interchange_archive_XXXXXX";
     const char* created = mkdtemp(template_path);
     if (created == nullptr) {
-        std::fprintf(stderr, "FAIL mkdtemp\n");
+        std::fprintf(stderr, "FAIL mkdtemp\\n");
         return 1;
     }
     const std::filesystem::path work(created);
+#endif
     g_frozen_created_at =
         oracle["meta"]["frozen_created_at"].get<std::string>();
     g_application_version =

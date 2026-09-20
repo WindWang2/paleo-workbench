@@ -1209,12 +1209,17 @@ if(TARGET pwb-platform
         # plus the document save seam and a reopen traceability round.
         # Needs the project-data closure (Pwb::Data) for the store.
         if(TARGET Pwb::ClosureReview AND TARGET Pwb::Data)
+            # PWB-V14-DATA-LINEAGE: shell_project_actions.cpp defines the
+            # MainWindow save/properties/bootstrap seams this battery links
+            # against (main_window.cpp references them); it was missing from
+            # this target's source list.
             add_executable(platform_closure_review_install
                 tests/cpp/platform/test_closure_review_install.cpp
                 apps/paleo_workbench_platform/main_window.cpp
                 apps/paleo_workbench_platform/app_context.cpp
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
+                apps/paleo_workbench_platform/shell_project_actions.cpp
                 apps/paleo_workbench_platform/closure_review_install.cpp)
             if(COMMAND pwb_link_job_runtime)
                 pwb_link_job_runtime(platform_closure_review_install)
@@ -1520,11 +1525,14 @@ if(TARGET pwb-platform
         Pwb::VizCharts Pwb::Application)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_MAPPING=1)
 
+    # PWB-V14-DATA-LINEAGE: shell_project_actions.cpp defines the
+    # MainWindow save/properties/bootstrap seams this battery links.
     add_executable(platform_closure_mapping tests/cpp/platform/test_closure_mapping.cpp
         apps/paleo_workbench_platform/app_shell.cpp
         apps/paleo_workbench_platform/main_window.cpp
         apps/paleo_workbench_platform/app_context.cpp
         apps/paleo_workbench_platform/diagnostics.cpp
+        apps/paleo_workbench_platform/shell_project_actions.cpp
         apps/paleo_workbench_platform/closure_mapping_document.cpp
         apps/paleo_workbench_platform/closure_mapping_install.cpp)
     pwb_link_job_runtime(platform_closure_mapping)
