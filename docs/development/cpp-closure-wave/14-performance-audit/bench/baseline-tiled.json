@@ -1,0 +1,58 @@
+{
+  "tool": "pwb-bench",
+  "format_version": 1,
+  "environment": {
+    "sysname": "Linux",
+    "release": "7.2.5-1-cachyos",
+    "machine": "x86_64",
+    "nodename": "cachyos-x8664",
+    "cpu_count": 40,
+    "cxx_compiler": "gcc 16.2",
+    "build_flavor": "ndebug",
+    "thread_env": {
+      "OMP_NUM_THREADS": "",
+      "OPENBLAS_NUM_THREADS": "",
+      "MKL_NUM_THREADS": "",
+      "CMAKE_BUILD_PARALLEL_LEVEL": "",
+      "CTEST_PARALLEL_LEVEL": ""
+    },
+    "pid": 3964603
+  },
+  "scenarios": {
+    "tiled": {
+      "samples_ms": [
+        2708.095791,
+        2570.258358,
+        2541.857183,
+        2593.167685,
+        2611.218359
+      ],
+      "median_ms": 2593.167685,
+      "p95_ms": 2708.095791,
+      "min_ms": 2541.857183,
+      "max_ms": 2708.095791,
+      "first_ms": 2708.095791,
+      "sample_count": 5,
+      "alloc_calls": 104860775,
+      "alloc_bytes": 6085652725,
+      "io_read_bytes": 0,
+      "io_write_bytes": 921600,
+      "io_rchar": 5242986,
+      "io_wchar": 450,
+      "io_syscr": 12,
+      "io_syscw": 225,
+      "peak_rss_mib": 229.50390625,
+      "voxels": 20971520,
+      "tiles_total": 45,
+      "tiles_done": 45,
+      "tile": [
+        64,
+        128,
+        128
+      ],
+      "overlap": 8,
+      "batch": 4,
+      "digest": "5725887231168153417"
+    }
+  }
+}

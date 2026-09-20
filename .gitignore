@@ -104,3 +104,7 @@ scratch_wt_batched*
 .workbuddy/
 
 a.out
+
+# Line-14 benchmark working dir: fixtures + reports are regenerated
+# by tools/pwb-bench; reports are archived under docs/development/.
+bench-out/
