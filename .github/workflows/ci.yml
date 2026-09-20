@@ -533,7 +533,12 @@ jobs:
 
       - name: Assert realdata_smoke family has not silently shrunk
         run: |
-          count="$(python -m pytest --collect-only -q -m realdata_smoke tests/test_geoviz_pr_realdata_smoke.py 2>&1 | awk -F': ' '/\.py: [0-9]+$/ {s+=$NF} END {print s+0}')"
+          count="$(python -m pytest --collect-only -q -m realdata_smoke tests/test_geoviz_pr_realdata_smoke.py 2>&1 | python -c '
+          import re, sys
+          text = sys.stdin.read()
+          m = re.search(r"(?m)^(\d+)(?:/\d+)? tests? collected", text)
+          print(int(m.group(1)) if m else 0
+          )')"
           echo "realdata_smoke tests collected: ${count} (baseline 7)"
           test -n "${count}" && test "${count}" -ge 7
 
