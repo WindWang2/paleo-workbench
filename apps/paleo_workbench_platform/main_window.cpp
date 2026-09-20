@@ -553,6 +553,11 @@ void MainWindow::buildUi() {
     auto* well_log_host = new pwb::viz::WellLogHostWidget(well_log_dock);
     well_log_dock->setWidget(well_log_host);
     addDockWidget(Qt::RightDockWidgetArea, well_log_dock);
+// BEGIN PWB-V14-THREE-STAGE — selection-bus sink target (dock raise).
+#ifdef PWB_WITH_STAGE_FLOW
+    stage_flow_well_log_dock_ = well_log_dock;
+#endif
+// END PWB-V14-THREE-STAGE
 
     // Native track settings (this branch): layout/template/export panel
     // bound to the host; interpretation events surface in the status bar.
@@ -678,6 +683,13 @@ void MainWindow::buildUi() {
     }
 #endif
 // END CLOSURE-MAPPING
+// BEGIN PWB-V14-THREE-STAGE — three-stage workbench install: stage bar
+// mount + controller seams + production commands + task-center
+// providers + selection bus. Last so every adopted surface exists.
+#ifdef PWB_WITH_STAGE_FLOW
+    installStageFlow();
+#endif
+// END PWB-V14-THREE-STAGE
 }
 
 #ifdef PWB_WITH_APP_SHELL
@@ -1433,6 +1445,13 @@ QString MainWindow::openProject(const QString& project_file) {
                                                     project_file);
         refreshRecentProjects();
     }
+// BEGIN PWB-V14-THREE-STAGE — the mapping stage follows the project
+// document (mapping_workspace.current_stage; lenient fallback) and the
+// selection bus rebinds to the fresh project token.
+#ifdef PWB_WITH_STAGE_FLOW
+    restoreStageFromProject();
+#endif
+// END PWB-V14-THREE-STAGE
 // BEGIN VIZ-B
 #ifdef PWB_WITH_VIZ_B
     if (viz_b_dock_ != nullptr) {
