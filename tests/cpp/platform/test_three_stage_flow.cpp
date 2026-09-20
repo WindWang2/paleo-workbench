@@ -113,8 +113,7 @@ void check_stage_switch_and_layout(MainWindow& window) {
     if (auto* page = shell->mapping_page()) {
         if (page->dock_manager() != nullptr) {
             PWB_CHECK(page->dock_manager()->is_panel_visible("composer"));
-            PWB_CHECK(!page->dock_manager()->is_panel_visible("bottom")
-                      || true);  // bottom is stage-3 visible by profile
+            // bottom hosts the stage-3 factor reference strip.
             PWB_CHECK(page->dock_manager()->is_panel_visible("bottom"));
         }
     }
@@ -215,21 +214,30 @@ int main(int argc, char** argv) {
             window.restoreStageFromProject();
             PWB_CHECK(window.stageFlow()->snapshot().stage_value ==
                       "integrated_compilation");
-            // Unknown value: refused (lenient default stays).
+            // Unknown value: the codec lenient-falls-back to stage 1
+            // (workspace state.cpp) — the restore applies that fallback,
+            // it does NOT keep the previous stage.
             root["mapping_workspace"]["current_stage"] = "stage_four";
             window.restoreStageFromProject();
             PWB_CHECK(window.stageFlow()->snapshot().stage_value ==
-                      "integrated_compilation");
+                      "facies_calibration");
         } else {
-            // No project: the snapshot reports the honest no-project state.
+            // No project: the snapshot reports the honest no-project state
+            // and the restore is a no-op.
             PWB_CHECK(!window.stageFlow()->snapshot().project_open);
+            const auto before =
+                window.stageFlow()->snapshot().stage_value;
+            window.restoreStageFromProject();
+            PWB_CHECK(window.stageFlow()->snapshot().stage_value == before);
         }
 #endif
     }
 
     // Second window: idempotent re-registration (same-id replace) and an
     // independent controller — the global registry and the per-window
-    // stage state must not interfere.
+    // stage state must not interfere. After the window's destruction the
+    // process-global registry must no longer hold its closures (a
+    // dangling-callback palette invocation would be a UAF).
     {
         MainWindow second;
         second.show();
@@ -237,6 +245,16 @@ int main(int argc, char** argv) {
         second.stageFlow()->request_stage("constraint_factor");
         PWB_CHECK(second.stageFlow()->snapshot().stage_value ==
                       "constraint_factor");
+    }
+    // The window is destroyed: the second-window command registrations
+    // were unregistered (destroyed hook), so a with-context evaluate on
+    // the survivors stays safe.
+    {
+        pwb::ui_shell::CommandContext context;
+        context.mapping_stage = "constraint_factor";
+        const auto verdict = pwb::ui_shell::command_registry().evaluate(
+            "panel.toggle.reference", &context);
+        PWB_CHECK(!verdict.enabled || verdict.reason.empty());
     }
 
     pwb::qgis::QgisRuntime::release();

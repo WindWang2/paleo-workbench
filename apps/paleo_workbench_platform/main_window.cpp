@@ -137,6 +137,7 @@
 #if __has_include(<pwb/closure_science/qt/page_binding.hpp>)
 #include <pwb/closure_science/qt/page_binding.hpp>
 #endif
+#include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/status_bar.hpp>
 // cpp-close-12 — palette tool-details come from the canonical explain()
@@ -419,6 +420,17 @@ void MainWindow::init_shell(QSettings* services_settings) {
 }
 
 MainWindow::~MainWindow() {
+#ifdef PWB_WITH_STAGE_FLOW
+    // The process-global command registry must not keep this window's
+    // closures after destruction (a palette evaluate on another window
+    // would dereference a dead this). Unregister HERE — in the body,
+    // while stage_flow_command_ids_ is still alive (a destroyed-signal
+    // hook runs in ~QObject, after member destruction).
+    for (const std::string& id : stage_flow_command_ids_) {
+        pwb::ui_shell::command_registry().unregister(id);
+    }
+    stage_flow_command_ids_.clear();
+#endif
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — stop job bodies at their next safe point and drain with a
     // bounded wait so no job can touch members during teardown (the
@@ -3364,6 +3376,13 @@ void MainWindow::applyStageValue(const std::string& value) {
     if (stage_dock_ != nullptr) stage_dock_->set_current_stage(*stage);
     refreshActionStates();
     refresh_readiness();
+    // V14-THREE-STAGE-UX: every stage surface follows the authority —
+    // the StageDock path (and any future writer) refreshes the flow
+    // projection too (true-change contract makes the request_stage path's
+    // extra refresh a no-op; no loop: refresh never writes the session).
+#ifdef PWB_WITH_STAGE_FLOW
+    if (stage_flow_ != nullptr) stage_flow_->refresh();
+#endif
 }
 
 pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {

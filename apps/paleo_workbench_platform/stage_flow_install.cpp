@@ -133,8 +133,10 @@ const std::vector<CommandSeed>& command_seeds() {
          "面板 日志 log", "面板", "", {}, false},
         {"panel.toggle.console", "控制台 开/关", "显示或隐藏控制台",
          "面板 console 控制台", "面板", "", {}, false},
-        {"panel.toggle.layers", "图层面板 开/关", "编图画布的图层面板",
-         "面板 layer 图层", "面板", "", {}, false},
+        // (no panel.toggle.layers: the mapping page registers
+        // reference/chrome/composer/bottom only; the workstation's own
+        // layer dock is composite_layer — an always-on surface the
+        // profiles deliberately do not manage.)
         {"panel.toggle.reference", "参考图面板 开/关", "编图画布的参考图面板",
          "面板 reference 参考", "面板", "", {kStage2Value, kStage3Value},
          false},
@@ -226,13 +228,17 @@ void MainWindow::restoreStageFromProject() {
 #ifdef PWB_WITH_DATA_INTEGRATION
     const auto store = context_.projectStore();
     if (store == nullptr) return;
+    // Const read: the non-const mapping_workspace() INSERTS an empty
+    // object into the live document when the section is absent (an
+    // unlocked mutation this restore path must not make).
+    const pwb::project::ProjectDocument& document = store->document();
+    domain::DiagnosticList diagnostics;
     const pwb::workspace::MappingWorkspaceState state =
         pwb::workspace::MappingWorkspaceState::from_json(
-            store->document().mapping_workspace(),
-            store->document().diagnostics());
+            document.mapping_workspace(), diagnostics);
     // The authority write canonicalizes and (with the CONV-27 closure)
-    // refreshes dock/readiness/actions; unknown values are refused there
-    // (the lenient stage-1 default stays).
+    // refreshes dock/readiness/actions; an unknown persisted value was
+    // already lenient-fallbacked to stage 1 by the codec (state.cpp).
     apply_stage_authority(*this, state.current_stage);
     if (stage_flow_ != nullptr) stage_flow_->refresh();
 
@@ -306,16 +312,21 @@ void MainWindow::installStageFlow() {
     };
     seams.apply_horizon = [this](const std::string& horizon) {
 #ifdef PWB_WITH_DATA_INTEGRATION
-        auto store = context_.projectStore();
+        const auto store = context_.projectStore();
         if (store == nullptr) return;
-        // In-memory document mutation; persistence rides the next project
-        // save (the workspace-mutations contract).
-        pwb::domain::Json& root = store->document().root();
-        if (!root.contains("stratigraphy") ||
-            !root["stratigraphy"].is_object()) {
-            root["stratigraphy"] = pwb::domain::Json::object();
+        // Serialized section mutation: the raw root write this replaced
+        // raced worker publishes on the same JSON tree (the read twin
+        // document_section documents that lock contract). Persistence
+        // rides the next project save (workspace-mutations contract).
+        pwb::domain::Json stratigraphy =
+            store->coordinator().document_section(
+                "stratigraphy", store->document());
+        if (!stratigraphy.is_object()) {
+            stratigraphy = pwb::domain::Json::object();
         }
-        root["stratigraphy"]["target_horizon"] = horizon;
+        stratigraphy["target_horizon"] = horizon;
+        store->coordinator().set_document_section(
+            "stratigraphy", stratigraphy, store->document());
         statusBar()->showMessage(
             tr("目标层位已设为 %1（随工程保存生效）")
                 .arg(QString::fromStdString(horizon)),
@@ -380,17 +391,20 @@ void MainWindow::installStageFlow() {
                         stage_flow_->request_horizon(horizon.toStdString());
                     }
                 });
-        connect(stage_flow_, &StageFlowController::stage_applied, this,
+        connect(stage_flow_, &StageFlowController::stage_applied, bar,
                 [bar](const QString& value) {
                     bar->set_current_stage(value.toStdString());
                 });
-        connect(stage_flow_, &StageFlowController::snapshot_changed, this,
+        connect(stage_flow_, &StageFlowController::snapshot_changed, bar,
                 [this, bar]() {
                     const auto& snap = stage_flow_->snapshot();
-                    if (snap.horizon.has_value()) {
-                        bar->set_horizon_state(
-                            QString::fromStdString(*snap.horizon));
-                    }
+                    // Empty horizon (project without stratigraphy) clears
+                    // the combo — a stale horizon must not survive a
+                    // project switch.
+                    bar->set_horizon_state(
+                        snap.horizon.has_value()
+                            ? QString::fromStdString(*snap.horizon)
+                            : QString());
                 });
     }
 
@@ -447,7 +461,22 @@ void MainWindow::installStageFlow() {
                 };
             } else {
                 // mapping-page panels: preference overrides for the CURRENT
-                // stage — the same toggle path the panel menus use.
+                // stage — the same toggle path the panel menus use. The
+                // applicability gate below refuses unknown keys so a
+                // stale seed can never write a garbage preference.
+                spec.applicability =
+                    [this, rest](const pwb::ui_shell::CommandContext&)
+                        -> std::optional<std::string> {
+                        auto* page = appShell() != nullptr
+                                         ? appShell()->mapping_page()
+                                         : nullptr;
+                        if (page == nullptr || page->dock_manager() == nullptr
+                            || !page->dock_manager()->is_panel_registered(
+                                rest)) {
+                            return std::string("面板不可用（无编图画布或未注册）");
+                        }
+                        return std::nullopt;
+                    };
                 spec.callback = [this, rest]() {
                     if (stage_flow_ == nullptr) return;
                     bool now = true;
@@ -470,9 +499,13 @@ void MainWindow::installStageFlow() {
             continue;  // unknown seed — honest skip
         }
         registry.register_command(spec);
+        stage_flow_command_ids_.push_back(id);
         ++registered;
     }
     stage_flow_command_count_ = registered;
+    // Unregistration lives in ~MainWindow (the body runs while the id
+    // list member is alive; a destroyed-signal hook would race member
+    // destruction).
 
     // -- TaskCenter providers (the dock leaves its permanent empty state) ---
 #ifdef PWB_WITH_CONV_30

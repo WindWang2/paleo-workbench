@@ -1408,8 +1408,10 @@ if(TARGET platform_app_shell)
     endif()
     # cpp-close-12 — shell project-actions battery: the four deferred
     # surfaces against a real store (save/reopen roundtrip, sample
-    # bootstrap through the run lifecycle, properties summary).
-    if(BUILD_TESTING)
+    # bootstrap through the run lifecycle, properties summary). Needs the
+    # full B/C adapter closure (the store surface under test).
+    if(BUILD_TESTING AND TARGET Pwb::Data AND TARGET Pwb::Science
+       AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
         add_executable(platform_shell_project_actions
             tests/cpp/platform/test_shell_project_actions.cpp
             apps/paleo_workbench_platform/main_window.cpp
@@ -1432,7 +1434,7 @@ if(TARGET platform_app_shell)
             ${CMAKE_BINARY_DIR}/generated)
         target_link_libraries(platform_shell_project_actions PRIVATE
             Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
-            Pwb::PlatformServices)
+            Pwb::PlatformServices Pwb::Data Pwb::Catalog)
         if(TARGET Pwb::UiCanvas)
             target_link_libraries(platform_shell_project_actions PRIVATE
                 Pwb::UiCanvas)

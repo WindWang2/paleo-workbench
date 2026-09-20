@@ -215,6 +215,17 @@ Json CommitCoordinator::document_section(
     return *section;
 }
 
+void CommitCoordinator::set_document_section(
+    std::string_view key, const domain::Json& section,
+    project::ProjectDocument& document) const {
+    // Same serialization as every other document mutation — the read twin
+    // above documents why an unlocked write is UB against worker
+    // publishes (V14-THREE-STAGE-UX; presentation-layer section writes
+    // route through here).
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
+    document.root()[std::string(key)] = section;
+}
+
 Result<RunStateV1> CommitCoordinator::finish_run(
     const domain::RunId& run_id, RunTerminalStatus terminal,
     Json extra_parameters) {

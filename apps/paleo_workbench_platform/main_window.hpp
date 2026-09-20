@@ -352,6 +352,11 @@ private:
     void applyStageVisibility(const std::map<std::string, bool>& visibility);
     pwb::ui_stageflow::qt::StageFlowController* stage_flow_ = nullptr;
     int stage_flow_command_count_ = 0;
+    // Registered production command ids (unregistered in the destructor:
+    // the registry is process-global while the callbacks capture this
+    // window — a closed window must not leave dangling closures for the
+    // next window's palette to invoke).
+    std::vector<std::string> stage_flow_command_ids_;
     // Well-log dock captured for the selection-bus sink (local in buildUi
     // under PWB_WITH_WELL_LOG).
     QDockWidget* stage_flow_well_log_dock_ = nullptr;

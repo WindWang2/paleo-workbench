@@ -249,6 +249,15 @@ public:
     domain::Json document_section(
         std::string_view key,
         const project::ProjectDocument& document) const;
+    // Serialized single-section mutation (V14-THREE-STAGE-UX): replaces
+    // document.sections[key] under the same whole-body mutex every other
+    // document-mutating method takes. Presentation-layer writes that
+    // would otherwise reach for the raw root (stratigraphy.target_horizon
+    // is the first consumer) MUST go through here — an unlocked
+    // operator[] on the shared tree races worker publishes (UB).
+    void set_document_section(std::string_view key,
+                              const domain::Json& section,
+                              project::ProjectDocument& document) const;
     // Resume/roll back every unfinished journal. Must run at startup before
     // any new commit. Never guesses silently: unresolvable journals land in
     // RecoveryReportV1::pending and BLOCK conflicting new writes until an
