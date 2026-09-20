@@ -22,3 +22,30 @@ if(TARGET Pwb::GeoModel)
     add_test(NAME interchange.archive COMMAND interchange.archive)
     set_tests_properties(interchange.archive PROPERTIES TIMEOUT 300)
 endif()
+
+# CPP-CLOSE-10 — delivery/batch/dependency-audit/closure services.
+# dependency_audit + delivery need only the catalog seams (always on);
+# closure rides on the native model-adapter service and the provider plugin
+# runtime (same gating as its lib sources).
+add_executable(interchange.dependency_audit dependency_audit_test.cpp)
+target_compile_features(interchange.dependency_audit PRIVATE cxx_std_20)
+target_link_libraries(interchange.dependency_audit PRIVATE
+    Pwb::Interchange Pwb::Domain)
+add_test(NAME interchange.dependency_audit COMMAND interchange.dependency_audit)
+set_tests_properties(interchange.dependency_audit PROPERTIES TIMEOUT 120)
+
+add_executable(interchange.delivery delivery_test.cpp)
+target_compile_features(interchange.delivery PRIVATE cxx_std_20)
+target_link_libraries(interchange.delivery PRIVATE
+    Pwb::Interchange Pwb::Domain)
+add_test(NAME interchange.delivery COMMAND interchange.delivery)
+set_tests_properties(interchange.delivery PROPERTIES TIMEOUT 300)
+
+if(TARGET Pwb::GeoModel AND TARGET Pwb::Providers)
+    add_executable(interchange.closure closure_test.cpp)
+    target_compile_features(interchange.closure PRIVATE cxx_std_20)
+    target_link_libraries(interchange.closure PRIVATE
+        Pwb::Interchange Pwb::Domain)
+    add_test(NAME interchange.closure COMMAND interchange.closure)
+    set_tests_properties(interchange.closure PROPERTIES TIMEOUT 300)
+endif()

@@ -45,3 +45,37 @@ target_compile_features(providers.service PRIVATE cxx_std_20)
 target_link_libraries(providers.service PRIVATE Pwb::Providers Pwb::Domain)
 add_test(NAME providers.service COMMAND providers.service)
 set_tests_properties(providers.service PROPERTIES TIMEOUT 120)
+
+# CPP-CLOSE-10 — dynamic plugin boundary: failure matrix (missing module /
+# bad ABI / missing host capability / bad descriptor) plus the refcounted
+# unload lifecycle (running task completes, new executions fail fast,
+# deferred finalize at last lease release). The four module variants come
+# from one source with VARIANT defines; they link only the authoring glue
+# (Pwb::PluginGlue + Domain headers) — the ABI they exercise is pure C, and
+# the mapping-kernel archives stay out of the .so link (PIC requirements).
+set(PWB_PLUGIN_TEST_DIR ${CMAKE_CURRENT_BINARY_DIR})
+foreach(variant OK BADABI BADDESC MISSING_CAP)
+    add_library(pwb_test_plugin_${variant} MODULE plugins/test_plugin_module.cpp)
+    target_compile_features(pwb_test_plugin_${variant} PRIVATE cxx_std_20)
+    target_compile_definitions(pwb_test_plugin_${variant} PRIVATE
+        PWB_TEST_PLUGIN_${variant})
+    target_link_libraries(pwb_test_plugin_${variant} PRIVATE Pwb::PluginGlue)
+    set_target_properties(pwb_test_plugin_${variant} PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "pwb_test_plugin_${variant}"
+        LIBRARY_OUTPUT_DIRECTORY "${PWB_PLUGIN_TEST_DIR}"
+        SUFFIX ".so"
+    )
+endforeach()
+
+add_executable(providers.plugins plugin_test.cpp)
+target_compile_features(providers.plugins PRIVATE cxx_std_20)
+target_link_libraries(providers.plugins PRIVATE Pwb::Providers Pwb::Domain)
+target_compile_definitions(providers.plugins PRIVATE
+    PWB_PLUGIN_OK="${PWB_PLUGIN_TEST_DIR}/pwb_test_plugin_OK.so"
+    PWB_PLUGIN_BADABI="${PWB_PLUGIN_TEST_DIR}/pwb_test_plugin_BADABI.so"
+    PWB_PLUGIN_BADDESC="${PWB_PLUGIN_TEST_DIR}/pwb_test_plugin_BADDESC.so"
+    PWB_PLUGIN_MISSING_CAP="${PWB_PLUGIN_TEST_DIR}/pwb_test_plugin_MISSING_CAP.so"
+)
+add_test(NAME providers.plugins COMMAND providers.plugins)
+set_tests_properties(providers.plugins PROPERTIES TIMEOUT 120)

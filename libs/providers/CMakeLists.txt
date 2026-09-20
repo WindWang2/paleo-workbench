@@ -18,6 +18,9 @@ add_library(pwb_providers STATIC
     src/builtin_factor_stats.cpp
     src/builtin_map_thumbnail.cpp
     src/png_writer.cpp
+    # CPP-CLOSE-10: dynamic plugin boundary + loader (versioned C ABI,
+    # capability negotiation, refcounted deferred unload).
+    src/plugin_loader.cpp
 )
 add_library(Pwb::Providers ALIAS pwb_providers)
 set_target_properties(pwb_providers PROPERTIES
@@ -35,6 +38,19 @@ target_link_libraries(pwb_providers PUBLIC
     Pwb::MappingKernel
     Pwb::MappingDocument
 )
+# dlopen/dlsym for the plugin loader (empty on platforms with them in libc).
+target_link_libraries(pwb_providers PUBLIC ${CMAKE_DL_LIBS})
+
+# CPP-CLOSE-10 — plugin-side authoring glue (error envelopes). A tiny static
+# lib so third-party MODULEs link only this + Pwb::Domain headers instead of
+# the full provider SDK (whose builtin dependencies are not all PIC).
+add_library(pwb_plugin_glue STATIC src/plugin_module_glue.cpp)
+add_library(Pwb::PluginGlue ALIAS pwb_plugin_glue)
+target_compile_features(pwb_plugin_glue PUBLIC cxx_std_20)
+set_target_properties(pwb_plugin_glue PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(pwb_plugin_glue PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(pwb_plugin_glue PUBLIC Pwb::Domain)
 
 if(BUILD_TESTING)
     add_subdirectory(providers_tests)
