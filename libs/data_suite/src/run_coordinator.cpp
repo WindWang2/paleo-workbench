@@ -204,6 +204,17 @@ std::optional<RunStateV1> CommitCoordinator::run_state(
     return project_run(*run);
 }
 
+Json CommitCoordinator::document_section(
+    std::string_view key, const project::ProjectDocument& document) const {
+    // Whole-body mutex hold: the same lock every document-mutating public
+    // method takes, so the copied section can never observe a torn
+    // worker publish (#1380 audit boundary, closed by 06).
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const Json* section = document.find_section(key);
+    if (section == nullptr) return Json::object();
+    return *section;
+}
+
 Result<RunStateV1> CommitCoordinator::finish_run(
     const domain::RunId& run_id, RunTerminalStatus terminal,
     Json extra_parameters) {

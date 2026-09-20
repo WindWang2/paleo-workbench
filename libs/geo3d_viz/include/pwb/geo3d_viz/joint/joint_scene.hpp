@@ -143,6 +143,11 @@ public:
     // ---- Volume -------------------------------------------------------------
     void set_volume_access(std::shared_ptr<IVolumeAccess> access);
     IVolumeAccess* volume_access() const { return volume_.get(); }
+    // Shared, refcount-safe view for off-thread readers (the joint host
+    // captures it into job requests; the scene keeps owning the lifetime).
+    std::shared_ptr<const IVolumeAccess> volume_access_shared() const {
+        return volume_;
+    }
     // Survey ↔ loaded volume index map (preview-aware).
     const VolumeRegistration* registration() const {
         return registration_ ? &*registration_ : nullptr;
@@ -183,6 +188,12 @@ public:
     // null so 2D and 3D share the single scene domain).
     std::optional<FenceExtraction> extract_active_fence(
         std::int64_t n_along = 128,
+        std::optional<VerticalDomain> domain = std::nullopt) const;
+    // Extract any fence by id (multi-fence rendering): same cache and
+    // read path as the active-fence variant; nullopt when the id is
+    // unknown or the volume/survey is not ready.
+    std::optional<FenceExtraction> extract_fence(
+        const std::string& fence_id, std::int64_t n_along = 128,
         std::optional<VerticalDomain> domain = std::nullopt) const;
 
     // ---- Active 2D assembly (#62) -------------------------------------------

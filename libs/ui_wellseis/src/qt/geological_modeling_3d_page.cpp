@@ -16,6 +16,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardItemModel>
+#include <QStyle>
 #include <QTabWidget>
 #include <QTextBrowser>
 #include <QTreeWidget>
@@ -34,6 +35,7 @@ QString qs(const std::string& text) {
 // byte-identical with the Python literals.
 constexpr const char* kJointRoot = "井震联合 (geoviz)";
 constexpr const char* kJointWells = "联合井轨迹 (geoviz)";
+constexpr const char* kJointFences = "井间剖面 fence (geoviz)";
 
 bool is_depth_domain(const JointSceneSnapshot& snap) {
     return snap.has_scene && snap.depth_domain;
@@ -225,6 +227,25 @@ GeologicalModeling3DPage::GeologicalModeling3DPage(
                     }
                 });
     }
+
+    // 06 multi-fence: selecting a fence child activates it for the 2D
+    // profile view (independent of the Geo3D inspector seam).
+    connect(model_tree_, &QTreeWidget::itemSelectionChanged, this, [this] {
+        const auto items = model_tree_->selectedItems();
+        if (host_ == nullptr || items.isEmpty() ||
+            joint_fence_item_ == nullptr) {
+            return;
+        }
+        QTreeWidgetItem* item = items.first();
+        if (item == joint_fence_item_ ||
+            !is_tree_descendant(item, joint_fence_item_)) {
+            return;
+        }
+        const QString id = item->data(0, Qt::UserRole).toString();
+        if (!id.isEmpty()) {
+            host_->activate_fence(id.toStdString());
+        }
+    });
 
     // 2. Center: toolbar + joint host + slice card + analysis card +
     // collapsible 2D strip.
@@ -552,6 +573,12 @@ GeologicalModeling3DPage::GeologicalModeling3DPage(
         new QLabel(QStringLiteral("域: Time · 2D/3D 联动"), joint_2d_panel_);
     time_chip_->setObjectName(QStringLiteral("Joint2DTimeChip"));
     j2_header->addWidget(time_chip_);
+    // 坐标/单位说明 (06): the visible chip names the active coordinate
+    // ranges/units; the tooltip carries the full mapping explanation.
+    coord_note_ = new QLabel(QString(), joint_2d_panel_);
+    coord_note_->setObjectName(QStringLiteral("JointCoordinateNote"));
+    coord_note_->setStyleSheet(QStringLiteral("color: #94a3b8;"));
+    j2_header->addWidget(coord_note_);
     j2_header->addStretch();
     auto* color_card_btn = new QPushButton(QStringLiteral("色标"),
                                            joint_2d_panel_);
@@ -676,6 +703,7 @@ GeologicalModeling3DPage::GeologicalModeling3DPage(
         connect(host_, &JointHostController::well_picked, this,
                 [this](const QString& name) { emit well_selected(name); });
     }
+    update_coordinate_note();
     sync_analysis_actions();
 }
 
@@ -776,8 +804,11 @@ void GeologicalModeling3DPage::populate_model_tree() {
                         QStringLiteral("地震预览体 (geoviz)"));
     joint_wells_item_ =
         add_checkable_child(joint_root_, QString::fromUtf8(kJointWells));
-    add_checkable_child(joint_root_,
-                        QStringLiteral("井间剖面 fence (geoviz)"));
+    // Multi-fence management (06): children are the scene fences
+    // (check = curtain visibility, selection = activation).
+    joint_fence_item_ =
+        add_checkable_child(joint_root_,
+                            QString::fromUtf8(kJointFences));
     stratal_item_ = add_checkable_child(
         joint_root_, QStringLiteral("地层切片体 (geoviz)"));
     add_checkable_child(joint_root_, QStringLiteral("井震 3D 视口"));
@@ -910,6 +941,44 @@ void GeologicalModeling3DPage::on_tree_item_changed(
         suppress_tree_signals_ = false;
         return;
     }
+    // Fence children (06 multi-fence): check = curtain visibility; the
+    // group item toggles every fence at once.
+    if (item == joint_fence_item_ && host_ != nullptr) {
+        const bool checked = item->checkState(0) == Qt::Checked;
+        suppress_tree_signals_ = true;
+        for (int i = 0; i < item->childCount(); ++i) {
+            item->child(i)->setCheckState(
+                0, checked ? Qt::Checked : Qt::Unchecked);
+        }
+        suppress_tree_signals_ = false;
+        for (int i = 0; i < item->childCount(); ++i) {
+            host_->set_fence_visible(
+                item->child(i)->data(0, Qt::UserRole).toString().toStdString(),
+                checked);
+        }
+        return;
+    }
+    if (is_tree_descendant(item, joint_fence_item_) && host_ != nullptr) {
+        host_->set_fence_visible(
+            item->data(0, Qt::UserRole).toString().toStdString(),
+            item->checkState(0) == Qt::Checked);
+        int checked = 0;
+        const int total = joint_fence_item_->childCount();
+        for (int i = 0; i < total; ++i) {
+            checked += joint_fence_item_->child(i)->checkState(0) ==
+                               Qt::Checked
+                           ? 1
+                           : 0;
+        }
+        suppress_tree_signals_ = true;
+        joint_fence_item_->setCheckState(
+            0,
+            checked == total
+                ? Qt::Checked
+                : checked == 0 ? Qt::Unchecked : Qt::PartiallyChecked);
+        suppress_tree_signals_ = false;
+        return;
+    }
     // Other geoviz layer checks -> host layer visibility; geo3d children
     // -> controller.
     if (is_tree_descendant(item, joint_root_) && host_ != nullptr) {
@@ -963,6 +1032,88 @@ void GeologicalModeling3DPage::sync_joint_visibility_from_tree() {
 
 // -- joint scene sync ---------------------------------------------------
 
+void GeologicalModeling3DPage::refresh_joint_fence_tree() {
+    if (joint_fence_item_ == nullptr || host_ == nullptr) {
+        return;
+    }
+    const auto snap = host_->scene_snapshot();
+    if (!snap.has_scene) {
+        return;
+    }
+    model_tree_->blockSignals(true);
+    joint_fence_item_->takeChildren();
+    int checked = 0;
+    for (const auto& fence : snap.fences) {
+        auto* item = add_checkable_child(
+            joint_fence_item_,
+            qs(fence.name.empty() ? fence.id : fence.name));
+        item->setData(0, Qt::UserRole, qs(fence.id));
+        item->setCheckState(0, fence.visible ? Qt::Checked : Qt::Unchecked);
+        checked += fence.visible ? 1 : 0;
+        if (fence.id == snap.active_fence_id) {
+            item->setIcon(
+                0, model_tree_->style()->standardIcon(
+                       QStyle::SP_ArrowRight));
+        }
+    }
+    if (!snap.fences.empty()) {
+        const Qt::CheckState parent_state =
+            checked == static_cast<int>(snap.fences.size())
+                ? Qt::Checked
+            : checked == 0 ? Qt::Unchecked
+                           : Qt::PartiallyChecked;
+        joint_fence_item_->setCheckState(0, parent_state);
+    }
+    model_tree_->blockSignals(false);
+    joint_fence_item_->setExpanded(true);
+}
+
+void GeologicalModeling3DPage::update_coordinate_note() {
+    if (coord_note_ == nullptr) {
+        return;
+    }
+    const auto snap =
+        host_ != nullptr ? host_->scene_snapshot() : JointSceneSnapshot{};
+    if (!snap.has_scene || (snap.n_inline <= 0 && snap.n_crossline <= 0)) {
+        coord_note_->setText(QStringLiteral("坐标/单位：加载体后显示"));
+        coord_note_->setToolTip(QStringLiteral(
+            "3D 视口与 2D 平面使用体内索引坐标：水平为 Inline/Crossline "
+            "索引，纵轴在 Time 域为 TWT (ms)、Depth 域为深度 (m)。井轨迹与 "
+            "fence 的世界坐标 (m，工程投影) 由 survey 角点标定映射到体内。"));
+        return;
+    }
+    QString vertical = QStringLiteral("TWT (ms)");
+    if (snap.depth_domain) {
+        vertical = QStringLiteral("深度 (m)");
+    }
+    // Physical line-number ranges follow from the registration-resolved
+    // number of the current index and the index bounds (start = number -
+    // index; constant step keeps the end consistent).
+    QString inline_range = QStringLiteral("0–%1").arg(snap.n_inline - 1);
+    QString crossline_range =
+        QStringLiteral("0–%1").arg(snap.n_crossline - 1);
+    if (snap.inline_number.has_value() && snap.inline_index.has_value()) {
+        const double start = *snap.inline_number - *snap.inline_index;
+        inline_range = QStringLiteral("%1–%2")
+                           .arg(start)
+                           .arg(start + snap.n_inline - 1);
+    }
+    if (snap.crossline_number.has_value() && snap.crossline_index.has_value()) {
+        const double start = *snap.crossline_number - *snap.crossline_index;
+        crossline_range = QStringLiteral("%1–%2")
+                              .arg(start)
+                              .arg(start + snap.n_crossline - 1);
+    }
+    coord_note_->setText(
+        QStringLiteral("坐标: IL %1 · XL %2 · 纵轴 %3")
+            .arg(inline_range, crossline_range, vertical));
+    coord_note_->setToolTip(QStringLiteral(
+        "3D 视口与 2D 平面使用体内索引坐标：水平为 Inline/Crossline 物理号"
+        "（括号内为对应索引范围），纵轴在 Time 域为 TWT (ms)、Depth 域为深度 "
+        "(m)。井轨迹与 fence 的世界坐标 (m，工程投影) 由 survey 角点标定映射"
+        "到体内索引；切片位置卡输入的物理号会自动换算为索引。"));
+}
+
 void GeologicalModeling3DPage::on_scene_updated() {
     if (host_ == nullptr) {
         return;
@@ -979,6 +1130,7 @@ void GeologicalModeling3DPage::on_scene_updated() {
         host_->push_scene_to_widget();
     }
     refresh_joint_well_tree();
+    refresh_joint_fence_tree();
     fill_joint_well_combos();
     if (geo3d_ != nullptr) {
         geo3d_->sync_scene();
@@ -996,6 +1148,7 @@ void GeologicalModeling3DPage::on_scene_updated() {
                              : combined);
     }
     sync_2d_time_chip();
+    update_coordinate_note();
 }
 
 void GeologicalModeling3DPage::fill_joint_well_combos() {
@@ -1290,11 +1443,13 @@ void GeologicalModeling3DPage::apply_pending_slice_numbers() {
     if (!pending_slice_numbers_.has_value() || host_ == nullptr) {
         return;
     }
-    // Consumed exactly once the registration exists — the physical line
-    // numbers are stable across sessions and LOD refinements.
-    if (host_->apply_slice_line_numbers(pending_slice_numbers_->first,
-                                        pending_slice_numbers_->second)) {
-        pending_slice_numbers_.reset();
+    // Consume BEFORE applying: apply_slice_line_numbers emits
+    // scene_updated synchronously (real host), which re-enters this
+    // handler — the pending value must already be gone or the recursion
+    // never terminates.
+    const auto numbers = *pending_slice_numbers_;
+    pending_slice_numbers_.reset();
+    if (host_->apply_slice_line_numbers(numbers.first, numbers.second)) {
         refresh_joint_slice_card();
     }
 }
@@ -1344,15 +1499,15 @@ GeologicalModeling3DPage::collect_joint_analysis_state() const {
     }
     // Active fence name.
     if (!snap.fences.empty()) {
-        for (const auto& [id, name] : snap.fences) {
-            if (id == snap.active_fence_id) {
+        for (const auto& fence : snap.fences) {
+            if (fence.id == snap.active_fence_id) {
                 state.active_fence_name =
-                    name.empty() ? id : name;
+                    fence.name.empty() ? fence.id : fence.name;
                 break;
             }
         }
         if (!state.active_fence_name.has_value()) {
-            state.active_fence_name = snap.fences.front().second;
+            state.active_fence_name = snap.fences.front().name;
         }
     }
     if (host_ != nullptr) {

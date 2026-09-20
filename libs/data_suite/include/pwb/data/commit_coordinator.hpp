@@ -241,6 +241,14 @@ public:
         project::ProjectDocument& document);
     // Read-only projection of one run row (nullopt when absent).
     std::optional<RunStateV1> run_state(const domain::RunId& run_id) const;
+    // Read-only copy of one live-document section taken INSIDE the
+    // serialization mutex (06 closure: GUI readers such as
+    // MainWindow::readiness_inputs must not race a worker publish that
+    // mutates the document under the same lock). Empty object when the
+    // section is absent.
+    domain::Json document_section(
+        std::string_view key,
+        const project::ProjectDocument& document) const;
     // Resume/roll back every unfinished journal. Must run at startup before
     // any new commit. Never guesses silently: unresolvable journals land in
     // RecoveryReportV1::pending and BLOCK conflicting new writes until an

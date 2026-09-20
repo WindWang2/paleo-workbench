@@ -65,4 +65,5 @@ if(TARGET Pwb::Geo3DViz AND TARGET Pwb::SeismicIo)
     add_test(NAME viz_c.joint_scene COMMAND viz_c_joint_scene)
     set_tests_properties(viz_c.joint_scene PROPERTIES TIMEOUT 300
         ENVIRONMENT "MALLOC_CHECK_=3")
+
 endif()

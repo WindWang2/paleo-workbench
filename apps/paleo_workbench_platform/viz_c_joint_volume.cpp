@@ -9,6 +9,7 @@
 namespace pwb::app::viz_c {
 
 using pwb::geo3d_viz::joint::FenceExtraction;
+using pwb::geo3d_viz::joint::FenceSection;
 using pwb::geo3d_viz::joint::WellSeismicScene;
 
 TiledVolumeAccess::TiledVolumeAccess(
@@ -82,6 +83,21 @@ std::array<float, 4> rgba_at(const std::vector<std::uint8_t>& rgba,
 CurtainMesh build_fence_curtain(const WellSeismicScene& scene,
                                 const FenceExtraction& extraction,
                                 const std::string& seismic_color_scale) {
+    // The extraction does not carry vertices; recover the fence from the
+    // scene by id and delegate to the explicit-fence core.
+    for (const auto& fence : scene.fences()) {
+        if (fence.id == extraction.fence_id) {
+            return build_fence_curtain(scene, fence, extraction,
+                                       seismic_color_scale);
+        }
+    }
+    return CurtainMesh{};
+}
+
+CurtainMesh build_fence_curtain(const WellSeismicScene& scene,
+                                const FenceSection& fence,
+                                const FenceExtraction& extraction,
+                                const std::string& seismic_color_scale) {
     CurtainMesh mesh;
     const std::int64_t n_along = extraction.n_along();
     const std::int64_t n_sample = extraction.n_sample();
@@ -90,19 +106,8 @@ CurtainMesh build_fence_curtain(const WellSeismicScene& scene,
     // Along-fence XY positions from the arc-length axis (uniform
     // resample parity with sample_fence_polyline).
     const std::vector<std::array<double, 2>> fence_xy =
-        [&] {
-            // The extraction does not carry vertices; recover the fence
-            // from the scene by id.
-            const std::vector<pwb::geo3d_viz::joint::FenceSection> fences =
-                scene.fences();
-            for (const auto& fence : fences) {
-                if (fence.id == extraction.fence_id) {
-                    return pwb::geo3d_viz::joint::sample_fence_polyline(
-                        fence.vertices_xy, n_along);
-                }
-            }
-            return std::vector<std::array<double, 2>>{};
-        }();
+        pwb::geo3d_viz::joint::sample_fence_polyline(fence.vertices_xy,
+                                                     n_along);
     if (fence_xy.size() != static_cast<std::size_t>(n_along)) return mesh;
 
     const std::int64_t stride_a = downsample_stride(n_along, kCurtainMaxAlong);
@@ -226,6 +231,76 @@ SliceMesh build_active_time_slice(const WellSeismicScene& scene,
             const std::int64_t x_mid = xl_idx[static_cast<std::size_t>(c)];
             const std::size_t color_index =
                 static_cast<std::size_t>(i_mid * shape[1] + x_mid);
+            const float alpha =
+                static_cast<float>(std::max(0.0, std::min(1.0, opacity)));
+            mesh.face_colors.push_back(
+                {rgba[color_index * 4] / 255.0f,
+                 rgba[color_index * 4 + 1] / 255.0f,
+                 rgba[color_index * 4 + 2] / 255.0f, alpha});
+            mesh.face_colors.push_back(
+                {rgba[color_index * 4] / 255.0f,
+                 rgba[color_index * 4 + 1] / 255.0f,
+                 rgba[color_index * 4 + 2] / 255.0f, alpha});
+        }
+    }
+    return mesh;
+}
+
+SliceMesh build_active_time_slice_prepared(const WellSeismicScene& scene,
+                                           const std::vector<unsigned char>& rgba,
+                                           std::int64_t n_inline,
+                                           std::int64_t n_crossline,
+                                           std::int64_t active_sample) {
+    SliceMesh mesh;
+    const auto render_state = scene.orthogonal_slice_render_state();
+    if (!render_state.has_value()) return mesh;
+    const auto& [il, xl, times, active, opacity] = *render_state;
+    (void)il;
+    (void)xl;
+    (void)times;
+    if (active_sample != active) return mesh;  // stale payload: never shown
+    if (n_inline < 2 || n_crossline < 2 || rgba.empty()) return mesh;
+    if (rgba.size() !=
+        static_cast<std::size_t>(n_inline * n_crossline) * 4) {
+        return mesh;
+    }
+
+    const std::int64_t stride_i = downsample_stride(n_inline, kSliceMaxEdge);
+    const std::int64_t stride_x =
+        downsample_stride(n_crossline, kSliceMaxEdge);
+    std::vector<std::int64_t> il_idx;
+    for (std::int64_t i = 0; i < n_inline; i += stride_i) il_idx.push_back(i);
+    if (il_idx.back() != n_inline - 1) il_idx.push_back(n_inline - 1);
+    std::vector<std::int64_t> xl_idx;
+    for (std::int64_t x = 0; x < n_crossline; x += stride_x) {
+        xl_idx.push_back(x);
+    }
+    if (xl_idx.back() != n_crossline - 1) xl_idx.push_back(n_crossline - 1);
+
+    const std::int64_t rows = static_cast<std::int64_t>(il_idx.size());
+    const std::int64_t cols = static_cast<std::int64_t>(xl_idx.size());
+    mesh.vertices.reserve(static_cast<std::size_t>(rows * cols));
+    for (std::int64_t r = 0; r < rows; ++r) {
+        for (std::int64_t c = 0; c < cols; ++c) {
+            mesh.vertices.push_back({static_cast<float>(il_idx[static_cast<std::size_t>(r)]),
+                                     static_cast<float>(xl_idx[static_cast<std::size_t>(c)]),
+                                     static_cast<float>(active)});
+        }
+    }
+    mesh.faces.reserve(static_cast<std::size_t>((rows - 1) * (cols - 1) * 2));
+    mesh.face_colors.reserve(mesh.faces.capacity());
+    for (std::int64_t r = 0; r + 1 < rows; ++r) {
+        for (std::int64_t c = 0; c + 1 < cols; ++c) {
+            const std::int64_t v00 = r * cols + c;
+            const std::int64_t v01 = r * cols + c + 1;
+            const std::int64_t v10 = (r + 1) * cols + c;
+            const std::int64_t v11 = (r + 1) * cols + c + 1;
+            mesh.faces.push_back({v00, v10, v11});
+            mesh.faces.push_back({v00, v11, v01});
+            const std::int64_t i_mid = il_idx[static_cast<std::size_t>(r)];
+            const std::int64_t x_mid = xl_idx[static_cast<std::size_t>(c)];
+            const std::size_t color_index =
+                static_cast<std::size_t>(i_mid * n_crossline + x_mid);
             const float alpha =
                 static_cast<float>(std::max(0.0, std::min(1.0, opacity)));
             mesh.face_colors.push_back(

@@ -40,17 +40,23 @@ void VizCTimeSliceMap::refresh() {
     hits_.clear();
     pierces_.clear();
     path_ids_.clear();
-    delete image_;
-    image_ = nullptr;
     caption_.clear();
     if (scene_ == nullptr) {
         // Unbound (host teardown): the honest empty state, never a
         // dangling dereference.
+        delete image_;
+        image_ = nullptr;
+        image_sample_ = -1;
+        image_pending_ = false;
         update();
         return;
     }
     if (scene_->vertical_domain() != VerticalDomain::Time) {
         caption_ = tr("Time 平面仅在 Time 域可用");
+        delete image_;
+        image_ = nullptr;
+        image_sample_ = -1;
+        image_pending_ = false;
         update();
         return;
     }
@@ -65,20 +71,15 @@ void VizCTimeSliceMap::refresh() {
     (void)xl;
     (void)times;
     (void)opacity;
-    try {
-        // Medium volumes: this reads one plane through the volume access
-        // (tiled backend: served from the byte-budget cache).
-        const std::vector<float> amp = scene_->slice_time(active);
-        const auto shape = scene_->volume_access()->shape();
-        const std::vector<unsigned char> rgba =
-            pwb::geo3d_viz::joint::colorize_amplitude(
-                amp, scene_->display_settings().seismic_color_scale);
-        set_prepared_slice(rgba, shape[0], shape[1]);
-    } catch (const std::exception&) {
-        caption_ = tr(kEmptyText);
-        update();
-        return;
+    // 06: no volume read here (the worker prepares the plane). An image
+    // from an older sample is replaced by the honest pending note until
+    // the host applies the fresh payload.
+    if (image_ != nullptr && image_sample_ != active) {
+        delete image_;
+        image_ = nullptr;
+        image_sample_ = -1;
     }
+    image_pending_ = image_ == nullptr;
     const auto active_ms = scene_->orthogonal_slice_state().active_time_ms;
     caption_ = active_ms.has_value()
                    ? tr("Time 平面  %1 ms").arg(
@@ -94,9 +95,11 @@ void VizCTimeSliceMap::refresh() {
 
 void VizCTimeSliceMap::set_prepared_slice(
     const std::vector<unsigned char>& rgba, std::int64_t n_inline,
-    std::int64_t n_crossline) {
+    std::int64_t n_crossline, std::int64_t sample_index) {
     delete image_;
     image_ = nullptr;
+    image_sample_ = -1;
+    image_pending_ = false;
     if (rgba.empty() || n_inline <= 0 || n_crossline <= 0 ||
         rgba.size() != static_cast<std::size_t>(n_inline * n_crossline) * 4) {
         update();
@@ -107,6 +110,16 @@ void VizCTimeSliceMap::set_prepared_slice(
                static_cast<int>(n_crossline) * 4,
                QImage::Format_RGBA8888);
     image_ = new QImage(raw.copy());
+    image_sample_ = sample_index;
+    // Drop the pending note right away if the payload already matches.
+    if (scene_ != nullptr) {
+        if (const auto render_state = scene_->orthogonal_slice_render_state();
+            render_state.has_value() &&
+            std::get<3>(*render_state) == sample_index) {
+            image_pending_ = false;
+        }
+    }
+    update();
 }
 
 void VizCTimeSliceMap::resizeEvent(QResizeEvent* event) {
@@ -156,10 +169,18 @@ void VizCTimeSliceMap::paintEvent(QPaintEvent* event) {
     if (image_ == nullptr) {
         painter.setPen(QColor(148, 163, 184));
         painter.setFont(QFont("Sans Serif", 10));
+        // Distinguish "nothing loaded" from "worker read in flight" —
+        // both are honest, but the pending state must not read as empty.
+        const bool pending = image_pending_ && scene_ != nullptr &&
+                             scene_->orthogonal_slice_render_state()
+                                 .has_value() &&
+                             scene_->vertical_domain() ==
+                                 VerticalDomain::Time;
         painter.drawText(rect,
                          int(Qt::AlignmentFlag::AlignCenter |
                              Qt::TextFlag::TextWordWrap),
-                         tr(kEmptyText));
+                         pending ? tr("正在后台读取 Time 切片…")
+                                 : tr(kEmptyText));
         return;
     }
     const QPixmap scaled =

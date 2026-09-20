@@ -68,6 +68,15 @@ CurtainMesh build_fence_curtain(
     const pwb::geo3d_viz::joint::FenceExtraction& extraction,
     const std::string& seismic_color_scale);
 
+// Explicit-fence variant (06): the async host passes the fence section
+// alongside its worker-extracted strip instead of having the builder
+// look the fence up on the scene (keeps the mesh stage read-free).
+CurtainMesh build_fence_curtain(
+    const pwb::geo3d_viz::joint::WellSeismicScene& scene,
+    const pwb::geo3d_viz::joint::FenceSection& fence,
+    const pwb::geo3d_viz::joint::FenceExtraction& extraction,
+    const std::string& seismic_color_scale);
+
 struct SliceMesh {
     std::vector<std::array<float, 3>> vertices;
     std::vector<std::array<std::int64_t, 3>> faces;
@@ -80,6 +89,14 @@ struct SliceMesh {
 SliceMesh build_active_time_slice(
     const pwb::geo3d_viz::joint::WellSeismicScene& scene,
     const std::string& seismic_color_scale);
+
+// Prepared variant (06): consumes the worker-colorized plane instead of
+// reading the volume on the calling thread; geometry/opacity still come
+// from the scene's render state (GUI-affine, read-only).
+SliceMesh build_active_time_slice_prepared(
+    const pwb::geo3d_viz::joint::WellSeismicScene& scene,
+    const std::vector<unsigned char>& rgba, std::int64_t n_inline,
+    std::int64_t n_crossline, std::int64_t active_sample);
 
 // Well trajectories as render-space polylines (world XY + domain z
 // through the scene transform).

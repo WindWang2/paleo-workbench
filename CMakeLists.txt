@@ -1249,6 +1249,44 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
             target_compile_options(viz_c_joint_example PRIVATE
                 -Wall -Wextra)
         endif()
+
+        # 06 closure — joint3d closure tests (async prep pipeline,
+        # multi-fence management, project-scoped state, the product
+        # binder over REAL fixture files). Registered here because the
+        # targets it needs (Pwb::UiWellseisQt) exist only after the
+        # ui_wellseis subdirectory above — the tests/cpp/viz_c block is
+        # processed earlier and would silently skip (never a silent test
+        # drop).
+        add_executable(viz_c_joint3d_closure
+            tests/cpp/viz_c/joint3d_closure_test.cpp
+            tests/cpp/viz_c/test_main.cpp
+            apps/paleo_workbench_platform/viz_c_joint_host.cpp
+            apps/paleo_workbench_platform/viz_c_joint_volume.cpp
+            apps/paleo_workbench_platform/viz_c_time_map.cpp
+            apps/paleo_workbench_platform/closure_joint3d_install.cpp
+            apps/paleo_workbench_platform/job_center.cpp)
+        set_target_properties(viz_c_joint3d_closure PROPERTIES AUTOMOC ON)
+        target_compile_features(viz_c_joint3d_closure PRIVATE cxx_std_20)
+        target_link_libraries(viz_c_joint3d_closure PRIVATE
+            Pwb::Geo3DViz Pwb::SeismicService Pwb::UiWellseisQt
+            Pwb::JobQt Pwb::Visualization Pwb::SeismicIo
+            Pwb::Data Pwb::Catalog Qt6::Widgets)
+        target_include_directories(viz_c_joint3d_closure PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/viz_c
+            ${CMAKE_CURRENT_SOURCE_DIR}/apps/paleo_workbench_platform)
+        target_compile_definitions(viz_c_joint3d_closure PRIVATE
+            JOINT3D_FIXTURE_VOLUME="${VIZ_C_EXAMPLE_VOLUME}"
+            JOINT3D_REALDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/realdata"
+            PWB_WITH_UI_WELLSEIS=1)
+        if(MSVC)
+            target_compile_options(viz_c_joint3d_closure PRIVATE /utf-8 /W3)
+        else()
+            target_compile_options(viz_c_joint3d_closure PRIVATE
+                -Wall -Wextra)
+        endif()
+        add_test(NAME viz_c.joint3d_closure COMMAND viz_c_joint3d_closure)
+        set_tests_properties(viz_c.joint3d_closure PROPERTIES TIMEOUT 300
+            ENVIRONMENT "MALLOC_CHECK_=3;QT_QPA_PLATFORM=offscreen")
     endif()
 endif()
 # END VIZ-C-host

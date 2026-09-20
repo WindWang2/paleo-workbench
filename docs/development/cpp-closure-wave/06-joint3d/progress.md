@@ -1,0 +1,9 @@
+# 06 — progress
+
+| 轮 | 候选 SHA | 目标/范围 | 命令/退出码 | 结果 | 下一步 |
+|---|---|---|---|---|---|
+| 0 | 06211541 (origin/main) | 盘点：joint host 接线/异步切片/fence/持久化现状；建立 worktree+协调登记 | git fetch/rev-parse; 读 app_shell/geo3d_dock/viz_c_*/main_window/readiness_inputs/Python joint_host.py | 完成；缺口 F1–F7 记录于 findings.md | R1 产品接线 |
+| 1 | 06211541+R1-R5 | R1 shell 注入真实 host（AppShell ctor param + buildUi 顺序 + pwb_job_center 设到 dock + CONV_30 守卫）；R2 异步管线（scene.extract_fence/volume_access_shared、host JointPrepRequest/Data + request_prep/prep_finished 单 owner 合并、time map 无读 refresh + set_prepared_slice 带 sample 键 + pending 文案、build_fence_curtain 显式 fence 重载、build_active_time_slice_prepared）；R3 页面 fence 树管理（激活/可见性）+ snapshot.JointFenceEntry + 接口默认实现；R4 set_project_identity + 身份转义键 + CommitCoordinator::document_section 锁定读 + readiness_inputs 改造；R5 closure_joint3d_install 绑定器（体版本/井头/TD 解析）+ openProject/openVolumeVersion 挂钩；新测试 joint3d_closure_test + CMake 注册 | 代码就绪；configure 因 RESOURCE_BUSY 退避重试中（holder pid 3706969） | 进行中 | 构建+修复编译错误 |
+| 2 | 同上+修复 | 闭包测试首轮：prep/rapid PASS；多fence/身份/teardown 修复（TD-fence fail-closed 语义对齐、rig 析构序、宏逗号、include、StrongId 括号歧义）| viz_c_joint3d_closure 6/6 (MALLOC_CHECK_=3) | 通过 | 受影响面回归 |
+| 3 | 同上+修复 | ctest 并行暴露 prep_finished applied-key 谎报竞态 → 如实记录修复；qgis_smoke_app 栈溢出 → display/visibility setter 重发环修复（Python 语义对齐）；示例 1/8 崩溃 → fences() 临时悬垂指针修复 | 受影响面 ×2：66/67（唯 integration.attribute_chain 预存，C 线 ledger 记录）；示例 xcb GL 截图证据 + offscreen 降级 15/15 | 通过 | 独立审查 |
+| 4 | a719375a+修复 | 独立审查（1 subagent，10 发现：P0×1 P1×2 P2×7）→ 全部修复：P0 页面 apply_pending_slice_numbers 先消费再应用（真实 host 下持久切片号递归栈溢出）；P1 set_project_identity 失效 prep 管线（generation bump + prepared_/prep_applied_ 清空 + time map 清图）；P1 restore 分支同样丢弃旧工程体/井/路径；P2 深度域早退清图、失败 outcome 收敛闩、shutdown 闩防 owner 复活、equality 含 registration 内容、测试去 flaky 阈值、注释纠偏 | 修复后：viz_c.joint3d_closure 6/6 ×6；受影响面 ×2 = 66/67（唯预存 attribute_chain）；xcb GL 截图复验；offscreen 降级 6/6 | 通过 | 提交+PR |

@@ -1,4 +1,8 @@
 // viz_c_joint_host.cpp — real joint host over the V4 scene core.
+// 06 closure: every cold-tile read (fence strips + the active time
+// plane) runs on the JobCenter worker; the GUI applies finished payloads
+// behind generation guards, so rapid slice scrubbing, window teardown,
+// cancellation and project switches can never block or cross the wire.
 #ifdef PWB_WITH_UI_WELLSEIS
 
 #include "viz_c_joint_host.hpp"
@@ -7,10 +11,12 @@
 #include <QWidget>
 
 #include <pwb/seismic_service/tiled_volume.hpp>
+#include <pwb/geo3d_viz/joint/color_scales.hpp>
 #include <pwb/geo3d_viz/joint/segy_survey.hpp>
 
 #include "viz_c_joint_volume.hpp"
 #include "viz_c_time_map.hpp"
+
 
 namespace pwb::app::viz_c {
 
@@ -23,7 +29,8 @@ using pwb::ui_wellseis::qt::JointHostController;
 using pwb::ui_wellseis::qt::JointSceneSnapshot;
 
 namespace {
-constexpr const char* kStateKey = "viz_c/joint_state";
+constexpr const char* kLegacyStateKey = "viz_c/joint_state";
+constexpr const char* kStateGroup = "viz_c/joint_states";
 
 struct VolumeOpenOutcome {
     std::string error;
@@ -34,6 +41,63 @@ struct VolumeOpenOutcome {
     std::int64_t nc = 0;
     std::int64_t ns = 0;
 };
+
+// QSettings keys must not carry arbitrary project paths verbatim ( '/'
+// would silently nest groups); hex-escape every non-safe byte so the
+// mapping stays injective and stable.
+QString identity_key_suffix(const std::string& identity) {
+    static const char* kHex = "0123456789ABCDEF";
+    QString out;
+    for (const char c : identity) {
+        const unsigned char b = static_cast<unsigned char>(c);
+        if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') ||
+            (b >= '0' && b <= '9') || b == '_' || b == '-') {
+            out.append(QLatin1Char(static_cast<char>(b)));
+        } else {
+            out.append(QLatin1Char('%'));
+            out.append(QLatin1Char(kHex[b >> 4]));
+            out.append(QLatin1Char(kHex[b & 0xF]));
+        }
+    }
+    return out;
+}
+
+QString scoped_state_key(const std::string& identity) {
+    if (identity.empty()) return QString::fromLatin1(kLegacyStateKey);
+    return QString::fromLatin1(kStateGroup) + QLatin1Char('/') +
+           identity_key_suffix(identity);
+}
+
+// Equality of the load-bearing prep inputs (lifetime pointers excluded —
+// they are identity, not behaviour).
+bool prep_requests_equal(const JointPrepRequest& a, const JointPrepRequest& b) {
+    if (a.generation != b.generation || a.access.get() != b.access.get() ||
+        a.slice_native_sample != b.slice_native_sample ||
+        a.color_scale != b.color_scale || a.n_along != b.n_along ||
+        a.sample_axis != b.sample_axis ||
+        a.registration.has_value() != b.registration.has_value() ||
+        a.fences.size() != b.fences.size()) {
+        return false;
+    }
+    if (a.registration.has_value()) {
+        const auto& ra = *a.registration;
+        const auto& rb = *b.registration;
+        if (ra.strides() != rb.strides() ||
+            ra.n_inline() != rb.n_inline() ||
+            ra.n_crossline() != rb.n_crossline() ||
+            ra.n_sample() != rb.n_sample()) {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < a.fences.size(); ++i) {
+        const auto& fa = a.fences[i];
+        const auto& fb = b.fences[i];
+        if (fa.id != fb.id || fa.vertices_xy != fb.vertices_xy) {
+            return false;
+        }
+    }
+    return true;
+}
 }  // namespace
 
 VizCJointHost::VizCJointHost(
@@ -64,7 +128,6 @@ bool VizCJointHost::open_volume(
     }
     ++volume_generation_;
     const std::uint64_t generation = volume_generation_;
-    const auto alive = job_center_.alive();
     auto& owner = job_center_.make_owner(this);
     volume_owner_ = &owner;
 
@@ -79,12 +142,8 @@ bool VizCJointHost::open_volume(
     spec.kind = "background.io";
     spec.title = "井震联合体打开";
     // compute(worker): metadata-only inspect through the tiled service
-    // (O(1) open, no sample reads). No GUI, no store. All SLICE reads for
-    // this volume happen afterwards on the GUI thread — one single
-    // reader for the volume's lifetime, which is the tiled backend's
-    // single-reader discipline in spirit (its cache is thread-safe
-    // anyway); moving them to jobs is future work with prepared-slice
-    // injection (VizCTimeSliceMap::set_prepared_slice is the seam).
+    // (O(1) open, no sample reads). All sample reads for this volume —
+    // open and every later slice/fence prep — run on the job worker.
     spec.run = [service, path](pwb::job::JobContext& ctx) -> std::any {
         auto staged = std::make_shared<StagedOpen>();
         ctx.check_cancelled();
@@ -142,8 +201,6 @@ bool VizCJointHost::open_volume(
                 scene_.set_volume_access(
                     std::make_shared<TiledVolumeAccess>((*staged)->volume,
                                                         (*staged)->lifetime));
-                loaded_paths_.clear();
-                loaded_paths_.push_back(path.generic_string());
             } catch (const std::exception& ex) {
                 engine_error_ = ex.what();
                 emit_status(tr("联合体标定失败：%1").arg(
@@ -151,6 +208,8 @@ bool VizCJointHost::open_volume(
                 return;
             }
             engine_error_.clear();
+            loaded_paths_.clear();
+            loaded_paths_.push_back(path.generic_string());
             install_scene_transform();
             assemble_joint_objects();
             push_scene_to_widget();
@@ -171,15 +230,60 @@ void VizCJointHost::set_wells(
     emit scene_updated();
 }
 
+// ---- project identity / persistence --------------------------------------
+
+void VizCJointHost::set_project_identity(const std::string& identity) {
+    if (project_identity_ == identity) return;
+    // The previous project's scene state is persisted under its own key
+    // before the switch (best-effort: a failing save must not block the
+    // rebind), then the new project's state becomes authoritative.
+    save_state();
+    project_identity_ = identity;
+    // Invalidate the async pipeline for the old project FIRST: the
+    // generation bump makes any in-flight or queued prep payload drop on
+    // arrival (a finished job can never re-apply the old project's
+    // plane/strips), and the applied/applied-key state is cleared so
+    // request_prep() re-reads for the new project from scratch.
+    ++volume_generation_;
+    prepared_ = JointPrepData{};
+    prep_applied_.reset();
+    if (time_map_ != nullptr) {
+        time_map_->set_prepared_slice({}, 0, 0, -1);
+    }
+    // The persisted joint state carries fences/slices/domain only —
+    // wells, the volume access and the loaded-path hints belong to the
+    // old project and are dropped in BOTH branches (Python set_project
+    // parity: the binder re-populates the new project's assets right
+    // after the switch).
+    scene_.clear_fences();
+    try {
+        scene_.restore_orthogonal_slice_state(OrthogonalSliceState{});
+    } catch (const std::invalid_argument&) {
+        // Degraded slice state: leave the cleared fences in place.
+    }
+    scene_.set_wells({}, {});
+    scene_.set_volume_access(nullptr);
+    loaded_paths_.clear();
+    QSettings settings;
+    if (!settings.value(scoped_state_key(identity)).toString().isEmpty()) {
+        restore_state();
+        return;
+    }
+    assemble_joint_objects();
+    push_scene_to_widget();
+    emit scene_updated();
+}
+
 void VizCJointHost::save_state() {
     QSettings settings;
-    settings.setValue(kStateKey,
+    settings.setValue(scoped_state_key(project_identity_),
                       QString::fromStdString(scene_.joint_state_to_json()));
 }
 
 void VizCJointHost::restore_state() {
     QSettings settings;
-    const QString raw = settings.value(kStateKey).toString();
+    const QString raw =
+        settings.value(scoped_state_key(project_identity_)).toString();
     if (raw.isEmpty()) return;
     std::vector<std::string> fences;
     if (scene_.restore_joint_state(raw.toStdString(), &fences)) {
@@ -189,15 +293,54 @@ void VizCJointHost::restore_state() {
     }
 }
 
+// ---- multi-fence management ------------------------------------------------
+
+void VizCJointHost::activate_fence(const std::string& fence_id) {
+    scene_.set_active_fence(fence_id);
+    assemble_joint_objects();
+    push_scene_to_widget();
+    emit scene_updated();
+}
+
+void VizCJointHost::set_fence_visible(const std::string& fence_id,
+                                      bool visible) {
+    scene_.set_fence_visible(fence_id, visible);
+    assemble_joint_objects();
+    push_scene_to_widget();
+    emit scene_updated();
+}
+
+void VizCJointHost::add_fence_vertices(
+    const std::vector<std::array<double, 2>>& vertices_xy,
+    const std::string& name) {
+    try {
+        pwb::geo3d_viz::joint::FenceSection fence(name, vertices_xy);
+        scene_.add_fence(std::move(fence), true);
+    } catch (const std::exception& ex) {
+        emit_status(tr("无法建立手绘 fence：%1").arg(
+            QString::fromStdString(ex.what())));
+        return;
+    }
+    assemble_joint_objects();
+    push_scene_to_widget();
+    emit scene_updated();
+}
+
 // ---- JointHostController -------------------------------------------------
 
 bool VizCJointHost::shutdown(int wait_ms) {
+    bool drained = true;
+    shutdown_done_ = true;
     if (volume_owner_ != nullptr) {
-        const bool drained = volume_owner_->shutdown(wait_ms);
+        drained = volume_owner_->shutdown(wait_ms) && drained;
         volume_owner_ = nullptr;
-        return drained;
     }
-    return true;
+    if (prep_owner_ != nullptr) {
+        drained = prep_owner_->shutdown(wait_ms) && drained;
+        prep_owner_ = nullptr;
+        prep_running_ = false;
+    }
+    return drained;
 }
 
 void VizCJointHost::reload() {
@@ -219,7 +362,7 @@ JointSceneSnapshot VizCJointHost::scene_snapshot() const {
         snapshot.active_fence_id = *id;
     }
     for (const auto& fence : scene_.fences()) {
-        snapshot.fences.emplace_back(fence.id, fence.name);
+        snapshot.fences.push_back({fence.id, fence.name, fence.visible});
     }
     for (const auto& presentation : scene_.well_presentations()) {
         snapshot.well_presentations.push_back(
@@ -450,7 +593,9 @@ void VizCJointHost::set_color_scales(const std::string& seismic_scale,
     }
     assemble_joint_objects();
     push_scene_to_widget();
-    emit scene_updated();
+    // No scene_updated here (Python parity: display settings are applied
+    // straight onto the scene/widgets). The page's scene_updated handler
+    // calls this setter — re-emitting would recurse forever.
 }
 
 void VizCJointHost::set_well_width(int px) {
@@ -463,7 +608,7 @@ void VizCJointHost::set_well_width(int px) {
         return;
     }
     assemble_joint_objects();
-    emit scene_updated();
+    // No scene_updated (see set_color_scales).
 }
 
 void VizCJointHost::set_well_visibility(const std::string& well_id,
@@ -474,7 +619,8 @@ void VizCJointHost::set_well_visibility(const std::string& well_id,
         return;
     }
     assemble_joint_objects();
-    emit scene_updated();
+    // No scene_updated (Python parity: visibility pushes come FROM the
+    // page's scene_updated handler — re-emitting would recurse forever).
 }
 
 void VizCJointHost::set_layer_visibility(const std::string& layer_name,
@@ -488,7 +634,6 @@ void VizCJointHost::set_layer_visibility(const std::string& layer_name,
     } catch (const std::exception&) {
         // Unknown layer names degrade honestly (no scene change).
     }
-    emit scene_updated();
 }
 
 void VizCJointHost::apply_camera_preset(const std::string& preset) {
@@ -503,14 +648,23 @@ void VizCJointHost::apply_camera_preset(const std::string& preset) {
     viewport_->update();
 }
 
-std::string VizCJointHost::well_identity_asset_id() const { return ""; }
+std::string VizCJointHost::well_identity_asset_id() const { return {}; }
 
 std::map<std::string, std::string> VizCJointHost::well_identity_map() const {
     return {};
 }
 
 std::map<std::string, std::string> VizCJointHost::path_hints() const {
-    return {};
+    std::map<std::string, std::string> hints;
+    if (!loaded_paths_.empty()) {
+        std::string joined;
+        for (const std::string& path : loaded_paths_) {
+            if (!joined.empty()) joined.push_back('|');
+            joined += path;
+        }
+        hints["segy"] = joined;
+    }
+    return hints;
 }
 
 std::vector<std::string> VizCJointHost::loaded_data_paths() const {
@@ -568,6 +722,167 @@ void VizCJointHost::push_scene_to_widget() {
     if (time_map_ != nullptr) {
         time_map_->refresh();
     }
+    request_prep();
+}
+
+// ---- async prep pipeline ----------------------------------------------------
+
+JointPrepRequest VizCJointHost::current_prep_request() const {
+    JointPrepRequest request;
+    request.generation = volume_generation_;
+    // Refcount-safe shared view; the worker only reads through it.
+    request.access = scene_.volume_access_shared();
+    const auto* registration = scene_.registration();
+    if (registration != nullptr) {
+        request.registration = *registration;
+    }
+    const auto* survey = scene_.survey();
+    if (survey != nullptr) request.survey = *survey;
+    for (const auto& fence : scene_.fences()) {
+        if (fence.visible) request.fences.push_back(fence);
+    }
+    request.n_along = 128;
+    // The extraction saxis (active-domain units), mirroring the scene's
+    // own extract path (full survey range, stride-aware spacing).
+    const std::int64_t nt =
+        scene_.volume_access() != nullptr ? scene_.volume_access()->shape()[2] : 0;
+    request.sample_axis.reserve(static_cast<std::size_t>(std::max<std::int64_t>(nt, 0)));
+    const std::int64_t stride_t =
+        registration != nullptr ? registration->strides()[2] : 1;
+    for (std::int64_t t = 0; t < nt; ++t) {
+        request.sample_axis.push_back(
+            request.survey.t0_ms +
+            static_cast<double>(t) *
+                (request.survey.dt_ms * static_cast<double>(stride_t)));
+    }
+    if (scene_.vertical_domain() == VerticalDomain::Depth) {
+        request.sample_axis =
+            scene_.depth_transform().time_ms_to_depth_m(request.sample_axis);
+    }
+    request.color_scale = scene_.display_settings().seismic_color_scale;
+    if (scene_.vertical_domain() == VerticalDomain::Time) {
+        if (const auto render_state = scene_.orthogonal_slice_render_state();
+            render_state.has_value()) {
+            request.slice_native_sample = std::get<3>(*render_state);
+        }
+    }
+    return request;
+}
+
+void VizCJointHost::request_prep() {
+    if (shutdown_done_) return;  // no post-shutdown resurrection
+    if (scene_.volume_access() == nullptr) return;  // nothing to read yet
+    JointPrepRequest current = current_prep_request();
+    if (prep_running_ && prep_in_flight_.has_value()) {
+        if (prep_requests_equal(*prep_in_flight_, current)) return;
+        // Cooperative cancel: the body stops at its next safe point; the
+        // finished callback drops the stale payload and re-issues.
+        prep_owner_->cancel();
+        return;
+    }
+    if (prep_applied_ && prep_requests_equal(*prep_applied_, current)) {
+        return;  // up to date
+    }
+    // One owner per host is reused once its job reaches terminal; each
+    // make_owner() registers a process-lifetime entry in the JobCenter,
+    // so per-request owners would leak it on every slice scrub.
+    if (prep_owner_ == nullptr) {
+        prep_owner_ = &job_center_.make_owner(this);
+    }
+    const std::uint64_t generation = current.generation;
+    auto request = std::make_shared<JointPrepRequest>(std::move(current));
+    prep_in_flight_ = *request;
+    prep_running_ = true;
+
+    pwb::job::JobSpec spec;
+    spec.kind = "background.io";
+    spec.title = "联合切片/帘幕读取";
+    spec.run = [request](pwb::job::JobContext& ctx) -> std::any {
+        auto data = std::make_shared<JointPrepData>();
+        try {
+            const auto& volume = *request->access;
+            for (const auto& fence : request->fences) {
+                ctx.check_cancelled();
+                data->strips.push_back(
+                    {fence.id,
+                     pwb::geo3d_viz::joint::extract_fence_strip(
+                         volume, fence, request->survey, request->n_along,
+                         request->sample_axis,
+                         request->registration ? &*request->registration
+                                               : nullptr)});
+            }
+            if (request->slice_native_sample >= 0) {
+                ctx.check_cancelled();
+                const auto shape = volume.shape();
+                const std::vector<float> plane =
+                    volume.slice_time(request->slice_native_sample);
+                data->slice_rgba = pwb::geo3d_viz::joint::colorize_amplitude(
+                    plane, request->color_scale);
+                data->n_inline = shape[0];
+                data->n_crossline = shape[1];
+                data->active_sample = request->slice_native_sample;
+            }
+        } catch (const pwb::job::JobCancelled&) {
+            throw;  // honest cancellation path (owner drops the payload)
+        } catch (const std::exception& ex) {
+            data->error = ex.what();
+        }
+        return data;
+    };
+    prep_owner_->start(
+        job_center_.scheduler(), std::move(spec),
+        [this, generation, request](
+            const pwb::job::qtbridge::JobOutcome& outcome) {
+            prep_running_ = false;
+            prep_in_flight_.reset();
+            if (outcome.state == pwb::job::JobState::cancelled ||
+                generation != volume_generation_) {
+                // Superseded: the re-issue below recomputes the current
+                // state — a stale payload is never applied.
+                request_prep();
+                return;
+            }
+            const auto data =
+                std::any_cast<std::shared_ptr<JointPrepData>>(&outcome.result);
+            if (data == nullptr || *data == nullptr) {
+                // Framework-level failure (empty any): record the
+                // request as served so a deterministic failure cannot
+                // resubmit in a tight loop; the next scene change
+                // re-issues normally.
+                prep_applied_ = *request;
+                request_prep();
+                return;
+            }
+            if (!(*data)->error.empty()) {
+                emit_status(tr("联合切片读取失败：%1").arg(
+                    QString::fromStdString((*data)->error)));
+            }
+            prep_finished(*request, **data);
+        });
+}
+
+void VizCJointHost::prep_finished(const JointPrepRequest& request,
+                                  JointPrepData data) {
+    prepared_ = std::move(data);
+    // The applied key is the request the job actually ran for — never
+    // the current one (a cooperatively-cancelled job can still finish
+    // "successfully" with stale payloads; recording the true key keeps
+    // the converge loop honest and re-issuing).
+    prep_applied_ = request;
+    if (time_map_ != nullptr && prepared_.active_sample >= 0 &&
+        !prepared_.slice_rgba.empty()) {
+        time_map_->set_prepared_slice(prepared_.slice_rgba, prepared_.n_inline,
+                                      prepared_.n_crossline,
+                                      prepared_.active_sample);
+    }
+    assemble_joint_objects();
+    if (time_map_ != nullptr) {
+        time_map_->refresh();
+    }
+    emit prep_applied();
+    emit scene_updated();
+    // Converge: the scene may have moved on while the worker ran.
+    request_prep();
 }
 
 // ---- assembly ----------------------------------------------------------------
@@ -587,7 +902,8 @@ void VizCJointHost::assemble_joint_objects() {
         }
     }
 
-    // Wells: render-space polylines through the scene transform.
+    // Wells: render-space polylines through the scene transform (no
+    // volume read — safe on the GUI thread).
     const auto width = static_cast<float>(
         scene_.display_settings().well_width_px);
     for (const auto& [id, traj] : scene_.well_trajectories()) {
@@ -607,23 +923,30 @@ void VizCJointHost::assemble_joint_objects() {
         }
     }
 
-    // Fence curtains.
-    for (const auto& fence : scene_.fences()) {
-        if (!fence.visible) continue;
-        auto extraction = scene_.extract_active_fence();
-        if (!extraction.has_value() ||
-            extraction->fence_id != fence.id) {
-            // extract_active_fence only reports the ACTIVE fence; other
-            // fences share the same extraction path per fence when
-            // activated (activation re-assembles).
-            continue;
+    // Fence curtains: one per VISIBLE fence, from the applied worker
+    // payload (never a synchronous volume read here). Missing strips
+    // arrive when the in-flight prep applies.
+    // One by-value copy of the fence list: fences() returns a temporary,
+    // so a pointer into it would dangle (caught as garbage curtain verts
+    // in the closure verification — the real crash behind the
+    // "non-finite coordinates" flake).
+    const std::vector<joint::FenceSection> scene_fences = scene_.fences();
+    for (const auto& strip : prepared_.strips) {
+        const joint::FenceSection* fence = nullptr;
+        for (const auto& candidate : scene_fences) {
+            if (candidate.id == strip.fence_id &&
+                candidate.visible) {
+                fence = &candidate;
+                break;
+            }
         }
+        if (fence == nullptr) continue;
         const CurtainMesh mesh = build_fence_curtain(
-            scene_, *extraction,
+            scene_, *fence, strip.extraction,
             scene_.display_settings().seismic_color_scale);
         if (mesh.empty()) continue;
         pwb::geo3d_viz::SceneObject object;
-        object.name = "joint:fence:" + fence.id;
+        object.name = "joint:fence:" + strip.fence_id;
         object.kind = pwb::geo3d_viz::ObjectKind::Volume;
         object.mode = pwb::geo3d_viz::ObjectMode::Mesh;
         object.verts = mesh.vertices;
@@ -634,10 +957,12 @@ void VizCJointHost::assemble_joint_objects() {
         manager.add(std::move(object));
     }
 
-    // Active time slice.
-    if (scene_.vertical_domain() == VerticalDomain::Time) {
-        const SliceMesh mesh = build_active_time_slice(
-            scene_, scene_.display_settings().seismic_color_scale);
+    // Active time slice from the prepared (worker-colorized) plane.
+    if (scene_.vertical_domain() == VerticalDomain::Time &&
+        prepared_.active_sample >= 0 && !prepared_.slice_rgba.empty()) {
+        const SliceMesh mesh = build_active_time_slice_prepared(
+            scene_, prepared_.slice_rgba, prepared_.n_inline,
+            prepared_.n_crossline, prepared_.active_sample);
         if (!mesh.empty()) {
             pwb::geo3d_viz::SceneObject object;
             object.name = "joint:slice:active";
