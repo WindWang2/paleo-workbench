@@ -537,7 +537,7 @@ if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
     endforeach()
     # CONV-26B's own imply-if ran earlier (its option block sits above
     # this point), so land the downstream switches it would have set.
-    # CONV-06/07/08 option blocks still lie ahead — normal-variable sets
+    # CONV-06/07 option blocks still lie ahead — normal-variable sets
     # shadow them (CMP0077) and their subdirectory adds run on time.
     # CONV-25's add_subdirectory already passed, so mount it directly.
     # V14-THREE-STAGE-UX: CONV-26B also sets PWB_BUILD_MAPPING_KERNEL —
@@ -892,6 +892,10 @@ if(PWB_BUILD_PLATFORM)
     # UI-12 — workstation shell slice: dock composition frame + panel
     # widgets over the UI-01 shell substrate (pages stay injected).
     add_subdirectory(libs/ui_workstation)
+    # V14-THREE-STAGE-UX — stage presentation projection (snapshot/layout
+    # profiles/preference codec + unified surface state model) with a Qt
+    # controller shell; authority stays in ProjectSession/tool_policy.
+    add_subdirectory(libs/ui_stageflow)
     # UI-13 — workstation-composite slice: Qt-free composite-editor
     # cores (vector layers/edit sessions, topology, merge, CRS gate,
     # snapping, map tools, controller) + Qt/QGIS shells as they land.
@@ -1210,6 +1214,75 @@ if(TARGET pwb-platform
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
             TIMEOUT 300)
+
+        # BEGIN PWB-V14-THREE-STAGE — three-stage workbench install
+        # (V14-THREE-STAGE-UX): the stage bar mount, StageFlowController
+        # seams, production command set, task-center providers and the
+        # selection bus. Requires the full AppShell closure (UI-17 above)
+        # plus the stage-flow projection lib; the selection bus leg joins
+        # additionally when UI-14's controller targets are in the closure.
+        if(TARGET Pwb::UiStageflowQt)
+            target_sources(pwb-platform PRIVATE
+                apps/paleo_workbench_platform/stage_flow_install.cpp)
+            target_link_libraries(pwb-platform PRIVATE Pwb::UiStageflowQt)
+            target_compile_definitions(pwb-platform PRIVATE
+                PWB_WITH_STAGE_FLOW=1)
+            if(TARGET Pwb::UiControllersQt)
+                target_link_libraries(pwb-platform PRIVATE
+                    Pwb::UiControllers Pwb::UiControllersQt)
+                target_compile_definitions(pwb-platform PRIVATE
+                    PWB_WITH_UI_CONTROLLERS=1)
+            endif()
+            # Integration battery: the full shell WITH the stage-flow
+            # install compiled in, same defines as the app.
+            add_executable(platform_three_stage_flow
+                tests/cpp/platform/test_three_stage_flow.cpp
+                apps/paleo_workbench_platform/main_window.cpp
+                apps/paleo_workbench_platform/app_context.cpp
+                apps/paleo_workbench_platform/diagnostics.cpp
+                apps/paleo_workbench_platform/app_shell.cpp
+                apps/paleo_workbench_platform/stage_flow_install.cpp)
+            if(COMMAND pwb_link_job_runtime)
+                pwb_link_job_runtime(platform_three_stage_flow)
+            endif()
+            set_target_properties(platform_three_stage_flow
+                PROPERTIES AUTOMOC ON)
+            target_compile_features(platform_three_stage_flow
+                PRIVATE cxx_std_20)
+            target_include_directories(platform_three_stage_flow PRIVATE
+                tests/cpp/platform
+                apps/paleo_workbench_platform
+                ${CMAKE_BINARY_DIR}/generated)
+            target_link_libraries(platform_three_stage_flow PRIVATE
+                Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+                Pwb::PlatformServices Pwb::UiStageflowQt
+                Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+            target_compile_definitions(platform_three_stage_flow PRIVATE
+                PWB_WITH_APP_SHELL=1
+                PWB_WITH_STAGE_FLOW=1
+                PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+            if(TARGET Pwb::UiControllersQt)
+                target_link_libraries(platform_three_stage_flow PRIVATE
+                    Pwb::UiControllers Pwb::UiControllersQt)
+                target_compile_definitions(platform_three_stage_flow
+                    PRIVATE PWB_WITH_UI_CONTROLLERS=1)
+            endif()
+            if(TARGET Pwb::Data)
+                target_link_libraries(platform_three_stage_flow PRIVATE
+                    Pwb::Data)
+                target_compile_definitions(platform_three_stage_flow
+                    PRIVATE PWB_WITH_DATA_INTEGRATION=1)
+            endif()
+            add_test(NAME platform.three_stage_flow
+                     COMMAND platform_three_stage_flow)
+            set_tests_properties(platform.three_stage_flow PROPERTIES
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+                TIMEOUT 300)
+        endif()
+        # END PWB-V14-THREE-STAGE
 
         # BEGIN CLOSURE-REVIEW (line 09)
         # Review/publish closure install battery: the real MainWindow +
