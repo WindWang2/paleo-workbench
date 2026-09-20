@@ -15,6 +15,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(MSVC)
     # Sources carry Chinese reason strings and comments: force UTF-8 parsing.
     add_compile_options(/utf-8 /EHsc /W3 /bigobj)
+    # math constants (M_PI and friends) are guarded behind this feature
+    # macro on MSVC; the Linux builds get them from glibc's math.h by
+    # default (V14-THREE-STAGE-UX: fresh-configure parity).
+    add_compile_definitions(_USE_MATH_DEFINES)
 endif()
 
 # ------------------------------------------------------------ feature graph --
@@ -536,6 +540,11 @@ if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
     # CONV-06/07/08 option blocks still lie ahead — normal-variable sets
     # shadow them (CMP0077) and their subdirectory adds run on time.
     # CONV-25's add_subdirectory already passed, so mount it directly.
+    # V14-THREE-STAGE-UX: CONV-26B also sets PWB_BUILD_MAPPING_KERNEL —
+    # without it the CONV-07 option block below fatals on any fresh
+    # PLATFORM+DATA configure that did not pass the kernel flag by hand
+    # (the presets masked this by passing it explicitly).
+    set(PWB_BUILD_MAPPING_KERNEL ON)
     set(PWB_BUILD_CONV_06 ON)
     set(PWB_BUILD_CONV_07 ON)
     set(PWB_BUILD_CONV_08 ON)
@@ -1679,7 +1688,12 @@ if(TARGET pwb-platform AND TARGET Pwb::VizChartsQt
             PRIVATE PWB_WELL_PRESENTERS_HAVE_TIE=1)
     endif()
     if(BUILD_TESTING AND TARGET Pwb::VisualizationCrossWell
-       AND TARGET Pwb::UiPagesDataQt)
+       AND TARGET Pwb::UiPagesDataQt
+       AND TARGET Pwb::UiWorkersWleLoad)
+        # V14-THREE-STAGE-UX: UiWorkersWleLoad only exists when the WLE
+        # viewer closure joined the build (science_suite viewer track);
+        # without it the tests' own first fail-closed check would abort
+        # every fresh PLATFORM+DATA+VIZ-B testing configure.
         add_subdirectory(tests/cpp/well_crosswell)
     endif()
 endif()
