@@ -34,6 +34,9 @@
 namespace pwb::ui_composite {
 class CompositeDocument;
 }
+namespace pwb::ui_data_core {
+class PreviewProvider;
+}
 namespace pwb::ui_pages_data::qt {
 class DataWorkspace;
 class HomePage;
@@ -134,6 +137,20 @@ public:
     }
 
     void set_project_name(const QString& name);
+
+    // CLOSURE-PREVIEW (task 04, function-level lease via the wave
+    // coordination registry): mount the composed data page over the bare
+    // management workspace. The composite ADOPTS data_workspace_ (it is
+    // reparented inside), so data_workspace() stays valid and the hub
+    // submodule widget becomes `composite`. Returns the replaced widget
+    // (nullptr when the composite is null). One-shot per shell lifetime.
+    QWidget* adopt_data_page(QWidget* composite);
+
+    // CLOSURE-PREVIEW (task 04, function-level lease): replace the
+    // deferred message-stub base builder of the 可视化 page's preview
+    // provider with the host-bound provider (parser-registry backed).
+    void bind_visualization_preview(
+        pwb::ui_data_core::PreviewProvider provider);
 
 signals:
     // App bar / home-page project actions forwarded to the host window

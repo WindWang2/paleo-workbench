@@ -20,6 +20,7 @@ class QTimer;
 
 namespace pwb::ui_pages_data::qt {
 
+class AssetSelectionBus;
 class DataAssetTable;
 class DataReaderPanel;
 class NavigationTree;
@@ -83,6 +84,12 @@ public:
     void set_well_map_panel(WellMapPanelApi* panel);
     void set_inspector_panel(QWidget* panel);
     void set_well_detail_panel(QWidget* panel);
+    // CLOSURE-PREVIEW (task 04): bind the single asset-selection state.
+    // Table selection publishes into the bus; bus state (rows, external
+    // selection, deletion/project-switch clears) mirrors into the table.
+    // The bus is NOT owned; nullptr unbinds.
+    void bind_selection_bus(AssetSelectionBus* bus);
+    AssetSelectionBus* selection_bus() const { return selection_bus_; }
 
     // Python attribute parity.
     NavigationTree* navigation_tree() { return navigation_tree_; }
@@ -124,6 +131,8 @@ private:
     FloatControllerApi* float_controller_ = nullptr;
     std::function<void(const QString&, const QList<int>&)>
         save_docked_sizes_fn_;
+    AssetSelectionBus* selection_bus_ = nullptr;
+    bool syncing_selection_bus_ = false;
     std::map<QString, QWidget*> floatable_;
     bool map_collapsed_before_overview_ = true;
     bool map_collapsed_before_float_ = true;

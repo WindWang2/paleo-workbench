@@ -173,6 +173,13 @@ void VisualizationPage::set_seams(VizPageSeams seams) {
     composite_->set_seams(seams_.workspace);
 }
 
+void VisualizationPage::set_preview_provider(
+    ui_data_core::PreviewProvider provider) {
+    if (preview_controller_ != nullptr) {
+        preview_controller_->set_provider(std::move(provider));
+    }
+}
+
 void VisualizationPage::set_project_path(const std::string& path) {
     project_path_ = path;
 }

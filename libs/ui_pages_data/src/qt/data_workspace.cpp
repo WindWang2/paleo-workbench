@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <pwb/ui_pages_data/qt/asset_selection_bus.hpp>
 #include <pwb/ui_pages_data/qt/data_asset_table.hpp>
 #include <pwb/ui_pages_data/qt/data_reader_panel.hpp>
 #include <pwb/ui_pages_data/qt/navigation_tree_widget.hpp>
@@ -177,6 +178,37 @@ void DataWorkspace::set_well_detail_panel(QWidget* panel) {
         center_stack_->removeWidget(old);
         old->deleteLater();
     }
+}
+
+void DataWorkspace::bind_selection_bus(AssetSelectionBus* bus) {
+    if (selection_bus_ != nullptr) {
+        disconnect(selection_bus_, nullptr, this, nullptr);
+    }
+    selection_bus_ = bus;
+    if (selection_bus_ == nullptr) return;
+    // Table → bus (the user's real selection is the state). The loop
+    // bus→table→bus terminates on the bus's unchanged-selection check.
+    connect(asset_table_, &DataAssetTable::selected_asset_changed,
+            selection_bus_, [this](const std::optional<AssetRow>& asset) {
+                if (syncing_selection_bus_) return;
+                selection_bus_->set_current_asset(asset);
+            });
+    // Bus → table (external selection, row deletion, project switch).
+    connect(selection_bus_,
+            &AssetSelectionBus::current_asset_changed, this,
+            [this](const std::optional<AssetRow>& asset) {
+                syncing_selection_bus_ = true;
+                asset_table_->set_selected_asset(asset.has_value()
+                                                     ? &*asset
+                                                     : nullptr);
+                syncing_selection_bus_ = false;
+            });
+    connect(selection_bus_, &AssetSelectionBus::assets_changed, this,
+            [this](const std::vector<AssetRow>& rows, const QString&) {
+                syncing_selection_bus_ = true;
+                asset_table_->update_assets(rows);
+                syncing_selection_bus_ = false;
+            });
 }
 
 void DataWorkspace::make_floatable(const QString& key, QWidget* panel,

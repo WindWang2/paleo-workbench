@@ -45,6 +45,23 @@ void HubPage::add_submodule(const std::string& key, const QString& title,
     switcher_host_->setVisible(keys_.size() > 1);
 }
 
+QWidget* HubPage::replace_submodule(const std::string& key, QWidget* page) {
+    const auto it = pages_.find(key);
+    if (it == pages_.end() || page == nullptr) return nullptr;
+    QWidget* old = it->second;
+    it->second = page;
+    stack_->addWidget(page);
+    if (current_ == key) stack_->setCurrentWidget(page);
+    // Detach the old widget only when this stack still hosts it — the
+    // adopt flow (task 04) reparents it into the composite BEFORE the
+    // swap, and stealing it back there would gut the page.
+    if (old->parent() == stack_) {
+        stack_->removeWidget(old);
+        old->setParent(nullptr);
+    }
+    return old;
+}
+
 void HubPage::finish() { switcher_layout_->addStretch(1); }
 
 void HubPage::switch_to(const std::string& key, bool emit_signal) {

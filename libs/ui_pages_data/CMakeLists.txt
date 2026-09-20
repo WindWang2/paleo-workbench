@@ -70,6 +70,9 @@ if(TARGET Qt6::Widgets)
         src/qt/tag_widgets.cpp
         src/qt/new_project_wizard.cpp
         src/qt/home_page.cpp
+        # CLOSURE-PREVIEW (task 04): the single real asset-selection state.
+        src/qt/asset_selection_bus.cpp
+        src/qt/vector_asset_row_source.cpp
         # preparation_page.cpp / data_page.cpp deferred — the two largest
         # page composites (377 / 3154 Python lines), see ledgers/ui-06-findings.md.
         # NOTE: preparation_page.hpp is intentionally NOT listed below —
@@ -98,6 +101,8 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_pages_data/qt/tag_widgets.hpp
         include/pwb/ui_pages_data/qt/new_project_wizard.hpp
         include/pwb/ui_pages_data/qt/home_page.hpp
+        include/pwb/ui_pages_data/qt/asset_selection_bus.hpp
+        include/pwb/ui_pages_data/qt/vector_asset_row_source.hpp
     )
     add_library(Pwb::UiPagesDataQt ALIAS pwb_ui_pages_data_qt)
     set_target_properties(pwb_ui_pages_data_qt PROPERTIES AUTOMOC ON)

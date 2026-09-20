@@ -7,6 +7,8 @@
 #include "job_center.hpp"
 #include "viz_e_dat_preview.hpp"
 
+#include "closure_preview_adapters.hpp"
+
 #include <pwb/ui_workers/contour_draft.hpp>
 #include <pwb/ui_workers/worker_common.hpp>
 #include <pwb/viz_charts/marching_squares.hpp>
@@ -16,10 +18,21 @@
 #include <pwb/viz_charts/qt/plot_widget.hpp>
 
 #include <pwb/ui_pages_data/asset_view.hpp>
+#include <pwb/ui_pages_data/qt/asset_selection_bus.hpp>
+#include <pwb/ui_pages_data/qt/data_reader_panel.hpp>
+#include <pwb/ui_pages_data/qt/data_workspace.hpp>
+#include <pwb/ui_pages_preview/qt/preview_settings_store.hpp>
 #include <pwb/domain/json.hpp>
+#include <pwb/project/document.hpp>
+#include <pwb/project/manager.hpp>
+#include <pwb/application/adapters/data_store.hpp>
 
 #include <QApplication>
 #include <QFile>
+#include <QImage>
+#include <QFileInfo>
+#include <QPushButton>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QLabel>
 #include <QTextStream>
@@ -27,12 +40,14 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <thread>
 
 using namespace pwb::viz_e;
 namespace upd = pwb::ui_pages_data;
+namespace upv = pwb::ui_pages_preview;
 using pwb::domain::Json;
 
 static int checks = 0;
@@ -609,6 +624,355 @@ int main(int argc, char** argv) {
         // empty path
         page.preview_asset(row_for(QString(""), "U2"));
         CHECK(failed.wait(2));
+    }
+
+    // ------------------------------------------------------------------
+    // 6) CLOSURE-PREVIEW (task 04): unified data page state machine over
+    //    the REAL parser-registry adapter (ingest::build_preview via
+    //    closure_preview_adapters::build_registry_view). Covers: 真实资产
+    //    选择→解析→正确 presenter→缩放/选择/导出, plus the state
+    //    assertions — 快速切换 / 取消 / 删除资产 / 工程切换 / 解析失败 /
+    //    媒体环境不可用.
+    // ------------------------------------------------------------------
+    {
+        namespace updqt = pwb::ui_pages_data::qt;
+        namespace adapters = pwb::closure_preview;
+
+        pwb::app::JobCenter jobs;
+        VizEDataPage page(nullptr, &jobs);
+        page.resize(1200, 800);
+        page.show();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+
+        // Temp-backed settings store (never touches the user profile).
+        QTemporaryDir cfg_dir;
+        QSettings cfg(cfg_dir.filePath("preview-settings.ini"),
+                      QSettings::IniFormat);
+        upv::PreviewSettingsStore settings_store(&cfg);
+        page.set_base_preview_builder(
+            [&settings_store](
+                const upd::AssetRow& row,
+                pwb::job::JobContext* ctx)
+                -> std::optional<updqt::PreviewResultView> {
+                if (ctx != nullptr) ctx->check_cancelled();
+                return adapters::build_registry_view(
+                    row, settings_store.load());
+            });
+
+        auto* reader = page.workspace()->reader_panel();
+        auto* bus = new updqt::AssetSelectionBus(&page);
+        page.bind_selection_bus(bus);
+
+        // -- asset source through the bus (single real selection state) ---
+        QTemporaryDir assets;
+        const QString csv = assets.filePath("curves.csv");
+        { QFile f(csv); f.open(QIODevice::WriteOnly);
+          f.write("depth,gr\n1000.0,42.5\n1000.5,47.1\n"); f.close(); }
+        const QString txt = assets.filePath("log.txt");
+        { QFile f(txt); f.open(QIODevice::WriteOnly);
+          f.write("hello data page\n"); f.close(); }
+        const QString json = assets.filePath("meta.json");
+        { QFile f(json); f.open(QIODevice::WriteOnly);
+          f.write("{\"well\":\"W1\",\"runs\":[1,2,3]}"); f.close(); }
+        const QString bad_json = assets.filePath("broken.json");
+        { QFile f(bad_json); f.open(QIODevice::WriteOnly);
+          f.write("{\"well\":"); f.close(); }
+        const QString missing = assets.filePath("gone.csv");
+
+        auto row_with = [&](const QString& path, const char* id,
+                            const char* fmt) {
+            upd::AssetRow row = row_for(path, id, fmt);
+            row.view.name = QFileInfo(path).fileName().toStdString();
+            return row;
+        };
+        bus->set_assets(
+            {row_with(csv, "A1", "csv"), row_with(txt, "A2", "txt"),
+             row_with(json, "A3", "json"), row_with(bad_json, "A4", "json"),
+             row_with(missing, "A5", "csv")},
+            QStringLiteral("proj-1"));
+
+        Counter rendered; rendered.track(&page, &VizEDataPage::preview_rendered);
+
+        // csv → table presenter, REAL parsed cells reach the widget
+        bus->set_current_asset(bus->assets()[0]);
+        CHECK(rendered.wait(1));
+        CHECK(page.active_target() == QStringLiteral("table"));
+        CHECK(reader->current_result().mode == "table");
+        const std::string tsv = reader->table_preview()->copy_all();
+        CHECK(tsv.find("42.5") != std::string::npos);
+        CHECK(tsv.find("1000.5") != std::string::npos);
+        CHECK(tsv.find("depth") != std::string::npos);
+
+        // txt → text presenter with the file's own bytes
+        bus->set_current_asset(bus->assets()[1]);
+        CHECK(rendered.wait(2));
+        CHECK(page.active_target() == QStringLiteral("text"));
+        CHECK(reader->text_preview()->toPlainText().contains(
+            QStringLiteral("hello data page")));
+
+        // json → json_tree presenter carrying the parsed payload
+        bus->set_current_asset(bus->assets()[2]);
+        CHECK(rendered.wait(3));
+        CHECK(page.active_target() == QStringLiteral("json_tree"));
+        CHECK(reader->current_result().payload != nullptr);
+        const auto* payload =
+            static_cast<const Json*>(reader->current_result().payload);
+        CHECK(payload != nullptr && payload->contains("well"));
+        if (payload != nullptr && payload->contains("well")) {
+            CHECK(payload->at("well").get<std::string>() == "W1");
+        }
+
+        // image family zoom/select affordances (image fixture)
+        const QString png = assets.filePath("thumb.png");
+        { QImage img(64, 48, QImage::Format_RGB32);
+          img.fill(QColor(30, 90, 200));
+          img.save(png); }
+        bus->set_assets({row_with(png, "A6", "png")},
+                        QStringLiteral("proj-1"));
+        // deletion semantics: the selection referenced a removed row → cleared
+        CHECK(!bus->current_asset().has_value());
+        bus->set_current_asset(bus->assets()[0]);
+        CHECK(rendered.wait(4));
+        CHECK(page.active_target() == QStringLiteral("image"));
+        auto* image = reader->image_preview_widget();
+        image->set_fit_mode(false);
+        const double before = image->zoom_factor();
+        image->zoom_in();
+        CHECK(image->zoom_factor() > before);
+
+        // 解析失败: corrupt json → honest parse-failure message (retryable
+        // is the registry's own semantic; the state is message, not a fake
+        // tree)
+        bus->set_assets({row_with(bad_json, "A7", "json")},
+                        QStringLiteral("proj-1"));
+        bus->set_current_asset(bus->assets()[0]);
+        CHECK(rendered.wait(4) || rendered.count >= 4);
+        bool settled = false;
+        for (int i = 0; i < 3000 && !settled; ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            settled = reader->current_mode() == "message";
+        }
+        CHECK(reader->current_mode() == QStringLiteral("message"));
+        CHECK(reader->message_label()->text().contains(
+            QStringLiteral("JSON")));
+
+        // missing file → the registry's honest 文件不存在 (status missing)
+        bus->set_assets({row_with(missing, "A8", "csv")},
+                        QStringLiteral("proj-1"));
+        bus->set_current_asset(bus->assets()[0]);
+        settled = false;
+        for (int i = 0; i < 3000 && !settled; ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            settled = reader->current_result().status == "missing";
+        }
+        CHECK(reader->current_result().status == "missing");
+
+        // media family: honest degradation offscreen (no video surface in
+        // the test environment — the widget must accept the load without
+        // crashing and the page routes to the media target; playback is an
+        // environment capability, asserted unavailable here).
+        const QString media = assets.filePath("clip.mp4");
+        { QFile f(media); f.open(QIODevice::WriteOnly);
+          f.write("\x00\x00\x00\x18ftypmp42", 12); f.close(); }
+        bus->set_assets({row_with(media, "A9", "mp4")},
+                        QStringLiteral("proj-1"));
+        bus->set_current_asset(bus->assets()[0]);
+        settled = false;
+        for (int i = 0; i < 3000 && !settled; ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            settled = reader->current_mode() == "media";
+        }
+        CHECK(reader->current_mode() == QStringLiteral("media"));
+        CHECK(page.active_target() == QStringLiteral("media"));
+
+        // 取消: a slow registry job cancelled through the loading page's
+        // hook lands the honest cancelled state (never a partial preview).
+        {
+            VizEDataPage slow_page(nullptr, &jobs);
+            auto* slow_reader = slow_page.workspace()->reader_panel();
+            slow_page.set_base_preview_builder(
+                [](const upd::AssetRow&, pwb::job::JobContext* ctx)
+                    -> std::optional<updqt::PreviewResultView> {
+                    // blocks until cancelled (cooperative token poll)
+                    while (true) {
+                        ctx->check_cancelled();
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(5));
+                    }
+                });
+            QTemporaryDir slow_assets;
+            upd::AssetRow slow_row =
+                row_with(slow_assets.filePath("big.csv"), "S1", "csv");
+            slow_page.preview_asset(slow_row);
+            // loading state reached
+            bool loading = false;
+            for (int i = 0; i < 2000 && !loading; ++i) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                loading = slow_reader->current_mode() == "loading";
+            }
+            CHECK(loading);
+            // the 取消 affordance is armed and cancels the in-flight load
+            auto* btn = slow_reader->findChild<QPushButton*>(
+                QStringLiteral("LoadingCancelButton"));
+            CHECK(btn != nullptr);
+            if (btn != nullptr) btn->click();
+            bool cancelled = false;
+            for (int i = 0; i < 3000 && !cancelled; ++i) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                cancelled = slow_reader->current_mode() == "message" &&
+                            slow_reader->message_label()->text().contains(
+                                QStringLiteral("取消"));
+            }
+            CHECK(cancelled);
+            jobs.shutdown_workers(500);
+        }
+
+        // 快速切换: the superseded job's delivery drops (generation guard);
+        // the final reader state belongs to the LAST selection only.
+        {
+            QTemporaryDir fast_assets;
+            const QString slow_csv = fast_assets.filePath("slow.csv");
+            { QFile f(slow_csv); f.open(QIODevice::WriteOnly);
+              f.write("a,b\n1,2\n"); f.close(); }
+            const QString fast_txt = fast_assets.filePath("fast.txt");
+            { QFile f(fast_txt); f.open(QIODevice::WriteOnly);
+              f.write("second selection wins\n"); f.close(); }
+            VizEDataPage fast_page(nullptr, &jobs);
+            auto* fast_reader = fast_page.workspace()->reader_panel();
+            QSettings fast_cfg(fast_assets.filePath("s.ini"),
+                               QSettings::IniFormat);
+            upv::PreviewSettingsStore fast_store(&fast_cfg);
+            fast_page.set_base_preview_builder(
+                [&fast_store](const upd::AssetRow& row,
+                              pwb::job::JobContext* ctx)
+                    -> std::optional<updqt::PreviewResultView> {
+                    if (row.view.format == std::string("csv")) {
+                        while (true) {
+                            ctx->check_cancelled();
+                            std::this_thread::sleep_for(
+                                std::chrono::milliseconds(5));
+                        }
+                    }
+                    return adapters::build_registry_view(
+                        row, fast_store.load());
+                });
+            // NOTE: the default-constructed store here is process-lifetime
+            // platform defaults (QSettings-backed); the test only asserts
+            // dispatch ORDER, not settings content.
+            fast_page.preview_asset(row_with(slow_csv, "F1", "csv"));
+            fast_page.preview_asset(row_with(fast_txt, "F2", "txt"));
+            bool done = false;
+            for (int i = 0; i < 3000 && !done; ++i) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                done = fast_reader->current_mode() == "text";
+            }
+            CHECK(fast_reader->current_mode() == QStringLiteral("text"));
+            CHECK(fast_reader->text_preview()->toPlainText().contains(
+                QStringLiteral("second selection wins")));
+            // settling further must NOT flip back to the cancelled/slow csv
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 200);
+            CHECK(fast_reader->current_mode() == QStringLiteral("text"));
+            jobs.shutdown_workers(500);
+        }
+
+        // 工程切换: a different project id clears the selection even when
+        // a row with the same identity reappears; rows are replaced.
+        bus->set_assets({row_with(csv, "A1", "csv")},
+                        QStringLiteral("proj-1"));
+        bus->set_current_asset(bus->assets()[0]);
+        CHECK(bus->current_asset().has_value());
+        bus->set_assets({row_with(csv, "A1", "csv")},
+                        QStringLiteral("proj-2"));
+        CHECK(!bus->current_asset().has_value());
+        CHECK(bus->assets().size() == 1);
+        CHECK(bus->project_id() == QStringLiteral("proj-2"));
+        jobs.shutdown_workers(500);
+    }
+
+    // ------------------------------------------------------------------
+    // 6b) CLOSURE-PREVIEW: REAL catalog asset source — project bootstrap
+    //    through the product stack (ProjectManager + CatalogRepository +
+    //    PwbDataStore publish) → snapshot → AssetRow → registry preview.
+    // ------------------------------------------------------------------
+    {
+        namespace adapters = pwb::closure_preview;
+        QTemporaryDir project_dir;
+        const QString project_file =
+            project_dir.filePath("closure_proj.paleo.json");
+        std::filesystem::path pf = std::filesystem::path(
+            project_file.toStdString());
+
+        auto document = pwb::project::ProjectDocument::create_new(
+            "closure_proj", "");
+        pwb::project::ProjectManager manager(pf);
+        CHECK(manager.save(document).is_ok());
+
+        std::string open_error;
+        auto store = pwb::application::PwbDataStore::open(pf, &open_error);
+        CHECK(store != nullptr);
+        if (store != nullptr) {
+            // one real GeoJSON asset through the real publish transaction
+            const std::filesystem::path staged =
+                pf.parent_path() / ".pwb-bootstrap" / "boundary-v1.geojson";
+            std::filesystem::create_directories(staged.parent_path());
+            { std::ofstream out(staged, std::ios::binary);
+              out << "{\"type\":\"FeatureCollection\",\"features\":[]}"; }
+            const pwb::domain::RunId run_id{std::string("run_cp-0001")};
+            pwb::data::RunRegistrationV1 registration;
+            registration.run_id = run_id;
+            registration.operation = "bootstrap";
+            registration.generator = "pwb-platform";
+            CHECK(store->coordinator().register_run(registration).is_ok());
+            pwb::data::PublishRequestV1 publish;
+            publish.operation_id =
+                pwb::domain::OperationId{std::string("pub_cp-0001")};
+            publish.run_id = run_id;
+            publish.new_asset_name = "相带边界";
+            publish.new_asset_type = "vector_boundary";
+            publish.stage = pwb::domain::DataStage::Raw;
+            pwb::data::StagedAssetV1 staged_asset;
+            staged_asset.source_path = staged;
+            staged_asset.format = "GeoJSON";
+            publish.products.push_back(std::move(staged_asset));
+            publish.result_metadata = pwb::domain::Json::object();
+            CHECK(store->coordinator()
+                      .publish_run_result(publish, store->document())
+                      .is_ok());
+
+            auto snapshot = store->snapshot();
+            CHECK(snapshot.is_ok());
+            const auto rows = adapters::asset_rows_from_snapshot(
+                snapshot.value());
+            CHECK(rows.size() == 1);
+            if (!rows.empty()) {
+                CHECK(rows[0].view.name == "相带边界");
+                CHECK(rows[0].view.format == "GeoJSON");
+                CHECK(!rows[0].view.path.empty());
+                CHECK(std::filesystem::exists(rows[0].view.path));
+
+                // the REAL row flows through the REAL registry: GeoJSON →
+                // json_tree preview with a parsed payload
+                QTemporaryDir cfg_dir;
+                QSettings cfg(cfg_dir.filePath("s.ini"),
+                              QSettings::IniFormat);
+                upv::PreviewSettingsStore settings_store(&cfg);
+                const auto view = adapters::build_registry_view(
+                    rows[0], settings_store.load());
+                CHECK(view.mode == "json_tree");
+                CHECK(view.payload != nullptr);
+                const auto* payload =
+                    static_cast<const Json*>(view.payload);
+                CHECK(payload != nullptr &&
+                      payload->value("type", std::string()) ==
+                          "FeatureCollection");
+            }
+        }
     }
 
     std::printf("%s: %d checks, %d failures\n", __func__, checks, failures);

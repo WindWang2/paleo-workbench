@@ -89,6 +89,12 @@ public:
     void set_seams(VizPageSeams seams);
     const VizPageSeams& seams() const { return seams_; }
 
+    // CLOSURE-PREVIEW (task 04, function-level lease via the wave
+    // coordination registry): swap the preview provider after
+    // construction (the shell binds the real parser-registry provider
+    // over its honest message stub).
+    void set_preview_provider(ui_data_core::PreviewProvider provider);
+
     // set_project_path — the real *.paleo.json path for export/artifact
     // routing (never a fabricated name).
     void set_project_path(const std::string& path);

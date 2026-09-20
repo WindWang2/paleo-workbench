@@ -1217,6 +1217,77 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
     if(BUILD_TESTING)
         add_subdirectory(tests/cpp/viz_e)
     endif()
+    # BEGIN CLOSURE-PREVIEW (task 04) — unified data page, parse-registry
+    # base seam and preview dispatch. Superset of the VIZ-E closure: adds
+    # the AppShell-side adopt mount, the ingest registry adapter, the
+    # ui_pages_preview format targets and the D→E seismic presenter
+    # registration. Missing optional targets keep the plain VIZ-E mount.
+    if(TARGET Pwb::UiCanvas AND TARGET Pwb::UiDataCore
+       AND TARGET Pwb::Ingest AND TARGET Pwb::SeismicIo
+       AND TARGET Pwb::Visualization AND TARGET Pwb::SeismicViewer
+       AND TARGET Pwb::Data)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/closure_preview_adapters.cpp
+            apps/paleo_workbench_platform/closure_preview_install.cpp
+            apps/paleo_workbench_platform/closure_preview_adapters.hpp
+            apps/paleo_workbench_platform/closure_preview_install.hpp)
+        target_link_libraries(pwb-platform PRIVATE
+            Pwb::UiCanvas Pwb::UiDataCore Pwb::Ingest Pwb::SeismicIo
+            Pwb::Visualization Pwb::SeismicViewer)
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_CLOSURE_PREVIEW=1)
+        if(BUILD_TESTING AND TARGET platform_app_shell)
+            # Task 04 wiring battery: the real MainWindow+AppShell with the
+            # closure defines — one data page, adopted workspace, presenter
+            # registry, project-refresh notification.
+            add_executable(platform_closure_preview
+                tests/cpp/platform/test_closure_preview.cpp
+                apps/paleo_workbench_platform/main_window.cpp
+                apps/paleo_workbench_platform/app_context.cpp
+                apps/paleo_workbench_platform/diagnostics.cpp
+                apps/paleo_workbench_platform/app_shell.cpp
+                apps/paleo_workbench_platform/job_center.cpp
+                apps/paleo_workbench_platform/viz_e_dat_preview.cpp
+                apps/paleo_workbench_platform/viz_e_factor_preview.cpp
+                apps/paleo_workbench_platform/viz_e_hosts.cpp
+                apps/paleo_workbench_platform/viz_e_install.cpp
+                apps/paleo_workbench_platform/closure_preview_adapters.cpp
+                apps/paleo_workbench_platform/closure_preview_install.cpp)
+            if(COMMAND pwb_link_job_runtime)
+                pwb_link_job_runtime(platform_closure_preview)
+            endif()
+            set_target_properties(platform_closure_preview PROPERTIES
+                AUTOMOC ON)
+            target_compile_features(platform_closure_preview PRIVATE
+                cxx_std_20)
+            target_include_directories(platform_closure_preview PRIVATE
+                tests/cpp/platform
+                apps/paleo_workbench_platform
+                ${CMAKE_BINARY_DIR}/generated)
+            target_link_libraries(platform_closure_preview PRIVATE
+                Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+                Pwb::PlatformServices
+                Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt
+                Pwb::UiCanvas Pwb::UiDataCore Pwb::Ingest Pwb::SeismicIo
+                Pwb::Visualization Pwb::SeismicViewer
+                Pwb::UiPagesPreview Pwb::UiPagesPreviewQt
+                Pwb::VizChartsQt Pwb::MappingKernel Pwb::UiWorkers
+                Pwb::JobQt Pwb::Domain)
+            target_compile_definitions(platform_closure_preview PRIVATE
+                PWB_WITH_APP_SHELL=1 PWB_WITH_VIZ_E=1 PWB_WITH_CONV_30=1
+                PWB_WITH_CLOSURE_PREVIEW=1
+                PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+            add_test(NAME platform.closure_preview
+                     COMMAND platform_closure_preview)
+            set_tests_properties(platform.closure_preview PROPERTIES
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+                TIMEOUT 300)
+        endif()
+    endif()
+    # END CLOSURE-PREVIEW
 endif()
 # END VIZ-E
 

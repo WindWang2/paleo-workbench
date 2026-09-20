@@ -40,13 +40,24 @@
 #include "viz_e_hosts.hpp"
 
 #include <pwb/ui_pages_data/asset_view.hpp>
+#include <pwb/ui_pages_data/qt/data_reader_panel.hpp>
+
+class QMainWindow;
 
 namespace pwb::app {
 class JobCenter;
 }  // namespace pwb::app
 
+namespace pwb::job {
+class JobContext;
+namespace qtbridge {
+class JobOwner;
+}
+}  // namespace pwb::job
+
 namespace pwb::ui_pages_data::qt {
 class DataWorkspace;
+class AssetSelectionBus;
 }  // namespace pwb::ui_pages_data::qt
 
 namespace pwb::app {
@@ -95,12 +106,26 @@ class VizEDataPage : public QWidget {
     Q_OBJECT
 public:
     explicit VizEDataPage(QWidget* parent, pwb::app::JobCenter* jobs);
+    // CLOSURE-PREVIEW (task 04): adopt an existing workspace (the AppShell
+    // hub's bare management DataWorkspace) so a shell-hosted window has
+    // exactly ONE data page — the duplicate entry point is removed, not
+    // shared. The page takes over the workspace's layout slot; the
+    // previous owner keeps its pointer valid (the widget lives on).
+    VizEDataPage(QWidget* parent, pwb::app::JobCenter* jobs,
+                 pwb::ui_pages_data::qt::DataWorkspace* adopted_workspace);
     ~VizEDataPage() override;
 
-    // Asset source seam: rows shown in the table. The catalog-fed source is
-    // the catalog integration slice's job (not this line's exclusive
-    // files); tests and integrators inject real file-backed rows here.
+    // Asset source seam: rows shown in the table. The catalog-fed source
+    // lives in closure_preview_install (task 04); tests and integrators
+    // inject real file-backed rows here.
     void set_asset_rows(const std::vector<pwb::ui_pages_data::AssetRow>& rows);
+
+    // CLOSURE-PREVIEW (task 04): bind the single asset-selection state.
+    // When bound, the page previews on bus selection changes ONLY (the
+    // direct table connection is dropped) so there is exactly one preview
+    // path; rows/selection flow through the bus as the single source of
+    // truth. nullptr unbinds (falls back to the direct table signal).
+    void bind_selection_bus(pwb::ui_pages_data::qt::AssetSelectionBus* bus);
 
     // Selection→preview entry point (what DataAssetTable::selected_asset_
     // changed drives). Public for the E2E flow test.
@@ -111,6 +136,23 @@ public:
     // Routes to the surface host through the same reader-panel render path
     // as asset-driven previews.
     void present_factor_surface(const SurfaceHost::SurfaceData& data);
+
+    // CLOSURE-PREVIEW (task 04): the parser-registry base preview seam.
+    // `fn` builds the reader view for an asset OFF the GUI thread (the
+    // JobContext*, when non-null, carries the cooperative cancel token;
+    // nullptr = synchronous no-cancel context). Returning nullopt means
+    // "no capability for this asset" → the honest unavailable path. The
+    // fn must not touch QWidget API. `payload` inside a returned view is
+    // only guaranteed alive for the duration of the render call.
+    using BasePreviewFn = std::function<std::optional<
+        pwb::ui_pages_data::qt::PreviewResultView>(
+        const pwb::ui_pages_data::AssetRow& row,
+        pwb::job::JobContext* ctx)>;
+    void set_base_preview_builder(BasePreviewFn fn);
+
+    // Cancel an in-flight base/surface preview (loading-page 取消 hook and
+    // fast-switch path). Returns true when something was cancelled.
+    bool cancel_active_preview();
 
     pwb::ui_pages_data::qt::DataWorkspace* workspace() const { return workspace_; }
     XyScatterHost* xy_host() const { return xy_host_; }
@@ -129,16 +171,30 @@ private Q_SLOTS:
         const std::optional<pwb::ui_pages_data::AssetRow>& asset);
 
 private:
+    // Worker-side outcome envelope (std::any payload through the JobOwner).
+    struct BasePreviewOutcome {
+        bool ok = false;
+        pwb::ui_pages_data::qt::PreviewResultView view;
+        std::string error;
+        bool retryable = true;
+    };
+
     void present_well_head(const QString& path, const std::string& asset_id);
     void present_horizon(const QString& path, const std::string& asset_id,
                          const QString& asset_name);
+    void present_base_preview(const pwb::ui_pages_data::AssetRow& row);
+    void deliver_base_outcome(std::uint64_t generation,
+                              const BasePreviewOutcome& outcome);
+    void deliver_base_preview(
+        std::uint64_t generation,
+        const pwb::ui_pages_data::qt::PreviewResultView& view);
     void show_unavailable(const QString& reason);
     void deliver_surface(std::uint64_t generation,
                          const pwb::viz_e::FactorPreviewOutcome& outcome);
     QWidget* try_external_presenter(const QString& path);
 
-    // Cleared in ~VizEDataPage; the surface job's delivery lambda holds a
-    // copy so a completion hopping to the GUI thread after the page died
+    // Cleared in ~VizEDataPage; the surface/base job delivery lambdas hold
+    // a copy so a completion hopping to the GUI thread after the page died
     // drops instead of touching freed members.
     std::shared_ptr<std::atomic<bool>> alive_;
     pwb::ui_pages_data::qt::DataWorkspace* workspace_ = nullptr;
@@ -147,6 +203,11 @@ private:
     pwb::app::JobCenter* jobs_ = nullptr;
     QString active_target_;
     std::uint64_t surface_generation_ = 0;
+    // Base-preview job bookkeeping (generation guard + cancel).
+    std::uint64_t base_generation_ = 0;
+    pwb::job::qtbridge::JobOwner* base_owner_ = nullptr;
+    BasePreviewFn base_builder_;
+    pwb::ui_pages_data::qt::AssetSelectionBus* selection_bus_ = nullptr;
 };
 
 // MainWindow mount (guarded by PWB_WITH_VIZ_E in main_window.cpp): creates
@@ -155,5 +216,9 @@ private:
 // created dock (never null when compiled in).
 QDockWidget* install_data_dock(QMainWindow* window,
                                pwb::app::JobCenter* jobs);
+// CLOSURE-PREVIEW (task 04): the dock mount returning the page — the
+// closure assembly needs the page pointer for bus/settings wiring.
+VizEDataPage* install_data_page(QMainWindow* window,
+                                pwb::app::JobCenter* jobs);
 
 }  // namespace pwb::viz_e
