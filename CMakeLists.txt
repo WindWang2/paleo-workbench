@@ -1520,13 +1520,21 @@ if(TARGET pwb-platform
         Pwb::VizCharts Pwb::Application)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_MAPPING=1)
 
+    # BEGIN V14-COMPILATION-PUBLISH — baseline link fix: main_window.cpp
+    # references shell_project_actions (12-line #1421 surface) but this
+    # test target's source list never carried the TU, so the target could
+    # not link at 412d8baf (reproduced on a clean main worktree; A/B
+    # evidence in docs/development/v14-compilation-publish/
+    # 09-verification-report.md).
     add_executable(platform_closure_mapping tests/cpp/platform/test_closure_mapping.cpp
         apps/paleo_workbench_platform/app_shell.cpp
         apps/paleo_workbench_platform/main_window.cpp
         apps/paleo_workbench_platform/app_context.cpp
         apps/paleo_workbench_platform/diagnostics.cpp
+        apps/paleo_workbench_platform/shell_project_actions.cpp
         apps/paleo_workbench_platform/closure_mapping_document.cpp
         apps/paleo_workbench_platform/closure_mapping_install.cpp)
+    # END V14-COMPILATION-PUBLISH
     pwb_link_job_runtime(platform_closure_mapping)
     set_target_properties(platform_closure_mapping PROPERTIES AUTOMOC ON)
     target_compile_features(platform_closure_mapping PRIVATE cxx_std_20)
@@ -1678,10 +1686,19 @@ if(TARGET pwb-platform AND TARGET Pwb::VizChartsQt
         target_compile_definitions(pwb-platform
             PRIVATE PWB_WELL_PRESENTERS_HAVE_TIE=1)
     endif()
+    # BEGIN V14-COMPILATION-PUBLISH — baseline configure fix: the mount
+    # condition must match tests/cpp/well_crosswell's own guard, which also
+    # requires Pwb::UiWorkersWleLoad. Without it every configuration with
+    # the default PWB_BUILD_VIZ_B=ON and BUILD_TESTING=ON (WLE absent)
+    # failed at configure time (reproduced on a clean main@412d8baf
+    # worktree with the documented linux-ninja option set — A/B evidence in
+    # docs/development/v14-compilation-publish/09-verification-report.md).
     if(BUILD_TESTING AND TARGET Pwb::VisualizationCrossWell
+       AND TARGET Pwb::UiWorkersWleLoad
        AND TARGET Pwb::UiPagesDataQt)
         add_subdirectory(tests/cpp/well_crosswell)
     endif()
+    # END V14-COMPILATION-PUBLISH
 endif()
 # END 05
 

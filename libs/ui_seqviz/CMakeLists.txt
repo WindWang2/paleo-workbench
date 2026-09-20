@@ -72,6 +72,9 @@ if(TARGET Qt6::Widgets)
         # mapping_document composition kernels (composition_state core +
         # CompositionEditSession) and document_io atomic save/load.
         src/qt/composition_panel.cpp
+        # V14-COMPILATION-PUBLISH — Qt PNG/PDF replay device for the native
+        # composer export (composer/export.py parity).
+        src/qt/composition_replay.cpp
         src/qt/correlation_page.cpp
         src/qt/preview_controller.cpp
         src/qt/visualization_page.cpp
@@ -83,6 +86,7 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_seqviz/qt/panel_float_button.hpp
         include/pwb/ui_seqviz/qt/factor_panels.hpp
         include/pwb/ui_seqviz/qt/composition_panel.hpp
+        include/pwb/ui_seqviz/qt/composition_replay.hpp
         include/pwb/ui_seqviz/qt/viz_panels.hpp
         include/pwb/ui_seqviz/qt/dialogs.hpp
         include/pwb/ui_seqviz/qt/correlation_page.hpp

@@ -204,6 +204,14 @@ if(PWB_ENABLE_PACKAGING AND (TARGET Pwb::Ui OR TARGET Pwb::Application))
 endif()
 # END PWB-PACKAGING
 
+# BEGIN V14-COMPILATION-PUBLISH
+# The composition install's colour-ramp seam resolves through the
+# cartography authority (composer PALETTE_ALIASES → get_color_ramp).
+if(TARGET Pwb::Cartography)
+    target_link_libraries(pwb-platform PRIVATE Pwb::Cartography)
+endif()
+# END V14-COMPILATION-PUBLISH
+
 # BEGIN CONV-29
 # Composition/Layout/Export C++ closure: the export dialog routes through
 # CompositionLayoutService (kernel spec + shared executor + parity).

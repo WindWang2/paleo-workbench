@@ -138,6 +138,15 @@ public:
     // unbind — the seam decides how the unbind is expressed).
     bool set_main_map(const std::any& map_document);
 
+    // BEGIN V14-COMPILATION-PUBLISH
+    // Headless export entry: runs the injected export executor without the
+    // file dialog (batch export, tests, future automation). Returns the
+    // executor's report; ok=false with a message when no engine is wired —
+    // the same honest refusal the dialog shows.
+    CompositionExportResult export_to(const std::string& path,
+                                      const std::string& format, double dpi);
+    // END V14-COMPILATION-PUBLISH
+
     // -- Python member surfaces ------------------------------------------
     QComboBox* template_combo() const { return template_combo_; }
     QListWidget* element_list() const { return element_list_; }
