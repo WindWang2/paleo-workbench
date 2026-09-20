@@ -377,6 +377,10 @@ const std::vector<FieldSpec> kEntityAssetLink{
     {"role", FieldType::String, "other"},
     {"is_primary", FieldType::Bool, false},
     {"unresolved", FieldType::Bool, false},
+    // V14-DATA-LINEAGE: role-internal ordering (e.g. multi-LAS load
+    // order). Default 0 keeps pre-V14 documents byte-stable through
+    // normalize; Python legacy reads unknown keys tolerantly.
+    {"ordinal", FieldType::Int, 0},
     {"note", FieldType::String, ""},
     {"metadata", FieldType::JsonMap, Json::object()},
     {"created_at", FieldType::String, ""},

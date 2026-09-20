@@ -4,6 +4,7 @@
 // The run row only turns terminal after payload, catalog rows and project
 // bindings are all durable.
 #include "pwb/data/commit_coordinator.hpp"
+#include "pwb/data/lifecycle_enforcement.hpp"
 
 #include "coordinator_detail.hpp"
 
@@ -356,6 +357,17 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
         return receipt;
     }
 
+    // BEGIN PWB-V14-DATA-LINEAGE: lifecycle fail-closed gate — artifact
+    // kinds the frozen table classifies as must-not-register (ephemeral
+    // task files) are refused BEFORE any write; nothing gets catalogized
+    // just because it landed in a temp dir.
+    if (auto lifecycle_error =
+            lifecycle_registration_error(request.artifact_kind)) {
+        receipt.diagnostics.push_back(Diagnostic::error(
+            "artifact_lifecycle_refused", *lifecycle_error));
+        return receipt;
+    }
+
     // ---- Idempotency: same operation id → replay or resume.
     if (auto existing = find_journal(request.operation_id)) {
         if (existing->kind != JournalKind::RunPublish) {
@@ -484,13 +496,17 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
     DataVersion version;
     version.id = domain::VersionId(domain::make_id("ver_"));
     version.asset_id = target_asset;
-    version.stage = request.stage;
+    const LifecycleDecision lifecycle =
+        lifecycle_for_artifact(request.artifact_kind);
+    version.stage =
+        resolve_publish_stage(request.artifact_kind, request.stage);
     version.managed = true;
     version.source_uri = pwb::project::path_to_u8(
         fs::weakly_canonical(staged.source_path));
     version.format = staged.format;
     version.run_id = request.run_id;
     version.metadata = request.result_metadata;
+    stamp_lifecycle_metadata(version.metadata, lifecycle);
     version.created_at = now();
     version.parent_version_ids = current_run->input_version_ids;
     receipt.asset_id = target_asset;

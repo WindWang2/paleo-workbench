@@ -745,4 +745,121 @@ std::optional<std::string> find_external_by_path_sql(Database& db,
     return rows.text(0);
 }
 
+// V14-DATA-LINEAGE: distinct run ids whose inputs OR outputs touch any
+// version of the given assets (entity workspace "related runs"). Degrades
+// silently like every entry point; ids chunked at the shared 500 ceiling.
+// Pre-V11 stores without run_inputs/run_outputs tables (prepare failure)
+// fall back to the runs.run_id column on versions of those assets.
+std::vector<std::string> run_ids_touching_assets(
+    Database& db, const std::vector<std::string>& asset_ids) {
+    std::vector<std::string> result;
+    if (asset_ids.empty()) return result;
+    std::set<std::string> seen;
+    const auto emit = [&](const std::string& id) {
+        if (!id.empty() && seen.insert(id).second) result.push_back(id);
+    };
+    for (std::size_t begin = 0; begin < asset_ids.size(); begin += kChunk) {
+        const std::size_t end =
+            std::min(begin + kChunk, asset_ids.size());
+        std::string sql =
+            "SELECT DISTINCT ri.run_id FROM run_inputs ri"
+            " JOIN versions v ON v.id = ri.version_id"
+            " WHERE v.asset_id IN (";
+        for (std::size_t i = begin; i < end; ++i) {
+            sql += (i == begin ? "?" : ", ?");
+        }
+        sql += ") UNION SELECT DISTINCT ro.run_id FROM run_outputs ro"
+               " JOIN versions v ON v.id = ro.version_id"
+               " WHERE v.asset_id IN (";
+        for (std::size_t i = begin; i < end; ++i) {
+            sql += (i == begin ? "?" : ", ?");
+        }
+        sql += ")";
+        Statement rows = db.prepare(sql);
+        if (!rows.is_valid()) break;
+        for (std::size_t i = begin; i < end; ++i) {
+            const int slot = static_cast<int>(i - begin) + 1;
+            rows.bind(slot, asset_ids[i]);
+            rows.bind(slot + static_cast<int>(end - begin), asset_ids[i]);
+        }
+        while (rows.step()) emit(rows.text(0));
+    }
+    if (!result.empty()) return result;
+    // Fallback: pre-run_inputs stores keep the flat runs.run_id column.
+    for (std::size_t begin = 0; begin < asset_ids.size(); begin += kChunk) {
+        const std::size_t end =
+            std::min(begin + kChunk, asset_ids.size());
+        std::string sql =
+            "SELECT DISTINCT v.run_id FROM versions v"
+            " WHERE v.run_id IS NOT NULL AND v.asset_id IN (";
+        for (std::size_t i = begin; i < end; ++i) {
+            sql += (i == begin ? "?" : ", ?");
+        }
+        sql += ")";
+        Statement rows = db.prepare(sql);
+        if (!rows.is_valid()) break;
+        for (std::size_t i = begin; i < end; ++i) {
+            rows.bind(static_cast<int>(i - begin) + 1, asset_ids[i]);
+        }
+        while (rows.step()) emit(rows.text(0));
+    }
+    return result;
+}
+
+// V14-DATA-LINEAGE: per-asset version rollup for the entity workspace —
+// one chunked GROUP BY for version counts + one chunked current-version
+// JOIN for the display fields. Absent current pointer → default fields
+// (nullopt stage). Silent degrade like every entry point.
+AssetVersionRollupMap asset_version_rollups_sql(
+    Database& db, const std::vector<std::string>& asset_ids) {
+    AssetVersionRollupMap result;
+    if (asset_ids.empty()) return result;
+    for (std::size_t begin = 0; begin < asset_ids.size(); begin += kChunk) {
+        const std::size_t end =
+            std::min(begin + kChunk, asset_ids.size());
+        std::string marks;
+        for (std::size_t i = begin; i < end; ++i) {
+            marks += (i == begin) ? "?" : ", ?";
+        }
+        std::vector<std::string> ids(asset_ids.begin() + begin,
+                                     asset_ids.begin() + end);
+        Statement counts = db.prepare(
+            "SELECT asset_id, COUNT(*) FROM versions WHERE asset_id IN (" +
+            marks + ") GROUP BY asset_id");
+        if (counts.is_valid()) {
+            for (std::size_t i = 0; i < ids.size(); ++i) {
+                counts.bind(static_cast<int>(i) + 1, ids[i]);
+            }
+            while (counts.step()) {
+                result[counts.text(0)].version_count =
+                    static_cast<int>(counts.int64(1));
+            }
+        }
+        Statement current = db.prepare(
+            "SELECT a.id, v.stage, v.format, v.trashed, v.managed, v.path,"
+            " (SELECT COUNT(*) FROM version_members m"
+            "   WHERE m.version_id = v.id)"
+            " FROM assets a LEFT JOIN versions v ON v.id ="
+            " a.current_version_id WHERE a.id IN (" + marks + ")");
+        if (current.is_valid()) {
+            for (std::size_t i = 0; i < ids.size(); ++i) {
+                current.bind(static_cast<int>(i) + 1, ids[i]);
+            }
+            while (current.step()) {
+                AssetVersionRollup& rollup = result[current.text(0)];
+                if (current.is_null(1)) continue;  // no current version
+                rollup.has_current = true;
+                rollup.current_stage = current.text(1);
+                rollup.current_format = current.text(2);
+                rollup.current_trashed = current.int64(3) != 0;
+                rollup.current_managed = current.int64(4) != 0;
+                rollup.current_path = current.text(5);
+                rollup.current_member_count =
+                    static_cast<int>(current.int64(6));
+            }
+        }
+    }
+    return result;
+}
+
 }  // namespace pwb::catalog

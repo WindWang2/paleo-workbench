@@ -219,6 +219,35 @@ CatalogRuntimeApi InstalledCatalogClosure::make_runtime() {
     // their own teardown into this bag.
     runtime.clear_session_caches = []() {};
 
+    // BEGIN PWB-V14-DATA-LINEAGE: manual-edit provenance seams (the bag
+    // entries existed but were unset). The bag's flat signatures carry
+    // note/extra only; entity context comes through the adapter method by
+    // direct callers. Errors surface as exceptions per the adapter's
+    // raise_ contract — the controllers' existing catch is the degrade
+    // path (run_id-less continuation, commit never blocked).
+    runtime.register_manual_edit_run =
+        [this](ui_controllers::CatalogServiceApi* service,
+               const std::vector<std::string>& source_version_ids,
+               const std::optional<std::string>& note,
+               const domain::Json& extra_parameters)
+        -> std::optional<catalog::DataRun> {
+        if (!adapter_ || adapter_->is_closed()) return std::nullopt;
+        (void)service;  // the LIVE adapter is the service (bag contract)
+        return adapter_->register_manual_edit_run(
+            source_version_ids, "", "", "", "",
+            note.value_or(""), false, extra_parameters);
+    };
+    runtime.complete_manual_edit_run =
+        [this](ui_controllers::CatalogServiceApi* service,
+               const std::string& run_id,
+               const std::vector<std::string>& committed_version_ids) {
+        if (!adapter_ || adapter_->is_closed()) return;
+        (void)service;
+        adapter_->complete_manual_edit_run(run_id, committed_version_ids,
+                                           "", 0);
+    };
+    // END PWB-V14-DATA-LINEAGE
+
     // shutdown_lifecycle / resume_lifecycle: unset — 05/03 own the seismic
     // lifecycle; an unset std::function is the documented "unavailable".
     return runtime;

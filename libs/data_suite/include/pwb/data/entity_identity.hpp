@@ -143,19 +143,75 @@ struct LinkUpsert {
 // flipping is_primary on demotes sibling primaries of the same
 // (entity_type, entity_id, role). Link rows keep the Python field set:
 // id, entity_type, entity_id, asset_id, role, is_primary, unresolved,
-// note, metadata.
+// note, metadata — plus `ordinal` (V14: role-internal ordering, e.g.
+// multi-LAS load order; schema default 0 keeps old documents identical).
+// ordinal < 0 on update = leave the stored value unchanged.
 LinkUpsert upsert_entity_asset_link(domain::Json& project_root,
                                     std::string_view entity_type,
                                     std::string_view entity_id,
                                     std::string_view asset_id,
                                     std::string_view role, bool is_primary,
                                     bool unresolved = false,
-                                    std::string_view note = "");
+                                    std::string_view note = "",
+                                    int ordinal = 0);
 
 // asset ids bound to (entity_type, entity_id, role); role "" = any role.
 std::vector<std::string> asset_ids_for_entity(
     const domain::Json& project_root, std::string_view entity_type,
     std::string_view entity_id, std::string_view role = "");
+
+// ---- link read views + entity domain ops (project/domain.py parity) -------
+
+// Stable read view of one link row (missing fields → schema defaults).
+struct EntityLinkView {
+    std::string id;
+    std::string entity_type;
+    std::string entity_id;
+    std::string asset_id;
+    std::string role;
+    bool is_primary = false;
+    bool unresolved = false;
+    int ordinal = 0;
+    std::string note;
+};
+
+std::vector<EntityLinkView> links_for_entity(
+    const domain::Json& project_root, std::string_view entity_type,
+    std::string_view entity_id);
+std::vector<EntityLinkView> links_for_asset(
+    const domain::Json& project_root, std::string_view asset_id);
+
+// (entity_type, entity_id) pairs attached to asset_id; entity_type ""
+// (default) = every entity type.
+std::vector<std::pair<std::string, std::string>> entity_ids_for_asset(
+    const domain::Json& project_root, std::string_view asset_id,
+    std::string_view entity_type = "");
+
+// spatial_scope == "reference" for the well node with this id.
+bool is_reference_well(const domain::Json& project_root,
+                       std::string_view well_id);
+
+struct LinkPruneResult {
+    int removed_links = 0;
+    int pruned_wells = 0;
+};
+
+// Drop every link pointing at asset_id (asset removed from catalog);
+// returns the number of links removed.
+int remove_links_for_asset(domain::Json& project_root,
+                           std::string_view asset_id);
+
+// Remove one well node and every link owned by that well.
+LinkPruneResult remove_well_entity(domain::Json& project_root,
+                                   std::string_view well_id);
+
+// Unlink the removed assets and drop REFERENCE wells that lose every link.
+// Only wells touched by one of the removed links are candidates, and only
+// reference wells with no remaining entity links are pruned — manually
+// maintained/unrelated wells and reference wells shared by another imported
+// file survive (domain.py remove_asset_links_and_prune_reference_wells).
+LinkPruneResult remove_asset_links_and_prune_reference_wells(
+    domain::Json& project_root, const std::vector<std::string>& asset_ids);
 
 // ---- role inference (project/roles.py infer_role_for_type) ----------------
 

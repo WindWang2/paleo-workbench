@@ -1,3 +1,4 @@
+#include "posix_shim.hpp"
 #include "pwb/catalog/audit.hpp"
 
 #include "pwb/catalog/checksum.hpp"
@@ -35,10 +36,10 @@ void issue(AuditReport* report, std::string_view kind, std::string_view severity
 std::optional<std::int64_t> parse_iso_epoch(const std::string& raw) {
     if (raw.empty()) return std::nullopt;
     std::tm tm{};
-    if (::strptime(raw.c_str(), "%Y-%m-%dT%H:%M:%S", &tm) == nullptr) {
+    if (!posix_shim::strptime_iso_prefix(raw.c_str(), &tm)) {
         return std::nullopt;
     }
-    return ::timegm(&tm);
+    return static_cast<std::int64_t>(posix_shim::timegm_compat(&tm));
 }
 
 std::int64_t utc_now_epoch() {

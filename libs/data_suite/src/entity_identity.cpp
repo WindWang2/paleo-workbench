@@ -326,7 +326,8 @@ LinkUpsert upsert_entity_asset_link(domain::Json& project_root,
                                     std::string_view entity_id,
                                     std::string_view asset_id,
                                     std::string_view role, bool is_primary,
-                                    bool unresolved, std::string_view note) {
+                                    bool unresolved, std::string_view note,
+                                    int ordinal) {
     domain::Json& links = links_array(project_root);
     const std::string role_value =
         role.empty() ? std::string("other") : std::string(role);
@@ -353,6 +354,13 @@ LinkUpsert upsert_entity_asset_link(domain::Json& project_root,
                 link["note"] = note;
                 result.changed = true;
             }
+            if (ordinal >= 0) {
+                const int existing = link.value("ordinal", 0);
+                if (existing != ordinal) {
+                    link["ordinal"] = ordinal;
+                    result.changed = true;
+                }
+            }
             if (is_primary) {
                 result.changed |= demote_sibling_primaries(
                     links, std::string(entity_type), std::string(entity_id),
@@ -376,6 +384,7 @@ LinkUpsert upsert_entity_asset_link(domain::Json& project_root,
     link["role"] = role_value;
     link["is_primary"] = is_primary;
     link["unresolved"] = unresolved;
+    link["ordinal"] = ordinal >= 0 ? ordinal : 0;
     link["note"] = note;
     link["metadata"] = domain::Json::object();
     link["created_at"] = "";
@@ -405,6 +414,222 @@ std::vector<std::string> asset_ids_for_entity(
         }
     }
     return ids;
+}
+
+// ---- link read views + entity domain ops (V14; project/domain.py parity) --
+
+namespace {
+
+EntityLinkView link_view(const domain::Json& link) {
+    EntityLinkView view;
+    view.id = link.value("id", std::string());
+    view.entity_type = link.value("entity_type", std::string());
+    view.entity_id = link.value("entity_id", std::string());
+    view.asset_id = link.value("asset_id", std::string());
+    view.role = link.value("role", std::string());
+    view.is_primary = link.value("is_primary", false);
+    view.unresolved = link.value("unresolved", false);
+    view.ordinal = link.value("ordinal", 0);
+    view.note = link.value("note", std::string());
+    return view;
+}
+
+}  // namespace
+
+std::vector<EntityLinkView> links_for_entity(
+    const domain::Json& project_root, std::string_view entity_type,
+    std::string_view entity_id) {
+    std::vector<EntityLinkView> result;
+    auto links = project_root.find("entity_asset_links");
+    if (links == project_root.end() || !links->is_array()) return result;
+    for (const auto& link : *links) {
+        if (!link.is_object()) continue;
+        if (link.value("entity_type", std::string()) == entity_type &&
+            link.value("entity_id", std::string()) == entity_id) {
+            result.push_back(link_view(link));
+        }
+    }
+    return result;
+}
+
+std::vector<EntityLinkView> links_for_asset(
+    const domain::Json& project_root, std::string_view asset_id) {
+    std::vector<EntityLinkView> result;
+    auto links = project_root.find("entity_asset_links");
+    if (links == project_root.end() || !links->is_array()) return result;
+    for (const auto& link : *links) {
+        if (!link.is_object()) continue;
+        if (link.value("asset_id", std::string()) == asset_id) {
+            result.push_back(link_view(link));
+        }
+    }
+    return result;
+}
+
+std::vector<std::pair<std::string, std::string>> entity_ids_for_asset(
+    const domain::Json& project_root, std::string_view asset_id,
+    std::string_view entity_type) {
+    std::vector<std::pair<std::string, std::string>> result;
+    auto links = project_root.find("entity_asset_links");
+    if (links == project_root.end() || !links->is_array()) return result;
+    for (const auto& link : *links) {
+        if (!link.is_object()) continue;
+        if (link.value("asset_id", std::string()) != asset_id) continue;
+        if (!entity_type.empty() &&
+            link.value("entity_type", std::string()) != entity_type) {
+            continue;
+        }
+        result.emplace_back(link.value("entity_type", std::string()),
+                            link.value("entity_id", std::string()));
+    }
+    return result;
+}
+
+bool is_reference_well(const domain::Json& project_root,
+                       std::string_view well_id) {
+    auto wells = project_root.find("wells");
+    if (wells == project_root.end() || !wells->is_array()) return false;
+    for (const auto& well : *wells) {
+        if (!well.is_object()) continue;
+        if (well.value("id", std::string()) == well_id) {
+            return well.value("spatial_scope", std::string("workarea")) ==
+                   "reference";
+        }
+    }
+    return false;
+}
+
+int remove_links_for_asset(domain::Json& project_root,
+                           std::string_view asset_id) {
+    auto links = project_root.find("entity_asset_links");
+    if (links == project_root.end() || !links->is_array()) return 0;
+    const std::size_t before = links->size();
+    domain::Json kept = domain::Json::array();
+    for (const auto& link : *links) {
+        const bool drop =
+            link.is_object() &&
+            link.value("asset_id", std::string()) == asset_id;
+        if (!drop) kept.push_back(link);
+    }
+    if (kept.size() != before) {
+        project_root["entity_asset_links"] = std::move(kept);
+    }
+    return static_cast<int>(before - kept.size());
+}
+
+LinkPruneResult remove_well_entity(domain::Json& project_root,
+                                   std::string_view well_id) {
+    LinkPruneResult result;
+    const std::string target(std::string_view(well_id).empty()
+                                 ? std::string()
+                                 : std::string(well_id));
+    if (target.empty()) return result;
+    if (auto links = project_root.find("entity_asset_links");
+        links != project_root.end() && links->is_array()) {
+        const std::size_t before = links->size();
+        domain::Json kept = domain::Json::array();
+        for (const auto& link : *links) {
+            const bool drop =
+                link.is_object() &&
+                link.value("entity_type", std::string()) == "well" &&
+                link.value("entity_id", std::string()) == target;
+            if (!drop) kept.push_back(link);
+        }
+        result.removed_links = static_cast<int>(before - kept.size());
+        project_root["entity_asset_links"] = std::move(kept);
+    }
+    if (auto wells = project_root.find("wells");
+        wells != project_root.end() && wells->is_array()) {
+        const std::size_t before = wells->size();
+        domain::Json kept = domain::Json::array();
+        for (const auto& well : *wells) {
+            const bool drop = well.is_object() &&
+                              well.value("id", std::string()) == target;
+            if (!drop) kept.push_back(well);
+        }
+        result.pruned_wells = static_cast<int>(before - kept.size());
+        if (kept.size() != before) {
+            project_root["wells"] = std::move(kept);
+        }
+    }
+    return result;
+}
+
+LinkPruneResult remove_asset_links_and_prune_reference_wells(
+    domain::Json& project_root, const std::vector<std::string>& asset_ids) {
+    LinkPruneResult result;
+    std::set<std::string> removed_asset_ids;
+    for (const auto& id : asset_ids) {
+        if (!id.empty()) removed_asset_ids.insert(id);
+    }
+    if (removed_asset_ids.empty()) return result;
+
+    auto links = project_root.find("entity_asset_links");
+    if (links == project_root.end() || !links->is_array()) return result;
+
+    // Reference wells touched by one of the removed links — the only prune
+    // candidates (domain.py: unrelated/manual wells and reference wells
+    // still linked from surviving assets must survive).
+    std::set<std::string> touched_reference_ids;
+    for (const auto& link : *links) {
+        if (!link.is_object()) continue;
+        if (link.value("entity_type", std::string()) != "well") continue;
+        if (removed_asset_ids.count(
+                link.value("asset_id", std::string())) == 0) {
+            continue;
+        }
+        touched_reference_ids.insert(link.value("entity_id", std::string()));
+    }
+
+    domain::Json kept = domain::Json::array();
+    for (const auto& link : *links) {
+        const bool drop =
+            link.is_object() &&
+            removed_asset_ids.count(link.value("asset_id", std::string())) !=
+                0;
+        if (!drop) kept.push_back(link);
+    }
+    result.removed_links =
+        static_cast<int>(links->size() - kept.size());
+    project_root["entity_asset_links"] = std::move(kept);
+
+    std::set<std::string> still_linked_well_ids;
+    for (const auto& link : kept) {
+        if (!link.is_object()) continue;
+        if (link.value("entity_type", std::string()) == "well") {
+            still_linked_well_ids.insert(
+                link.value("entity_id", std::string()));
+        }
+    }
+
+    std::set<std::string> orphan_ids;
+    auto wells = project_root.find("wells");
+    if (wells != project_root.end() && wells->is_array()) {
+        for (const auto& well : *wells) {
+            if (!well.is_object()) continue;
+            const std::string id = well.value("id", std::string());
+            if (touched_reference_ids.count(id) == 0) continue;
+            if (still_linked_well_ids.count(id) != 0) continue;
+            if (well.value("spatial_scope", std::string("workarea")) !=
+                "reference") {
+                continue;
+            }
+            orphan_ids.insert(id);
+        }
+    }
+    if (orphan_ids.empty()) return result;
+
+    domain::Json kept_wells = domain::Json::array();
+    for (const auto& well : *wells) {
+        const bool drop =
+            well.is_object() &&
+            orphan_ids.count(well.value("id", std::string())) != 0;
+        if (!drop) kept_wells.push_back(well);
+    }
+    result.pruned_wells =
+        static_cast<int>(wells->size() - kept_wells.size());
+    project_root["wells"] = std::move(kept_wells);
+    return result;
 }
 
 std::string normalize_well_name(std::string_view name) {

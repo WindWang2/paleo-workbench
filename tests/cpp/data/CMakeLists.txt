@@ -147,6 +147,11 @@ pwb_data_test(data_catalog_service catalog_service_test.cpp data.catalog_service
 # concurrent revision conflict / project switch) and the real change feed.
 # The adapter TUs are compiled into the test — the same sources the
 # platform app links under PWB_BUILD_CATALOG_CLOSURE.
+# PWB-V14-DATA-LINEAGE: guarded — the closure test needs the ROOT source
+# tree (apps/ + ui_controllers/ui_review/ui_data_core targets) and only
+# configures in the integrated build; the standalone data-suite entry
+# skips it instead of failing configure (01 ledger A12 follow-up).
+if(TARGET Pwb::UiControllers)
 pwb_data_test(data_catalog_closure catalog_closure_test.cpp
     data.catalog_closure)
 target_sources(data_catalog_closure PRIVATE
@@ -157,4 +162,5 @@ target_include_directories(data_catalog_closure PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/ui_review/include)
 target_link_libraries(data_catalog_closure PRIVATE
     Pwb::UiControllers Pwb::UiDataCore)
+endif()
 # END cpp-close-01

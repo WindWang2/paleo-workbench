@@ -1,3 +1,4 @@
+#include "posix_shim.hpp"
 #include "pwb/catalog/legacy_migration.hpp"
 #include "pwb/catalog/refs.hpp"
 #include "pwb/catalog/trash.hpp"
@@ -110,8 +111,7 @@ MigrationReport migrate_resources(const std::vector<LegacyResourceRow>& resource
             std::filesystem::path(resource.path).is_absolute()
                 ? std::filesystem::path(resource.path)
                 : project_dir / resource.path;
-        struct ::stat probe {};
-        if (::stat(file_path.c_str(), &probe) != 0) {
+        if (!posix_shim::stat_path(file_path).exists) {
             std::error_code ec;
             report.warnings.push_back(
                 "resource " + resource.id + ": file not found at " +
@@ -151,13 +151,12 @@ MigrationReport migrate_resources(const std::vector<LegacyResourceRow>& resource
         // fingerprint (size + mtime_ns) — cheap, no hashing, enough for the
         // relink stat-proof tier. The digest is never guessed.
         if (!managed && !resource.checksum.has_value() && !size_bytes.has_value()) {
-            struct ::stat st {};
-            if (::stat(file_path.c_str(), &st) == 0) {
-                size_bytes = st.st_size;
+            const posix_shim::FileStat st = posix_shim::stat_path(file_path);
+            if (st.exists) {
+                size_bytes = static_cast<std::int64_t>(st.size);
                 stat_fingerprint = domain::Json::object();
-                stat_fingerprint["size"] = st.st_size;
-                stat_fingerprint["mtime_ns"] =
-                    static_cast<std::int64_t>(st.st_mtim.tv_nsec);
+                stat_fingerprint["size"] = static_cast<std::int64_t>(st.size);
+                stat_fingerprint["mtime_ns"] = st.mtime_ns_frac;
             }
         }
         domain::Json metadata = legacy;
