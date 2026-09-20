@@ -3,6 +3,8 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLayout>
+#include <QPointer>
 #include <QPushButton>
 #include <QShowEvent>
 #include <QSize>
@@ -483,5 +485,64 @@ void MappingPage::emit_mapping_context() {
 void MappingPage::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
 }
+
+// BEGIN CLOSURE-MAPPING (08-line adopt implementations)
+namespace {
+
+// Swap `old_widget` for `replacement` inside its parent layout and retire
+// the placeholder (replaceWidget does not delete the removed widget).
+void swap_in_parent_layout(QWidget* old_widget, QWidget* replacement) {
+    QWidget* parent = old_widget->parentWidget();
+    QLayout* layout = parent != nullptr ? parent->layout() : nullptr;
+    if (layout == nullptr) return;
+    if (QLayoutItem* removed = layout->replaceWidget(old_widget, replacement);
+        removed != nullptr) {
+        delete removed;
+    }
+    old_widget->deleteLater();
+}
+
+}  // namespace
+
+void MappingPage::adopt_edit_view(QWidget* view) {
+    if (view == nullptr || edit_view_ == view) return;
+    // The edit view is center_stack_ index 0 (authoring surface);
+    // QStackedWidget has no replaceWidget — swap via index.
+    const int index = center_stack_->indexOf(edit_view_);
+    if (index < 0) return;
+    center_stack_->removeWidget(edit_view_);
+    center_stack_->insertWidget(index, view);
+    edit_view_->deleteLater();
+    edit_view_ = view;
+}
+
+void MappingPage::adopt_reference_panel(QWidget* panel) {
+    if (panel == nullptr || reference_panel_ == panel) return;
+    swap_in_parent_layout(reference_panel_, panel);
+    reference_panel_ = panel;
+    float_widgets_["mapping:reference"] = QPointer<QWidget>(panel);
+    dock_manager_->adopt_panel_widget("reference", panel);
+}
+
+void MappingPage::adopt_composition_panel(QWidget* panel) {
+    if (panel == nullptr || composition_panel_ == panel) return;
+    swap_in_parent_layout(composition_panel_, panel);
+    composition_panel_ = panel;
+    float_widgets_["mapping:composer"] = QPointer<QWidget>(panel);
+    dock_manager_->adopt_panel_widget("composer", panel);
+}
+
+void MappingPage::adopt_bottom_workbench(QWidget* panel) {
+    if (panel == nullptr || bottom_workbench_ == panel) return;
+    // The bottom slot sits in the page's own layout (not a stack): swap
+    // at the same index, keep the height cap and the dock registration.
+    swap_in_parent_layout(bottom_workbench_, panel);
+    panel->setMaximumHeight(kBottomDockedMaxHeight);
+    bottom_workbench_ = panel;
+    float_widgets_["mapping:bottom"] = QPointer<QWidget>(panel);
+    float_hosts_["mapping:bottom"] = QPointer<QWidget>(this);
+    dock_manager_->adopt_panel_widget("bottom", panel);
+}
+// END CLOSURE-MAPPING
 
 }  // namespace pwb::ui_map

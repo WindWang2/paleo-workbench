@@ -156,6 +156,16 @@ void MapDockManager::register_bottom(const std::string& key,
     install_rail_context_menu(key);
 }
 
+// BEGIN CLOSURE-MAPPING (08-line adopt)
+void MapDockManager::adopt_panel_widget(const std::string& key,
+                                        QWidget* widget) {
+    if (widget == nullptr) return;
+    if (PanelEntry* entry = entry_for(key); entry != nullptr) {
+        entry->widget = QPointer<QWidget>(widget);
+    }
+}
+// END CLOSURE-MAPPING
+
 void MapDockManager::set_panel_visible(const std::string& key,
                                        bool visible) {
     PanelEntry* entry = entry_for(key);

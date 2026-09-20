@@ -105,4 +105,22 @@ void HubPage::set_activate_fn(const std::string& key,
     activate_fns_[key] = std::move(fn);
 }
 
+
+// BEGIN CLOSURE-MAPPING (08-line adopt)
+void HubPage::adopt_submodule(const std::string& key, QWidget* page) {
+    const auto it = pages_.find(key);
+    if (page == nullptr || it == pages_.end() || it->second == page) {
+        return;
+    }
+    QWidget* old_page = it->second;
+    // QStackedWidget has no replaceWidget — swap via index.
+    const int index = stack_->indexOf(old_page);
+    if (index < 0) return;
+    stack_->removeWidget(old_page);
+    stack_->insertWidget(index, page);
+    old_page->deleteLater();
+    it->second = page;
+}
+// END CLOSURE-MAPPING
+
 }  // namespace pwb::ui_pages_data::qt

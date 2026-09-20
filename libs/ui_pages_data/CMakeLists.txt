@@ -70,14 +70,10 @@ if(TARGET Qt6::Widgets)
         src/qt/tag_widgets.cpp
         src/qt/new_project_wizard.cpp
         src/qt/home_page.cpp
-        # preparation_page.cpp / data_page.cpp deferred — the two largest
-        # page composites (377 / 3154 Python lines), see ledgers/ui-06-findings.md.
-        # NOTE: preparation_page.hpp is intentionally NOT listed below —
-        # its Q_OBJECT moc output embeds a default-ctor thunk for
-        # PreparationPage(QWidget* = nullptr), which is unbindable while
-        # the .cpp is deferred and breaks every consumer that pulls the
-        # mocs_compilation TU (found by ui_review.qt_widgets_smoke).
-        # Re-add the header when preparation_page.cpp lands.
+        # data_page.cpp stays deferred (04-line scope). preparation_page
+        # landed with the 08-line closure — header and TU land together so
+        # the moc default-ctor thunk is bindable (see the removed note).
+        src/qt/preparation_page.cpp
         # Q_OBJECT headers must be listed as sources — AUTOMOC does not
         # scan the separate include/ tree on its own.
         include/pwb/ui_pages_data/qt/cards.hpp
@@ -98,6 +94,7 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_pages_data/qt/tag_widgets.hpp
         include/pwb/ui_pages_data/qt/new_project_wizard.hpp
         include/pwb/ui_pages_data/qt/home_page.hpp
+        include/pwb/ui_pages_data/qt/preparation_page.hpp
     )
     add_library(Pwb::UiPagesDataQt ALIAS pwb_ui_pages_data_qt)
     set_target_properties(pwb_ui_pages_data_qt PROPERTIES AUTOMOC ON)

@@ -56,6 +56,13 @@ public:
     QString selected_method() const;
     bool method_user_selected() const { return method_user_selected_; }
     int row_count() const { return row_count_; }
+    // 08-line closure (PreparationPage install): read-only widget handles
+    // so the page can gate enablement and render progress summaries —
+    // additive accessors, no behavior change.
+    QComboBox* method_combo() const { return method_combo_; }
+    QPushButton* generate_btn() const { return generate_btn_; }
+    QPushButton* contour_draft_btn() const { return contour_draft_btn_; }
+    QLabel* summary_label() const { return summary_label_; }
 
 signals:
     void generate_requested(const QString& method);

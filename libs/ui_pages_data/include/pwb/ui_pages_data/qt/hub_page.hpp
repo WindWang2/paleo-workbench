@@ -28,6 +28,15 @@ public:
                        QWidget* page);
     void finish();
 
+    // BEGIN CLOSURE-MAPPING (08-line additive install seam — function
+    // lease registered in codex-coordination/cpp-close-wave/08-line.json;
+    // distinct from the 04-line replace_submodule lease, reconcile at
+    // merge) Replace an installed submodule widget in place (page lookup,
+    // button wiring and activation state keep working). No-op when the
+    // key is unknown.
+    void adopt_submodule(const std::string& key, QWidget* page);
+    // END CLOSURE-MAPPING
+
     // Activate the sub-module key (no-op when unknown). emit=true also
     // fires submodule_changed (UI-driven switch parity).
     void switch_to(const std::string& key, bool emit = false);

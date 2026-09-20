@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
@@ -28,7 +29,9 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
-#include <pwb/layout_export/layout_export.hpp>
+#include <algorithm>
+
+#include <pwb/mapping_document/document_io.hpp>
 #include <pwb/ui_seqviz/composition_state.hpp>
 
 namespace pwb::ui_seqviz::qt {
@@ -36,16 +39,16 @@ namespace {
 
 constexpr int kStaticFormRows = 5;  // title + x + y + w + h
 
-domain::Json default_schema(const domain::Json& item) {
-    auto it = item.find("default");
-    if (it == item.end()) return domain::Json{};
-    return it->second;
+QString qstr(const std::string& s) {
+    return QString::fromUtf8(s.data(), static_cast<qsizetype>(s.size()));
 }
 
-// Resolve the rendered element-type label for property keys that are
-// expected to reference element types (kept minimal: only used when a
-// schema field is itself a type-choice — composition_panel.py doesn't
-// translate schema values, so we don't either).
+// f"{value:g}" — Python's %g default precision (6 significant digits),
+// used for the series-table 数值 cells.
+QString py_g(double value) {
+    return QString::number(value, 'g', 6);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -133,8 +136,9 @@ CompositionPanel::CompositionPanel(QWidget* parent) : QFrame(parent) {
     auto make_spin = [prop_box](double lo, double hi) {
         auto* s = new QDoubleSpinBox(prop_box);
         s->setRange(lo, hi);
-        s->setDecimals(2);
+        s->setDecimals(1);
         s->setSingleStep(1.0);
+        s->setSuffix(" mm");
         return s;
     };
     x_spin_ = make_spin(-1e4, 1e4);
@@ -160,7 +164,7 @@ CompositionPanel::CompositionPanel(QWidget* parent) : QFrame(parent) {
     export_row->addWidget(new QLabel("导出:"));
     export_combo_ = new QComboBox(this);
     export_combo_->addItems({"pdf", "png", "svg"});
-    export_row->addWidget(export_combo_);
+    export_row->addWidget(export_combo_, 1);
     export_row->addWidget(new QLabel("DPI:"));
     dpi_spin_ = new QSpinBox(this);
     dpi_spin_->setRange(72, 1200);
@@ -199,10 +203,10 @@ CompositionPanel::CompositionPanel(QWidget* parent) : QFrame(parent) {
     for (auto* s : {x_spin_, y_spin_, w_spin_, h_spin_}) {
         connect(s, &QDoubleSpinBox::editingFinished, this, [this, s] {
             if (suppress_geometry_signals_) return;
-            const std::string field = s == x_spin_   ? "x_mm"
-                                      : s == y_spin_ ? "y_mm"
-                                      : s == w_spin_ ? "width_mm"
-                                                     : "height_mm";
+            const std::string field = s == x_spin_   ? "x"
+                                      : s == y_spin_ ? "y"
+                                      : s == w_spin_ ? "w"
+                                                     : "h";
             apply_geometry(field, s->value());
         });
     }
@@ -228,14 +232,26 @@ void CompositionPanel::set_registry(CompositionRegistrySeams seams) {
     template_combo_->clear();
     if (seams_.template_library) {
         for (const auto& t : seams_.template_library()) {
-            template_combo_->addItem(
-                QString::fromStdString(t.label),
-                QString::fromStdString(t.template_id));
+            template_combo_->addItem(qstr(t.label),
+                                     qstr(t.template_id));
             const int idx = template_combo_->count() - 1;
             if (!t.description.empty()) {
                 template_combo_->setItemData(
-                    idx, QString::fromStdString(t.description),
-                    Qt::ToolTipRole);
+                    idx, qstr(t.description), Qt::ToolTipRole);
+            }
+        }
+    }
+    // Python __init__ creates the default-template document right away;
+    // with injected seams the same observable state is "first registry
+    // install opens the current template" (never a fabricated document).
+    if (document_ == nullptr && seams_.instantiate_template) {
+        const QString tid = template_combo_->currentData().toString();
+        if (!tid.isEmpty()) {
+            try {
+                set_document(
+                    seams_.instantiate_template(tid.toStdString()));
+            } catch (const std::exception&) {
+                // Empty-panel state stays honest (no template resolved).
             }
         }
     }
@@ -246,6 +262,7 @@ void CompositionPanel::set_document(const Composition& doc) {
     session_ = std::make_unique<CompositionEditSession>(*document_,
                                                         factory_);
     schema_dirty_.clear();
+    title_edit_->setText(qstr(document_->title));
     refresh_all();
     emit composition_changed(session_->revision());
 }
@@ -282,10 +299,9 @@ void CompositionPanel::build_add_menu() {
     if (!seams_.element_menu) return;
     for (const auto& group : seams_.element_menu()) {
         if (group.specs.empty()) continue;
-        auto* sub = menu->addMenu(
-            QString::fromStdString(group.category_label));
+        auto* sub = menu->addMenu(qstr(group.category_label));
         for (const auto& [type, label] : group.specs) {
-            sub->addAction(QString::fromStdString(label), this,
+            sub->addAction(qstr(label), this,
                            [this, type] { add_element(type); });
         }
     }
@@ -297,8 +313,7 @@ void CompositionPanel::new_from_template() {
     try {
         set_document(seams_.instantiate_template(tid.toStdString()));
     } catch (const std::exception& exc) {
-        QMessageBox::warning(this, "模板新建失败",
-                             QString::fromStdString(exc.what()));
+        QMessageBox::warning(this, "模板新建失败", qstr(exc.what()));
     }
 }
 
@@ -320,15 +335,14 @@ mapping_document::ComposerElement* CompositionPanel::selected_element() {
 void CompositionPanel::add_element(const std::string& element_type) {
     if (!session_) return;
     try {
-        const std::string eid =
+        const ComposerElement created =
             session_->add_element(element_type);
         refresh_list();
-        select_element(eid);
+        select_element(created.id);
         refresh_preview();
         emit composition_changed(session_->revision());
     } catch (const mapping_document::ComposerError&) {
-        // Python silently swallows ComposerError here (element type not in
-        // the registry / unsupported) — the seam is the validator.
+        // Registry/refusal path — the injected spec provider decides.
     }
 }
 
@@ -348,20 +362,15 @@ void CompositionPanel::delete_selected() {
 }
 
 void CompositionPanel::duplicate_selected() {
-    if (!session_ || !document_) return;
-    const auto* src = selected_element();
-    if (!src) return;
-    mapping_document::ComposerElement copy = *src;
-    copy.id.clear();  // factory assigns a fresh id
-    copy.z_index += 1;
-    try {
-        const std::string eid = session_->add_element(copy);
-        refresh_list();
-        select_element(eid);
-        refresh_preview();
-        emit composition_changed(session_->revision());
-    } catch (const mapping_document::ComposerError&) {
-    }
+    if (!session_) return;
+    const std::string eid = selected_element_id();
+    if (eid.empty()) return;
+    const auto copy = session_->duplicate_element(eid);
+    if (!copy) return;  // missing / locked → no command (Python None)
+    refresh_list();
+    select_element(copy->id);
+    refresh_preview();
+    emit composition_changed(session_->revision());
 }
 
 void CompositionPanel::toggle_lock(const std::string& element_id) {
@@ -369,7 +378,7 @@ void CompositionPanel::toggle_lock(const std::string& element_id) {
     auto* el = mapping_document::find_element(*document_, element_id);
     if (!el) return;
     try {
-        session_->set_element_flag(element_id, "locked", !el->locked);
+        session_->set_locked(element_id, !el->locked);
     } catch (const mapping_document::ComposerError&) {
         return;
     }
@@ -383,7 +392,11 @@ void CompositionPanel::reorder(const std::string& mode) {
     const std::string eid = selected_element_id();
     if (eid.empty()) return;
     try {
-        session_->reorder_element(eid, mode);
+        if (mode == "front") {
+            session_->bring_to_front(eid);
+        } else {
+            session_->send_to_back(eid);
+        }
     } catch (const mapping_document::ComposerError&) {
         return;
     }
@@ -420,10 +433,9 @@ void CompositionPanel::apply_geometry(const std::string& field,
     if (!session_ || !document_) return;
     const std::string eid = selected_element_id();
     if (eid.empty()) return;
-    try {
-        apply_element_geometry(*session_, *document_, eid, field, value);
-    } catch (const mapping_document::ComposerError&) {
-        return;
+    if (!apply_element_geometry(*session_, *document_, eid, field,
+                                value)) {
+        return;  // locked/missing → no-op (Python parity)
     }
     refresh_preview();
     emit composition_changed(session_->revision());
@@ -470,70 +482,63 @@ void CompositionPanel::commit_schema_edits() {
         schema_dirty_.clear();
         return;
     }
-    domain::Json patch = domain::Json::object();
+    // Python commits each dirty property as its own configure command
+    // (one undo step per property), not one merged patch.
     for (const auto& name : schema_dirty_) {
-        auto it = schema_getters_.find(name);
-        if (it != schema_getters_.end() && it->second) {
-            patch[name] = it->second();
-        }
+        const auto it = schema_getters_.find(name);
+        if (it == schema_getters_.end() || !it->second) continue;
+        on_schema_value_changed(name, it->second());
     }
     schema_dirty_.clear();
-    if (patch.empty()) return;
-    try {
-        session_->configure_element(el->id, patch);
-    } catch (const mapping_document::ComposerError&) {
-        return;
-    }
-    refresh_preview();
-    emit composition_changed(session_->revision());
 }
 
 // -- selection -----------------------------------------------------------------
 
 void CompositionPanel::on_element_selected(int /*row*/) {
+    if (suppress_item_signals_) return;
     schema_dirty_.clear();
     refresh_property_editor();
 }
 
 void CompositionPanel::on_element_menu(const QPoint& pos) {
     auto* item = element_list_->itemAt(pos);
-    if (!item) return;
+    if (!item || !session_) return;
     const std::string eid =
         item->data(Qt::UserRole).toString().toStdString();
+    auto* el = mapping_document::find_element(*document_, eid);
+    if (!el) return;
     QMenu menu(this);
-    auto* lock_act = menu.addAction("锁定/解锁");
+    auto* lock_act = menu.addAction(el->locked ? "解锁" : "锁定");
+    auto* toggle_act = menu.addAction("显示/隐藏");
+    auto* dup_act = menu.addAction("复制组件");
     auto* front_act = menu.addAction("置顶");
     auto* back_act = menu.addAction("置底");
-    menu.addSeparator();
-    auto* dup_act = menu.addAction("复制");
-    auto* del_act = menu.addAction("删除");
     QAction* picked =
         menu.exec(element_list_->viewport()->mapToGlobal(pos));
     if (picked == lock_act) {
         toggle_lock(eid);
-    } else if (picked == front_act) {
-        try {
-            if (session_) session_->reorder_element(eid, "front");
-        } catch (const mapping_document::ComposerError&) {
-        }
-        refresh_list();
-        select_element(eid);
-        refresh_preview();
-    } else if (picked == back_act) {
-        try {
-            if (session_) session_->reorder_element(eid, "back");
-        } catch (const mapping_document::ComposerError&) {
-        }
-        refresh_list();
-        select_element(eid);
-        refresh_preview();
-    } else if (picked == dup_act) {
-        element_list_->setCurrentItem(item);
-        duplicate_selected();
-    } else if (picked == del_act) {
-        element_list_->setCurrentItem(item);
-        delete_selected();
+        return;
     }
+    if (picked == toggle_act) {
+        session_->set_element_visible(eid, !el->visible);
+    } else if (picked == dup_act) {
+        const auto copy = session_->duplicate_element(eid);
+        if (!copy) return;  // locked → debug-refused (Python parity)
+        element_list_->setCurrentItem(item);
+        refresh_all();
+        select_element(copy->id);
+        emit composition_changed(session_->revision());
+        return;
+    } else if (picked == front_act) {
+        session_->bring_to_front(eid);
+    } else if (picked == back_act) {
+        session_->send_to_back(eid);
+    } else {
+        return;
+    }
+    refresh_all();
+    select_element(eid);
+    emit composition_changed(session_->revision());
 }
 
 // -- refresh passes -----------------------------------------------------------------
@@ -549,28 +554,30 @@ void CompositionPanel::refresh_list() {
     suppress_item_signals_ = true;
     const QString keep = QString::fromStdString(selected_element_id());
     element_list_->clear();
-    for (const auto& row : composition_element_rows(
-             document_.get(), seams_.element_label_fn)) {
-        auto* item =
-            new QListWidgetItem(QString::fromStdString(row.label));
-        item->setData(Qt::UserRole,
-                      QString::fromStdString(row.element_id));
+    std::vector<CompositionElementRow> rows;
+    if (document_ != nullptr) {
+        rows = composition_element_rows(*document_, seams_.element_label_fn);
+    }
+    for (const auto& row : rows) {
+        auto* item = new QListWidgetItem(qstr(row.label));
+        item->setData(Qt::UserRole, qstr(row.id));
+        // Visible/hidden check state (context menu toggles visibility).
+        item->setCheckState(row.checked ? Qt::Checked : Qt::Unchecked);
         element_list_->addItem(item);
-        if (row.element_id == keep.toStdString()) {
+        if (row.id == keep.toStdString()) {
             element_list_->setCurrentItem(item);
         }
     }
     suppress_item_signals_ = false;
+    if (!keep.isEmpty()) {
+        refresh_property_editor();
+    }
 }
 
 void CompositionPanel::refresh_history_state() {
-    const auto hist =
-        session_ ? composition_history_state(*session_)
-                 : CompositionHistoryState{};
+    const auto hist = history_state(session_.get());
     undo_btn_->setEnabled(hist.can_undo);
     redo_btn_->setEnabled(hist.can_redo);
-    undo_btn_->setToolTip(QString::fromStdString(hist.undo_tip));
-    redo_btn_->setToolTip(QString::fromStdString(hist.redo_tip));
 }
 
 void CompositionPanel::clear_schema_rows() {
@@ -579,48 +586,52 @@ void CompositionPanel::clear_schema_rows() {
     }
     schema_editors_.clear();
     schema_getters_.clear();
+    schema_dirty_.clear();
 }
 
 void CompositionPanel::refresh_property_editor() {
     suppress_geometry_signals_ = true;
     suppress_schema_signals_ = true;
-    clear_schema_rows();
+    if (document_ != nullptr) {
+        title_edit_->setText(qstr(document_->title));
+    }
+    title_edit_->setEnabled(document_ != nullptr);
     auto* el = selected_element();
-    const auto state =
-        element_geometry_state(el, session_ != nullptr);
-    title_edit_->setEnabled(state.title_enabled);
-    title_edit_->setText(QString::fromStdString(state.title_text));
-    x_spin_->setEnabled(state.geometry_enabled);
-    y_spin_->setEnabled(state.geometry_enabled);
-    w_spin_->setEnabled(state.geometry_enabled);
-    h_spin_->setEnabled(state.geometry_enabled);
-    if (el) {
-        x_spin_->setValue(el->x_mm);
-        y_spin_->setValue(el->y_mm);
-        w_spin_->setValue(el->width_mm);
-        h_spin_->setValue(el->height_mm);
+    const auto state = property_geometry_state(el);
+    x_spin_->setEnabled(state.editable);
+    y_spin_->setEnabled(state.editable);
+    w_spin_->setEnabled(state.editable);
+    h_spin_->setEnabled(state.editable);
+    if (el != nullptr) {
+        x_spin_->setValue(state.x);
+        y_spin_->setValue(state.y);
+        w_spin_->setValue(state.w);
+        h_spin_->setValue(state.h);
     }
     lock_hint_->setVisible(state.lock_hint_visible);
 
-    if (el && !el->locked) {
-        domain::Json schema =
-            seams_.property_schema
-                ? seams_.property_schema(el->element_type)
-                : domain::Json{};
-        for (const auto& desc : schema_editor_descriptors(
-                 schema, el, seams_.chart_series_schemas)) {
+    clear_schema_rows();
+    if (el != nullptr && !el->locked) {
+        domain::Json schema = domain::Json::array();
+        if (seams_.property_schema) {
+            schema = seams_.property_schema(el->element_type);
+        }
+        // Python walks spec.property_schema with properties.get(name) —
+        // no schema-default fallback; a missing key edits as null.
+        const auto& properties = el->properties;
+        for (const auto& desc : schema_editor_descs(
+                 schema, *el, seams_.chart_series_schemas)) {
             const domain::Json* value = nullptr;
-            const auto pit = el->properties.find(desc.name);
-            if (pit != el->properties.end()) value = &pit->second;
-            domain::Json fallback;
-            if (!value) {
-                fallback = default_schema(desc.schema);
-                value = &fallback;
+            if (properties.is_object()) {
+                const auto pit = properties.find(desc.name);
+                if (pit != properties.end()) value = &pit.value();
             }
-            QWidget* editor = make_editor(desc, *value, *el);
+            static const domain::Json kNull;
+            const domain::Json& current = value ? *value : kNull;
+            QWidget* editor = make_editor(desc, current, *el);
             if (!editor) continue;
-            property_form_->addRow(
-                QString::fromStdString(desc.label), editor);
+            editor->setEnabled(true);
+            property_form_->addRow(qstr(desc.label), editor);
             schema_editors_[desc.name] = editor;
         }
     }
@@ -644,93 +655,95 @@ QWidget* CompositionPanel::make_editor(const SchemaEditorDesc& desc,
         });
         return box;
     }
-    case SchemaEditorKind::Float: {
+    case SchemaEditorKind::Number: {
         auto* spin = new QDoubleSpinBox(this);
-        spin->setDecimals(desc.decimals);
-        spin->setSingleStep(desc.step);
-        spin->setRange(desc.minimum, desc.maximum);
+        spin->setRange(desc.min, desc.max);
+        spin->setDecimals(2);
+        spin->setSingleStep(0.1);
         spin->setValue(schema_float_value(value));
         schema_getters_[name] = [spin] {
             return domain::Json(spin->value());
         };
-        connect(spin, &QDoubleSpinBox::editingFinished, this,
-                [this, name, spin] {
-                    on_schema_value_changed(name,
-                                            domain::Json(spin->value()));
+        connect(spin, &QDoubleSpinBox::valueChanged, this,
+                [this, name](double v) {
+                    on_schema_value_changed(name, domain::Json(v));
                 });
-        spin->installEventFilter(this);
         return spin;
     }
-    case SchemaEditorKind::Int: {
-        auto* spin = new QSpinBox(this);
-        spin->setRange(desc.minimum < -1e9 ? -1'000'000'000
-                                           : int(desc.minimum),
-                       desc.maximum > 1e9 ? 1'000'000'000
-                                          : int(desc.maximum));
-        spin->setValue(int(schema_float_value(value)));
-        schema_getters_[name] = [spin] {
-            return domain::Json(long long(spin->value()));
-        };
-        connect(spin, &QSpinBox::editingFinished, this,
-                [this, name, spin] {
-                    on_schema_value_changed(
-                        name, domain::Json(long long(spin->value())));
-                });
-        spin->installEventFilter(this);
-        return spin;
-    }
-    case SchemaEditorKind::Choice: {
+    case SchemaEditorKind::Choices: {
         auto* combo = new QComboBox(this);
-        for (const auto& opt : desc.options) {
-            combo->addItem(QString::fromStdString(opt),
-                           QString::fromStdString(opt));
+        for (const auto& opt : desc.choices) {
+            combo->addItem(qstr(opt));
         }
-        const std::string cur = schema_text_value(value);
-        const int idx = combo->findText(QString::fromStdString(cur));
-        combo->setCurrentIndex(idx >= 0 ? idx : 0);
+        // current = str(value or (choices[0] if choices else ""))
+        std::string current;
+        if (schema_bool_value(value)) {
+            current = schema_text_value(value);
+        } else if (!desc.choices.empty()) {
+            current = desc.choices.front();
+        }
+        if (!current.empty() && combo->findText(qstr(current)) < 0) {
+            combo->insertItem(0, qstr(current));
+        }
+        combo->setCurrentText(qstr(current));
         schema_getters_[name] = [combo] {
-            return domain::Json(combo->currentData()
-                                    .toString()
-                                    .toStdString());
+            return domain::Json(
+                combo->currentText().toStdString());
         };
-        connect(combo, &QComboBox::currentTextChanged, this,
-                [this, name](const QString& t) {
+        connect(combo, &QComboBox::currentIndexChanged, this,
+                [this, name, combo] {
                     on_schema_value_changed(
-                        name, domain::Json(t.toStdString()));
+                        name,
+                        domain::Json(
+                            combo->currentText().toStdString()));
                 });
         return combo;
     }
-    case SchemaEditorKind::SeriesTable:
-        return make_series_table_editor(element);
-    case SchemaEditorKind::JsonText: {
+    case SchemaEditorKind::Text: {
         auto* edit = new QTextEdit(this);
         edit->setAcceptRichText(false);
-        edit->setPlainText(
-            QString::fromStdString(schema_json_text(value)));
-        edit->setMaximumHeight(120);
+        edit->setPlainText(qstr(schema_text_value(value)));
+        edit->setMaximumHeight(64);
         schema_getters_[name] = [edit] {
-            const auto parsed =
-                schema_json_value(edit->toPlainText().toStdString());
-            return parsed.value_or(domain::Json{});
+            return domain::Json(
+                edit->toPlainText().toStdString());
         };
         connect(edit, &QTextEdit::textChanged, this,
                 [this, name] { mark_schema_dirty(name); });
         edit->installEventFilter(this);
         return edit;
     }
-    case SchemaEditorKind::Line:
+    case SchemaEditorKind::SeriesTable:
+        return make_series_table_editor(element);
+    case SchemaEditorKind::Json: {
+        // Non [{label,value}] list shapes degrade to a JSON line box.
+        auto* edit = new QLineEdit(this);
+        edit->setText(qstr(desc.json_text));
+        schema_getters_[name] = [edit] {
+            const auto parsed = schema_json_value(
+                edit->text().toStdString());
+            return parsed.value_or(domain::Json{});
+        };
+        connect(edit, &QLineEdit::editingFinished, this,
+                [this, name, edit] {
+                    on_schema_json_changed(name, edit->text());
+                });
+        return edit;
+    }
+    case SchemaEditorKind::Str:
     default: {
         auto* edit = new QLineEdit(this);
-        edit->setText(QString::fromStdString(schema_text_value(value)));
+        edit->setText(qstr(schema_text_value(value)));
         schema_getters_[name] = [edit] {
             return domain::Json(edit->text().toStdString());
         };
         connect(edit, &QLineEdit::editingFinished, this,
                 [this, name, edit] {
                     on_schema_value_changed(
-                        name, domain::Json(edit->text().toStdString()));
+                        name,
+                        domain::Json(
+                            edit->text().toStdString()));
                 });
-        edit->installEventFilter(this);
         return edit;
     }
     }
@@ -743,74 +756,99 @@ QWidget* CompositionPanel::make_series_table_editor(
     auto* lay = new QVBoxLayout(wrap);
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(2);
-    auto* table = new QTableWidget(wrap);
-    table->setColumnCount(2);
-    table->setHorizontalHeaderLabels({"曲线列", "样式"});
+    const domain::Json* series = nullptr;
+    if (element.properties.is_object()) {
+        const auto sit = element.properties.find("series");
+        if (sit != element.properties.end()) series = &sit.value();
+    }
+    const int rows =
+        series != nullptr && series->is_array()
+            ? std::max(1, static_cast<int>(series->size()))
+            : 1;
+    auto* table = new QTableWidget(rows, 2, wrap);
+    table->setHorizontalHeaderLabels({"标签", "数值"});
+    table->verticalHeader()->setVisible(false);
+    table->setMaximumHeight(120);
     table->horizontalHeader()->setStretchLastSection(true);
-    // Existing series rows — [{curve, label/color/...}] objects.
-    int rows = 0;
-    const auto sit = element.properties.find("series");
-    if (sit != element.properties.end() && sit->second.is_array()) {
-        rows = int(sit->second.size());
-    }
-    table->setRowCount(rows);
+    suppress_schema_signals_ = true;
     for (int r = 0; r < rows; ++r) {
-        const auto& obj = sit->second[size_t(r)];
-        auto cell = [&obj](const char* key) {
-            const auto it = obj.find(key);
-            return (it != obj.end() && it->second.is_string())
-                       ? QString::fromStdString(
-                             it->second.get<std::string>())
-                       : QString{};
-        };
-        table->setItem(r, 0, new QTableWidgetItem(cell("curve")));
-        table->setItem(r, 1, new QTableWidgetItem(cell("label")));
+        if (series != nullptr && series->is_array() &&
+            r < static_cast<int>(series->size())) {
+            const auto& entry = (*series)[size_t(r)];
+            auto cell_text = [&entry](const char* key,
+                                      bool numeric) {
+                if (!entry.is_object()) return QString{};
+                const auto it = entry.find(key);
+                if (it == entry.end()) return QString{};
+                if (numeric) {
+                    return py_g(schema_float_value(*it));
+                }
+                return qstr(schema_text_value(*it));
+            };
+            table->setItem(r, 0,
+                           new QTableWidgetItem(cell_text("label", false)));
+            table->setItem(r, 1,
+                           new QTableWidgetItem(cell_text("value", true)));
+        } else {
+            table->setItem(r, 0, new QTableWidgetItem({}));
+            table->setItem(r, 1, new QTableWidgetItem("0"));
+        }
     }
-    lay->addWidget(table);
+    suppress_schema_signals_ = false;
+
+    // collect() — (label, raw) rows → core series_collect (blank-row
+    // skip + float coercion), registered as the property getter too.
+    auto collect = [table]() -> domain::Json {
+        std::vector<std::pair<std::string, std::string>> rows;
+        rows.reserve(size_t(table->rowCount()));
+        for (int r = 0; r < table->rowCount(); ++r) {
+            auto* label_item = table->item(r, 0);
+            auto* value_item = table->item(r, 1);
+            rows.emplace_back(
+                label_item ? label_item->text().toStdString()
+                           : std::string{},
+                value_item ? value_item->text().toStdString()
+                           : std::string{});
+        }
+        return pwb::ui_seqviz::series_collect(rows);
+    };
+    schema_getters_[name] = collect;
+
+    connect(table, &QTableWidget::cellChanged, this,
+            [this, collect](int, int) {
+                on_schema_value_changed("series", collect());
+            });
     auto* btn_row = new QHBoxLayout();
     auto* add = new QToolButton(wrap);
     add->setText("＋行");
     auto* remove = new QToolButton(wrap);
-    remove->setText("−行");
+    remove->setText("－行");
     btn_row->addWidget(add);
     btn_row->addWidget(remove);
     btn_row->addStretch(1);
+    lay->addWidget(table);
     lay->addLayout(btn_row);
-    connect(add, &QToolButton::clicked, this,
-            [table, this] {
-                table->insertRow(table->rowCount());
-                mark_schema_dirty("series");
-            });
-    connect(remove, &QToolButton::clicked, this, [table, this] {
-        if (table->currentRow() >= 0) {
-            table->removeRow(table->currentRow());
-        } else if (table->rowCount() > 0) {
-            table->removeRow(table->rowCount() - 1);
-        }
-        mark_schema_dirty("series");
+    connect(add, &QToolButton::clicked, this, [this, table, collect] {
+        suppress_schema_signals_ = true;
+        const int row = table->rowCount();
+        table->insertRow(row);
+        table->setItem(row, 0, new QTableWidgetItem({}));
+        table->setItem(row, 1, new QTableWidgetItem("0"));
+        suppress_schema_signals_ = false;
+        on_schema_value_changed("series", collect());
     });
-    connect(table, &QTableWidget::itemChanged, this,
-            [this](QTableWidgetItem*) { mark_schema_dirty("series"); });
-    schema_getters_[name] = [this, table] {
-        return series_collect(table);
-    };
+    connect(remove, &QToolButton::clicked, this, [this, table, collect] {
+        int row = table->currentRow();
+        if (row < 0) {
+            row = table->rowCount() - 1;
+        }
+        if (row >= 0) {
+            table->removeRow(row);
+            on_schema_value_changed("series", collect());
+        }
+    });
     wrap->installEventFilter(this);
     return wrap;
-}
-
-domain::Json CompositionPanel::series_collect(QTableWidget* table) const {
-    domain::Json out = domain::Json::array();
-    for (int r = 0; r < table->rowCount(); ++r) {
-        domain::Json row = domain::Json::object();
-        auto* curve = table->item(r, 0);
-        auto* style = table->item(r, 1);
-        row["curve"] =
-            curve ? curve->text().toStdString() : std::string{};
-        row["label"] =
-            style ? style->text().toStdString() : std::string{};
-        out.push_back(std::move(row));
-    }
-    return out;
 }
 
 void CompositionPanel::refresh_preview() {
@@ -826,16 +864,15 @@ void CompositionPanel::refresh_preview() {
     }
     try {
         const std::string svg = seams_.render_svg(*document_);
-        QSvgRenderer renderer(
-            QByteArray::fromStdString(svg));
+        QSvgRenderer renderer(QByteArray::fromStdString(svg));
         if (!renderer.isValid()) {
             preview_label_->setText("预览渲染失败");
             preview_label_->setPixmap(QPixmap{});
             return;
         }
-        const auto [pw, ph] = mapping_document::
-            composition_page_pixels(*document_, 96.0);
-        QPixmap pix(int(pw), int(ph));
+        const auto [pw, ph] =
+            mapping_document::composition_page_pixels(*document_, 96.0);
+        QPixmap pix{int(pw), int(ph)};
         pix.fill(Qt::white);
         QPainter painter(&pix);
         renderer.render(&painter);
@@ -855,36 +892,37 @@ void CompositionPanel::save_json() {
     const QString path = QFileDialog::getSaveFileName(
         this, "保存组图", {}, "JSON (*.json)");
     if (path.isEmpty()) return;
-    try {
-        const domain::Json payload =
-            mapping_document::dump_composition(*document_);
-        QFile f(path);
-        if (!f.open(QIODevice::WriteOnly)) {
-            throw std::runtime_error("无法写入文件");
-        }
-        f.write(QByteArray::fromStdString(payload.dump(2)));
-        register_catalog_export(path.toStdString());
-    } catch (const std::exception& exc) {
-        QMessageBox::warning(this, "保存失败",
-                             QString::fromStdString(exc.what()));
+    // document_io atomic save (temp+fsync+bak) with the CONV-02 dump —
+    // not a bare QFile write.
+    std::string error;
+    auto store = mapping_document::make_std_file_store();
+    if (!mapping_document::save_composition_file(
+            *store, path.toStdString(), *document_, error)) {
+        QMessageBox::warning(this, "保存失败", qstr(error));
+        return;
     }
+    register_catalog_export(path.toStdString());
 }
 
 void CompositionPanel::load_json() {
     const QString path = QFileDialog::getOpenFileName(
         this, "载入组图", {}, "JSON (*.json)");
     if (path.isEmpty()) return;
-    try {
-        QFile f(path);
-        if (!f.open(QIODevice::ReadOnly)) {
-            throw std::runtime_error("无法读取文件");
-        }
-        const auto payload = domain::Json::parse(
-            f.readAll().toStdString());
-        set_document(mapping_document::parse_composition(payload));
-    } catch (const std::exception& exc) {
-        QMessageBox::warning(this, "载入失败",
-                             QString::fromStdString(exc.what()));
+    auto store = mapping_document::make_std_file_store();
+    mapping_document::DocumentIoDiagnostics diagnostics;
+    const auto result = mapping_document::load_composition_file(
+        *store, path.toStdString(), *document_, &diagnostics);
+    if (result.status == mapping_document::LoadStatus::kUnreadable ||
+        result.status == mapping_document::LoadStatus::kCorrupt) {
+        QMessageBox::warning(this, "载入失败", qstr(result.error));
+        return;
+    }
+    set_document(*document_);
+    if (result.status ==
+        mapping_document::LoadStatus::kRecoveredFromBackup) {
+        QMessageBox::information(
+            this, "载入组图",
+            "主文件缺失或损坏，已从备份恢复。");
     }
 }
 
@@ -901,29 +939,27 @@ void CompositionPanel::do_export() {
     if (!res.ok) {
         QMessageBox::warning(
             this, "导出失败",
-            QString::fromStdString(
-                res.message.empty() ? "导出引擎不可用" : res.message));
+            qstr(res.message.empty() ? "导出引擎不可用" : res.message));
         return;
     }
     register_catalog_export(res.path.empty() ? path.toStdString()
                                              : res.path);
-    emit composition_exported(QString::fromStdString(
-        res.path.empty() ? path.toStdString() : res.path));
+    emit composition_exported(
+        qstr(res.path.empty() ? path.toStdString() : res.path));
 }
 
 void CompositionPanel::register_catalog_export(
     const std::string& path) {
     // catalog_export_plan gate — best-effort provenance write.
-    const auto plan = catalog_export_plan(
-        seams_.project_provider ? seams_.project_provider() : std::any{},
-        path);
-    if (plan.registration_needed && seams_.record_export &&
-        plan.project.has_value()) {
+    const std::any project =
+        seams_.project_provider ? seams_.project_provider() : std::any{};
+    const auto plan = catalog_export_plan(project.has_value());
+    if (plan.should_register && seams_.record_export &&
+        project.has_value()) {
         try {
-            seams_.record_export(*plan.project, plan.path);
+            seams_.record_export(project, path);
         } catch (const std::exception&) {
-            // Provenance writes are best-effort (Python wraps the whole
-            // block in try/except and swallows).
+            // Provenance writes are best-effort (Python swallows).
         }
     }
 }

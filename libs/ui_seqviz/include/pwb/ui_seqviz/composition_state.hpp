@@ -117,6 +117,15 @@ domain::Json series_collect(
 // _on_schema_json_changed: text → parsed Json or nullopt (invalid → warn).
 std::optional<domain::Json> schema_json_value(const std::string& text);
 
+// Schema-editor value coercions — Python semantics used by _make_editor:
+//   * bool(value)          — Python truthiness (null/0/0.0/""/[]/{} → false)
+//   * float(0.0 if null)   — TypeError/ValueError → 0.0 (strings parse)
+//   * str(value if not None else "") — bool → "True"/"False", numbers via
+//     Python str() formatting, arrays/objects via json.dumps-compatible text
+bool schema_bool_value(const domain::Json& value);
+double schema_float_value(const domain::Json& value);
+std::string schema_text_value(const domain::Json& value);
+
 // ---------------------------------------------------------------------------
 // Session-level edits (_apply_title / _apply_geometry)
 // ---------------------------------------------------------------------------

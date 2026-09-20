@@ -157,6 +157,12 @@
 #include "viz_a_install.hpp"
 #endif
 
+// BEGIN CLOSURE-MAPPING
+#ifdef PWB_WITH_CLOSURE_MAPPING
+#include "closure_mapping_install.hpp"
+#endif
+// END CLOSURE-MAPPING
+
 #ifdef PWB_WITH_GEO3D_VIZ
 // VIZ-C: JobCenter* travels through a dynamic property; QVariant needs
 // the metatype declared at global scope (outside namespace pwb::app).
@@ -574,6 +580,21 @@ void MainWindow::buildUi() {
 #ifdef PWB_WITH_APP_SHELL
     wire_app_shell();
 #endif
+// BEGIN CLOSURE-MAPPING — 08-line product install (mapping-page adopt set
+// + preparation page + document bank). Requires the AppShell composition.
+#ifdef PWB_WITH_CLOSURE_MAPPING
+    if (app_shell_ != nullptr) {
+        pwb::app::closure_mapping::Install closure_install;
+        closure_install.window = this;
+        closure_install.shell = app_shell_;
+        closure_install.store_getter = [this]()
+            -> std::shared_ptr<pwb::application::PwbDataStore> {
+            return context_.projectStore();
+        };
+        pwb::app::closure_mapping::install(closure_install);
+    }
+#endif
+// END CLOSURE-MAPPING
 }
 
 #ifdef PWB_WITH_APP_SHELL

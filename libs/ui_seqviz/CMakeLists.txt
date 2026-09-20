@@ -68,11 +68,10 @@ if(TARGET Qt6::Widgets)
         src/qt/factor_panels.cpp
         src/qt/viz_panels.cpp
         src/qt/dialogs.cpp
-        # composition_panel.cpp deferred — it references mapping_document
-        # composition APIs and helpers (composition_history_state,
-        # schema_editor_descriptors, element_geometry_state) that do not
-        # exist; the agent-authored file never compiled. Re-add once the
-        # composition editor core is ported.
+        # 08-line closure: composition_panel now compiles against the
+        # mapping_document composition kernels (composition_state core +
+        # CompositionEditSession) and document_io atomic save/load.
+        src/qt/composition_panel.cpp
         src/qt/correlation_page.cpp
         src/qt/preview_controller.cpp
         src/qt/visualization_page.cpp
@@ -83,6 +82,7 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_seqviz/qt/sequence_framework_page.hpp
         include/pwb/ui_seqviz/qt/panel_float_button.hpp
         include/pwb/ui_seqviz/qt/factor_panels.hpp
+        include/pwb/ui_seqviz/qt/composition_panel.hpp
         include/pwb/ui_seqviz/qt/viz_panels.hpp
         include/pwb/ui_seqviz/qt/dialogs.hpp
         include/pwb/ui_seqviz/qt/correlation_page.hpp
@@ -97,7 +97,7 @@ if(TARGET Qt6::Widgets)
     target_compile_features(pwb_ui_seqviz_qt PUBLIC cxx_std_20)
     target_link_libraries(pwb_ui_seqviz_qt
         PUBLIC Pwb::UiSeqviz Pwb::UiShellQt Pwb::UiWidgets Pwb::JobQt
-               Qt6::Widgets
+               Qt6::Widgets Qt6::Svg
         PRIVATE Pwb::UiWorkers Pwb::UiDataCore Qt6::Gui)
 endif()
 

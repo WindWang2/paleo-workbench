@@ -220,6 +220,69 @@ std::optional<domain::Json> schema_json_value(const std::string& text) {
     }
 }
 
+bool schema_bool_value(const domain::Json& value) {
+    // Python bool(value): null/false/0/0.0/""/[]/{} → false.
+    switch (value.type()) {
+    case domain::Json::value_t::boolean:
+        return value.get<bool>();
+    case domain::Json::value_t::number_integer:
+    case domain::Json::value_t::number_unsigned:
+    case domain::Json::value_t::number_float:
+        return value.get<double>() != 0.0;
+    case domain::Json::value_t::string:
+        return !value.get<std::string>().empty();
+    case domain::Json::value_t::array:
+    case domain::Json::value_t::object:
+        return !value.empty();
+    case domain::Json::value_t::null:
+    default:
+        return false;
+    }
+}
+
+double schema_float_value(const domain::Json& value) {
+    // float(0.0 if value is None else value); TypeError/ValueError → 0.0.
+    if (value.is_null()) {
+        return 0.0;
+    }
+    if (value.is_boolean()) {
+        return value.get<bool>() ? 1.0 : 0.0;
+    }
+    if (value.is_number()) {
+        return value.get<double>();
+    }
+    if (value.is_string()) {
+        try {
+            return std::stod(value.get<std::string>());
+        } catch (...) {
+            return 0.0;
+        }
+    }
+    return 0.0;  // array/object → TypeError parity
+}
+
+std::string schema_text_value(const domain::Json& value) {
+    // str(value if value is not None else "").
+    if (value.is_null()) {
+        return {};
+    }
+    if (value.is_boolean()) {
+        return value.get<bool>() ? "True" : "False";
+    }
+    if (value.is_number_integer()) {
+        return std::to_string(value.get<long long>());
+    }
+    if (value.is_number()) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%.17g", value.get<double>());
+        return buf;
+    }
+    if (value.is_string()) {
+        return value.get<std::string>();
+    }
+    return value.dump();  // array/object → json text
+}
+
 // ---------------------------------------------------------------------------
 // Session-level edits
 // ---------------------------------------------------------------------------
