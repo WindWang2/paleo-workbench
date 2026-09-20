@@ -15,6 +15,14 @@
 //   6. 确定性：同一 DTW 输入两次完成的结果逐值一致（复现验收）；
 //   7. 在飞作业下的有界关闭：shutdown(timeout) 及时返回、析构汇合
 //      （对象销毁语义的 Qt-free 半；GUI 半在 well.dock_lifecycle）。
+//
+// Also: #1391 ragged grid_z rejection (worker-side, not an oracle replay).
+// The legacy `parameters["grid_z"]` bag can carry ragged rows (external
+// project JSON). Pre-fix, any_to_grid flattened them into a Grid2D whose
+// rows*cols no longer matched data.size(), and every downstream
+// Grid2D::at()/marching-squares read went out of bounds. The numpy
+// asarray equivalent raises, so the contract is PyValueError — which
+// compile_contour_drafts_for_project then skips per-task like Python.
 
 #include <atomic>
 #include <chrono>
@@ -26,9 +34,14 @@
 #include <thread>
 #include <vector>
 
+#include <any>
+#include <optional>
+
 #include <pwb/job_runtime/job_scheduler.hpp>
+#include <pwb/ui_workers/contour_draft.hpp>
 #include <pwb/ui_workers/dtw_propagation.hpp>
 #include <pwb/ui_workers/viz_resolve.hpp>
+#include <pwb/ui_workers/worker_common.hpp>
 
 namespace {
 
@@ -88,6 +101,38 @@ pwb::ui_workers::DtwPropagationInput small_input() {
     // 生产绑定（dock 同款）：seam 不注入 = KernelUnavailable。
     input.correlate_fn = pwb::ui_workers::dtw_engine_correlate;
     return input;
+}
+
+namespace uw = pwb::ui_workers;
+namespace job = pwb::job;
+
+uw::FactorTaskSlice ragged_task(std::any grid_z) {
+    uw::FactorTaskSlice task;
+    task.id = "t1";
+    task.name = "ragged";
+    task.status = "complete";
+    task.factor_type = "factor";
+    task.parameters["grid_z"] = std::move(grid_z);
+    task.parameters["grid_x"] = std::vector<double>{0.0, 1.0, 2.0};
+    task.parameters["grid_y"] = std::vector<double>{0.0, 1.0};
+    return task;
+}
+
+// Runs the public pipeline entry; expects the ragged-grid PyValueError out
+// of any_to_grid (not the unrelated missing-grid error — same exception
+// class, different message) before the extract seam is ever reached.
+bool throws_ragged_grid_error(uw::FactorTaskSlice task) {
+    job::CancellationToken token;
+    try {
+        (void)uw::contour_draft_from_factor_task(
+            task, std::nullopt, 5, std::nullopt, token,
+            uw::ExtractLinesFn{}, uw::IdFn{});
+    } catch (const uw::PyValueError& e) {
+        return e.py_message() == "grid_z 维数错误";
+    } catch (...) {
+        return false;
+    }
+    return false;
 }
 
 }  // namespace
@@ -311,6 +356,38 @@ int main() {
             CHECK(elapsed < std::chrono::seconds(3));  // 有界，不挂死
             release.store(true);
         }  // 析构汇合残留作业（jthreads 不可抛弃）。
+    }
+
+    // 8) #1391 ragged grid_z rejection.
+    // vector<vector<double>> path: second row longer than the first.
+    CHECK(throws_ragged_grid_error(ragged_task(std::vector<std::vector<double>>{
+              {1.0, 2.0}, {3.0, 4.0, 5.0}})));
+
+    // vector<any> path: rows of mixed length.
+    {
+        std::vector<std::any> rows;
+        rows.emplace_back(std::vector<double>{1.0, 2.0, 3.0});
+        rows.emplace_back(std::vector<double>{4.0});
+        CHECK(throws_ragged_grid_error(ragged_task(std::move(rows))));
+    }
+
+    // Rectangular input still compiles fine (guard against over-reject).
+    {
+        uw::FactorTaskSlice ok_task = ragged_task(
+            std::vector<std::vector<double>>{{1.0, 2.0}, {3.0, 4.0}});
+        job::CancellationToken token;
+        bool raised = false;
+        try {
+            (void)uw::contour_draft_from_factor_task(
+                ok_task, std::nullopt, 5, std::nullopt, token,
+                uw::ExtractLinesFn{}, uw::IdFn{});
+        } catch (const uw::PyValueError&) {
+            raised = true;   // grid shape was rejected — wrong
+        } catch (const uw::PyImportError&) {
+            // Expected: the extract seam is absent in this test — the grid
+            // itself was accepted and we reached the seam boundary.
+        }
+        CHECK(!raised);
     }
 
     if (failures != 0) {

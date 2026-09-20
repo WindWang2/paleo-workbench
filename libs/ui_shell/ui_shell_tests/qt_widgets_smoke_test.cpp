@@ -4,11 +4,13 @@
 // construct and respond under QT_QPA_PLATFORM=offscreen.
 
 #include <QApplication>
+#include <QEvent>
 #include <QLineEdit>
 #include <QSplitter>
 #include <QWidget>
 
 #include <cstdio>
+#include <map>
 #include <string>
 
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
@@ -114,6 +116,35 @@ int main(int argc, char** argv) {
     check(window != nullptr, "floating window exists");
     check(controller.dock_panel("page:panel"), "dock_panel restores");
     check(!controller.is_floating("page:panel"), "docked again");
+
+    // --- #1389: floatable_panel_entries callbacks must survive target
+    // destruction (raw-pointer captures dangled into deleteLater'd objects).
+    {
+        // Case A — floating-window capture: dock_panel() deleteLater()s the
+        // FloatingPanel; after DeferredDelete runs the captured pointer is
+        // dead and set_visible must no-op instead of dereferencing it.
+        auto* widget_a = new QWidget(splitter);
+        const std::map<std::string, QWidget*> panels_a{{"page:a", widget_a}};
+        controller.float_panel("page:a", widget_a);
+        const auto entries_a = floatable_panel_entries(controller, panels_a);
+        check(!entries_a.empty(), "entries built for floating panel");
+        controller.dock_panel("page:a");
+        QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        entries_a[0].set_visible(false);  // dead window — must no-op
+        entries_a[0].toggle_float();      // controller+widget alive — refloat
+        controller.dock_panel("page:a");
+        QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+
+        // Case B — docked-widget capture: the widget itself is gone.
+        auto* widget_b = new QWidget(splitter);
+        const std::map<std::string, QWidget*> panels_b{{"page:b", widget_b}};
+        const auto entries_b = floatable_panel_entries(controller, panels_b);
+        check(!entries_b.empty(), "entries built for docked widget");
+        delete widget_b;
+        entries_b[0].set_visible(true);   // dead widget — must no-op
+        entries_b[0].toggle_float();      // guarded controller, dead widget
+        check(true, "entries survive destroyed panel/widget");
+    }
 
     // --- command palette ---
     CommandRegistry registry;

@@ -78,6 +78,10 @@ std::string AlgorithmRunner::register_kernel(
 
 std::vector<AlgorithmRunner::AlgorithmInfo> AlgorithmRunner::algorithms()
     const {
+    // #1391: register_kernel writes under mutex_; iterating without the same
+    // lock is UB the moment a caller registers concurrently (today the
+    // product is serial, but the API contract does not say so).
+    const std::scoped_lock lock(mutex_);
     std::vector<AlgorithmInfo> infos;
     for (const auto& [id, kernel] : kernels_) {
         infos.push_back({id, kernel->descriptor().display_name,

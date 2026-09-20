@@ -12,6 +12,7 @@ add_library(pwb_domain STATIC
     src/ids.cpp
     src/sha256.cpp
     src/support.cpp
+    src/text.cpp
 )
 add_library(Pwb::Domain ALIAS pwb_domain)
 target_compile_features(pwb_domain PUBLIC cxx_std_20)

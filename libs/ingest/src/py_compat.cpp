@@ -13,9 +13,11 @@ namespace {
 bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
 bool is_py_space(unsigned char c) {
-    // ASCII members of CPython str.strip() default set.
+    // ASCII members of CPython str.strip() default set: HT/LF/VT/FF/CR/SP
+    // plus FS/GS/RS/US (0x1C-0x1F), which CPython also classifies as
+    // whitespace (str.isspace(), str.split(), float() padding).
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' ||
-           c == '\v';
+           c == '\v' || (c >= 0x1C && c <= 0x1F);
 }
 
 std::optional<CodePoint> decode_cp(std::string_view s, size_t i) {
@@ -54,16 +56,7 @@ void append_cp(std::string& out, char32_t cp) {
     }
 }
 
-bool cp_is_unicode_space(char32_t cp) {
-    // The non-ASCII str.isspace() members reachable in practice.
-    switch (cp) {
-        case 0x00A0: case 0x1680: case 0x2028: case 0x2029: case 0x202F:
-        case 0x205F: case 0x3000:
-            return true;
-        default:
-            return cp >= 0x2000 && cp <= 0x200A;
-    }
-}
+
 
 std::optional<double> nan_or_inf(std::string_view word) {
     // lowercase ASCII compare
@@ -83,12 +76,41 @@ std::optional<CodePoint> utf8_code_point(std::string_view s, size_t i) {
     return decode_cp(s, i);
 }
 
+bool cp_is_unicode_space(char32_t cp) {
+    // The non-ASCII str.isspace() members (U+0085 NEL, NBSP, Ogham,
+    // U+2000-U+200A, LS/PS, NNBSP, MMSP, ideographic space).
+    switch (cp) {
+        case 0x0085: case 0x00A0: case 0x1680: case 0x2028: case 0x2029:
+        case 0x202F: case 0x205F: case 0x3000:
+            return true;
+        default:
+            return cp >= 0x2000 && cp <= 0x200A;
+    }
+}
+
 }  // namespace detail
 
 std::optional<double> py_parse_float(std::string_view text) {
+    // float() strips Python whitespace on both ends — including non-ASCII
+    // spaces (float(" 1.0 ") parses in Python). #1386: same predicate as
+    // py_strip/py_split so an ideographic space can no longer reject a row.
+    auto space_at = [&](size_t i) {
+        auto cp = decode_cp(text, i);
+        return cp && (cp->cp < 128
+                           ? is_py_space(static_cast<unsigned char>(cp->cp))
+                           : detail::cp_is_unicode_space(cp->cp));
+    };
     size_t b = 0, e = text.size();
-    while (b < e && is_py_space(static_cast<unsigned char>(text[b]))) ++b;
-    while (e > b && is_py_space(static_cast<unsigned char>(text[e - 1]))) --e;
+    while (b < e && space_at(b)) {
+        b += decode_cp(text, b)->size;
+    }
+    while (e > b) {
+        size_t k = e - 1;
+        while (k > b && (static_cast<unsigned char>(text[k]) & 0xC0) == 0x80)
+            --k;
+        if (!space_at(k)) break;
+        e = k;
+    }
     std::string_view s = text.substr(b, e - b);
     if (s.empty()) return std::nullopt;
 
@@ -148,8 +170,9 @@ std::string py_strip(std::string_view text) {
     size_t b = 0, e = text.size();
     auto space_at = [&](size_t i) {
         auto cp = decode_cp(text, i);
-        return cp && (cp->cp < 128 ? is_py_space(static_cast<unsigned char>(cp->cp))
-                                   : cp_is_unicode_space(cp->cp));
+        return cp && (cp->cp < 128
+                           ? is_py_space(static_cast<unsigned char>(cp->cp))
+                           : detail::cp_is_unicode_space(cp->cp));
     };
     while (b < e && space_at(b)) {
         b += decode_cp(text, b)->size;

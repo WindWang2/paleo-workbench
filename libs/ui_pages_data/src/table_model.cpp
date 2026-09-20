@@ -1,4 +1,5 @@
 // UI-06 — data_asset_table column/search helpers + resource_table status.
+#include <pwb/domain/text.hpp>  // lowercase_utf8 (#1391)
 #include <pwb/ui_pages_data/table_model.hpp>
 
 #include <set>
@@ -28,10 +29,9 @@ ordered_column_keys(const std::vector<std::string>& requested) {
 }
 
 std::string normalize_search_text(const std::string& text) {
-    // str.strip().lower() — strip ASCII+Unicode whitespace; lowercasing is
-    // ASCII-exact here (CJK has no case; a full Unicode toLower is out of
-    // scope for the Qt-free core — the Qt shell may use QString::toLower
-    // for exotic input, noted in the ledger).
+    // str.strip().lower() — strip ASCII+Unicode whitespace; #1391: lowering
+    // is now the generated str.lower() table (lowercase_utf8), not
+    // ASCII-only, so accented/Cyrillic/Greek names fold like Python.
     std::size_t lo = 0, hi = text.size();
     auto ascii_space = [](unsigned char c) {
         return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' ||
@@ -73,11 +73,7 @@ std::string normalize_search_text(const std::string& text) {
         if (!len) break;
         hi -= len;
     }
-    std::string out = text.substr(lo, hi - lo);
-    for (auto& c : out) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
-    }
-    return out;
+    return pwb::domain::lowercase_utf8(text.substr(lo, hi - lo));
 }
 
 }  // namespace pwb::ui_pages_data

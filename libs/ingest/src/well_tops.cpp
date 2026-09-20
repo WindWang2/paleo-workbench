@@ -7,29 +7,32 @@ namespace pwb::ingest {
 namespace {
 
 // str.split() with no separator: runs of Unicode whitespace.
+// #1386: the whitespace predicate is the same one py_strip uses — ASCII
+// is_py_space members plus the non-ASCII str.isspace() set — so a row
+// separated by U+3000 (full-width space, what Excel/中文 editors emit)
+// splits the same way Python does instead of collapsing to one token.
 std::vector<std::string> py_split(std::string_view s) {
+    auto is_space = [](char32_t cp) {
+        return cp < 128 ? (cp == ' ' || cp == '\t' || cp == '\n' ||
+                           cp == '\r' || cp == '\f' || cp == '\v')
+                        : detail::cp_is_unicode_space(cp);
+    };
     std::vector<std::string> out;
     size_t i = 0;
     while (i < s.size()) {
         while (i < s.size()) {
             auto cp = detail::utf8_code_point(s, i);
-            bool space = cp && cp->cp < 128
-                             ? (cp->cp == ' ' || cp->cp == '\t' || cp->cp == '\n' ||
-                                cp->cp == '\r' || cp->cp == '\f' || cp->cp == '\v')
-                             : false;
-            if (!space) break;
+            if (!cp || !is_space(cp->cp)) break;
             i += cp->size;
         }
         if (i >= s.size()) break;
         size_t start = i;
         while (i < s.size()) {
             auto cp = detail::utf8_code_point(s, i);
-            bool space = cp && cp->cp < 128
-                             ? (cp->cp == ' ' || cp->cp == '\t' || cp->cp == '\n' ||
-                                cp->cp == '\r' || cp->cp == '\f' || cp->cp == '\v')
-                             : false;
-            if (space) break;
-            i += cp->size;
+            if (cp && is_space(cp->cp)) break;
+            // An ill-formed byte is not a separator: consume one byte so a
+            // truncated sequence can never wedge the loop (nullopt->size UB).
+            i += cp ? cp->size : 1;
         }
         out.emplace_back(s.substr(start, i - start));
     }

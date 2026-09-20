@@ -2,6 +2,8 @@
 // removal + QSettings saved-filter payload.
 #include <pwb/ui_pages_data/chips.hpp>
 
+#include <pwb/domain/text.hpp>  // casefold_utf8 (#1391)
+
 #include <algorithm>
 #include <map>
 
@@ -119,30 +121,57 @@ Json filter_query_to_dict(const FilterQuery& query) {
     return dict;
 }
 
-FilterQuery filter_query_from_dict(const Json& dict) {
+std::optional<FilterQuery> filter_query_from_dict(const Json& dict) {
     // FilterQuery(node_type=stored.get("node_type","all"), ...) — only the
     // 7 saved fields are restored; everything else defaults.
+    // #1391: Python builds this inside try/except — a malformed stored query
+    // raises and _apply_saved warns instead of applying. A field that is
+    // present-but-wrong-typed is the corruption signature, so it fails here
+    // rather than silently defaulting to the "all" view.
+    if (!dict.is_object()) return std::nullopt;
+    bool bad = false;
+    // Required str fields (node_type/search_text/tag_operator): absent →
+    // the Python .get() default; a present null/non-string is corruption —
+    // filter_query_to_dict only ever writes real strings for these.
+    auto required = [&](const char* key, const char* fallback) {
+        if (!dict.contains(key)) return std::string(fallback);
+        const Json& v = dict.at(key);
+        if (!v.is_string()) {
+            bad = true;
+            return std::string(fallback);
+        }
+        return jstr(v);
+    };
+    // Optional str|None fields: absent/null → no value (null is the shape
+    // filter_query_to_dict itself writes); a present non-string is corrupt.
+    auto optional = [&](const char* key) -> std::optional<std::string> {
+        if (!dict.contains(key) || dict.at(key).is_null()) {
+            return std::nullopt;
+        }
+        if (!dict.at(key).is_string()) {
+            bad = true;
+            return std::nullopt;
+        }
+        return jstr(dict.at(key));
+    };
     FilterQuery query;
-    if (!dict.is_object()) return query;
-    query.node_type =
-        dict.contains("node_type") && dict.at("node_type").is_string()
-            ? jstr(dict.at("node_type"))
-            : "all";
-    query.node_value = jopt(dict, "node_value");
-    query.search_text =
-        dict.contains("search_text") && dict.at("search_text").is_string()
-            ? jstr(dict.at("search_text"))
-            : "";
-    query.stage = jopt(dict, "stage");
-    query.data_type = jopt(dict, "data_type");
-    if (dict.contains("tags") && dict.at("tags").is_array()) {
-        for (const auto& tag : dict.at("tags"))
-            if (tag.is_string()) query.tags.push_back(tag.get<std::string>());
+    query.node_type = required("node_type", "all");
+    query.node_value = optional("node_value");
+    query.search_text = required("search_text", "");
+    query.stage = optional("stage");
+    query.data_type = optional("data_type");
+    if (dict.contains("tags") && !dict.at("tags").is_null()) {
+        // list(tags or ()) raises TypeError on a non-iterable in Python.
+        if (!dict.at("tags").is_array()) {
+            bad = true;
+        } else {
+            for (const auto& tag : dict.at("tags"))
+                if (tag.is_string())
+                    query.tags.push_back(tag.get<std::string>());
+        }
     }
-    query.tag_operator =
-        dict.contains("tag_operator") && dict.at("tag_operator").is_string()
-            ? jstr(dict.at("tag_operator"))
-            : "and";
+    query.tag_operator = required("tag_operator", "and");
+    if (bad) return std::nullopt;
     return query;
 }
 
@@ -197,14 +226,9 @@ std::vector<std::string> saved_filter_names_sorted(
     names.reserve(filters.size());
     for (const auto& [name, _] : filters) names.push_back(name);
     std::stable_sort(names.begin(), names.end(), [](const auto& a, const auto& b) {
-        // str.casefold ≈ ASCII lower for realistic names.
-        auto fold = [](const std::string& s) {
-            std::string out = s;
-            for (auto& c : out)
-                if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
-            return out;
-        };
-        return fold(a) < fold(b);
+        // #1391: real str.casefold, not the ASCII approximation — non-ASCII
+        // saved-filter names order the same way Python sorts them.
+        return pwb::domain::casefold_utf8(a) < pwb::domain::casefold_utf8(b);
     });
     return names;
 }

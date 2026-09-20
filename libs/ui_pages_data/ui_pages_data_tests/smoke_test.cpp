@@ -130,8 +130,20 @@ int main() {
         q.tags = {"x"};
         const auto dict = filter_query_to_dict(q);
         const auto rt = filter_query_from_dict(dict);
-        CHECK(rt.node_type == "integrity" && rt.stage &&
-              *rt.stage == "derived" && rt.tags.size() == 1);
+        CHECK(rt && rt->node_type == "integrity" && rt->stage &&
+              *rt->stage == "derived" && rt->tags.size() == 1);
+        // #1391: malformed saved queries fail instead of silently resetting
+        // to the "all" view (Python _apply_saved warns via except).
+        CHECK(!filter_query_from_dict(domain::Json(42)).has_value());
+        CHECK(!filter_query_from_dict(domain::Json::array()).has_value());
+        {
+            domain::Json bad = filter_query_to_dict(FilterQuery{});
+            bad["tags"] = 7;  // list(<scalar>) raises in Python
+            CHECK(!filter_query_from_dict(bad).has_value());
+            domain::Json bad2 = filter_query_to_dict(FilterQuery{});
+            bad2["node_type"] = 5;
+            CHECK(!filter_query_from_dict(bad2).has_value());
+        }
         CHECK(!dict.contains("asset_id"));  // only the 7 saved fields
         // Malformed payload → empty (Python returns {} on json failure).
         CHECK(saved_filters_load("not-json").empty());
@@ -145,6 +157,20 @@ int main() {
         CHECK(loaded[0].second.at("stage") == "raw");
         const auto names = saved_filter_names_sorted(loaded);
         CHECK(names.size() == 2 && names[0] == "a" && names[1] == "b");
+        // #1391: saved_filter_names_sorted is sorted(key=str.casefold) —
+        // exercise non-ASCII folds so an ASCII-only fold regression fails.
+        // Folded keys: "sigma-σ", "zulu", "ära" → 's'<'z'<'ä'(U+00E4);
+        // an ASCII-only fold would leave "Ära" sorted first.
+        const auto uni = saved_filter_names_sorted(
+            {{"zulu", {}}, {"Ära", {}}, {"sigma-Σ", {}}});
+        CHECK(uni.size() == 3 && uni[0] == "sigma-Σ" && uni[1] == "zulu" &&
+              uni[2] == "Ära");
+        // Empty-object query is a falsy stored payload — Python treats it
+        // as a silent no-op, so from_dict must NOT turn it into an "all"
+        // reset candidate at the widget layer (guarded in apply_saved).
+        // from_dict({}) itself returns a valid all-default query (same
+        // field defaults as FilterQuery()), which apply_saved now skips.
+        CHECK(filter_query_from_dict(domain::Json::object()).has_value());
     }
 
     // --- activity entries (activity_card.update_state) -------------------

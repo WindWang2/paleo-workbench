@@ -6,6 +6,7 @@
 // are other slices' components — injected seams.
 #pragma once
 
+#include <QPointer>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QToolButton>
@@ -133,7 +134,10 @@ private:
         save_docked_sizes_fn_;
     AssetSelectionBus* selection_bus_ = nullptr;
     bool syncing_selection_bus_ = false;
-    std::map<QString, QWidget*> floatable_;
+    // #1389: QPointer auto-nulls when a panel is destroyed (e.g. the
+    // inspector replaced by set_inspector_panel's deleteLater) — a raw
+    // pointer here would dangle into persist_docked_sizes' deferred timer.
+    std::map<QString, QPointer<QWidget>> floatable_;
     bool map_collapsed_before_overview_ = true;
     bool map_collapsed_before_float_ = true;
     QTimer* float_sizes_timer_;

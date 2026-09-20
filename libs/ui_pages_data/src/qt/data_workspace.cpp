@@ -161,6 +161,13 @@ void DataWorkspace::set_inspector_panel(QWidget* panel) {
     const int index = right_splitter_->indexOf(inspector_panel_);
     auto* old = inspector_panel_;
     inspector_panel_ = panel;
+    // #1389: keep the floatable registry pointed at the LIVE panel — the
+    // old one is deleteLater'd and a stale entry would dangle when the
+    // docked-sizes debounce timer fires.
+    auto fit = floatable_.find(QStringLiteral("data:inspector"));
+    if (fit != floatable_.end()) {
+        fit->second = panel;
+    }
     if (index >= 0) {
         right_splitter_->insertWidget(index, panel);
         old->hide();
@@ -243,6 +250,7 @@ void DataWorkspace::on_map_float_changed(const QString& key,
 void DataWorkspace::persist_docked_sizes() {
     if (!save_docked_sizes_fn_) return;
     for (const auto& [key, panel] : floatable_) {
+        if (panel == nullptr) continue;  // destroyed between events (#1389)
         if (auto* splitter =
                 qobject_cast<QSplitter*>(panel->parentWidget())) {
             save_docked_sizes_fn_(key, splitter->sizes());
