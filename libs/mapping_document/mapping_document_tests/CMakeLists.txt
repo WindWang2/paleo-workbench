@@ -16,3 +16,14 @@ target_compile_definitions(mapping_document.edit_session PRIVATE
     PWB_MAPPING_DOCUMENT_EDIT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/map_document_edit_oracle.json")
 add_test(NAME mapping_document.edit_session COMMAND mapping_document.edit_session)
 set_tests_properties(mapping_document.edit_session PROPERTIES TIMEOUT 120)
+
+# CONV-27d — bridge edit domain: native edit session controller, session
+# set, gesture manager, legacy-document render snapshot adapter.
+add_executable(mapping_document.bridge_session map_document_bridge_session_test.cpp)
+target_compile_features(mapping_document.bridge_session PRIVATE cxx_std_20)
+target_link_libraries(mapping_document.bridge_session PRIVATE
+    Pwb::MappingDocument Pwb::Domain)
+target_compile_definitions(mapping_document.bridge_session PRIVATE
+    PWB_MAPPING_DOCUMENT_BRIDGE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/map_document_bridge_oracle.json")
+add_test(NAME mapping_document.bridge_session COMMAND mapping_document.bridge_session)
+set_tests_properties(mapping_document.bridge_session PROPERTIES TIMEOUT 120)

@@ -407,3 +407,11 @@ def extent_for_snapshot(snapshot: MapRenderSnapshot) -> tuple[float, float, floa
             max(extent[3] for extent in populated),
         )
     )
+
+
+# C++ migration (CONV-27d): document_render_snapshot / extent_for_snapshot
+# are ported to libs/mapping_document render_snapshot (pwb::mapping_document)
+# as Qt-free value types + a style-default provider seam. Oracle-frozen
+# (snapshot_cases); content-derived revision VALUES are a C++ deterministic-
+# digest contract (the Python small-collection path is process-local hash()).
+# Python side stays as oracle/legacy reference.
