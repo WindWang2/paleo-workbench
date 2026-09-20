@@ -747,19 +747,11 @@ bool QgisCanvasShim::set_snapping_config(const QVariantMap& config) {
         config.value(QStringLiteral("layers")).toMap();
     if (!layers.isEmpty()) {
         cfg.setMode(Qgis::SnappingMode::AdvancedConfiguration);
+        const QHash<QString, QgsMapLayer*> doc_index =
+            build_doc_id_index(*session_->project());
         for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-            QgsMapLayer* ml = nullptr;
-            const auto map_layers = session_->project()->mapLayers();
-            for (auto lit = map_layers.constBegin();
-                 lit != map_layers.constEnd(); ++lit) {
-                if (lit.value()->customProperty(
-                        QString::fromLatin1(kDocIdProperty))
-                        .toString() == it.key()) {
-                    ml = lit.value();
-                    break;
-                }
-            }
-            auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+            auto* vl = qobject_cast<QgsVectorLayer*>(
+                doc_index.value(it.key()));
             if (vl == nullptr) continue;
             const QVariantMap lc = it.value().toMap();
             Qgis::SnappingTypes lt;
@@ -815,15 +807,8 @@ void QgisCanvasShim::set_current_layer(const QString& doc_id) {
         pushed_current_layer_.clear();
         return;
     }
-    QgsMapLayer* found = nullptr;
-    const auto layers = session_->project()->mapLayers();
-    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        if (it.value()->customProperty(QString::fromLatin1(kDocIdProperty))
-                .toString() == doc_id) {
-            found = it.value();
-            break;
-        }
-    }
+    QgsMapLayer* found =
+        find_mirror_layer(*session_->project(), doc_id);
     if (found == nullptr) {
         // Not mirrored yet / already removed: shadow keeps its old
         // value and the caller's idempotent re-push relies on that
@@ -1043,15 +1028,8 @@ QVariantMap QgisCanvasShim::mirror_provider_facts(
         return {};
     }
     QVariantMap facts;
-    QgsMapLayer* found = nullptr;
-    const auto layers = session_->project()->mapLayers();
-    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        if (it.value()->customProperty(QString::fromLatin1(kDocIdProperty))
-                .toString() == doc_id) {
-            found = it.value();
-            break;
-        }
-    }
+    QgsMapLayer* found =
+        find_mirror_layer(*session_->project(), doc_id);
     facts.insert(QStringLiteral("exists"), found != nullptr);
     facts.insert(QStringLiteral("is_valid"),
                  found != nullptr && found->isValid());
@@ -1480,7 +1458,9 @@ QString QgisCanvasShim::export_vector(const QString& path,
 
     QgsMapSettings settings;
     settings.setDestinationCrs(session_->project()->crs());
-    QStringList layer_ids;
+    // Export the mirror layers only — host-added project layers (e.g.
+    // basemaps) are not part of the document snapshot (#1385).
+    QList<QgsMapLayer*> export_layers;
     const auto project_layers = session_->project()->mapLayers();
     for (auto it = project_layers.constBegin();
          it != project_layers.constEnd(); ++it) {
@@ -1488,10 +1468,10 @@ QString QgisCanvasShim::export_vector(const QString& path,
                  ->customProperty(QString::fromLatin1(kDocIdProperty))
                  .toString()
                  .isEmpty()) {
-            layer_ids.append(it.key());
+            export_layers.append(it.value());
         }
     }
-    settings.setLayers(project_layers.values());
+    settings.setLayers(export_layers);
     settings.setExtent(QgsRectangle(xmin, ymin, xmax, ymax));
     settings.setOutputSize(QSize(width, height));
     settings.setOutputDpi(96.0);
@@ -1540,16 +1520,8 @@ void QgisCanvasShim::apply_highlight(const QString& doc_id,
     if (feature_ids.isEmpty()) {
         return;
     }
-    QgsMapLayer* ml = nullptr;
-    const auto layers = session_->project()->mapLayers();
-    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        if (it.value()->customProperty(QString::fromLatin1(kDocIdProperty))
-                .toString() == doc_id) {
-            ml = it.value();
-            break;
-        }
-    }
-    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+    auto* vl = qobject_cast<QgsVectorLayer*>(
+        find_mirror_layer(*session_->project(), doc_id));
     if (vl == nullptr) return;
     const int fid_idx =
         vl->fields().indexOf(QString::fromLatin1(kPwbFidField));

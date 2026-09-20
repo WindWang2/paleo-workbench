@@ -1,6 +1,7 @@
 #include <pwb/mapping/layer_products.hpp>
 
 #include <pwb/mapping/crs_policy.hpp>
+#include <pwb/domain/text.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -42,14 +43,7 @@ std::string format_g(double value) {
 
 // Python str.strip() — whitespace at both ends.
 std::string strip(const std::string& s) {
-    const auto is_space = [](char c) {
-        return std::isspace(static_cast<unsigned char>(c)) != 0;
-    };
-    std::size_t a = 0;
-    while (a < s.size() && is_space(s[a])) ++a;
-    std::size_t b = s.size();
-    while (b > a && is_space(s[b - 1])) --b;
-    return s.substr(a, b - a);
+    return domain::strip_ascii(s);  // shared impl (#1392)
 }
 
 // geometry_units.is_geographic_crs: strips first, then asks the D5

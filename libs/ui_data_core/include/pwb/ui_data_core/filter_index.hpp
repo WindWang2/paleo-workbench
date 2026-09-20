@@ -72,7 +72,12 @@ public:
     static std::string haystack(const AssetView& view);
 
 private:
+    // Query-level constants resolved once per filter_query call
+    // (#1388): stage_any set, legacy_category target, "other" type set,
+    // normalized tag targets. Defined in the .cpp.
+    struct QueryPlan;
     bool matches_query(const AssetView& view, const FilterQuery& query) const;
+    bool matches_planned(const AssetView& view, const QueryPlan& plan) const;
     static FilterQuery parse_legacy_category(const std::string& category,
                                              const std::string& search_text);
     AssetView build_view(const AssetHandle& asset,

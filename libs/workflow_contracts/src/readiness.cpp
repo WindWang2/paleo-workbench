@@ -1,5 +1,7 @@
 #include <pwb/workflow_contracts/readiness.hpp>
 
+#include <pwb/domain/text.hpp>
+
 #include <filesystem>
 #include <set>
 
@@ -48,10 +50,7 @@ bool truthy(const Json& v) {
 }
 
 std::string strip(const std::string& s) {
-    const auto b = s.find_first_not_of(" \t\n\v\f\r");
-    if (b == std::string::npos) return "";
-    const auto e = s.find_last_not_of(" \t\n\v\f\r");
-    return s.substr(b, e - b + 1);
+    return domain::strip_ascii(s);  // shared impl (#1392)
 }
 
 // _resource_payload_present — Path checks reach the FS only for absolute

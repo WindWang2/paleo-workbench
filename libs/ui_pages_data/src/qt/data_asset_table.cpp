@@ -202,7 +202,7 @@ void DataAssetTable::apply_filter() {
     visible_assets_.clear();
     for (const int i : filtered) {
         if (0 <= i && i < static_cast<int>(assets_.size())) {
-            visible_assets_.push_back(assets_[static_cast<std::size_t>(i)]);
+            visible_assets_.push_back(&assets_[static_cast<std::size_t>(i)]);
         }
     }
     reapply_sort(pre_build_sort);
@@ -238,6 +238,15 @@ int DataAssetTable::visible_asset_count() const {
         return paged_model_->rowCount();
     }
     return static_cast<int>(visible_assets_.size());
+}
+
+std::vector<AssetRow> DataAssetTable::visible_assets() const {
+    std::vector<AssetRow> out;
+    out.reserve(visible_assets_.size());
+    for (const AssetRow* asset : visible_assets_) {
+        out.push_back(*asset);
+    }
+    return out;
 }
 
 const AssetRow* DataAssetTable::asset_at(int view_row) const {
@@ -427,7 +436,7 @@ void DataAssetTable::on_model_reset() {
     if (active != nullptr) {
         for (int row = 0; row < active->rowCount(); ++row) {
             if (const AssetRow* asset = active->asset_at(row)) {
-                visible_assets_.push_back(*asset);
+                visible_assets_.push_back(asset);
             }
         }
     }
@@ -517,10 +526,10 @@ bool DataAssetTable::sync_selection() {
         }
     } else {
         for (std::size_t row = 0; row < visible_assets_.size(); ++row) {
-            if (const auto key = asset_key(&visible_assets_[row]);
+            if (const auto key = asset_key(visible_assets_[row]);
                 key && wanted.count(*key)) {
                 table_->selectRow(static_cast<int>(row));
-                restored.push_back(visible_assets_[row]);
+                restored.push_back(*visible_assets_[row]);
             }
         }
     }

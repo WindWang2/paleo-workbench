@@ -447,6 +447,9 @@ for name, expr, variables in [
     ("compare_result_as_value", "(GR > 20) * 10", {"GR": GR}),
     ("nested_calls", "where(clip(GR, 0, 20) > 10, sqrt(GR), 0)", {"GR": GR}),
     ("nan_rides_through_arithmetic", "HOLE * 2 + 1", {"HOLE": HOLE}),
+    # #1357: a trailing comma in the argument list is legal Python.
+    ("trailing_comma_call", "abs(GR,)", {"GR": GR}),
+    ("trailing_comma_two_args", "min(GR, RT,)", {"GR": GR, "RT": RT}),
 ]:
     expr_cases.append({"name": name, "expr": expr, "variables": variables,
                        "expected": run_expr(expr, variables)})
@@ -476,6 +479,12 @@ expect_error("bool_constant", "GR and True", {"GR": [1.0]})
 expect_error("disallowed_bitand", "GR & RT", {"GR": [1.0], "RT": [1.0]}, "prefix")
 expect_error("disallowed_not", "not GR", {"GR": [1.0]}, "prefix")
 expect_error("list_node", "[1, 2]", {"GR": [1.0]}, "prefix")
+# #1357: a CALL on an attribute is refused as "function '?'" (node.func is
+# an Attribute, no .id) — and the refusal happens before the object name is
+# resolved, so `np.abs(GR)` never reaches "unknown curve name 'np'".
+expect_error("attr_call_disallowed", "GR.abs()", {"GR": GR})
+expect_error("attr_call_unknown_object", "np.abs(GR)", {"GR": GR})
+expect_error("attr_chain_call", "GR.x.y(1)", {"GR": GR})
 expect_error("min_three_args", "min(GR, RT, 1)", {"GR": GR, "RT": RT})
 expect_error("sample_aligned_mismatch", "BB * BB", {"AA": [1.0, 2.0, 3.0, 4.0],
                                                     "BB": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]})

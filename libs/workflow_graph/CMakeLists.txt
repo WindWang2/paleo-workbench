@@ -12,4 +12,6 @@ target_include_directories(pwb_workflow_graph
 target_link_libraries(pwb_workflow_graph PUBLIC Pwb::Domain)
 target_compile_features(pwb_workflow_graph PUBLIC cxx_std_20)
 
-add_subdirectory(workflow_graph_tests)
+if(BUILD_TESTING)
+    add_subdirectory(workflow_graph_tests)
+endif()

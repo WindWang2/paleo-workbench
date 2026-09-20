@@ -10,8 +10,10 @@ verified sample-exactly. Regenerate with:
 
 Shapely repair is OUT OF SCOPE for this kernel. The generator monkeypatches
 ``paleo_workbench.mapping.geological_pipeline.polygonization.repair_invalid_geometry``
-to identity so the freeze is the pure raster-trace / hole-assignment kernel
-(no make_valid / orient). Clip-to-ring and GIS feature packing are not frozen.
+to its shapely-independent coordinate-level head (``r[0] != r[-1] -> append
+r[0]``, which the C++ kernel ports) so the freeze is the raster-trace /
+hole-assignment kernel plus exact ring closure (no make_valid / orient).
+Clip-to-ring and GIS feature packing are not frozen.
 """
 
 from __future__ import annotations
@@ -39,7 +41,29 @@ OUT = (
 
 
 def _identity_repair(geom):
-    """Leave GeoJSON polygons untouched (C++ kernel has no shapely repair)."""
+    """Coordinate-level closure only (C++ kernel has no shapely repair).
+
+    Mirrors the shapely-independent head of ``repair_invalid_geometry``
+    (topology.py): ``if r[0] != r[-1]: r.append(list(r[0]))`` on every
+    ring of a Polygon/MultiPolygon. The C++ port applies the same exact
+    first==last closure in ``polygonize_class`` (#1358); the shapely
+    make_valid/orient tail remains stubbed out.
+    """
+    if not isinstance(geom, dict):
+        return geom
+    geom_type = geom.get("type")
+    coords = geom.get("coordinates")
+    if geom_type == "Polygon" and isinstance(coords, list):
+        fixed = []
+        for ring in coords:
+            if isinstance(ring, (list, tuple)) and len(ring) >= 3:
+                r = [list(pt) for pt in ring]
+                if r[0] != r[-1]:
+                    r.append(list(r[0]))
+                fixed.append(r)
+            else:
+                fixed.append(ring)
+        return {"type": "Polygon", "coordinates": fixed}
     return geom
 
 

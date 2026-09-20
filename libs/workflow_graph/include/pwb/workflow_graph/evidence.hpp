@@ -31,6 +31,21 @@ struct EvidenceValueError : std::runtime_error {
     const char* python_class() const { return "ValueError"; }
 };
 
+// Python ImportError — the constraint resolver seam is absent. In Python
+// `from ... import resolve_constraint_ref` sits OUTSIDE the try that maps
+// call failures to UNKNOWN, so a missing resolver propagates (#1343 item 5).
+struct EvidenceImportError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+    const char* python_class() const { return "ImportError"; }
+};
+
+// Python AttributeError — verdict.get(...) on a non-dict constraint verdict
+// propagates out of resolve_evidence (it also runs outside the try; #1344).
+struct EvidenceAttributeError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+    const char* python_class() const { return "AttributeError"; }
+};
+
 enum class EvidenceKind {
     Phase1Draft,
     Factor,
@@ -50,8 +65,6 @@ enum class EvidenceStatus {
 
 const char* evidence_kind_value(EvidenceKind kind);
 const char* evidence_status_value(EvidenceStatus status);
-std::optional<EvidenceKind> evidence_kind_for_prefix(
-    const std::string& prefix);
 
 struct EvidenceSelector {
     EvidenceKind kind;
@@ -69,7 +82,6 @@ std::string format_evidence_selector(
     const std::string& ref_id,
     const std::string& version_id = "",
     bool floating = false);
-bool looks_like_version_id(const std::string& ref);
 
 struct EvidenceResolution {
     EvidenceSelector selector;
@@ -109,8 +121,12 @@ struct WorkspaceView {
         layers_with_role;
 };
 
-// resolve_constraint_ref(document, catalog, ref) -> {"status","detail"}.
-// Throwing maps to status=unknown (mirroring the Python except-clause).
+// Seam for Python's `resolve_constraint_ref(document, catalog, ref)` —
+// the port injects the resolver, so the catalog arg is folded into the
+// callback (#1345 stale comment). Returns the verdict {"status","detail"};
+// throwing maps to status=unknown (mirroring the Python except-clause). An
+// EMPTY resolver is Python's missing-import state and raises
+// EvidenceImportError instead.
 using ConstraintResolver =
     std::function<Json(const Json& document, const std::string& ref)>;
 

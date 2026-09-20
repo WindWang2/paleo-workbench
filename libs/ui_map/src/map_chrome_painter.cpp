@@ -107,22 +107,30 @@ void paint_scale_bar(QPainter& painter, const Extent& extent,
 
 }  // namespace
 
-Json ensure_basic_map_chrome(const Json& decorations) {
-    Json out = decorations.is_object() ? decorations : Json::object();
-    const Json raw = field_value(out, "elements", Json::array());
-    bool empty = !raw.is_array() || raw.empty();
-    if (!empty) {
-        empty = true;
-        for (const auto& item : raw) {
-            if (item.is_string() && !item.get<std::string>().empty()) {
-                empty = false;
-                break;
-            }
+// Read-only check: decorations has no usable "elements" list — used to
+// skip the whole-tree copy in the common non-empty case (#1392).
+static bool map_chrome_elements_empty(const Json& decorations) {
+    if (!decorations.is_object()) {
+        return true;
+    }
+    const Json raw = field_value(decorations, "elements", Json::array());
+    if (!raw.is_array() || raw.empty()) {
+        return true;
+    }
+    for (const auto& item : raw) {
+        if (item.is_string() && !item.get<std::string>().empty()) {
+            return false;
         }
     }
-    if (empty) {
-        out["elements"] = Json::array({"比例尺", "指北针"});
+    return true;
+}
+
+Json ensure_basic_map_chrome(const Json& decorations) {
+    if (!map_chrome_elements_empty(decorations)) {
+        return decorations;
     }
+    Json out = decorations.is_object() ? decorations : Json::object();
+    out["elements"] = Json::array({"比例尺", "指北针"});
     return out;
 }
 
@@ -161,7 +169,13 @@ void paint_map_decorations(QPainter& painter, const Json& decorations_in,
                            double width, double height, const Extent& extent,
                            double dpi, bool dark_chrome) {
     const double scale = dpi > 0.0 ? dpi / 96.0 : 1.0;
-    const Json decorations = ensure_basic_map_chrome(decorations_in);
+    // #1392: only pay the decorations tree copy when the default-fill
+    // actually applies; the non-empty common case reads decorations_in.
+    Json defaulted;
+    const Json& decorations =
+        map_chrome_elements_empty(decorations_in)
+            ? (defaulted = ensure_basic_map_chrome(decorations_in))
+            : decorations_in;
     const QString ink = dark_chrome
                             ? QString::fromLatin1(kChromeInkOnLightBody)
                             : QString::fromLatin1(kChromeInkOnDarkBody);

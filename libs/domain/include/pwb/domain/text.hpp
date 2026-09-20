@@ -20,4 +20,17 @@ std::string lowercase_utf8(std::string_view text);
 // for case-insensitive ordering (e.g. saved-filter name sorting).
 std::string casefold_utf8(std::string_view text);
 
+// ASCII whitespace trim (" \t\n\r\v\f") — the shared home for the
+// per-TU `strip`/`strip_copy` clones (#1392). For paths/tags/keys that
+// only carry ASCII whitespace.
+std::string strip_ascii(std::string_view text);
+
+// Python str.strip() — Unicode whitespace set (incl. U+3000 ideographic
+// space, U+00A0, U+2028/29, …). Use for strings Python authored.
+std::string python_strip(std::string_view text);
+
+// ASCII-only lowering — byte-wise A-Z fold, no Unicode semantics. The
+// shared home for the per-TU `lower_ascii` clones (#1392).
+std::string lower_ascii(std::string_view text);
+
 }  // namespace pwb::domain

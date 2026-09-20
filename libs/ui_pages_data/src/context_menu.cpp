@@ -1,5 +1,6 @@
 // UI-06 — asset_context_menu.build menu model.
 #include <pwb/ui_pages_data/context_menu.hpp>
+#include <pwb/domain/text.hpp>
 #include <pwb/ui_pages_data/vocab.hpp>
 
 namespace pwb::ui_pages_data {
@@ -24,14 +25,7 @@ MenuEntry separator() {
 
 // str.strip() — ASCII whitespace (paths don't carry CJK space).
 std::string strip(const std::string& s) {
-    std::size_t lo = 0, hi = s.size();
-    auto is_space = [](char c) {
-        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' ||
-               c == '\f';
-    };
-    while (lo < hi && is_space(s[lo])) ++lo;
-    while (hi > lo && is_space(s[hi - 1])) --hi;
-    return s.substr(lo, hi - lo);
+    return domain::strip_ascii(s);  // shared impl (#1392)
 }
 
 bool starts_with(const std::string& s, const char* prefix) {
