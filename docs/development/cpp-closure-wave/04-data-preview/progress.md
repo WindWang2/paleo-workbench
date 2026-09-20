@@ -17,9 +17,11 @@
 
 | 09-20 08:30 | 3 | 独立审查裁决 REQUEST-CHANGES（1 P0 + 7 P1 + 8 P2，3.44M tokens）；修复 P0-1（save_settings 自递归）、P1-1/2/3/4/5/6/7、P2-1/3/4/5/7/8；P2-2 补租约记录、P2-6 记录不修（viz-e 既有范式，窗口生命周期内有限） | 复验：pa_flow（含新增选中存活断言）+ platform.closure_preview ×2 + MALLOC 全绿，受影响集 30/30 |
 
+| 09-20 08:45 | 4 | 推送分支 + PR #1426 创建（base main@06211541，2 提交 cebb65e9+68eed780）；coordination 终态更新 | https://github.com/WindWang2/paleo-workbench/pull/1426 |
+
 ## 恢复点
 
-会话重启后：读本四文件 → git status 看未提交实现 → 继续门内构建（命令见下）→ ctest viz_e.pa_flow / platform.closure_preview ×2 + MALLOC → 审查 → 提交。
+本线完成态：PR #1426 开启待 12 线集成。若 PR 收到评审意见或 base 前移：读本四文件 → 在本 worktree 增量修复 → 门内复验（命令如下）→ 推送更新 PR（不新建）。
 
 构建命令（worktree 根，PATH 前置 /tmp/pwb-oracle-venv/bin）：
 `bash /tmp/gate_retry_04.sh 90 Build -b build/cpp-integrated -c Release -t "viz_e.pa_flow;platform_closure_preview" -j 2`
