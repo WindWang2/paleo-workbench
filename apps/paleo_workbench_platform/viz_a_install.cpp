@@ -7,6 +7,7 @@
 
 #include <pwb/ingest/preview/las_wle_bridge.hpp>
 #include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/ui_workers/well_identity.hpp>
 #include <pwb/ui_workers/well_log_load.hpp>
 #include <pwb/ui_workers/wle_load.hpp>
 #include <pwb/viz/well_log_document_plan.hpp>
@@ -187,6 +188,13 @@ bool install(QMainWindow* window, JobCenter* jobs) {
                     window->statusBar()->showMessage(
                         QObject::tr("LAS 文档无可显示曲线"), 4000);
                     return;
+                }
+                // 05 线：共享井身份注册（A 页来源；同键幂等，B 页/04 页
+                // 经 WellIdentityRegistry 消费同一身份）。
+                if (auto identity =
+                        pwb::ui_workers::WellIdentityRegistry::instance()
+                            .register_well(well_name, "well_log_page")) {
+                    Q_UNUSED(identity);
                 }
                 QString error;
                 if (!host->load_document(

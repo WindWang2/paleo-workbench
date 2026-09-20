@@ -62,6 +62,9 @@ if(TARGET Qt6::Widgets)
         src/qt/preview_settings_store.cpp
         src/qt/preview_settings_panel.cpp
         src/qt/lazy_visualization_tabs.cpp
+        # 05 线 — 04 数据页的 well/time-depth 外部 presenter 页面。
+        src/qt/well_log_preview_presenter.cpp
+        src/qt/time_depth_preview_presenter.cpp
         # Q_OBJECT headers must be listed as sources — AUTOMOC does not
         # scan the separate include/ tree on its own.
         include/pwb/ui_pages_preview/qt/table_preview_model.hpp

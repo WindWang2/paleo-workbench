@@ -17,6 +17,7 @@
 
 #include <QDockWidget>
 #include <QString>
+#include <QStringList>
 
 #include <pwb/domain/json.hpp>
 #include <pwb/viz/cross_well/picks_model.hpp>
@@ -67,8 +68,9 @@ class VizBCrossWellDock : public QDockWidget {
     void handle_project_closed();
 
     // Real data paths (JSON well store = the frozen fixture format;
-    // LAS arrives through the same seam once line A's parser merges).
+    // 05 线：LAS 经与测井页同一 WellLogLoadFn 生产 seam 真解析接入).
     bool load_wells_from_json(const QString& path, QString* error);
+    bool load_wells_from_las(const QStringList& paths, QString* error);
     bool load_tops_csv(const QString& path, QString* error);
     bool load_checkshot_csv(const QString& path, QString* error);
 
@@ -84,6 +86,7 @@ class VizBCrossWellDock : public QDockWidget {
 
   private slots:
     void on_load_wells();
+    void on_load_las();
     void on_load_tops();
     void on_load_checkshot();
     void on_auto_arrange();
@@ -98,6 +101,20 @@ class VizBCrossWellDock : public QDockWidget {
   private:
     void build_ui();
     void schedule_persistence();
+    // 清空工作区（工程切换到无 sidecar 的新工程时——绝不带着上一个工程
+    // 的井/拾取显示）。
+    void reset_workspace();
+    // LAS 加载结果统一落账（同步路径与 JobCenter 异步路径共用）：井列、
+    // 坐标、逐文件错误 → 状态 + 身份注册 + 来源显示 + 持久化调度。
+    void apply_las_wells(const QStringList& paths,
+                         const std::vector<
+                             pwb::viz::cross_well::WellColumnData>& wells,
+                         const pwb::domain::Json& coords,
+                         const QStringList& errors);
+    // 共享井身份（05 线）：井列加载成功后按名注册；结果来源显示引用。
+    void register_well_identities();
+    // 数据/结果来源显示（用户可见的出处：井文件来源 + 最近计算结果）。
+    void update_source_label();
     void apply_dtw_results(
         const std::vector<std::pair<std::string, double>>& pairs,
         const std::string& formation);
@@ -117,6 +134,7 @@ class VizBCrossWellDock : public QDockWidget {
     pwb::viz::well_tie::qt::WellTieCanvas* tie_canvas_ = nullptr;
     QComboBox* tie_well_selector_ = nullptr;
     QLabel* tie_readout_ = nullptr;
+    QLabel* source_label_ = nullptr;  // 05 线：井来源 + 最近结果出处
 
     // Jobs.
     JobCenter* job_center_ = nullptr;  // fresh JobOwner per submission
@@ -124,7 +142,9 @@ class VizBCrossWellDock : public QDockWidget {
     QTimer* persist_timer_ = nullptr;
     bool persist_dirty_ = false;
     QString project_directory_;
-    QString last_wells_path_;  // sidecar well source (auto-reload)
+    QString last_wells_path_;  // sidecar well source (auto-reload, JSON)
+    QStringList last_las_paths_;  // 05 线：sidecar well_source_las (auto-reload)
+    QString last_result_note_;  // 05 线：最近计算结果出处（来源显示）
     void persist_now();
     // Well coordinates (lng/lat) from the well store — the planner's
     // real input; without it auto-arrange is an honest no-op.

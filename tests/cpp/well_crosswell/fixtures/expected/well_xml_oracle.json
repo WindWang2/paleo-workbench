@@ -1,0 +1,234 @@
+{
+  "cases": {
+    "negative_generic_points.xml": {
+      "recognized": false
+    },
+    "negative_incomplete_witsml.xml": {
+      "recognized": false
+    },
+    "spreadsheet_welllog.xml": {
+      "bottom_depth": 1003.0,
+      "curves": [
+        {
+          "depth": [
+            1000.0,
+            1001.0,
+            1003.0
+          ],
+          "name": "GR",
+          "unit": "gAPI",
+          "values": [
+            45.2,
+            46.8,
+            50.4
+          ]
+        },
+        {
+          "depth": [
+            1000.0,
+            1001.0,
+            1003.0
+          ],
+          "name": "POR",
+          "unit": "%",
+          "values": [
+            12.5,
+            13.1,
+            15.0
+          ]
+        }
+      ],
+      "depth_unit": null,
+      "facies": [
+        {
+          "bottom": 1003.0,
+          "label": "三角洲前缘",
+          "top": 1000.0
+        }
+      ],
+      "formation": [
+        {
+          "bottom": 1003.0,
+          "label": "S1",
+          "top": 1000.0
+        }
+      ],
+      "horizons": [
+        {
+          "bottom": 1002.5,
+          "label": "K1 标志层",
+          "top": 1001.5
+        }
+      ],
+      "lithology": [
+        {
+          "bottom": 1002.0,
+          "label": "泥岩",
+          "top": 1000.0
+        },
+        {
+          "bottom": 1004.0,
+          "label": "细砂岩",
+          "top": 1002.0
+        }
+      ],
+      "recognized": true,
+      "sample_stride": 1,
+      "text_desc": [],
+      "top_depth": 1000.0,
+      "total_rows": 4,
+      "well_name": "W-SHEET"
+    },
+    "witsml_basic.xml": {
+      "bottom_depth": 100.0,
+      "curves": [
+        {
+          "depth": [
+            100.0,
+            99.0,
+            98.0,
+            97.0,
+            96.0
+          ],
+          "name": "GR",
+          "unit": "gAPI",
+          "values": [
+            42.3,
+            45.7,
+            48.2,
+            51.2,
+            49.85
+          ]
+        },
+        {
+          "depth": [
+            100.0,
+            99.0,
+            98.0,
+            97.0,
+            96.0
+          ],
+          "name": "DT",
+          "unit": "us/m",
+          "values": [
+            68.1,
+            70.25,
+            71.9,
+            73.4,
+            74.4
+          ]
+        }
+      ],
+      "depth_unit": null,
+      "facies": [],
+      "formation": [],
+      "horizons": [],
+      "lithology": [],
+      "recognized": true,
+      "sample_stride": 1,
+      "text_desc": [],
+      "top_depth": 96.0,
+      "total_rows": 5,
+      "well_name": "W-1"
+    },
+    "witsml_missing_cells.xml": {
+      "bottom_depth": 16.0,
+      "curves": [
+        {
+          "depth": [
+            10.0,
+            11.0,
+            12.0,
+            13.0,
+            14.0,
+            15.0,
+            16.0
+          ],
+          "name": "GR",
+          "unit": "gAPI",
+          "values": [
+            30.0,
+            31.5,
+            "nan",
+            34.0,
+            36.5,
+            "nan",
+            39.0
+          ]
+        },
+        {
+          "depth": [
+            10.0,
+            11.0,
+            12.0,
+            13.0,
+            14.0,
+            15.0,
+            16.0
+          ],
+          "name": "DT",
+          "unit": "us/m",
+          "values": [
+            50.0,
+            51.5,
+            52.5,
+            "nan",
+            55.5,
+            56.5,
+            58.0
+          ]
+        }
+      ],
+      "depth_unit": null,
+      "facies": [],
+      "formation": [],
+      "horizons": [],
+      "lithology": [],
+      "recognized": true,
+      "sample_stride": 1,
+      "text_desc": [],
+      "top_depth": 10.0,
+      "total_rows": 7,
+      "well_name": "W-GAP"
+    },
+    "witsml_reverse.xml": {
+      "bottom_depth": 200.0,
+      "curves": [
+        {
+          "depth": [
+            200.0,
+            199.0,
+            198.0,
+            197.0,
+            196.0,
+            195.0
+          ],
+          "name": "GR",
+          "unit": "gAPI",
+          "values": [
+            61.25,
+            58.9,
+            55.4,
+            53.1,
+            49.85,
+            45.7
+          ]
+        }
+      ],
+      "depth_unit": null,
+      "facies": [],
+      "formation": [],
+      "horizons": [],
+      "lithology": [],
+      "recognized": true,
+      "sample_stride": 1,
+      "text_desc": [],
+      "top_depth": 195.0,
+      "total_rows": 6,
+      "well_name": "W-REV"
+    }
+  },
+  "mode": "B-transcribed",
+  "note": "模式 A：geo-viz-engine@08851951 xml_preview.load_xml_preview 实测 | 模式 B：冻结源逐条转录（见 generate_well_xml_fixtures.py 内行号级推导）。",
+  "tolerance": 1e-12
+}
