@@ -32,6 +32,7 @@
 #include <qgsfeatureiterator.h>
 #include <qgsfields.h>
 #include <qgshighlight.h>
+#include <qgslayertree.h>
 #include <qgslayertreegroup.h>
 #include <qgslayertreelayer.h>
 #include <qgsmapcanvas.h>
@@ -1480,18 +1481,33 @@ QString QgisCanvasShim::export_vector(const QString& path,
 
     QgsMapSettings settings;
     settings.setDestinationCrs(session_->project()->crs());
-    QStringList layer_ids;
-    const auto project_layers = session_->project()->mapLayers();
-    for (auto it = project_layers.constBegin();
-         it != project_layers.constEnd(); ++it) {
-        if (!it.value()
-                 ->customProperty(QString::fromLatin1(kDocIdProperty))
-                 .toString()
-                 .isEmpty()) {
-            layer_ids.append(it.key());
+    // BEGIN V14-QGIS-CONTROL (export order contract 03 §1)
+    // The export layer set must follow the TREE order (top-first — the
+    // same list the canvas draws), restricted to the document mirrors.
+    // project->mapLayers() is a QMap keyed by QGIS layer id: using it
+    // directly produced an id-sorted z-order that could disagree with
+    // the screen and with LayoutService's explicit reversal.
+    // Join key: pwb/layer_id (V14 open path) with legacy pwb/doc_id
+    // read-compat (mirror flow) — layer_adapter::layer_id_of reports the
+    // legacy key through the out-param.
+    QList<QgsMapLayer*> export_layers;
+    const QList<QgsMapLayer*> tree_order =
+        session_->project()->layerTreeRoot()->layerOrder();
+    for (QgsMapLayer* layer : tree_order) {
+        if (layer == nullptr) continue;
+        std::string legacy_doc_id;
+        const std::string domain_id =
+            pwb::qgis::layer_adapter::layer_id_of(layer, &legacy_doc_id);
+        if (!domain_id.empty() || !legacy_doc_id.empty()) {
+            export_layers.append(layer);
         }
     }
-    settings.setLayers(project_layers.values());
+    if (export_layers.isEmpty()) {
+        return QStringLiteral(
+            "树中无可导出的镜像图层，矢量导出中止（请使用 PNG）");
+    }
+    // END V14-QGIS-CONTROL
+    settings.setLayers(export_layers);
     settings.setExtent(QgsRectangle(xmin, ymin, xmax, ymax));
     settings.setOutputSize(QSize(width, height));
     settings.setOutputDpi(96.0);
