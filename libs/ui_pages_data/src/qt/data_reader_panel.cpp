@@ -405,21 +405,25 @@ DataReaderPanel::DataReaderPanel(QWidget* parent) : QFrame(parent) {
     layout->addWidget(stack_, 1);
 
     // Registration order mirrors Python's addWidget order (indices matter
-    // only for stack bookkeeping).
+    // only for stack bookkeeping). Native targets register under their
+    // preview_dispatch target names — target_for resolves mode→name and a
+    // name mismatch would silently route real previews to the message
+    // widget (main-line latent defect surfaced by task 04's
+    // "keep image/table/JSON/PDF capabilities" acceptance).
     empty_ = new MessagePreview(this);
     empty_->set_message(
         QStringLiteral("从列表中选择一个数据、成果或文件"));
-    register_target(QStringLiteral("empty"), empty_);
+    register_target(QStringLiteral("empty_label"), empty_);
     message_ = new MessagePreview(this);
-    register_target(QStringLiteral("message"), message_);
+    register_target(QStringLiteral("message_label"), message_);
     text_ = new TextPreview(this);
-    register_target(QStringLiteral("text"), text_);
+    register_target(QStringLiteral("text_preview"), text_);
     table_ = new TablePreview(this);
-    register_target(QStringLiteral("table"), table_);
+    register_target(QStringLiteral("table_preview"), table_);
     image_ = new ImagePreview(this);
-    register_target(QStringLiteral("image"), image_);
+    register_target(QStringLiteral("image_preview_widget"), image_);
     pdf_ = new PdfPreview(this);
-    register_target(QStringLiteral("pdf"), pdf_);
+    register_target(QStringLiteral("pdf_preview_widget"), pdf_);
 
     warning_ = new QLabel(QString(), this);
     warning_->setWordWrap(true);
@@ -432,12 +436,32 @@ DataReaderPanel::DataReaderPanel(QWidget* parent) : QFrame(parent) {
     });
     layout->addWidget(warning_);
 
+    // CLOSURE-PREVIEW (task 04): dedicated loading page — the Python
+    // "正在生成预览…" message plus a 取消 affordance (visible only while a
+    // cancel hook is armed).
+    loading_page_ = new QWidget(this);
+    auto* loading_layout = new QVBoxLayout(loading_page_);
+    loading_layout->setContentsMargins(0, 0, 0, 0);
+    auto* loading_label = new MessagePreview(loading_page_);
+    loading_label->set_message(QStringLiteral("正在生成预览…"));
+    loading_label->setObjectName("LoadingLabel");
+    loading_layout->addWidget(loading_label, 1);
+
     stack_->setCurrentWidget(empty_);
     connect(image_, &ImagePreview::zoom_changed, this,
             [this](double) { sync_image_zoom_ui(); });
 }
 
 void DataReaderPanel::register_target(const QString& name, QWidget* w) {
+    // CLOSURE-PREVIEW (task 04): re-registering a target replaces the old
+    // widget (external presenters rebuild their page per preview) — the
+    // stale widget leaves the stack instead of accumulating in it.
+    const auto it = targets_.find(name);
+    if (it != targets_.end() && it->second != w) {
+        QWidget* old = it->second;
+        stack_->removeWidget(old);
+        old->deleteLater();
+    }
     targets_[name] = w;
     stack_->addWidget(w);
 }
@@ -473,11 +497,35 @@ void DataReaderPanel::show_loading(const std::string& resolved_name) {
     meta_->setText(QString());
     warning_->setText(QString::fromStdString(safe_clear_geoviz()));
     message_->set_message(QStringLiteral("正在生成预览…"));
-    stack_->setCurrentWidget(message_);
+    stack_->setCurrentWidget(loading_page_);
     current_mode_ = "loading";
     table_toolbar_->setVisible(false);
     image_toolbar_->setVisible(false);
     Q_EMIT reader_mode_changed(QStringLiteral("loading"));
+}
+
+void DataReaderPanel::set_cancel_hook(std::function<bool()> hook) {
+    cancel_hook_ = std::move(hook);
+    // (Re)build the cancel affordance for the armed state.
+    if (auto* btn = loading_page_->findChild<QPushButton*>(
+            QStringLiteral("LoadingCancelButton"));
+        btn != nullptr) {
+        btn->deleteLater();
+    }
+    if (cancel_hook_ == nullptr) return;
+    auto* btn = new QPushButton(QStringLiteral("取消"), loading_page_);
+    btn->setObjectName(QStringLiteral("LoadingCancelButton"));
+    auto* box = qobject_cast<QVBoxLayout*>(loading_page_->layout());
+    if (box != nullptr) {
+        auto* row = new QHBoxLayout();
+        row->addStretch(1);
+        row->addWidget(btn);
+        row->addStretch(1);
+        box->addLayout(row);
+    }
+    connect(btn, &QPushButton::clicked, this, [this]() {
+        if (cancel_hook_ != nullptr) cancel_hook_();
+    });
 }
 
 void DataReaderPanel::render(const PreviewResultView& result) {
@@ -576,17 +624,22 @@ QWidget* DataReaderPanel::target_for(const std::string& mode,
     auto hook = hooks_.find(name);
     if (hook != hooks_.end() && hook->second) {
         hook->second(target, result);
-    } else if (name == QLatin1String("text")) {
+    } else if (mode == "text") {
         text_->load_text(QString::fromStdString(result.text));
-    } else if (name == QLatin1String("table")) {
+    } else if (mode == "table") {
         table_->load_table(result.table_headers, result.table_rows);
-    } else if (name == QLatin1String("image")) {
+    } else if (mode == "image") {
         image_->load(QString::fromStdString(result.path),
                      QString::fromStdString(result.revision));
-    } else if (name == QLatin1String("pdf")) {
+    } else if (mode == "pdf") {
         pdf_->load(QString::fromStdString(result.path),
                    QString::fromStdString(result.revision));
-    } else if (name == QLatin1String("message")) {
+    } else if (mode == "message") {
+        message_->set_message(QString::fromStdString(
+            result.message.empty() ? "预览不可用" : result.message));
+    } else if (target == message_) {
+        // Unknown mode → the dict-.get default: render the result's own
+        // message (or 预览不可用) instead of a stale previous payload.
         message_->set_message(QString::fromStdString(
             result.message.empty() ? "预览不可用" : result.message));
     }

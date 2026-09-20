@@ -26,6 +26,12 @@ public:
 
     void add_submodule(const std::string& key, const QString& title,
                        QWidget* page);
+    // CLOSURE-PREVIEW (task 04): swap an already-added sub-module's widget
+    // in place (the composite data page replaces the bare management
+    // workspace; pill row and key order stay stable). The old widget is
+    // returned un-parented — the caller adopts or deletes it; nullptr when
+    // the key is unknown (no-op).
+    QWidget* replace_submodule(const std::string& key, QWidget* page);
     void finish();
 
     // Activate the sub-module key (no-op when unknown). emit=true also

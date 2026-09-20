@@ -12,6 +12,7 @@
 #include <pwb/ui_composite/composite_document.hpp>
 #include <pwb/ui_composite/layer_manager_panel.hpp>
 #include <pwb/ui_composite/mapping_stage_panel.hpp>
+#include <pwb/ui_data_core/preview_provider.hpp>
 #include <pwb/ui_map/mapping_page.hpp>
 #include <pwb/ui_pages_data/qt/data_workspace.hpp>
 #include <pwb/ui_pages_data/qt/home_page.hpp>
@@ -464,6 +465,24 @@ void AppShell::setup_shortcuts() {
 
 void AppShell::set_project_name(const QString& name) {
     status_bar_->set_project_name(name);
+}
+
+QWidget* AppShell::adopt_data_page(QWidget* composite) {
+    if (composite == nullptr || hub_data_ == nullptr) return nullptr;
+    if (data_page_adopted_) return nullptr;  // one-shot: a second adopt
+    // would strand the first composite (no parent, no hub slot)
+    data_page_adopted_ = true;
+    // The management submodule's workspace moves INSIDE the composite
+    // (the composite's ctor already reparented it) — data_workspace_
+    // stays a valid non-owning pointer; only the hub slot changes.
+    return hub_data_->replace_submodule("management", composite);
+}
+
+void AppShell::bind_visualization_preview(
+    pwb::ui_data_core::PreviewProvider provider) {
+    if (visualization_page_ != nullptr) {
+        visualization_page_->set_preview_provider(std::move(provider));
+    }
 }
 
 void AppShell::shutdown_workers() {

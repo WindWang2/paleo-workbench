@@ -47,6 +47,12 @@ public:
     void clear_disk_cache();
     bool set_settings(const ui_data_core::PreviewSettings& settings);
     void invalidate();
+    // CLOSURE-PREVIEW (task 04, function-level lease via the wave
+    // coordination registry): swap the provider after construction (the
+    // shell binds the real parser-registry provider over its message
+    // stub). In-flight results from the old provider are invalidated and
+    // never land.
+    void set_provider(ui_data_core::PreviewProvider provider);
 
     // asset == nullptr → the Python preview(None) path.
     void request(const ui_data_core::AssetObjectData* asset);

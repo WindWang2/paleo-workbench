@@ -52,6 +52,10 @@ struct PreviewResultView {
     bool engine_preview_prepared = false;      // geoviz PreparedPreview gate
     bool retryable = true;
     const void* payload = nullptr;             // hook-private payload
+    // CLOSURE-PREVIEW (task 04): shared lifetime for `payload` — the view
+    // is copied through the async delivery hop, so hook payloads ride a
+    // shared owner instead of pointing into a caller's stack frame.
+    std::shared_ptr<const void> payload_owner;
 };
 
 // --- native preview widgets ---------------------------------------------------
@@ -191,6 +195,12 @@ public:
     void set_geoviz_show_fn(std::function<bool(const PreviewResultView&)> fn);
 
     void show_loading(const std::string& resolved_asset_name = {});
+    // CLOSURE-PREVIEW (task 04): the loading page offers 取消 when a hook
+    // is armed; the hook cancels the host's in-flight load and returns
+    // true when something was actually cancelled. Task-mandated affordance
+    // (Python has no cancel UI — recorded as a workbench addition).
+    void set_cancel_hook(std::function<bool()> hook);
+    bool has_cancel_hook() const { return cancel_hook_ != nullptr; }
     // update_asset parity: the provider seam is the caller's — call this
     // with the provider's PreviewResultView.
     void render(const PreviewResultView& result);
@@ -258,6 +268,9 @@ private:
     ImagePreview* image_;
     PdfPreview* pdf_;
     QWidget* viz_tabs_ = nullptr;
+    // CLOSURE-PREVIEW: dedicated loading page (message + optional 取消).
+    QWidget* loading_page_ = nullptr;
+    std::function<bool()> cancel_hook_;
 
     std::map<QString, QWidget*> targets_;
     std::map<QString, PreviewRenderHook> hooks_;

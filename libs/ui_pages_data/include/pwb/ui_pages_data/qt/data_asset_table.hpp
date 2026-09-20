@@ -171,6 +171,10 @@ private:
     QAction* reset_columns_action_;
     QTableView* table_;
     AssetRowSource* model_ = nullptr;
+    // CLOSURE-PREVIEW (task 04): the shipped row source — auto-installed
+    // so the table always has a working model (UI-03 hosts replace it via
+    // set_model, which re-points model_ and keeps the owned source idle).
+    class VectorAssetRowSource* owned_model_ = nullptr;
     AssetRowSource* paged_model_ = nullptr;
 };
 

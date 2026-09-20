@@ -82,6 +82,16 @@ bool PreviewRequestController::set_settings(
 
 void PreviewRequestController::invalidate() { core_.invalidate(); }
 
+void PreviewRequestController::set_provider(
+    ui_data_core::PreviewProvider provider) {
+    provider_ = std::move(provider);
+    // Results built by the previous provider never land (the generation
+    // bump drops deliveries; cached entries built by the old builder are
+    // dropped with the cache).
+    core_.clear_disk_cache();
+    core_.invalidate();
+}
+
 void PreviewRequestController::request(const AssetObjectData* asset) {
     core_.request(asset);
 }

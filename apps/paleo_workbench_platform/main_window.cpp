@@ -32,6 +32,12 @@
 #include "viz_e_install.hpp"
 #endif
 // END VIZ-E
+// BEGIN CLOSURE-PREVIEW (task 04) — unified data page / parse registry /
+// preview dispatch closure (superset guard of the VIZ-E closure).
+#if defined(PWB_WITH_CLOSURE_PREVIEW)
+#include "closure_preview_install.hpp"
+#endif
+// END CLOSURE-PREVIEW
 
 #include <fstream>
 
@@ -553,8 +559,22 @@ void MainWindow::buildUi() {
     // BEGIN VIZ-E — data page dock (asset selection → preview/chart →
     // export loop; the page composes ui_pages_data + viz_charts hosts).
 #if defined(PWB_WITH_VIZ_E) && defined(PWB_WITH_CONV_30)
+    // BEGIN CLOSURE-PREVIEW (task 04) — one data page per window: with the
+    // AppShell the composed page ADOPTS the hub's management workspace
+    // (the dock was the duplicate selection entry); the reduced shell
+    // keeps the dock mount.
+#  if defined(PWB_WITH_CLOSURE_PREVIEW) && defined(PWB_WITH_APP_SHELL)
+    closure_preview::install(
+        pwb::closure_preview::Install{
+            this, app_shell_, job_center_.get(),
+            [this]() -> std::shared_ptr<pwb::application::PwbDataStore> {
+                return context_.projectStore();
+            }});
+#  else
     viz_e_data_dock_ =
         pwb::viz_e::install_data_dock(this, job_center_.get());
+#  endif
+    // END CLOSURE-PREVIEW
 #endif
     // END VIZ-E
 
@@ -1196,6 +1216,12 @@ QString MainWindow::openProject(const QString& project_file) {
     }
 #endif
 // END VIZ-B
+// BEGIN CLOSURE-PREVIEW (task 04) — the data page re-reads the catalog
+// from the CURRENT store (rows replaced, selection cleared on switch).
+#if defined(PWB_WITH_CLOSURE_PREVIEW)
+    pwb::closure_preview::notify_project_store_changed();
+#endif
+// END CLOSURE-PREVIEW
     return QString();
 }
 #endif  // PWB_WITH_DATA_INTEGRATION

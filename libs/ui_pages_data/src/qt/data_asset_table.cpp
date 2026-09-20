@@ -1,6 +1,8 @@
 // UI-06 — DataAssetTable shell (see qt/data_asset_table.hpp).
 #include <pwb/ui_pages_data/qt/data_asset_table.hpp>
 
+#include <pwb/ui_pages_data/qt/vector_asset_row_source.hpp>
+
 #include <QAction>
 #include <QHeaderView>
 #include <QMenu>
@@ -59,6 +61,13 @@ DataAssetTable::DataAssetTable(QWidget* parent) : QWidget(parent) {
 
     table_ = new QTableView(this);
     table_->setObjectName(QStringLiteral("DataAssetGrid"));
+    // CLOSURE-PREVIEW (task 04): a table without a model has no selection
+    // model and crashes on the first update_assets — ship the vector row
+    // source by default; set_model() replaces the pointer for UI-03 hosts.
+    owned_model_ = new VectorAssetRowSource(this);
+    install_model(owned_model_);
+    connect(owned_model_, &QAbstractItemModel::modelReset, this,
+            &DataAssetTable::on_model_reset);
     table_->setSelectionBehavior(
         QTableView::SelectionBehavior::SelectRows);
     table_->setSelectionMode(
@@ -144,6 +153,9 @@ void DataAssetTable::set_category(const QString& category) {
 void DataAssetTable::update_assets(const std::vector<AssetRow>& assets) {
     if (in_paged_mode_) exit_paged_mode();
     assets_ = assets;
+    if (model_ == owned_model_ && owned_model_ != nullptr) {
+        owned_model_->set_rows(assets);  // the shipped source mirrors rows
+    }
     const auto prev_primary = selected_asset_;
     const auto prev_multi = selected_assets_;
     const auto pre_build_sort =
@@ -165,8 +177,20 @@ void DataAssetTable::apply_filter() {
     const auto pre_build_sort =
         active_model() != nullptr ? active_model()->last_sort()
                                   : std::nullopt;
+    // Without a host filter seam the identity filter applies (Python
+    // shows the full set when no filter is armed) — an empty default left
+    // every row invisible and wiped the selection on each update.
     const std::vector<int> filtered =
-        filter_fn_ ? filter_fn_(filter_query_) : std::vector<int>();
+        filter_fn_
+            ? filter_fn_(filter_query_)
+            : [&] {
+                  std::vector<int> all(assets_.size());
+                  for (std::size_t i = 0; i < assets_.size(); ++i) {
+                      all[static_cast<std::size_t>(i)] =
+                          static_cast<int>(i);
+                  }
+                  return all;
+              }();
     visible_assets_.clear();
     for (const int i : filtered) {
         if (0 <= i && i < static_cast<int>(assets_.size())) {

@@ -8,10 +8,10 @@
 
 #include <pwb/ui_pages_data/asset_view.hpp>
 #include <pwb/ui_pages_data/preview_dispatch.hpp>
+#include <pwb/ui_pages_data/qt/asset_selection_bus.hpp>
 #include <pwb/ui_pages_data/qt/data_asset_table.hpp>
 #include <pwb/ui_pages_data/qt/data_reader_panel.hpp>
 #include <pwb/ui_pages_data/qt/data_workspace.hpp>
-
 
 #include <pwb/job_runtime/qt/job_bridge.hpp>
 
@@ -87,11 +87,22 @@ void reset_external_presenters_for_tests() {
 // ---------------------------------------------------------------------------
 
 VizEDataPage::VizEDataPage(QWidget* parent, pwb::app::JobCenter* jobs)
+    : VizEDataPage(parent, jobs, nullptr) {}
+
+VizEDataPage::VizEDataPage(QWidget* parent, pwb::app::JobCenter* jobs,
+                           updqt::DataWorkspace* adopted_workspace)
     : QWidget(parent), jobs_(jobs),
       alive_(std::make_shared<std::atomic<bool>>(true)) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    workspace_ = new updqt::DataWorkspace(this);
+    if (adopted_workspace != nullptr) {
+        // Adopted workspace: reparent into this page's layout (the hub
+        // slot it occupied was already swapped by the host).
+        adopted_workspace->setParent(this);
+        workspace_ = adopted_workspace;
+    } else {
+        workspace_ = new updqt::DataWorkspace(this);
+    }
     layout->addWidget(workspace_, 1);
 
     xy_host_ = new XyScatterHost(this);
@@ -103,6 +114,9 @@ VizEDataPage::VizEDataPage(QWidget* parent, pwb::app::JobCenter* jobs)
     updqt::DataReaderPanel* reader = workspace_->reader_panel();
     reader->register_target(QStringLiteral("xy_scatter_chart"), xy_host_);
     reader->register_target(QStringLiteral("surface_chart"), surface_host_);
+    // Loading-page 取消 → cancel the in-flight preview (task-mandated
+    // affordance; no-op when nothing is in flight).
+    reader->set_cancel_hook([this]() { return cancel_active_preview(); });
 
     connect(workspace_->asset_table(),
             &updqt::DataAssetTable::selected_asset_changed, this,
@@ -115,7 +129,53 @@ VizEDataPage::~VizEDataPage() {
 
 void VizEDataPage::set_asset_rows(
     const std::vector<pwb::ui_pages_data::AssetRow>& rows) {
+    if (selection_bus_ != nullptr) {
+        // Rows flow through the bus (single source of truth) keeping the
+        // current project identity; the bus mirrors them into the table.
+        selection_bus_->set_assets(rows, selection_bus_->project_id());
+        return;
+    }
     workspace_->asset_table()->update_assets(rows);
+}
+
+void VizEDataPage::bind_selection_bus(updqt::AssetSelectionBus* bus) {
+    if (selection_bus_ != nullptr) {
+        disconnect(selection_bus_, nullptr, this, nullptr);
+    }
+    // The ctor's direct table path must go: with the bus bound there is
+    // EXACTLY ONE preview path (bus selection changes) — leaving both
+    // connected dispatches every click twice.
+    disconnect(workspace_->asset_table(),
+               &updqt::DataAssetTable::selected_asset_changed, this,
+               &VizEDataPage::on_selected_asset);
+    selection_bus_ = bus;
+    if (selection_bus_ == nullptr) {
+        // Restore the direct table path (unbound tests / reduced mounts).
+        connect(workspace_->asset_table(),
+                &updqt::DataAssetTable::selected_asset_changed, this,
+                &VizEDataPage::on_selected_asset,
+                Qt::UniqueConnection);
+        return;
+    }
+    // Bus-bound: exactly one preview path (bus selection changes). The
+    // workspace mirrors bus state into the table via its own binding.
+    workspace_->bind_selection_bus(bus);
+    connect(bus, &updqt::AssetSelectionBus::current_asset_changed, this,
+            [this](const std::optional<pwb::ui_pages_data::AssetRow>&
+                       asset) {
+                if (asset.has_value()) {
+                    preview_asset(*asset);
+                    return;
+                }
+                // Deletion / project switch: the stale preview must go —
+                // the honest empty state, never a ghost asset's payload
+                // (Python preview(None) parity).
+                updqt::PreviewResultView empty;
+                empty.mode = "empty";
+                active_target_ = QStringLiteral("empty");
+                workspace_->reader_panel()->render(empty);
+                Q_EMIT preview_rendered(active_target_);
+            });
 }
 
 void VizEDataPage::on_selected_asset(
@@ -128,6 +188,15 @@ void VizEDataPage::on_selected_asset(
 
 void VizEDataPage::preview_asset(
     const pwb::ui_pages_data::AssetRow& row) {
+    // Fast-switch discipline: any in-flight preview is superseded. Both
+    // guards bump HERE so the early-exit paths (external presenter,
+    // .dat, honest unavailable) cannot be clobbered by a still-in-flight
+    // base delivery; a USER cancel with no follow-up selection does not
+    // bump (cancel_active_preview), so its honest 已取消 delivery lands.
+    ++surface_generation_;
+    ++base_generation_;
+    cancel_active_preview();
+
     const QString path = asset_path_of(row);
     if (path.isEmpty()) {
         show_unavailable(QStringLiteral("资产没有可解析的路径"));
@@ -152,7 +221,16 @@ void VizEDataPage::preview_asset(
         return;
     }
 
-    // 3) Honest unavailable with the dependency state (never a fake
+    // 3) Parser-registry base preview (CLOSURE-PREVIEW task 04): real
+    //    parse through the injected seam for the text/table/image/pdf/
+    //    json/media family. Honest unavailable when the seam is absent or
+    //    reports no capability — never a fabricated success.
+    if (base_builder_ != nullptr) {
+        present_base_preview(row);
+        return;
+    }
+
+    // 4) Honest unavailable with the dependency state (never a fake
     //    success preview).
     QString reason = QStringLiteral(
         "该资产类型暂无原生预览（格式: %1）")
@@ -170,6 +248,147 @@ void VizEDataPage::preview_asset(
             "\n井日志(.las)/时深/地震预览由并行批次提供，尚未合入。");
     }
     show_unavailable(reason);
+}
+
+// --- base parser-registry preview (task 04) ----------------------------------
+
+void VizEDataPage::set_base_preview_builder(BasePreviewFn fn) {
+    base_builder_ = std::move(fn);
+}
+
+bool VizEDataPage::cancel_active_preview() {
+    if (base_owner_ == nullptr) {
+        return false;
+    }
+    base_owner_->cancel();  // cooperative; the job lands the cancelled state
+    base_owner_ = nullptr;  // the delivery releases/clears the handle
+    // No generation bump here: the CANCELLED delivery must land (the
+    // honest 已取消 state). A new selection bumps the generation itself,
+    // dropping both the stale result and its cancelled notice.
+    return true;
+}
+
+void VizEDataPage::present_base_preview(
+    const pwb::ui_pages_data::AssetRow& row) {
+    updqt::DataReaderPanel* reader = workspace_->reader_panel();
+    const std::uint64_t generation = ++base_generation_;
+
+    if (jobs_ == nullptr) {
+        // Synchronous fallback (tests without a JobCenter): identical
+        // mapping, no cancellation context.
+        BasePreviewOutcome outcome;
+        try {
+            auto view = base_builder_(row, nullptr);
+            if (view.has_value()) {
+                outcome.ok = true;
+                outcome.view = std::move(*view);
+            } else {
+                outcome.retryable = false;
+                outcome.error = "该资产类型没有可用的解析器";
+            }
+        } catch (const std::exception& e) {
+            outcome.ok = false;
+            outcome.error = e.what();
+        }
+        if (generation == base_generation_) {
+            deliver_base_outcome(generation, outcome);
+        }
+        return;
+    }
+
+    reader->show_loading(row.view.name);
+    active_target_ = QStringLiteral("loading");
+
+    auto& owner = jobs_->make_owner(nullptr);
+    base_owner_ = &owner;
+    pwb::job::qtbridge::JobOwner* owner_ptr = &owner;
+    pwb::job::JobSpec spec;
+    spec.kind = "preview.registry_base";
+    spec.title = pwb::ui_pages_data::loading_title(row.view.name);
+    spec.task_key = "preview.registry_base";
+    spec.run = [row, fn = base_builder_](
+                   pwb::job::JobContext& ctx) -> std::any {
+        BasePreviewOutcome outcome;
+        try {
+            auto view = fn(row, &ctx);
+            if (view.has_value()) {
+                outcome.ok = true;
+                outcome.view = std::move(*view);
+            } else {
+                outcome.retryable = false;
+                outcome.error = "该资产类型没有可用的解析器";
+            }
+        } catch (const pwb::job::JobCancelled&) {
+            throw;  // the framework maps this to the cancelled state
+        } catch (const std::exception& e) {
+            outcome.error = e.what();
+        }
+        return outcome;
+    };
+    const std::shared_ptr<std::atomic<bool>> alive = alive_;
+    owner.start(jobs_->scheduler(), std::move(spec),
+                [this, alive, generation, owner_ptr](
+                    const pwb::job::qtbridge::JobOutcome& o) {
+                    if (!alive->load()) return;
+                    const bool terminal =
+                        o.state != pwb::job::JobState::queued &&
+                        o.state != pwb::job::JobState::running &&
+                        o.state != pwb::job::JobState::cancelling;
+                    if (terminal && base_owner_ == owner_ptr) {
+                        base_owner_ = nullptr;  // cancel handle released
+                    }
+                    if (generation != base_generation_) {
+                        return;  // superseded by a newer selection
+                    }
+                    if (o.state == pwb::job::JobState::done ||
+                        o.state == pwb::job::JobState::degraded) {
+                        if (const auto* outcome =
+                                std::any_cast<BasePreviewOutcome>(
+                                    &o.result)) {
+                            deliver_base_outcome(generation, *outcome);
+                        }
+                    } else if (o.state ==
+                               pwb::job::JobState::cancelled) {
+                        updqt::PreviewResultView view;
+                        view.mode = "message";
+                        view.message = "预览已取消";
+                        deliver_base_preview(generation, view);
+                    } else if (o.state == pwb::job::JobState::failed) {
+                        updqt::PreviewResultView view;
+                        view.mode = "message";
+                        view.message = "预览加载失败: " + o.error;
+                        view.retryable = true;
+                        deliver_base_preview(generation, view);
+                        Q_EMIT preview_failed(QStringLiteral("base"));
+                    }
+                });
+}
+
+void VizEDataPage::deliver_base_outcome(std::uint64_t generation,
+                                        const BasePreviewOutcome& outcome) {
+    if (!outcome.ok) {
+        updqt::PreviewResultView view;
+        view.mode = "message";
+        view.message = outcome.error.empty() ? "预览不可用" : outcome.error;
+        view.retryable = outcome.retryable;
+        deliver_base_preview(generation, view);
+        Q_EMIT preview_failed(QStringLiteral("base"));
+        return;
+    }
+    deliver_base_preview(generation, outcome.view);
+}
+
+void VizEDataPage::deliver_base_preview(
+    std::uint64_t generation,
+    const pwb::ui_pages_data::qt::PreviewResultView& view) {
+    if (generation != base_generation_) {
+        return;  // stale delivery — a newer selection superseded this job
+    }
+    active_target_ = QString::fromStdString(view.mode);
+    workspace_->reader_panel()->render(view);
+    if (view.mode != "message" && view.mode != "empty") {
+        Q_EMIT preview_rendered(active_target_);
+    }
 }
 
 QWidget* VizEDataPage::try_external_presenter(const QString& path) {
@@ -368,6 +587,16 @@ QDockWidget* install_data_dock(QMainWindow* window,
     dock->setWidget(page);
     window->addDockWidget(Qt::LeftDockWidgetArea, dock);
     return dock;
+}
+
+VizEDataPage* install_data_page(QMainWindow* window,
+                                pwb::app::JobCenter* jobs) {
+    auto* dock = new QDockWidget(QObject::tr("数据"), window);
+    dock->setObjectName(QStringLiteral("viz-e-data-dock"));
+    auto* page = new VizEDataPage(dock, jobs);
+    dock->setWidget(page);
+    window->addDockWidget(Qt::LeftDockWidgetArea, dock);
+    return page;
 }
 
 }  // namespace pwb::viz_e

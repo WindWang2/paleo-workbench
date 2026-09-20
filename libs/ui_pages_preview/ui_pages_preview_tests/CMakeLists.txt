@@ -23,8 +23,12 @@ if(TARGET pwb_ui_pages_preview_qt)
         Pwb::UiPagesPreviewQt Pwb::Visualization Qt6::Widgets Qt6::Gui)
     add_test(NAME ui_pages_preview.qt_widgets_smoke
              COMMAND ui_pages_preview.qt_widgets_smoke)
+    # CLOSURE-PREVIEW (task 04): runtime-library paths for vendor-shared
+    # libs (QGIS vendor bin; loader fails without them when the checkout
+    # reuses a vendor SDK outside the build tree).
     set_tests_properties(ui_pages_preview.qt_widgets_smoke PROPERTIES
         TIMEOUT 180
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox --disable-gpu --single-process")
 endif()
 
@@ -60,6 +64,7 @@ if(TARGET pwb_ui_pages_preview_qt AND TARGET Pwb::SeismicViewer)
              COMMAND ui_pages_preview.viz_d_presenter_smoke)
     set_tests_properties(ui_pages_preview.viz_d_presenter_smoke PROPERTIES
         TIMEOUT 120
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 # END VIZ-D
