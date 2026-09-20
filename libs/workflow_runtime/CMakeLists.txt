@@ -8,6 +8,9 @@ add_library(pwb_workflow_runtime STATIC
     src/node_adapters.cpp
     src/provenance_graph.cpp
     src/recompute_plan.cpp
+    # catalog/lifecycle.py shared run-orchestration skeleton (begin/
+    # complete/fail_run + typed-port annotation + input resolution).
+    src/run_orchestration.cpp
     src/runtime_service.cpp
     src/staleness.cpp
     # CONV-33 — top-level orchestration surfaces (round-1 contract-freeze

@@ -32,3 +32,14 @@ target_compile_features(closure_workflow_e2e_test PRIVATE cxx_std_20)
 target_link_libraries(closure_workflow_e2e_test
     PRIVATE Pwb::ClosureWorkflow Threads::Threads)
 add_test(NAME closure_workflow.e2e COMMAND closure_workflow_e2e_test)
+
+# pipeline/compile_map{,_production}.py — demo-draft determinism + the
+# fail-closed production compiler incl. catalog lineage (byte-exact
+# payload parity via python_dumps).
+add_executable(closure_workflow_map_compile_test map_compile_oracle_test.cpp)
+target_compile_features(closure_workflow_map_compile_test PRIVATE cxx_std_20)
+target_link_libraries(closure_workflow_map_compile_test
+    PRIVATE Pwb::ClosureWorkflow Threads::Threads)
+add_test(NAME closure_workflow.map_compile
+         COMMAND closure_workflow_map_compile_test
+                 ${CLOSURE_FIXTURE_DIR}/map_compile_oracle.json)

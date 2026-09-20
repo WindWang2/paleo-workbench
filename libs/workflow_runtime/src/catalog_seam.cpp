@@ -261,6 +261,43 @@ void RuntimeStore::attach_run_output(const std::string& run_id,
     }
 }
 
+void RuntimeStore::set_run_ports(const std::string& run_id,
+                                 const Json& input_ports,
+                                 const Json& output_ports) {
+    const auto it = run_index_.find(run_id);
+    if (it == run_index_.end()) {
+        throw std::invalid_argument("unknown run: " + run_id);
+    }
+    Json& metadata = runs_[it->second].run_metadata;
+    if (!metadata.is_object()) metadata = Json::object();
+    // Python service stores typed ports on the run record; the store
+    // mirrors them under run_metadata (flat id lists stay authoritative).
+    if (input_ports.is_array()) metadata["input_ports"] = input_ports;
+    if (output_ports.is_array()) metadata["output_ports"] = output_ports;
+}
+
+std::optional<VersionRecord> CatalogRepository::resolve_legacy_resource(
+    const std::string& resource_id) {
+    if (resource_id.empty()) return std::nullopt;
+    for (const AssetRecord& asset : list_assets()) {
+        for (const VersionRecord& version : list_versions(asset.id)) {
+            const auto it = version.metadata.find("legacy_resource_id");
+            if (it != version.metadata.end() && it->is_string() &&
+                it->get<std::string>() == resource_id) {
+                return version;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+void CatalogRepository::set_run_ports(const std::string& /*run_id*/,
+                                      const Json& /*input_ports*/,
+                                      const Json& /*output_ports*/) {
+    // Accept-and-ignore: typed ports refine provenance; the flat
+    // input_version_ids/output_version_ids lists stay authoritative.
+}
+
 std::optional<std::string> RuntimeStore::verify_integrity(
     const std::string& version_id) {
     const auto it = version_index_.find(version_id);

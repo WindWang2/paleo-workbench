@@ -33,4 +33,14 @@ std::string python_strip(std::string_view text);
 // shared home for the per-TU `lower_ascii` clones (#1392).
 std::string lower_ascii(std::string_view text);
 
+// Decode one UTF-8 code point at text[i]; an invalid sequence reports
+// size=1/valid=false so callers can pass bytes through instead of wedging
+// on bad input. i must be < text.size().
+struct Utf8CodePoint {
+    char32_t cp;
+    std::size_t size;
+    bool valid;
+};
+Utf8CodePoint decode_utf8_at(std::string_view text, std::size_t i);
+
 }  // namespace pwb::domain

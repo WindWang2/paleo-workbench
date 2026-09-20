@@ -2,6 +2,8 @@
 
 #include <pwb/ui_canvas/qt/map_export_worker.hpp>
 
+#include <pwb/ui_canvas/qt/fallback_map_backend.hpp>
+
 #include <QImage>
 #include <QMetaType>
 #include <QPainter>
@@ -82,10 +84,10 @@ MapExportReport render_and_save_map_export(
     }
     if (!frame.has_value()) {
         // The fallback path — create_map_render_backend(prefer_qgis=false)
-        // picks the first registered non-QGIS factory. Throws when none is
-        // registered (the concrete fallback renderer is a mapping-slice
-        // deliverable; an unregistered fallback fails honestly instead of
-        // silently producing nothing).
+        // picks the first registered non-QGIS factory. Installing here is
+        // what makes the fallback concrete (Python has it built into the
+        // selector; static-library TUs need an explicit pull).
+        qt::install_fallback_backend_factory();
         std::shared_ptr<MapRenderBackend> backend =
             create_map_render_backend(/*prefer_qgis=*/false);
         backend->set_layer_snapshot(spec.snapshot);

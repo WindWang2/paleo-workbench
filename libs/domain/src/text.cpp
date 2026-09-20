@@ -8,13 +8,7 @@ namespace pwb::domain {
 
 namespace {
 
-// Decode one UTF-8 code point at s[i]; 0-length (invalid) consumes 1 byte so
-// callers can pass bytes through unchanged instead of wedging on bad input.
-struct Decoded {
-    char32_t cp;
-    std::size_t size;
-    bool valid;
-};
+using Decoded = Utf8CodePoint;
 
 Decoded decode_cp(std::string_view s, std::size_t i) {
     const auto c = static_cast<unsigned char>(s[i]);
@@ -124,6 +118,10 @@ std::string lower_ascii(std::string_view text) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
     }
     return out;
+}
+
+Utf8CodePoint decode_utf8_at(std::string_view text, std::size_t i) {
+    return decode_cp(text, i);
 }
 
 }  // namespace pwb::domain
