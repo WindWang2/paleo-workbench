@@ -116,6 +116,10 @@
 #include "diagnostics.hpp"
 #ifdef PWB_WITH_APP_SHELL
 #include "app_shell.hpp"
+
+#if __has_include(<pwb/closure_science/qt/page_binding.hpp>)
+#include <pwb/closure_science/qt/page_binding.hpp>
+#endif
 #include <pwb/ui_shell/status_bar.hpp>
 #endif
 
@@ -581,6 +585,24 @@ void MainWindow::wire_app_shell() {
     // 主状态条入宿主原生槽位（Python dock_host=QMainWindow parity:
     // AppShell parks its StatusBar on the window's statusBar, stretch 1).
     statusBar()->addWidget(app_shell_->status_bar(), 1);
+
+// BEGIN CLOSURE-SCIENCE (line 03) — production science/prediction page
+// binding: the well-log + seismic prediction pages receive the
+// catalog-backed inference hooks (real ONNX runtime, catalog runs +
+// result versions, task journal, project-identity guard). Parented to the
+// shell — no AppShell member changes. Lease: 03-line.json
+// named_block_leases; assembled under PWB_BUILD_CLOSURE_SCIENCE by 12.
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    pwb::closure_science::qt::attach_prediction_pages(
+        *app_shell_->well_log_page(), *app_shell_->seismic_page(),
+        [this]() -> std::filesystem::path {
+            auto store = context_.projectStore();
+            if (store == nullptr) return std::filesystem::path();
+            return store->project_file();
+        },
+        app_shell_);
+#endif
+// END CLOSURE-SCIENCE
 
     connect(app_shell_, &AppShell::status_message, this,
             [this](const QString& message) {
