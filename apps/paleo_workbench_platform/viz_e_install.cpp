@@ -142,6 +142,12 @@ void VizEDataPage::bind_selection_bus(updqt::AssetSelectionBus* bus) {
     if (selection_bus_ != nullptr) {
         disconnect(selection_bus_, nullptr, this, nullptr);
     }
+    // The ctor's direct table path must go: with the bus bound there is
+    // EXACTLY ONE preview path (bus selection changes) — leaving both
+    // connected dispatches every click twice.
+    disconnect(workspace_->asset_table(),
+               &updqt::DataAssetTable::selected_asset_changed, this,
+               &VizEDataPage::on_selected_asset);
     selection_bus_ = bus;
     if (selection_bus_ == nullptr) {
         // Restore the direct table path (unbound tests / reduced mounts).
@@ -159,7 +165,16 @@ void VizEDataPage::bind_selection_bus(updqt::AssetSelectionBus* bus) {
                        asset) {
                 if (asset.has_value()) {
                     preview_asset(*asset);
+                    return;
                 }
+                // Deletion / project switch: the stale preview must go —
+                // the honest empty state, never a ghost asset's payload
+                // (Python preview(None) parity).
+                updqt::PreviewResultView empty;
+                empty.mode = "empty";
+                active_target_ = QStringLiteral("empty");
+                workspace_->reader_panel()->render(empty);
+                Q_EMIT preview_rendered(active_target_);
             });
 }
 
@@ -173,11 +188,13 @@ void VizEDataPage::on_selected_asset(
 
 void VizEDataPage::preview_asset(
     const pwb::ui_pages_data::AssetRow& row) {
-    // Fast-switch discipline: any in-flight preview is superseded. The
-    // surface family is invalidated HERE (its own guard); the base family
-    // is invalidated by the next present_base_preview's generation bump,
-    // so a USER cancel still lands its honest 已取消 delivery.
+    // Fast-switch discipline: any in-flight preview is superseded. Both
+    // guards bump HERE so the early-exit paths (external presenter,
+    // .dat, honest unavailable) cannot be clobbered by a still-in-flight
+    // base delivery; a USER cancel with no follow-up selection does not
+    // bump (cancel_active_preview), so its honest 已取消 delivery lands.
     ++surface_generation_;
+    ++base_generation_;
     cancel_active_preview();
 
     const QString path = asset_path_of(row);

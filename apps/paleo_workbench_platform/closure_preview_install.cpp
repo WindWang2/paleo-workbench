@@ -77,7 +77,7 @@ upv::PreviewSettings load_settings() {
 
 void save_settings(const upv::PreviewSettings& s) {
     std::lock_guard<std::mutex> lock(settings_mutex());
-    save_settings(s);
+    settings_store().save(s);
 }
 
 // ---------------------------------------------------------------------------
@@ -318,8 +318,11 @@ void wire_preview_settings(pwb::app::AppShell* shell) {
     QObject::connect(
         shell, &pwb::app::AppShell::preview_settings_requested, shell,
         [shell] {
-            auto* store = &settings_store();
-            pwb::ui_canvas::PreviewSettingsDialog dialog(shell, store);
+            // The panel gets its OWN default store instance (GUI-thread
+            // only); persistence to the shared store goes through the
+            // mutex-guarded save_settings below — the worker-side
+            // load_settings must never race a panel write.
+            pwb::ui_canvas::PreviewSettingsDialog dialog(shell, nullptr);
             QObject::connect(
                 &dialog,
                 &pwb::ui_canvas::PreviewSettingsDialog::settings_applied,
@@ -369,8 +372,9 @@ pwb::viz_e::VizEDataPage* install(const Install& parts) {
     auto* bus = new updqt::AssetSelectionBus(page);
     page->bind_selection_bus(bus);
 
-    // Parser-registry base preview (worker-thread build + cancel through
-    // the page's generation guard).
+    // Parser-registry base preview (worker-thread build; cooperative
+    // cancel covers the wait/supersede window — the registry itself has
+    // no cancellation checkpoints, recorded honestly in the ledger).
     page->set_base_preview_builder(
         [](const upd::AssetRow& row,
            pwb::job::JobContext*) -> std::optional<updqt::PreviewResultView> {

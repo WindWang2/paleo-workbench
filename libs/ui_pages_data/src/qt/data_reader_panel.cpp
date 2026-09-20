@@ -637,6 +637,11 @@ QWidget* DataReaderPanel::target_for(const std::string& mode,
     } else if (mode == "message") {
         message_->set_message(QString::fromStdString(
             result.message.empty() ? "预览不可用" : result.message));
+    } else if (target == message_) {
+        // Unknown mode → the dict-.get default: render the result's own
+        // message (or 预览不可用) instead of a stale previous payload.
+        message_->set_message(QString::fromStdString(
+            result.message.empty() ? "预览不可用" : result.message));
     }
     return target;
 }

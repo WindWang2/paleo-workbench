@@ -698,6 +698,12 @@ int main(int argc, char** argv) {
         CHECK(rendered.wait(1));
         CHECK(page.active_target() == QStringLiteral("table"));
         CHECK(reader->current_result().mode == "table");
+        // The table's own selection survives the bus round-trip (a broken
+        // default filter used to wipe visible rows and the highlight).
+        CHECK(page.workspace()->asset_table()->visible_asset_count() == 5);
+        CHECK(page.workspace()->asset_table()->selected_assets().size() == 1);
+        CHECK(page.workspace()->asset_table()->selected_assets().front()
+                  .view.id == "A1");
         const std::string tsv = reader->table_preview()->copy_all();
         CHECK(tsv.find("42.5") != std::string::npos);
         CHECK(tsv.find("1000.5") != std::string::npos);

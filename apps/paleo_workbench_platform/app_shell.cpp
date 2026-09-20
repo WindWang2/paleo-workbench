@@ -469,6 +469,9 @@ void AppShell::set_project_name(const QString& name) {
 
 QWidget* AppShell::adopt_data_page(QWidget* composite) {
     if (composite == nullptr || hub_data_ == nullptr) return nullptr;
+    if (data_page_adopted_) return nullptr;  // one-shot: a second adopt
+    // would strand the first composite (no parent, no hub slot)
+    data_page_adopted_ = true;
     // The management submodule's workspace moves INSIDE the composite
     // (the composite's ctor already reparented it) — data_workspace_
     // stays a valid non-owning pointer; only the hub slot changes.

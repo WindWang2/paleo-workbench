@@ -39,3 +39,5 @@
 | 轮 | 候选 SHA | 目标 | 结果 | 下一步 |
 |---|---|---|---|---|
 | 0 | 06211541 | worktree/分支建立、coordination 登记、资源门 Probe | RESOURCE_READY 40.9GiB jobs=2 | 盘点定稿 |
+| 1 | worktree | 实现：bus/adopt/base/install/租约块/两测试目标 | 过程中发现并修复 D1–D5（见 findings） | 验证轮 |
+| 2 | cebb65e9 | 验证：pa_flow 143 检查 + platform.closure_preview + 受影响集 30/30 ×2 + MALLOC 4/4 + 全量构建；提交 | 全绿 | 独立审查→修复→PR |

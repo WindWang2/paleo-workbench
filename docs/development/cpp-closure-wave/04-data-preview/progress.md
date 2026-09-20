@@ -12,6 +12,11 @@
 | 09-20 01:12 | 1 | 发现并修复：取消时 bump generation 会吞掉"已取消"投递（loading 永挂） | viz_e_install.cpp cancel_active_preview 不再 bump；surface 护栏移到 preview_asset |
 | 09-20 01:20 | 1 | 共享锁排队：14 线（performance-audit）与 06 线（joint3d）先后持锁；/tmp/gate_retry_04.sh 45s 退避重试，configure 已过，构建排队中 | gate_retry_04.sh + owner sidecar |
 
+| 09-20 02:40 | 2 | 验证轮全绿：viz_e.pa_flow 143 检查 + platform.closure_preview + 受影响集 30/30 ×2 + MALLOC 4/4 + 全量构建 | 见 acceptance.md 验证轮记录 |
+| 09-20 02:45 | 2 | 提交实现快照 cebb65e9；独立审查子代理启动（根任务子代理 #2） | git log / 审查输出待回填 |
+
+| 09-20 08:30 | 3 | 独立审查裁决 REQUEST-CHANGES（1 P0 + 7 P1 + 8 P2，3.44M tokens）；修复 P0-1（save_settings 自递归）、P1-1/2/3/4/5/6/7、P2-1/3/4/5/7/8；P2-2 补租约记录、P2-6 记录不修（viz-e 既有范式，窗口生命周期内有限） | 复验：pa_flow（含新增选中存活断言）+ platform.closure_preview ×2 + MALLOC 全绿，受影响集 30/30 |
+
 ## 恢复点
 
 会话重启后：读本四文件 → git status 看未提交实现 → 继续门内构建（命令见下）→ ctest viz_e.pa_flow / platform.closure_preview ×2 + MALLOC → 审查 → 提交。

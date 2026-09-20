@@ -193,6 +193,7 @@ private:
 
     pwb::ui_pages_data::qt::HomePage* home_page_ = nullptr;
     pwb::ui_pages_data::qt::DataWorkspace* data_workspace_ = nullptr;
+    bool data_page_adopted_ = false;  // CLOSURE-PREVIEW one-shot guard
     pwb::ui_wellseis::qt::WellLogPredictionPage* well_log_page_ = nullptr;
     pwb::ui_seqviz::qt::SequenceFrameworkPage* sequence_page_ = nullptr;
     pwb::ui_seqviz::qt::StratigraphyCorrelationPage* stratigraphy_page_ =

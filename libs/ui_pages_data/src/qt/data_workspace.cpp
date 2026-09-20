@@ -183,6 +183,9 @@ void DataWorkspace::set_well_detail_panel(QWidget* panel) {
 void DataWorkspace::bind_selection_bus(AssetSelectionBus* bus) {
     if (selection_bus_ != nullptr) {
         disconnect(selection_bus_, nullptr, this, nullptr);
+        // The table->bus lambda's receiver context is the bus itself —
+        // drop it explicitly or an unbound table keeps feeding an orphan.
+        disconnect(asset_table_, nullptr, selection_bus_, nullptr);
     }
     selection_bus_ = bus;
     if (selection_bus_ == nullptr) return;

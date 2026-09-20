@@ -270,11 +270,14 @@ std::shared_ptr<const void> load_json_payload(const std::string& path,
     truncated = static_cast<long long>(size) > limit;
     std::ifstream in(path, std::ios::binary);
     if (!in) return nullptr;
+    // Bounded read: at most `limit` bytes hit memory (never a whole-file
+    // slurp of a 10 GiB payload on the worker thread).
     std::string bytes;
-    bytes.reserve(static_cast<std::size_t>(std::min<long long>(size, limit)));
-    bytes.assign(std::istreambuf_iterator<char>(in),
-                 std::istreambuf_iterator<char>());
-    if (truncated) bytes.resize(static_cast<std::size_t>(limit));
+    const std::size_t want = static_cast<std::size_t>(
+        std::min<long long>(size, limit));
+    bytes.resize(want);
+    in.read(bytes.data(), static_cast<std::streamsize>(want));
+    bytes.resize(static_cast<std::size_t>(in.gcount()));
     auto parsed = domain::Json::parse(bytes, nullptr);
     if (parsed == nullptr) return nullptr;
     ok = true;
@@ -310,9 +313,10 @@ std::vector<ui_pages_data::AssetRow> asset_rows_from_snapshot(
             if (it != current.end() && it->second != nullptr) {
                 const catalog::DataVersion& version = *it->second;
                 row.view.format = version.format;
-                row.view.stage = "stage::" +
-                                 std::string(pwb::domain::to_string(
-                                     version.stage));
+                // stage::kRaw vocabulary is the BARE value ("raw") — the
+                // context-menu stage gates compare it verbatim.
+                row.view.stage =
+                    std::string(pwb::domain::to_string(version.stage));
                 row.view.version_label =
                     "v" + std::to_string(version.version_number);
                 if (!version.path.empty()) {
@@ -371,6 +375,16 @@ ui_data_core::PreviewProvider registry_preview_provider() {
            const ui_data_core::PreviewSettings& settings)
         -> ui_data_core::PreviewResult {
         const ingest::ResourceRef ref = ref_from_asset(asset);
+        if (ref.path.empty()) {
+            // A bare catalog::DataAsset row carries no payload path — the
+            // registry's 文件不存在 would be a FALSE statement; say what
+            // is actually true.
+            ui_data_core::PreviewResult bare;
+            bare.mode = ui_data_core::preview_mode::kMessage;
+            bare.title = ref.name;
+            bare.message = "该目录行没有可解析的文件路径，无法预览";
+            return bare;
+        }
         ingest::PreviewSettings ingest_settings;
         ingest_settings.font_size = settings.font_size;
         ingest_settings.show_metadata = settings.show_metadata;
@@ -390,6 +404,15 @@ ui_data_core::PreviewProvider registry_preview_provider() {
         ingest_settings.json_expand_depth = settings.json_expand_depth;
         ingest_settings.media_autoplay = settings.media_autoplay;
         ingest_settings.media_volume = settings.media_volume;
+        ingest_settings.geoviz_max_curves = settings.geoviz_max_curves;
+        ingest_settings.geoviz_max_depth_samples =
+            settings.geoviz_max_depth_samples;
+        ingest_settings.geoviz_max_slice_axis = settings.geoviz_max_slice_axis;
+        ingest_settings.geoviz_max_points = settings.geoviz_max_points;
+        ingest_settings.geoviz_surface_grid_size =
+            settings.geoviz_surface_grid_size;
+        ingest_settings.density = settings.density;
+        ingest_settings.theme_mode = settings.theme_mode;
         try {
             const ingest::PreviewResult result =
                 ingest::build_preview(ref, ingest_settings);
