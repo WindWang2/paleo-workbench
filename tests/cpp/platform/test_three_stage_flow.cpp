@@ -13,19 +13,24 @@
 
 #include <pwb/application/project_session.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+#include <pwb/ui_composite/composite_document.hpp>
+#include <pwb/ui_composite/mapping_stage_bar.hpp>
+#include <pwb/ui_map/map_dock_manager.hpp>
+#include <pwb/ui_map/mapping_page.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/navigation.hpp>
 #include <pwb/ui_stageflow/qt/stage_flow_controller.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
+#include "app_context.hpp"
 #include "app_shell.hpp"
 #include "main_window.hpp"
 
 #include "test_framework.hpp"
 
 #ifdef PWB_WITH_DATA_INTEGRATION
-#include <pwb/data/store.hpp>
+#include <pwb/application/adapters/data_store.hpp>
 #include <pwb/domain/json.hpp>
 #endif
 

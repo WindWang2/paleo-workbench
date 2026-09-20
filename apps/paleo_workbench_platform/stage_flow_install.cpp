@@ -31,8 +31,10 @@
 
 #include <QDockWidget>
 #include <QSettings>
+#include <QStatusBar>
 #include <QString>
 
+#include <pwb/application/adapters/data_store.hpp>
 #include <pwb/application/project_session.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/job_runtime/job_contract.hpp>
@@ -71,6 +73,22 @@ using StageFlowController = pwb::ui_stageflow::qt::StageFlowController;
 using ui_stageflow::kStage1Value;
 using ui_stageflow::kStage2Value;
 using ui_stageflow::kStage3Value;
+
+// The authoritative stage write. With the CONV-27 workbench closure in
+// the build this is MainWindow::applyStageValue (canonicalize + stage
+// dock + actions + readiness refresh); a reduced configure writes the
+// same ProjectSession authority directly — canonicalized identically.
+inline void apply_stage_authority(MainWindow& window,
+                                  const std::string& value) {
+#ifdef PWB_WITH_CONV_27
+    window.applyStageValue(value);
+#else
+    const auto stage = pwb::tool_policy::stage_from_value(value);
+    if (!stage.has_value()) return;
+    window.session()->set_mapping_stage(
+        pwb::tool_policy::stage_value(*stage));
+#endif
+}
 
 // The production command set. Every callback routes through the SAME
 // implementations the UI surfaces use (request_stage / navigate_to /
@@ -212,9 +230,10 @@ void MainWindow::restoreStageFromProject() {
         pwb::workspace::MappingWorkspaceState::from_json(
             store->document().mapping_workspace(),
             store->document().diagnostics());
-    // applyStageValue canonicalizes and refreshes dock/readiness/actions;
-    // unknown values are refused there (the lenient stage-1 default stays).
-    applyStageValue(state.current_stage);
+    // The authority write canonicalizes and (with the CONV-27 closure)
+    // refreshes dock/readiness/actions; unknown values are refused there
+    // (the lenient stage-1 default stays).
+    apply_stage_authority(*this, state.current_stage);
     if (stage_flow_ != nullptr) stage_flow_->refresh();
 
     // Selection bus project token: (re)bind on open.
@@ -239,34 +258,24 @@ void MainWindow::installStageFlow() {
     if (workstation == nullptr || composite == nullptr) return;
 
     // -- controller + persistence sink --------------------------------------
-    // services_settings_ is always valid after the constructor (owned
-    // fallback binds owned_services_settings_); the sink holds it by
-    // reference through a non-owning shared_ptr whose captured optional
-    // keeps an owned store alive for exactly the controller's lifetime.
-    std::optional<QSettings> owned_fallback;
-    QSettings* settings = services_settings_;
-    if (settings == nullptr) {
-        owned_fallback.emplace(QStringLiteral("PaleoWorkbench"),
-                               QStringLiteral("Workstation"));
-        settings = &owned_fallback.value();
-    }
-    std::shared_ptr<QSettings> settings_holder(
-        settings,
-        [fallback = std::move(owned_fallback)](QSettings*) mutable {
-            // Destroying the lambda body destroys the fallback store when
-            // the controller (and its sink) go away. Caller-owned stores
-            // (services_settings_) are not deleted here.
-        });
+    // buildUi() runs BEFORE the constructor's platform-services stage
+    // binds services_settings_ (injected or owned fallback) — at install
+    // time the member may still be null. The sink resolves the pointer
+    // lazily per call; after the constructor completes it is always valid,
+    // and the null guard keeps pre-bind calls honest.
     pwb::ui_stageflow::StagePreferenceSink sink;
-    sink.load = [settings_holder](const std::string& key) {
-        const QVariant value = settings_holder->value(
+    sink.load = [this](const std::string& key) -> std::optional<std::string> {
+        QSettings* settings = services_settings_;
+        if (settings == nullptr) return std::nullopt;
+        const QVariant value = settings->value(
             QString::fromStdString("stage_presentation/" + key));
-        if (!value.isValid()) return std::optional<std::string>{};
-        return std::optional<std::string>{value.toString().toStdString()};
+        if (!value.isValid()) return std::nullopt;
+        return value.toString().toStdString();
     };
-    sink.save = [settings_holder](const std::string& key,
-                                  const std::string& value) {
-        settings_holder->setValue(
+    sink.save = [this](const std::string& key,
+                       const std::string& value) {
+        if (services_settings_ == nullptr) return;
+        services_settings_->setValue(
             QString::fromStdString("stage_presentation/" + key),
             QString::fromStdString(value));
     };
@@ -279,7 +288,7 @@ void MainWindow::installStageFlow() {
         return context_.session().mapping_stage();
     };
     seams.apply_stage = [this](const std::string& value) {
-        applyStageValue(value);  // the authoritative write entry
+        apply_stage_authority(*this, value);
     };
     seams.read_horizon = [this]() -> std::optional<std::string> {
 #ifdef PWB_WITH_DATA_INTEGRATION
@@ -330,6 +339,7 @@ void MainWindow::installStageFlow() {
 #endif
     };
     seams.readiness = [this]() -> pwb::ui_stageflow::StageReadinessKind {
+#ifdef PWB_WITH_CONV_27
         const auto& stage = context_.session().mapping_stage();
         const auto parsed = pwb::tool_policy::stage_from_value(
             stage.value_or(""));
@@ -346,6 +356,10 @@ void MainWindow::installStageFlow() {
             case pwb::ui::StageReadinessStatus::NotReady:
                 return pwb::ui_stageflow::StageReadinessKind::NotReady;
         }
+#endif
+        // Reduced configure (no CONV-27 workbench closure): the readiness
+        // evaluator's inputs are not collected — report the honest
+        // unknown instead of fabricating a verdict.
         return pwb::ui_stageflow::StageReadinessKind::Unknown;
     };
     stage_flow_->set_seams(std::move(seams));

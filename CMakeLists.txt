@@ -1269,11 +1269,20 @@ if(TARGET pwb-platform
                 target_compile_definitions(platform_three_stage_flow
                     PRIVATE PWB_WITH_UI_CONTROLLERS=1)
             endif()
-            if(TARGET Pwb::Data)
+            # Mirror pwb_application's own adapter condition exactly: the
+            # data-integration surface (PwbDataStore::open, project store)
+            # compiles only with the full B/C closure; a reduced configure
+            # keeps the test honest rather than link-broken.
+            if(TARGET Pwb::Data AND TARGET Pwb::Science
+               AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
                 target_link_libraries(platform_three_stage_flow PRIVATE
                     Pwb::Data)
                 target_compile_definitions(platform_three_stage_flow
                     PRIVATE PWB_WITH_DATA_INTEGRATION=1)
+                # main_window.cpp references the 12-line project actions
+                # once the data closure is in (platform_app_shell parity).
+                target_sources(platform_three_stage_flow PRIVATE
+                    apps/paleo_workbench_platform/shell_project_actions.cpp)
             endif()
             add_test(NAME platform.three_stage_flow
                      COMMAND platform_three_stage_flow)
@@ -1372,7 +1381,12 @@ endif()
 # additionally needs the UI-07/UI-15 Qt closure (Pwb::UiCanvas pulls
 # Pwb::UiPagesPreviewQt).
 if(TARGET pwb-platform)
-    if(TARGET Pwb::Data)
+    # V14-THREE-STAGE-UX: Pwb::Data alone does NOT imply
+    # PWB_WITH_DATA_INTEGRATION (that define lands on Pwb::Application only
+    # with the full B/C adapter closure); mirror the adapter condition or
+    # shell_project_actions.cpp references surfaces the reduced build never
+    # declared.
+    if(TARGET Pwb::Data AND TARGET Pwb::Science AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
         target_sources(pwb-platform PRIVATE
             apps/paleo_workbench_platform/shell_project_actions.cpp)
     endif()
@@ -1383,7 +1397,7 @@ if(TARGET pwb-platform)
     endif()
 endif()
 if(TARGET platform_app_shell)
-    if(TARGET Pwb::Data)
+    if(TARGET Pwb::Data AND TARGET Pwb::Science AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
         target_sources(platform_app_shell PRIVATE
             apps/paleo_workbench_platform/shell_project_actions.cpp)
     endif()
@@ -1401,7 +1415,7 @@ if(TARGET platform_app_shell)
             apps/paleo_workbench_platform/main_window.cpp
             apps/paleo_workbench_platform/app_context.cpp
             apps/paleo_workbench_platform/diagnostics.cpp)
-        if(TARGET Pwb::Data)
+        if(TARGET Pwb::Data AND TARGET Pwb::Science AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
             target_sources(platform_shell_project_actions PRIVATE
                 apps/paleo_workbench_platform/shell_project_actions.cpp)
         endif()
@@ -1580,6 +1594,10 @@ endif()
 # kernel the preparation seam binds). Guarded on the full closure; LayoutExport
 # (CONV-29, default OFF) is intentionally not required — the composition
 # export engine wiring is a registered follow-up.
+# V14-THREE-STAGE-UX: Pwb::Data added to the guard — the install's
+# store_getter returns PwbDataStore (a data-integration surface; the
+# define lands on Pwb::Application only with the full B/C adapter
+# closure, so the mount mirrors that condition).
 if(TARGET pwb-platform
    AND TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt
    AND TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt
@@ -1587,7 +1605,9 @@ if(TARGET pwb-platform
    AND TARGET Pwb::UiWellseisQt AND TARGET Pwb::UiPagesMapedit
    AND TARGET Pwb::Application AND TARGET Pwb::Project
    AND TARGET Pwb::UiWorkers AND TARGET Pwb::MappingDocument
-   AND TARGET Pwb::VizCharts)
+   AND TARGET Pwb::VizCharts
+   AND TARGET Pwb::Data AND TARGET Pwb::Science
+   AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
     # Product wiring: the closure sources join pwb-platform (install call
     # in main_window.cpp compiles under PWB_WITH_CLOSURE_MAPPING).
     target_sources(pwb-platform PRIVATE

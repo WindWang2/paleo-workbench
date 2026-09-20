@@ -1131,6 +1131,10 @@ void MainWindow::newProjectDialog() {
         QMessageBox::warning(this, tr("新建工程"), error);
     }
 }
+#endif  // PWB_WITH_DATA_INTEGRATION
+// (V14-THREE-STAGE-UX: this #endif was missing — the region stayed open
+// and swallowed everything below, so noteDomainLayerFacts and the
+// preview-settings definition compiled ONLY in data-integration builds.)
 
 // --------------------------------------- cpp-close-12 shell actions ----
 // The AppShell app-bar request surfaces (UI-17 deferred list) — the
@@ -1214,6 +1218,10 @@ void MainWindow::showPreviewSettingsRequested() {
 }
 #endif  // PWB_WITH_UI_PAGES_PREVIEW_QT
 
+// Declaration is data-integration-gated in the header (PwbDataStore
+// surface); the definition matches (V14-THREE-STAGE-UX rebalance of the
+// previously-dangling newProjectDialog region).
+#ifdef PWB_WITH_DATA_INTEGRATION
 QString MainWindow::newProject(const QString& dir_path,
                                const QString& name) {
     if (context_.session().store() != nullptr) {
@@ -1314,7 +1322,11 @@ QString MainWindow::newProject(const QString& dir_path,
     (void)store->export_manifest();
     return openProject(QString::fromStdString(project_file.string()));
 }
+#endif  // PWB_WITH_DATA_INTEGRATION (newProject definition)
 
+// Same closure as its declaration (the store/recovery types are
+// data-integration surfaces).
+#ifdef PWB_WITH_DATA_INTEGRATION
 QString MainWindow::openProject(const QString& project_file) {
     if (context_.session().store() != nullptr) {
         return tr("已有工程打开（每窗口一个工程会话）");
@@ -1503,7 +1515,7 @@ QString MainWindow::openProject(const QString& project_file) {
 // END CLOSURE-REVIEW
     return QString();
 }
-#endif  // PWB_WITH_DATA_INTEGRATION
+#endif  // PWB_WITH_DATA_INTEGRATION (openProject definition)
 
 void MainWindow::armPan() {
     canvas_->setMapTool(pan_tool_);

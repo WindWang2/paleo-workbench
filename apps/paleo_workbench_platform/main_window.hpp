@@ -161,8 +161,12 @@ public:
     // <project>/.pwb-working/ — catalog payloads are never edited in
     // place. Returns "" on success; the store stays attached so save_edits
     // goes through the real catalog transaction.
-    QString openProject(const QString& project_file);
+    // V14-THREE-STAGE-UX: the definition compiles only in the
+    // data-integration closure (PwbDataStore/recovery types), so the
+    // declaration is gated to match — a reduced configure keeps the
+    // honest no-store surface instead of a link error.
 #ifdef PWB_WITH_DATA_INTEGRATION
+    QString openProject(const QString& project_file);
     // Creates a fresh project (B's document factory + empty catalog + one
     // bootstrap boundary asset via B's run lifecycle) and opens it.
     QString newProject(const QString& dir_path, const QString& name);

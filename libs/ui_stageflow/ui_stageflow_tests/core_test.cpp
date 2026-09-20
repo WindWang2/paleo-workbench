@@ -77,8 +77,9 @@ PWB_TEST(stage_layout_profile_lenient_fallback) {
     const auto empty = stage_layout_profile("");
     CHECK(unknown.stage_value == kStage1Value);
     CHECK(empty.stage_value == kStage1Value);
-    // Chinese display label parses too (stage_from_value tolerance).
-    CHECK(stage_layout_profile("② 约束与单因素").stage_value == kStage2Value);
+    // Known alias tolerance (stage_from_value vocabulary).
+    CHECK(stage_layout_profile("phase2").stage_value == kStage2Value);
+    CHECK(stage_layout_profile("智能预测").stage_value == kStage1Value);
 }
 
 PWB_TEST(stage_display_labels) {
