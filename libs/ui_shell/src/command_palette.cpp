@@ -57,6 +57,13 @@ void CommandPalette::set_tool_details_provider(
     tool_details_provider_ = std::move(provider);
 }
 
+// BEGIN CPP-CLOSE-12 — function-level integration lease (see header).
+void CommandPalette::set_context_provider(
+    std::function<const CommandContext*()> provider) {
+    context_provider_ = std::move(provider);
+}
+// END CPP-CLOSE-12
+
 void CommandPalette::popup() {
     rebuild_commands();
     apply_filter(filter_input_->text());

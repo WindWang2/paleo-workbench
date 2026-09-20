@@ -42,6 +42,15 @@ public:
                               const CommandContext& context)>;
     void set_tool_details_provider(ToolDetailsProvider provider);
 
+    // BEGIN CPP-CLOSE-12 — function-level integration lease (line 12).
+    // Late-bound context source for shells that construct the palette
+    // before their session surface exists (AppShell ctor parity with the
+    // eager ctor argument). Mirrors set_tool_details_provider; UI-01
+    // owners notified via the cpp-close-wave coordination registry.
+    void set_context_provider(
+        std::function<const CommandContext*()> provider);
+    // END CPP-CLOSE-12
+
     void popup();
     void dismiss();
 

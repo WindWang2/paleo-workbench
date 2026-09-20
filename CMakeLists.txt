@@ -1250,6 +1250,80 @@ if(PWB_BUILD_CLOSURE_SCIENCE)
 endif()
 # END CLOSURE-SCIENCE
 
+# BEGIN CPP-CLOSE-12 — shell project-actions integration slice.
+# apps/paleo_workbench_platform/shell_project_actions.* carries the
+# production bodies for the AppShell app-bar surfaces (save / open-sample /
+# properties). It needs the data closure (the same Pwb::Data presence that
+# defines PWB_WITH_DATA_INTEGRATION on Pwb::Application) — without it the
+# window keeps its honest reduced surface. The preview-settings surface
+# additionally needs the UI-07/UI-15 Qt closure (Pwb::UiCanvas pulls
+# Pwb::UiPagesPreviewQt).
+if(TARGET pwb-platform)
+    if(TARGET Pwb::Data)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/shell_project_actions.cpp)
+    endif()
+    if(TARGET Pwb::UiCanvas)
+        target_link_libraries(pwb-platform PRIVATE Pwb::UiCanvas)
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_UI_PAGES_PREVIEW_QT=1)
+    endif()
+endif()
+if(TARGET platform_app_shell)
+    if(TARGET Pwb::Data)
+        target_sources(platform_app_shell PRIVATE
+            apps/paleo_workbench_platform/shell_project_actions.cpp)
+    endif()
+    if(TARGET Pwb::UiCanvas)
+        target_link_libraries(platform_app_shell PRIVATE Pwb::UiCanvas)
+        target_compile_definitions(platform_app_shell PRIVATE
+            PWB_WITH_UI_PAGES_PREVIEW_QT=1)
+    endif()
+    # cpp-close-12 — shell project-actions battery: the four deferred
+    # surfaces against a real store (save/reopen roundtrip, sample
+    # bootstrap through the run lifecycle, properties summary).
+    if(BUILD_TESTING)
+        add_executable(platform_shell_project_actions
+            tests/cpp/platform/test_shell_project_actions.cpp
+            apps/paleo_workbench_platform/main_window.cpp
+            apps/paleo_workbench_platform/app_context.cpp
+            apps/paleo_workbench_platform/diagnostics.cpp)
+        if(TARGET Pwb::Data)
+            target_sources(platform_shell_project_actions PRIVATE
+                apps/paleo_workbench_platform/shell_project_actions.cpp)
+        endif()
+        if(COMMAND pwb_link_job_runtime)
+            pwb_link_job_runtime(platform_shell_project_actions)
+        endif()
+        set_target_properties(platform_shell_project_actions PROPERTIES
+            AUTOMOC ON)
+        target_compile_features(platform_shell_project_actions PRIVATE
+            cxx_std_20)
+        target_include_directories(platform_shell_project_actions PRIVATE
+            tests/cpp/platform
+            apps/paleo_workbench_platform
+            ${CMAKE_BINARY_DIR}/generated)
+        target_link_libraries(platform_shell_project_actions PRIVATE
+            Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+            Pwb::PlatformServices)
+        if(TARGET Pwb::UiCanvas)
+            target_link_libraries(platform_shell_project_actions PRIVATE
+                Pwb::UiCanvas)
+            target_compile_definitions(platform_shell_project_actions
+                PRIVATE PWB_WITH_UI_PAGES_PREVIEW_QT=1)
+        endif()
+        target_compile_definitions(platform_shell_project_actions PRIVATE
+            PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+        add_test(NAME platform.shell_project_actions
+                 COMMAND platform_shell_project_actions)
+        set_tests_properties(platform.shell_project_actions PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+            TIMEOUT 300)
+    endif()
+endif()
+# END CPP-CLOSE-12
+
 # BEGIN VIZ-A — line-A (LAS/WLE convergence + well-log drawing
 # differentials). This block runs after science_suite (:327), the platform
 # app (:703) and ui_workers (:725), so every guard below sees the real

@@ -113,6 +113,49 @@ exec "\$Here/libexec/pwb-platform" "\$@"
 LAUNCHER
 chmod +x "$DistDir/bin/pwb-platform"
 
+# ---- 4b) third-party license materials (cpp-close-12 release contract) ----
+# The deployed package must carry the license texts of every runtime
+# component: the vendored QGIS COPYING, the system Qt license set and a
+# notice listing the remaining components (WLE SDK / ONNX Runtime are
+# consumed from their SDK roots — their roots are collected here too when
+# present). audit-licenses.sh verifies the result.
+echo "== collecting third-party license materials"
+DeployRepoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+mkdir -p "$DistDir/licenses"
+# The vendor install tree has no COPYING at its root — fall back to the
+# QGIS source tree (same variable the SDK admission consumes).
+QgisCopying="${PALEO_QGIS_SOURCE_DIR:-$DeployRepoRoot/third_party/qgis}/COPYING"
+if [ -f "$QgisPrefix/COPYING" ]; then
+    cp "$QgisPrefix/COPYING" "$DistDir/licenses/QGIS-COPYING"
+elif [ -f "$QgisCopying" ]; then
+    cp "$QgisCopying" "$DistDir/licenses/QGIS-COPYING"
+fi
+if [ -d "${PWB_QT_PREFIX:-/usr}/share/licenses/qt6-base" ]; then
+    cp -R "${PWB_QT_PREFIX:-/usr}/share/licenses/qt6-base" \
+        "$DistDir/licenses/qt6-base" 2>/dev/null || true
+fi
+for extra_root in "${PWB_WLE_SDK_DIR:-$DeployRepoRoot/well-log-engine}" \
+                  "${PWB_ORT_DIR:-}"; do
+    if [ -n "$extra_root" ] && [ -f "$extra_root/LICENSE" ]; then
+        cp "$extra_root/LICENSE" \
+            "$DistDir/licenses/$(basename "$extra_root")-LICENSE"
+    fi
+done
+cat > "$DistDir/licenses/THIRD-PARTY-LICENSES.md" <<'NOTICE'
+# Third-party runtime components
+
+This package ships a native C++ product. Runtime third-party components:
+
+* Qt6 (system/vendor ABI, LGPL) — license set under `licenses/qt6-base/`.
+* QGIS 4.2 (vendored SDK, GPL + exception) — `licenses/QGIS-COPYING*`.
+* GDAL / PROJ / GEOS — consumed via the QGIS prefix; data dirs under `share/`.
+* WLE well-log SDK and ONNX Runtime, when present in this package, carry
+  their `LICENSE` files here.
+
+Regenerate with scripts/cpp-migration/audit-licenses.sh (FAIL = do not ship).
+NOTICE
+echo "   license materials under $DistDir/licenses"
+
 # ---- 5) deployed-tree self-check (honest: fixture checks skip) -------------
 echo "== deployed tree self-check"
 QT_QPA_PLATFORM=offscreen "$DistDir/bin/pwb-platform" --self-check

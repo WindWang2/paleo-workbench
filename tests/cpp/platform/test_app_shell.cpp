@@ -5,6 +5,7 @@
 // exercises the global shortcut-registry re-registration path.
 
 #include <QDockWidget>
+#include <QListWidget>
 #include <QString>
 #include <qgsapplication.h>
 #include <qgsmapcanvas.h>
@@ -14,6 +15,7 @@
 #include <pwb/ui_pages_data/qt/hub_page.hpp>
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
+#include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/navigation.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
@@ -95,6 +97,49 @@ int main(int argc, char** argv) {
         PWB_CHECK(shell->command_palette()->isVisible());
         shell->command_palette()->dismiss();
         PWB_CHECK(!shell->command_palette()->isVisible());
+
+        // BEGIN CPP-CLOSE-12 — provider injection coverage. The context
+        // provider feeds the live session snapshot and the details
+        // provider answers map: tools through the canonical explain()
+        // formatter; both are consumed by apply_filter during popup.
+        {
+            using pwb::ui_shell::command_registry;
+            command_registry().register_command(
+                [] {
+                    pwb::ui_shell::CommandSpec spec;
+                    spec.id = "core:palette_ctx_probe";
+                    spec.label = "palette context probe";
+                    spec.group = "core";
+                    return spec;
+                }());
+            command_registry().register_command(
+                [] {
+                    pwb::ui_shell::CommandSpec spec;
+                    spec.id = "map:palette_details_probe";
+                    spec.label = "palette details probe";
+                    spec.group = "core";
+                    return spec;
+                }());
+            shell->command_palette()->popup();
+            QListWidget* results =
+                shell->command_palette()->findChild<QListWidget*>();
+            PWB_CHECK_MSG(results != nullptr, "palette list missing");
+            bool details_tooltip = false;
+            for (int i = 0; i < results->count(); ++i) {
+                auto* item = results->item(i);
+                if (item->data(Qt::ItemDataRole::UserRole).toString()
+                    == QStringLiteral("map:palette_details_probe")) {
+                    details_tooltip = !item->toolTip().isEmpty();
+                }
+            }
+            PWB_CHECK_MSG(details_tooltip,
+                          "map: command has no details tooltip — "
+                          "tool_details_provider not wired");
+            shell->command_palette()->dismiss();
+            command_registry().unregister("core:palette_ctx_probe");
+            command_registry().unregister("map:palette_details_probe");
+        }
+        // END CPP-CLOSE-12
 
         // -- pages: real widgets, deferred seams honest --------------------
         PWB_CHECK(shell->home_page() != nullptr);
