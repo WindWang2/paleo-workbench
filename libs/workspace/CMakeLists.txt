@@ -26,3 +26,19 @@ install(DIRECTORY include/pwb DESTINATION include)
 # Membership mutation surface (set/remove/rebind + stale-reference repair).
 target_sources(pwb_workspace PRIVATE src/mutations.cpp)
 # END CONV-26
+
+# BEGIN V14-QGIS-CONTROL
+# Layer control plane core (Qt-free): ordering engine, domain tree model,
+# keyed-LCS tree diff, state behavior surface and the version->usage
+# reverse query (ports of mapping_workspace/{layer_order,layer_tree,
+# layer_tree_diff,stage_state behavior,source_usage}.py).
+target_sources(pwb_workspace PRIVATE
+    src/layer_order.cpp
+    src/layer_tree.cpp
+    src/layer_tree_diff.cpp
+    src/state_ops.cpp
+    src/source_usage.cpp)
+if(BUILD_TESTING)
+    add_subdirectory(workspace_tests)
+endif()
+# END V14-QGIS-CONTROL
