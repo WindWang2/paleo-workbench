@@ -3,6 +3,7 @@
 #include "pwb/catalog/trash.hpp"
 #include "pwb/project/paths.hpp"
 
+#include <chrono>
 #include <set>
 #include <sys/stat.h>
 
@@ -110,6 +111,15 @@ MigrationReport migrate_resources(const std::vector<LegacyResourceRow>& resource
             std::filesystem::path(resource.path).is_absolute()
                 ? std::filesystem::path(resource.path)
                 : project_dir / resource.path;
+#if defined(_WIN32)
+        // MSVC stat() is narrow-path; fs::exists is the same probe.
+        if (!std::filesystem::exists(file_path)) {
+            std::error_code ec;
+            report.warnings.push_back(
+                "resource " + resource.id + ": file not found at " +
+                std::filesystem::weakly_canonical(file_path, ec).string());
+        }
+#else
         struct ::stat probe {};
         if (::stat(file_path.c_str(), &probe) != 0) {
             std::error_code ec;
@@ -117,6 +127,7 @@ MigrationReport migrate_resources(const std::vector<LegacyResourceRow>& resource
                 "resource " + resource.id + ": file not found at " +
                 std::filesystem::weakly_canonical(file_path, ec).string());
         }
+#endif
         // Pure metadata projection: never managed (#396/C34).
         const bool managed = false;
         const std::string stored_path = absolute_posix(resource.path, project_dir);
@@ -151,6 +162,23 @@ MigrationReport migrate_resources(const std::vector<LegacyResourceRow>& resource
         // fingerprint (size + mtime_ns) — cheap, no hashing, enough for the
         // relink stat-proof tier. The digest is never guessed.
         if (!managed && !resource.checksum.has_value() && !size_bytes.has_value()) {
+#if defined(_WIN32)
+            // MSVC stat() is narrow-path; fs probes are the same facts.
+            std::error_code fp_ec{};
+            if (std::filesystem::is_regular_file(file_path, fp_ec)) {
+                const auto size = std::filesystem::file_size(file_path, fp_ec);
+                const auto written = std::filesystem::last_write_time(file_path, fp_ec);
+                if (!fp_ec) {
+                    size_bytes = static_cast<std::int64_t>(size);
+                    stat_fingerprint = domain::Json::object();
+                    stat_fingerprint["size"] = static_cast<std::int64_t>(size);
+                    stat_fingerprint["mtime_ns"] =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            written.time_since_epoch())
+                            .count();
+                }
+            }
+#else
             struct ::stat st {};
             if (::stat(file_path.c_str(), &st) == 0) {
                 size_bytes = st.st_size;
@@ -159,6 +187,7 @@ MigrationReport migrate_resources(const std::vector<LegacyResourceRow>& resource
                 stat_fingerprint["mtime_ns"] =
                     static_cast<std::int64_t>(st.st_mtim.tv_nsec);
             }
+#endif
         }
         domain::Json metadata = legacy;
         if (!stat_fingerprint.is_null()) {

@@ -68,7 +68,11 @@ bool record_catalog_event(const std::filesystem::path& project_path,
         payload["event"] = event;
         std::time_t now = std::time(nullptr);
         std::tm local{};
+#if defined(_WIN32)
+        localtime_s(&local, &now);
+#else
         localtime_r(&now, &local);
+#endif
         char stamp[32];
         std::strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &local);
         payload["at"] = stamp;
