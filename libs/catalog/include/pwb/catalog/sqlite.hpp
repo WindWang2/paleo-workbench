@@ -50,10 +50,13 @@ public:
 
     Statement prepare(std::string_view sql);
 
-    // BEGIN IMMEDIATE … COMMIT/ROLLBACK guard.
-    void begin_immediate();
-    void commit();
-    void rollback();
+    // BEGIN IMMEDIATE … COMMIT/ROLLBACK guard. Each returns the sqlite
+    // error verbatim (a failed BEGIN marks the guard inactive; a failed
+    // COMMIT leaves the transaction open for the destructor's rollback —
+    // the error is never swallowed, #1398 leftover).
+    domain::DataError begin_immediate();
+    domain::DataError commit();
+    domain::DataError rollback();
 
     // Applies the canonical v5 schema (idempotent, IF NOT EXISTS) — the
     // same statement list db.py runs per connection.
@@ -102,13 +105,18 @@ class Transaction {
 public:
     explicit Transaction(Database& db);  // BEGIN IMMEDIATE
     ~Transaction();                      // ROLLBACK unless committed
-    void commit();
-    void rollback();
+    // Returns the COMMIT error verbatim; the transaction stays open on
+    // failure so the destructor rolls back (committed_ is only set on a
+    // verified commit — a disk-full/BUSY commit can no longer be mistaken
+    // for success).
+    domain::DataError commit();
+    domain::DataError rollback();
 
 private:
     Database& db_;
     bool committed_ = false;
     bool began_ = false;
+    domain::DataError begin_error_{domain::ErrorCode::Ok, ""};
 };
 
 }  // namespace pwb::catalog
