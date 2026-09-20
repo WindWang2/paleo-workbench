@@ -513,10 +513,7 @@ void VizBCrossWellDock::refresh_factor_context() {
                            std::array<double, 2>{w.value("lng", 0.0),
                                                  w.value("lat", 0.0)});
     }
-    QVariant root_variant = owner->property("closure_project_root");
-    // The project document rides the store; the mapping install keeps the
-    // store reachable through the context — sample through the same
-    // project JSON the preparation page committed into.
+    // The project document rides the store the mapping install exposes.
     const Json* root = nullptr;
     if (auto* store = owner->property("closure_project_store")
                           .value<pwb::application::PwbDataStore*>();

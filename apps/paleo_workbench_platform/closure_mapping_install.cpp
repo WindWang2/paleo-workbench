@@ -766,6 +766,21 @@ bool install(const Install& install) {
                                 std::chrono::milliseconds(50));
                         }
                     });
+                    // RAII: whatever path leaves this scope (result, cancel
+                    // or exception) joins the bridge — a joinable thread at
+                    // destruction would std::terminate the app.
+                    const auto join_bridge =
+                        [&cancel_bridge, &body_done]() {
+                            body_done.store(true,
+                                            std::memory_order_relaxed);
+                            if (cancel_bridge.joinable()) {
+                                cancel_bridge.join();
+                            }
+                        };
+                    struct JoinGuard {
+                        std::function<void()> fn;
+                        ~JoinGuard() { fn(); }
+                    } join_guard{join_bridge};
                     const auto forward =
                         [&](const pwb::ui_workers::FactorPrepareProgress&
                                 update) {
@@ -783,8 +798,7 @@ bool install(const Install& install) {
                     auto result = pwb::ui_workers::
                         run_factor_prepare_schedule(snapshot, token, forward,
                                                     seams, /*workers=*/0);
-                    body_done.store(true, std::memory_order_relaxed);
-                    cancel_bridge.join();
+                    // (the JoinGuard joins at scope exit on every path)
                     pwb::ui_pages_data::qt::PrepareResultView done;
                     done.generation = result.generation;
                     done.clean_count = result.clean_count;
@@ -1186,6 +1200,12 @@ void notify_project_changed(QMainWindow* window) {
         }
     } else {
         self->factor_catalog.reset();
+    }
+    // Session caches must not leak across projects (Python
+    // clear_session_caches parity): the live grid store and any stashed
+    // un-committed batch die with the project switch.
+    if (self->factor_grids != nullptr) {
+        self->factor_grids->clear_all();
     }
     if (QMainWindow* owner = window; owner != nullptr) {
         owner->setProperty("closure_factor_catalog",

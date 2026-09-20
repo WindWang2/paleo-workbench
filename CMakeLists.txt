@@ -1216,6 +1216,13 @@ if(TARGET pwb-platform
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
                 apps/paleo_workbench_platform/closure_review_install.cpp)
+            # main_window.cpp references the shell project-action bodies
+            # under the PUBLIC PWB_WITH_DATA_INTEGRATION define (same
+            # baseline link gap as platform_closure_mapping).
+            if(TARGET Pwb::Data)
+                target_sources(platform_closure_review_install PRIVATE
+                    apps/paleo_workbench_platform/shell_project_actions.cpp)
+            endif()
             if(COMMAND pwb_link_job_runtime)
                 pwb_link_job_runtime(platform_closure_review_install)
             endif()

@@ -352,15 +352,26 @@ void test_degenerate_cases(LiveFactorGridStore& grids) {
     run_prepare(small, "约束IDW", grids, &r6);
     CHECK(r6.task_results[0].error.has_value());
 
-    // constrained without a boundary ring -> the engine's boundary
-    // requirement surfaces as the task error.
+    // constrained without a user ring -> the sample convex hull
+    // synthesizes the boundary (adapter parity); degenerate (<3 unique
+    // positions) still refuses with the engine text.
     Json no_boundary = make_project(
         {make_task("factor_c3", "砂地比",
                    synthetic_points(8, 21), "约束IDW")});
     FactorPrepareBatchResult r7;
     run_prepare(no_boundary, "约束IDW", grids, &r7);
-    CHECK(r7.task_results[0].error.has_value());
-    CHECK((*r7.task_results[0].error).find("boundary") != std::string::npos);
+    CHECK(!r7.task_results[0].error.has_value());
+    CHECK((*r7.task_results[0].task->source_json)["parameters"]
+              .contains("grid_boundary"));
+    Json degenerate = make_project(
+        {make_task("factor_c3b", "砂地比",
+                   Json::array({make_point(1, 1, 5.0),
+                                make_point(1, 1, 6.0),
+                                make_point(2, 2, 7.0)}),
+                   "约束IDW")});
+    FactorPrepareBatchResult r8;
+    run_prepare(degenerate, "约束IDW", grids, &r8);
+    CHECK(r8.task_results[0].error.has_value());
 }
 
 // ---------------------------------------------------------------- A3 ---
@@ -501,7 +512,9 @@ void test_commit_semantics(LiveFactorGridStore& grids) {
     item.task_id = "factor_g3";
     item.dirty_state = "MISSING_OUTPUT";
     cancelled.task_results.push_back(item);
-    // seed a live grid so the invalidation has something to clear
+    // Seed a live grid with a DIFFERENT fingerprint: the cancelled run
+    // produced no grid, so the fingerprint-conditional invalidation
+    // (#881) leaves the still-valid previous payload in place.
     LiveGridEntry entry;
     entry.grid_x = {0.0, 1.0};
     entry.grid_y = {0.0, 1.0};
@@ -511,7 +524,7 @@ void test_commit_semantics(LiveFactorGridStore& grids) {
     auto creport = commit_prepare_batch_result(project3, cancelled, 30,
                                                grids, &catalog);
     CHECK(creport.applied == 0);
-    CHECK(!grids.has("factor_g3"));
+    CHECK(grids.has("factor_g3"));  // #881: no grid produced -> no eviction
     CHECK(project3["factor_map_tasks"][0]["status"] == "pending");
 
     // first-prepare defaults bootstrap: empty task list grows the four

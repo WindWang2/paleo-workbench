@@ -54,20 +54,14 @@ namespace {
 
 // ------------------------------------------------------------------ misc --
 
-[[nodiscard]] std::string py_round_str(double value, int digits) {
-    // Python round(x, n) then str() — round-half-even, trailing zeros
-    // trimmed by str(). Used for quality_metrics label fields.
-    const double scaled = std::pow(10.0, digits);
-    double rounded = std::nearbyint(value * scaled) / scaled;
-    if (rounded == 0.0) rounded = 0.0;  // normalize -0.0
+[[nodiscard]] std::string range_label(double lo, double hi) {
+    // Python f"{min:.2f} – {max:.2f}" — two fixed decimals, en dash.
     std::ostringstream out;
-    out.precision(12);
-    out << rounded;
+    out << std::fixed << std::setprecision(2) << lo << " – " << hi;
     return out.str();
 }
-
-[[nodiscard]] std::string range_label(double lo, double hi) {
-    return py_round_str(lo, 2) + " – " + py_round_str(hi, 2);
+[[nodiscard]] std::string format_range(double lo, double hi) {
+    return range_label(lo, hi);
 }
 
 [[nodiscard]] const Json* find_field(const Json& object,
@@ -98,7 +92,8 @@ namespace {
     static std::mt19937_64 rng(std::random_device{}());
     std::lock_guard<std::mutex> guard(mutex);
     std::ostringstream out;
-    out << std::hex << rng() << rng();
+    out << std::hex << std::setfill('0') << std::setw(16) << rng()
+        << std::setw(16) << rng();
     const std::string hex = out.str();
     return std::string(prefix) + "_" + hex.substr(0, 12);
 }
@@ -203,15 +198,60 @@ struct ConstraintSet {
     std::string crs_conflict;
 };
 
-[[nodiscard]] std::string polyline_content_hash(const Json& layers,
-                                                const std::string& horizon) {
+// constraint_versions.py constraint_group_content_hash parity: the pin
+// digest is ID-free, ORDER-free and ACTIVE-lines-only — renames, id
+// regeneration, inactive lines and version rebinding must not flip it.
+// Per canonical line: role + 9-decimal-rounded coordinates (auto-closed
+// rings keep their closure point like boundary_rings_for_engine).
+[[nodiscard]] std::string canonical_line_key(const Json& line) {
     Json payload = Json::object();
-    payload["layers"] = layers;
+    payload["role"] = field_str(line, "role", "other");
+    Json coords = Json::array();
+    if (const Json* raw = find_field(line, "coordinates");
+        raw != nullptr && raw->is_array()) {
+        for (const auto& xy : *raw) {
+            if (!xy.is_array() || xy.size() < 2) continue;
+            if (!xy[0].is_number() || !xy[1].is_number()) continue;
+            std::ostringstream x_out, y_out;
+            x_out << std::fixed << std::setprecision(9)
+                  << xy[0].get<double>();
+            y_out << std::fixed << std::setprecision(9)
+                  << xy[1].get<double>();
+            coords.push_back(x_out.str() + "," + y_out.str());
+        }
+    }
+    payload["coordinates"] = std::move(coords);
+    return payload.dump();
+}
+
+[[nodiscard]] std::string polyline_content_hash(
+    const Json& layer, const std::string& horizon) {
+    std::vector<std::string> keys;
+    if (const Json* lines = find_field(layer, "lines");
+        lines != nullptr && lines->is_array()) {
+        for (const auto& line : *lines) {
+            if (!line.is_object()) continue;
+            const bool active = [&] {
+                const Json* flag = find_field(line, "active");
+                return flag == nullptr || !flag->is_boolean() ? true
+                                                              : flag->get<bool>();
+            }();
+            if (!active) continue;
+            keys.push_back(canonical_line_key(line));
+        }
+    }
+    std::sort(keys.begin(), keys.end());
+    Json payload = Json::object();
+    payload["canonical_lines"] = keys;
     payload["target_horizon"] = horizon;
     return pwb::factor_host::stable_sha256(payload);
 }
 
 // constraint_layers_for_project: empty layer horizon or exact match.
+[[nodiscard]] std::string horizon_of(const Json& layer) {
+    return field_str(layer, "target_horizon");
+}
+
 [[nodiscard]] std::vector<const Json*> layers_for_horizon(
     const std::vector<std::any>& constraint_layers,
     const std::string& target_horizon) {
@@ -251,6 +291,14 @@ struct ConstraintSet {
         int consumed = 0;
         for (const auto& line : *lines) {
             if (!line.is_object()) continue;
+            // active_lines parity: a line's own horizon (falling back to
+            // the layer's) must be empty or match the target.
+            const std::string line_horizon =
+                field_str(line, "target_horizon", horizon_of(*layer));
+            if (!line_horizon.empty() && !target_horizon.empty()
+                && line_horizon != target_horizon) {
+                continue;
+            }
             const bool active = [&] {
                 const Json* flag = find_field(line, "active");
                 return flag == nullptr || !flag->is_boolean()
@@ -276,13 +324,23 @@ struct ConstraintSet {
                 out.break_lines.push_back(std::move(points));
                 ++consumed;
             } else if (role == "direction" && points.size() >= 2) {
-                // First-segment bearing from north (atan2(dx, dy)).
-                const double dx = points[1][0] - points[0][0];
-                const double dy = points[1][1] - points[0][1];
+                // direction_line_params parity: an explicit azimuth wins;
+                // else the whole-line endpoint bearing from north, kept in
+                // [0, 360) (Python % 360.0 on a positive quantity).
+                const double dx = points.back()[0] - points.front()[0];
+                const double dy = points.back()[1] - points.front()[1];
+                double azimuth =
+                    std::atan2(dx, dy) * 180.0 / M_PI;
+                azimuth = std::fmod(azimuth + 360.0, 360.0);
+                const Json* explicit_azimuth =
+                    find_field(line, "azimuth_deg");
+                if (explicit_azimuth != nullptr
+                    && explicit_azimuth->is_number()) {
+                    azimuth = explicit_azimuth->get<double>();
+                }
                 Json params = Json::object();
                 params["id"] = field_str(line, "id", "cline_direction");
-                params["azimuth_deg"] =
-                    std::fmod(std::atan2(dx, dy) * 180.0 / M_PI, 360.0);
+                params["azimuth_deg"] = azimuth;
                 Json coordinates = Json::array();
                 for (const auto& [px, py] : points) {
                     coordinates.push_back(Json::array({px, py}));
@@ -301,13 +359,26 @@ struct ConstraintSet {
                 out.direction_params.push_back(std::move(params));
                 out.direction_lines.push_back(std::move(points));
                 ++consumed;
-            } else if (role == "boundary" && points.size() >= 4) {
-                const auto& first = points.front();
-                const auto& last = points.back();
-                const bool closed = std::abs(first[0] - last[0]) < 1e-9
-                                    && std::abs(first[1] - last[1]) < 1e-9;
-                if (closed) {
-                    out.boundary_rings.push_back(std::move(points));
+            } else if (role == "boundary" && points.size() >= 3) {
+                // boundary_rings_for_engine parity: drop duplicate closing
+                // points, auto-close open rings (the drawer may have left
+                // the ring open); >=3 unique vertices required.
+                std::vector<std::array<double, 2>> unique;
+                for (const auto& point : points) {
+                    const bool dup =
+                        !unique.empty()
+                        && std::abs(unique.back()[0] - point[0]) < 1e-12
+                        && std::abs(unique.back()[1] - point[1]) < 1e-12;
+                    if (!dup) unique.push_back(point);
+                }
+                if (unique.size() >= 3) {
+                    const auto& first = unique.front();
+                    const auto& last = unique.back();
+                    const bool closed =
+                        std::abs(first[0] - last[0]) < 1e-9
+                        && std::abs(first[1] - last[1]) < 1e-9;
+                    if (!closed) unique.push_back(first);
+                    out.boundary_rings.push_back(std::move(unique));
                     ++consumed;
                 }
             }
@@ -321,12 +392,11 @@ struct ConstraintSet {
             if (version_id != nullptr && version_id->is_string()) {
                 pin["version_id"] = version_id->get<std::string>();
             }
-            Json layer_copy = *layer;
             out.pins.push_back(std::move(pin));
-            // content hash over the whole (horizon-filtered) layer — one
-            // digest per consumed group, Python constraint_versions parity.
+            // canonical content hash per consumed group (constraint_
+            // versions.py parity — see polyline_content_hash).
             out.pins.back()["content_hash"] =
-                polyline_content_hash(layer_copy, target_horizon);
+                polyline_content_hash(*layer, target_horizon);
         }
     }
     // CRS discipline (fail-closed): mutually incompatible constraint
@@ -362,37 +432,20 @@ struct AnisotropyParams {
     const Json& direction_params, const Json& task_parameters) {
     AnisotropyParams out;
     if (direction_params.is_array() && !direction_params.empty()) {
-        double sx = 0.0, sy = 0.0;
-        int n = 0;
-        double major_sum = 0.0, minor_sum = 0.0;
-        int axes = 0;
-        for (const auto& params : direction_params) {
-            const double az = [&] {
-                const Json* field = find_field(params, "azimuth_deg");
-                return field != nullptr && field->is_number()
-                           ? field->get<double>()
-                           : 0.0;
-            }();
-            const double rad = az * M_PI / 180.0;
-            sx += std::sin(rad);
-            sy += std::cos(rad);
-            ++n;
-            const Json* major = find_field(params, "semi_major");
-            const Json* minor = find_field(params, "semi_minor");
-            if (major != nullptr && major->is_number() && minor != nullptr
-                && minor->is_number()) {
-                major_sum += major->get<double>();
-                minor_sum += minor->get<double>();
-                ++axes;
-            }
+        // resolve_anisotropy_params parity: the FIRST direction dict wins
+        // (geoviz takes params[0]), not a mean.
+        const Json& params = direction_params.front();
+        const Json* azimuth = find_field(params, "azimuth_deg");
+        if (azimuth != nullptr && azimuth->is_number()) {
+            out.azimuth_deg = azimuth->get<double>();
         }
-        if (n > 0) {
-            out.azimuth_deg =
-                std::fmod(std::atan2(sx, sy) * 180.0 / M_PI, 360.0);
+        const Json* major = find_field(params, "semi_major");
+        if (major != nullptr && major->is_number()) {
+            out.semi_major = major->get<double>();
         }
-        if (axes > 0) {
-            out.semi_major = major_sum / axes;
-            out.semi_minor = minor_sum / axes;
+        const Json* minor = find_field(params, "semi_minor");
+        if (minor != nullptr && minor->is_number()) {
+            out.semi_minor = minor->get<double>();
         }
     }
     if (task_parameters.is_object()) {
@@ -414,6 +467,11 @@ struct AnisotropyParams {
 }
 
 // ------------------------------------------------------- fingerprint glue --
+
+[[nodiscard]] const Json& nlohmann_json_empty_params() {
+    static const Json empty = Json::object();
+    return empty;
+}
 
 struct ResolvedFingerprints {
     pwb::factor_host::FactorFingerprints fingerprints;
@@ -444,11 +502,9 @@ struct ResolvedFingerprints {
         return empty_params;
     }();
 
-    // Python: method override wins, then task method; the fingerprint
-    // backend resolution defaults unknown labels to "idw" (unlike the
-    // engine resolution, which raises).
-    std::string method = field_str(params, "method");
-    if (method.empty()) method = task.method;
+    // Python: the schedule override wins, then the TASK's own method —
+    // parameters.method is never consulted at prepare time.
+    std::string method = task.method;
     if (!ctx.method.empty()) method = ctx.method;
     out.backend = pwb::factor_host::resolve_backend(method);
 
@@ -462,11 +518,10 @@ struct ResolvedFingerprints {
         }
     }
     if (grid_n <= 0) grid_n = ui_workers::kDefaultGridN;
-    double power = ctx.power;
-    const Json* power_field = find_field(params, "power");
-    if (power_field != nullptr && power_field->is_number()) {
-        power = power_field->get<double>();
-    }
+    // Python parity: the SCHEDULED power wins unconditionally
+    // (parameters.power is never read at prepare time — an override must
+    // invalidate results computed with a different power).
+    const double power = ctx.power;
 
     const Json sample_points = sample_points_to_json(
         [&] {
@@ -693,23 +748,33 @@ derived_constrained_config(
     const double span = std::max(xmax - xmin, ymax - ymin);
     const double diag =
         std::hypot(xmax - xmin, ymax - ymin);
-    const double pad = std::max(1e-9, (hi - lo) * 1e-6);
+    // Adapter parity: pad = (hi-lo)*1e-9, floored at max(|lo|*1e-6, 1e-9)
+    // for the degenerate constant field.
+    double pad = (hi - lo) * 1e-9;
+    if (hi == lo) pad = std::max(std::abs(lo) * 1e-6, 1e-9);
     config.value_min = lo - pad;
     config.value_max = hi + pad;
     config.search_radius =
         std::max(1.05 * diag, 0.75 * std::max(span, 1e-9));
     config.decluster_radius =
-        has_directions ? 0.0 : 0.15 * config.search_radius;
+        has_directions
+            ? 0.0
+            : std::max({0.15 * config.search_radius, 0.05 * span, 1e-6});
     config.grid_resolution = std::max(20, std::min(200, grid_n));
     config.power = power;
-    // Direction-active recipe (Python adapter): along-track blend 1.0,
-    // corridor 2.65, perpendicular 1.85, taper 0.95, smoothing 3.0.
+    // Direction-active recipe (adapter): along-track blend 1.0 (cell_g
+    // 0.025, exp_k 8.0), corridor 2.65, perpendicular 1.85, taper 0.95,
+    // direction SMOOTHING STRENGTH 3.0 (iterations stay at the default),
+    // declustering off.
     if (has_directions) {
         config.along_track_blend_strength = 1.0;
+        config.along_track_min_cell_g = 0.025;
+        config.along_track_exp_k = 8.0;
         config.direction_corridor_strength = 2.65;
         config.direction_perpendicular_strength = 1.85;
         config.direction_taper_plateau = 0.95;
-        config.grid_smoothing_iterations = 3;
+        config.direction_smoothing_strength = 3.0;
+        config.decluster_strength = 0.0;
     }
     return config;
 }
@@ -722,6 +787,8 @@ struct AttachedResult {
     Json r_squared = Json(nullptr);
     int n_break_lines = 0;
     int n_direction_lines = 0;
+    // Effective boundary rings (user rings, or the synthesized hull).
+    std::vector<std::vector<std::array<double, 2>>> effective_boundary;
 };
 
 // The per-task numeric core. Throws on task failure (caller isolates).
@@ -764,6 +831,10 @@ struct AttachedResult {
     token.check_cancelled();
 
     if (backend == pwb::factor_host::kConstrainedIdwLabel) {
+        // The hull fallback below extends the ring set locally (the input
+        // constraint set stays const — callers fingerprint it as consumed).
+        std::vector<std::vector<std::array<double, 2>>> boundary_rings =
+            constraints.boundary_rings;
         if (samples.points.size() < 3) {
             throw std::invalid_argument(
                 "约束IDW至少需要 3 口有效井（当前 "
@@ -794,13 +865,62 @@ struct AttachedResult {
                 + std::to_string(duplicates_dropped) + "）");
         }
         if (constraints.boundary_rings.empty()) {
-            throw std::invalid_argument(
-                "constrained_idw requires a boundary polygon "
-                "(constrained_boundary or interpolate.boundary)");
+            // constrained_idw_adapter._boundary_from_samples parity: no
+            // user ring -> synthesize the sample convex hull (Andrew
+            // monotone chain over the valid wells). Fewer than 3 unique
+            // positions genuinely cannot bound a surface — engine text.
+            std::vector<std::array<double, 2>> hull;
+            {
+                std::vector<std::array<double, 2>> pts;
+                for (const auto& point : samples.points) {
+                    pts.push_back({point.x, point.y});
+                }
+                std::sort(pts.begin(), pts.end());
+                pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+                if (pts.size() >= 3) {
+                    auto cross = [](const std::array<double, 2>& o,
+                                    const std::array<double, 2>& a,
+                                    const std::array<double, 2>& b) {
+                        return (a[0] - o[0]) * (b[1] - o[1])
+                               - (a[1] - o[1]) * (b[0] - o[0]);
+                    };
+                    std::vector<std::array<double, 2>> lower, upper;
+                    for (const auto& pt : pts) {
+                        while (lower.size() >= 2
+                               && cross(lower[lower.size() - 2],
+                                        lower[lower.size() - 1], pt)
+                                      <= 0) {
+                            lower.pop_back();
+                        }
+                        lower.push_back(pt);
+                    }
+                    for (std::size_t i = pts.size(); i-- > 0;) {
+                        const auto& pt = pts[i];
+                        while (upper.size() >= 2
+                               && cross(upper[upper.size() - 2],
+                                        upper[upper.size() - 1], pt)
+                                      <= 0) {
+                            upper.pop_back();
+                        }
+                        upper.push_back(pt);
+                    }
+                    lower.pop_back();
+                    upper.pop_back();
+                    hull = std::move(lower);
+                    hull.insert(hull.end(), upper.begin(), upper.end());
+                    hull.push_back(hull.front());  // close the ring
+                }
+            }
+            if (hull.empty()) {
+                throw std::invalid_argument(
+                    "constrained_idw requires a boundary polygon "
+                    "(constrained_boundary or interpolate.boundary)");
+            }
+            boundary_rings.push_back(std::move(hull));
         }
         std::vector<pwb::mapping::constrained_idw::BoundaryPolygon>
             boundaries;
-        for (const auto& ring : constraints.boundary_rings) {
+        for (const auto& ring : boundary_rings) {
             pwb::mapping::constrained_idw::BoundaryPolygon polygon;
             for (const auto& [x, y] : ring) {
                 polygon.exterior.push_back({x, y});
@@ -836,6 +956,7 @@ struct AttachedResult {
                                      directions, config);
         out.n_break_lines = static_cast<int>(barriers.size());
         out.n_direction_lines = static_cast<int>(directions.size());
+        out.effective_boundary = std::move(boundary_rings);
         return out;
     }
 
@@ -900,6 +1021,7 @@ void attach_result_to_task(Json& task_json, const Json& raw_points,
         samples.report.n_duplicate_groups;
     normalization["n_duplicates_merged"] =
         samples.report.n_duplicates_merged;
+    normalization["n_qc_flagged"] = samples.report.n_qc_flagged;
     params["sample_normalization"] = std::move(normalization);
 
     if (!constraints.pins.empty()) {
@@ -971,9 +1093,9 @@ void attach_result_to_task(Json& task_json, const Json& raw_points,
         params.erase("break_polylines");
     }
 
-    if (attached.constrained && !constraints.boundary_rings.empty()) {
+    if (attached.constrained && !attached.effective_boundary.empty()) {
         Json ring = Json::array();
-        for (const auto& [x, y] : constraints.boundary_rings.front()) {
+        for (const auto& [x, y] : attached.effective_boundary.front()) {
             ring.push_back(Json::array({x, y}));
         }
         params["grid_boundary"] = std::move(ring);
@@ -1009,7 +1131,7 @@ void attach_result_to_task(Json& task_json, const Json& raw_points,
                                       attached.constrained_grid.grid_z
                                           .end()))
                             : attached.grid.statistics;
-    quality["range"] = range_label(stats.min, stats.max);
+    quality["range"] = format_range(stats.min, stats.max);
     quality["r_squared"] = attached.r_squared;
     quality["grid"] = std::to_string(height) + "×"
                       + std::to_string(width);
@@ -1018,6 +1140,31 @@ void attach_result_to_task(Json& task_json, const Json& raw_points,
     quality["mean"] = Json(nullptr);
     if (std::isfinite(stats.mean)) {
         quality["mean"] = stats.mean;
+    }
+    // Python quality_metrics companions: distance policy annotation,
+    // duplicate accounting, kriging variance envelope.
+    if (!attached.constrained
+        && !attached.grid.distance_policy_annotation.empty()) {
+        quality["distance_policy"] =
+            attached.grid.distance_policy_annotation;
+    }
+    quality["duplicate_locations_merged"] =
+        samples.report.n_duplicate_groups;
+    quality["duplicate_samples_merged"] =
+        samples.report.n_duplicates_merged;
+    quality["duplicate_policy"] = samples.report.policy;
+    if (backend == "kriging") {
+        double vmin = std::numeric_limits<double>::infinity();
+        double vmax = -std::numeric_limits<double>::infinity();
+        for (const float v : attached.grid.variance_grid) {
+            if (!std::isfinite(v)) continue;
+            vmin = std::min(vmin, static_cast<double>(v));
+            vmax = std::max(vmax, static_cast<double>(v));
+        }
+        if (vmin <= vmax) {
+            quality["variance_min"] = vmin;
+            quality["variance_max"] = vmax;
+        }
     }
     task_json["quality_metrics"] = std::move(quality);
 
@@ -1189,8 +1336,12 @@ void LiveFactorGridStore::store(const std::string& task_id,
 std::optional<LiveGridEntry> LiveFactorGridStore::peek(
     const std::string& task_id) const {
     std::lock_guard<std::mutex> guard(impl_->mutex);
-    for (auto& [id, entry] : impl_->lru) {
-        if (id == task_id) return entry;
+    for (auto it = impl_->lru.begin(); it != impl_->lru.end(); ++it) {
+        if (it->first == task_id) {
+            // LRU semantics: a hit refreshes recency (move to back).
+            impl_->lru.splice(impl_->lru.end(), impl_->lru, it);
+            return it->second;
+        }
     }
     return std::nullopt;
 }
@@ -1235,6 +1386,12 @@ void LiveFactorGridStore::stash_last_result(
     std::shared_ptr<const ui_workers::FactorPrepareBatchResult> result) {
     std::lock_guard<std::mutex> guard(impl_->mutex);
     impl_->last_result = std::move(result);
+}
+
+void LiveFactorGridStore::clear_all() {
+    std::lock_guard<std::mutex> guard(impl_->mutex);
+    impl_->lru.clear();
+    impl_->last_result = nullptr;
 }
 
 std::optional<ui_workers::FactorPrepareBatchResult>
@@ -1428,9 +1585,7 @@ ui_workers::FactorPrepareSeams make_factor_prepare_seams(
                 }
 
                 const std::string method = [&] {
-                    std::string label =
-                        field_str(params, "method");
-                    if (label.empty()) label = task.method;
+                    std::string label = task.method;
                     if (!args.ctx.method.empty()) label = args.ctx.method;
                     return label;
                 }();
@@ -1497,12 +1652,24 @@ ui_workers::FactorPrepareSeams make_factor_prepare_seams(
         if (method != "IDW" && method != "idw" && method != "mock") {
             return std::nullopt;
         }
-        const Json raw_points = sample_points_to_json(
+        // _task_plan_group_key parity: the NORMALIZED sample set feeds
+        // the geometry digest (duplicates/partial-invalid inputs group
+        // like the oracle).
+        Json raw_points = sample_points_to_json(
             [&] {
                 const auto it = task.parameters.find("sample_points");
                 return it != task.parameters.end() ? it->second
                                                    : std::any{};
             }());
+        try {
+            raw_points = pwb::mapping::normalize_factor_samples(
+                                 raw_points,
+                                 pwb::mapping::duplicate_policy_from_params(
+                                     nlohmann_json_empty_params()))
+                             .first;
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
         const auto constraints = resolve_constraints(
             ctx.constraint_layers, ctx.target_horizon,
             ctx.project_crs.value_or(""));
@@ -1559,20 +1726,33 @@ ui_workers::FactorPrepareSeams make_factor_prepare_seams(
 // ---------------------------------------------------------- well-table ops --
 
 std::string value_key_for_factor_type(const std::string& factor_type) {
-    auto contains = [&](const char* needle) {
-        return factor_type.find(needle) != std::string::npos;
+    // well_table.py parity: normalized EXACT/alias equality (casefold,
+    // stripped) — never substring matching (#1151: a mis-selection mixes
+    // physical dimensions).
+    std::string key = factor_type;
+    const auto normalize = [](std::string value) {
+        value.erase(0, value.find_first_not_of(" \t"));
+        value.erase(value.find_last_not_of(" \t") + 1);
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char c) {
+                           return static_cast<char>(
+                               std::tolower(c));
+                       });
+        return value;
     };
-    if (contains("砂地比") || contains("sand_ratio") || factor_type == "R_s"
-        || factor_type == "rs") {
-        return "R_s";
-    }
-    if (contains("地层厚度") || contains("thickness") || factor_type == "H_t"
-        || factor_type == "ht" || contains("total_thickness")
-        || contains("formation_thickness")) {
+    key = normalize(std::move(key));
+    const auto matches = [&](std::initializer_list<const char*> aliases) {
+        for (const char* alias : aliases) {
+            if (key == normalize(alias)) return true;
+        }
+        return false;
+    };
+    if (matches({"砂地比", "sand_ratio", "r_s", "rs"})) return "R_s";
+    if (matches({"地层厚度", "thickness", "h_t", "ht", "total_thickness",
+                 "formation_thickness"})) {
         return "H_t";
     }
-    if (contains("砂岩厚度") || contains("sand_thickness") || contains("H_s")
-        || factor_type == "hs" || factor_type == "sand") {
+    if (matches({"砂岩厚度", "sand_thickness", "h_s", "hs", "sand"})) {
         return "H_s";
     }
     return "z";
@@ -1652,17 +1832,22 @@ Json run_well_table_qc(Json& well_table, const std::string& value_key) {
 
     double median = 0.0;
     double mad = 0.0;
-    if (!values.empty()) {
-        std::vector<double> sorted = values;
+    const auto middle_of = [](std::vector<double> sorted) {
         std::sort(sorted.begin(), sorted.end());
-        median = sorted[sorted.size() / 2];
+        const std::size_t n = sorted.size();
+        if (n == 0) return 0.0;
+        return n % 2 == 1
+                   ? sorted[n / 2]
+                   : 0.5 * (sorted[n / 2 - 1] + sorted[n / 2]);
+    };
+    if (!values.empty()) {
+        median = middle_of(values);
         std::vector<double> deviations;
-        deviations.reserve(sorted.size());
+        deviations.reserve(values.size());
         for (const double value : values) {
             deviations.push_back(std::abs(value - median));
         }
-        std::sort(deviations.begin(), deviations.end());
-        mad = deviations[deviations.size() / 2];
+        mad = middle_of(std::move(deviations));
     }
     const double sem = 0.6745 * mad;  // consistent-estimator scaling
 
@@ -1797,6 +1982,7 @@ CommitPrepareReport commit_prepare_batch_result(
         [&](Json& patched, const FactorTaskSlice& slice,
             const ui_workers::FactorPrepareTaskResult& item) {
             if (catalog == nullptr) return;
+            std::string booked_run_id;
             try {
                 const std::string generator_version =
                     ui_workers::kFactorInterpGeneratorVersion;
@@ -1836,10 +2022,23 @@ CommitPrepareReport commit_prepare_batch_result(
                     "factor_map", /*input_version_ids=*/{}, parameters,
                     generator_version, "running", slice.id,
                     field_str(patched, "input_snapshot_hash"));
+                booked_run_id = run_id;  // a booked run must not linger
                 const auto* entry =
                     std::any_cast<LiveGridEntry>(&item.grid);
-                std::string payload = "{}";
-                if (entry != nullptr) {
+                if (entry == nullptr) {
+                    // No grid payload (e.g. LRU eviction between execution
+                    // and commit): register no version — an empty-payload
+                    // INTERMEDIATE record would mispoint the lineage.
+                    catalog->update_run_status(booked_run_id, "failed",
+                                               Json{{"error",
+                                                     "grid payload absent "
+                                                     "at registration"}});
+                    report.registration_errors.push_back(
+                        slice.id + ": grid payload absent at registration");
+                    return;
+                }
+                std::string payload;
+                {
                     pwb::mapping::FactorGridEnvelope envelope;
                     envelope.height =
                         static_cast<int>(entry->grid_y.size());
@@ -1882,6 +2081,15 @@ CommitPrepareReport commit_prepare_batch_result(
             } catch (const std::exception& exc) {
                 report.registration_errors.push_back(slice.id + ": "
                                                      + exc.what());
+                if (!booked_run_id.empty()) {
+                    try {
+                        catalog->update_run_status(
+                            booked_run_id, "failed",
+                            Json{{"error", exc.what()}});
+                    } catch (const std::exception&) {
+                        // best-effort failure bookkeeping only
+                    }
+                }
             }
         };
 
@@ -1894,9 +2102,13 @@ CommitPrepareReport commit_prepare_batch_result(
     }
 
     if (result.cancelled) {
+        // Python routes cancel through the fingerprint-conditional
+        // invalidation (#881): cancelled items carry no grid, so a run
+        // that produced nothing clears nothing — the previous run's
+        // still-valid payload survives.
         for (const auto& item : result.task_results) {
             if (item.reused) continue;
-            grids.clear(item.task_id);
+            evict_if_fingerprint(item);
             report.discarded.push_back(item.task_id);
         }
         return report;
@@ -2160,16 +2372,33 @@ int commit_contour_drafts_full(Json& project_root, const Json& drafts_array) {
             || !(*document)["line_features"].is_array()) {
             (*document)["line_features"] = Json::array();
         }
+        // apply_contour_draft_to_map parity: strip BOTH the top-level
+        // role=="contour" features and property-tagged ones (properties
+        // .role / .contour_draft_id) so repeated commits never stack.
         Json& line_features = (*document)["line_features"];
-        line_features.erase(std::remove_if(
-                                line_features.begin(),
-                                line_features.end(),
-                                [](const Json& feature) {
-                                    return feature.is_object()
-                                           && field_str(feature, "role")
-                                                  == "contour";
-                                }),
-                            line_features.end());
+        const std::string draft_id = field_str(*target, "id");
+        line_features.erase(
+            std::remove_if(line_features.begin(), line_features.end(),
+                           [&](const Json& feature) {
+                               if (!feature.is_object()) return false;
+                               if (field_str(feature, "role") == "contour") {
+                                   return true;
+                               }
+                               const Json* props =
+                                   find_field(feature, "properties");
+                               if (props == nullptr || !props->is_object()) {
+                                   return false;
+                               }
+                               if (field_str(*props, "role") == "contour") {
+                                   return true;
+                               }
+                               return field_str(*props, "contour_draft_id")
+                                      == draft_id;
+                           }),
+            line_features.end());
+        (*document)["linked_contour_draft_id"] = draft_id;
+        (*document)["linked_target_horizon"] =
+            field_str(*target, "target_horizon");
         const Json* segments = find_field(*target, "segments");
         if (segments != nullptr && segments->is_array()) {
             for (const auto& segment : *segments) {

@@ -96,6 +96,10 @@ public:
         std::shared_ptr<const ui_workers::FactorPrepareBatchResult> result);
     [[nodiscard]] std::optional<ui_workers::FactorPrepareBatchResult>
     take_last_result();
+    // Session teardown (project switch): drop every entry + the stash
+    // (Python clear_session_caches parity — caches never leak across
+    // projects).
+    void clear_all();
 
 private:
     struct Impl;
