@@ -22,6 +22,10 @@ add_library(pwb_workflow_runtime STATIC
     src/qc.cpp
     src/map_qa_rules.cpp
     src/versioning.cpp
+    # cpp-close-02 — the real resolve_current_project_version_context
+    # project glue (CONV-33 findings A3 leftover): five-segment injection
+    # over the portable project tree + the repository seam.
+    src/resolve_context.cpp
 )
 add_library(Pwb::WorkflowRuntime ALIAS pwb_workflow_runtime)
 

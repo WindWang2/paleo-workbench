@@ -46,6 +46,16 @@ public:
     void mark_domain_product_current(const std::string& domain_task_id,
                                      const std::string& version_id);
 
+    // resolve_current_project_version_context support (issue #373 / C15):
+    // Python mutates ctx.selected_version_ids directly — a superseded
+    // domain tip leaves the selection without touching its asset pointer.
+    void deselect_version(const std::string& version_id);
+
+    // Python `ctx.selected_version_ids.add(vid)` + `ctx.labels[vid] = ...`
+    // for versions unknown to the catalog (no asset to point at).
+    void select_version_only(const std::string& version_id,
+                             const std::string& label);
+
     [[nodiscard]] std::optional<std::string> current_for_asset(
         const std::optional<std::string>& asset_id) const;
     [[nodiscard]] bool is_current_version(const std::string& version_id) const;

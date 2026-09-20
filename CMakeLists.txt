@@ -121,6 +121,25 @@ if(PWB_BUILD_CONV_24)
     set(PWB_BUILD_CONV_08 ON)
 endif()
 # END CONV-24
+# BEGIN CPP-CLOSE-02 (option block — declared BEFORE the CONV-33 block so
+# the full workflow cascade (CONV_33 -> 26B -> 07/08/25/06, CONV_32,
+# CONV_24, CONV_30) lands in time; the subdirectory itself is added after
+# the CONV-32 block) — workflow orchestration / versioning / recompute
+# closure consumers (libs/closure_workflow): the map_product catalog OUTPUT
+# orchestration + integrated compilation fusion consumers CONV-33 findings
+# A3 left to the consuming line, the file-backed provenance store (reopen
+# recovery), the scheduler face (submit_to_scheduler + synced cancel,
+# completing the CONV-32 deferral at closure level), the cache-run
+# provenance rail, and the typed UI host bindings.
+option(PWB_BUILD_CPP_CLOSE_02
+    "Build the cpp-close-02 workflow closure consumers (libs/closure_workflow; implies CONV_33 + CONV_32 + CONV_24 + CONV_30)" OFF)
+if(PWB_BUILD_CPP_CLOSE_02)
+    set(PWB_BUILD_CONV_33 ON)
+    set(PWB_BUILD_CONV_32 ON)
+    set(PWB_BUILD_CONV_24 ON)
+    set(PWB_BUILD_CONV_30 ON)
+endif()
+# END CPP-CLOSE-02 (option half)
 # BEGIN CONV-33 (option block — declared BEFORE the CONV-26B block so the
 # runtime closure's own implied switches (DATA / MAPPING_KERNEL / CONV-07/
 # 08/25) cascade from it; the slice adds no new subdirectory: its TUs are
@@ -605,6 +624,17 @@ if(PWB_BUILD_CONV_32)
     add_subdirectory(libs/workflow_interpretation)
 endif()
 # END CONV-32
+# CPP-CLOSE-02 subdirectory — after the CONV-32 block so the workflow
+# interpretation, runtime, engine, fusion and job targets exist.
+if(PWB_BUILD_CPP_CLOSE_02)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/closure_workflow/CMakeLists.txt")
+        message(FATAL_ERROR
+            "PWB_BUILD_CPP_CLOSE_02=ON but libs/closure_workflow is not "
+            "delivered on this branch (cpp-close-02 line).")
+    endif()
+    add_subdirectory(libs/closure_workflow)
+endif()
+# END CPP-CLOSE-02
 # BEGIN CONV-09
 # M8 first slice: DTW well-log matcher kernel (viz/dtw_log_matcher.py port),
 # Qt-free, frozen against the Python oracle. Tests need Pwb::Domain

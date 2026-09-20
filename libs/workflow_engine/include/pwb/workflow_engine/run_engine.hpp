@@ -108,6 +108,28 @@ public:
     virtual void restore_session_pointers(const domain::Json& /*outputs*/) {}
 };
 
+// engine.py _register_cache_run seam (L735): put a cacheable node's
+// execution on the catalog provenance rail so reuse is traceable —
+// "begin/complete like any other run". The engine calls it AFTER the
+// receipt is built for every cacheable node with a cache identity (the
+// Python gate: `identity is not None and catalog is not None`), and
+// treats any rail failure as non-fatal (execution stays valid; reuse for
+// that node is store-limited). cpp-close-02 completes the deferred half
+// of the CONV-32 deferral; the catalog-read half (CatalogLike) is
+// unchanged.
+class CacheRunRail {
+public:
+    virtual ~CacheRunRail() = default;
+    // Returns the rail's run id ("" == skipped); the engine records it on
+    // receipt.catalog_run_id when non-empty. Throw to refuse (the engine
+    // swallows and continues).
+    [[nodiscard]] virtual std::string
+    register_cache_run(const std::string& operation,
+                       const std::vector<std::string>& input_version_ids,
+                       const domain::Json& parameters,
+                       const std::string& generator_version) = 0;
+};
+
 // engine.ActionContext slice the lifecycle engine consumes.
 struct RunContext {
     std::string workspace_id;                 // context.workspace_id
@@ -153,7 +175,8 @@ public:
               BackoffWaiter waiter = nullptr,
               EnvironmentProvider env = nullptr,
               const CatalogLike* artifact_catalog = nullptr,
-              RunIdGenerator id_gen = nullptr);
+              RunIdGenerator id_gen = nullptr,
+              CacheRunRail* cache_run_rail = nullptr);
     ~RunEngine();
     RunEngine(const RunEngine&) = delete;
     RunEngine& operator=(const RunEngine&) = delete;
@@ -236,6 +259,7 @@ private:
     BackoffWaiter waiter_;
     EnvironmentProvider env_;
     const CatalogLike* artifact_catalog_;
+    CacheRunRail* cache_run_rail_;
     RunIdGenerator id_gen_;
 
     std::mutex active_mutex_;

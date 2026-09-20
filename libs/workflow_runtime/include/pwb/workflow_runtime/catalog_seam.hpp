@@ -140,6 +140,16 @@ public:
     virtual void update_run_status(const std::string& run_id,
                                    const std::string& status) = 0;
 
+    // Python update_run_status(..., extra_parameters={...}) parity — the
+    // failure notes ride the run record (e.g. assemble_map_product's
+    // "output registration failed"). Default: extras unavailable; only
+    // the status transition is guaranteed.
+    virtual void update_run_status(const std::string& run_id,
+                                   const std::string& status,
+                                   const Json& extra_parameters) {
+        update_run_status(run_id, status);
+    }
+
     // Wire a produced version into its run's output_version_ids (the
     // Python catalog does this inside register_*; the seam keeps it
     // explicit so the provenance publish path stays visible).
@@ -202,6 +212,10 @@ public:
 
     void update_run_status(const std::string& run_id,
                            const std::string& status) override;
+    // Merges *extra_parameters* into the run's run_metadata.
+    void update_run_status(const std::string& run_id,
+                           const std::string& status,
+                           const Json& extra_parameters) override;
     void set_current_version(const std::string& asset_id,
                              const std::string& version_id) override;
     std::optional<std::string> verify_integrity(
@@ -222,6 +236,16 @@ public:
     [[nodiscard]] const std::vector<AssetRecord>& assets() const {
         return assets_;
     }
+
+protected:
+    // cpp-close-02: persistence subclasses rehydrate the store from a
+    // snapshot (FileCatalogRepository); id counters resume after the
+    // loaded records and every index is rebuilt deterministically. The
+    // synthetic tick clock is NOT restored (records carry their own
+    // timestamps; production injects a real Clock).
+    void restore_state(std::vector<AssetRecord> assets,
+                       std::vector<VersionRecord> versions,
+                       std::vector<RunRecord> runs);
 
 private:
     std::string next_time();
