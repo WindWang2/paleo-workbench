@@ -5142,7 +5142,7 @@
       "sha256": "6d4844eaa0e4bbfcbfe2d1404038ad55f460f2ee0ba6e99bf213dbb596b214fc"
     },
     {
-      "name": "main_map_unbound",
+      "name": "dict_layers_well",
       "doc": {
         "id": "comp_0000000030",
         "title": "oracle",
@@ -5163,16 +5163,69 @@
             "z_index": 10,
             "visible": true,
             "locked": false,
-            "properties": {}
+            "properties": {
+              "extent": [
+                0.0,
+                0.0,
+                100.0,
+                100.0
+              ],
+              "layers": [
+                {
+                  "id": "w1",
+                  "name": "井位",
+                  "layer_type": "well",
+                  "style": {
+                    "fill": "#22b8a7",
+                    "stroke": "#182431",
+                    "marker_size": 7.0,
+                    "labels": {
+                      "field": "name",
+                      "size": 9.0,
+                      "color": "#1f2937"
+                    }
+                  },
+                  "features": [
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          30,
+                          30
+                        ]
+                      },
+                      "properties": {
+                        "name": "W-1",
+                        "value": 12.5
+                      }
+                    },
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          60,
+                          60
+                        ]
+                      },
+                      "properties": {
+                        "well": "W-2"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
           }
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000148\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<text x=\"70.0\" y=\"70.0\" font-family=\"Arial, sans-serif\" font-size=\"5\" fill=\"#888888\" text-anchor=\"middle\">主图画布 (Main Map Canvas)</text>\n</g>\n</svg>",
-      "sha256": "f9ca61dec7153ff56a5bb1c5ccc5d1995fcc03e0633b93cfb6d817afb1a29cd3"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000148\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<g id=\"layer_w1\" opacity=\"1.00\">\n<circle cx=\"46.00\" cy=\"90.00\" r=\"0.93\" fill=\"#ffffff\" stroke=\"#182431\" stroke-width=\"0.26\"/><circle cx=\"46.00\" cy=\"90.00\" r=\"0.37\" fill=\"#22b8a7\" stroke=\"none\"/>\n<text x=\"47.72\" y=\"90.79\" font-family=\"Arial\" font-size=\"2.38\" fill=\"#1f2937\">W-1 (12.50)</text>\n<circle cx=\"82.00\" cy=\"60.00\" r=\"0.93\" fill=\"#ffffff\" stroke=\"#182431\" stroke-width=\"0.26\"/><circle cx=\"82.00\" cy=\"60.00\" r=\"0.37\" fill=\"#22b8a7\" stroke=\"none\"/>\n<text x=\"83.72\" y=\"60.79\" font-family=\"Arial\" font-size=\"2.38\" fill=\"#1f2937\">W-2</text>\n</g>\n</g>\n</svg>",
+      "sha256": "2bcb4af9148d7a548f640551b247bd9e0ce14205c6463071b6eaf4e997021527"
     },
     {
-      "name": "main_map_unbound_titled",
+      "name": "dict_layers_well_renderer_keyword",
       "doc": {
         "id": "comp_0000000031",
         "title": "oracle",
@@ -5194,17 +5247,50 @@
             "visible": true,
             "locked": false,
             "properties": {
-              "title": "自定义画布"
+              "extent": [
+                0.0,
+                0.0,
+                100.0,
+                100.0
+              ],
+              "layers": [
+                {
+                  "id": "w2",
+                  "name": "井位2",
+                  "layer_type": "vector",
+                  "style": {
+                    "renderer": "well",
+                    "fill": "#22b8a7",
+                    "stroke": "#182431"
+                  },
+                  "features": [
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          30,
+                          30
+                        ]
+                      },
+                      "properties": {
+                        "name": "W-1",
+                        "value": 12.5
+                      }
+                    }
+                  ]
+                }
+              ]
             }
           }
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000149\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<text x=\"70.0\" y=\"70.0\" font-family=\"Arial, sans-serif\" font-size=\"5\" fill=\"#888888\" text-anchor=\"middle\">自定义画布</text>\n</g>\n</svg>",
-      "sha256": "8bba1d542c1e7f1dc5a0173abcc0f28ed4728a538c63aedfe223cde8fa6c3aa7"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000149\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<g id=\"layer_w2\" opacity=\"1.00\">\n<circle cx=\"46.00\" cy=\"90.00\" r=\"0.79\" fill=\"#ffffff\" stroke=\"#182431\" stroke-width=\"0.26\"/><circle cx=\"46.00\" cy=\"90.00\" r=\"0.32\" fill=\"#22b8a7\" stroke=\"none\"/>\n</g>\n</g>\n</svg>",
+      "sha256": "2992b1b4b2a9b3546320c5f46a32442636c7410f2019b6b185a8283aa63bdd02"
     },
     {
-      "name": "locked_and_hidden",
+      "name": "dict_layers_annotation",
       "doc": {
         "id": "comp_0000000032",
         "title": "oracle",
@@ -5216,7 +5302,324 @@
         "schema_version": 2,
         "elements": [
           {
+            "id": "el_0000000150",
+            "element_type": "main_map",
+            "x_mm": 10.0,
+            "y_mm": 20.0,
+            "width_mm": 120.0,
+            "height_mm": 100.0,
+            "z_index": 10,
+            "visible": true,
+            "locked": false,
+            "properties": {
+              "extent": [
+                0.0,
+                0.0,
+                100.0,
+                100.0
+              ],
+              "layers": [
+                {
+                  "id": "a1",
+                  "name": "注记",
+                  "layer_type": "annotation",
+                  "style": {
+                    "fill": "#eff3f8",
+                    "stroke": "#182431",
+                    "marker_size": 4.0
+                  },
+                  "features": [
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          40,
+                          50
+                        ]
+                      },
+                      "properties": {
+                        "text": "注记 A",
+                        "font_size": 8.0,
+                        "color": "#111111",
+                        "rotation": 15.0,
+                        "show_marker": true
+                      }
+                    },
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "LineString",
+                        "coordinates": [
+                          [
+                            10,
+                            80
+                          ],
+                          [
+                            50,
+                            90
+                          ],
+                          [
+                            90,
+                            80
+                          ]
+                        ]
+                      },
+                      "properties": {
+                        "text": "线注记",
+                        "bold": true
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "metadata": {}
+      },
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000150\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<g id=\"layer_a1\" opacity=\"1.00\">\n<circle cx=\"58.00\" cy=\"70.00\" r=\"0.53\" fill=\"#eff3f8\" stroke=\"#182431\" stroke-width=\"0.13\"/>\n<text x=\"58.00\" y=\"70.00\" font-family=\"Arial, sans-serif\" font-size=\"2.12\" font-weight=\"normal\" fill=\"#111111\" transform=\"rotate(15.0 58.00 70.00)\">注记 A</text>\n<polyline points=\"22.00,40.00 70.00,30.00 118.00,40.00\" fill=\"none\" stroke=\"#182431\" stroke-width=\"0.26\"/>\n<text x=\"70.00\" y=\"30.00\" font-family=\"Arial, sans-serif\" font-size=\"2.65\" font-weight=\"bold\" fill=\"#182431\" text-anchor=\"middle\">线注记</text>\n</g>\n</g>\n</svg>",
+      "sha256": "3d629a6a7096ab4faa970dd02d72db318cef8264a9459caa4f5c57f03198620b"
+    },
+    {
+      "name": "dict_layers_label",
+      "doc": {
+        "id": "comp_0000000033",
+        "title": "oracle",
+        "paper_size": "A4",
+        "orientation": "landscape",
+        "width_mm": 297.0,
+        "height_mm": 210.0,
+        "dpi": 300.0,
+        "schema_version": 2,
+        "elements": [
+          {
             "id": "el_0000000151",
+            "element_type": "main_map",
+            "x_mm": 10.0,
+            "y_mm": 20.0,
+            "width_mm": 120.0,
+            "height_mm": 100.0,
+            "z_index": 10,
+            "visible": true,
+            "locked": false,
+            "properties": {
+              "extent": [
+                0.0,
+                0.0,
+                100.0,
+                100.0
+              ],
+              "layers": [
+                {
+                  "id": "a2",
+                  "name": "标签",
+                  "layer_type": "label",
+                  "style": {
+                    "fill": "#eff3f8",
+                    "stroke": "#182431"
+                  },
+                  "features": [
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          70,
+                          20
+                        ]
+                      },
+                      "properties": {
+                        "label": "标签 L",
+                        "size": 7.0
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "metadata": {}
+      },
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000151\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<g id=\"layer_a2\" opacity=\"1.00\">\n<text x=\"94.00\" y=\"100.00\" font-family=\"Arial, sans-serif\" font-size=\"1.85\" font-weight=\"normal\" fill=\"#182431\">标签 L</text>\n</g>\n</g>\n</svg>",
+      "sha256": "9e789fdd41b377f435ff2e9464c778797537cb6fb24d8d1df6929532f71ca825"
+    },
+    {
+      "name": "subtitle_falsy_text",
+      "doc": {
+        "id": "comp_0000000034",
+        "title": "oracle",
+        "paper_size": "A4",
+        "orientation": "landscape",
+        "width_mm": 297.0,
+        "height_mm": 210.0,
+        "dpi": 300.0,
+        "schema_version": 2,
+        "elements": [
+          {
+            "id": "el_0000000152",
+            "element_type": "subtitle",
+            "x_mm": 10.0,
+            "y_mm": 15.0,
+            "width_mm": 100.0,
+            "height_mm": 6.0,
+            "z_index": 39,
+            "visible": true,
+            "locked": false,
+            "properties": {
+              "text": 0
+            }
+          }
+        ],
+        "metadata": {}
+      },
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000152\"><text x=\"60.0\" y=\"20.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"5.0\" fill=\"#333333\" text-anchor=\"middle\">0</text></g>\n</svg>",
+      "sha256": "0e800dde0c3ea5f8ad3de9c255a1dc8b5c343c890e6e36ceb7a30a60de80f9c9"
+    },
+    {
+      "name": "dict_layers_label_whitespace",
+      "doc": {
+        "id": "comp_0000000035",
+        "title": "oracle",
+        "paper_size": "A4",
+        "orientation": "landscape",
+        "width_mm": 297.0,
+        "height_mm": 210.0,
+        "dpi": 300.0,
+        "schema_version": 2,
+        "elements": [
+          {
+            "id": "el_0000000153",
+            "element_type": "main_map",
+            "x_mm": 10.0,
+            "y_mm": 20.0,
+            "width_mm": 120.0,
+            "height_mm": 100.0,
+            "z_index": 10,
+            "visible": true,
+            "locked": false,
+            "properties": {
+              "extent": [
+                0.0,
+                0.0,
+                100.0,
+                100.0
+              ],
+              "layers": [
+                {
+                  "id": "v8",
+                  "name": "Padded",
+                  "layer_type": "vector",
+                  "style": {
+                    "fill": "#4fc3f7",
+                    "stroke": "#222222",
+                    "labels": {
+                      "field": "name",
+                      "size": 9.0
+                    }
+                  },
+                  "features": [
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                          30,
+                          30
+                        ]
+                      },
+                      "properties": {
+                        "name": "  W1  "
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "metadata": {}
+      },
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000153\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<g id=\"layer_v8\" opacity=\"1.00\">\n<circle cx=\"46.00\" cy=\"90.00\" r=\"0.79\" fill=\"#4fc3f7\" stroke=\"#222222\" stroke-width=\"0.13\"/>\n<text x=\"47.32\" y=\"90.79\" font-family=\"Arial\" font-size=\"2.38\" fill=\"#f8f9fa\">W1</text>\n</g>\n</g>\n</svg>",
+      "sha256": "cc2049fddad6717920dc1dbe7ff57550b4d64de26e59cc8b452c314282014574"
+    },
+    {
+      "name": "main_map_unbound",
+      "doc": {
+        "id": "comp_0000000036",
+        "title": "oracle",
+        "paper_size": "A4",
+        "orientation": "landscape",
+        "width_mm": 297.0,
+        "height_mm": 210.0,
+        "dpi": 300.0,
+        "schema_version": 2,
+        "elements": [
+          {
+            "id": "el_0000000154",
+            "element_type": "main_map",
+            "x_mm": 10.0,
+            "y_mm": 20.0,
+            "width_mm": 120.0,
+            "height_mm": 100.0,
+            "z_index": 10,
+            "visible": true,
+            "locked": false,
+            "properties": {}
+          }
+        ],
+        "metadata": {}
+      },
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000154\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<text x=\"70.0\" y=\"70.0\" font-family=\"Arial, sans-serif\" font-size=\"5\" fill=\"#888888\" text-anchor=\"middle\">主图画布 (Main Map Canvas)</text>\n</g>\n</svg>",
+      "sha256": "667c825b1ff93bdfc0f3e9580d25fe78c03c2568d6c2e024d439eaa4d651a88d"
+    },
+    {
+      "name": "main_map_unbound_titled",
+      "doc": {
+        "id": "comp_0000000037",
+        "title": "oracle",
+        "paper_size": "A4",
+        "orientation": "landscape",
+        "width_mm": 297.0,
+        "height_mm": 210.0,
+        "dpi": 300.0,
+        "schema_version": 2,
+        "elements": [
+          {
+            "id": "el_0000000155",
+            "element_type": "main_map",
+            "x_mm": 10.0,
+            "y_mm": 20.0,
+            "width_mm": 120.0,
+            "height_mm": 100.0,
+            "z_index": 10,
+            "visible": true,
+            "locked": false,
+            "properties": {
+              "title": "自定义画布"
+            }
+          }
+        ],
+        "metadata": {}
+      },
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000155\">\n<rect x=\"10.0\" y=\"20.0\" width=\"120.0\" height=\"100.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<text x=\"70.0\" y=\"70.0\" font-family=\"Arial, sans-serif\" font-size=\"5\" fill=\"#888888\" text-anchor=\"middle\">自定义画布</text>\n</g>\n</svg>",
+      "sha256": "8e14913c972f1fe0cb5aa3afab01d66a2b2fdb0966bf72a83976eef26f247864"
+    },
+    {
+      "name": "locked_and_hidden",
+      "doc": {
+        "id": "comp_0000000038",
+        "title": "oracle",
+        "paper_size": "A4",
+        "orientation": "landscape",
+        "width_mm": 297.0,
+        "height_mm": 210.0,
+        "dpi": 300.0,
+        "schema_version": 2,
+        "elements": [
+          {
+            "id": "el_0000000157",
             "element_type": "text",
             "x_mm": 10.0,
             "y_mm": 20.0,
@@ -5230,7 +5633,7 @@
             }
           },
           {
-            "id": "el_0000000152",
+            "id": "el_0000000158",
             "element_type": "text",
             "x_mm": 10.0,
             "y_mm": 34.0,
@@ -5244,7 +5647,7 @@
             }
           },
           {
-            "id": "el_0000000150",
+            "id": "el_0000000156",
             "element_type": "title",
             "x_mm": 10.0,
             "y_mm": 4.0,
@@ -5260,8 +5663,8 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000152\">\n<text x=\"10.00\" y=\"38.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">可见</text>\n</g>\n<g id=\"el_0000000150\"><text x=\"60.0\" y=\"12.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">锁定</text></g>\n<g data-locked=\"true\" data-element=\"el_0000000150\"><path d=\"M 10.00 4.00 L 14.20 4.00 L 10.00 8.20 Z\" fill=\"#2f6fab\" fill-opacity=\"0.65\"/></g>\n</svg>",
-      "sha256": "5f5f5ef1d828b806e48d4b9814780a92b1041a57fa00690474cecab1f5e82b24"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000158\">\n<text x=\"10.00\" y=\"38.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">可见</text>\n</g>\n<g id=\"el_0000000156\"><text x=\"60.0\" y=\"12.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">锁定</text></g>\n<g data-locked=\"true\" data-element=\"el_0000000156\"><path d=\"M 10.00 4.00 L 14.20 4.00 L 10.00 8.20 Z\" fill=\"#2f6fab\" fill-opacity=\"0.65\"/></g>\n</svg>",
+      "sha256": "17b28801241b75190cfebc4ac4b483c9101fbe542c73a66ac4afdd9c8c50a3e5"
     },
     {
       "name": "unknown_element_type",
@@ -5330,7 +5733,7 @@
     {
       "name": "scale_bar_int",
       "doc": {
-        "id": "comp_0000000033",
+        "id": "comp_0000000039",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5340,7 +5743,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000153",
+            "id": "el_0000000159",
             "element_type": "scale_bar",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5356,13 +5759,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000153\"><rect x=\"10.0\" y=\"12.5\" width=\"46.0\" height=\"2\" fill=\"#000000\"/><rect x=\"10.0\" y=\"12.5\" width=\"23.0\" height=\"2\" fill=\"#ffffff\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"10.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"start\">0</text><text x=\"33.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"middle\">25</text><text x=\"56.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"end\">50 km</text></g>\n</svg>",
-      "sha256": "1855c207fe61b16c586711c574469e7f78005d38418fefa54446e91f4a169d79"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000159\"><rect x=\"10.0\" y=\"12.5\" width=\"46.0\" height=\"2\" fill=\"#000000\"/><rect x=\"10.0\" y=\"12.5\" width=\"23.0\" height=\"2\" fill=\"#ffffff\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"10.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"start\">0</text><text x=\"33.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"middle\">25</text><text x=\"56.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"end\">50 km</text></g>\n</svg>",
+      "sha256": "3f3a95f6c6f4ecfcea9614fb05ca6f72802475fa2dadef363ee362038f789da9"
     },
     {
       "name": "scale_bar_float",
       "doc": {
-        "id": "comp_0000000034",
+        "id": "comp_0000000040",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5372,7 +5775,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000154",
+            "id": "el_0000000160",
             "element_type": "scale_bar",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5388,13 +5791,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000154\"><rect x=\"10.0\" y=\"12.5\" width=\"46.0\" height=\"2\" fill=\"#000000\"/><rect x=\"10.0\" y=\"12.5\" width=\"23.0\" height=\"2\" fill=\"#ffffff\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"10.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"start\">0</text><text x=\"33.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"middle\">12.0</text><text x=\"56.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"end\">25.5 km</text></g>\n</svg>",
-      "sha256": "ae87ff89d5b3f39648f0327d20c969604fab62ee936d4cc032a74557b3d4d7d9"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000160\"><rect x=\"10.0\" y=\"12.5\" width=\"46.0\" height=\"2\" fill=\"#000000\"/><rect x=\"10.0\" y=\"12.5\" width=\"23.0\" height=\"2\" fill=\"#ffffff\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"10.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"start\">0</text><text x=\"33.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"middle\">12.0</text><text x=\"56.0\" y=\"16.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"end\">25.5 km</text></g>\n</svg>",
+      "sha256": "4e93a7c3b93f7f899a56a73fcda4a2fb5cb4cc14eb3ccb7f3d045b297c12693d"
     },
     {
       "name": "colorbar_discrete",
       "doc": {
-        "id": "comp_0000000035",
+        "id": "comp_0000000041",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5404,7 +5807,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000155",
+            "id": "el_0000000161",
             "element_type": "colorbar",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5434,13 +5837,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000155\">\n<rect x=\"10.00\" y=\"10.00\" width=\"9.60\" height=\"10.02\" fill=\"#111111\" stroke=\"#333333\" stroke-width=\"0.08\"/>\n<rect x=\"10.00\" y=\"20.00\" width=\"9.60\" height=\"10.02\" fill=\"#555555\" stroke=\"#333333\" stroke-width=\"0.08\"/>\n<rect x=\"10.00\" y=\"30.00\" width=\"9.60\" height=\"10.02\" fill=\"#999999\" stroke=\"#333333\" stroke-width=\"0.08\"/>\n<text x=\"21.10\" y=\"40.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"21.10\" y=\"12.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">1</text>\n</g>\n</svg>",
-      "sha256": "37090650e10715f46420cf76bb5bb4a675205815b7f15c12c4fd6c7d914893f3"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000161\">\n<rect x=\"10.00\" y=\"10.00\" width=\"9.60\" height=\"10.02\" fill=\"#111111\" stroke=\"#333333\" stroke-width=\"0.08\"/>\n<rect x=\"10.00\" y=\"20.00\" width=\"9.60\" height=\"10.02\" fill=\"#555555\" stroke=\"#333333\" stroke-width=\"0.08\"/>\n<rect x=\"10.00\" y=\"30.00\" width=\"9.60\" height=\"10.02\" fill=\"#999999\" stroke=\"#333333\" stroke-width=\"0.08\"/>\n<text x=\"21.10\" y=\"40.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"21.10\" y=\"12.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">1</text>\n</g>\n</svg>",
+      "sha256": "8d49c4e926b95f92ef9d35bae7d194f16f4bef5c094f1b7e6e562abcb2c94ef1"
     },
     {
       "name": "colorbar_named_ramp",
       "doc": {
-        "id": "comp_0000000036",
+        "id": "comp_0000000042",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5450,7 +5853,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000156",
+            "id": "el_0000000162",
             "element_type": "colorbar",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5468,13 +5871,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000156\">\n<defs><linearGradient id=\"cbar_H\" x1=\"0%\" y1=\"100%\" x2=\"0%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#440154\"/><stop offset=\"25.0%\" stop-color=\"#3b528b\"/><stop offset=\"50.0%\" stop-color=\"#21918c\"/><stop offset=\"75.0%\" stop-color=\"#5ec962\"/><stop offset=\"100.0%\" stop-color=\"#fde725\"/></linearGradient></defs>\n<rect x=\"10.00\" y=\"10.00\" width=\"9.60\" height=\"30.00\" fill=\"url(#cbar_H)\" stroke=\"#333333\" stroke-width=\"0.2\"/>\n<text x=\"21.10\" y=\"40.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"21.10\" y=\"12.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">100</text>\n</g>\n</svg>",
-      "sha256": "97145181ea1ca51a0f16568d3149e99c91b252c031d96031579d40ea209c9ee9"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000162\">\n<defs><linearGradient id=\"cbar_H\" x1=\"0%\" y1=\"100%\" x2=\"0%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#440154\"/><stop offset=\"25.0%\" stop-color=\"#3b528b\"/><stop offset=\"50.0%\" stop-color=\"#21918c\"/><stop offset=\"75.0%\" stop-color=\"#5ec962\"/><stop offset=\"100.0%\" stop-color=\"#fde725\"/></linearGradient></defs>\n<rect x=\"10.00\" y=\"10.00\" width=\"9.60\" height=\"30.00\" fill=\"url(#cbar_H)\" stroke=\"#333333\" stroke-width=\"0.2\"/>\n<text x=\"21.10\" y=\"40.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"21.10\" y=\"12.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">100</text>\n</g>\n</svg>",
+      "sha256": "2f8e324c315e9085aff246457ed5363adddd3da505453f173dd0b74d1d9d09df"
     },
     {
       "name": "colorbar_alias_ramp",
       "doc": {
-        "id": "comp_0000000037",
+        "id": "comp_0000000043",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5484,7 +5887,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000157",
+            "id": "el_0000000163",
             "element_type": "colorbar",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5500,13 +5903,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000157\">\n<defs><linearGradient id=\"cbar_H\" x1=\"0%\" y1=\"100%\" x2=\"0%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#ffffcc\"/><stop offset=\"25.0%\" stop-color=\"#a1dab4\"/><stop offset=\"50.0%\" stop-color=\"#41b6c4\"/><stop offset=\"75.0%\" stop-color=\"#2c7fb8\"/><stop offset=\"100.0%\" stop-color=\"#253494\"/></linearGradient></defs>\n<rect x=\"10.00\" y=\"10.00\" width=\"9.60\" height=\"30.00\" fill=\"url(#cbar_H)\" stroke=\"#333333\" stroke-width=\"0.2\"/>\n<text x=\"21.10\" y=\"40.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"21.10\" y=\"12.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">1</text>\n</g>\n</svg>",
-      "sha256": "52228598c0d8c8c5212c9793f95f6511abfe8cdc3208505aa3d5187033aca787"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000163\">\n<defs><linearGradient id=\"cbar_H\" x1=\"0%\" y1=\"100%\" x2=\"0%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#ffffcc\"/><stop offset=\"25.0%\" stop-color=\"#a1dab4\"/><stop offset=\"50.0%\" stop-color=\"#41b6c4\"/><stop offset=\"75.0%\" stop-color=\"#2c7fb8\"/><stop offset=\"100.0%\" stop-color=\"#253494\"/></linearGradient></defs>\n<rect x=\"10.00\" y=\"10.00\" width=\"9.60\" height=\"30.00\" fill=\"url(#cbar_H)\" stroke=\"#333333\" stroke-width=\"0.2\"/>\n<text x=\"21.10\" y=\"40.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"21.10\" y=\"12.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">1</text>\n</g>\n</svg>",
+      "sha256": "4f7a5b080a9e3e53dafa992efd33d3be9d5579048f7307700c349eb1982d405c"
     },
     {
       "name": "colorbar_default_stops",
       "doc": {
-        "id": "comp_0000000038",
+        "id": "comp_0000000044",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5516,7 +5919,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000158",
+            "id": "el_0000000164",
             "element_type": "colorbar",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5530,13 +5933,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000158\">\n<defs><linearGradient id=\"cbar_H\" x1=\"0%\" y1=\"100%\" x2=\"0%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#053061\"/><stop offset=\"100.0%\" stop-color=\"#67001f\"/></linearGradient></defs>\n<rect x=\"10.00\" y=\"10.00\" width=\"9.60\" height=\"30.00\" fill=\"url(#cbar_H)\" stroke=\"#333333\" stroke-width=\"0.2\"/>\n<text x=\"21.10\" y=\"40.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"21.10\" y=\"12.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">1</text>\n</g>\n</svg>",
-      "sha256": "4b31dea2502d4103eeab1092d1ed8a746cfd4f42330f52fc26dd6a1e91e25aef"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000164\">\n<defs><linearGradient id=\"cbar_H\" x1=\"0%\" y1=\"100%\" x2=\"0%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#053061\"/><stop offset=\"100.0%\" stop-color=\"#67001f\"/></linearGradient></defs>\n<rect x=\"10.00\" y=\"10.00\" width=\"9.60\" height=\"30.00\" fill=\"url(#cbar_H)\" stroke=\"#333333\" stroke-width=\"0.2\"/>\n<text x=\"21.10\" y=\"40.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"21.10\" y=\"12.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">1</text>\n</g>\n</svg>",
+      "sha256": "d75f3e5643f3fa175706f3438434412d753ad66cae9b1abcaba1caf307b097e7"
     },
     {
       "name": "text_clipping",
       "doc": {
-        "id": "comp_0000000039",
+        "id": "comp_0000000045",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5546,7 +5949,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000159",
+            "id": "el_0000000165",
             "element_type": "text",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5561,7 +5964,7 @@
             }
           },
           {
-            "id": "el_0000000160",
+            "id": "el_0000000166",
             "element_type": "text",
             "x_mm": 80.0,
             "y_mm": 10.0,
@@ -5577,7 +5980,7 @@
             }
           },
           {
-            "id": "el_0000000161",
+            "id": "el_0000000167",
             "element_type": "text",
             "x_mm": 80.0,
             "y_mm": 40.0,
@@ -5593,7 +5996,7 @@
             }
           },
           {
-            "id": "el_0000000162",
+            "id": "el_0000000168",
             "element_type": "text",
             "x_mm": 80.0,
             "y_mm": 70.0,
@@ -5610,13 +6013,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000159\">\n<text x=\"10.00\" y=\"14.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">L1</text>\n</g>\n<g id=\"el_0000000160\">\n<text x=\"140.00\" y=\"13.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"3.0\" fill=\"#000000\" text-anchor=\"end\">右对齐</text>\n</g>\n<g id=\"el_0000000161\">\n<text x=\"110.00\" y=\"43.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"3.0\" fill=\"#000000\" text-anchor=\"middle\">居中</text>\n</g>\n<g id=\"el_0000000162\">\n<text x=\"80.00\" y=\"74.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">未知对齐</text>\n</g>\n</svg>",
-      "sha256": "ac0b6953fbdb1b8b04461352bdf0e6012b036069db1635b6d6acc0629acac935"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000165\">\n<text x=\"10.00\" y=\"14.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">L1</text>\n</g>\n<g id=\"el_0000000166\">\n<text x=\"140.00\" y=\"13.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"3.0\" fill=\"#000000\" text-anchor=\"end\">右对齐</text>\n</g>\n<g id=\"el_0000000167\">\n<text x=\"110.00\" y=\"43.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"3.0\" fill=\"#000000\" text-anchor=\"middle\">居中</text>\n</g>\n<g id=\"el_0000000168\">\n<text x=\"80.00\" y=\"74.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">未知对齐</text>\n</g>\n</svg>",
+      "sha256": "c844eb17ceea1667e19c3c0781fe925759dd9f4953fcf6f727790ea574db3146"
     },
     {
       "name": "text_empty",
       "doc": {
-        "id": "comp_0000000040",
+        "id": "comp_0000000046",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5626,7 +6029,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000163",
+            "id": "el_0000000169",
             "element_type": "text",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5640,13 +6043,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000163\">\n<text x=\"10.00\" y=\"14.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\"></text>\n</g>\n</svg>",
-      "sha256": "108ee36ad45a1bddc8332b656ac68fb45b81d8b8cb1b8bb3aa83b4f62dc3548e"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000169\">\n<text x=\"10.00\" y=\"14.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\"></text>\n</g>\n</svg>",
+      "sha256": "1dbf6ab5585296aeef90c7e1fdc5c4a5d1cea56b5fbe213ede2d6d2be17193fa"
     },
     {
       "name": "timescale_empty",
       "doc": {
-        "id": "comp_0000000041",
+        "id": "comp_0000000047",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5656,7 +6059,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000164",
+            "id": "el_0000000170",
             "element_type": "timescale",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5670,13 +6073,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000164\"><rect x=\"10.00\" y=\"10.00\" width=\"100.00\" height=\"14.00\" fill=\"none\" stroke=\"#cccccc\" stroke-dasharray=\"1,1\"/><text x=\"60.00\" y=\"17.00\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#999999\" text-anchor=\"middle\">年代地层（未配置 stages）</text></g>\n</svg>",
-      "sha256": "c0876c85ed2d5d343fae35a356290c811b65f70ec43f0d9c703e3b1e83b7226c"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000170\"><rect x=\"10.00\" y=\"10.00\" width=\"100.00\" height=\"14.00\" fill=\"none\" stroke=\"#cccccc\" stroke-dasharray=\"1,1\"/><text x=\"60.00\" y=\"17.00\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#999999\" text-anchor=\"middle\">年代地层（未配置 stages）</text></g>\n</svg>",
+      "sha256": "fa8ec63d6c033eca47aa2631957f29b64e7eb65e59c3d0773ab57b5095892391"
     },
     {
       "name": "metadata_overflow",
       "doc": {
-        "id": "comp_0000000042",
+        "id": "comp_0000000048",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5686,7 +6089,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000165",
+            "id": "el_0000000171",
             "element_type": "metadata",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5739,13 +6142,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000165\">\n<text x=\"10.00\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k0: v</text>\n<text x=\"21.11\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k1: v</text>\n<text x=\"32.22\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k2: v</text>\n<text x=\"43.33\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k3: v</text>\n<text x=\"54.44\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k4: v</text>\n<text x=\"65.56\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k5: v</text>\n<text x=\"76.67\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k6: v</text>\n<text x=\"87.78\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k7: v</text>\n<text x=\"98.89\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k8: v</text>\n<rect x=\"10.00\" y=\"10.00\" width=\"100.00\" height=\"8.00\" fill=\"none\" stroke=\"#999999\" stroke-width=\"0.2\"/>\n</g>\n</svg>",
-      "sha256": "546de8d0231c21d421b621bb3bc480c00bdfacd16b49d9245b019c3ee4332b55"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000171\">\n<text x=\"10.00\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k0: v</text>\n<text x=\"21.11\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k1: v</text>\n<text x=\"32.22\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k2: v</text>\n<text x=\"43.33\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k3: v</text>\n<text x=\"54.44\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k4: v</text>\n<text x=\"65.56\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k5: v</text>\n<text x=\"76.67\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k6: v</text>\n<text x=\"87.78\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k7: v</text>\n<text x=\"98.89\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">k8: v</text>\n<rect x=\"10.00\" y=\"10.00\" width=\"100.00\" height=\"8.00\" fill=\"none\" stroke=\"#999999\" stroke-width=\"0.2\"/>\n</g>\n</svg>",
+      "sha256": "5b2cc8acde837c6d26e28c6cacd0123eae02ffe2aeddb268cff6f5a1b28f393b"
     },
     {
       "name": "metadata_bad_entries",
       "doc": {
-        "id": "comp_0000000043",
+        "id": "comp_0000000049",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5755,7 +6158,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000166",
+            "id": "el_0000000172",
             "element_type": "metadata",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5781,13 +6184,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000166\">\n<text x=\"10.00\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">ok: v</text>\n<rect x=\"10.00\" y=\"10.00\" width=\"100.00\" height=\"20.00\" fill=\"none\" stroke=\"#999999\" stroke-width=\"0.2\"/>\n</g>\n</svg>",
-      "sha256": "1119264329aac9a68c56fb267c7b0ed7fb84441cfe74efb6811c4f4d6d4121a7"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000172\">\n<text x=\"10.00\" y=\"14.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">ok: v</text>\n<rect x=\"10.00\" y=\"10.00\" width=\"100.00\" height=\"20.00\" fill=\"none\" stroke=\"#999999\" stroke-width=\"0.2\"/>\n</g>\n</svg>",
+      "sha256": "1e738a8c4d9b7f52955f55c288e254d7b063d761ca7e57ef113d3c9cb14aa7e7"
     },
     {
       "name": "neatline_double",
       "doc": {
-        "id": "comp_0000000044",
+        "id": "comp_0000000050",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5797,7 +6200,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000167",
+            "id": "el_0000000173",
             "element_type": "neatline",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5814,13 +6217,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000167\">\n<rect x=\"10.00\" y=\"10.00\" width=\"100.00\" height=\"60.00\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.80\"/>\n<rect x=\"12.00\" y=\"12.00\" width=\"96.00\" height=\"56.00\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.40\"/>\n</g>\n</svg>",
-      "sha256": "10ac6d13f1472668552a70b4d95e3be446144e41df19a1779299595c4e6aa01b"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000173\">\n<rect x=\"10.00\" y=\"10.00\" width=\"100.00\" height=\"60.00\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.80\"/>\n<rect x=\"12.00\" y=\"12.00\" width=\"96.00\" height=\"56.00\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.40\"/>\n</g>\n</svg>",
+      "sha256": "496a4e65afb665474bf30161473e19dd2f29236cf9ad1d07e591b406c9e0f455"
     },
     {
       "name": "image_b64",
       "doc": {
-        "id": "comp_0000000045",
+        "id": "comp_0000000051",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5830,7 +6233,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000168",
+            "id": "el_0000000174",
             "element_type": "image",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5846,13 +6249,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000168\"><image x=\"10.00\" y=\"10.00\" width=\"40.00\" height=\"20.00\" xlink:href=\"data:image/png;base64,iVBORw0KGgo=\" preserveAspectRatio=\"xMidYMid meet\"/></g>\n</svg>",
-      "sha256": "8710a269f18ffda9d6c228131a8677473ceae5eb9fcd5b0934e696da0fe091f4"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000174\"><image x=\"10.00\" y=\"10.00\" width=\"40.00\" height=\"20.00\" xlink:href=\"data:image/png;base64,iVBORw0KGgo=\" preserveAspectRatio=\"xMidYMid meet\"/></g>\n</svg>",
+      "sha256": "117a0fb99ee56f68f879add455a729221f087a05c43caa6b920d67e761227d35"
     },
     {
       "name": "image_path",
       "doc": {
-        "id": "comp_0000000046",
+        "id": "comp_0000000052",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5862,7 +6265,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000169",
+            "id": "el_0000000175",
             "element_type": "image",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5878,13 +6281,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000169\"><image x=\"10.00\" y=\"10.00\" width=\"40.00\" height=\"20.00\" xlink:href=\"/tmp/x.png\" preserveAspectRatio=\"xMidYMid meet\"/></g>\n</svg>",
-      "sha256": "c9e5080a3b2a9019010f4b85e91fd6331278b5a29f15cdbd6278d3b87c6ad9fa"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000175\"><image x=\"10.00\" y=\"10.00\" width=\"40.00\" height=\"20.00\" xlink:href=\"/tmp/x.png\" preserveAspectRatio=\"xMidYMid meet\"/></g>\n</svg>",
+      "sha256": "195dabea3e1e5a1d3227cee3a04a1de5062ba3e220c57e014b8e6b8740a11efd"
     },
     {
       "name": "well_legend_unbound",
       "doc": {
-        "id": "comp_0000000047",
+        "id": "comp_0000000053",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5894,7 +6297,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000170",
+            "id": "el_0000000176",
             "element_type": "well_legend",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5908,13 +6311,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000170\" data-placeholder=\"true\"><rect x=\"10.0\" y=\"10.0\" width=\"78.0\" height=\"20.0\" fill=\"none\" stroke=\"#cccccc\" stroke-dasharray=\"1,1\"/></g>\n</svg>",
-      "sha256": "e670fcf0d44817238e3472b76e5b3bb0a2e63ac90c5bf29bc9136f01fe248bc6"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000176\" data-placeholder=\"true\"><rect x=\"10.0\" y=\"10.0\" width=\"78.0\" height=\"20.0\" fill=\"none\" stroke=\"#cccccc\" stroke-dasharray=\"1,1\"/></g>\n</svg>",
+      "sha256": "11f33d6decb2d7b5da0c61db99b7e5952ba880892b2fe4daf71f08faf405a63c"
     },
     {
       "name": "profile_bound",
       "doc": {
-        "id": "comp_0000000048",
+        "id": "comp_0000000054",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5924,7 +6327,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000171",
+            "id": "el_0000000177",
             "element_type": "profile",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5946,13 +6349,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000171\">\n<rect x=\"10.00\" y=\"10.00\" width=\"80.00\" height=\"40.00\" fill=\"#ffffff\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n<text x=\"12.00\" y=\"14.40\" font-family=\"SimSun, Arial\" font-size=\"3.2\" fill=\"#333333\">附图</text>\n<rect x=\"18.00\" y=\"14.00\" width=\"40.00\" height=\"20.00\" fill=\"none\" stroke=\"#d84315\" stroke-width=\"0.4\"/>\n<rect x=\"10.00\" y=\"10.00\" width=\"80.00\" height=\"40.00\" fill=\"none\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n</g>\n</svg>",
-      "sha256": "dd923a742f9cc12d29372c53955618927bf53dd1c0bc2fda37d9d790f535e375"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000177\">\n<rect x=\"10.00\" y=\"10.00\" width=\"80.00\" height=\"40.00\" fill=\"#ffffff\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n<text x=\"12.00\" y=\"14.40\" font-family=\"SimSun, Arial\" font-size=\"3.2\" fill=\"#333333\">附图</text>\n<rect x=\"18.00\" y=\"14.00\" width=\"40.00\" height=\"20.00\" fill=\"none\" stroke=\"#d84315\" stroke-width=\"0.4\"/>\n<rect x=\"10.00\" y=\"10.00\" width=\"80.00\" height=\"40.00\" fill=\"none\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n</g>\n</svg>",
+      "sha256": "70154969bc0048b23e71200b84e8ec5ac726f2d3fa0b809f25e698277a6c790d"
     },
     {
       "name": "legend_defaults",
       "doc": {
-        "id": "comp_0000000049",
+        "id": "comp_0000000055",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5962,7 +6365,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000172",
+            "id": "el_0000000178",
             "element_type": "legend",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -5976,13 +6379,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000172\">\n<rect x=\"10.0\" y=\"10.0\" width=\"78.0\" height=\"30.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"14.0\" y=\"15.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"14.0\" y=\"19.0\" width=\"6\" height=\"3\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"21.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">三角洲砂体</text>\n<rect x=\"14.0\" y=\"25.0\" width=\"6\" height=\"3\" fill=\"#b0bec5\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"27.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">湖相泥岩</text>\n</g>\n</svg>",
-      "sha256": "b110e8140aa77f2e56b7c6905dadeeca3c489d16ca695f798e46fb43a4dc6fdc"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000178\">\n<rect x=\"10.0\" y=\"10.0\" width=\"78.0\" height=\"30.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"14.0\" y=\"15.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"14.0\" y=\"19.0\" width=\"6\" height=\"3\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"21.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">三角洲砂体</text>\n<rect x=\"14.0\" y=\"25.0\" width=\"6\" height=\"3\" fill=\"#b0bec5\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"27.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">湖相泥岩</text>\n</g>\n</svg>",
+      "sha256": "19e5c65b4fda730a647a9d544b48570e5a344434155c81d366231e209b984cdd"
     },
     {
       "name": "legend_title_override",
       "doc": {
-        "id": "comp_0000000050",
+        "id": "comp_0000000056",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -5992,7 +6395,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000173",
+            "id": "el_0000000179",
             "element_type": "legend",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -6014,13 +6417,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000173\">\n<rect x=\"10.0\" y=\"10.0\" width=\"78.0\" height=\"30.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"14.0\" y=\"15.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">自定义图例</text>\n<rect x=\"14.0\" y=\"19.0\" width=\"6\" height=\"3\" fill=\"#abcdef\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"21.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">唯一</text>\n</g>\n</svg>",
-      "sha256": "75fb78cee4aa0210f336497e15ef79628e50007d8b8bb69a13cfc309ce08f1ab"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000179\">\n<rect x=\"10.0\" y=\"10.0\" width=\"78.0\" height=\"30.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"14.0\" y=\"15.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">自定义图例</text>\n<rect x=\"14.0\" y=\"19.0\" width=\"6\" height=\"3\" fill=\"#abcdef\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"21.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">唯一</text>\n</g>\n</svg>",
+      "sha256": "fda1fd63262e554d574abf8dd5cb2a4a00de01f74a704855a6ef137f6f77076d"
     },
     {
       "name": "legend_overflow",
       "doc": {
-        "id": "comp_0000000051",
+        "id": "comp_0000000057",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -6030,7 +6433,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000174",
+            "id": "el_0000000180",
             "element_type": "legend",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -6079,13 +6482,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000174\">\n<rect x=\"10.0\" y=\"10.0\" width=\"78.0\" height=\"58.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"14.0\" y=\"15.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"14.0\" y=\"19.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"21.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L0</text>\n<rect x=\"14.0\" y=\"25.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"27.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L1</text>\n<rect x=\"14.0\" y=\"31.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"33.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L2</text>\n<rect x=\"14.0\" y=\"37.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"39.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L3</text>\n<rect x=\"14.0\" y=\"43.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"45.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L4</text>\n<rect x=\"14.0\" y=\"49.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"51.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L5</text>\n<rect x=\"14.0\" y=\"55.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"57.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L6</text>\n<rect x=\"14.0\" y=\"61.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"63.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L7</text>\n</g>\n</svg>",
-      "sha256": "c5488bd46e7637cc626632010de09608030655103b5676a5097a7f4d89929acf"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000180\">\n<rect x=\"10.0\" y=\"10.0\" width=\"78.0\" height=\"58.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"14.0\" y=\"15.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"14.0\" y=\"19.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"21.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L0</text>\n<rect x=\"14.0\" y=\"25.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"27.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L1</text>\n<rect x=\"14.0\" y=\"31.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"33.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L2</text>\n<rect x=\"14.0\" y=\"37.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"39.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L3</text>\n<rect x=\"14.0\" y=\"43.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"45.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L4</text>\n<rect x=\"14.0\" y=\"49.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"51.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L5</text>\n<rect x=\"14.0\" y=\"55.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"57.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L6</text>\n<rect x=\"14.0\" y=\"61.0\" width=\"6\" height=\"3\" fill=\"#112233\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"23.0\" y=\"63.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">L7</text>\n</g>\n</svg>",
+      "sha256": "b72d71c5e5317f8e71dea17fac446681d259042a0b5bf599d62cbaf6c5cd89d4"
     },
     {
       "name": "fault_symbols_empty",
       "doc": {
-        "id": "comp_0000000052",
+        "id": "comp_0000000058",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -6095,7 +6498,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000175",
+            "id": "el_0000000181",
             "element_type": "fault_symbols",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -6109,13 +6512,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000175\">\n<text x=\"10.00\" y=\"14.20\" font-family=\"SimSun, Arial\" font-size=\"3.4\" font-weight=\"bold\" fill=\"#000000\">断层符号</text>\n</g>\n</svg>",
-      "sha256": "c584174435b06938c84d3f5fe1254477519607ae0c2195faa5551f90ff691f10"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000181\">\n<text x=\"10.00\" y=\"14.20\" font-family=\"SimSun, Arial\" font-size=\"3.4\" font-weight=\"bold\" fill=\"#000000\">断层符号</text>\n</g>\n</svg>",
+      "sha256": "098c7ee28f97143b049a1aea0f2fa47ecf15582d2f2533d5108733c1bf279e4c"
     },
     {
       "name": "lithology_no_pattern",
       "doc": {
-        "id": "comp_0000000053",
+        "id": "comp_0000000059",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -6125,7 +6528,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000176",
+            "id": "el_0000000182",
             "element_type": "lithology_legend",
             "x_mm": 10.0,
             "y_mm": 10.0,
@@ -6146,13 +6549,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000176\">\n<text x=\"10.00\" y=\"14.60\" font-family=\"SimSun, Arial\" font-size=\"3.6\" font-weight=\"bold\" fill=\"#000000\">岩性图例</text>\n<rect x=\"13.00\" y=\"17.00\" width=\"9.00\" height=\"3.60\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.15\"/>\n<text x=\"24.50\" y=\"19.70\" font-family=\"SimSun, Arial\" font-size=\"2.8\" fill=\"#000000\">砂岩</text>\n</g>\n</svg>",
-      "sha256": "9b50a82997729d526b59e88d5bf10f63ce098bf4653785a84842fa6487193555"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000182\">\n<text x=\"10.00\" y=\"14.60\" font-family=\"SimSun, Arial\" font-size=\"3.6\" font-weight=\"bold\" fill=\"#000000\">岩性图例</text>\n<rect x=\"13.00\" y=\"17.00\" width=\"9.00\" height=\"3.60\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.15\"/>\n<text x=\"24.50\" y=\"19.70\" font-family=\"SimSun, Arial\" font-size=\"2.8\" fill=\"#000000\">砂岩</text>\n</g>\n</svg>",
+      "sha256": "833aa3474e45fc6b7a8f9936a246f4cef5a57c6d24e2e10b6580713209a1ffc5"
     },
     {
       "name": "title_default",
       "doc": {
-        "id": "comp_0000000054",
+        "id": "comp_0000000060",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -6162,7 +6565,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000178",
+            "id": "el_0000000184",
             "element_type": "subtitle",
             "x_mm": 10.0,
             "y_mm": 16.0,
@@ -6174,7 +6577,7 @@
             "properties": {}
           },
           {
-            "id": "el_0000000177",
+            "id": "el_0000000183",
             "element_type": "title",
             "x_mm": 10.0,
             "y_mm": 4.0,
@@ -6188,13 +6591,13 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000178\"><text x=\"60.0\" y=\"21.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"5.0\" fill=\"#333333\" text-anchor=\"middle\"></text></g>\n<g id=\"el_0000000177\"><text x=\"60.0\" y=\"12.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">古地理图</text></g>\n</svg>",
-      "sha256": "525d9960de6c56c8e6b2a168318c1cd8632635dcef7252138c30ce74660f4ba9"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000184\"><text x=\"60.0\" y=\"21.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"5.0\" fill=\"#333333\" text-anchor=\"middle\"></text></g>\n<g id=\"el_0000000183\"><text x=\"60.0\" y=\"12.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">古地理图</text></g>\n</svg>",
+      "sha256": "119ee8a807e1147929d3f6dbe60ef7e2dfa94fcae071303c3d1c2f5dc6419037"
     },
     {
       "name": "escaping",
       "doc": {
-        "id": "comp_0000000055",
+        "id": "comp_0000000061",
         "title": "oracle",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -6204,7 +6607,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000180",
+            "id": "el_0000000186",
             "element_type": "text",
             "x_mm": 10.0,
             "y_mm": 20.0,
@@ -6218,7 +6621,7 @@
             }
           },
           {
-            "id": "el_0000000179",
+            "id": "el_0000000185",
             "element_type": "title",
             "x_mm": 10.0,
             "y_mm": 4.0,
@@ -6234,15 +6637,15 @@
         ],
         "metadata": {}
       },
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000180\">\n<text x=\"10.00\" y=\"24.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">&lt;script&gt;alert(1)&lt;/script&gt;</text>\n<text x=\"10.00\" y=\"29.40\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">第二行 &amp; 转义</text>\n</g>\n<g id=\"el_0000000179\"><text x=\"60.0\" y=\"12.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">&lt;b&gt;&amp;&quot;&#x27;&lt;/b&gt;</text></g>\n</svg>",
-      "sha256": "53d4d2c95dfacf00b28e41e35844b161088feaccad0efdd690d8181d0061beb4"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"1122.5196850527px\" height=\"793.700787411px\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000186\">\n<text x=\"10.00\" y=\"24.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">&lt;script&gt;alert(1)&lt;/script&gt;</text>\n<text x=\"10.00\" y=\"29.40\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">第二行 &amp; 转义</text>\n</g>\n<g id=\"el_0000000185\"><text x=\"60.0\" y=\"12.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">&lt;b&gt;&amp;&quot;&#x27;&lt;/b&gt;</text></g>\n</svg>",
+      "sha256": "f24a2fffa93dbb1f1dea3714ed0e0dec024645c13251d098c9b508d3e80bac73"
     }
   ],
   "export_cases": [
     {
       "name": "export_template",
       "doc": {
-        "id": "comp_00000000b5",
+        "id": "comp_00000000bb",
         "title": "综合地质图",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -6252,7 +6655,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_00000000b6",
+            "id": "el_00000000bc",
             "element_type": "main_map",
             "x_mm": 12.0,
             "y_mm": 24.0,
@@ -6264,7 +6667,7 @@
             "properties": {}
           },
           {
-            "id": "el_00000000b7",
+            "id": "el_00000000bd",
             "element_type": "inset_map",
             "x_mm": 132.25,
             "y_mm": 24.0,
@@ -6278,7 +6681,7 @@
             }
           },
           {
-            "id": "el_00000000b8",
+            "id": "el_00000000be",
             "element_type": "stat_chart",
             "x_mm": 132.25,
             "y_mm": 100.0,
@@ -6296,7 +6699,7 @@
             }
           },
           {
-            "id": "el_00000000b9",
+            "id": "el_00000000bf",
             "element_type": "north_arrow",
             "x_mm": 265.0,
             "y_mm": 10.0,
@@ -6308,7 +6711,7 @@
             "properties": {}
           },
           {
-            "id": "el_00000000ba",
+            "id": "el_00000000c0",
             "element_type": "legend",
             "x_mm": 203.0,
             "y_mm": 26.0,
@@ -6320,7 +6723,7 @@
             "properties": {}
           },
           {
-            "id": "el_00000000bb",
+            "id": "el_00000000c1",
             "element_type": "datasource",
             "x_mm": 203.0,
             "y_mm": 114.0,
@@ -6335,7 +6738,7 @@
             }
           },
           {
-            "id": "el_00000000bc",
+            "id": "el_00000000c2",
             "element_type": "time_credits",
             "x_mm": 203.0,
             "y_mm": 144.0,
@@ -6349,7 +6752,7 @@
             }
           },
           {
-            "id": "el_00000000bd",
+            "id": "el_00000000c3",
             "element_type": "metadata",
             "x_mm": 12.0,
             "y_mm": 188.0,
@@ -6392,7 +6795,7 @@
             }
           },
           {
-            "id": "el_00000000be",
+            "id": "el_00000000c4",
             "element_type": "title",
             "x_mm": 12.0,
             "y_mm": 6.0,
@@ -6413,8 +6816,8 @@
           "template_category": "comprehensive"
         }
       },
-      "physical_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"297.0mm\" height=\"210.0mm\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_00000000b6\">\n<rect x=\"12.0\" y=\"24.0\" width=\"114.7\" height=\"152.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<text x=\"69.35\" y=\"100.0\" font-family=\"Arial, sans-serif\" font-size=\"5\" fill=\"#888888\" text-anchor=\"middle\">主图画布 (Main Map Canvas)</text>\n</g>\n<g id=\"el_00000000b7\">\n<rect x=\"132.25\" y=\"24.00\" width=\"62.90\" height=\"68.40\" fill=\"#ffffff\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n<text x=\"134.25\" y=\"28.40\" font-family=\"SimSun, Arial\" font-size=\"3.2\" fill=\"#333333\">附图</text>\n<rect x=\"132.25\" y=\"24.00\" width=\"62.90\" height=\"68.40\" fill=\"none\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n</g>\n<g id=\"el_00000000b8\">\n<rect x=\"132.25\" y=\"100.00\" width=\"62.90\" height=\"69.92\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.25\"/>\n<text x=\"163.70\" y=\"104.60\" font-family=\"SimSun, Arial\" font-size=\"3.4\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">单因素统计</text>\n<text x=\"163.70\" y=\"134.96\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#888888\" text-anchor=\"middle\">统计图（无数据）</text>\n</g>\n<g id=\"el_00000000b9\"><polygon points=\"271.0,10.0 277.0,26.0 271.0,22.0 265.0,26.0\" fill=\"#000000\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"271.0\" y=\"9.0\" font-family=\"Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">N</text></g>\n<g id=\"el_00000000ba\">\n<rect x=\"203.0\" y=\"26.0\" width=\"78.0\" height=\"84.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"207.0\" y=\"31.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"207.0\" y=\"35.0\" width=\"6\" height=\"3\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"216.0\" y=\"37.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">三角洲砂体</text>\n<rect x=\"207.0\" y=\"41.0\" width=\"6\" height=\"3\" fill=\"#b0bec5\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"216.0\" y=\"43.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">湖相泥岩</text>\n</g>\n<g id=\"el_00000000bb\">\n<text x=\"203.00\" y=\"117.40\" font-family=\"SimSun, Arial\" font-size=\"3.20\" font-weight=\"bold\" fill=\"#000000\">数据来源</text>\n<line x1=\"203.00\" y1=\"121.00\" x2=\"281.00\" y2=\"121.00\" stroke=\"#666666\" stroke-width=\"0.15\"/>\n<g id=\"el_00000000bb_body\">\n<text x=\"203.00\" y=\"124.20\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">数据来源：</text>\n<text x=\"203.00\" y=\"127.98\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">井位/测线：</text>\n<text x=\"203.00\" y=\"131.76\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">解释成果：</text>\n</g>\n</g>\n<g id=\"el_00000000bc\">\n<text x=\"281.00\" y=\"146.60\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">制图时间：</text>\n<text x=\"281.00\" y=\"150.11\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">编制：</text>\n<text x=\"281.00\" y=\"153.62\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">审核：</text>\n</g>\n<g id=\"el_00000000bd\">\n<text x=\"12.00\" y=\"192.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">图名: </text>\n<text x=\"12.00\" y=\"197.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">编图单元: </text>\n<text x=\"12.00\" y=\"202.40\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">资料来源: </text>\n<text x=\"75.33\" y=\"192.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">编制: </text>\n<text x=\"75.33\" y=\"197.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">审核: </text>\n<text x=\"75.33\" y=\"202.40\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">日期: </text>\n<text x=\"138.67\" y=\"192.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">比例尺: </text>\n<rect x=\"12.00\" y=\"188.00\" width=\"190.00\" height=\"16.00\" fill=\"none\" stroke=\"#999999\" stroke-width=\"0.2\"/>\n</g>\n<g id=\"el_00000000be\"><text x=\"104.5\" y=\"16.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">综合地质图</text></g>\n</svg>",
-      "sha256": "6783cdc58c0f891aa7a61c0fe2b77df4533f4958391264263ede2c608e2295e6",
+      "physical_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"297.0mm\" height=\"210.0mm\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_00000000bc\">\n<rect x=\"12.0\" y=\"24.0\" width=\"114.7\" height=\"152.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<text x=\"69.35\" y=\"100.0\" font-family=\"Arial, sans-serif\" font-size=\"5\" fill=\"#888888\" text-anchor=\"middle\">主图画布 (Main Map Canvas)</text>\n</g>\n<g id=\"el_00000000bd\">\n<rect x=\"132.25\" y=\"24.00\" width=\"62.90\" height=\"68.40\" fill=\"#ffffff\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n<text x=\"134.25\" y=\"28.40\" font-family=\"SimSun, Arial\" font-size=\"3.2\" fill=\"#333333\">附图</text>\n<rect x=\"132.25\" y=\"24.00\" width=\"62.90\" height=\"68.40\" fill=\"none\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n</g>\n<g id=\"el_00000000be\">\n<rect x=\"132.25\" y=\"100.00\" width=\"62.90\" height=\"69.92\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.25\"/>\n<text x=\"163.70\" y=\"104.60\" font-family=\"SimSun, Arial\" font-size=\"3.4\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">单因素统计</text>\n<text x=\"163.70\" y=\"134.96\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#888888\" text-anchor=\"middle\">统计图（无数据）</text>\n</g>\n<g id=\"el_00000000bf\"><polygon points=\"271.0,10.0 277.0,26.0 271.0,22.0 265.0,26.0\" fill=\"#000000\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"271.0\" y=\"9.0\" font-family=\"Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">N</text></g>\n<g id=\"el_00000000c0\">\n<rect x=\"203.0\" y=\"26.0\" width=\"78.0\" height=\"84.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"207.0\" y=\"31.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"207.0\" y=\"35.0\" width=\"6\" height=\"3\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"216.0\" y=\"37.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">三角洲砂体</text>\n<rect x=\"207.0\" y=\"41.0\" width=\"6\" height=\"3\" fill=\"#b0bec5\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"216.0\" y=\"43.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">湖相泥岩</text>\n</g>\n<g id=\"el_00000000c1\">\n<text x=\"203.00\" y=\"117.40\" font-family=\"SimSun, Arial\" font-size=\"3.20\" font-weight=\"bold\" fill=\"#000000\">数据来源</text>\n<line x1=\"203.00\" y1=\"121.00\" x2=\"281.00\" y2=\"121.00\" stroke=\"#666666\" stroke-width=\"0.15\"/>\n<g id=\"el_00000000c1_body\">\n<text x=\"203.00\" y=\"124.20\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">数据来源：</text>\n<text x=\"203.00\" y=\"127.98\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">井位/测线：</text>\n<text x=\"203.00\" y=\"131.76\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">解释成果：</text>\n</g>\n</g>\n<g id=\"el_00000000c2\">\n<text x=\"281.00\" y=\"146.60\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">制图时间：</text>\n<text x=\"281.00\" y=\"150.11\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">编制：</text>\n<text x=\"281.00\" y=\"153.62\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">审核：</text>\n</g>\n<g id=\"el_00000000c3\">\n<text x=\"12.00\" y=\"192.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">图名: </text>\n<text x=\"12.00\" y=\"197.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">编图单元: </text>\n<text x=\"12.00\" y=\"202.40\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">资料来源: </text>\n<text x=\"75.33\" y=\"192.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">编制: </text>\n<text x=\"75.33\" y=\"197.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">审核: </text>\n<text x=\"75.33\" y=\"202.40\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">日期: </text>\n<text x=\"138.67\" y=\"192.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">比例尺: </text>\n<rect x=\"12.00\" y=\"188.00\" width=\"190.00\" height=\"16.00\" fill=\"none\" stroke=\"#999999\" stroke-width=\"0.2\"/>\n</g>\n<g id=\"el_00000000c4\"><text x=\"104.5\" y=\"16.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">综合地质图</text></g>\n</svg>",
+      "sha256": "44e61eeccc7b304762c3df7ba682fe1d6d1b09a8aaee98ccd11dcfe436d613f0",
       "page_pixels_96": [
         1123,
         794
@@ -6427,7 +6830,7 @@
     {
       "name": "export_all_elements",
       "doc": {
-        "id": "comp_0000000056",
+        "id": "comp_0000000062",
         "title": "全要素",
         "paper_size": "A4",
         "orientation": "landscape",
@@ -6437,7 +6840,7 @@
         "schema_version": 2,
         "elements": [
           {
-            "id": "el_0000000204",
+            "id": "el_0000000210",
             "element_type": "neatline",
             "x_mm": 8.0,
             "y_mm": 18.0,
@@ -6451,7 +6854,7 @@
             }
           },
           {
-            "id": "el_0000000191",
+            "id": "el_0000000197",
             "element_type": "main_map",
             "x_mm": 10.0,
             "y_mm": 20.0,
@@ -6463,7 +6866,7 @@
             "properties": {}
           },
           {
-            "id": "el_0000000200",
+            "id": "el_0000000206",
             "element_type": "grid",
             "x_mm": 10.0,
             "y_mm": 20.0,
@@ -6477,7 +6880,7 @@
             }
           },
           {
-            "id": "el_0000000194",
+            "id": "el_0000000200",
             "element_type": "north_arrow",
             "x_mm": 120.0,
             "y_mm": 6.0,
@@ -6489,7 +6892,7 @@
             "properties": {}
           },
           {
-            "id": "el_0000000195",
+            "id": "el_0000000201",
             "element_type": "scale_bar",
             "x_mm": 12.0,
             "y_mm": 104.0,
@@ -6503,7 +6906,7 @@
             }
           },
           {
-            "id": "el_0000000196",
+            "id": "el_0000000202",
             "element_type": "legend",
             "x_mm": 120.0,
             "y_mm": 24.0,
@@ -6547,7 +6950,7 @@
             }
           },
           {
-            "id": "el_0000000197",
+            "id": "el_0000000203",
             "element_type": "facies_legend",
             "x_mm": 120.0,
             "y_mm": 84.0,
@@ -6559,7 +6962,7 @@
             "properties": {}
           },
           {
-            "id": "el_0000000198",
+            "id": "el_0000000204",
             "element_type": "well_legend",
             "x_mm": 120.0,
             "y_mm": 128.0,
@@ -6579,7 +6982,7 @@
             }
           },
           {
-            "id": "el_0000000199",
+            "id": "el_0000000205",
             "element_type": "colorbar",
             "x_mm": 204.0,
             "y_mm": 24.0,
@@ -6595,7 +6998,7 @@
             }
           },
           {
-            "id": "el_0000000203",
+            "id": "el_0000000209",
             "element_type": "timescale",
             "x_mm": 10.0,
             "y_mm": 116.0,
@@ -6622,7 +7025,7 @@
             }
           },
           {
-            "id": "el_0000000205",
+            "id": "el_0000000211",
             "element_type": "datasource",
             "x_mm": 204.0,
             "y_mm": 128.0,
@@ -6637,7 +7040,7 @@
             }
           },
           {
-            "id": "el_0000000206",
+            "id": "el_0000000212",
             "element_type": "time_credits",
             "x_mm": 204.0,
             "y_mm": 158.0,
@@ -6651,7 +7054,7 @@
             }
           },
           {
-            "id": "el_0000000207",
+            "id": "el_0000000213",
             "element_type": "fault_symbols",
             "x_mm": 204.0,
             "y_mm": 180.0,
@@ -6690,7 +7093,7 @@
             }
           },
           {
-            "id": "el_0000000208",
+            "id": "el_0000000214",
             "element_type": "lithology_legend",
             "x_mm": 8.0,
             "y_mm": 140.0,
@@ -6720,7 +7123,7 @@
             }
           },
           {
-            "id": "el_0000000209",
+            "id": "el_0000000215",
             "element_type": "strat_labels",
             "x_mm": 10.0,
             "y_mm": 158.0,
@@ -6734,7 +7137,7 @@
             }
           },
           {
-            "id": "el_0000000210",
+            "id": "el_0000000216",
             "element_type": "text",
             "x_mm": 10.0,
             "y_mm": 174.0,
@@ -6748,7 +7151,7 @@
             }
           },
           {
-            "id": "el_0000000211",
+            "id": "el_0000000217",
             "element_type": "metadata",
             "x_mm": 10.0,
             "y_mm": 190.0,
@@ -6795,7 +7198,7 @@
             }
           },
           {
-            "id": "el_0000000212",
+            "id": "el_0000000218",
             "element_type": "image",
             "x_mm": 204.0,
             "y_mm": 6.0,
@@ -6807,7 +7210,7 @@
             "properties": {}
           },
           {
-            "id": "el_0000000213",
+            "id": "el_0000000219",
             "element_type": "inset_map",
             "x_mm": 120.0,
             "y_mm": 152.0,
@@ -6826,7 +7229,7 @@
             }
           },
           {
-            "id": "el_0000000214",
+            "id": "el_0000000220",
             "element_type": "profile",
             "x_mm": 8.0,
             "y_mm": 104.0,
@@ -6838,7 +7241,7 @@
             "properties": {}
           },
           {
-            "id": "el_0000000215",
+            "id": "el_0000000221",
             "element_type": "stat_chart",
             "x_mm": 204.0,
             "y_mm": 210.0,
@@ -6850,7 +7253,7 @@
             "properties": {}
           },
           {
-            "id": "el_0000000201",
+            "id": "el_0000000207",
             "element_type": "annotation",
             "x_mm": 30.0,
             "y_mm": 40.0,
@@ -6864,7 +7267,7 @@
             }
           },
           {
-            "id": "el_0000000202",
+            "id": "el_0000000208",
             "element_type": "annotation",
             "x_mm": 30.0,
             "y_mm": 52.0,
@@ -6879,7 +7282,7 @@
             }
           },
           {
-            "id": "el_0000000193",
+            "id": "el_0000000199",
             "element_type": "subtitle",
             "x_mm": 10.0,
             "y_mm": 15.0,
@@ -6893,7 +7296,7 @@
             }
           },
           {
-            "id": "el_0000000192",
+            "id": "el_0000000198",
             "element_type": "title",
             "x_mm": 10.0,
             "y_mm": 4.0,
@@ -6909,8 +7312,8 @@
         ],
         "metadata": {}
       },
-      "physical_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"297.0mm\" height=\"210.0mm\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000204\">\n<rect x=\"8.00\" y=\"18.00\" width=\"102.00\" height=\"82.00\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.80\"/>\n</g>\n<g id=\"el_0000000191\">\n<rect x=\"10.0\" y=\"20.0\" width=\"100.0\" height=\"80.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<text x=\"60.0\" y=\"60.0\" font-family=\"Arial, sans-serif\" font-size=\"5\" fill=\"#888888\" text-anchor=\"middle\">主图画布 (Main Map Canvas)</text>\n</g>\n<g id=\"el_0000000200\">\n<line x1=\"40.00\" y1=\"20.00\" x2=\"40.00\" y2=\"100.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<line x1=\"70.00\" y1=\"20.00\" x2=\"70.00\" y2=\"100.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<line x1=\"100.00\" y1=\"20.00\" x2=\"100.00\" y2=\"100.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<line x1=\"10.00\" y1=\"50.00\" x2=\"110.00\" y2=\"50.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<line x1=\"10.00\" y1=\"80.00\" x2=\"110.00\" y2=\"80.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<rect x=\"10.00\" y=\"20.00\" width=\"100.00\" height=\"80.00\" fill=\"none\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n</g>\n<g id=\"el_0000000194\"><polygon points=\"126.0,6.0 132.0,22.0 126.0,18.0 120.0,22.0\" fill=\"#000000\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"126.0\" y=\"5.0\" font-family=\"Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">N</text></g>\n<g id=\"el_0000000195\"><rect x=\"12.0\" y=\"106.5\" width=\"46.0\" height=\"2\" fill=\"#000000\"/><rect x=\"12.0\" y=\"106.5\" width=\"23.0\" height=\"2\" fill=\"#ffffff\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"12.0\" y=\"110.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"start\">0</text><text x=\"35.0\" y=\"110.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"middle\">5</text><text x=\"58.0\" y=\"110.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"end\">10 km</text></g>\n<g id=\"el_0000000196\">\n<rect x=\"120.0\" y=\"24.0\" width=\"78.0\" height=\"56.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"124.0\" y=\"29.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"124.0\" y=\"33.0\" width=\"6\" height=\"3\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"133.0\" y=\"35.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">面状</text>\n<line x1=\"124.0\" y1=\"40.5\" x2=\"130.0\" y2=\"40.5\" stroke=\"#333333\" stroke-width=\"0.20\"/>\n<text x=\"133.0\" y=\"41.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">线状</text>\n<circle cx=\"127.0\" cy=\"46.5\" r=\"2\" fill=\"#e45756\" stroke=\"#333333\" stroke-width=\"0.13\"/>\n<text x=\"133.0\" y=\"47.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">点状</text>\n<defs><linearGradient id=\"grad_3_H\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#053061\"/><stop offset=\"100.0%\" stop-color=\"#67001f\"/></linearGradient></defs>\n<rect x=\"124.0\" y=\"51.0\" width=\"14\" height=\"3\" fill=\"url(#grad_3_H)\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"141.0\" y=\"53.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#000000\">渐变</text>\n</g>\n<g id=\"el_0000000197\">\n<rect x=\"120.0\" y=\"84.0\" width=\"78.0\" height=\"40.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"124.0\" y=\"89.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"124.0\" y=\"93.0\" width=\"6\" height=\"3\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"133.0\" y=\"95.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">三角洲砂体</text>\n<rect x=\"124.0\" y=\"99.0\" width=\"6\" height=\"3\" fill=\"#b0bec5\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"133.0\" y=\"101.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">湖相泥岩</text>\n</g>\n<g id=\"el_0000000198\">\n<rect x=\"120.0\" y=\"128.0\" width=\"78.0\" height=\"20.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"124.0\" y=\"133.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<circle cx=\"127.0\" cy=\"138.5\" r=\"2\" fill=\"#22b8a7\" stroke=\"#333333\" stroke-width=\"0.13\"/>\n<text x=\"133.0\" y=\"139.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">钻井</text>\n</g>\n<g id=\"el_0000000199\">\n<text x=\"202.80\" y=\"40.00\" font-family=\"SimSun, Arial\" font-size=\"3.2\" fill=\"#000000\" text-anchor=\"middle\" transform=\"rotate(-90 202.80 40.00)\">色标</text>\n<defs><linearGradient id=\"cbar_H\" x1=\"0%\" y1=\"100%\" x2=\"0%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#053061\"/><stop offset=\"100.0%\" stop-color=\"#67001f\"/></linearGradient></defs>\n<rect x=\"208.00\" y=\"30.00\" width=\"9.60\" height=\"20.00\" fill=\"url(#cbar_H)\" stroke=\"#333333\" stroke-width=\"0.2\"/>\n<text x=\"219.10\" y=\"50.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"219.10\" y=\"32.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">1</text>\n</g>\n<g id=\"el_0000000203\">\n<rect x=\"10.00\" y=\"118.40\" width=\"3.94\" height=\"6.00\" fill=\"#f2f2f2\" stroke=\"#37474f\" stroke-width=\"0.15\"/>\n<text x=\"11.97\" y=\"127.20\" font-family=\"SimSun, Arial\" font-size=\"2.4\" fill=\"#000000\" text-anchor=\"middle\">Q</text>\n<rect x=\"13.94\" y=\"118.40\" width=\"96.06\" height=\"6.00\" fill=\"#d9e6c3\" stroke=\"#37474f\" stroke-width=\"0.15\"/>\n<text x=\"61.97\" y=\"127.20\" font-family=\"SimSun, Arial\" font-size=\"2.4\" fill=\"#000000\" text-anchor=\"middle\">K</text>\n</g>\n<g id=\"el_0000000205\">\n<text x=\"204.00\" y=\"131.40\" font-family=\"SimSun, Arial\" font-size=\"3.20\" font-weight=\"bold\" fill=\"#000000\">数据来源</text>\n<line x1=\"204.00\" y1=\"135.00\" x2=\"282.00\" y2=\"135.00\" stroke=\"#666666\" stroke-width=\"0.15\"/>\n<g id=\"el_0000000205_body\">\n<text x=\"204.00\" y=\"138.20\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">来源A：</text>\n<text x=\"204.00\" y=\"141.98\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">来源B：</text>\n</g>\n</g>\n<g id=\"el_0000000206\">\n<text x=\"282.00\" y=\"160.60\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">制图：</text>\n<text x=\"282.00\" y=\"164.11\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">审核：</text>\n</g>\n<g id=\"el_0000000207\">\n<text x=\"204.00\" y=\"184.20\" font-family=\"SimSun, Arial\" font-size=\"3.4\" font-weight=\"bold\" fill=\"#000000\">断层符号</text>\n<line x1=\"206.00\" y1=\"187.00\" x2=\"218.00\" y2=\"187.00\" stroke=\"#1a1a1a\" stroke-width=\"0.55\"/>\n<text x=\"220.50\" y=\"187.90\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">正断层</text>\n<line x1=\"206.00\" y1=\"192.20\" x2=\"218.00\" y2=\"192.20\" stroke=\"#1a1a1a\" stroke-width=\"0.55\" stroke-dasharray=\"2.4,1.2\"/>\n<text x=\"220.50\" y=\"193.10\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">逆断层</text>\n<line x1=\"206.00\" y1=\"197.40\" x2=\"218.00\" y2=\"197.40\" stroke=\"#1a1a1a\" stroke-width=\"0.55\" stroke-dasharray=\"0.6,0.9\"/>\n<text x=\"220.50\" y=\"198.30\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">点线</text>\n<line x1=\"206.00\" y1=\"202.60\" x2=\"218.00\" y2=\"202.60\" stroke=\"#1a1a1a\" stroke-width=\"0.55\" stroke-dasharray=\"2.8,1.0,0.6,1.0\"/>\n<text x=\"220.50\" y=\"203.50\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">点划</text>\n<line x1=\"206.00\" y1=\"207.80\" x2=\"218.00\" y2=\"207.80\" stroke=\"#1a1a1a\" stroke-width=\"0.55\" stroke-dasharray=\"3.2,1.2\"/>\n<text x=\"220.50\" y=\"208.70\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">断层</text>\n<line x1=\"206.00\" y1=\"213.00\" x2=\"218.00\" y2=\"213.00\" stroke=\"#1a1a1a\" stroke-width=\"0.55\"/>\n<text x=\"220.50\" y=\"213.90\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">未知</text>\n</g>\n<g id=\"el_0000000208\">\n<text x=\"8.00\" y=\"144.60\" font-family=\"SimSun, Arial\" font-size=\"3.6\" font-weight=\"bold\" fill=\"#000000\">岩性图例</text>\n<rect x=\"11.00\" y=\"147.00\" width=\"9.00\" height=\"3.60\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.15\"/>\n<defs><pattern id=\"lith_H\" width=\"2.0\" height=\"2.0\" patternUnits=\"userSpaceOnUse\"><circle cx=\"0.5\" cy=\"0.5\" r=\"0.22\" fill=\"#00000088\"/><circle cx=\"1.5\" cy=\"1.5\" r=\"0.22\" fill=\"#00000088\"/></pattern></defs>\n<rect x=\"11.00\" y=\"147.00\" width=\"9.00\" height=\"3.60\" fill=\"url(#lith_H)\"/>\n<text x=\"22.50\" y=\"149.70\" font-family=\"SimSun, Arial\" font-size=\"2.8\" fill=\"#000000\">砂岩</text>\n<rect x=\"11.00\" y=\"153.00\" width=\"9.00\" height=\"3.60\" fill=\"#b0bec5\" stroke=\"#333333\" stroke-width=\"0.15\"/>\n<defs><pattern id=\"lith_H\" width=\"1.6\" height=\"1.6\" patternUnits=\"userSpaceOnUse\"><line x1=\"0\" y1=\"1.6\" x2=\"1.6\" y2=\"0\" stroke=\"#00000077\" stroke-width=\"0.18\"/></pattern></defs>\n<rect x=\"11.00\" y=\"153.00\" width=\"9.00\" height=\"3.60\" fill=\"url(#lith_H)\"/>\n<text x=\"22.50\" y=\"155.70\" font-family=\"SimSun, Arial\" font-size=\"2.8\" fill=\"#000000\">泥岩</text>\n<rect x=\"11.00\" y=\"159.00\" width=\"9.00\" height=\"3.60\" fill=\"#cfd8dc\" stroke=\"#333333\" stroke-width=\"0.15\"/>\n<defs><pattern id=\"lith_H\" width=\"1.4\" height=\"1.4\" patternUnits=\"userSpaceOnUse\"><line x1=\"0\" y1=\"1.4\" x2=\"1.4\" y2=\"0\" stroke=\"#00000077\" stroke-width=\"0.15\"/><line x1=\"0\" y1=\"0\" x2=\"1.4\" y2=\"1.4\" stroke=\"#00000077\" stroke-width=\"0.15\"/></pattern></defs>\n<rect x=\"11.00\" y=\"159.00\" width=\"9.00\" height=\"3.60\" fill=\"url(#lith_H)\"/>\n<text x=\"22.50\" y=\"161.70\" font-family=\"SimSun, Arial\" font-size=\"2.8\" fill=\"#000000\">灰岩</text>\n</g>\n<g id=\"el_0000000209\">\n<text x=\"10.00\" y=\"162.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">层序标签</text>\n</g>\n<g id=\"el_0000000210\">\n<text x=\"10.00\" y=\"178.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">多行</text>\n<text x=\"10.00\" y=\"183.40\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">文本</text>\n</g>\n<g id=\"el_0000000211\">\n<text x=\"10.00\" y=\"194.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">编制: </text>\n<text x=\"10.00\" y=\"199.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">日期: </text>\n<text x=\"50.00\" y=\"194.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">比例尺: </text>\n<text x=\"50.00\" y=\"199.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">数据来源: </text>\n<text x=\"90.00\" y=\"194.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">审核: </text>\n<text x=\"90.00\" y=\"199.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">图号: </text>\n<text x=\"130.00\" y=\"194.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">比例: </text>\n<text x=\"130.00\" y=\"199.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">密级: </text>\n<rect x=\"10.00\" y=\"190.00\" width=\"160.00\" height=\"14.00\" fill=\"none\" stroke=\"#999999\" stroke-width=\"0.2\"/>\n</g>\n<g id=\"el_0000000212\"><rect x=\"204.00\" y=\"6.00\" width=\"40.00\" height=\"20.00\" fill=\"#f2f4f7\" stroke=\"#999999\" stroke-width=\"0.2\"/><text x=\"224.00\" y=\"16.00\" font-family=\"Arial\" font-size=\"3.4\" fill=\"#777777\" text-anchor=\"middle\">图像占位（未绑定）</text></g>\n<g id=\"el_0000000213\">\n<rect x=\"120.00\" y=\"152.00\" width=\"60.00\" height=\"44.00\" fill=\"#ffffff\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n<text x=\"122.00\" y=\"156.40\" font-family=\"SimSun, Arial\" font-size=\"3.2\" fill=\"#333333\">附图</text>\n<rect x=\"132.00\" y=\"160.80\" width=\"24.00\" height=\"17.60\" fill=\"none\" stroke=\"#d84315\" stroke-width=\"0.4\"/>\n<rect x=\"120.00\" y=\"152.00\" width=\"60.00\" height=\"44.00\" fill=\"none\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n</g>\n<g id=\"el_0000000214\" data-placeholder=\"true\"><rect x=\"8.0\" y=\"104.0\" width=\"60.0\" height=\"30.0\" fill=\"none\" stroke=\"#cccccc\" stroke-dasharray=\"1,1\"/><text x=\"38.0\" y=\"119.0\" font-family=\"sans-serif\" font-size=\"4\" fill=\"#999999\" text-anchor=\"middle\">剖面（未绑定数据）</text></g>\n<g id=\"el_0000000215\">\n<rect x=\"204.00\" y=\"210.00\" width=\"78.00\" height=\"48.00\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.25\"/>\n<text x=\"243.00\" y=\"234.00\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#888888\" text-anchor=\"middle\">统计图（无数据）</text>\n</g>\n<g id=\"el_0000000201\">\n<line x1=\"72.00\" y1=\"48.00\" x2=\"38.40\" y2=\"42.80\" stroke=\"#555555\" stroke-width=\"0.2\"/>\n<circle cx=\"72.00\" cy=\"48.00\" r=\"0.5\" fill=\"#555555\"/>\n<text x=\"30.00\" y=\"43.50\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"3.5\" fill=\"#111111\">注记 →</text>\n</g>\n<g id=\"el_0000000202\">\n<text x=\"30.00\" y=\"55.50\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"3.5\" fill=\"#111111\">无引线</text>\n</g>\n<g id=\"el_0000000193\"><text x=\"60.0\" y=\"20.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"5.0\" fill=\"#333333\" text-anchor=\"middle\">副标题</text></g>\n<g id=\"el_0000000192\"><text x=\"60.0\" y=\"12.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">标题文本</text></g>\n</svg>",
-      "sha256": "81664177bff56dc519a67c65b955cf55eaae20e389bf61d563a5659f67adee52",
+      "physical_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 297.0 210.0\" width=\"297.0mm\" height=\"210.0mm\">\n<rect width=\"297.0\" height=\"210.0\" fill=\"#ffffff\" stroke=\"#333333\" stroke-width=\"0.5\"/>\n<g id=\"el_0000000210\">\n<rect x=\"8.00\" y=\"18.00\" width=\"102.00\" height=\"82.00\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.80\"/>\n</g>\n<g id=\"el_0000000197\">\n<rect x=\"10.0\" y=\"20.0\" width=\"100.0\" height=\"80.0\" fill=\"#181c22\" stroke=\"#444444\" stroke-width=\"0.3\"/>\n<text x=\"60.0\" y=\"60.0\" font-family=\"Arial, sans-serif\" font-size=\"5\" fill=\"#888888\" text-anchor=\"middle\">主图画布 (Main Map Canvas)</text>\n</g>\n<g id=\"el_0000000206\">\n<line x1=\"40.00\" y1=\"20.00\" x2=\"40.00\" y2=\"100.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<line x1=\"70.00\" y1=\"20.00\" x2=\"70.00\" y2=\"100.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<line x1=\"100.00\" y1=\"20.00\" x2=\"100.00\" y2=\"100.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<line x1=\"10.00\" y1=\"50.00\" x2=\"110.00\" y2=\"50.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<line x1=\"10.00\" y1=\"80.00\" x2=\"110.00\" y2=\"80.00\" stroke=\"#9aa4b2\" stroke-width=\"0.2\" stroke-dasharray=\"1.5,1\"/>\n<rect x=\"10.00\" y=\"20.00\" width=\"100.00\" height=\"80.00\" fill=\"none\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n</g>\n<g id=\"el_0000000200\"><polygon points=\"126.0,6.0 132.0,22.0 126.0,18.0 120.0,22.0\" fill=\"#000000\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"126.0\" y=\"5.0\" font-family=\"Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">N</text></g>\n<g id=\"el_0000000201\"><rect x=\"12.0\" y=\"106.5\" width=\"46.0\" height=\"2\" fill=\"#000000\"/><rect x=\"12.0\" y=\"106.5\" width=\"23.0\" height=\"2\" fill=\"#ffffff\" stroke=\"#000000\" stroke-width=\"0.2\"/><text x=\"12.0\" y=\"110.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"start\">0</text><text x=\"35.0\" y=\"110.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"middle\">5</text><text x=\"58.0\" y=\"110.0\" font-family=\"Arial, sans-serif\" font-size=\"3\" fill=\"#000000\" text-anchor=\"end\">10 km</text></g>\n<g id=\"el_0000000202\">\n<rect x=\"120.0\" y=\"24.0\" width=\"78.0\" height=\"56.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"124.0\" y=\"29.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"124.0\" y=\"33.0\" width=\"6\" height=\"3\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"133.0\" y=\"35.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">面状</text>\n<line x1=\"124.0\" y1=\"40.5\" x2=\"130.0\" y2=\"40.5\" stroke=\"#333333\" stroke-width=\"0.20\"/>\n<text x=\"133.0\" y=\"41.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">线状</text>\n<circle cx=\"127.0\" cy=\"46.5\" r=\"2\" fill=\"#e45756\" stroke=\"#333333\" stroke-width=\"0.13\"/>\n<text x=\"133.0\" y=\"47.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">点状</text>\n<defs><linearGradient id=\"grad_3_H\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#053061\"/><stop offset=\"100.0%\" stop-color=\"#67001f\"/></linearGradient></defs>\n<rect x=\"124.0\" y=\"51.0\" width=\"14\" height=\"3\" fill=\"url(#grad_3_H)\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"141.0\" y=\"53.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#000000\">渐变</text>\n</g>\n<g id=\"el_0000000203\">\n<rect x=\"120.0\" y=\"84.0\" width=\"78.0\" height=\"40.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"124.0\" y=\"89.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<rect x=\"124.0\" y=\"93.0\" width=\"6\" height=\"3\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"133.0\" y=\"95.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">三角洲砂体</text>\n<rect x=\"124.0\" y=\"99.0\" width=\"6\" height=\"3\" fill=\"#b0bec5\" stroke=\"#333333\" stroke-width=\"0.1\"/>\n<text x=\"133.0\" y=\"101.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">湖相泥岩</text>\n</g>\n<g id=\"el_0000000204\">\n<rect x=\"120.0\" y=\"128.0\" width=\"78.0\" height=\"20.0\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.2\" fill-opacity=\"0.95\"/>\n<text x=\"124.0\" y=\"133.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4\" font-weight=\"bold\" fill=\"#000000\">图 例</text>\n<circle cx=\"127.0\" cy=\"138.5\" r=\"2\" fill=\"#22b8a7\" stroke=\"#333333\" stroke-width=\"0.13\"/>\n<text x=\"133.0\" y=\"139.5\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\">钻井</text>\n</g>\n<g id=\"el_0000000205\">\n<text x=\"202.80\" y=\"40.00\" font-family=\"SimSun, Arial\" font-size=\"3.2\" fill=\"#000000\" text-anchor=\"middle\" transform=\"rotate(-90 202.80 40.00)\">色标</text>\n<defs><linearGradient id=\"cbar_H\" x1=\"0%\" y1=\"100%\" x2=\"0%\" y2=\"0%\"><stop offset=\"0.0%\" stop-color=\"#053061\"/><stop offset=\"100.0%\" stop-color=\"#67001f\"/></linearGradient></defs>\n<rect x=\"208.00\" y=\"30.00\" width=\"9.60\" height=\"20.00\" fill=\"url(#cbar_H)\" stroke=\"#333333\" stroke-width=\"0.2\"/>\n<text x=\"219.10\" y=\"50.80\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">0</text>\n<text x=\"219.10\" y=\"32.40\" font-family=\"Arial\" font-size=\"2.4\" fill=\"#000000\">1</text>\n</g>\n<g id=\"el_0000000209\">\n<rect x=\"10.00\" y=\"118.40\" width=\"3.94\" height=\"6.00\" fill=\"#f2f2f2\" stroke=\"#37474f\" stroke-width=\"0.15\"/>\n<text x=\"11.97\" y=\"127.20\" font-family=\"SimSun, Arial\" font-size=\"2.4\" fill=\"#000000\" text-anchor=\"middle\">Q</text>\n<rect x=\"13.94\" y=\"118.40\" width=\"96.06\" height=\"6.00\" fill=\"#d9e6c3\" stroke=\"#37474f\" stroke-width=\"0.15\"/>\n<text x=\"61.97\" y=\"127.20\" font-family=\"SimSun, Arial\" font-size=\"2.4\" fill=\"#000000\" text-anchor=\"middle\">K</text>\n</g>\n<g id=\"el_0000000211\">\n<text x=\"204.00\" y=\"131.40\" font-family=\"SimSun, Arial\" font-size=\"3.20\" font-weight=\"bold\" fill=\"#000000\">数据来源</text>\n<line x1=\"204.00\" y1=\"135.00\" x2=\"282.00\" y2=\"135.00\" stroke=\"#666666\" stroke-width=\"0.15\"/>\n<g id=\"el_0000000211_body\">\n<text x=\"204.00\" y=\"138.20\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">来源A：</text>\n<text x=\"204.00\" y=\"141.98\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.8\" fill=\"#000000\" text-anchor=\"start\">来源B：</text>\n</g>\n</g>\n<g id=\"el_0000000212\">\n<text x=\"282.00\" y=\"160.60\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">制图：</text>\n<text x=\"282.00\" y=\"164.11\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"2.6\" fill=\"#333333\" text-anchor=\"end\">审核：</text>\n</g>\n<g id=\"el_0000000213\">\n<text x=\"204.00\" y=\"184.20\" font-family=\"SimSun, Arial\" font-size=\"3.4\" font-weight=\"bold\" fill=\"#000000\">断层符号</text>\n<line x1=\"206.00\" y1=\"187.00\" x2=\"218.00\" y2=\"187.00\" stroke=\"#1a1a1a\" stroke-width=\"0.55\"/>\n<text x=\"220.50\" y=\"187.90\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">正断层</text>\n<line x1=\"206.00\" y1=\"192.20\" x2=\"218.00\" y2=\"192.20\" stroke=\"#1a1a1a\" stroke-width=\"0.55\" stroke-dasharray=\"2.4,1.2\"/>\n<text x=\"220.50\" y=\"193.10\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">逆断层</text>\n<line x1=\"206.00\" y1=\"197.40\" x2=\"218.00\" y2=\"197.40\" stroke=\"#1a1a1a\" stroke-width=\"0.55\" stroke-dasharray=\"0.6,0.9\"/>\n<text x=\"220.50\" y=\"198.30\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">点线</text>\n<line x1=\"206.00\" y1=\"202.60\" x2=\"218.00\" y2=\"202.60\" stroke=\"#1a1a1a\" stroke-width=\"0.55\" stroke-dasharray=\"2.8,1.0,0.6,1.0\"/>\n<text x=\"220.50\" y=\"203.50\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">点划</text>\n<line x1=\"206.00\" y1=\"207.80\" x2=\"218.00\" y2=\"207.80\" stroke=\"#1a1a1a\" stroke-width=\"0.55\" stroke-dasharray=\"3.2,1.2\"/>\n<text x=\"220.50\" y=\"208.70\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">断层</text>\n<line x1=\"206.00\" y1=\"213.00\" x2=\"218.00\" y2=\"213.00\" stroke=\"#1a1a1a\" stroke-width=\"0.55\"/>\n<text x=\"220.50\" y=\"213.90\" font-family=\"SimSun, Arial\" font-size=\"2.6\" fill=\"#000000\">未知</text>\n</g>\n<g id=\"el_0000000214\">\n<text x=\"8.00\" y=\"144.60\" font-family=\"SimSun, Arial\" font-size=\"3.6\" font-weight=\"bold\" fill=\"#000000\">岩性图例</text>\n<rect x=\"11.00\" y=\"147.00\" width=\"9.00\" height=\"3.60\" fill=\"#ffe082\" stroke=\"#333333\" stroke-width=\"0.15\"/>\n<defs><pattern id=\"lith_H\" width=\"2.0\" height=\"2.0\" patternUnits=\"userSpaceOnUse\"><circle cx=\"0.5\" cy=\"0.5\" r=\"0.22\" fill=\"#00000088\"/><circle cx=\"1.5\" cy=\"1.5\" r=\"0.22\" fill=\"#00000088\"/></pattern></defs>\n<rect x=\"11.00\" y=\"147.00\" width=\"9.00\" height=\"3.60\" fill=\"url(#lith_H)\"/>\n<text x=\"22.50\" y=\"149.70\" font-family=\"SimSun, Arial\" font-size=\"2.8\" fill=\"#000000\">砂岩</text>\n<rect x=\"11.00\" y=\"153.00\" width=\"9.00\" height=\"3.60\" fill=\"#b0bec5\" stroke=\"#333333\" stroke-width=\"0.15\"/>\n<defs><pattern id=\"lith_H\" width=\"1.6\" height=\"1.6\" patternUnits=\"userSpaceOnUse\"><line x1=\"0\" y1=\"1.6\" x2=\"1.6\" y2=\"0\" stroke=\"#00000077\" stroke-width=\"0.18\"/></pattern></defs>\n<rect x=\"11.00\" y=\"153.00\" width=\"9.00\" height=\"3.60\" fill=\"url(#lith_H)\"/>\n<text x=\"22.50\" y=\"155.70\" font-family=\"SimSun, Arial\" font-size=\"2.8\" fill=\"#000000\">泥岩</text>\n<rect x=\"11.00\" y=\"159.00\" width=\"9.00\" height=\"3.60\" fill=\"#cfd8dc\" stroke=\"#333333\" stroke-width=\"0.15\"/>\n<defs><pattern id=\"lith_H\" width=\"1.4\" height=\"1.4\" patternUnits=\"userSpaceOnUse\"><line x1=\"0\" y1=\"1.4\" x2=\"1.4\" y2=\"0\" stroke=\"#00000077\" stroke-width=\"0.15\"/><line x1=\"0\" y1=\"0\" x2=\"1.4\" y2=\"1.4\" stroke=\"#00000077\" stroke-width=\"0.15\"/></pattern></defs>\n<rect x=\"11.00\" y=\"159.00\" width=\"9.00\" height=\"3.60\" fill=\"url(#lith_H)\"/>\n<text x=\"22.50\" y=\"161.70\" font-family=\"SimSun, Arial\" font-size=\"2.8\" fill=\"#000000\">灰岩</text>\n</g>\n<g id=\"el_0000000215\">\n<text x=\"10.00\" y=\"162.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">层序标签</text>\n</g>\n<g id=\"el_0000000216\">\n<text x=\"10.00\" y=\"178.00\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">多行</text>\n<text x=\"10.00\" y=\"183.40\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"4.0\" fill=\"#000000\" text-anchor=\"start\">文本</text>\n</g>\n<g id=\"el_0000000217\">\n<text x=\"10.00\" y=\"194.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">编制: </text>\n<text x=\"10.00\" y=\"199.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">日期: </text>\n<text x=\"50.00\" y=\"194.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">比例尺: </text>\n<text x=\"50.00\" y=\"199.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">数据来源: </text>\n<text x=\"90.00\" y=\"194.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">审核: </text>\n<text x=\"90.00\" y=\"199.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">图号: </text>\n<text x=\"130.00\" y=\"194.80\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">比例: </text>\n<text x=\"130.00\" y=\"199.60\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#000000\">密级: </text>\n<rect x=\"10.00\" y=\"190.00\" width=\"160.00\" height=\"14.00\" fill=\"none\" stroke=\"#999999\" stroke-width=\"0.2\"/>\n</g>\n<g id=\"el_0000000218\"><rect x=\"204.00\" y=\"6.00\" width=\"40.00\" height=\"20.00\" fill=\"#f2f4f7\" stroke=\"#999999\" stroke-width=\"0.2\"/><text x=\"224.00\" y=\"16.00\" font-family=\"Arial\" font-size=\"3.4\" fill=\"#777777\" text-anchor=\"middle\">图像占位（未绑定）</text></g>\n<g id=\"el_0000000219\">\n<rect x=\"120.00\" y=\"152.00\" width=\"60.00\" height=\"44.00\" fill=\"#ffffff\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n<text x=\"122.00\" y=\"156.40\" font-family=\"SimSun, Arial\" font-size=\"3.2\" fill=\"#333333\">附图</text>\n<rect x=\"132.00\" y=\"160.80\" width=\"24.00\" height=\"17.60\" fill=\"none\" stroke=\"#d84315\" stroke-width=\"0.4\"/>\n<rect x=\"120.00\" y=\"152.00\" width=\"60.00\" height=\"44.00\" fill=\"none\" stroke=\"#444444\" stroke-width=\"0.35\"/>\n</g>\n<g id=\"el_0000000220\" data-placeholder=\"true\"><rect x=\"8.0\" y=\"104.0\" width=\"60.0\" height=\"30.0\" fill=\"none\" stroke=\"#cccccc\" stroke-dasharray=\"1,1\"/><text x=\"38.0\" y=\"119.0\" font-family=\"sans-serif\" font-size=\"4\" fill=\"#999999\" text-anchor=\"middle\">剖面（未绑定数据）</text></g>\n<g id=\"el_0000000221\">\n<rect x=\"204.00\" y=\"210.00\" width=\"78.00\" height=\"48.00\" fill=\"#ffffff\" stroke=\"#666666\" stroke-width=\"0.25\"/>\n<text x=\"243.00\" y=\"234.00\" font-family=\"SimSun, Arial\" font-size=\"3.0\" fill=\"#888888\" text-anchor=\"middle\">统计图（无数据）</text>\n</g>\n<g id=\"el_0000000207\">\n<line x1=\"72.00\" y1=\"48.00\" x2=\"38.40\" y2=\"42.80\" stroke=\"#555555\" stroke-width=\"0.2\"/>\n<circle cx=\"72.00\" cy=\"48.00\" r=\"0.5\" fill=\"#555555\"/>\n<text x=\"30.00\" y=\"43.50\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"3.5\" fill=\"#111111\">注记 →</text>\n</g>\n<g id=\"el_0000000208\">\n<text x=\"30.00\" y=\"55.50\" font-family=\"SimSun, Arial, sans-serif\" font-size=\"3.5\" fill=\"#111111\">无引线</text>\n</g>\n<g id=\"el_0000000199\"><text x=\"60.0\" y=\"20.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"5.0\" fill=\"#333333\" text-anchor=\"middle\">副标题</text></g>\n<g id=\"el_0000000198\"><text x=\"60.0\" y=\"12.0\" font-family=\"SimSun, Times New Roman, sans-serif\" font-size=\"8\" font-weight=\"bold\" fill=\"#000000\" text-anchor=\"middle\">标题文本</text></g>\n</svg>",
+      "sha256": "b43f55645d3e29bf914bb8c8cf363cb52d4db5e53a81945ca58de21291f8bedf",
       "page_pixels_96": [
         1123,
         794

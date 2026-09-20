@@ -90,7 +90,18 @@ CompositionExportReport export_composition_page(
         return report;
     }
 
-    const std::string svg = composition_export_svg_with_seams(doc, render_seams);
+    // The renderer's contract is "never throws for missing content", but a
+    // malformed numeric property (Python raises ValueError at the same
+    // points) surfaces as std::invalid_argument. The export boundary turns
+    // it into an honest refusal instead of letting it escape into the Qt
+    // event loop.
+    std::string svg;
+    try {
+        svg = composition_export_svg_with_seams(doc, render_seams);
+    } catch (const std::invalid_argument& ex) {
+        report.message = std::string("composition render failed: ") + ex.what();
+        return report;
+    }
     if (format_name == "svg") {
         std::string error;
         report.ok = write_svg_atomic(path, svg, error);

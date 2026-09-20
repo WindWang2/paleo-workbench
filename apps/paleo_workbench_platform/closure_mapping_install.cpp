@@ -690,8 +690,19 @@ make_export_fn(const Install& platform_install, const QWidget* canvas) {
             make_render_seams(canvas);
         // 2. Native QGIS layout executor (vector map output).
         if (platform_install.layout_export) {
-            const Json report = platform_install.layout_export(
-                pwb::mapping_document::dump_composition(document), path, format, dpi);
+            Json report = Json::object();
+            try {
+                report = platform_install.layout_export(
+                    pwb::mapping_document::dump_composition(document), path, format,
+                    dpi);
+            } catch (const std::exception& ex) {
+                // The QGIS path refused by raising: fall through to the
+                // composer engine with the reason recorded.
+                result.message = ex.what();
+                report = Json::object();
+                report["ok"] = false;
+                report["failure"] = ex.what();
+            }
             const bool ok = report.is_object() && report.value("ok", false);
             if (ok) {
                 result.ok = true;
@@ -714,9 +725,15 @@ make_export_fn(const Install& platform_install, const QWidget* canvas) {
         // 3. Composer engine (native SVG; PNG/PDF replayed on Qt).
         const pwb::mapping_document::ComposerReplaySeams replay =
             pwb::ui_seqviz::qt::make_composition_replay_seams();
-        const pwb::mapping_document::CompositionExportReport report =
-            pwb::mapping_document::export_composition_page(document, path, format, dpi,
-                                                           render_seams, replay);
+        pwb::mapping_document::CompositionExportReport report;
+        try {
+            report = pwb::mapping_document::export_composition_page(
+                document, path, format, dpi, render_seams, replay);
+        } catch (const std::exception& ex) {
+            result.ok = false;
+            result.message = std::string("composition export failed: ") + ex.what();
+            return result;
+        }
         result.ok = report.ok;
         result.engine = report.engine;
         result.message = report.message;
@@ -858,9 +875,21 @@ bool install(const Install& install) {
     };
     seams.record_export = [](const std::any& project_any,
                              const std::string& path) {
-        auto store = std::any_cast<std::shared_ptr<pwb::application::PwbDataStore>>(
-            project_any);
+        // Pointer-form any_cast: an empty/mismatched payload is a nullptr,
+        // never a thrown bad_any_cast.
+        auto* store_holder =
+            std::any_cast<std::shared_ptr<pwb::application::PwbDataStore>>(
+                &project_any);
+        auto store = store_holder != nullptr ? *store_holder : nullptr;
         if (store == nullptr) return;
+        // The format is derived from the artifact path (the export ledger
+        // records what was actually written, never a hardcoded guess).
+        std::string format = "json";
+        const std::filesystem::path target(path);
+        if (target.has_extension()) {
+            format = target.extension().string();
+            if (!format.empty() && format.front() == '.') format.erase(0, 1);
+        }
         Json& root = store->document().root();
         if (!root.is_object()) return;
         if (!root.contains("export_artifacts") || !root["export_artifacts"].is_array()) {
@@ -871,11 +900,11 @@ bool install(const Install& install) {
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
         artifact["linked_id"] = "composition";
-        artifact["format"] = "svg";
+        artifact["format"] = format;
         artifact["output_path"] = path;
         artifact["options"] = Json::object();
         artifact["included_map_elements"] = Json::array();
-        artifact["generated_at"] = "";
+        artifact["generated_at"] = pwb::domain::now_iso8601();
         artifact["source_task_ids"] = Json::array();
         // Honest degradation: no catalog OUTPUT registration from this
         // seam (registered=false), never a fabricated version id.

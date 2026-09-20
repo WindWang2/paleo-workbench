@@ -157,6 +157,18 @@ const Json& json_get(const Json& object, const std::string& key) {
     return it == object.end() ? kNull : *it;
 }
 
+// Python str.strip() (ASCII whitespace, matching the map-text helpers).
+void strip_in_place(std::string& text) {
+    const char* kSpace = " \t\n\r\v\f";
+    const std::size_t first = text.find_first_not_of(kSpace);
+    if (first == std::string::npos) {
+        text.clear();
+        return;
+    }
+    const std::size_t last = text.find_last_not_of(kSpace);
+    text = text.substr(first, last - first + 1);
+}
+
 // Python truthiness for JSON values (bool/None/number/string/empty
 // containers).
 bool py_truthy(const Json& value) {
@@ -295,7 +307,10 @@ struct StyleView {
     double label_size = 9.0;
     std::string label_color = "#f8f9fa";
     std::string label_font;
-    bool labels_visible = true;
+    // Python: labels is Optional[TextStyle] — an ABSENT labels object
+    // means no labels at all (not default labels).
+    bool labels_visible = false;
+    bool labels_present = false;
 
     static StyleView from_dict(const Json& data) {
         StyleView style;
@@ -402,6 +417,7 @@ struct StyleView {
         // labels: TextStyle subset (field/size/color/font_family/visible).
         if (data.contains("labels") && !data["labels"].is_null()) {
             const Json& labels = data["labels"];
+            style.labels_present = true;
             if (labels.is_object()) {
                 if (labels.contains("field") && !labels["field"].is_null()) {
                     style.label_field = py_str_value(labels["field"]);
@@ -420,6 +436,9 @@ struct StyleView {
                 }
                 if (labels.contains("visible") && !labels["visible"].is_null()) {
                     style.labels_visible = py_truthy(labels["visible"]);
+                } else {
+                    // Python TextStyle default: visible=True.
+                    style.labels_visible = true;
                 }
             }
         }
@@ -440,7 +459,9 @@ struct DictLayer {
 
 // renderers.py RendererRegistry.resolve for the dict-layer path (the only
 // layer class the JSON route materialises).
-enum class LayerRendererKind { Single, Categorized, Graduated, Unsupported };
+enum class LayerRendererKind {
+    Single, Categorized, Graduated, Well, Annotation, Unsupported
+};
 
 LayerRendererKind resolve_renderer(const DictLayer& layer, const StyleView& style) {
     const std::string ltype = [&] {
@@ -449,18 +470,32 @@ LayerRendererKind resolve_renderer(const DictLayer& layer, const StyleView& styl
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return out;
     }();
-    if (ltype == "grid" || ltype == "scalar_grid" || ltype == "contour" ||
-        ltype == "well_point" || ltype == "well" || ltype == "annotation") {
-        // A VectorMapLayer cannot carry those renderers' data — Python would
-        // raise; the C++ engine refuses the layer instead of inventing it.
+    // Python RendererRegistry.resolve (renderers.py 776-798): specialised
+    // layer types first, then the style renderer keyword, then ranges, then
+    // the layer type, then single. well / well_point / annotation / label
+    // have real renderers that only need `features` — exactly the shape the
+    // dict-layer route materialises — so they are supported. grid /
+    // scalar_grid / contour need grid data a VectorMapLayer does not carry
+    // and are refused (Python's GridRenderer also returns "" for them).
+    if (ltype == "grid" || ltype == "scalar_grid" || ltype == "contour") {
         return LayerRendererKind::Unsupported;
     }
+    if (ltype == "well" || ltype == "well_point") return LayerRendererKind::Well;
+    if (ltype == "annotation" || ltype == "label") return LayerRendererKind::Annotation;
     std::string style_renderer = style.renderer;
     std::transform(style_renderer.begin(), style_renderer.end(), style_renderer.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (!style_renderer.empty() && style_renderer != "single") {
-        if (style_renderer == "categorized") return LayerRendererKind::Categorized;
+        if (style_renderer == "categorized" || style_renderer == "facies") {
+            return LayerRendererKind::Categorized;
+        }
         if (style_renderer == "graduated") return LayerRendererKind::Graduated;
+        if (style_renderer == "well" || style_renderer == "well_point") {
+            return LayerRendererKind::Well;
+        }
+        if (style_renderer == "annotation" || style_renderer == "label") {
+            return LayerRendererKind::Annotation;
+        }
     }
     if (layer.style.is_object() && layer.style.contains("ranges") &&
         py_truthy(layer.style["ranges"])) {
@@ -509,6 +544,221 @@ const Json* feature_props(const Json& feature) {
 // ---------------------------------------------------------------------------
 // The renderer (renderer.py MapComposerRenderer)
 // ---------------------------------------------------------------------------
+
+// renderers.py WellSymbolRenderer.render_svg (dict-layer route).
+std::vector<std::string> well_layer_fragments(const DictLayer& layer,
+                                              const MmContext& ctx,
+                                              const StyleView& style) {
+    std::vector<std::string> parts;
+    for (const Json& feat : layer.features) {
+        if (!feat.is_object()) continue;
+        auto geom_it = feat.find("geometry");
+        if (geom_it == feat.end() || !geom_it->is_object()) continue;
+        const Json& geom = *geom_it;
+        auto coords_it = geom.find("coordinates");
+        if (coords_it == geom.end() || !coords_it->is_array() ||
+            coords_it->size() < 2) {
+            continue;
+        }
+        double wx = 0.0;
+        double wy = 0.0;
+        try {
+            wx = py_float((*coords_it)[0]);
+            wy = py_float((*coords_it)[1]);
+        } catch (const std::invalid_argument&) {
+            continue;
+        }
+        double sx = 0.0;
+        double sy = 0.0;
+        ctx.world_to_screen(wx, wy, sx, sy);
+        const double r = ctx.to_target(std::max(1.5, style.marker_size / 2.0));
+        parts.push_back(
+            "<circle cx=\"" + fmt2(sx) + "\" cy=\"" + fmt2(sy) + "\" r=\"" +
+            fmt2(r) + "\" fill=\"#ffffff\" stroke=\"" + style.stroke +
+            "\" stroke-width=\"" + fmt2(ctx.to_target(1)) + "\"/>"
+            "<circle cx=\"" +
+            fmt2(sx) + "\" cy=\"" + fmt2(sy) + "\" r=\"" +
+            fmt2(std::max(ctx.to_target(0.8), r * 0.4)) + "\" fill=\"" +
+            style.fill + "\" stroke=\"none\"/>");
+        // Well name (+ optional value) label.
+        const Json* props = feature_props(feat);
+        std::string well_name;
+        if (props != nullptr) {
+            if (props->contains("name")) well_name = py_or_str((*props)["name"]);
+            else if (props->contains("well")) well_name = py_or_str((*props)["well"]);
+        }
+        strip_in_place(well_name);
+        std::string value_suffix;
+        if (props != nullptr && props->contains("value") &&
+            py_is_number((*props)["value"])) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), " (%.2f)", (*props)["value"].get<double>());
+            value_suffix = buf;
+        }
+        const std::string display_text = well_name + value_suffix;
+        if (!display_text.empty() && style.labels_visible) {
+            parts.push_back(
+                "<text x=\"" + fmt2(sx + r + ctx.to_target(3)) + "\" y=\"" +
+                fmt2(sy + ctx.to_target(3)) + "\" font-family=\"" +
+                ((style.labels_present && !style.label_font.empty())
+                     ? style.label_font
+                     : "Arial") +
+                "\" font-size=\"" + fmt2(ctx.to_target(style.label_size)) +
+                "\" fill=\"" + style.label_color + "\">" +
+                html_escape(display_text) + "</text>");
+        }
+    }
+    return parts;
+}
+
+// renderers.py AnnotationRenderer.render_svg (dict-layer route).
+std::vector<std::string> annotation_layer_fragments(const DictLayer& layer,
+                                                    const MmContext& ctx,
+                                                    const StyleView& style) {
+    std::vector<std::string> parts;
+    for (const Json& feat : layer.features) {
+        if (!feat.is_object()) continue;
+        auto geom_it = feat.find("geometry");
+        if (geom_it == feat.end() || !geom_it->is_object()) continue;
+        const Json& geom = *geom_it;
+        const std::string gtype =
+            py_or_str(geom.contains("type") ? geom["type"] : Json(nullptr));
+        auto coords_it = geom.find("coordinates");
+        if (coords_it == geom.end() || !coords_it->is_array()) continue;
+        const Json& coords = *coords_it;
+        const Json* props = feature_props(feat);
+
+        auto prop_or_style = [&](const char* key, const std::string& fallback) {
+            if (props != nullptr && props->contains(key)) {
+                const std::string text = py_or_str((*props)[key]);
+                if (!text.empty()) return text;
+            }
+            return fallback;
+        };
+        auto prop_float_or = [&](const char* key, double fallback) {
+            if (props != nullptr && props->contains(key)) {
+                try {
+                    const double v = py_or_float((*props)[key], fallback);
+                    return v;
+                } catch (const std::invalid_argument&) {
+                    return fallback;
+                }
+            }
+            return fallback;
+        };
+
+        std::string text;
+        if (props != nullptr) {
+            if (props->contains("text")) text = py_or_str((*props)["text"]);
+            else if (props->contains("label")) text = py_or_str((*props)["label"]);
+            else if (props->contains("name")) text = py_or_str((*props)["name"]);
+        }
+        strip_in_place(text);
+        // Python: props font_size → props size → style.labels.size (9.0) →
+        // 10.0 when the style carries no labels object at all.
+        const double font_size =
+            prop_float_or("font_size",
+                          prop_float_or("size", style.labels_present
+                                                  ? style.label_size
+                                                  : 10.0));
+        const std::string color = prop_or_style(
+            "color", style.labels_present ? style.label_color : style.stroke);
+        const std::string font_family =
+            prop_or_style("font_family",
+                          (style.labels_present && !style.label_font.empty())
+                              ? style.label_font
+                              : "Arial, sans-serif");
+        const bool bold = props != nullptr && props->contains("bold")
+                              ? py_truthy((*props)["bold"])
+                              : false;
+        const std::string font_weight = bold ? "bold" : "normal";
+        double rotation = 0.0;
+        if (props != nullptr && props->contains("rotation")) {
+            try {
+                rotation = py_or_float((*props)["rotation"], 0.0);
+            } catch (const std::invalid_argument&) {
+                rotation = 0.0;
+            }
+        }
+        const std::string escaped_text = text.empty() ? "" : html_escape(text);
+
+        if (gtype == "Point" && coords.size() >= 2) {
+            double wx = 0.0;
+            double wy = 0.0;
+            try {
+                wx = py_float(coords[0]);
+                wy = py_float(coords[1]);
+            } catch (const std::invalid_argument&) {
+                continue;
+            }
+            double sx = 0.0;
+            double sy = 0.0;
+            ctx.world_to_screen(wx, wy, sx, sy);
+            std::string transform_attr;
+            if (rotation != 0.0) {
+                char buf[80];
+                std::snprintf(buf, sizeof(buf), "rotate(%.1f %.2f %.2f)", rotation,
+                              sx, sy);
+                transform_attr = " transform=\"" + std::string(buf) + "\"";
+            }
+            const bool show_marker =
+                props != nullptr && props->contains("show_marker")
+                    ? py_truthy((*props)["show_marker"])
+                    : false;
+            if (style.marker_size > 0 && style.fill != "transparent" && show_marker) {
+                const double r = ctx.to_target(std::max(1.0, style.marker_size / 2.0));
+                parts.push_back("<circle cx=\"" + fmt2(sx) + "\" cy=\"" + fmt2(sy) +
+                                "\" r=\"" + fmt2(r) + "\" fill=\"" + style.fill +
+                                "\" stroke=\"" + style.stroke +
+                                "\" stroke-width=\"" + fmt2(ctx.to_target(0.5)) +
+                                "\"/>");
+            }
+            if (!escaped_text.empty()) {
+                parts.push_back("<text x=\"" + fmt2(sx) + "\" y=\"" + fmt2(sy) +
+                                "\" font-family=\"" + font_family +
+                                "\" font-size=\"" + fmt2(ctx.to_target(font_size)) +
+                                "\" font-weight=\"" + font_weight + "\" fill=\"" +
+                                color + "\"" + transform_attr + ">" + escaped_text +
+                                "</text>");
+            }
+        } else if (gtype == "LineString" && !coords.empty()) {
+            const std::string pts = points_attr(ring_points(coords), ctx);
+            if (!pts.empty()) {
+                parts.push_back("<polyline points=\"" + pts +
+                                "\" fill=\"none\" stroke=\"" + color +
+                                "\" stroke-width=\"" +
+                                fmt2(ctx.to_target(style.stroke_width)) + "\"/>");
+            }
+            if (!escaped_text.empty() && coords.size() >= 2) {
+                const std::size_t mid = coords.size() / 2;
+                double mx = 0.0;
+                double my = 0.0;
+                try {
+                    const Json& mid_point = coords[mid];
+                    if (mid_point.is_array() && mid_point.size() >= 2) {
+                        ctx.world_to_screen(py_float(mid_point[0]),
+                                            py_float(mid_point[1]), mx, my);
+                    }
+                } catch (const std::invalid_argument&) {
+                }
+                std::string transform_attr;
+                if (rotation != 0.0) {
+                    char buf[80];
+                    std::snprintf(buf, sizeof(buf), "rotate(%.1f %.2f %.2f)", rotation,
+                                  mx, my);
+                    transform_attr = " transform=\"" + std::string(buf) + "\"";
+                }
+                parts.push_back("<text x=\"" + fmt2(mx) + "\" y=\"" + fmt2(my) +
+                                "\" font-family=\"" + font_family +
+                                "\" font-size=\"" + fmt2(ctx.to_target(font_size)) +
+                                "\" font-weight=\"" + font_weight + "\" fill=\"" +
+                                color + "\" text-anchor=\"middle\"" + transform_attr +
+                                ">" + escaped_text + "</text>");
+            }
+        }
+    }
+    return parts;
+}
 
 class ComposerRenderer {
 public:
@@ -627,7 +877,12 @@ private:
         if (t == "fault_symbols") return render_fault_symbols(elem);
         if (t == "lithology_legend") return render_lithology_legend(elem);
         if (t == "subtitle") {
-            const std::string subtitle_text = html_escape(py_or_str(prop(elem, "text")));
+            // Python: str(elem.properties.get("text", "")) — the default
+            // applies only when the key is ABSENT; a present falsy value
+            // renders (0 → "0", None → "None").
+            const std::string subtitle_text =
+                html_escape(has_prop(elem, "text") ? py_str_value(prop(elem, "text"))
+                                                   : "");
             const double font_size = py_or_float(prop(elem, "font_size"), 5.0);
             return "<g id=\"" + elem.id + "\"><text x=\"" + py_float_repr(x + w / 2) +
                    "\" y=\"" + py_float_repr(y + h - 1) +
@@ -1019,16 +1274,23 @@ private:
         const double width_mm = py_or_float(prop(elem, "line_width_mm"), 0.2);
         std::vector<std::string> parts;
         parts.push_back("<g id=\"" + elem.id + "\">");
+        // Structural guard: a pathological width must not turn the frame
+        // into a multi-gigabyte string (prompt scale budget).
+        const int kMaxGridLines = 20000;
+        int lines = 0;
         double gx = x + spacing;
-        while (gx < x + w - 0.01) {
+        while (gx < x + w - 0.01 && lines < kMaxGridLines) {
+            ++lines;
             parts.push_back("<line x1=\"" + fmt2(gx) + "\" y1=\"" + fmt2(y) + "\" x2=\"" +
                             fmt2(gx) + "\" y2=\"" + fmt2(y + h) + "\" stroke=\"" +
                             color + "\" stroke-width=\"" + py_float_repr(width_mm) +
                             "\" stroke-dasharray=\"1.5,1\"/>");
             gx += spacing;
         }
+        lines = 0;
         double gy = y + spacing;
-        while (gy < y + h - 0.01) {
+        while (gy < y + h - 0.01 && lines < kMaxGridLines) {
+            ++lines;
             parts.push_back("<line x1=\"" + fmt2(x) + "\" y1=\"" + fmt2(gy) + "\" x2=\"" +
                             fmt2(x + w) + "\" y2=\"" + fmt2(gy) + "\" stroke=\"" +
                             color + "\" stroke-width=\"" + py_float_repr(width_mm) +
@@ -2101,8 +2363,10 @@ private:
                 }
                 return "<g id=\"" + elem.id + "\">\n" + join(inner_svg) + "\n</g>";
             } catch (const std::invalid_argument&) {
-                // A non-numeric extent refuses the frame — fall through to
-                // the honest placeholder (Python would raise here).
+                // Python parity: a non-numeric extent still enters route 3
+                // (the condition only checks presence/length); every layer
+                // then renders nothing, so the frame stays dark and empty —
+                // no placeholder text, no layers.
             }
         }
 
@@ -2126,6 +2390,24 @@ private:
 
         std::vector<std::string> parts;
         parts.push_back("<g id=\"layer_" + layer.id + "\" opacity=\"1.00\">");
+        // Well symbols and annotations are feature-shape renderers: they
+        // take the whole feature list (renderers.py WellSymbolRenderer /
+        // AnnotationRenderer).
+        if (kind == LayerRendererKind::Well) {
+            for (const std::string& fragment : well_layer_fragments(layer, ctx, style)) {
+                parts.push_back(fragment);
+            }
+            parts.push_back("</g>");
+            return join(parts);
+        }
+        if (kind == LayerRendererKind::Annotation) {
+            for (const std::string& fragment :
+                 annotation_layer_fragments(layer, ctx, style)) {
+                parts.push_back(fragment);
+            }
+            parts.push_back("</g>");
+            return join(parts);
+        }
         for (const Json& feat : layer.features) {
             if (!feat.is_object()) continue;
             const Json* geom_it = feat.contains("geometry") ? &feat["geometry"] : nullptr;
@@ -2170,6 +2452,7 @@ private:
                             lbl_text = py_or_str((*props)["name"]);
                         }
                     }
+                    strip_in_place(lbl_text);
                     const bool blank =
                         lbl_text.find_first_not_of(" \t\n\r\v\f") == std::string::npos;
                     if (!lbl_text.empty() && !blank) {

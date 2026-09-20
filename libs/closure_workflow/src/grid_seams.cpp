@@ -155,9 +155,12 @@ IntegratedGridSeams make_production_grid_seams(CatalogRepository* catalog,
             if (it != task.end() && it->is_string()) {
                 const std::string version_id = it->get<std::string>();
                 if (!version_id.empty()) {
-                    if (auto grid = load_grid_from_version(catalog, version_id)) {
-                        return grid;
-                    }
+                    // The task PINS a catalog version: when that artifact
+                    // cannot be loaded the seam refuses. Falling back to the
+                    // live grid would silently substitute current data for a
+                    // stale pin — exactly what the acceptance loop's
+                    // staleness detection must see.
+                    return load_grid_from_version(catalog, version_id);
                 }
             }
         }

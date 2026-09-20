@@ -304,7 +304,15 @@ CompositionExportResult CompositionPanel::export_to(const std::string& path,
         result.message = "no composition export engine wired";
         return result;
     }
-    result = seams_.export_fn(*document_, path, format, dpi);
+    try {
+        result = seams_.export_fn(*document_, path, format, dpi);
+    } catch (const std::exception& ex) {
+        // The host engine must never crash the panel: a refusal with the
+        // reason is the honest outcome (the preview path behaves the same).
+        result.ok = false;
+        result.message = ex.what();
+        return result;
+    }
     if (result.ok) {
         register_catalog_export(result.path.empty() ? path : result.path);
         emit composition_exported(

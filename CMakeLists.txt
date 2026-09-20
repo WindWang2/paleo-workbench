@@ -186,7 +186,13 @@ option(PWB_BUILD_CONV_25
     "Build the CONV-25 workflow graph + evidence kernel (libs/workflow_graph; implies PWB_BUILD_DATA)" OFF)
 if(PWB_BUILD_CONV_25)
     set(PWB_BUILD_DATA ON)
-    add_subdirectory(libs/workflow_graph)
+    # BEGIN V14-COMPILATION-PUBLISH — the once-guard so the UI-14-IMPLY
+    # block's pwb_add_subdirectory_once(libs/workflow_graph) does not
+    # collide with this raw add (a configure error that blocked every
+    # PWB_BUILD_CPP_CLOSE_02=ON configuration, reproduced on a clean
+    # main@412d8baf worktree).
+    pwb_add_subdirectory_once(libs/workflow_graph)
+    # END V14-COMPILATION-PUBLISH
 endif()
 # END CONV-25
 # BEGIN CLOSURE-SCIENCE — line-03 science/prediction product loop: the

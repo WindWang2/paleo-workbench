@@ -207,7 +207,8 @@ void check_render_cases(const pwb::domain::Json& fixture) {
         }
         ++g_checks;
     }
-    check(cases == 57, "57 render cases replayed (got " + std::to_string(cases) + ")");
+    check(cases == fixture.at("render_cases").size(),
+          "every render case replayed (got " + std::to_string(cases) + ")");
 
     // Deterministic ids: two renders of the same document are byte-equal
     // (Python's hash()-derived ids are NOT — documented divergence).

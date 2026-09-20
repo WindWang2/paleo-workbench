@@ -359,6 +359,82 @@ def dict_layer_corpus():
             {"id": "v7", "name": "Empty", "layer_type": "vector", "features": []},
         ]),
     ])))
+    # Well symbols, annotations and label layers: renderers.py's
+    # WellSymbolRenderer / AnnotationRenderer take the same VectorMapLayer
+    # feature shape, so the JSON route renders them (the registry resolves
+    # them by layer_type AND by style.renderer keyword).
+    well_feature = {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [30, 30]},
+        "properties": {"name": "W-1", "value": 12.5},
+    }
+    plain_well_feature = {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [60, 60]},
+        "properties": {"well": "W-2"},
+    }
+    docs.append(("dict_layers_well", make_doc([
+        el("main_map", 10, 20, 120, 100, z=10, extent=extent, layers=[
+            {"id": "w1", "name": "井位", "layer_type": "well",
+             "style": {"fill": "#22b8a7", "stroke": "#182431", "marker_size": 7.0,
+                       "labels": {"field": "name", "size": 9.0, "color": "#1f2937"}},
+             "features": [well_feature, plain_well_feature]},
+        ]),
+    ])))
+    docs.append(("dict_layers_well_renderer_keyword", make_doc([
+        el("main_map", 10, 20, 120, 100, z=10, extent=extent, layers=[
+            {"id": "w2", "name": "井位2", "layer_type": "vector",
+             "style": {"renderer": "well", "fill": "#22b8a7", "stroke": "#182431"},
+             "features": [well_feature]},
+        ]),
+    ])))
+    annotation_feature = {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [40, 50]},
+        "properties": {"text": "注记 A", "font_size": 8.0, "color": "#111111",
+                       "rotation": 15.0, "show_marker": True},
+    }
+    annotation_line_feature = {
+        "type": "Feature",
+        "geometry": {"type": "LineString",
+                     "coordinates": [[10, 80], [50, 90], [90, 80]]},
+        "properties": {"text": "线注记", "bold": True},
+    }
+    docs.append(("dict_layers_annotation", make_doc([
+        el("main_map", 10, 20, 120, 100, z=10, extent=extent, layers=[
+            {"id": "a1", "name": "注记", "layer_type": "annotation",
+             "style": {"fill": "#eff3f8", "stroke": "#182431", "marker_size": 4.0},
+             "features": [annotation_feature, annotation_line_feature]},
+        ]),
+    ])))
+    docs.append(("dict_layers_label", make_doc([
+        el("main_map", 10, 20, 120, 100, z=10, extent=extent, layers=[
+            {"id": "a2", "name": "标签", "layer_type": "label",
+             "style": {"fill": "#eff3f8", "stroke": "#182431"},
+             "features": [{
+                 "type": "Feature",
+                 "geometry": {"type": "Point", "coordinates": [70, 20]},
+                 "properties": {"label": "标签 L", "size": 7.0},
+             }]},
+        ]),
+    ])))
+    # A falsy-but-present subtitle text renders (Python .get(key, default)).
+    docs.append(("subtitle_falsy_text", make_doc([
+        el("subtitle", 10, 15, 100, 6, z=39, text=0),
+    ])))
+    # Dict-layer labels strip surrounding whitespace (Python .strip()).
+    docs.append(("dict_layers_label_whitespace", make_doc([
+        el("main_map", 10, 20, 120, 100, z=10, extent=extent, layers=[
+            {"id": "v8", "name": "Padded", "layer_type": "vector",
+             "style": {"fill": "#4fc3f7", "stroke": "#222222",
+                       "labels": {"field": "name", "size": 9.0}},
+             "features": [{
+                 "type": "Feature",
+                 "geometry": {"type": "Point", "coordinates": [30, 30]},
+                 "properties": {"name": "  W1  "},
+             }]},
+        ]),
+    ])))
     return docs
 
 

@@ -79,7 +79,7 @@ public:
         d.provenance = [this](const domain::Json& report) -> std::string {
             const auto store = context_->projectStore();
             if (store == nullptr) return {};
-            auto& rail = workflow_rail();
+            auto rail = workflow_rail();
             if (!rail) return {};
             try {
                 const std::string run_id = rail->register_run(
@@ -102,8 +102,10 @@ public:
     // The per-project workflow provenance rail (lazy; opened once per
     // project file). A corrupt/absent file yields an empty store, never a
     // silent reset over provenance (FileCatalogRepository::open contract).
-    std::shared_ptr<pwb::closure_workflow::FileCatalogRepository>&
-    workflow_rail() {
+    // Returns a COPY (shared_ptr by value): the caller then uses the rail
+    // without holding the mutex, and a concurrent project switch cannot
+    // destroy the instance mid-use.
+    std::shared_ptr<pwb::closure_workflow::FileCatalogRepository> workflow_rail() {
         const auto store = context_ != nullptr ? context_->projectStore() : nullptr;
         const std::filesystem::path project_file =
             store != nullptr ? store->project_file() : std::filesystem::path();
