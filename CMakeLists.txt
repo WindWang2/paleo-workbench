@@ -1548,15 +1548,26 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
 
     # BEGIN JOINT-ANALYSIS (geoviz final closure) — the 井震联合 3D page
     # analysis hooks. Nested TARGET gate (fail-closed): every kernel lib
-    # the hooks call must exist or the TU stays out (its buttons then show
-    # the honest 未接入 fallbacks).
+    # the hooks call must exist, AND the AppShell composition must be in
+    # (the install consumes app_shell->geomodel_page()); otherwise the TU
+    # stays out and PWB_WITH_JOINT_ANALYSIS stays undefined so
+    # main_window.cpp compiles the page's honest 未接入 fallbacks instead
+    # of referencing symbols that would not link (round-1 review: a
+    # reduced SEISMIC_VIEWER=OFF configure linked-failed before the
+    # define existed).
     if(TARGET Pwb::UiWorkers AND TARGET Pwb::SeismicViewer AND
-       TARGET Pwb::VisualizationWellTie AND TARGET Pwb::GeoModel)
+       TARGET Pwb::VisualizationWellTie AND TARGET Pwb::GeoModel AND
+       TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt AND
+       TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt AND
+       TARGET Pwb::UiMapQgis AND TARGET Pwb::UiReviewQt AND
+       TARGET Pwb::UiSeqvizQt)
         target_sources(pwb-platform PRIVATE
             apps/paleo_workbench_platform/joint_analysis_install.cpp)
         target_link_libraries(pwb-platform PRIVATE
             Pwb::UiWorkers Pwb::SeismicViewer Pwb::VisualizationWellTie
             Pwb::GeoModel)
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_JOINT_ANALYSIS=1)
     endif()
     # END JOINT-ANALYSIS
 

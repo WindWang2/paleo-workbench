@@ -669,8 +669,7 @@ void MainWindow::buildUi() {
 // FLAC3D/Abaqus export, advisor, joint-analysis sidecar persistence).
 // Every kernel already existed natively; this is the product wiring the
 // empty-hook fallbacks ("未接入") were waiting for.
-#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS) && \
-    defined(PWB_WITH_CONV_30)
+#ifdef PWB_WITH_JOINT_ANALYSIS
     if (geo3d_dock_ != nullptr && app_shell_ != nullptr &&
         app_shell_->geomodel_page() != nullptr && job_center_ != nullptr) {
         pwb::app::joint_analysis::JointAnalysisInstall joint_deps;
@@ -1527,11 +1526,20 @@ QString MainWindow::openProject(const QString& project_file) {
 #endif
 // END VIZ-B
 // BEGIN JOINT-ANALYSIS flush/restore (same sidecar discipline as VIZ-B:
-// flush the OLD project before rebinding directories).
-#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+// flush the OLD project before rebinding directories — including the
+// joint host's own QSettings scene state so click-added fences survive a
+// window close, which previously only flushed on volume load/switch).
+#if defined(PWB_WITH_GEO3D_VIZ)
     if (geo3d_dock_ != nullptr) {
         geo3d_dock_->persist_project_workspace();
+#ifdef PWB_WITH_UI_WELLSEIS
+        if (geo3d_dock_->joint_host() != nullptr) {
+            geo3d_dock_->joint_host()->save_state();
+        }
+#endif
     }
+#endif
+#ifdef PWB_WITH_JOINT_ANALYSIS
     if (app_shell_ != nullptr && app_shell_->geomodel_page() != nullptr) {
         app_shell_->geomodel_page()->save_joint_analysis_to_project();
     }
@@ -1566,12 +1574,14 @@ QString MainWindow::openProject(const QString& project_file) {
 // END CLOSURE-JOINT3D
 // BEGIN JOINT-ANALYSIS restore — geo3d seven-key workspace sidecar +
 // joint-analysis state sidecar for the NEW project.
-#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+#if defined(PWB_WITH_GEO3D_VIZ)
     if (geo3d_dock_ != nullptr) {
         geo3d_dock_->set_project_directory(
             QString::fromStdString(project_dir.string()));
         geo3d_dock_->restore_project_workspace();
     }
+#endif
+#ifdef PWB_WITH_JOINT_ANALYSIS
     if (app_shell_ != nullptr && app_shell_->geomodel_page() != nullptr) {
         joint_project_directory_ =
             QString::fromStdString(project_dir.string());
@@ -2296,10 +2306,17 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 #endif
 // END VIZ-B
 // BEGIN JOINT-ANALYSIS close flush (same cancel-gate discipline).
-#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+#if defined(PWB_WITH_GEO3D_VIZ)
     if (geo3d_dock_ != nullptr) {
         geo3d_dock_->persist_project_workspace();
+#ifdef PWB_WITH_UI_WELLSEIS
+        if (geo3d_dock_->joint_host() != nullptr) {
+            geo3d_dock_->joint_host()->save_state();
+        }
+#endif
     }
+#endif
+#ifdef PWB_WITH_JOINT_ANALYSIS
     if (app_shell_ != nullptr && app_shell_->geomodel_page() != nullptr) {
         app_shell_->geomodel_page()->save_joint_analysis_to_project();
     }

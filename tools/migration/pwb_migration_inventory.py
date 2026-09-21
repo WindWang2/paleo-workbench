@@ -492,8 +492,6 @@ def scan_product_implied_switches(root: str) -> Set[str]:
                 depth -= 1
             end += 1
         body = text[m.end():end - 1]
-        im = re.search(r"IMPLIES\s+([A-Z0-9_;\"\s]+?)(?:\)|(?=[A-Z_]+\s*$))", body)
-        tokens = re.findall(r"PWB_BUILD_[A-Z0-9_]+", body)
         # Everything before REQUIRES (if present) belongs to IMPLIES when the
         # keyword is present; otherwise there is no implies list.
         if "IMPLIES" in body:
@@ -502,7 +500,6 @@ def scan_product_implied_switches(root: str) -> Set[str]:
             implies[name] = re.findall(r"PWB_BUILD_[A-Z0-9_]+", implies_tail)
         else:
             implies[name] = []
-        _ = (im, tokens)
     closure: Set[str] = set()
     frontier = ["PWB_BUILD_NATIVE_PRODUCT"]
     while frontier:

@@ -10,6 +10,8 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QPointer>
+#include <QSaveFile>
 #include <QTextBrowser>
 #include <QVBoxLayout>
 
@@ -31,8 +33,6 @@
 #include <pwb/seismic_viewer/horizon_core.hpp>
 #include <pwb/ui_workers/geological_modeling.hpp>
 #include <pwb/ui_wellseis/joint_state.hpp>
-#include <pwb/viz/well_tie/auto_tie.hpp>
-#include <pwb/viz/well_tie/synthetic.hpp>
 
 #include "geo3d_dock.hpp"
 #include "job_center.hpp"
@@ -92,12 +92,16 @@ void write_stored_state(const JointAnalysisInstall& deps,
     if (path.isEmpty()) {
         return;
     }
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    // QSaveFile: temp file + atomic rename — a crash mid-write can never
+    // leave a truncated sidecar behind (the read side degrades corrupt
+    // files to nullopt, but losing state silently is still data loss).
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
         return;
     }
     file.write(QByteArray::fromStdString(
         pwb::ui_wellseis::joint_state_to_json(state).dump(2)));
+    file.commit();
 }
 
 // ---- bh placeholder records (Python _sync_bh_raw_from_joint_scene) --------
@@ -128,16 +132,26 @@ Json borehole_records(const pwb::app::viz_c::VizCJointHost* host) {
 // ---- analysis overlays ------------------------------------------------------
 
 // One colored quad-grid mesh overlay from a sample-index surface grid
-// (rows = preview inlines, cols = preview crosslines). With a
-// registration the XY comes from the survey and z from the time axis;
-// the demo path places the grid on the ±80 demo footprint instead.
+// (rows = preview inlines, cols = preview crosslines).
+//
+// Render space (Review round-1 P1): the shared geo3d viewport draws the
+// joint scene in PREVIEW-INDEX space — fence curtains and the active
+// time slice place verts at (il_idx, xl_idx, sample_idx)
+// (viz_c_joint_volume.cpp); the adapter's to_render map does the same.
+// With a registration the overlay therefore uses (i, x, s) directly —
+// world XY / TWT ms would land ~10^5 off the volume box. The demo path
+// (no scene yet) keeps the standalone ±80 demo footprint.
+//
+// Opacity: the viewport shader multiplies v_color.a * u_opacity, so the
+// Python 0.8 alpha lives in the color and object.opacity stays 1.0
+// (0.8 x 0.8 = 0.64 would double-multiply).
 void add_stratal_overlay(SceneObjectManager& manager, const std::string& label,
                          const Grid2D& surface, const Registration* reg) {
     SceneObject object;
     object.name = kStratalOverlayPrefix + label;
     object.kind = ObjectKind::Horizon;
     object.mode = ObjectMode::Mesh;
-    object.opacity = 0.8f;
+    object.opacity = 1.0f;
     object.color = kStratalColor;
     object.pickable = false;
     constexpr double kDemoSpan = 80.0;
@@ -150,13 +164,9 @@ void add_stratal_overlay(SceneObjectManager& manager, const std::string& label,
             double wy = 0.0;
             double wz = 0.0;
             if (reg != nullptr) {
-                const auto [il, xl] = reg->volume_idx_to_il_xl(
-                    static_cast<double>(i), static_cast<double>(x));
-                const auto [sx, sy] =
-                    reg->survey().il_xl_to_xy(il, xl);
-                wx = sx;
-                wy = sy;
-                wz = reg->sample_idx_to_time_ms(s);
+                wx = static_cast<double>(i);
+                wy = static_cast<double>(x);
+                wz = s;
             } else {
                 wx = surface.cols > 1
                          ? -kDemoSpan +
@@ -225,7 +235,9 @@ void add_rgb_fusion_overlay(SceneObjectManager& manager) {
     object.name = kRgbOverlayName;
     object.kind = ObjectKind::Horizon;
     object.mode = ObjectMode::Mesh;
-    object.opacity = 0.85f;
+    // Face colors carry the 0.85 alpha (blend_rgba); opacity stays 1.0 so
+    // the shader does not multiply it in twice.
+    object.opacity = 1.0f;
     object.pickable = false;
     object.verts.reserve(ch_r.size());
     for (int j = 0; j < kN; ++j) {
@@ -289,74 +301,84 @@ void add_rgb_fusion_overlay(SceneObjectManager& manager) {
 // HorizonParser parity), nearest-fill gaps, then sample the stride
 // lattice and convert ms → preview sample indices through the
 // registration. Exact on the lattice; NaN propagates.
-std::optional<std::pair<Grid2D, Grid2D>> build_preview_grids(
-    const std::string& top_path, const std::string& bottom_path,
-    const Registration& reg, std::string& error) {
-    const auto& survey = reg.survey();
-    pwb::seismic_viewer::horizon::HorizonAxes axes;
-    axes.ilines.reserve(static_cast<std::size_t>(survey.n_inlines));
-    axes.xlines.reserve(static_cast<std::size_t>(survey.n_crosslines));
-    for (std::int64_t il = 0; il < survey.n_inlines; ++il) {
-        axes.ilines.push_back(survey.iline_start + il * survey.iline_step);
-    }
-    for (std::int64_t xl = 0; xl < survey.n_crosslines; ++xl) {
-        axes.xlines.push_back(survey.xline_start + xl * survey.xline_step);
-    }
+//
+// Runs INSIDE the stratal job (worker thread): parse_horizon_text throws
+// std::invalid_argument on a file with no numeric triples (a header-only
+// CSV is selectable via the 所有-files dialog filter) — throwing here is
+// the correct failure mode (with_plain_errors converts it to the job's
+// error string; the round-1 review caught the same throw reaching
+// std::terminate when it ran on the GUI thread).
+using GridsFn = std::function<std::optional<std::pair<Grid2D, Grid2D>>(
+    const pwb::ui_workers::StratalInput&, std::size_t, std::size_t,
+    double, double, double, double, int)>;
 
-    const auto load =
-        [&](const std::string& path) -> std::optional<Grid2D> {
-        QFile file(QString::fromStdString(path));
-        if (!file.open(QIODevice::ReadOnly)) {
-            error = "无法读取 horizon 文件：" + path;
-            return std::nullopt;
+GridsFn make_grids_fn(std::string top_path, std::string bottom_path,
+                      Registration reg) {
+    return [top_path = std::move(top_path),
+            bottom_path = std::move(bottom_path),
+            reg = std::move(reg)](
+               const pwb::ui_workers::StratalInput&, std::size_t,
+               std::size_t, double, double, double, double,
+               int) -> std::optional<std::pair<Grid2D, Grid2D>> {
+        const auto& survey = reg.survey();
+        pwb::seismic_viewer::horizon::HorizonAxes axes;
+        axes.ilines.reserve(static_cast<std::size_t>(survey.n_inlines));
+        axes.xlines.reserve(static_cast<std::size_t>(survey.n_crosslines));
+        for (std::int64_t il = 0; il < survey.n_inlines; ++il) {
+            axes.ilines.push_back(survey.iline_start +
+                                  il * survey.iline_step);
         }
-        const QByteArray text = file.readAll();
-        const auto parsed =
-            pwb::seismic_viewer::horizon::parse_horizon_text(
-                text.toStdString(), axes);
-        if (parsed.points_read == 0) {
-            error = "horizon 文件无有效数据点：" + path;
-            return std::nullopt;
+        for (std::int64_t xl = 0; xl < survey.n_crosslines; ++xl) {
+            axes.xlines.push_back(survey.xline_start +
+                                  xl * survey.xline_step);
         }
-        const auto filled =
-            pwb::seismic_viewer::horizon::fill_nearest(parsed.grid, 0.0);
-        Grid2D out;
-        out.rows = static_cast<std::size_t>(reg.n_inline());
-        out.cols = static_cast<std::size_t>(reg.n_crossline());
-        out.data.assign(out.rows * out.cols,
-                        std::numeric_limits<double>::quiet_NaN());
-        const auto strides = reg.strides();
-        for (std::size_t i = 0; i < out.rows; ++i) {
-            const std::int64_t native_i =
-                static_cast<std::int64_t>(i) * strides[0];
-            if (native_i >= survey.n_inlines) {
-                continue;
+        const auto load = [&](const std::string& path) -> Grid2D {
+            QFile file(QString::fromStdString(path));
+            if (!file.open(QIODevice::ReadOnly)) {
+                throw std::runtime_error("无法读取 horizon 文件：" + path);
             }
-            for (std::size_t x = 0; x < out.cols; ++x) {
-                const std::int64_t native_x =
-                    static_cast<std::int64_t>(x) * strides[1];
-                if (native_x >= survey.n_crosslines) {
+            const QByteArray text = file.readAll();
+            const auto parsed =
+                pwb::seismic_viewer::horizon::parse_horizon_text(
+                    text.toStdString(), axes);
+            if (parsed.points_read == 0) {
+                throw std::runtime_error("horizon 文件无有效数据点：" +
+                                         path);
+            }
+            const auto filled =
+                pwb::seismic_viewer::horizon::fill_nearest(parsed.grid,
+                                                           0.0);
+            Grid2D out;
+            out.rows = static_cast<std::size_t>(reg.n_inline());
+            out.cols = static_cast<std::size_t>(reg.n_crossline());
+            out.data.assign(out.rows * out.cols,
+                            std::numeric_limits<double>::quiet_NaN());
+            const auto strides = reg.strides();
+            for (std::size_t i = 0; i < out.rows; ++i) {
+                const std::int64_t native_i =
+                    static_cast<std::int64_t>(i) * strides[0];
+                if (native_i >= survey.n_inlines) {
                     continue;
                 }
-                const double ms = filled.at(native_i, native_x);
-                if (!std::isfinite(ms)) {
-                    continue;
+                for (std::size_t x = 0; x < out.cols; ++x) {
+                    const std::int64_t native_x =
+                        static_cast<std::int64_t>(x) * strides[1];
+                    if (native_x >= survey.n_crosslines) {
+                        continue;
+                    }
+                    const double ms = filled.at(native_i, native_x);
+                    if (!std::isfinite(ms)) {
+                        continue;
+                    }
+                    out.at(i, x) = reg.time_ms_to_sample_idx(ms);
                 }
-                out.at(i, x) = reg.time_ms_to_sample_idx(ms);
             }
-        }
-        return out;
+            return out;
+        };
+        Grid2D top = load(top_path);
+        Grid2D bottom = load(bottom_path);
+        return std::make_pair(std::move(top), std::move(bottom));
     };
-
-    auto top = load(top_path);
-    if (!top) {
-        return std::nullopt;
-    }
-    auto bottom = load(bottom_path);
-    if (!bottom) {
-        return std::nullopt;
-    }
-    return std::make_pair(std::move(*top), std::move(*bottom));
 }
 
 // ---- report dialogs ---------------------------------------------------------
@@ -462,16 +484,21 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
         };
 
     // ---- stratal -----------------------------------------------------------
+    // Job plumbing follows the frozen viz_b contract: spec.on_done/on_fail
+    // run on the WORKER thread, so they stay EMPTY here and every GUI
+    // side effect (overlay registration, status lines, dialogs) happens
+    // in the queued on_finished hop on the GUI thread (round-1 review
+    // P0: the previous shape ran SceneObjectManager writes + QLabel::setText
+    // + QDialog creation on the worker).
     hooks.generate_stratal =
         [state](const std::string& top_entry,
                 const std::string& bottom_entry,
                 const std::vector<double>& fractions, bool demo) {
-            Page* the_page = state->page;
-            if (the_page == nullptr) {
-                return;
-            }
-            const auto fail = [the_page](const QString& text) {
-                the_page->set_stratal_status(text);
+            QPointer<Page> page = state->page;
+            const auto fail = [page](const QString& text) {
+                if (page != nullptr) {
+                    page->set_stratal_status(text);
+                }
             };
             if (state->jobs == nullptr) {
                 fail(QStringLiteral("任务运行时不可用，无法生成地层切片。"));
@@ -502,14 +529,11 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
                                ? entry.substr(prefix.size())
                                : entry;
                 };
-                std::string error;
-                auto grids = build_preview_grids(
-                    trim(top_entry), trim(bottom_entry), *reg, error);
-                if (!grids) {
-                    fail(QString::fromStdString(error));
-                    return;
-                }
-                input.preview_grids = std::move(grids);
+                // .dat parsing + nearest-fill + stride resampling run on
+                // the worker through the grids_fn seam (the hook only
+                // validates cheap preconditions here).
+                input.grids_fn = make_grids_fn(trim(top_entry),
+                                               trim(bottom_entry), *reg);
                 input.n_i_prev =
                     static_cast<std::size_t>(reg->n_inline());
                 input.n_x_prev =
@@ -519,20 +543,54 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
             }
             auto& owner =
                 state->jobs->make_owner(state->dialog_parent);
-            the_page->set_stratal_status(
-                demo ? QStringLiteral("正在生成演示地层切片…")
-                     : QStringLiteral("正在计算比例地层切片…"));
+            if (page != nullptr) {
+                page->set_stratal_status(
+                    demo ? QStringLiteral("正在生成演示地层切片…")
+                         : QStringLiteral("正在计算比例地层切片…"));
+            }
+            // Stale-delivery guard: if the project directory changes while
+            // the job runs, the surfaces belong to the OLD project and
+            // must never land in the new workspace (VIZ-B session-
+            // generation parity; the directory is this install's identity).
+            const QString directory_at_request =
+                state->project_directory ? state->project_directory()
+                                         : QString();
             auto spec = pwb::ui_workers::make_stratal_job_spec(
-                std::move(input),
-                [state, demo](const pwb::ui_workers::StratalResult& result) {
-                    // Overlays are scene state, not page state: add them
-                    // regardless of the page (a null page only drops the
-                    // status line — the test rig drives the same path).
+                std::move(input));
+            owner.start(
+                state->jobs->scheduler(), std::move(spec),
+                [state, page, demo, directory_at_request](
+                    const pwb::job::qtbridge::JobOutcome& outcome) {
+                    const QString directory_now =
+                        state->project_directory
+                            ? state->project_directory()
+                            : QString();
+                    if (directory_now != directory_at_request) {
+                        return;  // stale project: drop silently
+                    }
+                    if (page == nullptr) {
+                        return;
+                    }
+                    using pwb::job::JobState;
+                    if (outcome.state == JobState::failed) {
+                        page->set_stratal_status(
+                            QString::fromStdString(outcome.error));
+                        return;
+                    }
+                    if (outcome.state == JobState::cancelled) {
+                        return;
+                    }
+                    const pwb::ui_workers::StratalResult* result =
+                        std::any_cast<pwb::ui_workers::StratalResult>(
+                            &outcome.result);
+                    if (result == nullptr) {
+                        page->set_stratal_status(QStringLiteral(
+                            "地层切片结果类型异常"));
+                        return;
+                    }
                     if (state->scene_objects == nullptr) {
-                        if (state->page != nullptr) {
-                            state->page->set_stratal_status(QStringLiteral(
-                                "3D 视口尚未就绪，无法预览。"));
-                        }
+                        page->set_stratal_status(QStringLiteral(
+                            "3D 视口尚未就绪，无法预览。"));
                         return;
                     }
                     const Registration* reg =
@@ -541,32 +599,22 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
                             : nullptr;
                     clear_stratal_overlays(state->scene_objects);
                     for (std::size_t k = 0;
-                         k < result.surfaces.size() &&
-                         k < result.labels.size();
+                         k < result->surfaces.size() &&
+                         k < result->labels.size();
                          ++k) {
                         add_stratal_overlay(*state->scene_objects,
-                                            result.labels[k],
-                                            result.surfaces[k], reg);
+                                            result->labels[k],
+                                            result->surfaces[k], reg);
                     }
-                    if (state->page != nullptr) {
-                        state->page->set_stratal_status(
-                            demo
-                                ? QStringLiteral(
-                                      "已用合成演示体生成 %1 张比例切片（演示"
-                                      "预览模式）。")
-                                      .arg(result.surfaces.size())
-                                : QStringLiteral("已生成 %1 张比例地层切片。")
-                                      .arg(result.surfaces.size()));
-                    }
-                },
-                [the_page](const std::string& error) {
-                    if (the_page != nullptr) {
-                        the_page->set_stratal_status(
-                            QString::fromStdString(error));
-                    }
+                    page->set_stratal_status(
+                        demo
+                            ? QStringLiteral(
+                                  "已用合成演示体生成 %1 张比例切片（演示预览"
+                                  "模式）。")
+                                  .arg(result->surfaces.size())
+                            : QStringLiteral("已生成 %1 张比例地层切片。")
+                                  .arg(result->surfaces.size()));
                 });
-            owner.start(state->jobs->scheduler(), std::move(spec),
-                        [](const pwb::job::qtbridge::JobOutcome&) {});
         };
     hooks.clear_stratal = [state] {
         clear_stratal_overlays(state->scene_objects);
@@ -581,12 +629,11 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
     // records ("未分层" → lithology defaults), so the synthetic is
     // constant and the tie fails honestly. Real well tie runs on the
     // VIZ-B dock with actual LAS logs (calibration + auto-tie + export).
-    auto tie_freq = std::make_shared<int>(30);
-    hooks.tie_params_changed = [tie_freq](int freq, int shift) {
-        Q_UNUSED(shift);
-        *tie_freq = freq;
+    hooks.tie_params_changed = [](int freq, int shift) {
+        Q_UNUSED(freq);
+        Q_UNUSED(shift);  // no rebuild consumer until real logs land here
     };
-    hooks.run_auto_tie = [state, tie_freq] {
+    hooks.run_auto_tie = [state] {
         QWidget* parent = state->dialog_parent;
         const Json wells = borehole_records(state->host);
         if (wells.empty()) {
@@ -708,23 +755,39 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
         // Python visible-flow defaults (hidden card spinboxes 20/20/15 ×
         // 10/10/8).
         input.grid_spec = {20, 20, 15, 10.0, 10.0, 8.0};
-        state->page->set_export_status(QStringLiteral("正在导出…"));
+        QPointer<Page> page = state->page;
+        page->set_export_status(QStringLiteral("正在导出…"));
         auto& owner = state->jobs->make_owner(parent);
-        Page* the_page = state->page;
         auto spec = pwb::ui_workers::make_export_job_spec(
-            std::move(input),
-            [the_page](const pwb::ui_workers::ExportResult& result) {
-                the_page->set_export_status(
+            std::move(input));
+        owner.start(
+            state->jobs->scheduler(), std::move(spec),
+            [page](const pwb::job::qtbridge::JobOutcome& outcome) {
+                if (page == nullptr) {
+                    return;
+                }
+                using pwb::job::JobState;
+                if (outcome.state == JobState::failed) {
+                    page->set_export_status(
+                        QStringLiteral("网格模型导出失败：%1")
+                            .arg(QString::fromStdString(outcome.error)));
+                    return;
+                }
+                if (outcome.state == JobState::cancelled) {
+                    return;
+                }
+                const pwb::ui_workers::ExportResult* result =
+                    std::any_cast<pwb::ui_workers::ExportResult>(
+                        &outcome.result);
+                if (result == nullptr) {
+                    page->set_export_status(QStringLiteral(
+                        "导出结果类型异常"));
+                    return;
+                }
+                page->set_export_status(
                     QStringLiteral("导出成功：%1")
-                        .arg(QString::fromStdString(result.filename)));
-            },
-            [the_page](const std::string& error) {
-                the_page->set_export_status(
-                    QStringLiteral("网格模型导出失败：%1")
-                        .arg(QString::fromStdString(error)));
+                        .arg(QString::fromStdString(result->filename)));
             });
-        owner.start(state->jobs->scheduler(), std::move(spec),
-                    [](const pwb::job::qtbridge::JobOutcome&) {});
     };
     hooks.run_advisor = [state] {
         QWidget* parent = state->dialog_parent;
@@ -740,41 +803,57 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
             return;
         }
         input.faults = Json::array();  // Python parity: never populated
-        Page* the_page = state->page;
-        the_page->set_export_status(QStringLiteral("正在诊断…"));
+        QPointer<Page> page = state->page;
+        page->set_export_status(QStringLiteral("正在诊断…"));
         auto& owner = state->jobs->make_owner(parent);
         auto spec = pwb::ui_workers::make_advisor_job_spec(
-            std::move(input),
-            [parent, the_page](
-                const pwb::ui_workers::AdvisorResult& result) {
-                the_page->set_export_status(
+            std::move(input));
+        owner.start(
+            state->jobs->scheduler(), std::move(spec),
+            [parent, page](const pwb::job::qtbridge::JobOutcome& outcome) {
+                if (page == nullptr) {
+                    return;
+                }
+                using pwb::job::JobState;
+                if (outcome.state == JobState::failed) {
+                    page->set_export_status(
+                        QStringLiteral("一致性复核诊断失败：%1")
+                            .arg(QString::fromStdString(outcome.error)));
+                    return;
+                }
+                if (outcome.state == JobState::cancelled) {
+                    return;
+                }
+                const pwb::ui_workers::AdvisorResult* result =
+                    std::any_cast<pwb::ui_workers::AdvisorResult>(
+                        &outcome.result);
+                if (result == nullptr) {
+                    page->set_export_status(QStringLiteral(
+                        "诊断结果类型异常"));
+                    return;
+                }
+                page->set_export_status(
                     QStringLiteral("一致性诊断完成"));
+                // GUI thread (queued delivery): creating the report dialog
+                // here is safe — the round-1 shape did this on the worker.
                 show_report_dialog(
                     parent, QStringLiteral("一致性诊断报告"),
                     QStringLiteral("<h3>钻孔检查</h3>%1<h3>断层共面检查</h3>%2")
-                        .arg(report_table(result.bh_report,
+                        .arg(report_table(result->bh_report,
                                           QStringLiteral("checked_boreholes")),
-                             report_table(result.fault_report,
+                             report_table(result->fault_report,
                                           QStringLiteral("checked_faults"))));
-            },
-            [the_page](const std::string& error) {
-                the_page->set_export_status(
-                    QStringLiteral("一致性复核诊断失败：%1")
-                        .arg(QString::fromStdString(error)));
             });
-        owner.start(state->jobs->scheduler(), std::move(spec),
-                    [](const pwb::job::qtbridge::JobOutcome&) {});
     };
 
     return hooks;
 }
 
 void install(const JointAnalysisInstall& deps) {
-    Page* page = deps.page;
-    if (page == nullptr) {
+    if (deps.page == nullptr) {
         return;
     }
-    page->set_analysis_hooks(make_hooks(deps));
+    deps.page->set_analysis_hooks(make_hooks(deps));
 }
 
 }  // namespace pwb::app::joint_analysis

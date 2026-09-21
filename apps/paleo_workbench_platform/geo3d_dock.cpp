@@ -15,6 +15,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -278,6 +279,12 @@ void Geo3DDock::restore_project_workspace() {
         return;
     }
     if (!file.open(QIODevice::ReadOnly)) {
+        // Unreadable sidecar (permissions/lock): same isolation as the
+        // corrupt case — reset, never inherit the previous project's
+        // objects (round-1 review P2).
+        controller_->reset();
+        refresh_objects();
+        show_status(tr("三维工作区不可读，已重置"));
         return;
     }
     try {
@@ -299,10 +306,13 @@ void Geo3DDock::persist_project_workspace() {
     }
     const QString path =
         project_directory_ + QStringLiteral("/geo3d_workspace.json");
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    // QSaveFile: atomic temp+rename — a crash mid-write never leaves a
+    // truncated sidecar behind.
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
         return;
     }
     file.write(QByteArray::fromStdString(
         controller_->save_state().dump(2)));
+    file.commit();
 }

@@ -41,13 +41,18 @@ using Viewer = pwb::seismic_viewer::SeismicSliceWidget;
 constexpr const char* kRgbFusionLabel = "RGB融合";
 
 // The single-trace (E line) kernels computable on a 2-D section: each trace
-// is an independent 1-D chain. Structural kernels (sweetness, relative
-// impedance, dips, azimuth, curvature, C3) need cross-trace neighborhoods
-// and are declined on sections — an honest capability boundary, not a stub.
+// is an independent 1-D chain — envelope/rms/phase/freq PLUS sweetness and
+// relative impedance (round-1 review: those two are also per-trace chains
+// in the Python panel, attribute_pipeline kind="trace"; refusing them with
+// the "needs 3-D neighborhood" text was wrong). The genuinely structural
+// kernels (dips, azimuth, curvature, C3) need cross-trace neighborhoods
+// and are declined on sections — an honest capability boundary, not a
+// stub; they stay reachable through the volume-level 计算属性 dialog.
 bool is_section_kernel(const std::string& kernel_id) {
     return kernel_id == "envelope" || kernel_id == "rms_amplitude" ||
            kernel_id == "instantaneous_phase" ||
-           kernel_id == "instantaneous_frequency";
+           kernel_id == "instantaneous_frequency" ||
+           kernel_id == "sweetness" || kernel_id == "relative_impedance";
 }
 
 // Deterministic section-attribute run: wrap the canonical plane
@@ -276,7 +281,8 @@ struct SeismicPageBinding::Impl {
         }
 
         if (!is_section_kernel(kernel)) {
-            note_unavailable("该属性需三维邻域计算，2D 剖面暂不支持：" + label);
+            note_unavailable("该属性需三维邻域计算，2D 剖面暂不支持，请使用"
+                             "「计算属性」进行体级计算：" + label);
             return;
         }
         std::vector<float> attribute;
