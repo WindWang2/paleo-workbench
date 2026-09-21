@@ -4,6 +4,14 @@
 #include <cstdlib>
 #include <utility>
 
+// PWB-V14-DATA-LINEAGE: kPi is POSIX-only (MSVC lacks it without
+// _USE_MATH_DEFINES before the first <cmath>); one file-local
+// constant keeps the math identical on every platform.
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+}  // namespace
+
+
 namespace pwb::ui_composite {
 namespace {
 
@@ -441,7 +449,7 @@ bool CircleCaptureTool::finish() {
     }
     Json ring = Json::array();
     for (int i = 0; i < kSegments; ++i) {
-        double a = 2.0 * M_PI * i / kSegments;
+        double a = 2.0 * kPi * i / kSegments;
         ring.push_back({cx + radius * std::cos(a),
                         cy + radius * std::sin(a)});
     }
@@ -479,7 +487,7 @@ bool ArcCaptureTool::finish() {
         double a0 = std::atan2(y0 - uy, x0 - ux);
         double a1 = std::atan2(y1 - uy, x1 - ux);
         double a2 = std::atan2(y2 - uy, x2 - ux);
-        double two_pi = 2.0 * M_PI;
+        double two_pi = 2.0 * kPi;
         double sweep_ccw = std::fmod(a2 - a0, two_pi);
         if (sweep_ccw < 0) sweep_ccw += two_pi;
         double mid_ccw = std::fmod(a1 - a0, two_pi);
@@ -517,7 +525,7 @@ bool RegularPolygonCaptureTool::finish() {
     double base = std::atan2(points[1][1] - cy, points[1][0] - cx);
     Json ring = Json::array();
     for (int i = 0; i < sides; ++i) {
-        double a = base + 2.0 * M_PI * i / sides;
+        double a = base + 2.0 * kPi * i / sides;
         ring.push_back({cx + radius * std::cos(a),
                         cy + radius * std::sin(a)});
     }
@@ -554,7 +562,7 @@ bool EllipseCaptureTool::finish() {
     }
     Json ring = Json::array();
     for (int i = 0; i < kSegments; ++i) {
-        double t = 2.0 * M_PI * i / kSegments;
+        double t = 2.0 * kPi * i / kSegments;
         ring.push_back({cx + a * std::cos(t) * ux - b * std::sin(t) * uy,
                         cy + a * std::cos(t) * uy + b * std::sin(t) * ux});
     }
@@ -581,7 +589,7 @@ bool SectorCaptureTool::finish() {
     }
     double a0 = std::atan2(sy - cy, sx - cx);
     double a1 = std::atan2(ey - cy, ex - cx);
-    double two_pi = 2.0 * M_PI;
+    double two_pi = 2.0 * kPi;
     double sweep = std::fmod(a1 - a0, two_pi);
     if (sweep <= 0.0) sweep += two_pi;  // 起止同方位 = 整圆
     Json ring = Json::array({Json::array({cx, cy})});

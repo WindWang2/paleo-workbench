@@ -22,25 +22,16 @@ long long preview_result_weight(const PreviewResult& value) {
 std::optional<std::pair<long long, long long>> safe_file_stat(
     const std::filesystem::path& path) {
 #if defined(_WIN32)
-    // MSVC stat() takes narrow paths only; fs probes give the same facts.
-    std::error_code ec{};
-    if (!std::filesystem::is_regular_file(path, ec) || ec) {
+    struct _stat64 st {};
+    if (_wstat64(path.c_str(), &st) != 0) {
         return std::nullopt;
     }
-    const long long size =
-        static_cast<long long>(std::filesystem::file_size(path, ec));
-    if (ec) return std::nullopt;
-    const auto written = std::filesystem::last_write_time(path, ec);
-    if (ec) return std::nullopt;
-    const long long mtime_ns = std::chrono::duration_cast<
-        std::chrono::nanoseconds>(written.time_since_epoch())
-        .count();
-    return std::make_pair(size, mtime_ns);
 #else
     struct stat st {};
     if (::stat(path.c_str(), &st) != 0) {
         return std::nullopt;
     }
+#endif
     long long mtime_ns;
 #ifdef st_mtime  // glibc macro → st_mtim.tv_sec
     mtime_ns = static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL +
@@ -49,7 +40,6 @@ std::optional<std::pair<long long, long long>> safe_file_stat(
     mtime_ns = static_cast<long long>(st.st_mtime) * 1000000000LL;
 #endif
     return std::make_pair(static_cast<long long>(st.st_size), mtime_ns);
-#endif
 }
 
 namespace {

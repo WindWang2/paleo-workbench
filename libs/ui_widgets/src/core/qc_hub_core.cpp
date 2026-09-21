@@ -18,7 +18,10 @@ std::array<double, 4> padded_bbox(const std::vector<double>& bbox,
 }
 
 double ease_in_out(double t) {
-    return 0.5 - 0.5 * std::cos(M_PI * std::max(0.0, std::min(1.0, t)));
+    // PWB-V14-DATA-LINEAGE: local pi constant (M_PI is POSIX-only; the
+    // _USE_MATH_DEFINES dance cannot fix an already-included <cmath>).
+    constexpr double kPi = 3.14159265358979323846;
+    return 0.5 - 0.5 * std::cos(kPi * std::max(0.0, std::min(1.0, t)));
 }
 
 const std::vector<QuickFixActionMeta>& quick_fix_registry() {

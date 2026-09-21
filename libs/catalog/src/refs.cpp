@@ -25,7 +25,7 @@ std::string utc_now_iso() {
     const std::time_t secs = system_clock::to_time_t(now);
     const auto usec = duration_cast<microseconds>(now.time_since_epoch()).count() % 1'000'000;
     std::tm tm{};
-#if defined(_WIN32)
+#ifdef _WIN32
     gmtime_s(&tm, &secs);
 #else
     gmtime_r(&secs, &tm);
@@ -225,19 +225,11 @@ std::optional<domain::Json> version_display_payload(
         auto resolver = context.resolve_path ? context.resolve_path
                                              : &default_resolve;
         std::filesystem::path payload = resolver(*version);
-#if defined(_WIN32)
-        // MSVC stat() takes a narrow path; fs::path::c_str() is wchar_t
-        // there. is_regular_file is the same probe S_ISREG made.
-        std::error_code probe_ec{};
-        const bool payload_is_regular =
-            !payload.empty() && std::filesystem::is_regular_file(payload, probe_ec);
-#else
-        struct ::stat probe {};
-        const bool payload_is_regular =
-            !payload.empty() && ::stat(payload.c_str(), &probe) == 0 &&
-            S_ISREG(probe.st_mode);
-#endif
-        if (payload_is_regular) {
+        std::error_code probe_ec;
+        const bool payload_is_file =
+            !payload.empty() && std::filesystem::is_regular_file(payload,
+                                                                 probe_ec);
+        if (payload_is_file) {
             if (version->sha256.has_value() && !version->sha256->empty()) {
                 auto digest = sha256_file(payload);
                 integrity_label = (digest.is_ok() && digest.value() == *version->sha256)

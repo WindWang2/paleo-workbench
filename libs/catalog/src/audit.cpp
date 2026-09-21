@@ -1,4 +1,4 @@
-#include <cstdio>
+#include "posix_shim.hpp"
 #include "pwb/catalog/audit.hpp"
 
 #include "pwb/catalog/checksum.hpp"
@@ -36,27 +36,10 @@ void issue(AuditReport* report, std::string_view kind, std::string_view severity
 std::optional<std::int64_t> parse_iso_epoch(const std::string& raw) {
     if (raw.empty()) return std::nullopt;
     std::tm tm{};
-#if defined(_WIN32)
-    // MSVC has no strptime/timegm; sscanf covers the fixed prefix and
-    // _mkgmtime gives the same UTC-direct conversion.
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    if (std::sscanf(raw.c_str(), "%d-%d-%dT%d:%d:%d", &year, &month, &day,
-                    &hour, &minute, &second) != 6) {
+    if (!posix_shim::strptime_iso_prefix(raw.c_str(), &tm)) {
         return std::nullopt;
     }
-    tm.tm_year = year - 1900;
-    tm.tm_mon = month - 1;
-    tm.tm_mday = day;
-    tm.tm_hour = hour;
-    tm.tm_min = minute;
-    tm.tm_sec = second;
-    return static_cast<std::int64_t>(_mkgmtime(&tm));
-#else
-    if (::strptime(raw.c_str(), "%Y-%m-%dT%H:%M:%S", &tm) == nullptr) {
-        return std::nullopt;
-    }
-    return ::timegm(&tm);
-#endif
+    return static_cast<std::int64_t>(posix_shim::timegm_compat(&tm));
 }
 
 std::int64_t utc_now_epoch() {

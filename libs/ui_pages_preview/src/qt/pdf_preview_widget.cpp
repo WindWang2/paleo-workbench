@@ -54,6 +54,7 @@ PdfPreviewWidget::PdfPreviewWidget(QWidget* parent)
     if (pdf_view_ != nullptr) {
         pdf_view_->setDocument(document_);
         content_stack_->addWidget(pdf_view_);
+#endif
     }
 #endif
 #if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDF)
@@ -74,6 +75,8 @@ PdfPreviewWidget::PdfPreviewWidget(QWidget* parent)
                 [this](int value) { on_fallback_scroll(value); });
     }
     content_stack_->addWidget(fallback_scroll_);
+    // PWB-V14-DATA-LINEAGE: guard the PdfWidgets-only reference the same
+    // way (Pdf without PdfWidgets has no QPdfView to stack).
     content_stack_->setCurrentWidget(
 #if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDFWIDGETS)
         pdf_view_ != nullptr ? static_cast<QWidget*>(pdf_view_)
@@ -296,6 +299,9 @@ bool PdfPreviewWidget::eventFilter(QObject* obj, QEvent* event) {
     }
 #endif
     return QWidget::eventFilter(obj, event);
+#else
+    return QWidget::eventFilter(obj, event);
+#endif
 }
 
 void PdfPreviewWidget::apply_settings(const PreviewSettings& settings) {

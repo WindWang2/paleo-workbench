@@ -110,3 +110,12 @@ target_sources(pwb_catalog PRIVATE
     src/v11_bundle.cpp
 )
 # END CONV-31B
+
+# BEGIN PWB-V14-DATA-LINEAGE
+# Manual-edit provenance assembly (catalog/lifecycle.py register/complete
+# parity). The entity-workspace batched reads (run_ids_touching_assets /
+# asset_version_rollups_sql) extend src/queries_sql.cpp in place above.
+target_sources(pwb_catalog PRIVATE
+    src/manual_edit.cpp
+)
+# END PWB-V14-DATA-LINEAGE

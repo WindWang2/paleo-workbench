@@ -151,6 +151,10 @@ pwb_data_test(data_catalog_service catalog_service_test.cpp data.catalog_service
 # concurrent revision conflict / project switch) and the real change feed.
 # The adapter TUs are compiled into the test — the same sources the
 # platform app links under PWB_BUILD_CATALOG_CLOSURE.
+# PWB-V14-DATA-LINEAGE: guarded — the closure test needs the ROOT source
+# tree (apps/ + ui_controllers/ui_review/ui_data_core targets) and only
+# configures in the integrated build; the standalone data-suite entry
+# skips it instead of failing configure (01 ledger A12 follow-up).
 if(TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore)
     pwb_data_test(data_catalog_closure catalog_closure_test.cpp
         data.catalog_closure)
@@ -164,3 +168,23 @@ if(TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore)
         Pwb::UiControllers Pwb::UiDataCore)
 endif()
 # END cpp-close-01
+
+# BEGIN PWB-V14-DATA-LINEAGE
+# V14 domain layer: role registry + entity↔asset link ordinals/read views +
+# remove/prune family; entity workspace read model (fake/throwing catalog
+# seam, slot assembly, stale attribution, honest degrade); manual-edit
+# provenance run assembly/completion + artifact lifecycle enforcement.
+pwb_data_test(data_entity_domain_ops entity_domain_ops_test.cpp
+    data.entity_domain_ops)
+pwb_data_test(data_entity_workspace entity_workspace_test.cpp
+    data.entity_workspace)
+# Scale / structural layer over the same read model: 10k wells + 100k links
+# with a throwing source (zero catalog reads, O(W+L) index ceiling), bounded
+# expand-one-well point lookups, project-switch isolation, snapshot guard.
+pwb_data_test(data_entity_workspace_scale entity_workspace_scale_test.cpp
+    data.entity_workspace_scale)
+pwb_data_test(data_manual_edit manual_edit_provenance_test.cpp
+    data.manual_edit)
+pwb_data_test(data_fabric_e2e data_fabric_e2e_test.cpp data.data_fabric_e2e)
+# END PWB-V14-DATA-LINEAGE
+

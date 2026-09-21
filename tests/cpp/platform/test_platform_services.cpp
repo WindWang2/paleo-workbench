@@ -34,6 +34,29 @@
 #include <pwb/qgis/qgis_runtime.hpp>
 
 #include "test_framework.hpp"
+// PWB-V14-DATA-LINEAGE: setenv/unsetenv are POSIX-only; MSVC equivalent
+// through the CRT (process environment), same semantics for this test.
+#if defined(_WIN32)
+#include <stdlib.h>
+inline int pwb_setenv(const char* name, const char* value, int overwrite) {
+    char* existing = nullptr;
+    std::size_t size = 0;
+    if (!overwrite && _dupenv_s(&existing, &size, name) == 0 &&
+        existing != nullptr) {
+        free(existing);
+        return 0;
+    }
+    return _putenv_s(name, value);
+}
+inline int pwb_unsetenv(const char* name) { return _putenv_s(name, ""); }
+#else
+#include <stdlib.h>
+inline int pwb_setenv(const char* name, const char* value, int overwrite) {
+    return ::setenv(name, value, overwrite);
+}
+inline int pwb_unsetenv(const char* name) { return ::unsetenv(name); }
+#endif
+
 
 namespace {
 
@@ -463,49 +486,36 @@ void check_session_policy() {
                           "PALEO_FORCE_XCB", "PALEO_ALLOW_NVIDIA_EGL",
                           "__EGL_VENDOR_LIBRARY_FILENAMES"};
     QMap<QString, QString> saved;
-    // MSVC has no setenv/unsetenv; _putenv_s(key, "") is the documented
-    // removal (empty value removes the variable for getenv).
-#if defined(_WIN32)
-    const auto unset_env = [](const char* key) { _putenv_s(key, ""); };
-    const auto set_env = [](const char* key, const char* value) {
-        _putenv_s(key, value);
-    };
-#else
-    const auto unset_env = [](const char* key) { unsetenv(key); };
-    const auto set_env = [](const char* key, const char* value) {
-        setenv(key, value, 1);
-    };
-#endif
     for (const char* key : keys) {
         if (const char* v = std::getenv(key)) {
             saved.insert(key, v);
         }
-        unset_env(key);
+        pwb_unsetenv(key);
     }
-    auto restore_env = [saved, keys, unset_env, set_env]() {
-        for (const char* key : keys) unset_env(key);
+    auto restore_env = [saved, keys]() {
+        for (const char* key : keys) pwb_unsetenv(key);
         for (auto it = saved.begin(); it != saved.end(); ++it) {
-            set_env(it.key().toLatin1().constData(),
-                    it.value().toLatin1().constData());
+            pwb_setenv(it.key().toLatin1().constData(),
+                   it.value().toLatin1().constData(), 1);
         }
     };
 
-    set_env("QT_QPA_PLATFORM", "offscreen");
+    pwb_setenv("QT_QPA_PLATFORM", "offscreen", 1);
     PWB_CHECK(configure_qt_platform_for_session() == "offscreen");
     PWB_CHECK(effective_qt_platform_hint() == "offscreen");
 
     // xcb on a Wayland session is cleared unless forced.
-    set_env("QT_QPA_PLATFORM", "xcb");
-    set_env("WAYLAND_DISPLAY", "wayland-0");
+    pwb_setenv("QT_QPA_PLATFORM", "xcb", 1);
+    pwb_setenv("WAYLAND_DISPLAY", "wayland-0", 1);
     PWB_CHECK(configure_qt_platform_for_session() == "");
     // The first configure already cleared the variable (one-time contract):
     // a forced run must re-set it before checking the opt-out.
-    set_env("QT_QPA_PLATFORM", "xcb");
-    set_env("PALEO_FORCE_XCB", "1");
+    pwb_setenv("QT_QPA_PLATFORM", "xcb", 1);
+    pwb_setenv("PALEO_FORCE_XCB", "1", 1);
     PWB_CHECK(configure_qt_platform_for_session() == "xcb");
     PWB_CHECK(effective_qt_platform_hint().find("forced")
               != std::string::npos);
-    unset_env("PALEO_FORCE_XCB");
+    pwb_unsetenv("PALEO_FORCE_XCB");
 
     // Mesa EGL pin on Wayland with an injected existing candidate. The
     // pin's environment write is Q_OS_UNIX-only (a Wayland/NVIDIA EGL
@@ -516,19 +526,19 @@ void check_session_policy() {
     const std::string vendor_json =
         (dir.filePath("50_mesa.json")).toStdString();
     { QFile f(QString::fromStdString(vendor_json)); f.open(QIODevice::WriteOnly); }
-    unset_env("__EGL_VENDOR_LIBRARY_FILENAMES");  // configure() may have pinned
-    set_env("QT_QPA_PLATFORM", "offscreen");
+    pwb_unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");  // configure() may have pinned
+    pwb_setenv("QT_QPA_PLATFORM", "offscreen", 1);
 #if !defined(Q_OS_WIN)
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json}) == vendor_json);
     PWB_CHECK(std::getenv("__EGL_VENDOR_LIBRARY_FILENAMES") != nullptr);
     // Already pinned -> untouched; opt-out -> untouched.
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json + "x"}) == "");
-    set_env("PALEO_ALLOW_NVIDIA_EGL", "1");
-    unset_env("__EGL_VENDOR_LIBRARY_FILENAMES");
+    pwb_setenv("PALEO_ALLOW_NVIDIA_EGL", "1", 1);
+    pwb_unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json}) == "");
-    unset_env("PALEO_ALLOW_NVIDIA_EGL");
+    pwb_unsetenv("PALEO_ALLOW_NVIDIA_EGL");
     // No Wayland session -> untouched.
-    unset_env("WAYLAND_DISPLAY");
+    pwb_unsetenv("WAYLAND_DISPLAY");
 #endif
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json}) == "");
 

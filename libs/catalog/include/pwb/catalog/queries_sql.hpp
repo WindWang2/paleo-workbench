@@ -129,4 +129,27 @@ std::optional<std::string> find_managed_raw_sql(
 std::optional<std::string> find_external_by_path_sql(Database& db,
                                                      const std::string& path);
 
+// V14-DATA-LINEAGE: distinct run ids whose inputs OR outputs touch any
+// version of the given assets (entity workspace related-runs rollup).
+// Silent degrade; pre-V11 stores fall back to the versions.run_id column.
+std::vector<std::string> run_ids_touching_assets(
+    Database& db, const std::vector<std::string>& asset_ids);
+
+// V14-DATA-LINEAGE: per-asset version rollup (entity workspace read
+// model): total version count + current-version display fields, in two
+// chunked statements per 500 ids. Silent degrade.
+struct AssetVersionRollup {
+    int version_count = 0;
+    bool has_current = false;
+    std::string current_stage;
+    std::string current_format;
+    bool current_trashed = false;
+    bool current_managed = true;
+    std::string current_path;
+    int current_member_count = 0;
+};
+using AssetVersionRollupMap = std::map<std::string, AssetVersionRollup>;
+AssetVersionRollupMap asset_version_rollups_sql(
+    Database& db, const std::vector<std::string>& asset_ids);
+
 }  // namespace pwb::catalog

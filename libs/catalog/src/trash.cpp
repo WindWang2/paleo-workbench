@@ -1,21 +1,20 @@
+#include "posix_shim.hpp"
 #include "pwb/catalog/trash.hpp"
 
 #include "pwb/catalog/models.hpp"
 #include "pwb/domain/errors.hpp"
 #include "pwb/project/paths.hpp"
 
-#include <atomic>
 #include <cstdio>
-#include <fstream>
-#include <iomanip>
-#include <sstream>
-#include <vector>
-
 #if !defined(_WIN32)
 #include <fcntl.h>
+#endif
+#include <fstream>
 #include <sys/stat.h>
+#if !defined(_WIN32)
 #include <unistd.h>
 #endif
+#include <vector>
 
 namespace pwb::catalog {
 
@@ -43,36 +42,18 @@ void fsync_dir_best_effort(const fs::path& directory) {
     ::fsync(fd);
     ::close(fd);
 #else
+    // storage.py returns early on Windows (B-31); no directory-fsync
+    // equivalent exists there.
     (void)directory;
 #endif
 }
 
 void make_readonly_best_effort(const fs::path& path) {
-#if defined(_WIN32)
-    // MSVC stat()/chmod() narrow-path mismatch; readonly is best-effort
-    // (storage.py no-ops on Windows too — same direction as fsync_dir).
-    const bool was_readonly = std::filesystem::is_regular_file(path);
-    if (!was_readonly) return;
-    std::error_code ec;
-    std::filesystem::permissions(path, std::filesystem::perms::owner_write,
-                                 std::filesystem::perm_options::remove, ec);
-#else
-    struct ::stat st {};
-    if (::stat(path.c_str(), &st) != 0) return;
-    ::chmod(path.c_str(), st.st_mode & ~(S_IWUSR | S_IWGRP | S_IWOTH));
-#endif
+    posix_shim::make_readonly_best_effort(path);
 }
 
 void make_writable_best_effort(const fs::path& path) {
-#if defined(_WIN32)
-    std::error_code ec;
-    std::filesystem::permissions(path, std::filesystem::perms::owner_write,
-                                 std::filesystem::perm_options::add, ec);
-#else
-    struct ::stat st {};
-    if (::stat(path.c_str(), &st) != 0) return;
-    ::chmod(path.c_str(), st.st_mode | S_IWUSR);
-#endif
+    posix_shim::make_writable_best_effort(path);
 }
 
 void prune_empty_ancestors(const fs::path& directory, int levels) {
@@ -255,35 +236,20 @@ domain::Result<fs::path> create_working_copy(const fs::path& project_path,
     }
     const fs::path target = target_dir / version_path.filename();
 
-    // #1219-style unique temp per writer under the target dir. POSIX uses
-    // mkstemp; Windows uses _creat-style exclusive open with a per-process
-    // counter suffix (no O_EXCL temp template API there — same uniqueness
-    // intent, retry loop below guards the rename).
-#if defined(_WIN32)
-    static std::atomic<unsigned long long> temp_counter{0};
-    fs::path temp;
-    bool temp_open = false;
-    std::FILE* temp_file = nullptr;
-    for (int attempt = 0; attempt < 32 && !temp_open; ++attempt) {
-        std::ostringstream name;
-        name << ".work-" << std::setw(6) << std::setfill('0')
-             << (temp_counter.fetch_add(1) + 1) << "-" << (attempt + 1);
-        temp = target_dir / name.str();
-        // "xn" = _O_BINARY|_O_EXCL|_O_CREAT via the wide exclusive fopen.
-        const std::wstring wtemp = temp.wstring();
-        const errno_t opened =
-            _wfopen_s(&temp_file, wtemp.c_str(), L"wbx");
-        if (opened == 0 && temp_file != nullptr) {
-            temp_open = true;
-        }
-    }
-    if (!temp_open) {
-        return DataError(ErrorCode::IoError, "working-copy temp create failed");
-    }
+    // #1219-style unique temp per writer under the target dir - portable
+    // staged write (temp + rename). POSIX additionally fsyncs the payload
+    // before the rename (crash-safety parity with the mkstemp original);
+    // Windows has no mkstemp/fsync equivalent (storage.py B-31 note).
+    fs::path temp = posix_shim::temp_file_path(target_dir, ".work-");
     do {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            fs::remove(temp, ec);
+            return DataError(ErrorCode::IoError,
+                             "working-copy temp create failed");
+        }
         std::ifstream in(version_path, std::ios::binary);
         if (!in) {
-            std::fclose(temp_file);
             fs::remove(temp, ec);
             return DataError(ErrorCode::NotFound,
                              "Managed payload not found: " + version_path.string());
@@ -291,52 +257,29 @@ domain::Result<fs::path> create_working_copy(const fs::path& project_path,
         char chunk[1 << 20];
         while (in) {
             in.read(chunk, sizeof(chunk));
-            if (in.gcount() > 0 &&
-                std::fwrite(chunk, 1, static_cast<std::size_t>(in.gcount()),
-                            temp_file) < static_cast<std::size_t>(in.gcount())) {
-                std::fclose(temp_file);
-                fs::remove(temp, ec);
-                return DataError(ErrorCode::IoError, "working-copy write failed");
+            if (in.gcount() > 0) {
+                out.write(chunk, in.gcount());
             }
         }
-        std::fflush(temp_file);
-    } while (false);
-    std::fclose(temp_file);
-#else
-    std::string pattern = (target_dir / ".work-XXXXXX").string();
-    std::vector<char> pat(pattern.begin(), pattern.end());
-    pat.push_back('\0');
-    int fd = ::mkstemp(pat.data());
-    if (fd < 0) {
-        return DataError(ErrorCode::IoError, "working-copy temp create failed");
-    }
-    fs::path temp(pat.data());
-    do {
-        std::ifstream in(version_path, std::ios::binary);
-        if (!in) {
-            ::close(fd);
+        out.flush();
+        if (!out) {
             fs::remove(temp, ec);
-            return DataError(ErrorCode::NotFound,
-                             "Managed payload not found: " + version_path.string());
+            return DataError(ErrorCode::IoError, "working-copy write failed");
         }
-        char chunk[1 << 20];
-        while (in) {
-            in.read(chunk, sizeof(chunk));
-            if (in.gcount() > 0 &&
-                ::write(fd, chunk, static_cast<unsigned>(in.gcount())) < 0) {
-                ::close(fd);
+#if !defined(_WIN32)
+        out.close();
+        const int fd = ::open(temp.c_str(), O_RDONLY);
+        if (fd >= 0) {
+            const int synced = ::fsync(fd);
+            ::close(fd);
+            if (synced != 0) {
                 fs::remove(temp, ec);
-                return DataError(ErrorCode::IoError, "working-copy write failed");
+                return DataError(ErrorCode::IoError,
+                                 "working-copy fsync failed");
             }
         }
-        if (::fsync(fd) != 0) {
-            ::close(fd);
-            fs::remove(temp, ec);
-            return DataError(ErrorCode::IoError, "working-copy fsync failed");
-        }
-    } while (false);
-    ::close(fd);
 #endif
+    } while (false);
 
     make_writable_best_effort(target);  // replace over a stale read-only copy
     fs::rename(temp, target, ec);

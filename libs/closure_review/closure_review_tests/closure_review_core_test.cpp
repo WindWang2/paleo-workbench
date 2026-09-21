@@ -20,7 +20,13 @@
 #include <limits>
 #include <set>
 #include <string>
+#if defined(_WIN32)
+#include <process.h>
+inline int pwb_test_pid() { return _getpid(); }
+#else
 #include <unistd.h>
+inline int pwb_test_pid() { return static_cast<int>(pwb_test_pid()); }
+#endif
 
 using namespace pwb;
 using namespace pwb::closure_review;
@@ -403,7 +409,7 @@ PWB_TEST(export_writes_parseable_json_and_registers_artifact) {
 
     const std::filesystem::path out_dir =
         std::filesystem::temp_directory_path() /
-        ("pwb09_export_" + std::to_string(::getpid()));
+        ("pwb09_export_" + std::to_string(pwb_test_pid()));
     std::filesystem::create_directories(out_dir);
     const auto out_path = out_dir / "qc_map_broken.json";
 
@@ -440,7 +446,7 @@ PWB_TEST(export_failure_leaves_no_success_receipt) {
     // created — the write must fail and append NO artifact.
     const std::filesystem::path block =
         std::filesystem::temp_directory_path() /
-        ("pwb09_block_" + std::to_string(::getpid()));
+        ("pwb09_block_" + std::to_string(pwb_test_pid()));
     std::filesystem::create_directories(block);
     std::ofstream(block / "as_file") << "x";
     const auto out_path = block / "as_file" / "nested" / "qc.json";
@@ -474,7 +480,7 @@ PWB_TEST(non_finite_floats_normalize_to_null) {
                             std::numeric_limits<double>::infinity()}}}}})}};
     const std::filesystem::path out_dir =
         std::filesystem::temp_directory_path() /
-        ("pwb09_nan_" + std::to_string(::getpid()));
+        ("pwb09_nan_" + std::to_string(pwb_test_pid()));
     const auto out_path = out_dir / "qc_nan.json";
     domain::Json sink_root = domain::Json::object();
     const domain::DataError error =

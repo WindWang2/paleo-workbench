@@ -33,8 +33,14 @@
 #include <unordered_map>
 #include <vector>
 
-#if defined(__unix__) || defined(__APPLE__)
+#if defined(_WIN32)
+#include <process.h>  // _getpid
+#define PWB_TEST_PID() (_getpid())
+#elif defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
+#define PWB_TEST_PID() (::getpid())
+#else
+#define PWB_TEST_PID() (0)
 #endif
 
 #include <pwb/domain/json.hpp>
@@ -658,7 +664,7 @@ void run_cpp_contract_sections() {
     {
         namespace fs = std::filesystem;
         fs::path dir = fs::temp_directory_path()
-                       / ("pwb_conv27_io_" + std::to_string(::getpid()));
+                       / ("pwb_conv27_io_" + std::to_string(PWB_TEST_PID()));
         fs::create_directories(dir);
         auto store = make_std_file_store();
         const std::string path = (dir / "composition.json").string();
@@ -763,7 +769,7 @@ void run_cpp_contract_sections() {
               "snapshot pins the session revision");
         namespace fs = std::filesystem;
         fs::path dir = fs::temp_directory_path()
-                       / ("pwb_conv27_service_" + std::to_string(::getpid()));
+                       / ("pwb_conv27_service_" + std::to_string(PWB_TEST_PID()));
         fs::create_directories(dir);
         std::string save_error;
         check(service.save_file((dir / "doc.json").string(), &save_error),

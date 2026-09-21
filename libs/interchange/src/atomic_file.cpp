@@ -9,6 +9,9 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -94,35 +97,31 @@ AtomicOutputFile::AtomicOutputFile(const std::filesystem::path& target)
         const std::string candidate =
             (parent / (prefix + rand_chars + suffix)).string();
 #if defined(_WIN32)
-        // MSVC: exclusive wide-char creation (O_CREAT|O_EXCL|O_WRONLY
-        // semantics); errno-style EEXIST keeps the retry loop identical.
-        const std::wstring wcandidate =
-            std::filesystem::path(candidate).wstring();
-        HANDLE handle = CreateFileW(
-            wcandidate.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
-            FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (handle != INVALID_HANDLE_VALUE) {
-            CloseHandle(handle);
-            temp_path_ = candidate;
-            return;
-        }
-        if (GetLastError() != ERROR_FILE_EXISTS) {
-            throw std::runtime_error(
-                "cannot create temp file beside " + target.string() + ": WinError "
-                + std::to_string(GetLastError()));
-        }
+        // MSVC has no open()/O_EXCL; _wopen with _O_CREAT|_O_EXCL|_O_WRONLY
+        // gives the same create-or-fail reservation (mode 0600 → _S_IWRITE).
+        const int fd = _wopen(
+            std::filesystem::path(candidate).c_str(),
+            _O_CREAT | _O_EXCL | _O_WRONLY, _S_IWRITE);
 #else
         const int fd = ::open(candidate.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
+#endif
         if (fd >= 0) {
+#if defined(_WIN32)
+            _close(fd);
+#else
             ::close(fd);
+#endif
             temp_path_ = candidate;
             return;
         }
+#if defined(_WIN32)
         if (errno != EEXIST) {
+#else
+        if (errno != EEXIST) {
+#endif
             throw std::runtime_error("cannot create temp file beside " +
                                      target.string() + ": " + errno_message());
         }
-#endif
     }
     throw std::runtime_error("cannot create temp file beside " + target.string() +
                              ": no free temp name");

@@ -16,6 +16,7 @@
 
 #include <pwb/catalog/dedup.hpp>
 #include <pwb/catalog/lineage_graph.hpp>
+#include <pwb/catalog/manual_edit.hpp>
 #include <pwb/catalog/refs.hpp>
 #include <pwb/catalog/resolve.hpp>
 #include <pwb/catalog/tags.hpp>
@@ -1373,6 +1374,108 @@ void CatalogClosureAdapter::update_run_status(const std::string& run_id,
     event.mutation_serial = core.mutation_serial();
     event.run_ids.push_back(run_id);
     event.note = "运行状态已更新：" + run_id + " → " + status;
+    publish_after_(std::move(event));
+    lock.unlock();
+    flush_queued_();
+}
+
+// ---- manual-edit provenance (V14; lifecycle.py register/complete) ---------
+
+std::optional<catalog::DataRun> CatalogClosureAdapter::register_manual_edit_run(
+    const std::vector<std::string>& source_version_ids,
+    const std::string& entity_type, const std::string& entity_id,
+    const std::string& business_role, const std::string& actor,
+    const std::string& note, bool as_new_asset,
+    const domain::Json& extra_parameters) {
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
+    ensure_open_("register_manual_edit_run");
+    catalog::CatalogServiceCore& core = core_();
+
+    catalog::ManualEditRequest request;
+    request.source_version_ids = source_version_ids;
+    request.entity_type = entity_type;
+    request.entity_id = entity_id;
+    request.business_role = business_role;
+    request.actor = actor;
+    request.note = note;
+    request.as_new_asset = as_new_asset;
+    request.extra_parameters = extra_parameters;
+    auto built = catalog::build_manual_edit_run(core.document(), request);
+    if (!built.is_ok()) {
+        raise_(built.error());
+    }
+    DataRun run = std::move(built.value());
+
+    catalog::DataRun* added = core.add_run(run);
+    if (added == nullptr) {
+        raise_(DataError(ErrorCode::Unknown, "catalog document add failed"));
+    }
+    DirtySet dirty;
+    dirty.mark_run(run.id.str());
+    DataError error = core.save(dirty);
+    if (error.code != ErrorCode::Ok) {
+        Rollback plan;
+        plan.runs.push_back(added);
+        rollback_(std::move(plan));
+        raise_(std::move(error));
+    }
+    CatalogChangeEvent event;
+    event.kind = CatalogChangeEvent::Kind::RunsChanged;
+    event.identity = identity_;
+    event.store_revision = core.index_revision().value_or(-1);
+    event.mutation_serial = core.mutation_serial();
+    event.run_ids.push_back(run.id.str());
+    event.note = "人工修改 run 已登记：" + run.id.str();
+    publish_after_(std::move(event));
+    lock.unlock();
+    flush_queued_();
+    return run;
+}
+
+void CatalogClosureAdapter::complete_manual_edit_run(
+    const std::string& run_id,
+    const std::vector<std::string>& committed_version_ids,
+    const std::string& business_role, int failed_count) {
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
+    ensure_open_("complete_manual_edit_run");
+    catalog::CatalogServiceCore& core = core_();
+    catalog::DataRun* run = nullptr;
+    for (auto& candidate : core.document().runs) {
+        if (candidate.id.str() == run_id) {
+            run = &candidate;
+            break;
+        }
+    }
+    if (run == nullptr) {
+        raise_(DataError(ErrorCode::NotFound, "Unknown run: " + run_id));
+    }
+
+    catalog::ManualEditCompletion completion;
+    completion.committed_version_ids = committed_version_ids;
+    completion.business_role = business_role;
+    completion.failed_count = failed_count;
+    auto updated = catalog::apply_manual_edit_completion(*run, completion);
+    if (!updated.is_ok()) {
+        raise_(updated.error());
+    }
+    const DataRun before = *run;  // in-memory restore on save failure
+    *run = std::move(updated.value());
+    core.invalidate_maps();  // fold the cache edit into the node store
+    DirtySet dirty;
+    dirty.mark_run(run_id);
+    DataError error = core.save(dirty);
+    if (error.code != ErrorCode::Ok) {
+        *run = before;
+        core.invalidate_maps();
+        raise_(std::move(error));
+    }
+    CatalogChangeEvent event;
+    event.kind = CatalogChangeEvent::Kind::RunsChanged;
+    event.identity = identity_;
+    event.store_revision = core.index_revision().value_or(-1);
+    event.mutation_serial = core.mutation_serial();
+    event.run_ids.push_back(run_id);
+    event.note = "人工修改 run 已关闭：" + run_id;
     publish_after_(std::move(event));
     lock.unlock();
     flush_queued_();
