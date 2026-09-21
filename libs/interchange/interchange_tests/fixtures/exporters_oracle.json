@@ -1,0 +1,450 @@
+{
+ "work_files": {
+  "basic.las": "~Version Information\nVERS.  2.0 : CWLS LOG ASCII STANDARD - VERSION 2.0\nWRAP.  NO  : ONE LINE PER DEPTH STEP\n~Well Information\nSTRT.M         1520.0000 : START DEPTH\nSTOP.M         1521.0000 : STOP DEPTH\nSTEP.M            0.5000 : STEP\nNULL.          -999.2500 : NULL VALUE\nWELL.          DEMO-WELL-1 : WELL NAME\n~Curve Information\nDEPT.M                 : DEPTH\nGR .API                : GAMMA RAY\nRES.OHMM               : RESISTIVITY\n~A\n1520.0000 45.1234 10.5\n1520.5000 -999.25 11.25\n1521.0000 47.0 12.75\n",
+  "no_well.las": "~V\nVERS. 2.0\nWRAP. NO\n~W\nSTRT.M 100.0\nNULL. -999.25\n~C\nDEPT.M : depth\nRHOB.G/CC : density\n~A\n100.0 2.5\n100.5 2.6\n",
+  "bad.las": "not a las file\n",
+  "basic.csv": "depth,gr,name\n1520.0,45.5,alpha\n1521.0,,beta\n",
+  "ints.csv": "id,count,label\n1,10,x\n2,20,y\n",
+  "dupes.csv": "a,a,b\n1,2,3\n",
+  "na.csv": "x,y\nNA,1\nnull,2\n3,nan\n",
+  "ok.geojson": "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[1,2]},\"properties\":{\"name\":\"井1\"}}]}",
+  "generic.json": "{\"a\":[1,2],\"b\":{\"c\":\"中\"}}",
+  "root.geojson": "[1,2,3]",
+  "broken.geojson": "{not json",
+  "plain.txt": "line1\n第二行\n",
+  "bad_utf8.txt": "abc��def\n"
+ },
+ "xlsx_input": {
+  "xlsx_sheet": "Sheet1",
+  "xlsx_grid": [
+   [
+    "depth",
+    "name",
+    "flag"
+   ],
+   [
+    1.5,
+    "甲",
+    true
+   ],
+   [
+    2.5,
+    "乙",
+    false
+   ]
+  ]
+ },
+ "png_input_hex": "89504e470d0a1a0a0000000d4948445200000002000000020802000000fdd49a730000001349444154789c6360b06900a18a2d0d155b1a001a1e04d1e8fd92090000000049454e44ae426082",
+ "registry": [
+  {
+   "format": "las",
+   "labels": [
+    "CSV",
+    "XLSX",
+    "JSON"
+   ]
+  },
+  {
+   "format": ".las",
+   "labels": [
+    "CSV",
+    "XLSX",
+    "JSON"
+   ]
+  },
+  {
+   "format": "LAS",
+   "labels": [
+    "CSV",
+    "XLSX",
+    "JSON"
+   ]
+  },
+  {
+   "format": "csv",
+   "labels": [
+    "JSON",
+    "XLSX"
+   ]
+  },
+  {
+   "format": "xlsx",
+   "labels": [
+    "JSON"
+   ]
+  },
+  {
+   "format": "xls",
+   "labels": [
+    "JSON"
+   ]
+  },
+  {
+   "format": "png",
+   "labels": [
+    "PNG"
+   ]
+  },
+  {
+   "format": "tif",
+   "labels": [
+    "PNG"
+   ]
+  },
+  {
+   "format": "jpg",
+   "labels": [
+    "PNG"
+   ]
+  },
+  {
+   "format": "txt",
+   "labels": [
+    "TXT"
+   ]
+  },
+  {
+   "format": "md",
+   "labels": [
+    "TXT"
+   ]
+  },
+  {
+   "format": "json",
+   "labels": [
+    "TXT",
+    "GeoJSON"
+   ]
+  },
+  {
+   "format": "geojson",
+   "labels": [
+    "GeoJSON"
+   ]
+  },
+  {
+   "format": "sgy",
+   "labels": [
+    "SUMMARY"
+   ]
+  },
+  {
+   "format": "segy",
+   "labels": [
+    "SUMMARY"
+   ]
+  },
+  {
+   "format": "xml",
+   "labels": [
+    "TXT"
+   ]
+  },
+  {
+   "format": "dat",
+   "labels": [
+    "TXT"
+   ]
+  },
+  {
+   "format": "log",
+   "labels": [
+    "TXT"
+   ]
+  },
+  {
+   "format": "unknown",
+   "labels": []
+  },
+  {
+   "format": "",
+   "labels": []
+  },
+  {
+   "format": ".",
+   "labels": []
+  },
+  {
+   "ext_for": "CSV",
+   "ext": ".csv"
+  },
+  {
+   "ext_for": "JSON",
+   "ext": ".json"
+  },
+  {
+   "ext_for": "XLSX",
+   "ext": ".xlsx"
+  },
+  {
+   "ext_for": "PNG",
+   "ext": ".png"
+  },
+  {
+   "ext_for": "TXT",
+   "ext": ".txt"
+  },
+  {
+   "ext_for": "GeoJSON",
+   "ext": ".geojson"
+  },
+  {
+   "ext_for": "SUMMARY",
+   "ext": ".summary.json"
+  },
+  {
+   "ext_for": "INVENTORY",
+   "ext": ".inventory.json"
+  },
+  {
+   "ext_for": "BOGUS",
+   "ext": ".out"
+  },
+  {
+   "ext_for": "",
+   "ext": ".out"
+  }
+ ],
+ "cases": [
+  {
+   "id": "las_to_csv.basic",
+   "src": "basic.las",
+   "out_name": "b.csv",
+   "file": {
+    "text": "DEPT,GR,RES\n1520.0,45.1234,10.5\n1520.5,,11.25\n1521.0,47.0,12.75\n"
+   }
+  },
+  {
+   "id": "las_to_csv.no_well",
+   "src": "no_well.las",
+   "out_name": "nw.csv",
+   "file": {
+    "text": "DEPT,RHOB\n100.0,2.5\n100.5,2.6\n"
+   }
+  },
+  {
+   "id": "las_to_csv.bad",
+   "src": "bad.las",
+   "out_name": "bad.csv",
+   "error": {
+    "class": "ExportError",
+    "message": "LAS -> CSV 失败: 'No ~ sections found. Is this a LAS file?'"
+   }
+  },
+  {
+   "id": "las_to_xlsx.basic",
+   "src": "basic.las",
+   "out_name": "b.xlsx",
+   "file": {
+    "xlsx_sheet": "Sheet1",
+    "xlsx_grid": [
+     [
+      "DEPT",
+      "GR",
+      "RES"
+     ],
+     [
+      1520,
+      45.1234,
+      10.5
+     ],
+     [
+      1520.5,
+      null,
+      11.25
+     ],
+     [
+      1521,
+      47,
+      12.75
+     ]
+    ]
+   }
+  },
+  {
+   "id": "las_to_json_summary.basic",
+   "src": "basic.las",
+   "out_name": "b.json",
+   "file": {
+    "text": "{\n  \"source\": \"/tmp/exp_oracle_bnqw_3w3/basic.las\",\n  \"well_name\": \"DEMO-WELL-1\",\n  \"curve_count\": 3,\n  \"curves\": [\n    {\n      \"mnemonic\": \"DEPT\",\n      \"unit\": \"M\",\n      \"descr\": \"DEPTH\"\n    },\n    {\n      \"mnemonic\": \"GR\",\n      \"unit\": \"API\",\n      \"descr\": \"GAMMA RAY\"\n    },\n    {\n      \"mnemonic\": \"RES\",\n      \"unit\": \"OHMM\",\n      \"descr\": \"RESISTIVITY\"\n    }\n  ]\n}"
+   }
+  },
+  {
+   "id": "las_to_json_summary.no_well",
+   "src": "no_well.las",
+   "out_name": "nw.json",
+   "file": {
+    "text": "{\n  \"source\": \"/tmp/exp_oracle_bnqw_3w3/no_well.las\",\n  \"well_name\": \"no_well\",\n  \"curve_count\": 2,\n  \"curves\": [\n    {\n      \"mnemonic\": \"DEPT\",\n      \"unit\": \"M\",\n      \"descr\": \"depth\"\n    },\n    {\n      \"mnemonic\": \"RHOB\",\n      \"unit\": \"G/CC\",\n      \"descr\": \"density\"\n    }\n  ]\n}"
+   }
+  },
+  {
+   "id": "table_to_json.csv",
+   "src": "basic.csv",
+   "out_name": "t.json",
+   "file": {
+    "text": "[{\"depth\":1520.0,\"gr\":45.5,\"name\":\"alpha\"},{\"depth\":1521.0,\"gr\":null,\"name\":\"beta\"}]"
+   }
+  },
+  {
+   "id": "table_to_json.ints",
+   "src": "ints.csv",
+   "out_name": "i.json",
+   "file": {
+    "text": "[{\"id\":1,\"count\":10,\"label\":\"x\"},{\"id\":2,\"count\":20,\"label\":\"y\"}]"
+   }
+  },
+  {
+   "id": "table_to_json.dupes",
+   "src": "dupes.csv",
+   "out_name": "d.json",
+   "file": {
+    "text": "[{\"a\":1,\"a.1\":2,\"b\":3}]"
+   }
+  },
+  {
+   "id": "table_to_json.na",
+   "src": "na.csv",
+   "out_name": "n.json",
+   "file": {
+    "text": "[{\"x\":null,\"y\":1.0},{\"x\":null,\"y\":2.0},{\"x\":3.0,\"y\":null}]"
+   }
+  },
+  {
+   "id": "table_to_json.xlsx",
+   "src": "in.xlsx",
+   "out_name": "x.json",
+   "file": {
+    "text": "[{\"depth\":1.5,\"name\":\"甲\",\"flag\":true},{\"depth\":2.5,\"name\":\"乙\",\"flag\":false}]"
+   }
+  },
+  {
+   "id": "table_to_xlsx.csv",
+   "src": "basic.csv",
+   "out_name": "t.xlsx",
+   "file": {
+    "xlsx_sheet": "Sheet1",
+    "xlsx_grid": [
+     [
+      "depth",
+      "gr",
+      "name"
+     ],
+     [
+      1520,
+      45.5,
+      "alpha"
+     ],
+     [
+      1521,
+      null,
+      "beta"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "table_to_xlsx.xlsx",
+   "src": "in.xlsx",
+   "out_name": "x2.xlsx",
+   "file": {
+    "xlsx_sheet": "Sheet1",
+    "xlsx_grid": [
+     [
+      "depth",
+      "name",
+      "flag"
+     ],
+     [
+      1.5,
+      "甲",
+      true
+     ],
+     [
+      2.5,
+      "乙",
+      false
+     ]
+    ]
+   }
+  },
+  {
+   "id": "text_to_txt.plain",
+   "src": "plain.txt",
+   "out_name": "p.txt",
+   "file": {
+    "text": "line1\n第二行\n"
+   }
+  },
+  {
+   "id": "text_to_txt.bad_utf8",
+   "src": "bad_utf8.txt",
+   "out_name": "u.txt",
+   "file": {
+    "text": "abc��def\n"
+   }
+  },
+  {
+   "id": "geojson_normalize.ok",
+   "src": "ok.geojson",
+   "out_name": "g.geojson",
+   "file": {
+    "text": "{\n  \"type\": \"FeatureCollection\",\n  \"features\": [\n    {\n      \"type\": \"Feature\",\n      \"geometry\": {\n        \"type\": \"Point\",\n        \"coordinates\": [\n          1,\n          2\n        ]\n      },\n      \"properties\": {\n        \"name\": \"井1\"\n      }\n    }\n  ]\n}"
+   }
+  },
+  {
+   "id": "geojson_normalize.generic_json",
+   "src": "generic.json",
+   "out_name": "gj.json",
+   "file": {
+    "text": "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": {\n    \"c\": \"中\"\n  }\n}"
+   }
+  },
+  {
+   "id": "geojson_normalize.bad_root",
+   "src": "root.geojson",
+   "out_name": "br.geojson",
+   "error": {
+    "class": "ExportError",
+    "message": "GeoJSON 根节点必须是对象"
+   }
+  },
+  {
+   "id": "geojson_normalize.broken",
+   "src": "broken.geojson",
+   "out_name": "bk.geojson",
+   "error": {
+    "class": "ExportError",
+    "message": "GeoJSON 规范化失败: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+   }
+  },
+  {
+   "id": "image_to_png.png",
+   "src": "img.png",
+   "out_name": "img_out.png",
+   "file": {
+    "png_hex": "89504e470d0a1a0a0000000d4948445200000002000000020802000000fdd49a730000001649444154789c6364b06960606060a9a86060606000000db001b2610b62c00000000049454e44ae426082"
+   }
+  },
+  {
+   "id": "image_to_png.bad",
+   "src": "bad.las",
+   "out_name": "img_bad.png",
+   "error": {
+    "class": "ExportError",
+    "message": "图像 -> PNG 失败: cannot identify image file '/tmp/exp_oracle_bnqw_3w3/bad.las'"
+   }
+  }
+ ],
+ "seismic_stub_payload": {
+  "source": "stub.sgy",
+  "n_inlines": 3,
+  "n_crosslines": 4,
+  "n_samples": 5,
+  "dt_ms": 2.0,
+  "t0_ms": 0.0,
+  "iline_start": 100,
+  "iline_step": 1,
+  "xline_start": 200,
+  "xline_step": 1
+ }
+}

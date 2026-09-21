@@ -21,6 +21,7 @@
 
 add_library(pwb_ui_canvas_core STATIC
     src/map_render_backend.cpp
+    src/vector_lod.cpp
     src/layer_scene.cpp
     src/layer_tree_core.cpp
     src/layer_properties_core.cpp
@@ -47,6 +48,7 @@ target_link_libraries(pwb_ui_canvas_core
 if(TARGET Qt6::Widgets AND TARGET Pwb::UiWidgets
    AND TARGET Pwb::UiPagesPreviewQt AND TARGET Pwb::JobQt)
     add_library(pwb_ui_canvas STATIC
+        src/qt/fallback_map_backend.cpp
         src/qt/unified_map_canvas.cpp
         src/qt/native_map_canvas.cpp
         src/qt/native_raster_controller.cpp
@@ -54,6 +56,7 @@ if(TARGET Qt6::Widgets AND TARGET Pwb::UiWidgets
         src/qt/map_layer_properties.cpp
         src/qt/map_export_worker.cpp
         src/qt/preview_settings_dialog.cpp
+        include/pwb/ui_canvas/qt/fallback_map_backend.hpp
         include/pwb/ui_canvas/qt/unified_map_canvas.hpp
         include/pwb/ui_canvas/qt/native_map_canvas.hpp
         include/pwb/ui_canvas/qt/native_raster_controller.hpp

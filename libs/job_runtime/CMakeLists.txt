@@ -6,6 +6,10 @@
 add_library(pwb_job_runtime STATIC
     src/job_scheduler.cpp
     src/job_categories.cpp
+    src/resource_budget.cpp
+    src/memory_pressure.cpp
+    src/resource_governor.cpp
+    src/governance.cpp
 )
 add_library(Pwb::JobRuntime ALIAS pwb_job_runtime)
 target_include_directories(pwb_job_runtime PUBLIC

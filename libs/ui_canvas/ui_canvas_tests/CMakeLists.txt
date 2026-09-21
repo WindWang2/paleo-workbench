@@ -38,6 +38,19 @@ set_tests_properties(ui_canvas.core_smoke PROPERTIES TIMEOUT 120)
 
 # --- Qt widget smoke (offscreen, no QGIS) ----------------------------------
 if(TARGET pwb_ui_canvas)
+    add_executable(ui_canvas.fallback_backend fallback_backend_test.cpp)
+    target_compile_features(ui_canvas.fallback_backend PRIVATE cxx_std_20)
+    set_target_properties(ui_canvas.fallback_backend PROPERTIES AUTOMOC ON)
+    target_link_libraries(ui_canvas.fallback_backend PRIVATE
+        Pwb::UiCanvas Qt6::Widgets Qt6::Test)
+    target_include_directories(ui_canvas.fallback_backend PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME ui_canvas.fallback_backend
+             COMMAND ui_canvas.fallback_backend)
+    set_tests_properties(ui_canvas.fallback_backend PROPERTIES
+        TIMEOUT 120
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     add_executable(ui_canvas.qt_widgets_smoke qt_widgets_smoke_test.cpp)
     target_compile_features(ui_canvas.qt_widgets_smoke PRIVATE cxx_std_20)
     set_target_properties(ui_canvas.qt_widgets_smoke PROPERTIES AUTOMOC ON)
