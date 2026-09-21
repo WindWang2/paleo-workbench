@@ -217,6 +217,17 @@ struct SeismicPageBinding::Impl {
             note_unavailable("未知属性：" + label);
             return;
         }
+        // 振幅 leaf: restore the raw amplitude display. This is the user
+        // reachability path for clear_attribute_view() — without it the
+        // export refusal ("请先清除属性视图") pointed at an action no menu
+        // or panel entry ever exposed.
+        if (kernel == "amplitude") {
+            if (widget->attribute_active()) {
+                widget->clear_attribute_view();
+            }
+            note_unavailable("");
+            return;
+        }
 
         // Sample interval for the kernels (seconds). Depth volumes decline
         // the one time-based kernel instead of producing nonsense units.

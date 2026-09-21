@@ -48,7 +48,7 @@ const std::vector<SeismicAttributeGroup>& seismic_attribute_panel_groups() {
     // (seismic_attribute_panel.py:32 marks it 未实现); recorded in the
     // 07 findings ledger and PR. 高斯曲率/最大曲率 stay 未实现.
     static const std::vector<SeismicAttributeGroup> groups = {
-        {"振幅属性", {"包络", "RMS振幅", "相对阻抗"}},
+        {"振幅属性", {"振幅", "包络", "RMS振幅", "相对阻抗"}},
         {"频率属性", {"瞬时频率", "瞬时相位", "甜点"}},
         {"连续性属性", {"相干(C3)"}},
         {"构造属性", {"Dip_IL", "Dip_XL", "方位角", "平均曲率"}},
@@ -60,7 +60,13 @@ const std::vector<SeismicAttributeGroup>& seismic_attribute_panel_groups() {
 
 const std::vector<std::pair<std::string, std::string>>&
 computable_kernel_labels() {
+    // "amplitude" is a pseudo-kernel: the 振幅 leaf maps to the viewer's
+    // clear_attribute_view() path (restore the raw amplitude display). It is
+    // not a science-registry algorithm id — closure_seismic special-cases it
+    // before run_section_kernel, so "clear attribute view" is reachable from
+    // the panel instead of being a dead end behind the export refusal.
     static const std::vector<std::pair<std::string, std::string>> labels = {
+        {"amplitude", "振幅"},
         {"c3", "相干(C3)"},
         {"envelope", "包络"},
         {"rms_amplitude", "RMS振幅"},

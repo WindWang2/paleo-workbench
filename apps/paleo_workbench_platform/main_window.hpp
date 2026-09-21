@@ -21,6 +21,10 @@
 #include <pwb/application/project_session.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/ui/tool_actions.hpp>
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+// Joint-analysis project binding (ProjectSlice value member).
+#include <pwb/ui_wellseis/slices.hpp>
+#endif
 #ifdef PWB_WITH_APP_SHELL
 // CommandContext for the palette context buffer below — must stay OUTSIDE
 // the pwb::app namespace block (a global-include, not a nested decl).
@@ -510,6 +514,14 @@ private:
 #ifdef PWB_WITH_GEO3D_VIZ
     Geo3DDock* geo3d_dock_ = nullptr;
 #endif
+// BEGIN JOINT-ANALYSIS (geoviz final closure) — the 井震联合 3D page's
+// project binding (sidecar directory + the ProjectSlice the page's
+// save_joint_analysis_to_project contract requires).
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+    QString joint_project_directory_;
+    pwb::ui_wellseis::ProjectSlice joint_project_slice_;
+#endif
+// END JOINT-ANALYSIS
 // BEGIN VIZ-B
 #ifdef PWB_WITH_VIZ_B
     VizBCrossWellDock* viz_b_dock_ = nullptr;

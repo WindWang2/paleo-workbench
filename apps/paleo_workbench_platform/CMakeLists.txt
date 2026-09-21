@@ -317,3 +317,9 @@ if(TARGET Pwb::Geo3DViz AND TARGET Pwb::SeismicService)
     # the host (never a fake seam).
 endif()
 # END VIZ-C
+# BEGIN JOINT-ANALYSIS (geoviz final closure)
+# joint_analysis_install.cpp + its kernel links are wired from the ROOT
+# CMakeLists after libs/ui_wellseis and libs/ui_workers exist (the same
+# ordering discipline as viz_c_joint_host.cpp above — a TARGET check in
+# this file would be forever-false because apps/ is processed first).
+# END JOINT-ANALYSIS

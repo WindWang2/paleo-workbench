@@ -703,7 +703,13 @@ endif()
 option(PWB_BUILD_CONV_09
     "Build the CONV-09 well_science DTW kernel (M8 first slice)" OFF)
 if(PWB_BUILD_CONV_09)
-    pwb_add_subdirectory_once(libs/well_science)
+    # TARGET guard, not just the once-guard: with the WLE viewer stack on,
+    # science_suite (added at the NATIVE_PRODUCT imply block, before this
+    # line) already pulls libs/well_science for the well-log adapter — the
+    # once-guard's bookkeeping cannot see that add (same idiom as CONV-11).
+    if(NOT TARGET pwb_well_science)
+        pwb_add_subdirectory_once(libs/well_science)
+    endif()
 endif()
 # END CONV-09
 # BEGIN CONV-11
@@ -1539,6 +1545,20 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
         apps/paleo_workbench_platform/viz_c_joint_host.cpp)
     target_link_libraries(pwb-platform PRIVATE Pwb::UiWellseisQt)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_UI_WELLSEIS=1)
+
+    # BEGIN JOINT-ANALYSIS (geoviz final closure) — the 井震联合 3D page
+    # analysis hooks. Nested TARGET gate (fail-closed): every kernel lib
+    # the hooks call must exist or the TU stays out (its buttons then show
+    # the honest 未接入 fallbacks).
+    if(TARGET Pwb::UiWorkers AND TARGET Pwb::SeismicViewer AND
+       TARGET Pwb::VisualizationWellTie AND TARGET Pwb::GeoModel)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/joint_analysis_install.cpp)
+        target_link_libraries(pwb-platform PRIVATE
+            Pwb::UiWorkers Pwb::SeismicViewer Pwb::VisualizationWellTie
+            Pwb::GeoModel)
+    endif()
+    # END JOINT-ANALYSIS
 
     # Runnable production seam: real PWBVOL1 through the tiled service
     # into the joint scene (frozen seismic_io oracle fixture; override by
