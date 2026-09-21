@@ -137,6 +137,7 @@
 #if __has_include(<pwb/closure_science/qt/page_binding.hpp>)
 #include <pwb/closure_science/qt/page_binding.hpp>
 #endif
+#include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/status_bar.hpp>
 // cpp-close-12 — palette tool-details come from the canonical explain()
@@ -419,6 +420,17 @@ void MainWindow::init_shell(QSettings* services_settings) {
 }
 
 MainWindow::~MainWindow() {
+#ifdef PWB_WITH_STAGE_FLOW
+    // The process-global command registry must not keep this window's
+    // closures after destruction (a palette evaluate on another window
+    // would dereference a dead this). Unregister HERE — in the body,
+    // while stage_flow_command_ids_ is still alive (a destroyed-signal
+    // hook runs in ~QObject, after member destruction).
+    for (const std::string& id : stage_flow_command_ids_) {
+        pwb::ui_shell::command_registry().unregister(id);
+    }
+    stage_flow_command_ids_.clear();
+#endif
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — stop job bodies at their next safe point and drain with a
     // bounded wait so no job can touch members during teardown (the
@@ -553,6 +565,11 @@ void MainWindow::buildUi() {
     auto* well_log_host = new pwb::viz::WellLogHostWidget(well_log_dock);
     well_log_dock->setWidget(well_log_host);
     addDockWidget(Qt::RightDockWidgetArea, well_log_dock);
+// BEGIN PWB-V14-THREE-STAGE — selection-bus sink target (dock raise).
+#ifdef PWB_WITH_STAGE_FLOW
+    stage_flow_well_log_dock_ = well_log_dock;
+#endif
+// END PWB-V14-THREE-STAGE
 
     // Native track settings (this branch): layout/template/export panel
     // bound to the host; interpretation events surface in the status bar.
@@ -678,6 +695,13 @@ void MainWindow::buildUi() {
     }
 #endif
 // END CLOSURE-MAPPING
+// BEGIN PWB-V14-THREE-STAGE — three-stage workbench install: stage bar
+// mount + controller seams + production commands + task-center
+// providers + selection bus. Last so every adopted surface exists.
+#ifdef PWB_WITH_STAGE_FLOW
+    installStageFlow();
+#endif
+// END PWB-V14-THREE-STAGE
 }
 
 #ifdef PWB_WITH_APP_SHELL
@@ -1119,6 +1143,10 @@ void MainWindow::newProjectDialog() {
         QMessageBox::warning(this, tr("新建工程"), error);
     }
 }
+#endif  // PWB_WITH_DATA_INTEGRATION
+// (V14-THREE-STAGE-UX: this #endif was missing — the region stayed open
+// and swallowed everything below, so noteDomainLayerFacts and the
+// preview-settings definition compiled ONLY in data-integration builds.)
 
 // --------------------------------------- cpp-close-12 shell actions ----
 // The AppShell app-bar request surfaces (UI-17 deferred list) — the
@@ -1202,6 +1230,10 @@ void MainWindow::showPreviewSettingsRequested() {
 }
 #endif  // PWB_WITH_UI_PAGES_PREVIEW_QT
 
+// Declaration is data-integration-gated in the header (PwbDataStore
+// surface); the definition matches (V14-THREE-STAGE-UX rebalance of the
+// previously-dangling newProjectDialog region).
+#ifdef PWB_WITH_DATA_INTEGRATION
 QString MainWindow::newProject(const QString& dir_path,
                                const QString& name) {
     if (context_.session().store() != nullptr) {
@@ -1302,7 +1334,11 @@ QString MainWindow::newProject(const QString& dir_path,
     (void)store->export_manifest();
     return openProject(QString::fromStdString(project_file.string()));
 }
+#endif  // PWB_WITH_DATA_INTEGRATION (newProject definition)
 
+// Same closure as its declaration (the store/recovery types are
+// data-integration surfaces).
+#ifdef PWB_WITH_DATA_INTEGRATION
 QString MainWindow::openProject(const QString& project_file) {
     if (context_.session().store() != nullptr) {
         return tr("已有工程打开（每窗口一个工程会话）");
@@ -1439,6 +1475,13 @@ QString MainWindow::openProject(const QString& project_file) {
                                                     project_file);
         refreshRecentProjects();
     }
+// BEGIN PWB-V14-THREE-STAGE — the mapping stage follows the project
+// document (mapping_workspace.current_stage; lenient fallback) and the
+// selection bus rebinds to the fresh project token.
+#ifdef PWB_WITH_STAGE_FLOW
+    restoreStageFromProject();
+#endif
+// END PWB-V14-THREE-STAGE
 // BEGIN VIZ-B
 #ifdef PWB_WITH_VIZ_B
     if (viz_b_dock_ != nullptr) {
@@ -1490,7 +1533,7 @@ QString MainWindow::openProject(const QString& project_file) {
 // END CLOSURE-REVIEW
     return QString();
 }
-#endif  // PWB_WITH_DATA_INTEGRATION
+#endif  // PWB_WITH_DATA_INTEGRATION (openProject definition)
 
 void MainWindow::armPan() {
     canvas_->setMapTool(pan_tool_);
@@ -3347,6 +3390,13 @@ void MainWindow::applyStageValue(const std::string& value) {
     if (stage_dock_ != nullptr) stage_dock_->set_current_stage(*stage);
     refreshActionStates();
     refresh_readiness();
+    // V14-THREE-STAGE-UX: every stage surface follows the authority —
+    // the StageDock path (and any future writer) refreshes the flow
+    // projection too (true-change contract makes the request_stage path's
+    // extra refresh a no-op; no loop: refresh never writes the session).
+#ifdef PWB_WITH_STAGE_FLOW
+    if (stage_flow_ != nullptr) stage_flow_->refresh();
+#endif
 }
 
 pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {

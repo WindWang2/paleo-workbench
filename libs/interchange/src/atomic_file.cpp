@@ -1,8 +1,5 @@
 #include "pwb/interchange/atomic_file.hpp"
 
-#include <fcntl.h>
-#include <unistd.h>
-
 #include <cerrno>
 #include <mutex>
 #include <random>
@@ -12,6 +9,9 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace pwb::interchange {
@@ -93,6 +93,25 @@ AtomicOutputFile::AtomicOutputFile(const std::filesystem::path& target)
         if (!suffix.empty() && suffix[0] != '.') suffix = "." + suffix;
         const std::string candidate =
             (parent / (prefix + rand_chars + suffix)).string();
+#if defined(_WIN32)
+        // MSVC: exclusive wide-char creation (O_CREAT|O_EXCL|O_WRONLY
+        // semantics); errno-style EEXIST keeps the retry loop identical.
+        const std::wstring wcandidate =
+            std::filesystem::path(candidate).wstring();
+        HANDLE handle = CreateFileW(
+            wcandidate.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle);
+            temp_path_ = candidate;
+            return;
+        }
+        if (GetLastError() != ERROR_FILE_EXISTS) {
+            throw std::runtime_error(
+                "cannot create temp file beside " + target.string() + ": WinError "
+                + std::to_string(GetLastError()));
+        }
+#else
         const int fd = ::open(candidate.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
         if (fd >= 0) {
             ::close(fd);
@@ -103,6 +122,7 @@ AtomicOutputFile::AtomicOutputFile(const std::filesystem::path& target)
             throw std::runtime_error("cannot create temp file beside " +
                                      target.string() + ": " + errno_message());
         }
+#endif
     }
     throw std::runtime_error("cannot create temp file beside " + target.string() +
                              ": no free temp name");

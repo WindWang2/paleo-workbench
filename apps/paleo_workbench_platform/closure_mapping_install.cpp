@@ -913,6 +913,16 @@ bool save_documents(QMainWindow* window, std::string* error) {
     return true;
 }
 
+// V14-THREE-STAGE-UX — read-only bank access for the stage-flow
+// presentation wiring (bank signals → MappingPage state).
+MapDocumentBank* document_bank(QMainWindow* window) {
+    if (window == nullptr) return nullptr;
+    const QVariant stored = window->property("closure_mapping_context");
+    auto* context = stored.value<QObject*>();
+    auto* self = dynamic_cast<ClosureContext*>(context);
+    return self != nullptr ? self->bank : nullptr;
+}
+
 }  // namespace pwb::app::closure_mapping
 
 #include "closure_mapping_install.moc"

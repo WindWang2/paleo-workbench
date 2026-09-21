@@ -87,8 +87,11 @@ set(PWB_APP_SERVICE_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/diagnostics.cpp)
 # BEGIN CPP-CLOSE-12 — main_window.cpp's DATA_INTEGRATION handlers call
 # shell_project_actions; every MainWindow-compiling test target needs the
-# same source (gated on the same Pwb::Data presence behind the app target).
-if(TARGET Pwb::Data)
+# same source (gated on the same B/C adapter closure behind
+# PWB_WITH_DATA_INTEGRATION on Pwb::Application — V14-THREE-STAGE-UX:
+# Pwb::Data alone does not define it).
+if(TARGET Pwb::Data AND TARGET Pwb::Science
+   AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
     list(APPEND PWB_APP_SERVICE_SOURCES
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/shell_project_actions.cpp)
 endif()

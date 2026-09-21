@@ -86,6 +86,10 @@ public:
 
     void set_panel_visible(const std::string& key, bool visible);
     bool is_panel_visible(const std::string& key) const;
+    // V14-THREE-STAGE-UX: does the key name a registered panel at all?
+    // Command applicability checks this before writing a stage
+    // preference for a panel key (an unknown key must not persist).
+    bool is_panel_registered(const std::string& key) const;
     QToolButton* panel_button(const std::string& key) const;
 
     bool bottom_user_visible() const { return bottom_user_visible_; }

@@ -50,12 +50,12 @@ PdfPreviewWidget::PdfPreviewWidget(QWidget* parent)
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    if (pdf_view_ != nullptr) {
 #if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDFWIDGETS)
+    if (pdf_view_ != nullptr) {
         pdf_view_->setDocument(document_);
-#endif
         content_stack_->addWidget(pdf_view_);
     }
+#endif
 #if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDF)
     connect(document_, &QPdfDocument::statusChanged, this,
             [this](QPdfDocument::Status) { on_document_status_changed(); });
@@ -75,8 +75,11 @@ PdfPreviewWidget::PdfPreviewWidget(QWidget* parent)
     }
     content_stack_->addWidget(fallback_scroll_);
     content_stack_->setCurrentWidget(
+#if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDFWIDGETS)
         pdf_view_ != nullptr ? static_cast<QWidget*>(pdf_view_)
-                             : static_cast<QWidget*>(fallback_image_));
+                             :
+#endif
+                             static_cast<QWidget*>(fallback_image_));
     layout->addWidget(content_stack_, 1);
 
     auto* controls = new QHBoxLayout();
@@ -142,7 +145,6 @@ PdfPreviewWidget::PdfPreviewWidget(QWidget* parent)
                 [this](int page) { on_current_page_changed(page); });
 #endif
     }
-
     sync_zoom_ui();
 
     if (document_ == nullptr) {
@@ -278,6 +280,7 @@ void PdfPreviewWidget::update_page_status() {
 }
 
 bool PdfPreviewWidget::eventFilter(QObject* obj, QEvent* event) {
+#if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDFWIDGETS)
     if (obj == pdf_view_ && event->type() == QEvent::Wheel) {
         auto* wheel = static_cast<QWheelEvent*>(event);
         if (wheel->modifiers() & Qt::ControlModifier) {
@@ -291,6 +294,7 @@ bool PdfPreviewWidget::eventFilter(QObject* obj, QEvent* event) {
             return true;
         }
     }
+#endif
     return QWidget::eventFilter(obj, event);
 }
 

@@ -105,6 +105,14 @@ class JobCenter;
 namespace pwb::seismic_viewer {
 class SeismicSliceWidget;
 }
+namespace pwb::ui_stageflow::qt {
+class StageFlowController;
+}
+#ifdef PWB_WITH_UI_CONTROLLERS
+namespace pwb::ui_controllers::qt {
+class ViewCoordinationController;
+}
+#endif
 
 namespace pwb::app {
 
@@ -168,8 +176,12 @@ public:
     // <project>/.pwb-working/ — catalog payloads are never edited in
     // place. Returns "" on success; the store stays attached so save_edits
     // goes through the real catalog transaction.
-    QString openProject(const QString& project_file);
+    // V14-THREE-STAGE-UX: the definition compiles only in the
+    // data-integration closure (PwbDataStore/recovery types), so the
+    // declaration is gated to match — a reduced configure keeps the
+    // honest no-store surface instead of a link error.
 #ifdef PWB_WITH_DATA_INTEGRATION
+    QString openProject(const QString& project_file);
     // Creates a fresh project (B's document factory + empty catalog + one
     // bootstrap boundary asset via B's run lifecycle) and opens it.
     QString newProject(const QString& dir_path, const QString& name);
@@ -331,6 +343,44 @@ public:
     void showFactorStatistics(const QString& factor_name,
                               const pwb::mapping::GridStatistics& stats);
 #endif
+
+// BEGIN PWB-V14-THREE-STAGE (V14-THREE-STAGE-UX: three-stage workbench —
+// stage bar mount, StageFlowController seams, production command set,
+// task-center providers, selection/focus bus. Body in
+// stage_flow_install.cpp.)
+#ifdef PWB_WITH_STAGE_FLOW
+public:
+    // One-shot install (idempotent). Called from buildUi after the app
+    // shell exists; test entry point as well.
+    void installStageFlow();
+    // Restore the mapping stage from the opened project document
+    // (mapping_workspace.current_stage, lenient fallback). Called on the
+    // openProject success path.
+    void restoreStageFromProject();
+    pwb::ui_stageflow::qt::StageFlowController* stageFlow() const {
+        return stage_flow_;
+    }
+    // Registered production command count (test assertion surface).
+    int stageFlowCommandCount() const { return stage_flow_command_count_; }
+
+private:
+    void applyStageVisibility(const std::map<std::string, bool>& visibility);
+    pwb::ui_stageflow::qt::StageFlowController* stage_flow_ = nullptr;
+    int stage_flow_command_count_ = 0;
+    // Registered production command ids (unregistered in the destructor:
+    // the registry is process-global while the callbacks capture this
+    // window — a closed window must not leave dangling closures for the
+    // next window's palette to invoke).
+    std::vector<std::string> stage_flow_command_ids_;
+    // Well-log dock captured for the selection-bus sink (local in buildUi
+    // under PWB_WITH_WELL_LOG).
+    QDockWidget* stage_flow_well_log_dock_ = nullptr;
+#ifdef PWB_WITH_UI_CONTROLLERS
+    pwb::ui_controllers::qt::ViewCoordinationController*
+        stage_flow_coordination_ = nullptr;
+#endif
+#endif
+// END PWB-V14-THREE-STAGE
 
 protected:
     void closeEvent(QCloseEvent* event) override;

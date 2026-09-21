@@ -58,6 +58,7 @@
 //     replace it — not expressible while re-throwing an unknown type).
 //
 // CONV-31b: implemented in Wave2-A4.
+#include <chrono>
 #include "pwb/catalog/service_core.hpp"
 
 #include "pwb/catalog/gc.hpp"
@@ -81,12 +82,22 @@ using domain::ErrorCode;
 namespace fs = std::filesystem;
 
 // service.py _disk_mtime_ns (218-222) — POSIX st_mtim ns (findings B-16:
-// never a seconds-granularity stat).
+// never a seconds-granularity stat). Windows maps the 100 ns file-time
+// ticks (repository.cpp disk_mtime_ns precedent).
 std::optional<std::int64_t> disk_mtime_ns(const fs::path& path) {
+#if defined(_WIN32)
+    std::error_code ec{};
+    const auto written = std::filesystem::last_write_time(path, ec);
+    if (ec) return std::nullopt;
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               written.time_since_epoch())
+        .count();
+#else
     struct ::stat info {};
     if (::stat(path.c_str(), &info) != 0) return std::nullopt;
     return static_cast<std::int64_t>(info.st_mtim.tv_sec) * 1000000000LL +
            static_cast<std::int64_t>(info.st_mtim.tv_nsec);
+#endif
 }
 
 bool path_is_file(const fs::path& path) {

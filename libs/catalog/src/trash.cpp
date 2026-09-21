@@ -4,12 +4,18 @@
 #include "pwb/domain/errors.hpp"
 #include "pwb/project/paths.hpp"
 
+#include <atomic>
 #include <cstdio>
-#include <fcntl.h>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <vector>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <vector>
+#endif
 
 namespace pwb::catalog {
 
@@ -31,22 +37,42 @@ fs::path artifacts_root(const fs::path& project_path) {
 }
 
 void fsync_dir_best_effort(const fs::path& directory) {
+#if !defined(_WIN32)
     int fd = ::open(directory.c_str(), O_RDONLY | O_DIRECTORY);
     if (fd < 0) return;
     ::fsync(fd);
     ::close(fd);
+#else
+    (void)directory;
+#endif
 }
 
 void make_readonly_best_effort(const fs::path& path) {
+#if defined(_WIN32)
+    // MSVC stat()/chmod() narrow-path mismatch; readonly is best-effort
+    // (storage.py no-ops on Windows too — same direction as fsync_dir).
+    const bool was_readonly = std::filesystem::is_regular_file(path);
+    if (!was_readonly) return;
+    std::error_code ec;
+    std::filesystem::permissions(path, std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::remove, ec);
+#else
     struct ::stat st {};
     if (::stat(path.c_str(), &st) != 0) return;
     ::chmod(path.c_str(), st.st_mode & ~(S_IWUSR | S_IWGRP | S_IWOTH));
+#endif
 }
 
 void make_writable_best_effort(const fs::path& path) {
+#if defined(_WIN32)
+    std::error_code ec;
+    std::filesystem::permissions(path, std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add, ec);
+#else
     struct ::stat st {};
     if (::stat(path.c_str(), &st) != 0) return;
     ::chmod(path.c_str(), st.st_mode | S_IWUSR);
+#endif
 }
 
 void prune_empty_ancestors(const fs::path& directory, int levels) {
@@ -229,7 +255,54 @@ domain::Result<fs::path> create_working_copy(const fs::path& project_path,
     }
     const fs::path target = target_dir / version_path.filename();
 
-    // #1219-style unique temp per writer (mkstemp) under the target dir.
+    // #1219-style unique temp per writer under the target dir. POSIX uses
+    // mkstemp; Windows uses _creat-style exclusive open with a per-process
+    // counter suffix (no O_EXCL temp template API there — same uniqueness
+    // intent, retry loop below guards the rename).
+#if defined(_WIN32)
+    static std::atomic<unsigned long long> temp_counter{0};
+    fs::path temp;
+    bool temp_open = false;
+    std::FILE* temp_file = nullptr;
+    for (int attempt = 0; attempt < 32 && !temp_open; ++attempt) {
+        std::ostringstream name;
+        name << ".work-" << std::setw(6) << std::setfill('0')
+             << (temp_counter.fetch_add(1) + 1) << "-" << (attempt + 1);
+        temp = target_dir / name.str();
+        // "xn" = _O_BINARY|_O_EXCL|_O_CREAT via the wide exclusive fopen.
+        const std::wstring wtemp = temp.wstring();
+        const errno_t opened =
+            _wfopen_s(&temp_file, wtemp.c_str(), L"wbx");
+        if (opened == 0 && temp_file != nullptr) {
+            temp_open = true;
+        }
+    }
+    if (!temp_open) {
+        return DataError(ErrorCode::IoError, "working-copy temp create failed");
+    }
+    do {
+        std::ifstream in(version_path, std::ios::binary);
+        if (!in) {
+            std::fclose(temp_file);
+            fs::remove(temp, ec);
+            return DataError(ErrorCode::NotFound,
+                             "Managed payload not found: " + version_path.string());
+        }
+        char chunk[1 << 20];
+        while (in) {
+            in.read(chunk, sizeof(chunk));
+            if (in.gcount() > 0 &&
+                std::fwrite(chunk, 1, static_cast<std::size_t>(in.gcount()),
+                            temp_file) < static_cast<std::size_t>(in.gcount())) {
+                std::fclose(temp_file);
+                fs::remove(temp, ec);
+                return DataError(ErrorCode::IoError, "working-copy write failed");
+            }
+        }
+        std::fflush(temp_file);
+    } while (false);
+    std::fclose(temp_file);
+#else
     std::string pattern = (target_dir / ".work-XXXXXX").string();
     std::vector<char> pat(pattern.begin(), pattern.end());
     pat.push_back('\0');
@@ -263,6 +336,7 @@ domain::Result<fs::path> create_working_copy(const fs::path& project_path,
         }
     } while (false);
     ::close(fd);
+#endif
 
     make_writable_best_effort(target);  // replace over a stale read-only copy
     fs::rename(temp, target, ec);

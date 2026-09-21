@@ -3,6 +3,7 @@
 #include "pwb/catalog/refs.hpp"
 #include "pwb/catalog/trash.hpp"
 
+#include <chrono>
 #include <sys/stat.h>
 
 namespace pwb::catalog {
@@ -43,9 +44,16 @@ MissingSourceReport find_missing_sources(
         report.scanned += 1;
         const DataAsset* asset = index.asset(version.asset_id.str());
         const std::filesystem::path probe = missing_probe_path(project_path, version);
+#if defined(_WIN32)
+        // MSVC stat() is narrow-path; fs::path::c_str() is wchar_t there.
+        std::error_code probe_ec{};
+        const bool resolved =
+            std::filesystem::is_regular_file(probe, probe_ec);
+#else
         struct ::stat probe_stat {};
         const bool resolved =
             ::stat(probe.c_str(), &probe_stat) == 0 && S_ISREG(probe_stat.st_mode);
+#endif
         if (resolved) continue;
         MissingSource entry;
         entry.version_id = version.id.str();
@@ -77,6 +85,34 @@ std::optional<std::string> relink_identity_proof(
     if (version.metadata.is_object() && version.metadata.contains(kExternalStatKey) &&
         version.metadata[kExternalStatKey].is_object()) {
         const auto& fingerprint = version.metadata[kExternalStatKey];
+        // Same probe both platforms: file present, size matches, mtime_ns
+        // matches. Windows maps file-time ticks (repository.cpp
+        // disk_mtime_ns precedent); POSIX reads st_mtim directly.
+#if defined(_WIN32)
+        std::error_code stat_ec{};
+        const bool file_present = std::filesystem::is_regular_file(candidate, stat_ec);
+        std::int64_t size_bytes = -1;
+        std::int64_t mtime_ns = -1;
+        if (file_present) {
+            size_bytes = static_cast<std::int64_t>(std::filesystem::file_size(candidate, stat_ec));
+            if (!stat_ec) {
+                const auto written = std::filesystem::last_write_time(candidate, stat_ec);
+                if (!stat_ec) {
+                    mtime_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   written.time_since_epoch())
+                                   .count();
+                }
+            }
+        }
+        if (file_present &&
+            fingerprint.contains("size") && fingerprint.contains("mtime_ns") &&
+            fingerprint["size"].is_number_integer() &&
+            fingerprint["mtime_ns"].is_number_integer() &&
+            fingerprint["size"].get<std::int64_t>() == size_bytes &&
+            fingerprint["mtime_ns"].get<std::int64_t>() == mtime_ns) {
+            return std::string("stat_fingerprint");
+        }
+#else
         struct ::stat st {};
         if (::stat(candidate.c_str(), &st) == 0 &&
             fingerprint.contains("size") && fingerprint.contains("mtime_ns") &&
@@ -87,6 +123,7 @@ std::optional<std::string> relink_identity_proof(
                 static_cast<std::int64_t>(st.st_mtim.tv_nsec)) {
             return std::string("stat_fingerprint");
         }
+#endif
     }
     return std::nullopt;
 }
@@ -113,12 +150,36 @@ domain::DataError relink_external_source(
         return DataError(ErrorCode::InvalidArgument,
                          "只有外部 RAW 版本支持 relink；派生数据请重新生成");
     }
+#if defined(_WIN32)
+    // MSVC stat() is narrow-path; fs probes give the same facts with the
+    // full-epoch ns mtime convention (see relink_identity_proof above —
+    // recorder and comparator share the platform convention).
+    std::error_code cand_ec{};
+    const bool candidate_ok = std::filesystem::is_regular_file(new_path, cand_ec);
+    std::uintmax_t candidate_size = 0;
+    std::int64_t candidate_mtime_ns = 0;
+    if (candidate_ok) {
+        candidate_size = std::filesystem::file_size(new_path, cand_ec);
+        const auto written = std::filesystem::last_write_time(new_path, cand_ec);
+        if (!cand_ec) {
+            candidate_mtime_ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    written.time_since_epoch())
+                    .count();
+        }
+    }
+    if (!candidate_ok || cand_ec) {
+        return DataError(ErrorCode::InvalidArgument,
+                         "Candidate file not found: " + new_path.string());
+    }
+#else
     struct ::stat candidate_stat {};
     if (::stat(new_path.c_str(), &candidate_stat) != 0 ||
         !S_ISREG(candidate_stat.st_mode)) {
         return DataError(ErrorCode::InvalidArgument,
                          "Candidate file not found: " + new_path.string());
     }
+#endif
     auto proof = relink_identity_proof(*version, new_path);
     if (!proof.has_value()) {
         return DataError(ErrorCode::ConflictBaseVersion,
@@ -136,11 +197,19 @@ domain::DataError relink_external_source(
         std::filesystem::weakly_canonical(new_path).string();
     version->path = posix_path;
     version->source_uri = posix_path;
+#if defined(_WIN32)
+    version->size_bytes = static_cast<std::int64_t>(candidate_size);
+    if (!version->metadata.is_object()) version->metadata = domain::Json::object();
+    domain::Json stat_json = domain::Json::object();
+    stat_json["size"] = static_cast<std::int64_t>(candidate_size);
+    stat_json["mtime_ns"] = candidate_mtime_ns;
+#else
     version->size_bytes = candidate_stat.st_size;
     if (!version->metadata.is_object()) version->metadata = domain::Json::object();
     domain::Json stat_json = domain::Json::object();
     stat_json["size"] = candidate_stat.st_size;
     stat_json["mtime_ns"] = static_cast<std::int64_t>(candidate_stat.st_mtim.tv_nsec);
+#endif
     version->metadata[kExternalStatKey] = std::move(stat_json);
     domain::Json history = domain::Json::array();
     if (version->metadata.contains(kRelinkHistoryKey) &&

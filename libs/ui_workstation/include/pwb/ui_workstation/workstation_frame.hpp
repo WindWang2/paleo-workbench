@@ -81,6 +81,14 @@ public:
     // First-run sizing (descriptor preferred_size; grow-only).
     void apply_first_run_sizes();
 
+    // V14-THREE-STAGE-UX: mount a host-provided global bar (the mapping
+    // stage bar) on the app-bar toolbar row, right of the app bar.
+    // One-shot: a second call is refused (returns false) — the bar is an
+    // identity surface, not a swappable slot. Ownership transfers here
+    // (reparent into the toolbar).
+    bool mount_top_bar(QWidget* bar);
+    bool top_bar_mounted() const { return top_bar_ != nullptr; }
+
     WorkstationAppBar* app_bar() const { return app_bar_; }
     ActivityRail* activity_rail() const { return rail_; }
     WorkstationExplorer* explorer() const { return explorer_; }
@@ -129,6 +137,7 @@ private:
     bool inspector_user_visible_ = true;
 
     WorkstationAppBar* app_bar_ = nullptr;
+    QWidget* top_bar_ = nullptr;
     ActivityRail* rail_ = nullptr;
     WorkstationExplorer* explorer_ = nullptr;
     WorkstationInspector* inspector_ = nullptr;

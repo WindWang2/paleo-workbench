@@ -407,7 +407,43 @@ std::string build_platform_qss(ThemeMode mode, Density density) {
            "QScrollBar:horizontal { background: transparent; height: 10px; margin: 0; }\n"
            "QScrollBar::handle:horizontal { background: " + token("BORDER_STRONG") +
            "; border-radius: 5px; min-width: 24px; }\n"
-           "QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }\n";
+           "QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }\n"
+           // Pwb state surfaces (ui_widgets states/badges vocabulary —
+           // V14-THREE-STAGE-UX): the components carried these objectNames
+           // with no C++-side selectors to match them; the unified
+           // busy/empty/error/stale presentation needs them themed.
+           "QFrame#PwbStateSurface { background: " + token("SURFACE") +
+           "; border: 1px solid " + token("BORDER_LIGHT") +
+           "; border-radius: " + token("RADIUS_PANEL") + "px; }\n"
+           "QLabel#PwbStateTitle { color: " + token("TEXT_PRIMARY") +
+           "; font-size: " + token("FONT_SIZE_TITLE") + "px; font-weight: 600; }\n"
+           "QLabel#PwbStateHint { color: " + token("TEXT_SECONDARY") +
+           "; font-size: " + token("FONT_SIZE_BASE") + "px; }\n"
+           "QProgressBar#PwbProgress { background: " + token("BG_DISABLED") +
+           "; border: none; border-radius: 3px; max-height: 6px; }\n"
+           "QProgressBar#PwbProgress::chunk { background: " + token("PRIMARY") +
+           "; border-radius: 3px; }\n"
+           "QProgressBar#PwbProgress[progressState=\"running\"]::chunk { background: " +
+           token("WARNING") + "; }\n"
+           "QProgressBar#PwbProgress[progressState=\"failed\"]::chunk { background: " +
+           token("ERROR") + "; }\n"
+           "QProgressBar#PwbProgress[progressState=\"done\"]::chunk { background: " +
+           token("SUCCESS") + "; }\n"
+           "QLabel#PwbBadge { background: " + token("BG_HEADER") +
+           "; border-radius: " + token("RADIUS_BADGE") + "px; padding: 1px 8px; }\n"
+           "QLabel#PwbBadge { color: " + token("TEXT_PRIMARY") +
+           "; font-size: " + token("FONT_SIZE_MICRO") + "px; }\n"
+           "QLabel#PwbBadge[tone=\"success\"] { background: " +
+           token("BADGE_SUCCESS") + "; }\n"
+           "QLabel#PwbBadge[tone=\"warning\"] { background: " +
+           token("BADGE_WARNING") + "; }\n"
+           "QLabel#PwbBadge[tone=\"error\"] { background: " +
+           token("ERROR_RED") + "; }\n"
+           "QLabel#PwbBadge[tone=\"primary\"] { background: " +
+           token("BADGE_PRIMARY") + "; }\n"
+           "QWidget#PwbInlineStatus { background: transparent; }\n"
+           "QLabel#PwbInlineStatusText { color: " + token("TEXT_SECONDARY") +
+           "; font-size: " + token("FONT_SIZE_BASE") + "px; }\n";
 }
 
 }  // namespace pwb::platform_services

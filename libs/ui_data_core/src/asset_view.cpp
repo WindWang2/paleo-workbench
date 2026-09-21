@@ -1,5 +1,6 @@
 // data_view_models.py adapters — see asset_view.hpp for the contract.
 
+#include <chrono>
 #include "pwb/ui_data_core/asset_view.hpp"
 
 #include <pwb/domain/text.hpp>
@@ -319,6 +320,27 @@ std::string resource_type_display_label(std::string_view type,
 
 std::optional<StatNode> FsProbeCache::stat_node(
     const std::filesystem::path& path) const {
+#if defined(_WIN32)
+    // MSVC stat() takes narrow paths only; fs probes give the same facts
+    // (mtime_ns from 100 ns file-time ticks).
+    std::error_code ec{};
+    const auto status = std::filesystem::status(path, ec);
+    if (ec || !std::filesystem::exists(status)) return std::nullopt;
+    StatNode node;
+    node.size = static_cast<long long>(std::filesystem::file_size(path, ec));
+    const auto written = std::filesystem::last_write_time(path, ec);
+    node.mtime = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            written.time_since_epoch())
+            .count());
+    node.mtime_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        written.time_since_epoch())
+                        .count();
+    node.mode = 0;
+    node.is_regular = std::filesystem::is_regular_file(status);
+    node.is_directory = std::filesystem::is_directory(status);
+    return node;
+#else
     struct stat st {};
     if (::stat(path.c_str(), &st) != 0) {
         return std::nullopt;
@@ -336,6 +358,7 @@ std::optional<StatNode> FsProbeCache::stat_node(
     node.is_regular = S_ISREG(st.st_mode);
     node.is_directory = S_ISDIR(st.st_mode);
     return node;
+#endif
 }
 
 const StatNode* FsProbeCache::probe(const std::filesystem::path& path) {
@@ -384,9 +407,15 @@ bool path_is_dir_safe(const std::filesystem::path& path) {
 std::string format_mtime_minutes(double mtime_seconds) {
     const std::time_t t = static_cast<std::time_t>(mtime_seconds);
     std::tm tm_value {};
+#if defined(_WIN32)
+    if (localtime_s(&tm_value, &t) != 0) {
+        return "—";
+    }
+#else
     if (::localtime_r(&t, &tm_value) == nullptr) {
         return "—";
     }
+#endif
     char buf[32];
     if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm_value) == 0) {
         return "—";
@@ -447,6 +476,22 @@ AssetView asset_view_from_resource(const ResourceItem& resource,
         file_exists = path_exists_safe(path_obj);
         std::error_code ec;
         if (file_exists && std::filesystem::is_regular_file(path_obj, ec) && !ec) {
+#if defined(_WIN32)
+            transient.size = static_cast<long long>(
+                std::filesystem::file_size(path_obj, ec));
+            const auto written = ec ? std::filesystem::file_time_type{}
+                                    : std::filesystem::last_write_time(path_obj, ec);
+            transient.mtime = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    written.time_since_epoch())
+                    .count());
+            transient.mtime_ns = std::chrono::duration_cast<
+                std::chrono::nanoseconds>(written.time_since_epoch())
+                .count();
+            transient.mode = 0;
+            transient.is_regular = true;
+            stat_node = &transient;
+#else
             struct stat st {};
             if (::stat(path_obj.c_str(), &st) == 0) {
                 transient.size = static_cast<long long>(st.st_size);
@@ -458,6 +503,7 @@ AssetView asset_view_from_resource(const ResourceItem& resource,
                 transient.is_regular = true;
                 stat_node = &transient;
             }
+#endif
         }
     }
 
@@ -551,6 +597,12 @@ AssetView asset_view_from_artifact(const ExportArtifact& artifact,
         file_exists = path_exists_safe(path_obj);
         std::error_code ec;
         if (file_exists && std::filesystem::is_regular_file(path_obj, ec) && !ec) {
+#if defined(_WIN32)
+            transient_artifact.size = static_cast<long long>(
+                std::filesystem::file_size(path_obj, ec));
+            transient_artifact.is_regular = true;
+            stat_node = &transient_artifact;
+#else
             struct stat st {};
             if (::stat(path_obj.c_str(), &st) == 0) {
                 transient_artifact.size = static_cast<long long>(st.st_size);
@@ -558,6 +610,7 @@ AssetView asset_view_from_artifact(const ExportArtifact& artifact,
                 transient_artifact.is_regular = true;
                 stat_node = &transient_artifact;
             }
+#endif
         }
     }
     // No recorded checksum → mere existence is never "verified" (#850-4).
