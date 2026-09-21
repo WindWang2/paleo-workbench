@@ -481,8 +481,7 @@ def scan_wiring(root: str) -> Dict[str, Tuple[str, List[str]]]:
         for dep, ev in libs_edges.items():
             if dep in seen:
                 continue
-            if any(e.startswith(f"libs/{alias}/") or f"(via {alias})" in e
-                   for e in ev):
+            if any(f"(via {alias})" in e for e in ev):
                 # dep is linked by the unit that declares `alias`
                 mode, evidence = out.get(dep, ("conditional", []))
                 evidence = evidence + [f"transitive via {alias}: {ev[0]}"]

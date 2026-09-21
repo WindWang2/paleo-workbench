@@ -36,7 +36,7 @@ pwb::job::JobHandle WorkflowScheduler::submit(
     // already-terminal run. The done latch (set under the mutex in the
     // body's deregister) closes that window both ways.
     auto done = std::make_shared<std::atomic<bool>>(false);
-    const auto deregister = [this, run_id, &engine_token, &done]() {
+    const auto deregister = [this, run_id, engine_token, done]() {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = pending_.find(run_id);
         if (it != pending_.end() && it->second == engine_token) {

@@ -580,6 +580,15 @@ int MainWindow::syncConstraintGeometryOnSave() {
             (*group).contains("target_horizon")
                 ? (*group).at("target_horizon").get<std::string>()
                 : std::string();
+        // The constraint-kind stamp is hoisted here, BEFORE the replace
+        // mutation below invalidates the matched-line pointers (the
+        // array's old storage is released by copy-and-swap on
+        // assignment).
+        std::optional<Json> template_kind_props;
+        if (!matched.lines.empty()
+            && (*matched.lines[0]).contains("properties")) {
+            template_kind_props = (*matched.lines[0]).at("properties");
+        }
         // Replace semantics: drop the matched (stale) lines, then one
         // line per harvested sequence.
         std::set<const Json*> stale(matched.lines.begin(),
@@ -609,15 +618,11 @@ int MainWindow::syncConstraintGeometryOnSave() {
                  {"feature_index", static_cast<std::uint64_t>(index)},
                  {"content_fingerprint",
                   content_fingerprint(sequences[index].points)}});
-            if (!matched.lines.empty()
-                && (*matched.lines[0]).contains("properties")
-                && (*matched.lines[0])
-                       .at("properties")
-                       .contains("constraint_kind")) {
+            if (template_kind_props.has_value()
+                && template_kind_props->is_object()
+                && template_kind_props->contains("constraint_kind")) {
                 props["constraint_kind"] =
-                    (*matched.lines[0])
-                        .at("properties")
-                        .at("constraint_kind");
+                    template_kind_props->at("constraint_kind");
             }
             line["properties"] = std::move(props);
             lines.push_back(std::move(line));

@@ -1577,16 +1577,22 @@ QString MainWindow::closeProject() {
             const std::filesystem::path staged_dir =
                 std::filesystem::temp_directory_path() / "pwb-platform"
                                                        / "staged";
-            for (const std::string& layer_id :
-                 context_.session().edit().editing_layer_ids()) {
-                if (!context_.session().edit().dirty(layer_id)) continue;
-                std::string error;
-                context_.session().stage_commit(layer_id, staged_dir,
-                                                &error);
-                if (!error.empty()) {
-                    return tr("保存失败（%1），工程未关闭")
-                        .arg(QString::fromStdString(error));
-                }
+            const QString commit_error =
+                commitAllDirtyLayers(staged_dir);
+            if (!commit_error.isEmpty()) {
+                return tr("保存失败（%1），工程未关闭").arg(commit_error);
+            }
+            // The document write: the staged edits only cover layer
+            // payloads — the project document (constraint registrations,
+            // workspace state, stratigraphy) needs its own save or the
+            // close silently discards everything not yet flushed
+            // (#1453).
+            QString saved_to;
+            const QString save_error =
+                shell_project_actions::save_open_project(*this, &saved_to);
+            if (!save_error.isEmpty()) {
+                return tr("文档保存失败（%1），工程未关闭")
+                    .arg(save_error);
             }
         } else {
             for (const std::string& layer_id :
@@ -2584,6 +2590,22 @@ QString MainWindow::commitActiveLayer(const std::filesystem::path& staged_dir) {
     return QString::fromStdString(error);
 }
 
+QString MainWindow::commitAllDirtyLayers(
+    const std::filesystem::path& staged_dir) {
+    for (const std::string& layer_id :
+         context_.session().edit().editing_layer_ids()) {
+        if (!context_.session().edit().dirty(layer_id)) continue;
+        std::string error;
+        context_.session().stage_commit(layer_id, staged_dir, &error);
+        if (!error.empty()) {
+            // Keep the edits staged and stop on the first failure — the
+            // caller must not save or close on this message.
+            return QString::fromStdString(error);
+        }
+    }
+    return QString();
+}
+
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
 std::vector<std::string> MainWindow::volumeVersionIds() const {
     std::vector<std::string> ids;
@@ -3502,8 +3524,7 @@ void MainWindow::install_conv27_surface() {
                 }
               }
               if (active_removed) {
-                pwb::application::DomainLayerFacts empty;
-                context_.session().set_active_layer(empty);
+                context_.session().clear_active_layer();
               }
               refreshActionStates();
             });

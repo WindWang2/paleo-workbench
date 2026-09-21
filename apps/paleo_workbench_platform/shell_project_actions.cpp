@@ -100,9 +100,14 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
     // (same stage_commit path as the close-time Save branch; a failed
     // commit aborts the save and keeps the edits staged).
     if (window.anyDirtyEditSession()) {
+        // Commit EVERY open dirty session, then harvest (#1453). The
+        // single-active-layer commit left non-active dirty layers
+        // un-committed while the constraint harvest read their edit
+        // buffers — the document then recorded geometry the provider
+        // never got (Python commits all sessions first).
         const std::filesystem::path staged_dir =
             std::filesystem::temp_directory_path() / "pwb-platform" / "staged";
-        const QString commit_error = window.commitActiveLayer(staged_dir);
+        const QString commit_error = window.commitAllDirtyLayers(staged_dir);
         if (!commit_error.isEmpty()) {
             return QObject::tr("编辑提交失败，工程未保存：%1").arg(commit_error);
         }
