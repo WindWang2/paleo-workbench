@@ -1,9 +1,26 @@
 // CONV-27 internal — numpy-exact numeric primitives. See numpy_math.hpp.
 #include "numpy_math.hpp"
 
+#if defined(_MSC_VER)
+#include <intrin.h>  // _umul128 for the 128-bit Lemire product
+#endif
+
 namespace pwb::cartography::numpy_math {
 
 namespace {
+
+// 64x64 -> 128 product split: returns the HIGH word, writes the LOW word.
+// MSVC has no __uint128_t; _umul128 is the same widening multiply.
+inline std::uint64_t mul64_split(std::uint64_t a, std::uint64_t b,
+                                 std::uint64_t* low) {
+#if defined(_MSC_VER)
+    return _umul128(a, b, low);
+#else
+    const __uint128_t m = static_cast<__uint128_t>(a) * b;
+    *low = static_cast<std::uint64_t>(m);
+    return static_cast<std::uint64_t>(m >> 64);
+#endif
+}
 constexpr std::uint32_t kInitA = 0x43b0d7e5u;
 constexpr std::uint32_t kMultA = 0x931e8875u;
 constexpr std::uint32_t kInitB = 0x8b51f9ddu;
@@ -240,29 +257,17 @@ std::uint64_t Pcg64::random_bounded_uint64(std::uint64_t rng) {
     if (rng == 0xFFFFFFFFFFFFFFFFull) return next_uint64();
     // bounded_lemire_uint64(rng): rng inclusive.
     const std::uint64_t rng_excl = rng + 1;
-#if defined(_MSC_VER)
-    // MSVC has no __uint128_t; _umul128 carries the same Lemire product.
-    unsigned long long hi = 0;
-    std::uint64_t leftover = _umul128(next_uint64(), rng_excl, &hi);
+    std::uint64_t m_low = 0;
+    std::uint64_t m_high = mul64_split(next_uint64(), rng_excl, &m_low);
+    std::uint64_t leftover = m_low;
     if (leftover < rng_excl) {
         const std::uint64_t threshold = (0xFFFFFFFFFFFFFFFFull - rng) % rng_excl;
         while (leftover < threshold) {
-            leftover = _umul128(next_uint64(), rng_excl, &hi);
+            m_high = mul64_split(next_uint64(), rng_excl, &m_low);
+            leftover = m_low;
         }
     }
-    return hi;
-#else
-    __uint128_t m = static_cast<__uint128_t>(next_uint64()) * rng_excl;
-    std::uint64_t leftover = static_cast<std::uint64_t>(m);
-    if (leftover < rng_excl) {
-        const std::uint64_t threshold = (0xFFFFFFFFFFFFFFFFull - rng) % rng_excl;
-        while (leftover < threshold) {
-            m = static_cast<__uint128_t>(next_uint64()) * rng_excl;
-            leftover = static_cast<std::uint64_t>(m);
-        }
-    }
-    return static_cast<std::uint64_t>(m >> 64);
-#endif
+    return m_high;
 }
 
 std::vector<std::size_t> choice_indices_without_replacement(

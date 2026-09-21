@@ -137,6 +137,7 @@
 #if __has_include(<pwb/closure_science/qt/page_binding.hpp>)
 #include <pwb/closure_science/qt/page_binding.hpp>
 #endif
+#include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/status_bar.hpp>
 // cpp-close-12 — palette tool-details come from the canonical explain()
@@ -419,6 +420,17 @@ void MainWindow::init_shell(QSettings* services_settings) {
 }
 
 MainWindow::~MainWindow() {
+#ifdef PWB_WITH_STAGE_FLOW
+    // The process-global command registry must not keep this window's
+    // closures after destruction (a palette evaluate on another window
+    // would dereference a dead this). Unregister HERE — in the body,
+    // while stage_flow_command_ids_ is still alive (a destroyed-signal
+    // hook runs in ~QObject, after member destruction).
+    for (const std::string& id : stage_flow_command_ids_) {
+        pwb::ui_shell::command_registry().unregister(id);
+    }
+    stage_flow_command_ids_.clear();
+#endif
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — stop job bodies at their next safe point and drain with a
     // bounded wait so no job can touch members during teardown (the
@@ -553,6 +565,11 @@ void MainWindow::buildUi() {
     auto* well_log_host = new pwb::viz::WellLogHostWidget(well_log_dock);
     well_log_dock->setWidget(well_log_host);
     addDockWidget(Qt::RightDockWidgetArea, well_log_dock);
+// BEGIN PWB-V14-THREE-STAGE — selection-bus sink target (dock raise).
+#ifdef PWB_WITH_STAGE_FLOW
+    stage_flow_well_log_dock_ = well_log_dock;
+#endif
+// END PWB-V14-THREE-STAGE
 
     // Native track settings (this branch): layout/template/export panel
     // bound to the host; interpretation events surface in the status bar.
@@ -678,6 +695,13 @@ void MainWindow::buildUi() {
     }
 #endif
 // END CLOSURE-MAPPING
+// BEGIN PWB-V14-THREE-STAGE — three-stage workbench install: stage bar
+// mount + controller seams + production commands + task-center
+// providers + selection bus. Last so every adopted surface exists.
+#ifdef PWB_WITH_STAGE_FLOW
+    installStageFlow();
+#endif
+// END PWB-V14-THREE-STAGE
 }
 
 #ifdef PWB_WITH_APP_SHELL
@@ -1119,6 +1143,10 @@ void MainWindow::newProjectDialog() {
         QMessageBox::warning(this, tr("新建工程"), error);
     }
 }
+#endif  // PWB_WITH_DATA_INTEGRATION
+// (V14-THREE-STAGE-UX: this #endif was missing — the region stayed open
+// and swallowed everything below, so noteDomainLayerFacts and the
+// preview-settings definition compiled ONLY in data-integration builds.)
 
 // --------------------------------------- cpp-close-12 shell actions ----
 // The AppShell app-bar request surfaces (UI-17 deferred list) — the
@@ -1202,6 +1230,10 @@ void MainWindow::showPreviewSettingsRequested() {
 }
 #endif  // PWB_WITH_UI_PAGES_PREVIEW_QT
 
+// Declaration is data-integration-gated in the header (PwbDataStore
+// surface); the definition matches (V14-THREE-STAGE-UX rebalance of the
+// previously-dangling newProjectDialog region).
+#ifdef PWB_WITH_DATA_INTEGRATION
 QString MainWindow::newProject(const QString& dir_path,
                                const QString& name) {
     if (context_.session().store() != nullptr) {
@@ -1302,7 +1334,11 @@ QString MainWindow::newProject(const QString& dir_path,
     (void)store->export_manifest();
     return openProject(QString::fromStdString(project_file.string()));
 }
+#endif  // PWB_WITH_DATA_INTEGRATION (newProject definition)
 
+// Same closure as its declaration (the store/recovery types are
+// data-integration surfaces).
+#ifdef PWB_WITH_DATA_INTEGRATION
 QString MainWindow::openProject(const QString& project_file) {
     if (context_.session().store() != nullptr) {
         return tr("已有工程打开（每窗口一个工程会话）");
@@ -1412,6 +1448,12 @@ QString MainWindow::openProject(const QString& project_file) {
         }
         ++opened;
     }
+// BEGIN V14-QGIS-CONTROL
+    // Desired-tree reconcile + stage-view restore over the opened
+    // project's live workspace state (QGIS stays the runtime authority;
+    // the domain state is the persistence/semantics authority).
+    applyLayerControlForOpen();
+// END V14-QGIS-CONTROL
     refreshActionStates();
     QString summary = tr("工程已打开：%1 个绑定图层（%2 跳过）")
                           .arg(opened)
@@ -1433,6 +1475,13 @@ QString MainWindow::openProject(const QString& project_file) {
                                                     project_file);
         refreshRecentProjects();
     }
+// BEGIN PWB-V14-THREE-STAGE — the mapping stage follows the project
+// document (mapping_workspace.current_stage; lenient fallback) and the
+// selection bus rebinds to the fresh project token.
+#ifdef PWB_WITH_STAGE_FLOW
+    restoreStageFromProject();
+#endif
+// END PWB-V14-THREE-STAGE
 // BEGIN VIZ-B
 #ifdef PWB_WITH_VIZ_B
     if (viz_b_dock_ != nullptr) {
@@ -1484,7 +1533,7 @@ QString MainWindow::openProject(const QString& project_file) {
 // END CLOSURE-REVIEW
     return QString();
 }
-#endif  // PWB_WITH_DATA_INTEGRATION
+#endif  // PWB_WITH_DATA_INTEGRATION (openProject definition)
 
 void MainWindow::armPan() {
     canvas_->setMapTool(pan_tool_);
@@ -3330,9 +3379,24 @@ void MainWindow::applyStageValue(const std::string& value) {
     // Canonicalize: the session string feeds the evaluator's stage
     // whitelist comparisons, which speak canonical values only.
     context_.session().set_mapping_stage(pwb::tool_policy::stage_value(*stage));
+// BEGIN V14-QGIS-CONTROL
+    // Layer-side stage policy: empty-group rematerialization + effective
+    // group visibility + edit-target reassignment (instant, never
+    // rewrites order — contracts 03 §6).
+    if (layer_stage_ != nullptr) {
+        layer_stage_->set_stage(*stage);
+    }
+// END V14-QGIS-CONTROL
     if (stage_dock_ != nullptr) stage_dock_->set_current_stage(*stage);
     refreshActionStates();
     refresh_readiness();
+    // V14-THREE-STAGE-UX: every stage surface follows the authority —
+    // the StageDock path (and any future writer) refreshes the flow
+    // projection too (true-change contract makes the request_stage path's
+    // extra refresh a no-op; no loop: refresh never writes the session).
+#ifdef PWB_WITH_STAGE_FLOW
+    if (stage_flow_ != nullptr) stage_flow_->refresh();
+#endif
 }
 
 pwb::ui::ReadinessInputs MainWindow::readiness_inputs() const {
@@ -3484,5 +3548,155 @@ void MainWindow::resetLayoutState() {
     statusBar()->showMessage(tr("布局已重置（下次启动恢复默认）"), 6000);
 }
 #endif
+
+// BEGIN V14-QGIS-CONTROL
+// Native layer control plane glue — see docs/development/
+// qgis-v14-layer-control/02-architecture.md §D. The live workspace state
+// is the single domain authority (loaded from the project document's
+// mapping_workspace section, written back on save); QGIS stays the
+// runtime tree authority through QgsLayerTreeStack.
+void MainWindow::applyLayerControlForOpen() {
+    pwb::application::PwbDataStore* store = context_.projectStore().get();
+    if (store == nullptr) return;
+    pwb::domain::DiagnosticList diagnostics;
+    // Const read (the non-const mapping_workspace() would materialize an
+    // empty section into the document on every open).
+    const pwb::project::ProjectDocument& document = store->document();
+    layer_workspace_ =
+        std::make_unique<pwb::workspace::MappingWorkspaceState>(
+            pwb::workspace::MappingWorkspaceState::from_json(
+                document.mapping_workspace(), diagnostics));
+    layer_tree_stack_ =
+        std::make_unique<pwb::qgis::QgsLayerTreeStack>(
+            context_.session().map());
+    layer_groups_ =
+        std::make_unique<pwb::ui_composite::LayerGroupController>(
+            *layer_workspace_);
+    layer_groups_->attach_stack(layer_tree_stack_.get());
+    layer_stage_ =
+        std::make_unique<pwb::ui_composite::LayerStageController>(
+            *layer_workspace_, *layer_groups_);
+    // Target model probes read the runtime map back (the canvas current
+    // layer stays the fact; drift is reported, never papered over).
+    layer_targets_ = std::make_unique<pwb::ui_composite::LayerTargets>();
+    layer_targets_->set_probes(
+        [this](const std::string& layer_id) {
+            return context_.session().map().layerById(layer_id) != nullptr;
+        },
+        [this](const std::string& layer_id) {
+            QgsVectorLayer* layer = context_.session().map().vectorLayerById(
+                layer_id);
+            return layer != nullptr && layer->isModified();
+        },
+        [this]() -> std::optional<std::string> {
+            if (canvas_ == nullptr || canvas_->currentLayer() == nullptr) {
+                return std::nullopt;
+            }
+            return std::optional<std::string>{
+                pwb::qgis::layer_adapter::layer_id_of(
+                    canvas_->currentLayer())};
+        });
+    // Composition snapshots come from the materialized working-copy
+    // layers (facts_ holds the domain records of the open project).
+    std::vector<pwb::ui_composite::LayerSnapshotInput> snapshots;
+    snapshots.reserve(facts_.size());
+    for (const auto& [layer_id, facts] : facts_) {
+        pwb::ui_composite::LayerSnapshotInput input;
+        input.id = layer_id;
+        input.metadata["role"] = facts.role;
+        input.metadata["maturity"] = facts.artifact_maturity;
+        snapshots.push_back(std::move(input));
+    }
+    // Stage target resolution (V13 W-P order 2): first live layer of
+    // each profile editing role, from the workspace memberships.
+    layer_stage_->set_target_resolver(
+        [this](const std::string& role) -> std::optional<std::string> {
+            for (const std::string& layer_id :
+                 pwb::workspace::layers_with_role(*layer_workspace_, role)) {
+                if (context_.session().map().layerById(layer_id) != nullptr) {
+                    return layer_id;
+                }
+            }
+            return std::nullopt;
+        });
+    layer_stage_->set_target_validator(
+        [this](const std::string& layer_id) {
+            return context_.session().map().layerById(layer_id) != nullptr;
+        });
+    layer_snapshots_ = snapshots;
+    // Partial composition (catalog-bound working copies only): ghost
+    // cleanup must NOT run — an absent layer here is not evidence of
+    // deletion (destructive-purge guard; contracts 03 §7).
+    layer_groups_->ensure_memberships(snapshots, /*full_composition=*/false);
+    try {
+        // Host guard (02-architecture §5): an applier throw must not
+        // escape openProject — the plane degrades, the open proceeds.
+        layer_groups_->reconcile(snapshots);
+    } catch (const std::exception&) {
+        // status surface notes the degraded reconcile; retry on the next
+        // composition change (V5 §78).
+    }
+    // Drop targets referencing layers the runtime does not have (report
+    // only — a fresh open cannot have dirty sessions yet).
+    layer_targets_->revalidate();
+    layer_stage_->restore_stage_view();
+    // Row status language (contracts 03 §9): binding/freshness/target
+    // projection for the panel chips + tooltips.
+    for (auto& [layer_id, facts] : facts_) {
+        pwb::ui_composite::LayerRowInputs inputs;
+        inputs.layer_id = layer_id;
+        const pwb::workspace::LayerBinding* binding =
+            pwb::workspace::membership(*layer_workspace_, layer_id);
+        inputs.binding = binding;
+        inputs.is_active =
+            layer_stage_->active_target_layer_id().has_value() &&
+            *layer_stage_->active_target_layer_id() == layer_id;
+        inputs.is_locked = facts.frozen || facts.stage_locked;
+        facts.status_flags = [&] {
+            const auto status =
+                pwb::ui_composite::build_layer_row_status(inputs);
+            return status.flags;
+        }();
+        facts.status_summary =
+            pwb::ui_composite::layer_row_summary(inputs);
+    }
+    if (layer_panel_ != nullptr) layer_panel_->refresh_indicators();
+}
+
+void MainWindow::syncLayerControlOnSave() {
+    if (layer_workspace_ == nullptr) return;
+    pwb::application::PwbDataStore* store = context_.projectStore().get();
+    if (store == nullptr) return;
+    // Adopt user tree-structure edits (drag / group moves) observed on
+    // the QGIS tree, then RE-RECONCILE so the adopted structure reaches
+    // state.tree (observe alone only updates the runtime placement
+    // tables; only reconcile persists the tree — Round-2 review P1-1).
+    // The re-reconcile diffs against the already-observed tree, so it
+    // applies zero structural ops and just rewrites the desired-tree
+    // payload. An illegal placement is rejected by the same
+    // role-routing validation (desired tree unchanged). Real-time
+    // model-signal write-back remains the Prompt-2 integration point
+    // (08 §2).
+    if (layer_tree_stack_ != nullptr && layer_groups_ != nullptr) {
+        if (layer_groups_->observe_tree_nodes(
+                layer_tree_stack_->tree_snapshot_nodes()) &&
+            !layer_snapshots_.empty()) {
+            try {
+                // No force: the diff runs against the pre-drag baseline
+                // and emits exactly the user's minimal move set.
+                layer_groups_->reconcile(layer_snapshots_);
+            } catch (const std::exception&) {
+                // save proceeds with the last persisted tree; the next
+                // successful reconcile re-syncs it
+            }
+        }
+    }
+    // Persist the desired tree / memberships / stage view states into
+    // the project document (additive section rewrite; the store saves
+    // right after through ProjectManager).
+    pwb::workspace::write_mapping_workspace(store->document().root(),
+                                            *layer_workspace_);
+}
+// END V14-QGIS-CONTROL
 
 }  // namespace pwb::app

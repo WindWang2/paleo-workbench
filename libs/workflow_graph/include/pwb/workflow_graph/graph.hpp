@@ -10,7 +10,6 @@
 
 #include <pwb/domain/json.hpp>
 
-#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -28,8 +27,17 @@ struct DependencyGraphError : std::runtime_error {
     const char* python_class() const { return "DependencyGraphError"; }
 };
 
-// Lightweight reference mirrors (catalog.types) — restricted to the fields
-// the graph and evidence surfaces actually read (D2).
+// Forced TypeError parity — e.g. parameters.source_task_ids given a truthy
+// non-iterable scalar makes `for s in <scalar>` raise TypeError in Python
+// (#1343 item 4).
+struct WorkflowTypeError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+    const char* python_class() const { return "TypeError"; }
+};
+
+// Lightweight reference mirrors (catalog.types) — the fields the graph,
+// evidence and runtime surfaces read (D2). finished_at is populated/read by
+// workflow_runtime's recompute/freshness paths (#1345 re-review).
 struct DataVersionRef {
     std::string asset_id;
     std::string version_id;
@@ -72,11 +80,13 @@ public:
     void rebuild(const std::vector<DataVersionRef>& versions,
                  const std::vector<DataRunRef>& runs);
 
-    bool has_cycle() const { return !cycle_nodes.empty(); }
-    const std::set<std::string>& cycles() const { return cycle_nodes; }
+    bool has_cycle() const { return !cycle_nodes_.empty(); }
+    const std::set<std::string>& cycles() const { return cycle_nodes_; }
 
-    // Read-only index views (frozen via freeze_graph in the oracle).
-    const std::vector<DataVersionRef>& version_list() const { return versions_; }
+    // run_list(): the deduplicated dict-values view (first-key order, last
+    // record per id — self.runs is a Python dict). Iterated by
+    // workflow_runtime's freshness/recompute paths; retained per #1345
+    // re-review (it has consumers now; version_list() was removed, none did).
     const std::vector<DataRunRef>& run_list() const { return runs_; }
     const DataRunRef* run(const std::string& run_id) const;
     const DataVersionRef* version(const std::string& version_id) const;
@@ -124,6 +134,8 @@ public:
             task_consumers = std::nullopt) const;
 
 private:
+    // versions_/runs_ mirror Python's dict attributes: first-key insertion
+    // order, LAST record per duplicated id (#1340).
     std::vector<DataVersionRef> versions_;
     std::vector<DataRunRef> runs_;
     std::unordered_map<std::string, std::size_t> version_index_;
@@ -131,7 +143,7 @@ private:
 
     // Insertion-ordered indexes (Python dict semantics).
     std::vector<std::pair<std::string, std::string>> producing_run_;
-    std::unordered_map<std::string, std::size_t> producing_index_;
+    std::unordered_map<std::string, std::size_t> producing_run_index_;
     std::vector<std::pair<std::string, std::vector<std::string>>> consumers_;
     std::unordered_map<std::string, std::size_t> consumers_index_;
     std::vector<std::pair<std::string, std::vector<std::string>>> run_inputs_;
@@ -145,7 +157,7 @@ private:
     std::vector<std::pair<std::string, std::vector<std::string>>> domain_task_runs_;
     std::unordered_map<std::string, std::size_t> domain_task_index_;
     std::vector<GraphEdge> edges_;
-    std::set<std::string> cycle_nodes;
+    std::set<std::string> cycle_nodes_;
 
     std::set<std::string> detect_cycle_nodes() const;
 };

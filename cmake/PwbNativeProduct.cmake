@@ -45,18 +45,56 @@ set(PWB_NATIVE_PRODUCT_CAPABILITIES
     "seismic_viewer|地震切片视图 dock|PWB_BUILD_SEISMIC_VIEWER|hard"
     "seismic_attributes|地震属性内核|PWB_BUILD_SEISMIC_ATTRIBUTES|hard"
     "seismic_io|SEG-Y 读取/导入|PWB_BUILD_SEISMIC_IO|hard"
+    "seismic_service|地震体分块读取服务|PWB_BUILD_SEISMIC_SERVICE|hard"
     "mapping_kernel|编图数值内核 插值/等值线/栅格分类|PWB_BUILD_MAPPING_KERNEL|hard"
     "factor_map_pipeline|地质因子图产品链 CONV-01|PWB_BUILD_CONV_01|hard"
     "workflow_engine|最小 DAG 工作流引擎 CONV-07|PWB_BUILD_CONV_07|hard"
+    "workflow_runtime|持久化/重算工作流运行时 CONV-26B|PWB_BUILD_CONV_26B|hard"
     "factor_stats_hud|因子统计 HUD CONV-16|PWB_BUILD_CONV_16|hard"
+    "data_lifecycle|目录/项目数据生命周期 CONV-26|PWB_BUILD_CONV_26|hard"
+    "qgis_editing|QGIS 图层树/编辑缓冲区 CONV-27|PWB_BUILD_CONV_27|hard"
+    "composition_export|原生布局/PNG/PDF/SVG 导出 CONV-29|PWB_BUILD_CONV_29|hard"
+    "job_runtime|异步任务/取消/进度运行时 CONV-30|PWB_BUILD_CONV_30|hard"
+    "provider_runtime|原生能力提供器服务|PWB_BUILD_PROVIDERS|hard"
+    "prediction_runtime|原生预测服务闭环|PWB_BUILD_CLOSURE_SCIENCE|hard"
+    "geo3d_viewer|原生三维地质模型视图|PWB_BUILD_GEO3D_VIZ|hard"
+    "cross_well_viewer|跨井对比/井震标定视图|PWB_BUILD_VIZ_B|hard"
     "well_log_viewer|WLE 测井 dock|Pwb::VisualizationWellLog|optional"
-    "prediction_kernel|岩相预测内核 仅内核未接线|Pwb::Prediction|kernel"
     "geomodel_kernel|地质建模内核 仅内核未接线|Pwb::Geomodel|kernel"
     "well_science_kernel|井科学对比内核 仅内核未接线|Pwb::WellScience|kernel"
     "factor_fusion_kernel|因子融合内核 仅内核未接线|Pwb::FactorFusion|kernel"
     "ingest_kernel|资源解析内核 仅内核未接线|Pwb::Ingest|kernel"
     "interchange_kernel|交换/清单内核 仅内核未接线|Pwb::Interchange|kernel"
     "workflow_contracts_kernel|工作流契约内核 仅内核未接线|Pwb::WorkflowContracts|kernel"
+)
+
+# id|required-target|consumer-target|required-pwb-platform-definition
+#
+# The feature switch table above drives dependency resolution. This table
+# proves that each hard switch materialized as a target consumed by the
+# product closure; `-` means that no separate link or host-definition check
+# applies.
+set(PWB_NATIVE_PRODUCT_LINK_CLOSURE
+    "qgis_platform|pwb-platform|-|-"
+    "data_integration|Pwb::Data|Pwb::Application|-"
+    "science_kernels|Pwb::Science|Pwb::Application|-"
+    "seismic_viewer|Pwb::SeismicViewer|pwb-platform|PWB_WITH_SEISMIC_VIEWER=1"
+    "seismic_attributes|Pwb::SeismicAttributes|pwb-platform|PWB_WITH_SEISMIC_ATTRIBUTES=1"
+    "seismic_io|Pwb::SeismicIo|pwb-platform|PWB_WITH_SEISMIC_IO=1"
+    "seismic_service|Pwb::SeismicService|pwb-platform|PWB_WITH_SEISMIC_SERVICE=1"
+    "mapping_kernel|Pwb::MappingKernel|Pwb::Application|-"
+    "factor_map_pipeline|Pwb::Application|pwb-platform|PWB_WITH_CONV_01=1"
+    "workflow_engine|Pwb::WorkflowEngine|pwb-platform|PWB_WITH_WORKFLOW_ENGINE=1"
+    "workflow_runtime|Pwb::UiControllers|pwb-platform|-"
+    "factor_stats_hud|Pwb::MappingKernel|pwb-platform|PWB_WITH_CONV_16=1"
+    "data_lifecycle|Pwb::UiControllers|pwb-platform|-"
+    "qgis_editing|Pwb::UiWorkbench|pwb-platform|PWB_WITH_CONV_27=1"
+    "composition_export|Pwb::LayoutExport|Pwb::Qgis|PWB_WITH_CONV_29=1"
+    "job_runtime|Pwb::JobQt|pwb-platform|PWB_WITH_CONV_30=1"
+    "provider_runtime|Pwb::Providers|pwb-platform|PWB_WITH_PROVIDERS=1"
+    "prediction_runtime|Pwb::ClosureScienceQt|pwb-platform|PWB_WITH_CLOSURE_SCIENCE=1"
+    "geo3d_viewer|Pwb::Geo3DViz|pwb-platform|PWB_WITH_GEO3D_VIZ=1"
+    "cross_well_viewer|Pwb::VisualizationCrossWellQt|pwb-platform|PWB_WITH_VIZ_B=1"
 )
 
 function(pwb_native_product_imply)
@@ -184,7 +222,55 @@ function(pwb_native_product_summary)
             "ships without these modules (fail-closed).")
     endif()
 
-    # 2) Human-readable closure summary (configure log).
+    # 2) Validate the target/host-definition side of every hard feature.
+    get_target_property(_platform_definitions pwb-platform COMPILE_DEFINITIONS)
+    if(NOT _platform_definitions)
+        set(_platform_definitions)
+    endif()
+    set(_missing_wiring)
+    foreach(_link IN LISTS PWB_NATIVE_PRODUCT_LINK_CLOSURE)
+        string(REPLACE "|" ";" _fields "${_link}")
+        list(GET _fields 0 _id)
+        list(GET _fields 1 _target)
+        list(GET _fields 2 _consumer)
+        list(GET _fields 3 _definition)
+        if(NOT TARGET ${_target})
+            list(APPEND _missing_wiring "${_id} (target ${_target} absent)")
+            continue()
+        endif()
+        if(NOT _consumer STREQUAL "-")
+            if(NOT TARGET ${_consumer})
+                list(APPEND _missing_wiring
+                    "${_id} (consumer target ${_consumer} absent)")
+                continue()
+            endif()
+            get_target_property(_consumer_links ${_consumer} LINK_LIBRARIES)
+            if(NOT _consumer_links)
+                set(_consumer_links)
+            endif()
+            list(FIND _consumer_links "${_target}" _link_index)
+            if(_link_index EQUAL -1)
+                list(APPEND _missing_wiring
+                    "${_id} (${_consumer} does not link ${_target})")
+            endif()
+        endif()
+        if(NOT _definition STREQUAL "-")
+            list(FIND _platform_definitions "${_definition}" _definition_index)
+            if(_definition_index EQUAL -1)
+                list(APPEND _missing_wiring
+                    "${_id} (pwb-platform definition ${_definition} absent)")
+            endif()
+        endif()
+    endforeach()
+    if(_missing_wiring)
+        list(JOIN _missing_wiring "\n  " _joined)
+        message(FATAL_ERROR
+            "PWB_BUILD_NATIVE_PRODUCT=ON but hard product wiring is "
+            "incomplete:\n  ${_joined}\nA feature switch alone is not "
+            "accepted as product wiring.")
+    endif()
+
+    # 3) Human-readable closure summary (configure log).
     message(STATUS "native-product closure:")
     foreach(_cap IN LISTS PWB_NATIVE_PRODUCT_CAPABILITIES)
         string(REPLACE "|" ";" _fields "${_cap}")
@@ -210,7 +296,7 @@ function(pwb_native_product_summary)
         message(STATUS "  [${_class}] ${_id}: ${_state} — ${_title}")
     endforeach()
 
-    # 3) Install skeleton: the executable plus the generated capability
+    # 4) Install skeleton: the executable plus the generated capability
     #    header. The runtime closure (Qt/QGIS/geo SOs, plugins, proj/gdal
     #    data) is assembled by scripts/cpp-migration/deploy-native-product.sh,
     #    which also smoke-verifies the deployed tree with --self-check.

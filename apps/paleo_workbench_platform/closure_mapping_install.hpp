@@ -64,4 +64,10 @@ void notify_project_changed(QMainWindow* window);
 // write failed.
 bool save_documents(QMainWindow* window, std::string* error);
 
+// V14-THREE-STAGE-UX: the installed document bank for this window
+// (nullptr when the mapping closure is absent or not yet installed).
+// Read-only access for presentation wiring (bank signals → page state).
+class MapDocumentBank;
+MapDocumentBank* document_bank(QMainWindow* window);
+
 }  // namespace pwb::app::closure_mapping

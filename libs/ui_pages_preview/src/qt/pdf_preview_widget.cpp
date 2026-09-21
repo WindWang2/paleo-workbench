@@ -50,12 +50,13 @@ PdfPreviewWidget::PdfPreviewWidget(QWidget* parent)
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    if (pdf_view_ != nullptr) {
 #if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDFWIDGETS)
+    if (pdf_view_ != nullptr) {
         pdf_view_->setDocument(document_);
         content_stack_->addWidget(pdf_view_);
 #endif
     }
+#endif
 #if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDF)
     connect(document_, &QPdfDocument::statusChanged, this,
             [this](QPdfDocument::Status) { on_document_status_changed(); });
@@ -147,7 +148,6 @@ PdfPreviewWidget::PdfPreviewWidget(QWidget* parent)
                 [this](int page) { on_current_page_changed(page); });
 #endif
     }
-
     sync_zoom_ui();
 
     if (document_ == nullptr) {
@@ -297,6 +297,7 @@ bool PdfPreviewWidget::eventFilter(QObject* obj, QEvent* event) {
             return true;
         }
     }
+#endif
     return QWidget::eventFilter(obj, event);
 #else
     return QWidget::eventFilter(obj, event);

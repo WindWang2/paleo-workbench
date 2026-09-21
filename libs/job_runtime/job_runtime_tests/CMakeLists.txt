@@ -27,6 +27,17 @@ target_compile_definitions(job_runtime.policy_oracle PRIVATE
 add_test(NAME job_runtime.policy_oracle COMMAND job_runtime.policy_oracle)
 set_tests_properties(job_runtime.policy_oracle PROPERTIES TIMEOUT 120)
 
+add_executable(job_runtime.governor_oracle governor_oracle_test.cpp)
+target_compile_features(job_runtime.governor_oracle PRIVATE cxx_std_20)
+target_link_libraries(job_runtime.governor_oracle PRIVATE
+    Pwb::JobRuntime Pwb::Domain)
+target_include_directories(job_runtime.governor_oracle PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(job_runtime.governor_oracle PRIVATE
+    PWB_GOVERNOR_ORACLE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/governor_oracle.json")
+add_test(NAME job_runtime.governor_oracle COMMAND job_runtime.governor_oracle)
+set_tests_properties(job_runtime.governor_oracle PROPERTIES TIMEOUT 120)
+
 # Qt bridge (queued event loop; runs offscreen like the platform tests).
 if(TARGET Pwb::JobQt)
     add_executable(job_qt.bridge qt_bridge_test.cpp)

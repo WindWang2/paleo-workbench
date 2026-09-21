@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 namespace pwb::viz::well_tie {
 

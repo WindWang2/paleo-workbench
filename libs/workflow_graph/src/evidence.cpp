@@ -1,130 +1,22 @@
 #include <pwb/workflow_graph/evidence.hpp>
 
-#include <charconv>
-#include <cmath>
-#include <cstdlib>
+#include "py_text.hpp"
 
 namespace pwb::workflow_graph {
+
+using detail::attr_or_empty;
+using detail::attr_str;
+using detail::attr_str_or_empty;
+using detail::py_repr_string;
+using detail::py_strip;
+using detail::str_or_empty;
+using detail::truthy;
+using detail::utf8_code_point;
+
 namespace {
 
 // ---------------------------------------------------------------------------
-// Python scalar helpers (local, leaf-lib scope)
-
-// repr()-style quoting for messages that interpolate with !r.
-std::string py_repr_string(const std::string& s) {
-    std::string out = "'";
-    for (char c : s) {
-        switch (c) {
-            case '\\': out += "\\\\"; break;
-            case '\'': out += "\\'"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof buf, "\\x%02x",
-                                  static_cast<unsigned char>(c));
-                    out += buf;
-                } else {
-                    out += c;
-                }
-        }
-    }
-    out += '\'';
-    return out;
-}
-
-// Shortest round-trip float repr with Python str() notation rules
-// (nan/inf lowercase — str(), not repr-in-dict style).
-std::string py_float_str(double value) {
-    if (std::isnan(value)) return "nan";
-    if (std::isinf(value)) return value > 0 ? "inf" : "-inf";
-    if (value == 0.0) return std::signbit(value) ? "-0.0" : "0.0";
-    char buf[64];
-    auto result = std::to_chars(buf, buf + sizeof buf, value,
-                                std::chars_format::scientific);
-    std::string text(buf, result.ptr);
-    const std::size_t epos = text.find('e');
-    std::string mantissa = text.substr(0, epos);
-    const int exp10 = std::atoi(text.c_str() + epos + 1);
-    bool negative = false;
-    if (!mantissa.empty() && mantissa.front() == '-') {
-        negative = true;
-        mantissa.erase(0, 1);
-    }
-    std::string digits;
-    for (char c : mantissa)
-        if (c != '.') digits += c;
-    std::string out = negative ? "-" : "";
-    if (exp10 >= -4 && exp10 < 16) {
-        if (exp10 >= 0) {
-            const std::size_t int_digits = static_cast<std::size_t>(exp10) + 1;
-            if (digits.size() <= int_digits) {
-                out += digits;
-                out += std::string(int_digits - digits.size(), '0');
-                out += ".0";
-            } else {
-                out += digits.substr(0, int_digits);
-                out += '.';
-                out += digits.substr(int_digits);
-            }
-        } else {
-            out += "0.";
-            out += std::string(static_cast<std::size_t>(-exp10) - 1, '0');
-            out += digits;
-        }
-    } else {
-        out += digits.front();
-        if (digits.size() > 1) {
-            out += '.';
-            out += digits.substr(1);
-        }
-        const int magnitude = std::abs(exp10);
-        out += exp10 < 0 ? "e-" : "e+";
-        if (magnitude < 10) out += '0';
-        out += std::to_string(magnitude);
-    }
-    return out;
-}
-
-// Python str() on a Json scalar (getattr(obj, key, "") results).
-std::string py_str(const Json& v) {
-    if (v.is_null()) return "";
-    if (v.is_string()) return v.get<std::string>();
-    if (v.is_boolean()) return v.get<bool>() ? "True" : "False";
-    if (v.is_number_integer()) return std::to_string(v.get<long long>());
-    if (v.is_number_unsigned())
-        return std::to_string(v.get<unsigned long long>());
-    if (v.is_number_float()) return py_float_str(v.get<double>());
-    return v.dump();
-}
-
-// getattr(obj, key, "") with `or ""` semantics then str().
-std::string attr_str(const Json& obj, const char* key) {
-    if (!obj.is_object() || !obj.contains(key)) return "";
-    return py_str(obj.at(key));
-}
-
-// getattr(obj, key, None) or fallback — truthy-aware attr fetch.
-Json attr_or_empty(const Json& obj, const char* key) {
-    if (!obj.is_object() || !obj.contains(key)) return Json(nullptr);
-    return obj.at(key);
-}
-
-bool truthy(const Json& v) {
-    if (v.is_null()) return false;
-    if (v.is_boolean()) return v.get<bool>();
-    if (v.is_number()) return v.get<double>() != 0.0;
-    if (v.is_string()) return !v.get<std::string>().empty();
-    return !v.empty();
-}
-
-// str(value or ""): None/falsy -> "".
-std::string str_or_empty(const Json& v) {
-    if (!truthy(v)) return "";
-    return py_str(v);
-}
+// Python scalar helpers come from src/py_text.hpp (#1345 — one copy).
 
 // catalog.resolve_version seam — exceptions map to "not resolvable"
 // exactly where Python's _resolve_version swallows them.
@@ -138,18 +30,52 @@ std::optional<VersionInfo> resolve_version(
     }
 }
 
-const char* kPrefixes[] = {"draft:", "factor:", "prediction:", "constraints:",
-                           "version:"};
+// Python _PREFIX_KINDS — explicit (prefix, kind) pairs; the previous
+// kPrefixes[i] -> EvidenceKind(i) relied on implicit enum order (#1345).
+constexpr std::pair<std::string_view, EvidenceKind> kPrefixes[] = {
+    {"draft:", EvidenceKind::Phase1Draft},
+    {"factor:", EvidenceKind::Factor},
+    {"prediction:", EvidenceKind::Prediction},
+    {"constraints:", EvidenceKind::ConstraintGroup},
+    {"version:", EvidenceKind::CatalogVersion},
+};
 
-std::string utf8_strip(const std::string& s) {
-    // Python str.strip() — ASCII whitespace plus the common Unicode spaces
-    // that appear in selectors (the full Unicode set is overkill here but
-    // the ASCII set covers all frozen cases).
-    const char* ws = " \t\n\r\v\f";
-    const auto b = s.find_first_not_of(ws);
-    if (b == std::string::npos) return "";
-    const auto e = s.find_last_not_of(ws);
-    return s.substr(b, e - b + 1);
+// Python _looks_like_version_id (module-private — internal here, #1345).
+bool looks_like_version_id(const std::string& ref) {
+    if (ref.rfind("ver_", 0) == 0 || ref.rfind("dver_", 0) == 0) return true;
+    // Python len() counts code points.
+    std::size_t cps = 0;
+    for (std::size_t i = 0; i < ref.size();) {
+        const auto d = utf8_code_point(ref, i);
+        i += d ? d->size : 1;
+        ++cps;
+    }
+    return cps >= 32 && ref.find('-') != std::string::npos &&
+           ref.rfind("sha:", 0) != 0;
+}
+
+// verdict.get(key, "") — Python's .get on a non-dict verdict runs OUTSIDE
+// the try that maps resolver failures to UNKNOWN, so a malformed verdict
+// propagates out of resolve_evidence as AttributeError (#1344).
+Json verdict_get(const Json& verdict, const char* key) {
+    if (!verdict.is_object()) {
+        throw EvidenceAttributeError("'" + detail::py_type_name(verdict) +
+                                     "' object has no attribute 'get'");
+    }
+    // .get(key, "") — a missing key yields "" (not None).
+    return verdict.contains(key) ? verdict.at(key) : Json("");
+}
+
+// Python's `from ... import resolve_constraint_ref` executes BEFORE the
+// try that maps call failures to UNKNOWN — an empty seam is the
+// missing-import state, not a call failure (#1343 item 5). Throwing here
+// propagates out of resolve_evidence.
+void require_constraint_resolver(const ConstraintResolver& resolver) {
+    if (!resolver) {
+        throw EvidenceImportError(
+            "constraint resolver seam not provided "
+            "(resolve_constraint_ref unavailable)");
+    }
 }
 
 }  // namespace
@@ -179,30 +105,8 @@ const char* evidence_status_value(EvidenceStatus status) {
     return "";
 }
 
-std::optional<EvidenceKind> evidence_kind_for_prefix(
-    const std::string& prefix) {
-    for (std::size_t i = 0; i < 5; ++i) {
-        if (prefix == kPrefixes[i])
-            return static_cast<EvidenceKind>(i);
-    }
-    return std::nullopt;
-}
-
 std::string EvidenceSelector::str() const {
     return format_evidence_selector(kind, ref_id, version_id, floating);
-}
-
-bool looks_like_version_id(const std::string& ref) {
-    if (ref.rfind("ver_", 0) == 0 || ref.rfind("dver_", 0) == 0) return true;
-    // Python len() counts code points.
-    std::size_t cps = 0;
-    for (std::size_t i = 0; i < ref.size();) {
-        const unsigned char c = ref[i];
-        i += c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
-        ++cps;
-    }
-    return cps >= 32 && ref.find('-') != std::string::npos &&
-           ref.rfind("sha:", 0) != 0;
 }
 
 std::string format_evidence_selector(EvidenceKind kind,
@@ -238,16 +142,15 @@ std::string format_evidence_selector(EvidenceKind kind,
 }
 
 EvidenceSelector parse_evidence_selector(const std::string& value) {
-    const std::string text = utf8_strip(value);
+    const std::string text = py_strip(value);
     if (text.empty()) throw EvidenceValueError("empty evidence selector");
     if (text == "constraints:current") {
         return EvidenceSelector{EvidenceKind::ConstraintGroup, "", "", true};
     }
-    for (const char* prefix : kPrefixes) {
+    for (const auto& [prefix, kind] : kPrefixes) {
         const std::string p(prefix);
         if (text.rfind(p, 0) != 0) continue;
         const std::string body = text.substr(p.size());
-        const auto kind = *evidence_kind_for_prefix(p);
         if (kind == EvidenceKind::Phase1Draft) {
             if (body.empty()) {
                 throw EvidenceValueError("draft selector missing layer id: " +
@@ -347,8 +250,10 @@ EvidenceResolution resolve_draft(const Json& document,
     if (layers.is_array()) {
         for (const auto& layer : layers) {
             if (attr_str(layer, "id") == layer_id) {
-                const std::string name = attr_str(layer, "name");
-                display = name.empty() ? layer_id : name;
+                // str(getattr(layer,"name","") or layer_id) — falsy names
+                // collapse to the layer id (#1339).
+                display = attr_str_or_empty(layer, "name");
+                if (display.empty()) display = layer_id;
                 break;
             }
         }
@@ -399,9 +304,12 @@ EvidenceResolution resolve_factor(
         return make_res(sel, EvidenceStatus::Missing, "", "", sel.ref_id,
                         "单因素任务不存在：" + sel.ref_id);
     }
-    const std::string name = attr_str(*task, "name");
+    // str(getattr(task,"name","") or ref_id) / str(getattr(task,
+    // "grid_artifact_version_id","") or "") — falsy values collapse (#1339).
+    const std::string name = attr_str_or_empty(*task, "name");
     const std::string display = name.empty() ? sel.ref_id : name;
-    const std::string current = attr_str(*task, "grid_artifact_version_id");
+    const std::string current =
+        attr_str_or_empty(*task, "grid_artifact_version_id");
     const std::string version_id =
         sel.version_id.empty() ? current : sel.version_id;
     if (version_id.empty()) {
@@ -454,9 +362,11 @@ EvidenceResolution resolve_prediction(
         return make_res(sel, EvidenceStatus::Missing, "", "", sel.ref_id,
                         "预测任务不存在：" + sel.ref_id);
     }
-    const std::string name = attr_str(*task, "name");
+    // name/status both go through `or ""` in Python (#1339): a falsy status
+    // means "not finished-looking" but Python lets it proceed to UNPINNED.
+    const std::string name = attr_str_or_empty(*task, "name");
     const std::string display = name.empty() ? sel.ref_id : name;
-    const std::string status = attr_str(*task, "status");
+    const std::string status = attr_str_or_empty(*task, "status");
     if (!status.empty() && status != "complete" && status != "completed" &&
         status != "done") {
         return make_res(sel, EvidenceStatus::Missing, "", "", display,
@@ -488,6 +398,9 @@ EvidenceResolution resolve_prediction(
 EvidenceResolution resolve_constraint_group(
     const Json& document, const EvidenceSelector& sel,
     const ConstraintResolver& constraint_resolver) {
+    // Python's `from ... import resolve_constraint_ref` runs before the try;
+    // an empty seam is ImportError, not an UNKNOWN call failure (#1343-5).
+    require_constraint_resolver(constraint_resolver);
     if (sel.floating) {
         Json verdict;
         try {
@@ -496,6 +409,10 @@ EvidenceResolution resolve_constraint_group(
             return make_res(sel, EvidenceStatus::Unknown, "", "",
                             "地质约束（当前内容）",
                             std::string("约束解析失败：") + exc.what());
+        } catch (...) {
+            return make_res(sel, EvidenceStatus::Unknown, "", "",
+                            "地质约束（当前内容）",
+                            "约束解析失败：<non-std exception>");
         }
         static const std::pair<const char*, EvidenceStatus> map[] = {
             {"clean", EvidenceStatus::Floating},
@@ -504,15 +421,15 @@ EvidenceResolution resolve_constraint_group(
             {"superseded", EvidenceStatus::Stale},
             {"unknown", EvidenceStatus::Unknown},
         };
+        // verdict.get(...) is outside the try — non-dict verdicts raise
+        // AttributeError, not UNKNOWN (#1344).
         const std::string status_text =
-            verdict.is_object() ? attr_str(verdict, "status") : "";
+            detail::py_str(verdict_get(verdict, "status"));
         EvidenceStatus st = EvidenceStatus::Unknown;
         for (const auto& [k, v] : map)
             if (status_text == k) st = v;
         return make_res(sel, st, "", "", "地质约束（当前内容）",
-                        verdict.is_object() ? str_or_empty(verdict.value(
-                                                 "detail", Json()))
-                                            : "");
+                        str_or_empty(verdict_get(verdict, "detail")));
     }
     const std::string raw =
         sel.version_id.empty()
@@ -524,12 +441,13 @@ EvidenceResolution resolve_constraint_group(
     } catch (const std::exception& exc) {
         return make_res(sel, EvidenceStatus::Unknown, "", "", sel.ref_id,
                         std::string("约束解析失败：") + exc.what());
+    } catch (...) {
+        return make_res(sel, EvidenceStatus::Unknown, "", "", sel.ref_id,
+                        "约束解析失败：<non-std exception>");
     }
     const std::string status_text =
-        verdict.is_object() ? attr_str(verdict, "status") : "";
-    const std::string detail =
-        verdict.is_object() ? str_or_empty(verdict.value("detail", Json()))
-                            : "";
+        detail::py_str(verdict_get(verdict, "status"));
+    const std::string detail = str_or_empty(verdict_get(verdict, "detail"));
     if (status_text == "missing") {
         return make_res(sel, EvidenceStatus::Missing, sel.version_id, "",
                         sel.ref_id, detail);
@@ -607,18 +525,22 @@ std::vector<EvidenceResolution> available_evidence(
     if (workspace && workspace->layers_with_role) {
         for (const auto& layer_id :
              workspace->layers_with_role("initial_facies_draft")) {
+            // Python builds the selector STRING (f"draft:{layer_id}") and
+            // resolves it — parse() path, not a direct EvidenceSelector
+            // (#1341).
             out.push_back(resolve_evidence(
-                document, EvidenceSelector{EvidenceKind::Phase1Draft,
-                                           layer_id, "", false},
-                std::nullopt, workspace, constraint_resolver));
+                document, "draft:" + layer_id, std::nullopt, workspace,
+                constraint_resolver));
         }
     }
     const Json factors = attr_or_empty(document, "factor_map_tasks");
     if (factors.is_array()) {
         for (const auto& task : factors) {
             if (attr_str(task, "status") != "complete") continue;
+            // version goes through `or ""` in Python; f"{task.id}" is bare
+            // str() (#1339).
             const std::string version =
-                attr_str(task, "grid_artifact_version_id");
+                attr_str_or_empty(task, "grid_artifact_version_id");
             std::string raw = "factor:" + attr_str(task, "id") + ":" + version;
             while (!raw.empty() && raw.back() == ':') raw.pop_back();
             out.push_back(resolve_evidence(document, raw, std::nullopt,
@@ -632,11 +554,11 @@ std::vector<EvidenceResolution> available_evidence(
             if (status != "complete" && status != "completed" &&
                 status != "done")
                 continue;
+            // f"prediction:{task.id}" — string selector through parse()
+            // (#1341); bare str() on the id (no `or` collapse).
             out.push_back(resolve_evidence(
-                document,
-                EvidenceSelector{EvidenceKind::Prediction,
-                                 attr_str(task, "id"), "", false},
-                std::nullopt, workspace, constraint_resolver));
+                document, "prediction:" + attr_str(task, "id"), std::nullopt,
+                workspace, constraint_resolver));
         }
     }
     const Json constraints = attr_or_empty(document, "constraint_layers");

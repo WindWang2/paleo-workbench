@@ -11,6 +11,7 @@
 //   * rebase            — service.py 4538 (document-first + full save)
 // A failed save rolls the composition back in memory AND unlinks the placed
 // payload (CAS blobs are shared and never unlinked); nothing is published.
+#include <chrono>
 #include "closure_catalog_service.hpp"
 
 #include <pwb/catalog/dedup.hpp>
@@ -681,7 +682,28 @@ domain::Result<catalog::DataVersion> CatalogClosureAdapter::link_external(
     // Identity fingerprint for a later fail-closed relink (D9): size +
     // mtime are the recorded facts a relocated file must match when no
     // digest was ever taken. The mtime convention is the deep core's
-    // (sources.cpp stat_fingerprint tier compares st_mtim.tv_nsec).
+    // (sources.cpp stat_fingerprint tier; POSIX records the st_mtim
+    // nsec component, Windows records full-epoch ns — each platform's
+    // recorder and comparator use the same convention).
+#if defined(_WIN32)
+    {
+        std::error_code probe_ec{};
+        if (fs::is_regular_file(path, probe_ec) && !probe_ec) {
+            const auto size = fs::file_size(path, probe_ec);
+            const auto written = fs::last_write_time(path, probe_ec);
+            if (!probe_ec) {
+                version.size_bytes = static_cast<std::int64_t>(size);
+                domain::Json external_stat = domain::Json::object();
+                external_stat["size"] = static_cast<std::int64_t>(size);
+                external_stat["mtime_ns"] =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        written.time_since_epoch())
+                        .count();
+                version.metadata["external_stat"] = external_stat;
+            }
+        }
+    }
+#else
     struct stat st = {};
     if (::stat(path.string().c_str(), &st) == 0) {
         version.size_bytes = static_cast<std::int64_t>(st.st_size);
@@ -690,6 +712,7 @@ domain::Result<catalog::DataVersion> CatalogClosureAdapter::link_external(
         external_stat["mtime_ns"] = static_cast<std::int64_t>(st.st_mtim.tv_nsec);
         version.metadata["external_stat"] = external_stat;
     }
+#endif
     version.metadata["format"] = version.format;
 
     // Pre-add legacy decision (see import_raw: node edits after a cache

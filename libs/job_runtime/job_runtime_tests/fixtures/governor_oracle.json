@@ -1,0 +1,2012 @@
+{
+  "schema": "pwb.governor_oracle/1",
+  "source": "paleo_workbench/runtime/resource_budget.py + memory_pressure.py + resource_governor.py + governance.py",
+  "budgets": [
+    {
+      "name": "cores:1",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 1,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 1,
+        "heavy_task_core_allowance": 1
+      }
+    },
+    {
+      "name": "cores:2",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 2,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 1,
+        "heavy_task_core_allowance": 1
+      }
+    },
+    {
+      "name": "cores:4",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 4,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 2,
+        "heavy_task_core_allowance": 2
+      }
+    },
+    {
+      "name": "cores:8",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 8,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 6,
+        "heavy_task_core_allowance": 6
+      }
+    },
+    {
+      "name": "cores:16",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 16,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 14,
+        "heavy_task_core_allowance": 14
+      }
+    },
+    {
+      "name": "cores:32",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 32,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 30,
+        "heavy_task_core_allowance": 30
+      }
+    },
+    {
+      "name": "cores:8,ceiling:3",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 8,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 3,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 3,
+        "heavy_task_core_allowance": 3
+      }
+    },
+    {
+      "name": "cores:8,ceiling:20",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 8,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 20,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 7,
+        "heavy_task_core_allowance": 7
+      }
+    },
+    {
+      "name": "cores:4,ceiling:1",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 4,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 1,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 1,
+        "heavy_task_core_allowance": 1
+      }
+    },
+    {
+      "name": "for_total_ram:8",
+      "expected": {
+        "total_ram_gb": 8.0,
+        "os_reserve_gb": 4.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 536870912,
+        "streaming_buffer_bytes": 1342177280,
+        "vram_budget_mb": 512,
+        "logical_cores": 0,
+        "interactive_reserve_cores": 1,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 0.25,
+        "background_cores": 39,
+        "heavy_task_core_allowance": 39
+      }
+    },
+    {
+      "name": "for_total_ram:12",
+      "expected": {
+        "total_ram_gb": 12.0,
+        "os_reserve_gb": 4.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 805306368,
+        "streaming_buffer_bytes": 2013265920,
+        "vram_budget_mb": 512,
+        "logical_cores": 0,
+        "interactive_reserve_cores": 1,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 3.375,
+        "background_cores": 39,
+        "heavy_task_core_allowance": 39
+      }
+    },
+    {
+      "name": "for_total_ram:16",
+      "expected": {
+        "total_ram_gb": 16.0,
+        "os_reserve_gb": 4.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 1073741824,
+        "streaming_buffer_bytes": 2684354560,
+        "vram_budget_mb": 1024,
+        "logical_cores": 0,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 6.5,
+        "background_cores": 38,
+        "heavy_task_core_allowance": 38
+      }
+    },
+    {
+      "name": "for_total_ram:24",
+      "expected": {
+        "total_ram_gb": 24.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 1610612736,
+        "streaming_buffer_bytes": 4026531840,
+        "vram_budget_mb": 1024,
+        "logical_cores": 0,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 10.75,
+        "background_cores": 38,
+        "heavy_task_core_allowance": 38
+      }
+    },
+    {
+      "name": "for_total_ram:32",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 0,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 38,
+        "heavy_task_core_allowance": 38
+      }
+    },
+    {
+      "name": "for_total_ram:48",
+      "expected": {
+        "total_ram_gb": 48.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 0,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 33.0,
+        "background_cores": 38,
+        "heavy_task_core_allowance": 38
+      }
+    },
+    {
+      "name": "for_total_ram:64",
+      "expected": {
+        "total_ram_gb": 64.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 0,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 49.0,
+        "background_cores": 38,
+        "heavy_task_core_allowance": 38
+      }
+    },
+    {
+      "name": "for_total_ram:128",
+      "expected": {
+        "total_ram_gb": 128.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 0,
+        "interactive_reserve_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 113.0,
+        "background_cores": 38,
+        "heavy_task_core_allowance": 38
+      }
+    },
+    {
+      "name": "cores:8,reserve:0",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 8,
+        "interactive_reserve_cores": 0,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 7,
+        "heavy_task_core_allowance": 7
+      }
+    },
+    {
+      "name": "cores:8,reserve:1",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 8,
+        "interactive_reserve_cores": 1,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 7,
+        "heavy_task_core_allowance": 7
+      }
+    },
+    {
+      "name": "cores:8,reserve:4",
+      "expected": {
+        "total_ram_gb": 32.0,
+        "os_reserve_gb": 6.0,
+        "python_reserve_gb": 2.0,
+        "l1_slice_cache_bytes": 2147483648,
+        "streaming_buffer_bytes": 5368709120,
+        "vram_budget_mb": 1024,
+        "logical_cores": 8,
+        "interactive_reserve_cores": 4,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "ram_pressure_frac": 0.85,
+        "ram_critical_frac": 0.95,
+        "page_cache_floor_gb": 17.0,
+        "background_cores": 4,
+        "heavy_task_core_allowance": 4
+      }
+    }
+  ],
+  "pressure_scale": [
+    {
+      "input": {
+        "logical_cores": 8,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 1.0
+      },
+      "expected": {
+        "background_core_ceiling": 6,
+        "background_cores": 6,
+        "io_slots": 4.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 8,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.5
+      },
+      "expected": {
+        "background_core_ceiling": 3,
+        "background_cores": 3,
+        "io_slots": 2.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 8,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.25
+      },
+      "expected": {
+        "background_core_ceiling": 2,
+        "background_cores": 2,
+        "io_slots": 1.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 8,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.1
+      },
+      "expected": {
+        "background_core_ceiling": 1,
+        "background_cores": 1,
+        "io_slots": 1.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 8,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.05
+      },
+      "expected": {
+        "background_core_ceiling": 1,
+        "background_cores": 1,
+        "io_slots": 1.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 8,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 1.5
+      },
+      "expected": {
+        "background_core_ceiling": 6,
+        "background_cores": 6,
+        "io_slots": 4.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 5,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.5
+      },
+      "expected": {
+        "background_core_ceiling": 2,
+        "background_cores": 2,
+        "io_slots": 2.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 3,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.5
+      },
+      "expected": {
+        "background_core_ceiling": 1,
+        "background_cores": 1,
+        "io_slots": 2.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 7,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.25
+      },
+      "expected": {
+        "background_core_ceiling": 1,
+        "background_cores": 1,
+        "io_slots": 1.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 8,
+        "background_core_ceiling": 5,
+        "io_slots": 4.0,
+        "factor": 0.5
+      },
+      "expected": {
+        "background_core_ceiling": 2,
+        "background_cores": 2,
+        "io_slots": 2.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 8,
+        "background_core_ceiling": 3,
+        "io_slots": 4.0,
+        "factor": 0.5
+      },
+      "expected": {
+        "background_core_ceiling": 2,
+        "background_cores": 2,
+        "io_slots": 2.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 4,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.5
+      },
+      "expected": {
+        "background_core_ceiling": 1,
+        "background_cores": 1,
+        "io_slots": 2.0
+      }
+    },
+    {
+      "input": {
+        "logical_cores": 2,
+        "background_core_ceiling": 0,
+        "io_slots": 4.0,
+        "factor": 0.25
+      },
+      "expected": {
+        "background_core_ceiling": 1,
+        "background_cores": 1,
+        "io_slots": 1.0
+      }
+    }
+  ],
+  "env_overrides": [
+    {
+      "name": "32_only",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32"
+      },
+      "expected": {
+        "logical_cores": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 38
+      }
+    },
+    {
+      "name": "cores8",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_BUDGET_CORES": "8"
+      },
+      "expected": {
+        "logical_cores": 8,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 6
+      }
+    },
+    {
+      "name": "cores0_falsy",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_BUDGET_CORES": "0"
+      },
+      "expected": {
+        "logical_cores": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 38
+      }
+    },
+    {
+      "name": "cores_bad",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_BUDGET_CORES": "abc"
+      },
+      "expected": {
+        "logical_cores": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 38
+      }
+    },
+    {
+      "name": "cores_space",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_BUDGET_CORES": " 6 "
+      },
+      "expected": {
+        "logical_cores": 6,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 4
+      }
+    },
+    {
+      "name": "io2",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_IO_SLOTS": "2"
+      },
+      "expected": {
+        "logical_cores": 0,
+        "io_slots": 2.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 38
+      }
+    },
+    {
+      "name": "io0_falsy",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_IO_SLOTS": "0"
+      },
+      "expected": {
+        "logical_cores": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 38
+      }
+    },
+    {
+      "name": "io_bad",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_IO_SLOTS": "z"
+      },
+      "expected": {
+        "logical_cores": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 38
+      }
+    },
+    {
+      "name": "nice0",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_BACKGROUND_NICE": "0"
+      },
+      "expected": {
+        "logical_cores": 0,
+        "io_slots": 4.0,
+        "background_nice": 0,
+        "total_ram_gb": 32.0,
+        "background_cores": 38
+      }
+    },
+    {
+      "name": "nice_bad",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "32",
+        "PALEO_BACKGROUND_NICE": "x"
+      },
+      "expected": {
+        "logical_cores": 0,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 38
+      }
+    },
+    {
+      "name": "ram_bad",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "junk",
+        "PALEO_BUDGET_CORES": "4"
+      },
+      "expected": {
+        "logical_cores": 4,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 2
+      }
+    },
+    {
+      "name": "ram_16",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "16",
+        "PALEO_BUDGET_CORES": "4"
+      },
+      "expected": {
+        "logical_cores": 4,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 16.0,
+        "background_cores": 2
+      }
+    },
+    {
+      "name": "ram_float",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": " 48.5 ",
+        "PALEO_BUDGET_CORES": "4"
+      },
+      "expected": {
+        "logical_cores": 4,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 48.5,
+        "background_cores": 2
+      }
+    },
+    {
+      "name": "ram_trail",
+      "env": {
+        "PALEO_BUDGET_RAM_GB": "64x",
+        "PALEO_BUDGET_CORES": "4"
+      },
+      "expected": {
+        "logical_cores": 4,
+        "io_slots": 4.0,
+        "background_nice": 5,
+        "total_ram_gb": 32.0,
+        "background_cores": 2
+      }
+    }
+  ],
+  "monitor": [
+    {
+      "name": "classify_grid",
+      "grid": [
+        {
+          "used_frac": 0.0,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "normal"
+        },
+        {
+          "used_frac": 0.5,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "normal"
+        },
+        {
+          "used_frac": 0.84,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "normal"
+        },
+        {
+          "used_frac": 0.85,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "pressure"
+        },
+        {
+          "used_frac": 0.9,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "pressure"
+        },
+        {
+          "used_frac": 0.94,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "pressure"
+        },
+        {
+          "used_frac": 0.95,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "critical"
+        },
+        {
+          "used_frac": 0.99,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "critical"
+        },
+        {
+          "used_frac": 1.0,
+          "pressure_frac": 0.85,
+          "critical_frac": 0.95,
+          "state": "critical"
+        }
+      ]
+    },
+    {
+      "name": "transitions_with_relief",
+      "input": {
+        "samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ],
+          [
+            0.9,
+            0,
+            34359738368
+          ],
+          [
+            0.97,
+            0,
+            34359738368
+          ],
+          [
+            0.5,
+            0,
+            34359738368
+          ],
+          [
+            0.9,
+            0,
+            34359738368
+          ]
+        ],
+        "interval": 0.0,
+        "clock": [
+          0.0,
+          1.0,
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0,
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0,
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0,
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0,
+          42.0,
+          43.0,
+          44.0,
+          45.0,
+          46.0,
+          47.0,
+          48.0,
+          49.0,
+          50.0,
+          51.0,
+          52.0,
+          53.0,
+          54.0,
+          55.0,
+          56.0,
+          57.0,
+          58.0,
+          59.0,
+          60.0,
+          61.0,
+          62.0,
+          63.0
+        ],
+        "ops": [
+          "state",
+          "refresh",
+          "refresh",
+          "refresh",
+          "refresh"
+        ],
+        "evictables": {
+          "cache_a": 1000,
+          "cache_b": 250
+        },
+        "rebind_at": null,
+        "rebind": null
+      },
+      "expected": {
+        "states": [
+          "normal",
+          "pressure",
+          "critical",
+          "normal",
+          "pressure"
+        ],
+        "relief_runs": 3,
+        "relief_freed_bytes": 3750,
+        "evictables": [
+          "cache_a",
+          "cache_b"
+        ]
+      }
+    },
+    {
+      "name": "evictable_failure_swallowed",
+      "input": {
+        "samples": [
+          [
+            0.9,
+            0,
+            34359738368
+          ]
+        ],
+        "interval": 0.0,
+        "clock": [
+          0.0,
+          1.0
+        ],
+        "ops": [
+          "refresh"
+        ],
+        "evictables": {
+          "bad": "raise",
+          "ok": 100
+        },
+        "rebind_at": null,
+        "rebind": null
+      },
+      "expected": {
+        "states": [
+          "pressure"
+        ],
+        "relief_runs": 1,
+        "relief_freed_bytes": 100,
+        "evictables": [
+          "bad",
+          "ok"
+        ]
+      }
+    },
+    {
+      "name": "rate_limited_sampling",
+      "input": {
+        "samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ],
+          [
+            0.9,
+            0,
+            34359738368
+          ]
+        ],
+        "interval": 10.0,
+        "clock": [
+          0.0,
+          5.0,
+          20.0
+        ],
+        "ops": [
+          "state",
+          "state",
+          "state"
+        ],
+        "evictables": {},
+        "rebind_at": null,
+        "rebind": null
+      },
+      "expected": {
+        "states": [
+          "normal",
+          "pressure",
+          "pressure"
+        ],
+        "relief_runs": 1,
+        "relief_freed_bytes": 0,
+        "evictables": []
+      }
+    },
+    {
+      "name": "rebind_thresholds",
+      "input": {
+        "samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ],
+          [
+            0.5,
+            0,
+            34359738368
+          ]
+        ],
+        "interval": 0.0,
+        "clock": [
+          0.0,
+          1.0,
+          2.0,
+          3.0
+        ],
+        "ops": [
+          "state",
+          "state"
+        ],
+        "evictables": {},
+        "rebind_at": 1,
+        "rebind": {
+          "ram_pressure_frac": 0.4
+        }
+      },
+      "expected": {
+        "states": [
+          "normal",
+          "pressure"
+        ],
+        "relief_runs": 1,
+        "relief_freed_bytes": 0,
+        "evictables": []
+      }
+    }
+  ],
+  "governor": [
+    {
+      "name": "background_ceiling_defer",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "admit",
+          "seismic.transcode",
+          {
+            "estimated_cpu_cores": 4.0
+          }
+        ],
+        [
+          "admit",
+          "seismic.attribute",
+          {
+            "estimated_cpu_cores": 2.0
+          }
+        ],
+        [
+          "try",
+          "background.io",
+          {
+            "estimated_cpu_cores": 1.0
+          }
+        ],
+        [
+          "admit",
+          "index.documents",
+          {
+            "estimated_cpu_cores": 1.0
+          }
+        ],
+        [
+          "release",
+          1
+        ],
+        [
+          "try",
+          "background.io",
+          {
+            "estimated_cpu_cores": 1.0
+          }
+        ],
+        [
+          "status"
+        ]
+      ],
+      "steps": [
+        {
+          "result": "lease"
+        },
+        {
+          "result": "raise",
+          "reason": "io: slot budget exhausted",
+          "retryable": true,
+          "pressure": "normal"
+        },
+        {
+          "result": "defer"
+        },
+        {
+          "result": "raise",
+          "reason": "io: slot budget exhausted",
+          "retryable": true,
+          "pressure": "normal"
+        },
+        {},
+        {
+          "result": "defer"
+        },
+        {
+          "reserved": {
+            "cores": 4.0,
+            "ram_bytes": 0,
+            "vram_bytes": 0,
+            "io_weight": 4.0,
+            "active_leases": 1
+          },
+          "bg_effective": 6,
+          "io_effective": 4.0
+        }
+      ],
+      "metrics": {
+        "admitted": 1,
+        "deferred": 2,
+        "rejected": 2,
+        "released": 1,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "interactive_pool",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "admit",
+          "seismic.transcode",
+          {
+            "estimated_cpu_cores": 6.0
+          }
+        ],
+        [
+          "admit",
+          "interactive.render",
+          {
+            "estimated_cpu_cores": 1.0
+          }
+        ],
+        [
+          "admit",
+          "interactive.query",
+          {
+            "estimated_cpu_cores": 7.0
+          }
+        ],
+        [
+          "admit",
+          "preview.thumb",
+          {
+            "estimated_cpu_cores": 1.0
+          }
+        ],
+        [
+          "release",
+          0
+        ],
+        [
+          "admit",
+          "interactive.query",
+          {
+            "estimated_cpu_cores": 7.0
+          }
+        ]
+      ],
+      "steps": [
+        {
+          "result": "lease"
+        },
+        {
+          "result": "lease"
+        },
+        {
+          "result": "raise",
+          "reason": "cpu: interactive pool exhausted",
+          "retryable": true,
+          "pressure": "normal"
+        },
+        {
+          "result": "lease"
+        },
+        {},
+        {
+          "result": "raise",
+          "reason": "cpu: interactive pool exhausted",
+          "retryable": true,
+          "pressure": "normal"
+        }
+      ],
+      "metrics": {
+        "admitted": 3,
+        "deferred": 0,
+        "rejected": 2,
+        "released": 3,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "ram_soft_limit",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "admit",
+          "background.io",
+          {
+            "estimated_ram_bytes": 4294967296,
+            "estimated_cpu_cores": 1.0
+          }
+        ],
+        [
+          "admit",
+          "background.compute",
+          {
+            "estimated_ram_bytes": 2147483648,
+            "estimated_cpu_cores": 1.0
+          }
+        ],
+        [
+          "admit",
+          "interactive.render",
+          {
+            "estimated_ram_bytes": 8589934592,
+            "estimated_cpu_cores": 1.0
+          }
+        ],
+        [
+          "try",
+          "background.io",
+          {
+            "estimated_ram_bytes": 1
+          }
+        ]
+      ],
+      "steps": [
+        {
+          "result": "lease"
+        },
+        {
+          "result": "raise",
+          "reason": "ram: streaming buffer soft limit",
+          "retryable": true,
+          "pressure": "normal"
+        },
+        {
+          "result": "lease"
+        },
+        {
+          "result": "defer"
+        }
+      ],
+      "metrics": {
+        "admitted": 2,
+        "deferred": 1,
+        "rejected": 1,
+        "released": 2,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "io_slots",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "admit",
+          "seismic.transcode",
+          {}
+        ],
+        [
+          "try",
+          "export.map",
+          {}
+        ],
+        [
+          "release",
+          0
+        ],
+        [
+          "admit",
+          "export.map",
+          {}
+        ],
+        [
+          "admit",
+          "background.io",
+          {}
+        ],
+        [
+          "admit",
+          "interactive.render",
+          {}
+        ]
+      ],
+      "steps": [
+        {
+          "result": "lease"
+        },
+        {
+          "result": "defer"
+        },
+        {},
+        {
+          "result": "lease"
+        },
+        {
+          "result": "lease"
+        },
+        {
+          "result": "lease"
+        }
+      ],
+      "metrics": {
+        "admitted": 4,
+        "deferred": 1,
+        "rejected": 0,
+        "released": 4,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "vram_guard",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 64,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "admit",
+          "seismic.transcode",
+          {
+            "estimated_vram_bytes": 67108864
+          }
+        ],
+        [
+          "try",
+          "seismic.attribute",
+          {
+            "estimated_vram_bytes": 1
+          }
+        ],
+        [
+          "admit",
+          "interactive.render",
+          {
+            "estimated_vram_bytes": 134217728
+          }
+        ]
+      ],
+      "steps": [
+        {
+          "result": "lease"
+        },
+        {
+          "result": "defer"
+        },
+        {
+          "result": "lease"
+        }
+      ],
+      "metrics": {
+        "admitted": 2,
+        "deferred": 1,
+        "rejected": 0,
+        "released": 2,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "pressure_scaling",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ],
+          [
+            0.9,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "pressure"
+        ],
+        [
+          "admit",
+          "seismic.transcode",
+          {
+            "estimated_cpu_cores": 6.0
+          }
+        ],
+        [
+          "release",
+          0
+        ],
+        [
+          "pressure"
+        ],
+        [
+          "admit",
+          "seismic.transcode",
+          {
+            "estimated_cpu_cores": 4.0
+          }
+        ],
+        [
+          "admit",
+          "seismic.transcode",
+          {
+            "estimated_cpu_cores": 3.0
+          }
+        ],
+        [
+          "admit",
+          "interactive.render",
+          {
+            "estimated_cpu_cores": 2.0
+          }
+        ],
+        [
+          "io_slots"
+        ],
+        [
+          "status"
+        ]
+      ],
+      "steps": [
+        {
+          "value": "normal"
+        },
+        {
+          "result": "raise",
+          "reason": "cpu: background core ceiling exhausted",
+          "retryable": true,
+          "pressure": "pressure"
+        },
+        {},
+        {
+          "value": "pressure"
+        },
+        {
+          "result": "raise",
+          "reason": "cpu: background core ceiling exhausted",
+          "retryable": true,
+          "pressure": "pressure"
+        },
+        {
+          "result": "raise",
+          "reason": "io: slot budget exhausted",
+          "retryable": true,
+          "pressure": "pressure"
+        },
+        {
+          "result": "lease"
+        },
+        {
+          "value": 2.0
+        },
+        {
+          "reserved": {
+            "cores": 2.0,
+            "ram_bytes": 0,
+            "vram_bytes": 0,
+            "io_weight": 1.0,
+            "active_leases": 1
+          },
+          "bg_effective": 3,
+          "io_effective": 2.0
+        }
+      ],
+      "metrics": {
+        "admitted": 1,
+        "deferred": 0,
+        "rejected": 3,
+        "released": 1,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "critical_shed",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.97,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "admit",
+          "seismic.transcode",
+          {}
+        ],
+        [
+          "admit",
+          "background.io",
+          {}
+        ],
+        [
+          "admit",
+          "interactive.render",
+          {
+            "estimated_cpu_cores": 0.5
+          }
+        ],
+        [
+          "admit",
+          "interactive.query",
+          {
+            "estimated_cpu_cores": 0.5
+          }
+        ],
+        [
+          "admit",
+          "preview.thumb",
+          {
+            "estimated_cpu_cores": 0.5
+          }
+        ],
+        [
+          "try",
+          "maintenance.gc",
+          {}
+        ],
+        [
+          "pressure"
+        ]
+      ],
+      "steps": [
+        {
+          "result": "raise",
+          "reason": "pressure: memory CRITICAL, shedding seismic.transcode",
+          "retryable": false,
+          "pressure": "critical"
+        },
+        {
+          "result": "raise",
+          "reason": "pressure: memory CRITICAL, shedding background.io",
+          "retryable": false,
+          "pressure": "critical"
+        },
+        {
+          "result": "lease"
+        },
+        {
+          "result": "lease"
+        },
+        {
+          "result": "lease"
+        },
+        {
+          "result": "defer"
+        },
+        {
+          "value": "critical"
+        }
+      ],
+      "metrics": {
+        "admitted": 3,
+        "deferred": 1,
+        "rejected": 2,
+        "released": 3,
+        "pressure_rejections": 2,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "allowances",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ],
+          [
+            0.9,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "allowance",
+          "background.compute",
+          null
+        ],
+        [
+          "allowance",
+          "background.compute",
+          4
+        ],
+        [
+          "allowance",
+          "background.compute",
+          0
+        ],
+        [
+          "allowance",
+          "interactive.render",
+          null
+        ],
+        [
+          "allowance",
+          "interactive.render",
+          99
+        ],
+        [
+          "onnx"
+        ],
+        [
+          "io_slots"
+        ],
+        [
+          "pressure"
+        ],
+        [
+          "allowance",
+          "background.compute",
+          null
+        ],
+        [
+          "onnx"
+        ],
+        [
+          "io_slots"
+        ]
+      ],
+      "steps": [
+        {
+          "value": 6
+        },
+        {
+          "value": 3
+        },
+        {
+          "value": 1
+        },
+        {
+          "value": 8
+        },
+        {
+          "value": 8
+        },
+        {
+          "value": 3
+        },
+        {
+          "value": 2.0
+        },
+        {
+          "value": "pressure"
+        },
+        {
+          "value": 3
+        },
+        {
+          "value": 3
+        },
+        {
+          "value": 2.0
+        }
+      ],
+      "metrics": {
+        "admitted": 0,
+        "deferred": 0,
+        "rejected": 0,
+        "released": 0,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "admit_raise_semantics",
+      "input": {
+        "cores": 2,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "admit",
+          "seismic.transcode",
+          {
+            "estimated_cpu_cores": 4.0
+          }
+        ],
+        [
+          "try",
+          "seismic.attribute",
+          {}
+        ],
+        [
+          "status"
+        ]
+      ],
+      "steps": [
+        {
+          "result": "raise",
+          "reason": "cpu: background core ceiling exhausted",
+          "retryable": true,
+          "pressure": "normal"
+        },
+        {
+          "result": "lease"
+        },
+        {
+          "reserved": {
+            "cores": 1.0,
+            "ram_bytes": 0,
+            "vram_bytes": 0,
+            "io_weight": 1.0,
+            "active_leases": 1
+          },
+          "bg_effective": 1,
+          "io_effective": 4.0
+        }
+      ],
+      "metrics": {
+        "admitted": 1,
+        "deferred": 0,
+        "rejected": 1,
+        "released": 1,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "release_idempotent",
+      "input": {
+        "cores": 8,
+        "ceiling": 0,
+        "io_slots": 4.0,
+        "ram_gb": 32.0,
+        "vram_mb": 1024,
+        "pressure_samples": [
+          [
+            0.5,
+            0,
+            34359738368
+          ]
+        ]
+      },
+      "ops": [
+        [
+          "admit",
+          "background.io",
+          {
+            "estimated_cpu_cores": 2.0
+          }
+        ],
+        [
+          "release",
+          0
+        ],
+        [
+          "release",
+          0
+        ],
+        [
+          "release",
+          9
+        ],
+        [
+          "status"
+        ]
+      ],
+      "steps": [
+        {
+          "result": "lease"
+        },
+        {},
+        {},
+        {},
+        {
+          "reserved": {
+            "cores": 0.0,
+            "ram_bytes": 0,
+            "vram_bytes": 0,
+            "io_weight": 0.0,
+            "active_leases": 0
+          },
+          "bg_effective": 6,
+          "io_effective": 4.0
+        }
+      ],
+      "metrics": {
+        "admitted": 1,
+        "deferred": 0,
+        "rejected": 0,
+        "released": 1,
+        "pressure_rejections": 0,
+        "active_leases": 0
+      }
+    },
+    {
+      "name": "from_kind_defaults",
+      "requests": [
+        {
+          "kind": "seismic.transcode",
+          "category": "seismic.transcode",
+          "effective_priority": 45,
+          "effective_io_weight": 4.0
+        },
+        {
+          "kind": "interactive.render",
+          "category": "interactive.render",
+          "effective_priority": 100,
+          "effective_io_weight": 1.0
+        },
+        {
+          "kind": "preview.x",
+          "category": "preview",
+          "effective_priority": 70,
+          "effective_io_weight": 1.0
+        },
+        {
+          "kind": "export",
+          "category": "export",
+          "effective_priority": 40,
+          "effective_io_weight": 2.0
+        },
+        {
+          "kind": "weird",
+          "category": "background.io",
+          "effective_priority": 30,
+          "effective_io_weight": 2.0
+        },
+        {
+          "kind": "",
+          "category": "background.io",
+          "effective_priority": 30,
+          "effective_io_weight": 2.0
+        },
+        {
+          "kind": "RENDER",
+          "category": "interactive.render",
+          "effective_priority": 100,
+          "effective_io_weight": 1.0
+        }
+      ]
+    }
+  ]
+}

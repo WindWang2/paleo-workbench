@@ -133,7 +133,9 @@ private:
     void on_chrome_changed(const Json& payload);
     void emit_mapping_context();
     void refresh_preview();
-    Json unified_overlay_state() const;
+    // Cached per-document overlay state — the DisplayMapCanvas provider
+    // contract calls this every paint frame (#1392).
+    const Json& unified_overlay_state() const;
 
     MapDockManager* dock_manager_ = nullptr;              // child QObject
     pwb::ui_shell::FloatController* float_controller_ = nullptr;
@@ -156,6 +158,10 @@ private:
 
     std::vector<Json> documents_;
     const Json* active_document_ = nullptr;  // points into documents_
+    // unified_overlay_state cache — rebuilt only when the document set,
+    // active doc, or its map_chrome/name fields change (#1392).
+    mutable Json overlay_state_cache_;
+    mutable bool overlay_state_dirty_ = true;
     bool preview_mode_ = false;
     bool canvas_priority_ = false;
     bool presentation_dirty_ = false;

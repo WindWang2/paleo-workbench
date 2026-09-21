@@ -1,7 +1,9 @@
 // data_view_models.py adapters — see asset_view.hpp for the contract.
 
+#include <chrono>
 #include "pwb/ui_data_core/asset_view.hpp"
 
+#include <pwb/domain/text.hpp>
 #include "pwb/catalog/entity_view.hpp"  // normalize_tag_name
 #include "pwb/ui_data_core/governance.hpp"
 #include "pwb/ui_data_core/json_util.hpp"
@@ -890,10 +892,7 @@ std::optional<long long> int_like(const domain::Json& value) {
 }
 
 std::string lower_ascii(std::string value) {
-    for (auto& c : value) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return value;
+    return domain::lower_ascii(value);  // shared impl (#1392)
 }
 
 }  // namespace

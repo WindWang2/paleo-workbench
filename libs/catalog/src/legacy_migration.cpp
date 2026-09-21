@@ -4,6 +4,7 @@
 #include "pwb/catalog/trash.hpp"
 #include "pwb/project/paths.hpp"
 
+#include <chrono>
 #include <set>
 #include <sys/stat.h>
 

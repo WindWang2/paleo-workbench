@@ -89,7 +89,9 @@ public:
 
     // Overlay payload provider — called inside the overlay's paintEvent.
     // Must never throw; empty/non-object → decorations cleared.
-    void set_overlay_provider(std::function<Json()> provider);
+    // Provider returns a widget-owned cached state — invoked per paint,
+    // so callers must not rebuild the tree per call (#1392).
+    void set_overlay_provider(std::function<const Json&()> provider);
 
     QgsMapCanvas* qgs_canvas() const { return canvas_; }
     pwb::qgis::MapSession* session() const { return session_.get(); }
@@ -125,7 +127,7 @@ private:
     QgsMapTool* pan_tool_ = nullptr;   // owned by canvas after setMapTool
     QLabel* placeholder_ = nullptr;    // unavailable surface
     QWidget* overlay_ = nullptr;       // transparent decoration layer
-    std::function<Json()> overlay_provider_;
+    std::function<const Json&()> overlay_provider_;
     Json snapshot_ = Json::object();
     ExtentHistory history_;
     std::vector<std::string> mirror_failures_;

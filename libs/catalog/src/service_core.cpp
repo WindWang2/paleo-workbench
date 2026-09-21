@@ -82,7 +82,8 @@ using domain::ErrorCode;
 namespace fs = std::filesystem;
 
 // service.py _disk_mtime_ns (218-222) — POSIX st_mtim ns (findings B-16:
-// never a seconds-granularity stat).
+// never a seconds-granularity stat). Windows maps the 100 ns file-time
+// ticks (repository.cpp disk_mtime_ns precedent).
 std::optional<std::int64_t> disk_mtime_ns(const fs::path& path) {
     const posix_shim::FileStat info = posix_shim::stat_path(path);
     if (!info.exists) return std::nullopt;

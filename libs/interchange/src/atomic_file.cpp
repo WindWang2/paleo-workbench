@@ -1,10 +1,5 @@
 #include "pwb/interchange/atomic_file.hpp"
 
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <unistd.h>
-#endif
-
 #include <cerrno>
 #include <mutex>
 #include <random>
@@ -17,6 +12,9 @@
 #include <fcntl.h>
 #include <io.h>
 #include <share.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace pwb::interchange {

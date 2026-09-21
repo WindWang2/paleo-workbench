@@ -1,0 +1,471 @@
+{
+ "cases": [
+  {
+   "id": "labels",
+   "labels": {
+    "csv": [
+     "JSON",
+     "XLSX"
+    ],
+    "las": [
+     "CSV",
+     "XLSX",
+     "JSON"
+    ],
+    "geojson": [
+     "GeoJSON"
+    ],
+    "png": [
+     "PNG"
+    ],
+    "txt": [
+     "TXT"
+    ],
+    "xyz": [],
+    "sgy": [
+     "SUMMARY"
+    ]
+   },
+   "ranks": {
+    "PNG": 0,
+    "svg": 1,
+    "Pdf": 2,
+    "JSON": 99,
+    "": 99,
+    "png": 0
+   }
+  },
+  {
+   "id": "asset.csv_to_json",
+   "result": {
+    "success": true,
+    "output_path": "tree/out_table.json",
+    "format": "JSON",
+    "artifact": null,
+    "message": "已导出: out_table.json",
+    "warnings": []
+   },
+   "output_text": "[{\"a\":1,\"b\":2},{\"a\":3,\"b\":4}]"
+  },
+  {
+   "id": "asset.csv_to_xlsx",
+   "result": {
+    "success": true,
+    "output_path": "tree/out_table.xlsx",
+    "format": "XLSX",
+    "artifact": null,
+    "message": "已导出: out_table.xlsx",
+    "warnings": []
+   },
+   "output_xlsx": {
+    "sheet": "Sheet1",
+    "grid": [
+     [
+      "a",
+      "b"
+     ],
+     [
+      1,
+      2
+     ],
+     [
+      3,
+      4
+     ]
+    ]
+   }
+  },
+  {
+   "id": "asset.unsupported_label",
+   "result": {
+    "success": false,
+    "output_path": "",
+    "format": "",
+    "artifact": null,
+    "message": "资源不支持导出为 PDF",
+    "warnings": []
+   }
+  },
+  {
+   "id": "asset.missing_source",
+   "result": {
+    "success": false,
+    "output_path": "",
+    "format": "",
+    "artifact": null,
+    "message": "源文件不存在: <root>/tree/missing.csv",
+    "warnings": []
+   }
+  },
+  {
+   "id": "asset.las_error",
+   "result": {
+    "success": false,
+    "output_path": "",
+    "format": "",
+    "artifact": null,
+    "message": "LAS -> CSV 失败: 'No ~ sections found. Is this a LAS file?'",
+    "warnings": []
+   }
+  },
+  {
+   "id": "asset.registered",
+   "result": {
+    "success": true,
+    "output_path": "tree/out_reg.json",
+    "format": "JSON",
+    "artifact": {
+     "id": "artifact_<id>",
+     "linked_id": "res_src01",
+     "format": "json",
+     "output_path": "tree/out_reg.json",
+     "options": {},
+     "included_map_elements": [
+      "source:table.csv"
+     ],
+     "generated_at": "<ts>",
+     "source_task_ids": [],
+     "catalog_version_id": null
+    },
+    "message": "已导出: out_reg.json",
+    "warnings": []
+   },
+   "output_text": "[{\"a\":1,\"b\":2},{\"a\":3,\"b\":4}]",
+   "project_artifacts": [
+    {
+     "id": "artifact_<id>",
+     "linked_id": "res_src01",
+     "format": "json",
+     "output_path": "tree/out_reg.json",
+     "options": {},
+     "included_map_elements": [
+      "source:table.csv"
+     ],
+     "generated_at": "<ts>",
+     "source_task_ids": [],
+     "catalog_version_id": null
+    }
+   ]
+  },
+  {
+   "id": "inventory",
+   "result": {
+    "success": true,
+    "output_path": "tree/inv.json",
+    "format": "INVENTORY",
+    "artifact": {
+     "id": "artifact_<id>",
+     "linked_id": "inv",
+     "format": "inventory.json",
+     "output_path": "tree/inv.json",
+     "options": {},
+     "included_map_elements": [
+      "inventory"
+     ],
+     "generated_at": "<ts>",
+     "source_task_ids": [],
+     "catalog_version_id": null
+    },
+    "message": "已导出工程清单: inv.json",
+    "warnings": []
+   },
+   "output_json": {
+    "project": "inv",
+    "region": "Z",
+    "resource_count": 2,
+    "artifact_count": 1,
+    "resources": [
+     {
+      "id": "res_src01",
+      "name": "table.csv",
+      "type": "tabular",
+      "type_label": "表格",
+      "format": "csv",
+      "path": "tree/table.csv",
+      "status": "indexed",
+      "external": false,
+      "artifact_role": null,
+      "tags": [],
+      "parsed_summary": {}
+     },
+     {
+      "id": "res_gj",
+      "name": "map.geojson",
+      "type": "geojson",
+      "type_label": "GeoJSON矢量",
+      "format": "geojson",
+      "path": "tree/map.geojson",
+      "status": "indexed",
+      "external": false,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "k": 1
+      }
+     }
+    ],
+    "export_artifacts": [
+     {
+      "id": "artifact_fixed01",
+      "linked_id": "res_src01",
+      "format": "json",
+      "output_path": "out_table.json"
+     }
+    ]
+   },
+   "project_artifacts": [
+    {
+     "id": "artifact_<id>",
+     "linked_id": "res_src01",
+     "format": "json",
+     "output_path": "out_table.json",
+     "options": {},
+     "included_map_elements": [],
+     "generated_at": "<ts>",
+     "source_task_ids": [],
+     "catalog_version_id": null
+    },
+    {
+     "id": "artifact_<id>",
+     "linked_id": "inv",
+     "format": "inventory.json",
+     "output_path": "tree/inv.json",
+     "options": {},
+     "included_map_elements": [
+      "inventory"
+     ],
+     "generated_at": "<ts>",
+     "source_task_ids": [],
+     "catalog_version_id": null
+    }
+   ],
+   "seed_project": {
+    "schema_version": 1,
+    "meta": {
+     "name": "inv",
+     "region": "Z",
+     "version": "0.2.17a0",
+     "created_at": "2026-09-20T11:32:42.783361+00:00",
+     "updated_at": "2026-09-20T11:32:42.783380+00:00",
+     "project_root": ".",
+     "last_recovery": null
+    },
+    "coordinate": {
+     "project_crs": "",
+     "crs_locked": false,
+     "target_crs": null,
+     "display_crs": "EPSG:4326 / WGS84",
+     "transform_history": []
+    },
+    "stratigraphy": {
+     "target_horizon": "",
+     "sequence_boundaries": [],
+     "systems_tract_scheme": "LST/TST/HST",
+     "interpretation_version": "v1",
+     "applicable_wells": [],
+     "applicable_seismic_ranges": []
+    },
+    "facies_taxonomy": null,
+    "workarea": null,
+    "wells": [],
+    "seismic_surveys": [],
+    "geological_entities": [],
+    "auxiliary_entities": [],
+    "entity_asset_links": [],
+    "resources": [
+     {
+      "id": "res_src01",
+      "name": "table.csv",
+      "path": "tree/table.csv",
+      "type": "tabular",
+      "format": "csv",
+      "crs": null,
+      "status": "indexed",
+      "tags": [],
+      "source": "local",
+      "parsed_summary": {},
+      "checksum": null,
+      "external": false,
+      "artifact_role": null
+     },
+     {
+      "id": "res_gj",
+      "name": "map.geojson",
+      "path": "tree/map.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "crs": null,
+      "status": "indexed",
+      "tags": [
+       "input"
+      ],
+      "source": "local",
+      "parsed_summary": {
+       "k": 1
+      },
+      "checksum": null,
+      "external": false,
+      "artifact_role": "input"
+     }
+    ],
+    "well_tables": [],
+    "constraint_layers": [],
+    "map_products": [],
+    "contour_drafts": [],
+    "compilation_runs": [],
+    "factor_map_tasks": [],
+    "horizon_interpretations": [],
+    "correlation_interpretations": [],
+    "fault_interpretations": [],
+    "prediction_tasks": [],
+    "paleomap_documents": [],
+    "user_vector_layers": [],
+    "map_qgis_project_xml": "",
+    "workstation_reference_layers": [],
+    "onboarding_report": {},
+    "quality_reports": [],
+    "version_sets": [],
+    "export_artifacts": [
+     {
+      "id": "artifact_fixed01",
+      "linked_id": "res_src01",
+      "format": "json",
+      "output_path": "out_table.json",
+      "options": {},
+      "included_map_elements": [],
+      "generated_at": "2026-09-20T11:32:42.783947+00:00",
+      "source_task_ids": [],
+      "catalog_version_id": null
+     }
+    ],
+    "joint_analysis": {
+     "tree_checks": {},
+     "well_visibility": {},
+     "well_identity_asset_id": null,
+     "well_identity_map": {},
+     "seismic_color_scale": "blue-white-red",
+     "gr_color_scale": "viridis",
+     "well_width_px": 5,
+     "orthogonal_inline_index": null,
+     "orthogonal_crossline_index": null,
+     "orthogonal_inline_number": null,
+     "orthogonal_crossline_number": null,
+     "time_slices": [],
+     "active_time_slice_ms": null,
+     "time_slice_opacity": 80,
+     "vertical_domain": "Time",
+     "active_fence_wells": [],
+     "active_fence_name": null,
+     "path_hints": {}
+    },
+    "geo3d_workspace": {
+     "objects": [],
+     "measurements": [],
+     "display": {},
+     "clip": {},
+     "camera": {},
+     "views": [],
+     "selected": ""
+    },
+    "mapping_workspace": {},
+    "compilation_input_sets": [],
+    "integrated_interpretations": [],
+    "interpretation_revisions": []
+   }
+  },
+  {
+   "id": "register_view",
+   "artifact": {
+    "id": "artifact_<id>",
+    "linked_id": "viz_view",
+    "format": "png",
+    "output_path": "tree/view.png",
+    "options": {},
+    "included_map_elements": [
+     "visualization_view",
+     "generic"
+    ],
+    "generated_at": "<ts>",
+    "source_task_ids": [
+     "task_a",
+     "task_b"
+    ],
+    "catalog_version_id": null
+   },
+   "project_artifacts": [
+    {
+     "id": "artifact_<id>",
+     "linked_id": "viz_view",
+     "format": "png",
+     "output_path": "tree/view.png",
+     "options": {},
+     "included_map_elements": [
+      "visualization_view",
+      "generic"
+     ],
+     "generated_at": "<ts>",
+     "source_task_ids": [
+      "task_a",
+      "task_b"
+     ],
+     "catalog_version_id": null
+    }
+   ]
+  },
+  {
+   "id": "default_export_dir",
+   "no_project": "paleo_exports",
+   "with_project": "proj/project.pwb.artifacts/exports"
+  },
+  {
+   "id": "registry",
+   "classify": {
+    "table.csv": [
+     "tabular",
+     "csv",
+     "indexed"
+    ],
+    "x.xyz": [
+     "custom_type",
+     "xyz",
+     "indexed_custom"
+    ],
+    "notes.txt": [
+     "unknown",
+     "txt",
+     "indexed_reference"
+    ]
+   },
+   "scan_count": 9,
+   "scan_names": [
+    "bad.las",
+    "inv.json",
+    "map.geojson",
+    "notes.txt",
+    "out_reg.json",
+    "out_table.json",
+    "out_table.xlsx",
+    "table.csv",
+    "x.xyz"
+   ],
+   "scan_types": [
+    "well_log",
+    "tabular",
+    "geojson",
+    "unknown",
+    "tabular",
+    "tabular",
+    "spreadsheet",
+    "tabular",
+    "custom_type"
+   ],
+   "spec_export_ok": true,
+   "spec_export_text": "spec-export",
+   "conv_export_ok": true,
+   "conv_export_text": "[{\"a\":1,\"b\":2},{\"a\":3,\"b\":4}]",
+   "missing_exporter": "ExportError: 没有可用于 PDF 的导出器: xyz"
+  }
+ ]
+}

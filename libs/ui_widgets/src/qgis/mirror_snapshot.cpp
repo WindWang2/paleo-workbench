@@ -295,11 +295,10 @@ QString push_features(QgsVectorLayer* vl, const QVariantList& features) {
         const QVariantMap geometry_map =
             f.value(QStringLiteral("geometry")).toMap();
         if (!geometry_map.isEmpty()) {
-            const QString geom_json = QString::fromUtf8(
-                QJsonDocument::fromVariant(geometry_map)
-                    .toJson(QJsonDocument::Compact));
-            const QgsGeometry geom =
-                QgsJsonUtils::geometryFromGeoJson(geom_json);
+            // QVariant → nlohmann json in memory — no UTF-8 string
+            // round-trip per feature (#1385).
+            const QgsGeometry geom = QgsJsonUtils::geometryFromGeoJson(
+                QgsJsonUtils::jsonFromVariant(geometry_map));
             if (geom.isNull()) {
                 return QStringLiteral("invalid GeoJSON geometry");
             }
@@ -383,19 +382,6 @@ QString apply_labeling_xml(QgsVectorLayer* vl, const QString& xml) {
     return {};
 }
 
-QgsMapLayer* find_mirror_layer(QgsProject& project, const QString& doc_id) {
-    const auto layers = project.mapLayers();
-    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        QgsMapLayer* layer = it.value();
-        if (layer != nullptr &&
-            layer->customProperty(QString::fromLatin1(kDocIdProperty))
-                    .toString() == doc_id) {
-            return layer;
-        }
-    }
-    return nullptr;
-}
-
 void sink_into(QStringList* diags, const QString& doc_id,
                const QString& message) {
     if (diags != nullptr) {
@@ -404,6 +390,24 @@ void sink_into(QStringList* diags, const QString& doc_id,
 }
 
 }  // namespace
+
+QHash<QString, QgsMapLayer*> build_doc_id_index(QgsProject& project) {
+    QHash<QString, QgsMapLayer*> index;
+    const auto layers = project.mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        QgsMapLayer* layer = it.value();
+        if (layer == nullptr) continue;
+        const QString doc_id =
+            layer->customProperty(QString::fromLatin1(kDocIdProperty))
+                .toString();
+        if (!doc_id.isEmpty()) index.insert(doc_id, layer);
+    }
+    return index;
+}
+
+QgsMapLayer* find_mirror_layer(QgsProject& project, const QString& doc_id) {
+    return build_doc_id_index(project).value(doc_id);
+}
 
 const MirrorLedger::Tokens* MirrorLedger::entry(const QString& doc_id) const {
     const auto it = entries_.find(doc_id);
@@ -750,8 +754,10 @@ MirrorResult mirror_snapshot_to_project(QgsProject& project,
     if (!options.groups) {
         if (QgsLayerTreeGroup* root = project.layerTreeRoot()) {
             int position = 0;
+            const QHash<QString, QgsMapLayer*> doc_index =
+                build_doc_id_index(project);
             for (const MirrorLayerSpec& layer : snapshot.layers) {
-                QgsMapLayer* ml = find_mirror_layer(project, layer.id);
+                QgsMapLayer* ml = doc_index.value(layer.id);
                 if (ml == nullptr) continue;
                 QgsLayerTreeLayer* node = root->findLayer(ml->id());
                 if (node == nullptr) continue;

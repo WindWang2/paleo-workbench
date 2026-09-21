@@ -13,8 +13,6 @@ namespace pwb::workflow_contracts {
 // tools/oracle/generate_workflow_contract_fixtures.py).
 namespace {
 
-// PWB-V14-DATA-LINEAGE: the frozen payload exceeds MSVC's per-line
-// literal ceiling, so modules_data.inc now emits adjacent raw literals
 // PWB-V14-DATA-LINEAGE: the frozen payload exceeds MSVC's per-line raw
 // literal ceiling; modules_data.inc now emits several raw literals joined
 // with '+', which needs a std::string initializer (adjacent literals

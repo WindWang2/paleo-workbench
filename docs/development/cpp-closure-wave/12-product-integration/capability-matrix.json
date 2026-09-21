@@ -95,11 +95,35 @@
       "implemented": true,
       "merged": false,
       "wired": true,
-      "verified": true,
+      "verified": false,
       "evidence": [
-        "部署树 self-check 12/12（python_free_process verified）；audit-licenses.sh PASS"
+        "历史部署证据保留；当前 final-closure revision 因缺少 Qt 6.8/QGIS SDK 未复验"
       ],
       "note": "部署包级 verified 需 QGIS SDK 就绪后的 dist 树 self-check；在无 SDK 主机上标注为未执行"
+    },
+    {
+      "capability": "逐 Python 模块 final-closure truth matrix",
+      "python_source": "paleo_workbench/**/*.py",
+      "cpp_target": "tools/migration/pwb_final_closure_matrix.py",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "678/678 unique modules; generator unit tests 4/4"
+      ]
+    },
+    {
+      "capability": "声明式 native-product feature fixpoint",
+      "python_source": "—",
+      "cpp_target": "cmake/PwbFeatures.cmake + cmake/PwbNativeProduct.cmake",
+      "implemented": true,
+      "merged": false,
+      "wired": true,
+      "verified": true,
+      "evidence": [
+        "root option coverage complete; product configure reaches required Qt 6.8 discovery"
+      ]
     },
     {
       "capability": "占位宿主收口（joint host/IReviewActions/DataPage composite/PreparationPage/LocalVizProvider base seam）",

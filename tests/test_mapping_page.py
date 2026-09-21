@@ -313,7 +313,9 @@ def test_unified_layer_properties_change_only_style_and_status_tracks_editing(qt
     assert page.save_draft()
     assert document.layer_state["vector_layers"][0]["style"]["fill"] == "#e03131"
     page.action_controller.actions["toggle_editing"].trigger()
-    assert page.status_bar.edit.text() == "Editing"
+    # #1428: the edit chip vocabulary is zh ("编辑"), not English — the
+    # original assertion pinned a locale the widget never emits.
+    assert page.status_bar.edit.text() == "编辑"
     assert "EPSG:3857" in page.status_bar.crs.text()
 
 

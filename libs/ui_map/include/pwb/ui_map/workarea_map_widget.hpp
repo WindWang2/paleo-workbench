@@ -80,12 +80,16 @@ signals:
     void well_activated(const QString& well_id);  // 单击激活（直接开井）
 
 private:
-    Json overlay_state() const;
+    // Provider contract calls this every paint frame — cached, dirtied by
+    // set_project / select_well (#1392).
+    const Json& overlay_state() const;
     Json well_feature(const std::string& well_id) const;
     void on_map_clicked(double x, double y);
 
     Json signature_ = Json(nullptr);  // domain_signature cache (_signature)
     Json snapshot_ = Json(nullptr);   // last built snapshot (_snapshot)
+    mutable Json overlay_state_cache_;
+    mutable bool overlay_state_dirty_ = true;
     std::string selected_well_id_;
     std::string title_;
     bool show_legend_ = true;

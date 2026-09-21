@@ -1,5 +1,7 @@
 #include <pwb/application/map_pipeline_runner.hpp>
 
+#include <pwb/domain/text.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -33,12 +35,7 @@ std::string python_g(double value) {
 }
 
 std::string strip(const std::string& s) {
-    std::size_t a = 0;
-    while (a < s.size() && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
-    std::size_t b = s.size();
-    while (b > a &&
-           std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
-    return s.substr(a, b - a);
+    return domain::strip_ascii(s);  // shared impl (#1392)
 }
 
 // geometry_units.is_geographic_crs — delegated to the D5 authority; the C++

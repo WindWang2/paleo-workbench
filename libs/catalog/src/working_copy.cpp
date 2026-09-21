@@ -84,8 +84,9 @@ void safe_unlink_best_effort(const fs::path& path) {
     fs::remove(path, ec);
 }
 
-// st_mtim ns (findings B-16; Windows falls back to the second-granular
-// st_mtime, matching the 100 ns tick mapping note).
+// st_mtim ns (findings B-16; Windows maps the 100 ns file-time ticks —
+// the second-granular fallback note is superseded by the fs probe, same
+// direction as repository.cpp disk_mtime_ns).
 std::optional<std::int64_t> mtime_ns_of(const fs::path& path) {
     const posix_shim::FileStat st = posix_shim::stat_path(path);
     if (!st.exists) return std::nullopt;

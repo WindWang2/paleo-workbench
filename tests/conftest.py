@@ -4,6 +4,16 @@ import os
 
 import pytest
 
+# #1427: tests must not assume production-machine core counts — hosted CI
+# runners expose 2 cores, where the lazily-created default governor's
+# background ceiling (cores − interactive reserve = 1) refuses the
+# multi-core admissions several provider/harness tests make. Pin the
+# budget's logical-core column for the whole suite; explicit
+# ResourceBudget(logical_cores=N) constructions and set_budget() calls in
+# individual tests bypass this env and keep working. setdefault keeps a
+# caller-provided value authoritative.
+os.environ.setdefault("PALEO_BUDGET_CORES", "8")
+
 
 @pytest.fixture(autouse=True, scope="session")
 def isolate_qsettings(tmp_path_factory):

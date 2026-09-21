@@ -4,6 +4,7 @@
 #include "pwb/catalog/refs.hpp"
 #include "pwb/catalog/trash.hpp"
 
+#include <chrono>
 #include <sys/stat.h>
 
 namespace pwb::catalog {

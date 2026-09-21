@@ -117,11 +117,15 @@ PWB_TEST(display_canvas_backend) {
     CHECK(canvas.map_units_per_pixel() > 0.0);
 
     // Overlay provider feeds the decoration layer without throwing.
-    canvas.set_overlay_provider([] {
-        return Json{{"decorations",
-                     Json{{"title", "工区图"},
-                          {"elements", Json::array({"比例尺", "指北针"})},
-                          {"legend_items", Json::array()}}}};
+    // The contract takes a cached const Json& — per-frame rebuild is the
+    // regression #1392 removed.
+    canvas.set_overlay_provider([]() -> const Json& {
+        static const Json state{
+            {"decorations",
+             Json{{"title", "工区图"},
+                  {"elements", Json::array({"比例尺", "指北针"})},
+                  {"legend_items", Json::array()}}}};
+        return state;
     });
     canvas.update();  // force a repaint path under offscreen
 

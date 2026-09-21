@@ -23,10 +23,11 @@ def test_ensure_basic_map_chrome_adds_scale_and_north():
 
 
 def test_ensure_basic_map_chrome_keeps_existing_aliases():
+    # An explicit non-empty elements list is a whitelist (#1428): the
+    # defaults are NOT force-appended — injecting 指北针 into a
+    # title-only export breaks the dpi/96 height contract (9d64f4f5).
     out = ensure_basic_map_chrome({"elements": ["scale_bar", "title"]})
-    assert "scale_bar" in out["elements"]
-    assert "指北针" in out["elements"]
-    assert "title" in out["elements"]
+    assert out["elements"] == ["scale_bar", "title"]
 
 
 def test_empty_decorations_paint_scale_bar_and_north_arrow():

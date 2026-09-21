@@ -517,13 +517,18 @@ void check_session_policy() {
               != std::string::npos);
     pwb_unsetenv("PALEO_FORCE_XCB");
 
-    // Mesa EGL pin on Wayland with an injected existing candidate.
+    // Mesa EGL pin on Wayland with an injected existing candidate. The
+    // pin's environment write is Q_OS_UNIX-only (a Wayland/NVIDIA EGL
+    // mitigation); on Windows the function can never pin, so the pin
+    // assertions would be vacuous failures (V14-THREE-STAGE-UX guard —
+    // the test had never run on this platform).
     QTemporaryDir dir;
     const std::string vendor_json =
         (dir.filePath("50_mesa.json")).toStdString();
     { QFile f(QString::fromStdString(vendor_json)); f.open(QIODevice::WriteOnly); }
     pwb_unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");  // configure() may have pinned
     pwb_setenv("QT_QPA_PLATFORM", "offscreen", 1);
+#if !defined(Q_OS_WIN)
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json}) == vendor_json);
     PWB_CHECK(std::getenv("__EGL_VENDOR_LIBRARY_FILENAMES") != nullptr);
     // Already pinned -> untouched; opt-out -> untouched.
@@ -534,6 +539,7 @@ void check_session_policy() {
     pwb_unsetenv("PALEO_ALLOW_NVIDIA_EGL");
     // No Wayland session -> untouched.
     pwb_unsetenv("WAYLAND_DISPLAY");
+#endif
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json}) == "");
 
     restore_env();

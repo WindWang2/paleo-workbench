@@ -17,6 +17,11 @@ add_library(pwb_ui_composite STATIC
     src/geometry.cpp
     src/layer_decorations.cpp
     src/layer_groups.cpp
+    src/layer_group_controller.cpp
+    src/layer_presentation.cpp
+    src/layer_stage_controller.cpp
+    src/layer_targets.cpp
+    src/layer_tree_plan.cpp
     src/map_interaction.cpp
     src/map_snapshot.cpp
     src/map_styles.cpp
@@ -41,7 +46,8 @@ target_compile_features(pwb_ui_composite PUBLIC cxx_std_20)
 # geometry/command vocabulary; UiWorkstation supplies state-language
 # projections the stage panels reuse.
 target_link_libraries(pwb_ui_composite PUBLIC
-    Pwb::Domain Pwb::ToolPolicy Pwb::UiDataCore Pwb::UiWorkstation)
+    Pwb::Domain Pwb::ToolPolicy Pwb::UiDataCore Pwb::UiWorkstation
+    Pwb::Workspace)
 
 # Qt Widgets shells (UI-13). Every Q_OBJECT header is listed as a source
 # so AUTOMOC discovers the classes in this split include/ layout. The
