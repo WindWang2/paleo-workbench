@@ -5101,10 +5101,16 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
             .value(QStringLiteral("minimum_scale"))
             .toDouble(0.0);
     if (minimum_scale > 0.0) {
-      // vendored QGIS 3.14+：Global 模式 = 比例尺分母 >= minimum_scale 才参与。
+      // vendored QGIS（qgssnappingutils.cpp:324-328 的权威注释）：
+      // snapping 配置里 maximumScale 是【最小】分母（放大边界）、
+      // minimumScale 是【最大】分母（缩小边界）——与 QgsMapLayer 的
+      // 命名正好相反。Global 生效条件 scale <= minimumScale &&
+      // scale >= maximumScale；因此「分母 >= X 才捕捉」(ScaleGreaterThan)
+      // 必须落在 maximumScale=X 上（此前误写 setMinimumScale，方向整反：
+      // 放大才捕、缩小不捕）(#1445)。
       config.setScaleDependencyMode(
           QgsSnappingConfig::ScaleDependencyMode::Global);
-      config.setMinimumScale(minimum_scale);
+      config.setMaximumScale(minimum_scale);
     }
   }
   config.setTypeFlag(parseSnappingTypes(

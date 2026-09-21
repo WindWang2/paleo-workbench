@@ -125,11 +125,16 @@ void apply_scale_range(QgsMapLayer& layer, const VectorLayerSpec& spec) {
         layer.setScaleBasedVisibility(false);
         return;
     }
-    // QGIS semantics: minimumScale = the MOST zoomed-out bound (largest
-    // denominator), maximumScale = most zoomed-in. VectorStyle.scale_range is
-    // (min_denominator, max_denominator) with the same meaning.
-    layer.setMinimumScale(spec.scale_range_max_denom);
-    layer.setMaximumScale(spec.scale_range_min_denom);
+    // QGIS semantics (qgsmaplayer.cpp isInScaleRange): visible iff
+    // scale >= minimumScale && scale < maximumScale — minimumScale is the
+    // MOST ZOOMED-IN bound (smallest denominator), maximumScale the most
+    // zoomed-out. VectorStyle.scale_range is (min_denominator,
+    // max_denominator) with exactly that meaning, so it maps straight
+    // through (the fallback renderer's max is inclusive; QGIS's is
+    // exclusive — an exact-equality hairline documented here). The
+    // previous swap emptied the visibility window (#1445).
+    layer.setMinimumScale(spec.scale_range_min_denom);
+    layer.setMaximumScale(spec.scale_range_max_denom);
     layer.setScaleBasedVisibility(true);
 }
 

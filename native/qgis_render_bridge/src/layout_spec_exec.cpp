@@ -162,8 +162,11 @@ std::string execute_layout_spec(const ExecContext& context,
                                     extent.at(3).toDouble()));
       }
       // Layer order: the host's full-tree top-first order is the same
-      // sequence the screen canvas draws; QgsLayoutItemMap consumes
-      // bottom-first draw order, hence the reverse.
+      // sequence the screen canvas draws. QgsMapSettings::setLayers stores
+      // index 0 = TOP ("The layers are stored in the reverse order of how
+      // they are rendered"), so the top-first list is passed through
+      // as-is — no reversal (#1445; the previous reverse inverted every
+      // export's stacking relative to the screen).
       QList<QgsMapLayer*> ordered;
       std::vector<std::string> order;
       if (context.order_top_first) {
@@ -175,8 +178,8 @@ std::string execute_layout_spec(const ExecContext& context,
           if (layer != nullptr) order.push_back(layer->id().toStdString());
         }
       }
-      for (auto it = order.rbegin(); it != order.rend(); ++it) {
-        if (QgsMapLayer* layer = resolveLayer(context, *it)) {
+      for (const std::string& id : order) {
+        if (QgsMapLayer* layer = resolveLayer(context, id)) {
           ordered.append(layer);
         }
       }
