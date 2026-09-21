@@ -25,6 +25,7 @@
 #include <cstring>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -191,8 +192,17 @@ void MainWindow::applyStageVisibility(
             const std::string dock_id = key.substr(prefix.size());
             // Absent docks (capability-off degrade) are skipped, not
             // errors — honest degradation, never a crash.
+            //
+            // A dock WITHOUT a real panel factory renders a
+            // "(占位页, 待实现)" placeholder — a stage profile must not
+            // present that as the stage's work surface (#1450). Real
+            // content (factory present) follows the profile; factoryless
+            // docks stay hidden regardless.
             if (workstation->dock(dock_id) != nullptr) {
-                workstation->set_dock_visible(dock_id, visible);
+                workstation->set_dock_visible(
+                    dock_id, visible
+                                 && workstation->has_panel_factory(
+                                        dock_id));
             }
         }
     }
@@ -415,10 +425,61 @@ void MainWindow::installStageFlow() {
                     // Empty horizon (project without stratigraphy) clears
                     // the combo — a stale horizon must not survive a
                     // project switch.
+                    //
+                    // Candidates come from the project document (#1450):
+                    // the stratigraphy target + every horizon named by a
+                    // factor task or a constraint group. The combo used
+                    // to ship with zero options and !editable, so the
+                    // readiness verdict 未设定编图层位 pointed at an
+                    // impossible remediation forever.
+                    std::vector<QString> options;
+                    std::set<QString> seen;
+                    const auto add_option =
+                        [&options, &seen](const QString& value) {
+                            if (value.isEmpty()) return;
+                            if (seen.insert(value).second) {
+                                options.push_back(value);
+                            }
+                        };
+                    if (snap.horizon.has_value()) {
+                        add_option(
+                            QString::fromStdString(*snap.horizon));
+                    }
+                    auto* store = context_.projectStore().get();
+                    if (store != nullptr) {
+                        const pwb::domain::Json& root =
+                            store->document().root();
+                        if (root.is_object()) {
+                            const auto scan_array =
+                                [&add_option,
+                                 &root](const char* key) {
+                                    const auto it = root.find(key);
+                                    if (it == root.end()
+                                        || !it->is_array()) {
+                                        return;
+                                    }
+                                    for (const auto& entry : *it) {
+                                        if (!entry.is_object()) continue;
+                                        const auto h =
+                                            entry.find("target_horizon");
+                                        if (h != entry.end()
+                                            && h->is_string()) {
+                                            add_option(
+                                                QString::fromStdString(
+                                                    h->template get<
+                                                        std::string>()));
+                                        }
+                                    }
+                                };
+                            scan_array("factor_map_tasks");
+                            scan_array("constraint_layers");
+                        }
+                    }
                     bar->set_horizon_state(
                         snap.horizon.has_value()
                             ? QString::fromStdString(*snap.horizon)
-                            : QString());
+                            : QString(),
+                        options);
                 });
     }
 
