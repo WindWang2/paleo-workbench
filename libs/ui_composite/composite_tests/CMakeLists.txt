@@ -11,6 +11,18 @@ target_include_directories(ui_composite.core PRIVATE
 add_test(NAME ui_composite.core COMMAND ui_composite.core)
 set_tests_properties(ui_composite.core PROPERTIES TIMEOUT 120)
 
+# BEGIN V14-QGIS-CONTROL
+# Layer control plane over a recording fake stack: transaction batching,
+# minimal diff ops, stage policy, fail-closed targets, call-count scale.
+add_executable(ui_composite.layer_control layer_control_test.cpp)
+target_compile_features(ui_composite.layer_control PRIVATE cxx_std_20)
+target_link_libraries(ui_composite.layer_control PRIVATE Pwb::UiComposite)
+target_include_directories(ui_composite.layer_control PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ui_composite.layer_control COMMAND ui_composite.layer_control)
+set_tests_properties(ui_composite.layer_control PROPERTIES TIMEOUT 300)
+# END V14-QGIS-CONTROL
+
 # Qt widget smoke (offscreen): every ported widget constructs +
 # responds; the document shell hosts an injected canvas.
 if(TARGET pwb_ui_composite_qt)

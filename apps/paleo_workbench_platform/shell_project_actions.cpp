@@ -108,6 +108,12 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
         }
     }
 
+    // BEGIN V14-QGIS-CONTROL
+    // Persist the live layer-control workspace state (desired tree,
+    // memberships, stage view states) into the document before the save
+    // pipeline serializes it.
+    window.syncLayerControlOnSave();
+    // END V14-QGIS-CONTROL
     pwb::project::ProjectManager manager(store->project_file());
     auto prepared = manager.prepare_save(store->document());
     if (!prepared.is_ok()) {

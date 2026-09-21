@@ -34,6 +34,13 @@ struct DomainLayerFacts {
     bool raw_locked = false;
     bool stage_locked = false;
     bool write_granted = false;
+    // BEGIN V14-QGIS-CONTROL
+    // Layer presentation projection (pwb::ui_composite::layer_presentation):
+    // stable flag vocabulary for the panel chips/tooltip + one-line
+    // summary (binding/freshness/targets — see contracts 03 §9).
+    std::vector<std::string> status_flags;
+    std::string status_summary;
+    // END V14-QGIS-CONTROL
 };
 
 class ProjectSession {
