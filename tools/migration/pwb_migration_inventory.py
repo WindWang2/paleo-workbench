@@ -202,6 +202,12 @@ class UnitFact:
     root_dir: str
     target: Optional[str] = None
     alias: Optional[str] = None
+    # Every Pwb:: alias declared in the unit's CMakeLists (#1448): the
+    # single `alias` field kept only the LAST one, so a unit exporting
+    # both Pwb::UiDataCore and Pwb::UiDataQt became matchable only by
+    # the Qt alias — the product links the base alias, and the wiring
+    # scan reported not_wired.
+    aliases: List[str] = field(default_factory=list)
     sources: List[str] = field(default_factory=list)
     headers: List[str] = field(default_factory=list)
     python_origins: List[str] = field(default_factory=list)
@@ -215,6 +221,13 @@ class UnitFact:
     wired: bool = False
     wiring_mode: str = "not_wired"
     wiring_evidence: List[str] = field(default_factory=list)
+    # Production TU include evidence (#1448): headers under this unit's
+    # public namespace included by apps/** or another lib's src/include
+    # (outside the unit itself and outside tests). A unit can be linked
+    # into the closure yet have ZERO production consumers — the matrix
+    # must not call that NATIVE_PRODUCT (retiring the Python side would
+    # orphan the capability).
+    production_includes: List[str] = field(default_factory=list)
     status: str = "partial_native"
     notes: List[str] = field(default_factory=list)
 
@@ -252,6 +265,8 @@ def scan_units(root: str) -> Dict[str, UnitFact]:
             for target in RE_LIB_TARGET.findall(text):
                 if target.startswith("Pwb::"):
                     fact.alias = target
+                    if target not in fact.aliases:
+                        fact.aliases.append(target)
                 elif fact.target is None:
                     fact.target = target
             fact.tests.extend(RE_ADD_TEST.findall(text))
@@ -399,6 +414,38 @@ def scan_wiring(root: str) -> Dict[str, Tuple[str, List[str]]]:
     root_cml = os.path.join(root, "CMakeLists.txt")
     if os.path.exists(root_cml):
         candidates.append(root_cml)
+    # libs/*/CMakeLists.txt link edges (#1448): the product's link
+    # closure is transitive — libs/ui_data_core PUBLIC-linking
+    # Pwb::Interchange reaches pwb-platform without any direct edge.
+    # These edges seed the transitive closure below; a link found only
+    # here (never from apps/) is marked conditional.
+    libs_edges: Dict[str, List[str]] = {}
+    libs_root = os.path.join(root, "libs")
+    if os.path.isdir(libs_root):
+        for entry in sorted(os.listdir(libs_root)):
+            unit_dir = os.path.join(libs_root, entry)
+            if not os.path.isdir(unit_dir):
+                continue
+            for dirpath, _dirnames, filenames in os.walk(unit_dir):
+                if "CMakeLists.txt" not in filenames:
+                    continue
+                path = os.path.join(dirpath, "CMakeLists.txt")
+                rel = repo_rel(root, path)
+                # which alias does THIS CMakeLists declare?
+                text0 = read_text(path)
+                declared = [
+                    t for t in RE_LIB_TARGET.findall(text0)
+                    if t.startswith("Pwb::")
+                ]
+                if not declared:
+                    continue
+                for line in text0.splitlines():
+                    stripped = line.strip()
+                    for alias in RE_PWB_LINK.findall(stripped):
+                        for decl in declared:
+                            libs_edges.setdefault(alias, []).append(
+                                f"{rel}: {stripped} (via {decl})"
+                            )
     for path in candidates:
         rel = repo_rel(root, path)
         stack: List[str] = []
@@ -424,6 +471,24 @@ def scan_wiring(root: str) -> Dict[str, Tuple[str, List[str]]]:
                 mode = "always" if prev_mode == "always" or mode == "always" else "conditional"
                 evidence.append(f"{rel}: {stripped}")
                 out[alias] = (mode, evidence)
+    # Transitive closure (#1448): walk libs_edges from every directly
+    # linked alias; each newly reached alias is wired 'conditional'
+    # (it rides the linking lib's own gate) with the path as evidence.
+    frontier = list(out.keys())
+    seen = set(out.keys())
+    while frontier:
+        alias = frontier.pop()
+        for dep, ev in libs_edges.items():
+            if dep in seen:
+                continue
+            if any(e.startswith(f"libs/{alias}/") or f"(via {alias})" in e
+                   for e in ev):
+                # dep is linked by the unit that declares `alias`
+                mode, evidence = out.get(dep, ("conditional", []))
+                evidence = evidence + [f"transitive via {alias}: {ev[0]}"]
+                out[dep] = ("conditional", evidence)
+                seen.add(dep)
+                frontier.append(dep)
     return out
 
 
@@ -458,8 +523,20 @@ def scan_python_packages(root: str) -> List[str]:
 
 def classify(fact: UnitFact) -> str:
     has_oracle = bool(fact.fixtures) or bool(fact.oracle_generators)
-    if fact.wired and fact.wiring_mode == "always" and has_oracle:
+    if fact.wired and has_oracle and fact.production_includes:
+        # Wired covers both a direct apps/root link ('always') and the
+        # transitive link closure through a gated lib ('conditional') —
+        # both reach the product binary in the native-product configure.
+        # NATIVE_PRODUCT additionally requires a production TU consumer
+        # (#1448): linked-but-never-included cores (the integrated
+        # compilation family) stay NATIVE_LIBRARY_NOT_WIRED so retiring
+        # the Python side cannot orphan the capability.
         return "native_complete_wired"
+    if fact.wired and has_oracle and not fact.production_includes:
+        fact.notes.append(
+            "linked into the product closure but no production TU "
+            "includes its headers (test-only consumers do not count)"
+        )
     if has_oracle:
         return "native_core_not_wired"
     # Infrastructure libraries that were never ported from Python (domain,
@@ -487,6 +564,20 @@ def build_inventory(root: str) -> dict:
     )
     wiring = scan_wiring(root)
     conv_defines = scan_conv_defines(root)
+    # Production sources for include evidence: apps/** plus every lib's
+    # src (tests/ fixtures excluded — test-only consumers do not make a
+    # unit a product capability).
+    production_sources: Set[str] = set()
+    apps_src_root = os.path.join(root, "apps")
+    for dirpath, _dirnames, filenames in os.walk(apps_src_root):
+        for fn in filenames:
+            if fn.endswith((".cpp", ".cc", ".cxx")):
+                production_sources.add(
+                    repo_rel(root, os.path.join(dirpath, fn)))
+    for other in units.values():
+        for src in other.sources:
+            if "/tests/" not in src.replace("\\", "/") and "_tests/" not in src:
+                production_sources.add(src)
     python_packages = scan_python_packages(root)
 
     for name, fact in units.items():
@@ -499,11 +590,32 @@ def build_inventory(root: str) -> dict:
             if opt in options:
                 options[opt].gates_subdirs.append(subdir)
 
-        for alias in {fact.alias, fact.target} - {None}:
+        # Production TU include evidence (#1448): the unit's public
+        # namespace prefix (pwb/<ns>/ from its first header path) scanned
+        # across every OTHER unit's sources and apps/** sources.
+        if fact.headers:
+            import re as _re
+            header = fact.headers[0]
+            mprefix = _re.search(r"include/(pwb/[^/]+(?:/[^/]+)*)/", header)
+            if mprefix:
+                ns = mprefix.group(1) + "/"
+                for other_name, other in units.items():
+                    if other_name == name:
+                        continue
+                    for src in other.sources:
+                        if src in production_sources:
+                            try:
+                                text = read_text(os.path.join(root, src))
+                            except OSError:
+                                continue
+                            if ns in text:
+                                fact.production_includes.append(src)
+        for alias in set(fact.aliases + [fact.alias, fact.target]) - {None}:
             if alias in wiring:
                 mode, evidence = wiring[alias]
-                fact.wired = True
-                fact.wiring_mode = mode
+                if not fact.wired or fact.wiring_mode == "conditional":
+                    fact.wired = True
+                    fact.wiring_mode = mode
                 fact.wiring_evidence.extend(evidence[:4])
         for slice_id in fact.slices:
             define = "PWB_WITH_" + slice_id.replace("-", "_")
@@ -513,6 +625,7 @@ def build_inventory(root: str) -> dict:
                     fact.wiring_mode = "conditional"
                 fact.wiring_evidence.append(f"compile definition {define} in apps/")
         fact.wiring_evidence = sorted(set(fact.wiring_evidence))
+        fact.production_includes = sorted(set(fact.production_includes))
         fact.status = classify(fact)
 
         if not fact.python_origins:
