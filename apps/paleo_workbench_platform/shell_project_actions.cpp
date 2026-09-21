@@ -116,6 +116,14 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
     window.syncLayerControlOnSave();
 #endif
     // END V14-QGIS-CONTROL
+#ifdef PWB_WITH_STAGE_FLOW
+    // V14 constraint authoring (#1446): harvest the constraint layers'
+    // digitized features into the linked ConstraintLine coordinates
+    // (+ content fingerprints) before the document write — the same
+    // flush-then-harvest order as Python stage_save. Failures are
+    // per-layer honest: an empty layer never wipes synced geometry.
+    window.syncConstraintGeometryOnSave();
+#endif
     pwb::project::ProjectManager manager(store->project_file());
     auto prepared = manager.prepare_save(store->document());
     if (!prepared.is_ok()) {

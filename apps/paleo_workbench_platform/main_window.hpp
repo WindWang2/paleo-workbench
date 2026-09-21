@@ -362,6 +362,19 @@ public:
     // Registered production command count (test assertion surface).
     int stageFlowCommandCount() const { return stage_flow_command_count_; }
 
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // V14 constraint authoring (#1446) — the Stage-2 constraint buttons'
+    // production side (body in constraint_authoring.cpp):
+    //   createStageConstraint — create a bound, role-registered
+    //     constraint layer + document line entry (Python
+    //     stage_actions.create_constraint parity);
+    //   syncConstraintGeometryOnSave — harvest the live layer features
+    //     into the linked ConstraintLine coordinates + fingerprints at
+    //     save (Python constraints_sync.py parity). Returns lines synced.
+    void createStageConstraint(const QString& kind_value);
+    int syncConstraintGeometryOnSave();
+#endif
+
 private:
     void applyStageVisibility(const std::map<std::string, bool>& visibility);
     pwb::ui_stageflow::qt::StageFlowController* stage_flow_ = nullptr;

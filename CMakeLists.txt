@@ -1298,7 +1298,8 @@ if(TARGET pwb-platform
     # if(BUILD_TESTING) below and silently vanish) (#1444).
     if(TARGET Pwb::UiStageflowQt)
         target_sources(pwb-platform PRIVATE
-            apps/paleo_workbench_platform/stage_flow_install.cpp)
+            apps/paleo_workbench_platform/stage_flow_install.cpp
+            apps/paleo_workbench_platform/constraint_authoring.cpp)
         target_link_libraries(pwb-platform PRIVATE Pwb::UiStageflowQt)
         target_compile_definitions(pwb-platform PRIVATE
             PWB_WITH_STAGE_FLOW=1)
@@ -1346,7 +1347,8 @@ if(TARGET pwb-platform
         if(TARGET Pwb::Data AND TARGET Pwb::Science
            AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
             target_sources(platform_app_shell PRIVATE
-                apps/paleo_workbench_platform/shell_project_actions.cpp)
+                apps/paleo_workbench_platform/shell_project_actions.cpp
+                apps/paleo_workbench_platform/constraint_authoring.cpp)
         endif()
         add_test(NAME platform.app_shell COMMAND platform_app_shell)
         set_tests_properties(platform.app_shell PROPERTIES
@@ -1384,7 +1386,8 @@ if(TARGET pwb-platform
                 Pwb::PlatformServices Pwb::UiStageflowQt
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
                 Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
-                Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt
+                Pwb::FactorHost)
             target_compile_definitions(platform_three_stage_flow PRIVATE
                 PWB_WITH_APP_SHELL=1
                 PWB_WITH_STAGE_FLOW=1
@@ -1408,10 +1411,65 @@ if(TARGET pwb-platform
                 # main_window.cpp references the 12-line project actions
                 # once the data closure is in (platform_app_shell parity).
                 target_sources(platform_three_stage_flow PRIVATE
-                    apps/paleo_workbench_platform/shell_project_actions.cpp)
+                    apps/paleo_workbench_platform/shell_project_actions.cpp
+                    apps/paleo_workbench_platform/constraint_authoring.cpp)
             endif()
             add_test(NAME platform.three_stage_flow
                      COMMAND platform_three_stage_flow)
+
+        # V14 constraint authoring chain regression (#1446): create →
+        # digitize → harvest → document truth, through the real window.
+        add_executable(platform_constraint_authoring
+            tests/cpp/platform/test_constraint_authoring.cpp
+            apps/paleo_workbench_platform/main_window.cpp
+            apps/paleo_workbench_platform/app_context.cpp
+            apps/paleo_workbench_platform/diagnostics.cpp
+            apps/paleo_workbench_platform/app_shell.cpp
+            apps/paleo_workbench_platform/stage_flow_install.cpp
+            apps/paleo_workbench_platform/constraint_authoring.cpp)
+        if(COMMAND pwb_link_job_runtime)
+            pwb_link_job_runtime(platform_constraint_authoring)
+        endif()
+        set_target_properties(platform_constraint_authoring
+            PROPERTIES AUTOMOC ON)
+        target_compile_features(platform_constraint_authoring
+            PRIVATE cxx_std_20)
+        target_include_directories(platform_constraint_authoring PRIVATE
+            tests/cpp/platform
+            apps/paleo_workbench_platform
+            ${CMAKE_BINARY_DIR}/generated)
+        target_link_libraries(platform_constraint_authoring PRIVATE
+            Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+            Pwb::PlatformServices Pwb::UiStageflowQt
+            Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+            Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+            Pwb::UiSeqvizQt Pwb::UiWellseisQt
+            Pwb::FactorHost)
+        target_compile_definitions(platform_constraint_authoring PRIVATE
+            PWB_WITH_APP_SHELL=1
+            PWB_WITH_STAGE_FLOW=1
+            PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+        if(TARGET Pwb::UiControllersQt)
+            target_link_libraries(platform_constraint_authoring PRIVATE
+                Pwb::UiControllers Pwb::UiControllersQt)
+            target_compile_definitions(platform_constraint_authoring
+                PRIVATE PWB_WITH_UI_CONTROLLERS=1)
+        endif()
+        if(TARGET Pwb::Data AND TARGET Pwb::Science
+           AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
+            target_link_libraries(platform_constraint_authoring PRIVATE
+                Pwb::Data)
+            target_compile_definitions(platform_constraint_authoring
+                PRIVATE PWB_WITH_DATA_INTEGRATION=1)
+            target_sources(platform_constraint_authoring PRIVATE
+                apps/paleo_workbench_platform/shell_project_actions.cpp)
+        endif()
+        add_test(NAME platform.constraint_authoring
+                 COMMAND platform_constraint_authoring)
+        set_tests_properties(platform.constraint_authoring PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+            TIMEOUT 300)
             set_tests_properties(platform.three_stage_flow PROPERTIES
                 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
                 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"

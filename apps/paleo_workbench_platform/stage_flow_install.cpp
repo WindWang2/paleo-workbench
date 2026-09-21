@@ -267,6 +267,16 @@ void MainWindow::installStageFlow() {
     auto* composite = shell->composite();
     if (workstation == nullptr || composite == nullptr) return;
 
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // V14 constraint authoring (#1446): the stage panel's eight
+    // constraint buttons used to emit constraint_requested with no
+    // consumer — dead UI on the flagship Stage-2 surface. Route them to
+    // the production creation path (constraint_authoring.cpp).
+    connect(composite,
+            &pwb::ui_composite::CompositeDocument::constraint_requested,
+            this, &MainWindow::createStageConstraint);
+#endif
+
     // -- controller + persistence sink --------------------------------------
     // buildUi() runs BEFORE the constructor's platform-services stage
     // binds services_settings_ (injected or owned fallback) — at install
