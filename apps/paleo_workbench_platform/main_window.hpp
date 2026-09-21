@@ -184,6 +184,12 @@ public:
     // Creates a fresh project (B's document factory + empty catalog + one
     // bootstrap boundary asset via B's run lifecycle) and opens it.
     QString newProject(const QString& dir_path, const QString& name);
+    // Closes the open project (dirty-confirmed over every edit session,
+    // workers flushed, layers dropped, all closures re-notified) so the
+    // window can open another project without a process restart (#1447).
+    // Empty return on success/idempotent-no-store; non-empty = the user
+    // cancelled or a dirty save failed (project stays open).
+    QString closeProject();
 #endif
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
     // Imports one post-stack SEG-Y file as a new Raw seismic_volume asset

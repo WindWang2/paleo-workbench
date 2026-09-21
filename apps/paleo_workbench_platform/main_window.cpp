@@ -1241,7 +1241,9 @@ void MainWindow::showPreviewSettingsRequested() {
 QString MainWindow::newProject(const QString& dir_path,
                                const QString& name) {
     if (context_.session().store() != nullptr) {
-        return tr("已有工程打开（每窗口一个工程会话）");
+        // Close-then-open parity with openProject (#1447).
+        const QString close_error = closeProject();
+        if (!close_error.isEmpty()) return close_error;
     }
     // File-system-safe project name (also becomes the .paleo.json stem).
     std::string safe = name.toStdString();
@@ -1345,7 +1347,11 @@ QString MainWindow::newProject(const QString& dir_path,
 #ifdef PWB_WITH_DATA_INTEGRATION
 QString MainWindow::openProject(const QString& project_file) {
     if (context_.session().store() != nullptr) {
-        return tr("已有工程打开（每窗口一个工程会话）");
+        // Close-then-open (#1447): switching projects stays in this
+        // window — the dirty protection runs inside closeProject and a
+        // cancelled/dirty-blocked close surfaces its own message.
+        const QString close_error = closeProject();
+        if (!close_error.isEmpty()) return close_error;
     }
     std::string open_error;
     auto store = pwb::application::PwbDataStore::open(
@@ -1472,8 +1478,16 @@ QString MainWindow::openProject(const QString& project_file) {
         summary += tr("；%1 个日志已回滚").arg(recovery.rolled_back.size());
     }
     statusBar()->showMessage(summary, 10000);
+    // A single-layer working-copy failure is PARTIAL: the store is bound
+    // and most layers are live, so the rebind/restore tail below must
+    // still run (the old early-return left a half-initialized session
+    // that, with no close-project path, only a process restart could
+    // recover from) (#1447). The failure is surfaced, not swallowed.
     if (!first_error.empty()) {
-        return QString::fromStdString(first_error);
+        statusBar()->showMessage(
+            tr("工程已打开，但部分图层加载失败：%1")
+                .arg(QString::fromStdString(first_error)),
+            15000);
     }
     // Success: the project becomes the MRU head (native recent-projects).
     if (services_settings_ != nullptr) {
@@ -1540,6 +1554,85 @@ QString MainWindow::openProject(const QString& project_file) {
     return QString();
 }
 #endif  // PWB_WITH_DATA_INTEGRATION (openProject definition)
+
+// Same closure as its declaration (store/recovery types are
+// data-integration surfaces).
+#ifdef PWB_WITH_DATA_INTEGRATION
+QString MainWindow::closeProject() {
+    if (context_.session().store() == nullptr) {
+        return QString();  // idempotent: no project open
+    }
+    // Dirty protection — the SAME three-way decision as window close,
+    // over every open edit session (not just the active layer).
+    if (anyDirtyEditSession()) {
+        const int choice = dirty_close_responder_();
+        if (choice == QMessageBox::Cancel) {
+            return tr("已取消关闭工程");
+        }
+        if (choice == QMessageBox::Save) {
+            const std::filesystem::path staged_dir =
+                std::filesystem::temp_directory_path() / "pwb-platform"
+                                                       / "staged";
+            for (const std::string& layer_id :
+                 context_.session().edit().editing_layer_ids()) {
+                if (!context_.session().edit().dirty(layer_id)) continue;
+                std::string error;
+                context_.session().stage_commit(layer_id, staged_dir,
+                                                &error);
+                if (!error.empty()) {
+                    return tr("保存失败（%1），工程未关闭")
+                        .arg(QString::fromStdString(error));
+                }
+            }
+        } else {
+            for (const std::string& layer_id :
+                 context_.session().edit().editing_layer_ids()) {
+                if (context_.session().edit().dirty(layer_id)) {
+                    context_.session().edit().roll_back(layer_id);
+                }
+            }
+        }
+    }
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+    if (viz_b_dock_ != nullptr) {
+        viz_b_dock_->handle_project_closed();  // flush + drop late results
+    }
+#endif
+// END VIZ-B
+    // Roll back any surviving (clean) edit sessions, then drop every
+    // layer from the map: the next open materializes the new project's
+    // own bindings (no ghost layers across projects).
+    for (const std::string& layer_id :
+         context_.session().edit().editing_layer_ids()) {
+        context_.session().edit().roll_back(layer_id);
+    }
+    if (QgsProject* project = context_.session().map().project()) {
+        project->removeAllMapLayers();
+    }
+    context_.session().set_store(nullptr);
+    context_.setProjectStore(nullptr);
+    facts_.clear();
+// BEGIN CLOSURE-MAPPING
+#ifdef PWB_WITH_CLOSURE_MAPPING
+    pwb::app::closure_mapping::notify_project_changed(this);
+#endif
+// END CLOSURE-MAPPING
+#if defined(PWB_WITH_CLOSURE_PREVIEW)
+    pwb::closure_preview::notify_project_store_changed();
+#endif
+#ifdef PWB_WITH_CLOSURE_REVIEW
+    pwb::app::closure_review::notify_project_store_changed(app_shell_,
+                                                           &context_);
+#endif
+    refreshActionStates();
+#ifdef PWB_WITH_CONV_27
+    refresh_readiness();
+#endif
+    statusBar()->showMessage(tr("工程已关闭"), 8000);
+    return QString();
+}
+#endif  // PWB_WITH_DATA_INTEGRATION (closeProject definition)
 
 void MainWindow::armPan() {
     canvas_->setMapTool(pan_tool_);
@@ -2178,9 +2271,14 @@ void MainWindow::onActiveLayerChanged() {
 // ---------------------------------------------------------------- close ----
 
 bool MainWindow::anyDirtyEditSession() const {
-    const auto active = context_.session().active_layer();
-    return active.has_value() && context_.session().edit().editing(active->layer_id)
-        && context_.session().edit().dirty(active->layer_id);
+    // ALL open edit sessions, not just the active layer — switching the
+    // active layer never stops another layer's session, and a dirty
+    // non-active buffer used to be silently discarded here (#1447).
+    for (const std::string& layer_id :
+         context_.session().edit().editing_layer_ids()) {
+        if (context_.session().edit().dirty(layer_id)) return true;
+    }
+    return false;
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -2191,24 +2289,35 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             return;
         }
         if (choice == QMessageBox::Save) {
-            const auto active = context_.session().active_layer();
+            // Commit EVERY dirty layer (the same three-way decision the
+            // toggle path gives one layer); any failure cancels the close
+            // so no edit is destroyed (#1447).
             const std::filesystem::path staged_dir =
                 std::filesystem::temp_directory_path() / "pwb-platform" / "staged";
-            std::string error;
-            context_.session().stage_commit(active->layer_id, staged_dir, &error);
-            if (!error.empty()) {
-                // Failed save must not destroy the edits: cancel the close.
-                // (Non-modal: a blocking dialog here is untestable offscreen;
-                // the open window itself carries the message.)
-                statusBar()->showMessage(
-                    tr("保存失败，关闭已取消: %1").arg(QString::fromStdString(error)),
-                    10000);
-                event->ignore();
-                return;
+            for (const std::string& layer_id :
+                 context_.session().edit().editing_layer_ids()) {
+                if (!context_.session().edit().dirty(layer_id)) continue;
+                std::string error;
+                context_.session().stage_commit(layer_id, staged_dir, &error);
+                if (!error.empty()) {
+                    // Failed save must not destroy the edits: cancel the
+                    // close. (Non-modal: a blocking dialog here is
+                    // untestable offscreen; the open window carries it.)
+                    statusBar()->showMessage(
+                        tr("保存失败（%1），关闭已取消")
+                            .arg(QString::fromStdString(error)),
+                        10000);
+                    event->ignore();
+                    return;
+                }
             }
         } else {
-            const auto active = context_.session().active_layer();
-            if (active.has_value()) context_.session().edit().roll_back(active->layer_id);
+            for (const std::string& layer_id :
+                 context_.session().edit().editing_layer_ids()) {
+                if (context_.session().edit().dirty(layer_id)) {
+                    context_.session().edit().roll_back(layer_id);
+                }
+            }
         }
     }
 #ifdef PWB_WITH_CONV_27

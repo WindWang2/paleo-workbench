@@ -246,7 +246,11 @@ pwb::tool_policy::ToolContextSnapshot ProjectSession::snapshot() const {
 
 void ProjectSession::close() {
     if (map_ == nullptr) return;
-    edit_.reset();
+    // Detach, don't destroy: the session object stays reusable for the
+    // rest of the window's life (edit() must never return a null
+    // dereference, and a close-then-open switch needs a live
+    // controller) — #1447.
+    if (edit_ != nullptr) edit_->detach_all();
     active_facts_.reset();
     canvas_ = nullptr;
     map_->close();

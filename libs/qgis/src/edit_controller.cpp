@@ -44,6 +44,12 @@ EditController::~EditController() {
     }
 }
 
+void EditController::detach_all() {
+    while (!captures_.empty()) {
+        disconnectCapture(captures_.begin()->first);
+    }
+}
+
 QgsVectorLayer* EditController::editingLayerOrError(const std::string& layer_id,
                                                     std::string* error) const {
     QgsVectorLayer* layer = session_.vectorLayerById(layer_id);
@@ -367,6 +373,15 @@ bool EditController::editing(const std::string& layer_id) const {
 bool EditController::dirty(const std::string& layer_id) const {
     QgsVectorLayer* layer = session_.vectorLayerById(layer_id);
     return layer != nullptr && layer->isModified();
+}
+
+std::vector<std::string> EditController::editing_layer_ids() const {
+    std::vector<std::string> ids;
+    for (const auto& [layer_id, capture] : captures_) {
+        (void)capture;
+        if (editing(layer_id)) ids.push_back(layer_id);
+    }
+    return ids;
 }
 
 bool EditController::can_undo(const std::string& layer_id) const {
