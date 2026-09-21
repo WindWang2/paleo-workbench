@@ -1705,16 +1705,18 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
     # reduced SEISMIC_VIEWER=OFF configure linked-failed before the
     # define existed).
     if(TARGET Pwb::UiWorkers AND TARGET Pwb::SeismicViewer AND
-       TARGET Pwb::VisualizationWellTie AND TARGET Pwb::GeoModel AND
+       TARGET Pwb::GeoModel AND
        TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt AND
        TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt AND
        TARGET Pwb::UiMapQgis AND TARGET Pwb::UiReviewQt AND
        TARGET Pwb::UiSeqvizQt)
+        # (No Pwb::VisualizationWellTie here: the auto-tie hook is an
+        # honest refusal until real logs reach the joint page — the kernel
+        # link survived a rewrite that removed its last include.)
         target_sources(pwb-platform PRIVATE
             apps/paleo_workbench_platform/joint_analysis_install.cpp)
         target_link_libraries(pwb-platform PRIVATE
-            Pwb::UiWorkers Pwb::SeismicViewer Pwb::VisualizationWellTie
-            Pwb::GeoModel)
+            Pwb::UiWorkers Pwb::SeismicViewer Pwb::GeoModel)
         target_compile_definitions(pwb-platform PRIVATE
             PWB_WITH_JOINT_ANALYSIS=1)
     endif()
@@ -1802,23 +1804,27 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
         # geoviz final closure — joint-analysis install tests (hook
         # contract: sidecar persistence, RGB overlay, demo stratal path).
         if(TARGET Pwb::UiWorkers AND TARGET Pwb::SeismicViewer AND
-           TARGET Pwb::VisualizationWellTie AND TARGET Pwb::GeoModel)
+           TARGET Pwb::GeoModel)
             add_executable(viz_c_joint_analysis
                 tests/cpp/viz_c/joint_analysis_test.cpp
                 tests/cpp/viz_c/test_main.cpp
                 apps/paleo_workbench_platform/joint_analysis_install.cpp
-                apps/paleo_workbench_platform/job_center.cpp)
+                apps/paleo_workbench_platform/job_center.cpp
+                apps/paleo_workbench_platform/viz_c_joint_host.cpp
+                apps/paleo_workbench_platform/viz_c_joint_volume.cpp
+                apps/paleo_workbench_platform/viz_c_time_map.cpp)
             set_target_properties(viz_c_joint_analysis PROPERTIES AUTOMOC ON)
             target_compile_features(viz_c_joint_analysis PRIVATE cxx_std_20)
             target_link_libraries(viz_c_joint_analysis PRIVATE
                 Pwb::Geo3DViz Pwb::UiWellseisQt Pwb::UiWorkers
-                Pwb::SeismicViewer Pwb::VisualizationWellTie Pwb::GeoModel
+                Pwb::SeismicViewer Pwb::GeoModel
                 Pwb::SeismicService Pwb::JobQt Qt6::Widgets)
             target_include_directories(viz_c_joint_analysis PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/viz_c
                 ${CMAKE_CURRENT_SOURCE_DIR}/apps/paleo_workbench_platform)
             target_compile_definitions(viz_c_joint_analysis PRIVATE
-                PWB_WITH_UI_WELLSEIS=1)
+                PWB_WITH_UI_WELLSEIS=1
+                JOINT_ANALYSIS_FIXTURE_VOLUME="${VIZ_C_EXAMPLE_VOLUME}")
             if(MSVC)
                 target_compile_options(viz_c_joint_analysis PRIVATE
                     /utf-8 /W3)

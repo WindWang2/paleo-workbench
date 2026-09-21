@@ -21,10 +21,15 @@
 #include <memory>
 #include <string>
 
+#include <filesystem>
+#include <fstream>
+
 #include "job_center.hpp"
 #include "joint_analysis_install.hpp"
+#include "viz_c_joint_host.hpp"
 
 #include <pwb/geo3d_viz/scene_object_manager.hpp>
+#include <pwb/seismic_service/volume_service.hpp>
 #include <pwb/ui_wellseis/joint_state.hpp>
 #include <pwb/ui_wellseis/qt/engine_seams.hpp>
 #include <pwb/ui_wellseis/qt/geological_modeling_3d_page.hpp>
@@ -33,6 +38,8 @@ using pwb::app::joint_analysis::JointAnalysisInstall;
 using pwb::geo3d_viz::SceneObjectManager;
 using Hooks = pwb::ui_wellseis::qt::Geo3DAnalysisHooks;
 using Page = pwb::ui_wellseis::qt::GeologicalModeling3DPage;
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -164,11 +171,122 @@ PWB_TEST(joint_analysis_stratal_demo_and_clear) {
     PWB_CHECK(rig.manager.get("analysis:stratal-k=0.25") == nullptr);
     PWB_CHECK(rig.manager.get("analysis:stratal-k=0.75") == nullptr);
 
-    // Real path without a registration: the honest Python refusal text.
+    // Real path without a registration: the honest Python refusal text
+    // (round-2 review: this used to assert a predicate that was true
+    // before the call — vacuous. The status line is the contract).
     rig.hooks.generate_stratal("top.dat", "bottom.dat", {0.5}, false);
     PWB_CHECK(wait_until([&] {
-        return rig.manager.get("analysis:stratal-k=0.50") == nullptr;
+        return rig.page->stratal_status_text()
+                   .contains(QStringLiteral(
+                       "survey/registration 不可用")) ||
+               rig.page->stratal_status_text()
+                   .contains(QStringLiteral("无法对齐"));
     }));
+    PWB_CHECK(rig.manager.get("analysis:stratal-k=0.50") == nullptr);
+}
+
+PWB_TEST(joint_analysis_stratal_real_dat_end_to_end) {
+    // REAL .dat path over a REAL volume: open the frozen io_oracle_bins
+    // survey, write horizon triples on its actual IL/XL axes, run the
+    // hook, and expect a proportional surface pinned in the shared
+    // render space. This is the path the round-1/round-2 fixes targeted
+    // (worker-thread parsing, render-space verts, registration guard).
+    // Destruction order contract (the joint3d HostRig comment): the
+    // JobCenter must die BEFORE the host — the host's QObject-child
+    // JobOwners are ALSO owned by the center's vector, and the reverse
+    // order double-deletes them. unique_ptr members declared host-first
+    // give center-first destruction.
+    std::unique_ptr<pwb::app::viz_c::VizCJointHost> host;
+    std::unique_ptr<pwb::app::JobCenter> jobs;
+    jobs = std::make_unique<pwb::app::JobCenter>();
+    host = std::make_unique<pwb::app::viz_c::VizCJointHost>(*jobs, nullptr,
+                                                            nullptr);
+    auto& the_host = *host;
+    auto& the_jobs = *jobs;
+    const fs::path volume = fs::path(JOINT_ANALYSIS_FIXTURE_VOLUME);
+    QString error;
+    PWB_CHECK(the_host.open_volume(
+        std::make_shared<pwb::seismic_service::SeismicVolumeService>(),
+        volume, &error));
+    PWB_CHECK(wait_until([&] {
+        return the_host.scene_snapshot().n_inline > 0;
+    }));
+    const auto* reg = the_host.scene().registration();
+    PWB_CHECK(reg != nullptr);
+    QTemporaryDir dir;
+    const auto write_horizon = [&](const QString& name,
+                                   double offset_ms) {
+        const QString path = dir.path() + "/" + name;
+        QFile file(path);
+        PWB_CHECK(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        const auto& survey = reg->survey();
+        // Subsample the axes (every 2nd) with gaps: nearest-fill must
+        // close them (Python build_stratal_grids default).
+        for (std::int64_t il = 0; il < survey.n_inlines; il += 2) {
+            for (std::int64_t xl = 0; xl < survey.n_crosslines; xl += 2) {
+                const std::int64_t il_no =
+                    survey.iline_start + il * survey.iline_step;
+                const std::int64_t xl_no =
+                    survey.xline_start + xl * survey.xline_step;
+                const double t = 0.25 * reg->n_sample() *
+                                     survey.dt_ms +
+                                 offset_ms + 0.01 * il;
+                file.write(QString("%1 %2 %3\n")
+                               .arg(il_no)
+                               .arg(xl_no)
+                               .arg(t, 0, 'f', 1)
+                               .toUtf8());
+            }
+        }
+        file.close();
+        return path;
+    };
+    const QString top = write_horizon("top.dat", 0.0);
+    const QString bottom = write_horizon("bottom.dat",
+                                         0.25 * reg->n_sample() *
+                                             reg->survey().dt_ms);
+
+    QTemporaryDir sdir;
+    Page page(nullptr, &the_host);
+    SceneObjectManager manager;
+    JointAnalysisInstall deps;
+    deps.page = &page;
+    deps.host = &the_host;
+    deps.jobs = &the_jobs;
+    deps.scene_objects = &manager;
+    QString project_dir = sdir.path();
+    deps.project_directory = [&project_dir] { return project_dir; };
+    const auto hooks = pwb::app::joint_analysis::make_hooks(deps);
+
+    hooks.generate_stratal(top.toStdString(), bottom.toStdString(),
+                           {0.5}, false);
+    PWB_CHECK(wait_until([&] {
+        return manager.get("analysis:stratal-k=0.50") != nullptr ||
+               page.stratal_status_text().contains(
+                   QStringLiteral("失败"));
+    }));
+    const pwb::geo3d_viz::SceneObject* overlay =
+        manager.get("analysis:stratal-k=0.50");
+    if (overlay == nullptr) {
+        std::printf("real .dat stratal failed: %s\n",
+                    page.stratal_status_text().toStdString().c_str());
+    }
+    PWB_CHECK(overlay != nullptr);
+    if (overlay != nullptr) {
+        // Render space: verts span (n_inline, n_crossline) preview axes
+        // with z in preview sample indices between top and bottom.
+        PWB_CHECK(overlay->verts.size() ==
+                  static_cast<std::size_t>(reg->n_inline()) *
+                      static_cast<std::size_t>(reg->n_crossline()));
+        double z_min = 1e30;
+        double z_max = -1e30;
+        for (const auto& v : overlay->verts) {
+            z_min = std::min(z_min, static_cast<double>(v[2]));
+            z_max = std::max(z_max, static_cast<double>(v[2]));
+        }
+        PWB_CHECK(z_min > 0.0 && z_max < static_cast<double>(reg->n_sample()));
+    }
+    PWB_CHECK(the_host.shutdown(2000));
 }
 
 PWB_TEST(joint_analysis_page_install_fills_hooks) {

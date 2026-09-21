@@ -16,6 +16,7 @@
 #include <QVBoxLayout>
 
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -101,7 +102,11 @@ void write_stored_state(const JointAnalysisInstall& deps,
     }
     file.write(QByteArray::fromStdString(
         pwb::ui_wellseis::joint_state_to_json(state).dump(2)));
-    file.commit();
+    if (!file.commit()) {
+        std::fprintf(stderr,
+                     "joint_analysis: sidecar commit failed: %s\n",
+                     path.toStdString().c_str());
+    }
 }
 
 // ---- bh placeholder records (Python _sync_bh_raw_from_joint_scene) --------
@@ -548,25 +553,40 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
                     demo ? QStringLiteral("正在生成演示地层切片…")
                          : QStringLiteral("正在计算比例地层切片…"));
             }
-            // Stale-delivery guard: if the project directory changes while
-            // the job runs, the surfaces belong to the OLD project and
-            // must never land in the new workspace (VIZ-B session-
-            // generation parity; the directory is this install's identity).
+            // Stale-delivery guard (round-2 hardened): the surfaces are
+            // computed against the REQUEST-TIME registration (survey axes,
+            // strides, ms->sample map). Deliver only when both the project
+            // directory AND the registration object identity still match —
+            // a volume switch within one project rebuilds the
+            // registration, and (i, x, s) verts from the old survey would
+            // land misshapen in the new render space.
             const QString directory_at_request =
                 state->project_directory ? state->project_directory()
                                          : QString();
+            const void* registration_at_request =
+                state->host != nullptr
+                    ? static_cast<const void*>(
+                          state->host->scene().registration())
+                    : nullptr;
             auto spec = pwb::ui_workers::make_stratal_job_spec(
                 std::move(input));
             owner.start(
                 state->jobs->scheduler(), std::move(spec),
-                [state, page, demo, directory_at_request](
+                [state, page, demo, directory_at_request,
+                 registration_at_request](
                     const pwb::job::qtbridge::JobOutcome& outcome) {
                     const QString directory_now =
                         state->project_directory
                             ? state->project_directory()
                             : QString();
-                    if (directory_now != directory_at_request) {
-                        return;  // stale project: drop silently
+                    const void* registration_now =
+                        state->host != nullptr
+                            ? static_cast<const void*>(
+                                  state->host->scene().registration())
+                            : nullptr;
+                    if (directory_now != directory_at_request ||
+                        registration_now != registration_at_request) {
+                        return;  // stale project/volume: drop silently
                     }
                     if (page == nullptr) {
                         return;

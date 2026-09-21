@@ -150,6 +150,21 @@ QVector<AppContext::RuntimeCapability> AppContext::capabilities() const {
                 : QStringLiteral("not in this build");
         }
         // Runtime refinement: services this context actually owns.
+        if (cap.id == QLatin1String("geomodel_kernel") &&
+            build.in_closure) {
+#if defined(PWB_WITH_JOINT_ANALYSIS)
+            // The joint-analysis install consumes the lithology tables /
+            // advisor rules at runtime (round-2 review: the generic
+            // kernel detail had gone stale).
+            cap.detail =
+                QStringLiteral("kernel present — consumed by the joint "
+                               "analysis hooks");
+#else
+            cap.detail =
+                QStringLiteral("kernel present, not wired into the "
+                               "product");
+#endif
+        }
         if (cap.id == QLatin1String("seismic_attributes")) {
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
             cap.runtime_ok = impl_->attribute_runner != nullptr

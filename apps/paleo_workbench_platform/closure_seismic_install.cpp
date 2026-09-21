@@ -242,8 +242,13 @@ struct SeismicPageBinding::Impl {
             sample_interval_s = std::abs(geometry.step[2]) / 1000.0;
         } else if (geometry.unit == "s") {
             sample_interval_s = std::abs(geometry.step[2]);
-        } else if (kernel == "instantaneous_frequency") {
-            note_unavailable("瞬时频率需要时间轴数据体（ms/s），当前体为深度域");
+        } else if (kernel == "instantaneous_frequency" ||
+                   kernel == "sweetness") {
+            // sweetness = envelope / sqrt(instantaneous frequency): the
+            // frequency chain needs a time axis exactly like the freq
+            // kernel (round-2 review — it silently produced wrong-unit
+            // values on depth volumes before this gate).
+            note_unavailable("该属性需要时间轴数据体（ms/s），当前体为深度域");
             return;
         }
 

@@ -1842,23 +1842,6 @@ void GeologicalModeling3DPage::set_analysis_hooks(
     sync_analysis_actions();
 }
 
-void GeologicalModeling3DPage::set_well_tie_result(int shift_samples,
-                                                   double cc) {
-    if (wtie_shift_ != nullptr) {
-        wtie_shift_->setValue(shift_samples);
-    }
-    if (wtie_corr_label_ != nullptr) {
-        wtie_corr_label_->setText(
-            QStringLiteral("互相关系数 (Cross-Correlation CC): %1")
-                .arg(cc, 0, 'f', 3));
-    }
-    if (status_ != nullptr) {
-        status_->setText(QStringLiteral("自动标定：时移 %1 样本，CC %2")
-                             .arg(shift_samples)
-                             .arg(cc, 0, 'f', 3));
-    }
-}
-
 void GeologicalModeling3DPage::set_export_status(const QString& text) {
     if (export_status_ != nullptr) {
         export_status_->setText(text);

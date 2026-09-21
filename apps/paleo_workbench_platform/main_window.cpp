@@ -679,7 +679,6 @@ void MainWindow::buildUi() {
         pwb::app::joint_analysis::JointAnalysisInstall joint_deps;
         joint_deps.page = app_shell_->geomodel_page();
         joint_deps.host = geo3d_dock_->joint_host();
-        joint_deps.geo3d = geo3d_dock_->controller();
         joint_deps.scene_objects =
             &geo3d_dock_->viewport()->scene_manager();
         joint_deps.jobs = job_center_.get();

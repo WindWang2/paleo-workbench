@@ -296,7 +296,12 @@ void Geo3DDock::restore_project_workspace() {
                         : tr("已恢复三维工作区（%1 项降级）").arg(
                               restored.size()));
     } catch (const std::exception&) {
-        show_status(tr("三维工作区损坏，忽略"));
+        // Corrupt but readable: same isolation as missing/unreadable —
+        // reset, never keep the previous project's objects (the round-2
+        // review caught this half of the isolation doing nothing).
+        controller_->reset();
+        refresh_objects();
+        show_status(tr("三维工作区损坏，已重置"));
     }
 }
 

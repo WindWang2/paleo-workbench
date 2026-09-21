@@ -60,7 +60,7 @@ set(PWB_NATIVE_PRODUCT_CAPABILITIES
     "geo3d_viewer|原生三维地质模型视图|PWB_BUILD_GEO3D_VIZ|hard"
     "cross_well_viewer|跨井对比/井震标定视图|PWB_BUILD_VIZ_B|hard"
     "well_log_viewer|WLE 测井 dock|Pwb::VisualizationWellLog|optional"
-    "geomodel_kernel|地质建模内核 仅内核未接线|Pwb::GeoModel|kernel"
+    "geomodel_kernel|地质建模内核（联合分析/几何建模消费）|Pwb::GeoModel|kernel"
     "well_science_kernel|井科学对比内核 仅内核未接线|Pwb::WellScience|kernel"
     "factor_fusion_kernel|因子融合内核 经science_service接入产品|Pwb::FactorFusion|kernel"
     "ingest_kernel|资源解析内核 仅内核未接线|Pwb::Ingest|kernel"

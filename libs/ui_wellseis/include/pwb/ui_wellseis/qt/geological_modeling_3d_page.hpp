@@ -92,10 +92,6 @@ public:
     // seam; reduced builds keep the honest 未接入 fallbacks). Replaces the
     // hooks and refreshes the interpretation combos.
     void set_analysis_hooks(const Geo3DAnalysisHooks& hooks);
-    // Auto-tie result surface for the host hook: applies the recovered
-    // shift to the 时深偏移 slider and reports the correlation coefficient
-    // (Python parity: slider_td_shift.setValue + CC label).
-    void set_well_tie_result(int shift_samples, double cc);
     // Export/diagnostics status line (the export tab's own label).
     void set_export_status(const QString& text);
     // Stratal tab status line / joint top-bar status (host hooks report).

@@ -10,7 +10,8 @@
 //
 //   * stratal       — ui_workers run_stratal (demo + proportional surfaces)
 //                     + seismic_viewer horizon parse/fill for .dat inputs;
-//   * auto-tie      — visualization well_tie synthetic + correlate kernels;
+//   * auto-tie      — honest refusal on the joint page's placeholder
+//     records (real well tie stays the VIZ-B dock path);
 //   * crossplot     — seismic_viewer analyze_lithology_crossplot +
 //                     geomodel lithology tables;
 //   * export        — ui_workers run_export (FLAC3D/Abaqus legacy grid);
@@ -37,7 +38,6 @@
 #include <pwb/ui_wellseis/qt/geological_modeling_3d_page.hpp>
 
 namespace pwb::geo3d_viz {
-class Geo3DWorkspaceController;
 class SceneObjectManager;
 }  // namespace pwb::geo3d_viz
 
@@ -55,8 +55,6 @@ struct JointAnalysisInstall {
     pwb::ui_wellseis::qt::GeologicalModeling3DPage* page = nullptr;
     // The joint host behind the #1394 seam (geo3d dock composition root).
     pwb::app::viz_c::VizCJointHost* host = nullptr;
-    // The geo3d dock workspace controller (may be null in headless tests).
-    pwb::geo3d_viz::Geo3DWorkspaceController* geo3d = nullptr;
     // The dock viewport's named scene-object registry — analysis overlays
     // (stratal planes, RGB fusion) are added here exactly like the Python
     // "analysis:*" scene objects.
