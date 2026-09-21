@@ -228,8 +228,14 @@ public:
 
 private:
     void flush();
+    // Grid payloads live as sidecar files next to the store
+    // (<root>.payloads/<version_id>.json) so a commit never rewrites the
+    // megabytes of payload text on every mutation.
+    void write_payload(const std::string& version_id,
+                       const std::string& payload);
 
     std::filesystem::path file_;
+    std::string on_disk_digest_;  // byte digest at open/last flush
 };
 
 // ------------------------------------------------------ well-table exports --

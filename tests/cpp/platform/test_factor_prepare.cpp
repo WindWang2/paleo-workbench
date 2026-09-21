@@ -736,6 +736,19 @@ void test_persistence(const std::filesystem::path& tmp) {
         project["factor_map_tasks"][0]["grid_artifact_version_id"]
             .get<std::string>();
     CHECK(stamped == version_id);
+    // Sidecar payload: the store JSON stays metadata-only; the grid
+    // payload lives beside it.
+    CHECK(std::filesystem::exists(root / ("workflow_provenance.json.payloads/" + version_id + ".json")));
+    {
+        std::ifstream store_in(root / "workflow_provenance.json",
+                               std::ios::binary);
+        const std::string store_text((std::istreambuf_iterator<char>(store_in)),
+                                     std::istreambuf_iterator<char>());
+        const Json rail = Json::parse(store_text);
+        for (const auto& node : rail["versions"]) {
+            CHECK(node.value("payload_json", std::string()).empty());
+        }
+    }
 
     // corrupt store refuses to open (fail-closed over provenance).
     {
@@ -821,6 +834,142 @@ void test_well_table_bridge() {
               .size() == 4);  // untouched
 }
 
+// ------------------------------------------------------ adversarial add-ons --
+
+void test_cancel_mid_run(LiveFactorGridStore& grids) {
+    // A pre-cancelled token: the scheduler cancels between tasks; the
+    // commit must apply NOTHING and evict nothing (#881).
+    Json project = make_project(
+        {make_task("factor_xa", "地层厚度", synthetic_points(10, 91)),
+         make_task("factor_xb", "砂岩含量", synthetic_points(10, 92))});
+    const auto slice = build_prepare_slice(project);
+    const auto seams = make_factor_prepare_seams(
+        std::shared_ptr<LiveFactorGridStore>(&grids,
+                                            [](LiveFactorGridStore*) {}));
+    auto snapshot = pwb::ui_workers::build_prepare_snapshot(
+        slice, 90, "IDW", std::nullopt, 2.0, false, 0, std::nullopt,
+        std::nullopt, seams);
+    pwb::job::CancellationToken token;
+    token.cancel();  // pre-cancelled: the scheduler refuses before classify
+    bool threw_cancelled = false;
+    pwb::ui_workers::FactorPrepareBatchResult r;
+    try {
+        r = pwb::ui_workers::run_factor_prepare_schedule(snapshot, token,
+                                                          nullptr, seams, 0);
+    } catch (const pwb::job::JobCancelled&) {
+        threw_cancelled = true;  // scheduler's pre-classify cancel guard
+    }
+    CHECK(threw_cancelled);
+    // The commit contract under cancel: even a partially-staged result
+    // (cancelled=true) must apply nothing and evict nothing (#881) —
+    // synthesise the same shape the scheduler hands back mid-run.
+    r.generation = 90;
+    r.method = "IDW";
+    r.cancelled = true;
+    r.clean_count = 0;
+    r.executed_count = 0;
+    for (const auto& task : snapshot.tasks) {
+        pwb::ui_workers::FactorPrepareTaskResult item;
+        item.task_id = task.id;
+        item.dirty_state = "MISSING_OUTPUT";
+        r.task_results.push_back(item);
+    }
+    pwb::workflow_runtime::RuntimeStore catalog;
+    const auto report = commit_prepare_batch_result(project, r, 90, grids,
+                                                    &catalog);
+    CHECK(report.applied == 0);
+    CHECK(report.discarded.size() == 2);
+    CHECK(project["factor_map_tasks"][0]["status"] == "pending");
+    CHECK(catalog.list_runs().empty());
+}
+
+void test_degenerate_hull_refusal(LiveFactorGridStore& grids) {
+    // Collinear wells: the synthesized hull has zero area — the task must
+    // fail (scipy QhullError parity), never complete an all-NaN surface.
+    Json collinear = Json::array();
+    for (int i = 0; i < 6; ++i) {
+        collinear.push_back(make_point(i, 2 * i, 5.0 + i, "W"));
+    }
+    Json project = make_project(
+        {make_task("factor_xc", "砂地比", collinear, "约束IDW")});
+    FactorPrepareBatchResult r;
+    run_prepare(project, "约束IDW", grids, &r, 91);
+    CHECK(r.task_results[0].error.has_value());
+    CHECK(!grids.has("factor_xc"));
+}
+
+void test_direction_degenerate_skip(LiveFactorGridStore& grids) {
+    // A zero-length direction line (no explicit azimuth) is skipped — the
+    // task still runs on its boundary ring alone.
+    Json layer = make_boundary_ring(105.0, 35.0, 6.0);
+    Json zero_line = Json::object();
+    zero_line["id"] = "cline_zero";
+    zero_line["role"] = "direction";
+    zero_line["active"] = true;
+    zero_line["coordinates"] =
+        Json::array({Json::array({104.0, 34.0}),
+                     Json::array({104.0, 34.0})});
+    layer["lines"].push_back(zero_line);
+    Json project =
+        make_project({make_task("factor_xd", "砂地比",
+                                synthetic_points(8, 31), "约束IDW")},
+                     Json::array({layer}));
+    FactorPrepareBatchResult r;
+    run_prepare(project, "约束IDW", grids, &r, 92);
+    CHECK(!r.task_results[0].error.has_value());
+}
+
+void test_multi_window_rail_drift(const std::filesystem::path& tmp) {
+    // A second store opening the same rail must refuse to clobber the
+    // first window's provenance (fail closed, not last-writer-wins).
+    const auto root = tmp / "drift_proj";
+    std::filesystem::create_directories(root);
+    LiveFactorGridStore grids_a;
+    PersistentRuntimeCatalog rail_a;
+    rail_a.open(root / "workflow_provenance");
+    Json project_a = make_project(
+        {make_task("factor_ma", "地层厚度", synthetic_points(10, 93))});
+    FactorPrepareBatchResult r_a;
+    run_prepare(project_a, "IDW", grids_a, &r_a, 93);
+    CHECK(commit_prepare_batch_result(project_a, r_a, 93, grids_a,
+                                      &rail_a)
+              .applied == 1);
+
+    // Window B snapshots the rail (its own open).
+    PersistentRuntimeCatalog rail_b;
+    rail_b.open(root / "workflow_provenance");
+    // Window A commits again (advancing the on-disk state).
+    Json project_a2 = make_project(
+        {make_task("factor_mb", "砂岩含量", synthetic_points(10, 94))});
+    project_a2["factor_map_tasks"][0]["parameters"]["sample_points"] =
+        synthetic_points(10, 95);
+    FactorPrepareBatchResult r_a2;
+    run_prepare(project_a2, "IDW", grids_a, &r_a2, 94);
+    CHECK(commit_prepare_batch_result(project_a2, r_a2, 94, grids_a,
+                                      &rail_a)
+              .applied == 1);
+
+    // Window B's flush now sees the drift: the mutation must THROW
+    // (the install catches it and detaches the rail — honest
+    // degradation, no history loss).
+    LiveFactorGridStore grids_b;
+    Json project_b = make_project(
+        {make_task("factor_mc", "泥岩含量", synthetic_points(10, 96))});
+    FactorPrepareBatchResult r_b;
+    run_prepare(project_b, "IDW", grids_b, &r_b, 95);
+    bool refused = false;
+    try {
+        commit_prepare_batch_result(project_b, r_b, 95, grids_b, &rail_b);
+    } catch (const std::exception&) {
+        refused = true;
+    }
+    CHECK(refused);
+    // The rail still holds BOTH of window A's runs (nothing clobbered).
+    PersistentRuntimeCatalog reopened;
+    reopened.open(root / "workflow_provenance");
+    CHECK(reopened.list_runs().size() == 2);
+}
+
 // ----------------------------------------------------------- cross-well --
 
 void test_factor_context_provider() {
@@ -889,6 +1038,10 @@ int main(int argc, char** argv) {
     test_persistence(tmp);
     test_well_table_bridge();
     test_factor_context_provider();
+    test_cancel_mid_run(grids);
+    test_degenerate_hull_refusal(grids);
+    test_direction_degenerate_skip(grids);
+    test_multi_window_rail_drift(tmp);
 
     std::filesystem::remove_all(tmp);
     if (g_failures == 0) {

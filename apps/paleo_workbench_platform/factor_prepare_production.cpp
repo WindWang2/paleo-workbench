@@ -329,6 +329,15 @@ struct ConstraintSet {
                 // [0, 360) (Python % 360.0 on a positive quantity).
                 const double dx = points.back()[0] - points.front()[0];
                 const double dy = points.back()[1] - points.front()[1];
+                const Json* explicit_azimuth_probe =
+                    find_field(line, "azimuth_deg");
+                const bool has_explicit =
+                    explicit_azimuth_probe != nullptr
+                    && explicit_azimuth_probe->is_number();
+                // A zero-length line without an explicit azimuth is a
+                // degenerate direction (atan2(0,0)=0 would silently
+                // fabricate a north-pointing constraint) — skip it.
+                if (dx == 0.0 && dy == 0.0 && !has_explicit) continue;
                 double azimuth =
                     std::atan2(dx, dy) * 180.0 / M_PI;
                 azimuth = std::fmod(azimuth + 360.0, 360.0);
@@ -518,6 +527,9 @@ struct ResolvedFingerprints {
         }
     }
     if (grid_n <= 0) grid_n = ui_workers::kDefaultGridN;
+    // Plain path clamp mirrors the constrained engine's [20, 200]
+    // resolution bounds (a hand-edited 2000 would be 4M cells).
+    grid_n = std::max(20, std::min(200, grid_n));
     // Python parity: the SCHEDULED power wins unconditionally
     // (parameters.power is never read at prepare time — an override must
     // invalidate results computed with a different power).
@@ -676,9 +688,17 @@ struct InterpSamples {
 // LOO R² (Python parity: cap MAX_LOO_SAMPLES=64 via linspace subsample,
 // re-interpolate per fold; <2 valid pairs → null). Constrained backend →
 // null (spatial-4-fold metric not ported — honest).
+//
+// Production efficiency: each fold consumes exactly ONE bilinear sample
+// of the fold grid, so the fold runs on a coarse grid (kLooGridN) instead
+// of the production grid — same estimator, orders of magnitude cheaper
+// (200x200 -> 20x20 is 100x fewer cell solves). Cancellation is checked
+// per fold.
 [[nodiscard]] Json loo_r_squared(
     const std::vector<pwb::mapping::SamplePoint>& points,
-    const pwb::mapping::InterpolateOptions& options) {
+    const pwb::mapping::InterpolateOptions& options,
+    const job::CancellationToken& token) {
+    constexpr int kLooGridN = 20;
     constexpr int kMaxLooSamples = 64;
     Json out = Json(nullptr);
     if (points.size() < 3) return out;
@@ -704,8 +724,11 @@ struct InterpSamples {
             if (i != held) train.push_back(points[i]);
         }
         try {
+            token.check_cancelled();
+            pwb::mapping::InterpolateOptions fold_options = options;
+            fold_options.grid_n = kLooGridN;
             const auto grid =
-                pwb::mapping::interpolate_factor(train, options);
+                pwb::mapping::interpolate_factor(train, fold_options);
             std::vector<double> z(grid.grid_z.begin(), grid.grid_z.end());
             const auto sampled = pwb::factor_host::bilinear_sample_grid(
                 z, grid.grid_x, grid.grid_y, points[held].x, points[held].y);
@@ -909,6 +932,19 @@ struct AttachedResult {
                     hull = std::move(lower);
                     hull.insert(hull.end(), upper.begin(), upper.end());
                     hull.push_back(hull.front());  // close the ring
+                    // A degenerate (collinear) well set collapses the
+                    // chain to a zero-area ring — scipy raises QhullError
+                    // here; refuse with the same engine text instead of
+                    // completing an all-NaN surface.
+                    double area2 = 0.0;
+                    for (std::size_t i = 0; i + 1 < hull.size(); ++i) {
+                        area2 += hull[i][0] * hull[i + 1][1]
+                                 - hull[i + 1][0] * hull[i][1];
+                    }
+                    if (hull.size() < 4
+                        || std::abs(area2) <= 1e-12) {
+                        hull.clear();
+                    }
                 }
             }
             if (hull.empty()) {
@@ -966,6 +1002,15 @@ struct AttachedResult {
     options.grid_n = grid_n;
     options.power = power;
     options.crs = crs;
+    // Production neighborhoods: without max_neighbors the kriging path
+    // solves an (n+1)x(n+1) system PER CELL (O(n^3) per cell); the
+    // kernel's kNN path caps the system at k+1 (<=256). 12 neighbours is
+    // the standard production default and keeps a 1000-well kriging
+    // sub-second instead of hours.
+    if (backend == "kriging" && samples.points.size() > 32) {
+        options.max_neighbors = 12;
+        options.min_neighbors = 1;
+    }
     const Json variogram =
         pwb::factor_host::variogram_settings_from_params(params);
     if (variogram.is_object()) {
@@ -976,7 +1021,7 @@ struct AttachedResult {
     }
     out.grid = pwb::mapping::interpolate_factor(samples.points, options);
     out.backend = backend;
-    out.r_squared = loo_r_squared(samples.points, options);
+    out.r_squared = loo_r_squared(samples.points, options, token);
     out.n_break_lines = 0;
     out.n_direction_lines = 0;
     // The result fingerprint must reflect the scheduled inputs (the caller
@@ -1515,6 +1560,8 @@ ui_workers::FactorPrepareSeams make_factor_prepare_seams(
         view.status = task.status;
         view.input_snapshot_hash = task.input_snapshot_hash;
         view.grid_artifact_path = task.grid_artifact_path;
+        view.grid_artifact_version_id =
+            field_str(*task.source_json, "grid_artifact_version_id");
         view.has_live_factor_grid =
             grids_ptr != nullptr && grids_ptr->has(task.id);
         const auto state = pwb::factor_host::classify_factor_recompute(
@@ -1591,6 +1638,7 @@ ui_workers::FactorPrepareSeams make_factor_prepare_seams(
                 }();
                 int grid_n = args.ctx.grid_n;
                 if (grid_n <= 0) grid_n = ui_workers::kDefaultGridN;
+                grid_n = std::max(20, std::min(200, grid_n));
                 const double power = args.ctx.power;
 
                 const ConstraintSet constraints = resolve_constraints(
@@ -2090,6 +2138,12 @@ CommitPrepareReport commit_prepare_batch_result(
                         // best-effort failure bookkeeping only
                     }
                 }
+                // Provenance-safety failures (on-disk drift) must not be
+                // swallowed: the caller detaches the rail instead.
+                const std::string what = exc.what();
+                if (what.find("changed on disk") != std::string::npos) {
+                    throw;
+                }
             }
         };
 
@@ -2509,8 +2563,18 @@ namespace {
         version.metadata = *field;
     }
     if (const Json* field = find_field(node, "payload_json");
-        field != nullptr && field->is_string()) {
+        field != nullptr && field->is_string()
+        && !field->get<std::string>().empty()) {
         version.payload_json = field->get<std::string>();
+    }
+    // Sidecar payloads (metadata-only stores): lazily re-read.
+    if (version.payload_json.empty() && !version.path.empty()) {
+        std::ifstream payload_in(version.path, std::ios::binary);
+        if (payload_in) {
+            version.payload_json.assign(
+                std::istreambuf_iterator<char>(payload_in),
+                std::istreambuf_iterator<char>());
+        }
     }
     return version;
 }
@@ -2593,6 +2657,13 @@ namespace {
     return run;
 }
 
+// Byte-exact sha256 (store files are compared byte-for-byte; the
+// factor_host canonical encoder would normalize whitespace and defeat
+// the drift check).
+[[nodiscard]] std::string raw_sha256(const std::string& text) {
+    return pwb::factor_host::stable_sha256(Json(text));
+}
+
 void atomic_write(const std::filesystem::path& target,
                   const std::string& text) {
     std::filesystem::path tmp = target;
@@ -2617,6 +2688,7 @@ void atomic_write(const std::filesystem::path& target,
 void PersistentRuntimeCatalog::open(const std::filesystem::path& root) {
     file_ = root;
     file_ += ".json";
+    on_disk_digest_.clear();
     if (!std::filesystem::exists(file_)) {
         restore_state({}, {}, {});
         return;  // fresh store
@@ -2659,12 +2731,20 @@ void PersistentRuntimeCatalog::open(const std::filesystem::path& root) {
         for (const auto& node : *field) runs.push_back(decode_run(node));
     }
     restore_state(std::move(assets), std::move(versions), std::move(runs));
+    on_disk_digest_ = raw_sha256(text);
 }
 
 void PersistentRuntimeCatalog::flush() {
     if (file_.empty()) {
         throw std::runtime_error("catalog store not opened");
     }
+    // Payload sidecar files keep the store JSON metadata-only: a 20-task
+    // batch at 200x200 otherwise rewrites ~16 MB (with the payloads
+    // inlined) FOUR times per committed task — O(T^2) write amplification
+    // on the GUI thread. Payload files live in <root>.payloads/ next to
+    // the store; VersionRecord.path carries the file path and the
+    // checksum stays the payload's sha256 (integrity verify still reads
+    // the sidecar).
     Json out = Json::object();
     out["store_version"] = 1;
     Json assets = Json::array();
@@ -2674,7 +2754,11 @@ void PersistentRuntimeCatalog::flush() {
     out["assets"] = std::move(assets);
     Json versions = Json::array();
     for (const auto& version : this->versions()) {
-        versions.push_back(encode_version(version));
+        Json node = encode_version(version);
+        // Payload stays out of the store document; the path field points
+        // at the sidecar (decode re-reads it lazily).
+        node["payload_json"] = "";
+        versions.push_back(std::move(node));
     }
     out["versions"] = std::move(versions);
     Json runs = Json::array();
@@ -2683,7 +2767,64 @@ void PersistentRuntimeCatalog::flush() {
     }
     out["runs"] = std::move(runs);
     std::filesystem::create_directories(file_.parent_path());
-    atomic_write(file_, pwb::domain::dump_json_python_compatible(out));
+    const std::string text =
+        pwb::domain::dump_json_python_compatible(out);
+    // Multi-window guard: another window may have rewritten the rail since
+    // this store opened (each open() is a snapshot; a blind full-file
+    // rewrite would silently delete the other window's runs). Fail closed
+    // on drift — the honest degradation (no new versions) beats losing
+    // provenance.
+    const std::string digest = raw_sha256(text);
+    if (!on_disk_digest_.empty() && std::filesystem::exists(file_)) {
+        std::ifstream current(file_, std::ios::binary);
+        const std::string current_text(
+            (std::istreambuf_iterator<char>(current)),
+            std::istreambuf_iterator<char>());
+        if (raw_sha256(current_text) != on_disk_digest_) {
+            throw std::runtime_error(
+                "catalog store changed on disk since open (another "
+                "window wrote it): refusing to clobber provenance");
+        }
+    }
+    atomic_write(file_, text);
+    on_disk_digest_ = digest;
+}
+
+void PersistentRuntimeCatalog::write_payload(const std::string& version_id,
+                                             const std::string& payload) {
+    const std::filesystem::path dir = file_.string() + ".payloads";
+    std::filesystem::create_directories(dir);
+    // Unique tmp sibling (concurrent windows never share a .tmp).
+    std::ostringstream tmp_name;
+    tmp_name << version_id << '.' << std::this_thread::get_id() << ".tmp";
+    const std::filesystem::path tmp = dir / tmp_name.str();
+    const std::filesystem::path final = dir / (version_id + ".json");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            throw std::runtime_error("cannot write payload file: "
+                                     + tmp.string());
+        }
+        out << payload;
+        out.flush();
+        if (!out) throw std::runtime_error("short write: "
+                                           + tmp.string());
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, final, ec);
+    if (ec) {
+        std::filesystem::remove(tmp, ec);
+        throw std::runtime_error("cannot rename payload file: "
+                                 + final.string());
+    }
+    // Backfill the in-memory path so decode/verify can find the sidecar.
+    for (auto& version : const_cast<std::vector<
+             pwb::workflow_runtime::VersionRecord>&>(this->versions())) {
+        if (version.version_id == version_id) {
+            version.path = final.string();
+            return;
+        }
+    }
 }
 
 std::string PersistentRuntimeCatalog::register_run(
@@ -2709,6 +2850,10 @@ PersistentRuntimeCatalog::register_result_asset(
     auto registered = RuntimeStore::register_result_asset(
         name, type, format, asset_metadata, payload_json, stage, run_id,
         version_metadata);
+    // The payload bytes go to the sidecar BEFORE the metadata flush that
+    // references it (a metadata record must never point at a missing
+    // sidecar).
+    write_payload(registered.version_id, payload_json);
     flush();
     return registered;
 }
@@ -2720,6 +2865,7 @@ std::string PersistentRuntimeCatalog::register_version(
     const std::string& run_id, const Json& metadata) {
     const std::string id = RuntimeStore::register_version(
         asset_id, payload_json, stage, parent_version_ids, run_id, metadata);
+    write_payload(id, payload_json);
     flush();
     return id;
 }
@@ -2815,8 +2961,13 @@ std::vector<WellFactorSample> sample_factor_context(
             }
             for (const auto& v : *px) gx.push_back(v.get<double>());
             for (const auto& v : *py) gy.push_back(v.get<double>());
+            bool ragged = false;
             for (const auto& row : *pz) {
-                if (!row.is_array()) continue;
+                if (!row.is_array()
+                    || row.size() != gx.size()) {
+                    ragged = true;
+                    break;
+                }
                 for (const auto& cell : row) {
                     gz.push_back(cell.is_null()
                                      ? std::numeric_limits<double>::
@@ -2824,6 +2975,7 @@ std::vector<WellFactorSample> sample_factor_context(
                                      : cell.get<double>());
                 }
             }
+            if (ragged) gz.clear();  // reject misaligned payloads
         }
         if (gx.empty() || gy.empty()
             || gz.size() != gx.size() * gy.size()) {

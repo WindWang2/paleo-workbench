@@ -92,6 +92,7 @@ public:
         // "正在生成中" modal guard forever, even though the worker ended.
         thread_ = std::thread([this, body = std::move(body)]() {
             body();
+            finished_.store(true, std::memory_order_release);
             busy_.store(false);
         });
     }
@@ -102,12 +103,26 @@ public:
     bool busy() const { return busy_.load(); }
     void* target() const { return target_; }
 
-    // OwnedWorkerJob.shutdown parity: request cancellation, then join.
-    // A cooperative worker observes the flag; the join is unbounded (the
-    // terminal callbacks are marshalled, never joined from the GUI thread).
-    bool shutdown(int /*wait_ms*/) {
+    // OwnedWorkerJob.shutdown parity: request cancellation, then join —
+    // BOUNDED by wait_ms (page teardown / window close must not freeze the
+    // GUI for the full kernel duration). On timeout the worker is
+    // abandoned as detached: its marshalled terminal callback is dropped
+    // by the page's generation+target guards, so a stale result can never
+    // land on the next run (the same discipline Python's daemon join uses).
+    bool shutdown(int wait_ms) {
         if (!thread_.joinable()) return true;
         cancelled_.store(true);
+        if (wait_ms > 0) {
+            if (wait_join(wait_ms)) {
+                busy_.store(false);
+                target_ = nullptr;
+                return true;
+            }
+            thread_.detach();  // abandoned; guards discard its result
+            busy_.store(false);
+            target_ = nullptr;
+            return false;
+        }
         join();
         return !thread_.joinable();
     }
@@ -129,12 +144,31 @@ public:
         }
     }
 
+    // Timed join: std::thread has no timed join, so the body sets
+    // finished_ when it returns and we poll joinability at 5 ms.
+    bool wait_join(int ms) {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (true) {
+            if (finished_.load(std::memory_order_acquire)) {
+                if (thread_.joinable()) thread_.join();
+                finished_.store(false, std::memory_order_relaxed);
+                return true;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return !thread_.joinable() && !finished_.load();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+
     ~WorkerHost() override { join(); }
 
 private:
     std::thread thread_;
     std::atomic<bool> cancelled_{false};
     std::atomic<bool> busy_{false};
+    std::atomic<bool> finished_{false};  // set when the body returns
     void* target_ = nullptr;
 };
 
@@ -482,8 +516,11 @@ bool grid_from_task_parameters(const Json& task, std::vector<double>& grid_x,
     for (const auto& row : *z) {
         if (!row.is_array()) return false;
         for (const auto& v : row) {
-            if (!v.is_number()) return false;
-            grid_z.data.push_back(v.get<double>());
+            // null == nodata (encode_legacy_grid_lists convention).
+            if (!v.is_number() && !v.is_null()) return false;
+            grid_z.data.push_back(
+                v.is_null() ? std::numeric_limits<double>::quiet_NaN()
+                            : v.get<double>());
         }
     }
     if (grid_z.data.size() != grid_z.rows * grid_z.cols) return false;
@@ -508,6 +545,9 @@ public:
     std::shared_ptr<pwb::factor_production::LiveFactorGridStore> factor_grids;
     std::unique_ptr<pwb::factor_production::PersistentRuntimeCatalog>
         factor_catalog;
+    // Project the live grid store currently serves (same-project reopen
+    // keeps its entries; a switch clears them — #848).
+    std::filesystem::path factor_grids_project_;
 #endif
 };
 
@@ -703,6 +743,7 @@ bool install(const Install& install) {
     // CancellationToken parity).
     context->factor_grids =
         std::make_shared<pwb::factor_production::LiveFactorGridStore>();
+    context->factor_grids_project_.clear();
     context->factor_catalog =
         std::make_unique<pwb::factor_production::PersistentRuntimeCatalog>();
     {
@@ -1005,23 +1046,28 @@ bool install(const Install& install) {
             }
         }
 #endif
+        // GUI-thread snapshot of the task list (the worker body never
+        // touches the live document — a commit may mutate it concurrently
+        // while this body runs).
+        Json tasks_json = Json::array();
+        if (store != nullptr) {
+            if (const auto it = store->document().root().find(
+                    "factor_map_tasks");
+                it != store->document().root().end() && it->is_array()) {
+                tasks_json = *it;
+            }
+        }
         host->run(project, [host, completed = std::move(completed),
                             failed = std::move(failed), store,
+                            tasks_json = std::move(tasks_json),
                             resolved_grids = std::move(resolved_grids)]() {
             try {
-                Json* root = store != nullptr ? &store->document().root()
-                                              : nullptr;
                 // Shared result payload: the ledger JSON the GUI-thread
                 // commit writes back, plus the created-draft count.
                 auto payload = std::make_shared<Json>(Json::array());
                 int count = 0;
-                if (root != nullptr) {
+                {
                     std::vector<pwb::ui_workers::FactorTaskSlice> tasks;
-                    Json tasks_json = Json::array();
-                    if (const auto it = root->find("factor_map_tasks");
-                        it != root->end() && it->is_array()) {
-                        tasks_json = *it;
-                    }
                     for (const auto& entry : tasks_json) {
                         pwb::ui_workers::FactorTaskSlice task;
                         auto field = [&entry](const char* key) {
@@ -1201,11 +1247,19 @@ void notify_project_changed(QMainWindow* window) {
     } else {
         self->factor_catalog.reset();
     }
-    // Session caches must not leak across projects (Python
-    // clear_session_caches parity): the live grid store and any stashed
-    // un-committed batch die with the project switch.
+    // Session caches must not leak ACROSS projects (Python
+    // clear_session_caches parity — called on catalog close/switch):
+    // reopen of the SAME project keeps the grids (the classifier then
+    // sees live grids for reuse), a DIFFERENT project clears them.
     if (self->factor_grids != nullptr) {
-        self->factor_grids->clear_all();
+        const std::filesystem::path current_project =
+            store != nullptr
+                ? store->project_file()
+                : std::filesystem::path{};
+        if (current_project != self->factor_grids_project_) {
+            self->factor_grids->clear_all();
+            self->factor_grids_project_ = current_project;
+        }
     }
     if (QMainWindow* owner = window; owner != nullptr) {
         owner->setProperty("closure_factor_catalog",

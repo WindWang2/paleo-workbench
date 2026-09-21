@@ -414,7 +414,7 @@ int factor_kernel_battery(QgsApplication& app) {
             PWB_CHECK(fs::exists(tmp / "workflow_provenance.json"));
         }
 
-        // rerun unchanged -> all reused
+        // rerun unchanged -> all reused (no compute)
         QMetaObject::invokeMethod(panel, "generate_requested",
                                   Q_ARG(QString, QStringLiteral("IDW")));
         const bool reused = wait_for(
@@ -429,6 +429,67 @@ int factor_kernel_battery(QgsApplication& app) {
         PWB_CHECK_MSG(panel->summary_label()->text()
                           .contains(QStringLiteral("复用 2")),
                       "unchanged rerun reuses both tasks");
+        PWB_CHECK_MSG(
+            panel->summary_label()->text().contains(
+                QStringLiteral("计算 0")),
+            "unchanged rerun computes nothing");
+
+        // 4b) change ONE task's values (coordinates held) -> selective
+        // recompute: exactly one task recomputes, the other stays reused.
+        {
+            Json live = read_document();
+            Json points = live["factor_map_tasks"][0]["parameters"]
+                              ["sample_points"];
+            for (auto& point : points) {
+                point["value"] = point["value"].get<double>() + 11.0;
+            }
+            live["factor_map_tasks"][0]["parameters"]["sample_points"] =
+                points;
+            {
+                std::ofstream out(project_file,
+                                  std::ios::binary | std::ios::trunc);
+                out << pwb::domain::dump_json_python_compatible(live);
+            }
+            // One-window-one-project contract: edit the file on disk, then
+            // re-enter the page through a FRESH window (the first window
+            // keeps its live store). The generation counter is per-page,
+            // so the new run supersedes cleanly.
+            window.hide();
+            preparation = nullptr;
+            panel = nullptr;
+            auto* reopen_window =
+                new MainWindow();  // owned by the test scope
+            reopen_window->show();
+            const QString reopen_error = reopen_window->openProject(
+                QString::fromStdString(project_file.string()));
+            PWB_CHECK_MSG(reopen_error.isEmpty(),
+                          "reopen after value edit failed");
+            preparation = reopen_window->appShell()
+                              ->findChild<
+                                  pwb::ui_pages_data::qt::PreparationPage*>();
+            PWB_CHECK(preparation != nullptr);
+            panel = preparation->task_panel();
+            PWB_CHECK(panel != nullptr);
+            reopen_window->hide();
+        }
+        QMetaObject::invokeMethod(panel, "generate_requested",
+                                  Q_ARG(QString, QStringLiteral("IDW")));
+        const bool recomputed = wait_for(
+            [&] {
+                return panel->summary_label() != nullptr
+                       && panel->summary_label()
+                              ->text()
+                              .contains(QStringLiteral("已制备"));
+            },
+            "selective recompute");
+        PWB_CHECK_MSG(recomputed, "selective recompute did not complete");
+        PWB_CHECK_MSG(panel->summary_label()->text()
+                          .contains(QStringLiteral("复用 1")),
+                      "unchanged task reused after the value edit");
+        PWB_CHECK_MSG(
+            panel->summary_label()->text().contains(
+                QStringLiteral("计算 1")),
+            "exactly the edited task recomputed");
     }
 
     // 5) save/reopen: a fresh window recovers the tasks + provenance rail.
@@ -457,9 +518,13 @@ int factor_kernel_battery(QgsApplication& app) {
                                std::istreambuf_iterator<char>());
         const Json rail = Json::parse(text);
         PWB_CHECK_MSG(rail["store_version"] == 1, "provenance store header");
-        PWB_CHECK_MSG(rail["runs"].size() == 2,
-                      "two factor_map runs on the rail");
-        PWB_CHECK_MSG(rail["assets"].size() == 2, "two grid assets");
+        // First window: 2 committed tasks (2 runs). Recompute window: only
+        // the edited task recomputes and re-registers (1 more run, 1 more
+        // asset) — the reused task never re-registers.
+        PWB_CHECK_MSG(rail["runs"].size() == 3,
+                      "three factor_map runs on the rail (2 + 1 recompute)");
+        PWB_CHECK_MSG(rail["assets"].size() == 3,
+                      "three grid assets (recompute adds one)");
     }
 
     fs::remove_all(tmp);
