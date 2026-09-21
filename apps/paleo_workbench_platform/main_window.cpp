@@ -597,18 +597,22 @@ void MainWindow::buildUi() {
     well_log_host->set_interpretation_callback(
         [this](const pwb::viz::WellLogInterpretationEvent& event) {
             const QString label = QString::fromStdString(event.label);
+            // Transient message, NOT status_label_: the persistent label
+            // is rewritten by every refreshActionStates pass (工具可用
+            // N/M), which used to erase the readout within a tick
+            // (#1451).
+            QString text;
             if (event.kind ==
                 pwb::viz::WellLogInterpretationEvent::Kind::marker_hit) {
-                status_label_->setText(tr("地层顶部: %1 @ %2")
-                                           .arg(label)
-                                           .arg(event.top));
+                text = tr("地层顶部: %1 @ %2").arg(label).arg(event.top);
             } else {
-                status_label_->setText(tr("相带证据: %1 [%2, %3] %4")
-                                           .arg(label)
-                                           .arg(event.top)
-                                           .arg(event.bottom)
-                                           .arg(QString::fromStdString(event.unit)));
+                text = tr("相带证据: %1 [%2, %3] %4")
+                           .arg(label)
+                           .arg(event.top)
+                           .arg(event.bottom)
+                           .arg(QString::fromStdString(event.unit));
             }
+            statusBar()->showMessage(text, 6000);
         });
 #if defined(PWB_WITH_VIZ_A) && defined(PWB_WITH_CONV_30)
     // BEGIN VIZ-A — production wiring (preview provider + background LAS
@@ -3471,6 +3475,37 @@ void MainWindow::install_conv27_surface() {
                 connect(vector_layer, &QgsVectorLayer::editingStopped,
                         this, [this]() { refreshActionStates(); });
               }
+            });
+    // Removing layers (tree context-menu 移除组或图层) must retire the
+    // domain facts too (#1451): a stale active entry kept every gated
+    // tool reporting the misleading 图层源缺失（文件被移动或删除）
+    // verdict until another layer was clicked.
+    connect(context_.session().map().project(), &QgsProject::layersRemoved,
+            this, [this](const QList<QString>& layer_ids) {
+              (void)layer_ids;
+              // Retire every fact whose layer no longer resolves in the
+              // map, and clear the active selection if it was one of
+              // them (#1451) — a stale active entry kept every gated
+              // tool reporting the misleading 图层源缺失 verdict.
+              bool active_removed = false;
+              const auto active = context_.session().active_layer();
+              for (auto it = facts_.begin(); it != facts_.end();) {
+                if (context_.session().map().vectorLayerById(it->first)
+                    == nullptr) {
+                  if (active.has_value()
+                      && active->layer_id == it->first) {
+                    active_removed = true;
+                  }
+                  it = facts_.erase(it);
+                } else {
+                  ++it;
+                }
+              }
+              if (active_removed) {
+                pwb::application::DomainLayerFacts empty;
+                context_.session().set_active_layer(empty);
+              }
+              refreshActionStates();
             });
 
     // Layout persistence: restore a same-version layout if present.
