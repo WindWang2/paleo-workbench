@@ -1640,6 +1640,39 @@ if(TARGET pwb-platform
         Pwb::VizCharts Pwb::Application)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_MAPPING=1)
 
+    # BEGIN V14-FACTOR — the real factor-grid compute kernel (V14 line
+    # V14-CONSTRAINT-FACTOR): mapping_kernel interpolation (idw/kriging +
+    # CONV-05 constrained engine), CONV-18 envelope codec, factor_host
+    # fingerprints and the workflow_runtime catalog seam. Configures without
+    # the CONV-05/18 kernel slices keep the honest kernel-unavailable
+    # prepare surface (closure_mapping_install falls back to the staged
+    # KernelUnavailable result — never a fake grid).
+    if(PWB_BUILD_CONV_05 AND PWB_BUILD_CONV_18
+       AND TARGET Pwb::FactorHost AND TARGET Pwb::WorkflowRuntime)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/factor_prepare_production.cpp)
+        target_link_libraries(pwb-platform PRIVATE
+            Pwb::FactorHost Pwb::WorkflowRuntime Pwb::MappingKernel)
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_FACTOR_KERNEL=1)
+
+        add_executable(platform_factor_prepare
+            tests/cpp/platform/test_factor_prepare.cpp
+            apps/paleo_workbench_platform/factor_prepare_production.cpp)
+        target_compile_features(platform_factor_prepare PRIVATE cxx_std_20)
+        target_include_directories(platform_factor_prepare PRIVATE
+            tests/cpp/platform
+            apps/paleo_workbench_platform)
+        target_link_libraries(platform_factor_prepare PRIVATE
+            Pwb::FactorHost Pwb::WorkflowRuntime Pwb::UiWorkers
+            Pwb::MappingKernel Pwb::Domain Pwb::JobRuntime)
+        add_test(NAME platform.factor_prepare
+                 COMMAND platform_factor_prepare)
+        set_tests_properties(platform.factor_prepare PROPERTIES
+            TIMEOUT 600)
+    endif()
+    # END V14-FACTOR
+
     # BEGIN V14-COMPILATION-PUBLISH — baseline link fix: main_window.cpp
     # references shell_project_actions (12-line #1421 surface) but this
     # test target's source list never carried the TU, so the target could
@@ -1674,6 +1707,18 @@ if(TARGET pwb-platform
     target_compile_definitions(platform_closure_mapping PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/platform"
         PWB_WITH_APP_SHELL=1 PWB_WITH_CLOSURE_MAPPING=1)
+    # V14-FACTOR: the platform E2E test also binds the real kernel when the
+    # CONV-05/18 slices are present (same degradation rule as the app; the
+    # production source itself is already in the executable above).
+    if(PWB_BUILD_CONV_05 AND PWB_BUILD_CONV_18
+       AND TARGET Pwb::FactorHost AND TARGET Pwb::WorkflowRuntime)
+        target_sources(platform_closure_mapping PRIVATE
+            apps/paleo_workbench_platform/factor_prepare_production.cpp)
+        target_link_libraries(platform_closure_mapping PRIVATE
+            Pwb::FactorHost Pwb::WorkflowRuntime Pwb::MappingKernel)
+        target_compile_definitions(platform_closure_mapping PRIVATE
+            PWB_WITH_FACTOR_KERNEL=1)
+    endif()
     add_test(NAME platform.closure_mapping
              COMMAND platform_closure_mapping)
     set_tests_properties(platform.closure_mapping PROPERTIES

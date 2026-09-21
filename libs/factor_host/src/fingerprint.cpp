@@ -381,6 +381,9 @@ std::optional<FactorFingerprints> stored_fingerprints_from_task(
 
 bool task_has_numerical_output(const FactorTaskView& task) {
     if (task.has_live_factor_grid) return true;
+    // A catalog-registered grid version is a persisted numerical output
+    // (register_factor_map_run INTERMEDIATE payload).
+    if (!task.grid_artifact_version_id.empty()) return true;
     if (!task.grid_artifact_path.empty()) {
         std::error_code ec;
         return std::filesystem::is_regular_file(task.grid_artifact_path, ec);

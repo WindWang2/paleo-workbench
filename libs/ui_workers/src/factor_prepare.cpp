@@ -5,6 +5,10 @@
 #include <condition_variable>
 #include <deque>
 #include <future>
+#include <iomanip>
+#include <mutex>
+#include <random>
+#include <sstream>
 #include <utility>
 
 #include "pwb/ui_workers/synthetic_points.hpp"
@@ -44,6 +48,18 @@ std::optional<FactorDirtyState> factor_dirty_state_from_string(
 }
 
 namespace {
+
+// FactorMapTask id default (models.py _id): "factor_" + uuid4 hex[:12].
+// Synthesized default tasks need distinct ids — the scheduler keys results
+// and the host commit indexes live tasks by id, so empty ids would collide.
+std::string new_factor_task_id() {
+    static std::mutex mutex;
+    static std::mt19937_64 rng(std::random_device{}());
+    std::lock_guard<std::mutex> guard(mutex);
+    std::ostringstream out;
+    out << std::hex << std::setfill('0') << std::setw(16) << rng();
+    return "factor_" + out.str().substr(0, 12);
+}
 
 double steady_seconds() {
     return std::chrono::duration<double>(
@@ -133,6 +149,7 @@ FactorPrepareSnapshot build_prepare_snapshot(
         int index = 0;
         for (const auto& factor_type : types) {
             FactorTaskSlice task;
+            task.id = new_factor_task_id();
             task.name = horizon + " " + factor_type;
             task.target_horizon = horizon;
             task.factor_type = factor_type;

@@ -29,6 +29,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -36,6 +37,10 @@
 #include <utility>
 
 #include "closure_mapping_document.hpp"
+
+#if PWB_WITH_FACTOR_KERNEL
+#include "factor_prepare_production.hpp"
+#endif
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/cartography/color_ramps.hpp>
@@ -98,7 +103,15 @@ public:
         target_ = target;
         busy_.store(true);
         cancelled_.store(false);
-        thread_ = std::thread([body = std::move(body)]() { body(); });
+        // V14-FACTOR fix: a normally-finished body must release busy_ —
+        // Python OwnedWorkerJob.is_running tracks the live thread. Without
+        // this, the SECOND action (e.g. 等值线初稿 after 批量生成) hit the
+        // "正在生成中" modal guard forever, even though the worker ended.
+        thread_ = std::thread([this, body = std::move(body)]() {
+            body();
+            finished_.store(true, std::memory_order_release);
+            busy_.store(false);
+        });
     }
 
     void cancel() { cancelled_.store(true); }
@@ -107,12 +120,26 @@ public:
     bool busy() const { return busy_.load(); }
     void* target() const { return target_; }
 
-    // OwnedWorkerJob.shutdown parity: request cancellation, then join.
-    // A cooperative worker observes the flag; the join is unbounded (the
-    // terminal callbacks are marshalled, never joined from the GUI thread).
-    bool shutdown(int /*wait_ms*/) {
+    // OwnedWorkerJob.shutdown parity: request cancellation, then join —
+    // BOUNDED by wait_ms (page teardown / window close must not freeze the
+    // GUI for the full kernel duration). On timeout the worker is
+    // abandoned as detached: its marshalled terminal callback is dropped
+    // by the page's generation+target guards, so a stale result can never
+    // land on the next run (the same discipline Python's daemon join uses).
+    bool shutdown(int wait_ms) {
         if (!thread_.joinable()) return true;
         cancelled_.store(true);
+        if (wait_ms > 0) {
+            if (wait_join(wait_ms)) {
+                busy_.store(false);
+                target_ = nullptr;
+                return true;
+            }
+            thread_.detach();  // abandoned; guards discard its result
+            busy_.store(false);
+            target_ = nullptr;
+            return false;
+        }
         join();
         return !thread_.joinable();
     }
@@ -134,12 +161,31 @@ public:
         }
     }
 
+    // Timed join: std::thread has no timed join, so the body sets
+    // finished_ when it returns and we poll joinability at 5 ms.
+    bool wait_join(int ms) {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (true) {
+            if (finished_.load(std::memory_order_acquire)) {
+                if (thread_.joinable()) thread_.join();
+                finished_.store(false, std::memory_order_relaxed);
+                return true;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return !thread_.joinable() && !finished_.load();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+
     ~WorkerHost() override { join(); }
 
 private:
     std::thread thread_;
     std::atomic<bool> cancelled_{false};
     std::atomic<bool> busy_{false};
+    std::atomic<bool> finished_{false};  // set when the body returns
     void* target_ = nullptr;
 };
 
@@ -487,8 +533,11 @@ bool grid_from_task_parameters(const Json& task, std::vector<double>& grid_x,
     for (const auto& row : *z) {
         if (!row.is_array()) return false;
         for (const auto& v : row) {
-            if (!v.is_number()) return false;
-            grid_z.data.push_back(v.get<double>());
+            // null == nodata (encode_legacy_grid_lists convention).
+            if (!v.is_number() && !v.is_null()) return false;
+            grid_z.data.push_back(
+                v.is_null() ? std::numeric_limits<double>::quiet_NaN()
+                            : v.get<double>());
         }
     }
     if (grid_z.data.size() != grid_z.rows * grid_z.cols) return false;
@@ -506,6 +555,17 @@ public:
     Install install;
     MapDocumentBank* bank = nullptr;
     pwb::ui_pages_data::qt::PreparationPage* preparation = nullptr;
+#if PWB_WITH_FACTOR_KERNEL
+    // V14-FACTOR: process-live grid cache + the persisted factor_map
+    // provenance rail (one workflow seam contract, GUI-thread-confined like
+    // every other catalog surface in this install).
+    std::shared_ptr<pwb::factor_production::LiveFactorGridStore> factor_grids;
+    std::unique_ptr<pwb::factor_production::PersistentRuntimeCatalog>
+        factor_catalog;
+    // Project the live grid store currently serves (same-project reopen
+    // keeps its entries; a switch clears them — #848).
+    std::filesystem::path factor_grids_project_;
+#endif
 
     // BEGIN V14-COMPILATION-PUBLISH
     // Element ids the user explicitly bound to the live map document
@@ -1055,11 +1115,175 @@ bool install(const Install& install) {
                        : 0;
         });
 
-    // Prepare worker: the real batch grid kernel is not ported natively
-    // yet (cross-line dependency — registered in the PR). The run stages a
-    // real batch result whose tasks carry the explicit kernel-missing
-    // error; the page shows the honest failure instead of a fabricated
-    // product.
+#if PWB_WITH_FACTOR_KERNEL
+    // BEGIN V14-FACTOR PREPARE — the REAL batch grid kernel: the host
+    // thread builds the narrow scientific snapshot (fingerprint inputs
+    // match classification, Python parity), the WorkerHost thread runs the
+    // scheduler over the fully-bound seams (classify → reuse → per-task
+    // isolated interpolation), and exactly one terminal callback is
+    // marshalled back to the GUI thread. The cancel bridge polls
+    // host->cancelled() onto the job token (50 ms granularity, Python
+    // CancellationToken parity).
+    context->factor_grids =
+        std::make_shared<pwb::factor_production::LiveFactorGridStore>();
+    context->factor_grids_project_.clear();
+    context->factor_catalog =
+        std::make_unique<pwb::factor_production::PersistentRuntimeCatalog>();
+    {
+        const auto store0 = project_store_fn();
+        if (store0 != nullptr) {
+            try {
+                context->factor_catalog->open(
+                    store0->project_file().parent_path()
+                    / "workflow_provenance");
+            } catch (const std::exception&) {
+                // Fail-closed provenance: a corrupt store refuses to open;
+                // the prepare run degrades to no-version registration
+                // rather than silently resetting history.
+                context->factor_catalog.reset();
+            }
+        }
+    }
+    {
+        pwb::factor_production::FactorPrepareKernelConfig kernel_config;
+        auto seams = pwb::factor_production::make_factor_prepare_seams(
+            context->factor_grids, kernel_config);
+        auto grids = context->factor_grids;
+        preparation->set_prepare_worker_fn(
+            [host, project_store_fn, seams, grids](
+                void* project, const std::string& method, int gen,
+                std::function<void(
+                    const pwb::ui_pages_data::qt::PrepareProgressView&)>
+                    progress,
+                std::function<void(
+                    const pwb::ui_pages_data::qt::PrepareResultView&)>
+                    completed,
+                std::function<void(const QString&)> failed,
+                std::function<void()> cancelled) {
+            // Snapshot on the host thread (the GUI thread at call time) so
+            // the scientific inputs match the Stage-4 fingerprints.
+            const auto store = project_store_fn();
+            pwb::ui_workers::FactorPrepareSnapshot snapshot;
+            if (store != nullptr) {
+                const auto slice = pwb::factor_production::
+                    build_prepare_slice(store->document().root());
+                snapshot = pwb::ui_workers::build_prepare_snapshot(
+                    slice, gen, method, /*grid_n=*/std::nullopt,
+                    /*power=*/2.0, /*force=*/false, /*seed=*/0,
+                    /*target_horizon=*/std::nullopt,
+                    /*factor_types=*/std::nullopt, seams);
+            }
+            host->run(project,
+                      [host, snapshot = std::move(snapshot), seams, grids,
+                       progress, completed, failed, cancelled, gen,
+                       method]() {
+                try {
+                    job::CancellationToken token;
+                    std::atomic<bool> body_done{false};
+                    std::thread cancel_bridge([&host, &token, &body_done] {
+                        while (!body_done.load(std::memory_order_relaxed)) {
+                            if (host->cancelled()) {
+                                token.cancel();
+                                return;
+                            }
+                            std::this_thread::sleep_for(
+                                std::chrono::milliseconds(50));
+                        }
+                    });
+                    // RAII: whatever path leaves this scope (result, cancel
+                    // or exception) joins the bridge — a joinable thread at
+                    // destruction would std::terminate the app.
+                    const auto join_bridge =
+                        [&cancel_bridge, &body_done]() {
+                            body_done.store(true,
+                                            std::memory_order_relaxed);
+                            if (cancel_bridge.joinable()) {
+                                cancel_bridge.join();
+                            }
+                        };
+                    struct JoinGuard {
+                        std::function<void()> fn;
+                        ~JoinGuard() { fn(); }
+                    } join_guard{join_bridge};
+                    const auto forward =
+                        [&](const pwb::ui_workers::FactorPrepareProgress&
+                                update) {
+                        pwb::ui_pages_data::qt::PrepareProgressView view;
+                        view.generation = update.generation;
+                        view.total_tasks = update.total_tasks;
+                        view.clean = update.clean;
+                        view.dirty = update.dirty;
+                        view.completed = update.completed;
+                        view.phase = update.phase;
+                        view.message = update.message;
+                        host->marshal(
+                            [progress, view] { progress(view); });
+                    };
+                    auto result = pwb::ui_workers::
+                        run_factor_prepare_schedule(snapshot, token, forward,
+                                                    seams, /*workers=*/0);
+                    // (the JoinGuard joins at scope exit on every path)
+                    pwb::ui_pages_data::qt::PrepareResultView done;
+                    done.generation = result.generation;
+                    done.clean_count = result.clean_count;
+                    done.executed_count = result.executed_count;
+                    if (result.cancelled) {
+                        host->marshal([cancelled] { cancelled(); });
+                    } else {
+                        // The full DTO travels through the shared grid
+                        // store keyed by task id; the view carries the
+                        // counters the page label reads. The commit pulls
+                        // the staged DTOs back out of the context.
+                        auto payload =
+                            std::make_shared<pwb::ui_workers::
+                                                 FactorPrepareBatchResult>(
+                                std::move(result));
+                        host->marshal(
+                            [completed, done, payload, grids] {
+                                grids->stash_last_result(payload);
+                                completed(done);
+                            });
+                    }
+                } catch (const job::JobCancelled&) {
+                    host->marshal([cancelled] { cancelled(); });
+                } catch (const std::exception& exc) {
+                    const QString message = QString::fromUtf8(exc.what());
+                    host->marshal(
+                        [failed, message] { failed(message); });
+                }
+            });
+        });
+    }
+
+    // Commit: the real host-side guard semantics — stale generation
+    // mutates nothing; per-item fingerprint re-verification against the
+    // LIVE project under the scheduled overrides; targeted index
+    // replacement; live grid repair; factor_map run + INTERMEDIATE version
+    // registration on the persisted provenance rail.
+    preparation->set_commit_prepare_fn(
+        [project_store_fn, context](
+            void*, const pwb::ui_pages_data::qt::PrepareResultView&,
+            int expected_generation) -> int {
+        const auto store = project_store_fn();
+        if (store == nullptr) return 0;
+        auto last = context->factor_grids->take_last_result();
+        if (!last.has_value()) return 0;
+        pwb::factor_production::CommitPrepareReport report;
+        try {
+            report = pwb::factor_production::
+                commit_prepare_batch_result(
+                    store->document().root(), *last, expected_generation,
+                    *context->factor_grids, context->factor_catalog.get());
+        } catch (const std::exception&) {
+            return 0;  // commit failure mutates nothing (host guard)
+        }
+        return static_cast<int>(report.discarded.size());
+    });
+#else
+    // Prepare worker: the real batch grid kernel slices (CONV-05/18) are
+    // not in this configure. The run stages a real batch result whose
+    // tasks carry the explicit kernel-missing error; the page shows the
+    // honest failure instead of a fabricated product.
     preparation->set_prepare_worker_fn(
         [host](void* project, const std::string& method, int gen,
                std::function<void(const pwb::ui_pages_data::qt::PrepareProgressView&)>
@@ -1098,19 +1322,19 @@ bool install(const Install& install) {
             host->marshal([completed, done] { completed(done); });
         });
         });
-
-    // Commit: the Python host-side guard semantics (stale generation
-    // mutates nothing). Task-patch application lands with the science
-    // kernel binding (the conversion seam needs produced task payloads).
     preparation->set_commit_prepare_fn(
         [](void*, const pwb::ui_pages_data::qt::PrepareResultView&,
            int) { return 0; });
+#endif
+    // END V14-FACTOR PREPARE
 
     // Contour worker: the REAL ui_workers compile pipeline with the REAL
-    // viz_charts marching-squares extraction kernel over legacy parameter
-    // grids. Without completed grids it honestly yields zero drafts.
+    // viz_charts marching-squares extraction kernel. Grid resolution order
+    // (V14-FACTOR, Python factor_grid_result_for_task parity): live grid
+    // cache → catalog version payload → legacy inline parameters. Without
+    // completed grids it honestly yields zero drafts.
     preparation->set_contour_worker_fn(
-        [host, project_store_fn](
+        [host, project_store_fn, context](
             void* project, std::function<void(void*)> completed,
             std::function<void(const QString&)> failed) {
         // Keep the store alive for the whole worker run (captured on the
@@ -1119,22 +1343,114 @@ bool install(const Install& install) {
         // the captured (superseded) store and is dropped by the page
         // guards on the GUI thread.
         auto store = project_store_fn();
+        // GUI-thread pre-resolution of every complete task's grid payload
+        // (the live cache and the catalog seam are thread-confined to the
+        // GUI thread by contract — the worker body only reads the copies).
+        std::map<std::string,
+                 std::tuple<std::vector<double>, std::vector<double>,
+                            pwb::ui_workers::Grid2D>>
+            resolved_grids;
+#if PWB_WITH_FACTOR_KERNEL
+        if (store != nullptr && context->factor_grids != nullptr) {
+            const Json& root = store->document().root();
+            const auto tasks_it = root.find("factor_map_tasks");
+            if (tasks_it != root.end() && tasks_it->is_array()) {
+                for (const auto& entry : *tasks_it) {
+                    if (!entry.is_object()) continue;
+                    const auto status_it = entry.find("status");
+                    if (status_it == entry.end()
+                        || status_it->get<std::string>() != "complete") {
+                        continue;
+                    }
+                    std::string id;
+                    if (const auto id_it = entry.find("id");
+                        id_it != entry.end() && id_it->is_string()) {
+                        id = id_it->get<std::string>();
+                    }
+                    if (id.empty()) continue;
+                    if (auto live = context->factor_grids->peek(id)) {
+                        pwb::ui_workers::Grid2D grid;
+                        grid.rows = live->grid_y.size();
+                        grid.cols = live->grid_x.size();
+                        grid.data.assign(live->grid_z.begin(),
+                                         live->grid_z.end());
+                        resolved_grids.emplace(
+                            id, std::make_tuple(live->grid_x, live->grid_y,
+                                                std::move(grid)));
+                        continue;
+                    }
+                    // Catalog version payload (to_legacy_dict shape) — the
+                    // reopened-project leg (live cache is empty there).
+                    if (context->factor_catalog != nullptr) {
+                        const auto vid_it =
+                            entry.find("grid_artifact_version_id");
+                        if (vid_it == entry.end() || !vid_it->is_string()) {
+                            continue;
+                        }
+                        try {
+                            const auto version =
+                                context->factor_catalog->resolve_version(
+                                    vid_it->get<std::string>());
+                            if (!version.has_value()) continue;
+                            const Json payload =
+                                Json::parse(version->payload_json);
+                            std::vector<double> gx, gy;
+                            for (const auto& v : payload["grid_x"]) {
+                                gx.push_back(v.get<double>());
+                            }
+                            for (const auto& v : payload["grid_y"]) {
+                                gy.push_back(v.get<double>());
+                            }
+                            pwb::ui_workers::Grid2D gz;
+                            gz.rows = gy.size();
+                            gz.cols = gx.size();
+                            gz.data.reserve(gz.rows * gz.cols);
+                            for (const auto& row : payload["grid_z"]) {
+                                for (const auto& cell : row) {
+                                    gz.data.push_back(
+                                        cell.is_null()
+                                            ? std::numeric_limits<double>::quiet_NaN()
+                                            : cell.get<double>());
+                                }
+                            }
+                            if (gz.data.size() == gz.rows * gz.cols
+                                && !gx.empty()) {
+                                resolved_grids.emplace(
+                                    id, std::make_tuple(
+                                            std::move(gx), std::move(gy),
+                                            std::move(gz)));
+                            }
+                        } catch (const std::exception&) {
+                            // Unresolvable payload — the legacy inline leg
+                            // below is the last resort, then honest skip.
+                        }
+                    }
+                }
+            }
+        }
+#endif
+        // GUI-thread snapshot of the task list (the worker body never
+        // touches the live document — a commit may mutate it concurrently
+        // while this body runs).
+        Json tasks_json = Json::array();
+        if (store != nullptr) {
+            if (const auto it = store->document().root().find(
+                    "factor_map_tasks");
+                it != store->document().root().end() && it->is_array()) {
+                tasks_json = *it;
+            }
+        }
         host->run(project, [host, completed = std::move(completed),
-                            failed = std::move(failed), store]() {
+                            failed = std::move(failed), store,
+                            tasks_json = std::move(tasks_json),
+                            resolved_grids = std::move(resolved_grids)]() {
             try {
-                Json* root = store != nullptr ? &store->document().root()
-                                              : nullptr;
                 // Shared result payload: the ledger JSON the GUI-thread
                 // commit writes back, plus the created-draft count.
                 auto payload = std::make_shared<Json>(Json::array());
                 int count = 0;
-                if (root != nullptr) {
+                {
                     std::vector<pwb::ui_workers::FactorTaskSlice> tasks;
-                    Json tasks_json = Json::array();
-                    if (const auto it = root->find("factor_map_tasks");
-                        it != root->end() && it->is_array()) {
-                        tasks_json = *it;
-                    }
                     for (const auto& entry : tasks_json) {
                         pwb::ui_workers::FactorTaskSlice task;
                         auto field = [&entry](const char* key) {
@@ -1156,6 +1472,12 @@ bool install(const Install& install) {
                                 task.grid_x = std::move(x);
                                 task.grid_y = std::move(y);
                                 task.grid_z = std::move(z);
+                            } else if (const auto resolved =
+                                           resolved_grids.find(task.id);
+                                       resolved != resolved_grids.end()) {
+                                task.grid_x = std::get<0>(resolved->second);
+                                task.grid_y = std::get<1>(resolved->second);
+                                task.grid_z = std::get<2>(resolved->second);
                             }
                         }
                         tasks.push_back(std::move(task));
@@ -1227,6 +1549,22 @@ bool install(const Install& install) {
         });
     // The commit receives the shared Json payload pointer and writes the
     // compiled ledger into project.contour_drafts.
+    // BEGIN V14-FACTOR CONTOUR COMMIT — id-preserving upsert into
+    // project.contour_drafts + apply each draft to its map document
+    // (paleomap_documents line features, role "contour"); the commit that
+    // previously wholesale-replaced the ledger. Without the kernel slices
+    // the legacy replace stays (same honest surface).
+#if PWB_WITH_FACTOR_KERNEL
+    preparation->set_commit_contour_fn(
+        [project_store_fn](void*, void* result) -> int {
+            auto* payload = static_cast<Json*>(result);
+            if (payload == nullptr) return 0;
+            const auto store = project_store_fn();
+            if (store == nullptr) return 0;
+            return pwb::factor_production::commit_contour_drafts_full(
+                store->document().root(), *payload);
+        });
+#else
     preparation->set_commit_contour_fn(
         [project_store_fn](void*, void* result) -> int {
             auto* payload = static_cast<Json*>(result);
@@ -1237,8 +1575,20 @@ bool install(const Install& install) {
             }
             return payload->is_array() ? static_cast<int>(payload->size()) : 0;
         });
+#endif
+    // END V14-FACTOR CONTOUR COMMIT
 
     context->preparation = preparation;
+#if PWB_WITH_FACTOR_KERNEL
+    // BEGIN V14-FACTOR CROSSWELL: expose the factor context handles for
+    // the cross-well dock's linkage provider (GUI-thread-confined reads).
+    install.window->setProperty(
+        "closure_factor_grids",
+        QVariant::fromValue(context->factor_grids.get()));
+    install.window->setProperty(
+        "closure_factor_catalog",
+        QVariant::fromValue(context->factor_catalog.get()));
+#endif
 
     install.shell->adopt_preparation_page(preparation);
 
@@ -1260,6 +1610,49 @@ void notify_project_changed(QMainWindow* window) {
         self->install.store_getter ? self->install.store_getter() : nullptr;
     void* project_root =
         store != nullptr ? &store->document().root() : nullptr;
+#if PWB_WITH_FACTOR_KERNEL
+    // V14-FACTOR: the provenance rail follows the open project — reopened
+    // on every switch so run/version history stays per-project. A corrupt
+    // store fails closed (rail detached, honest no-version degradation).
+    // The cross-well context handles track the same lifetime.
+    if (self->factor_catalog == nullptr) {
+        self->factor_catalog =
+            std::make_unique<pwb::factor_production::
+                                 PersistentRuntimeCatalog>();
+    }
+    if (store != nullptr) {
+        try {
+            self->factor_catalog->open(
+                store->project_file().parent_path() / "workflow_provenance");
+        } catch (const std::exception&) {
+            self->factor_catalog.reset();
+        }
+    } else {
+        self->factor_catalog.reset();
+    }
+    // Session caches must not leak ACROSS projects (Python
+    // clear_session_caches parity — called on catalog close/switch):
+    // reopen of the SAME project keeps the grids (the classifier then
+    // sees live grids for reuse), a DIFFERENT project clears them.
+    if (self->factor_grids != nullptr) {
+        const std::filesystem::path current_project =
+            store != nullptr
+                ? store->project_file()
+                : std::filesystem::path{};
+        if (current_project != self->factor_grids_project_) {
+            self->factor_grids->clear_all();
+            self->factor_grids_project_ = current_project;
+        }
+    }
+    if (QMainWindow* owner = window; owner != nullptr) {
+        owner->setProperty("closure_factor_catalog",
+                           QVariant::fromValue(
+                               self->factor_catalog.get()));
+        owner->setProperty(
+            "closure_project_store",
+            QVariant::fromValue(store.get()));
+    }
+#endif
     if (self->preparation != nullptr) {
         self->preparation->set_project(project_root);
     }

@@ -55,6 +55,11 @@ using pwb::viz::cross_well::WellCurve;
 using pwb::viz::well_tie::qt::WellTieReportInputs;
 using pwb::viz::well_tie::qt::export_well_tie_report;
 
+#if PWB_WITH_FACTOR_KERNEL
+#include "factor_prepare_production.hpp"
+#include <pwb/application/adapters/data_store.hpp>
+#endif
+
 namespace {
 
 std::vector<double> read_nums(const Json& arr) {
@@ -203,6 +208,13 @@ void VizBCrossWellDock::build_ui() {
     // 05 线：数据/结果来源显示（诚实出处：井文件 + 最近计算结果）。
     source_label_ = new QLabel(tr("井数据来源：未加载"), section_page);
     source_label_->setWordWrap(true);
+    // BEGIN V14-FACTOR: factor context readout under the source line.
+    factor_context_label_ =
+        new QLabel(tr("因子上下文：制备完成后自动刷新"), section_page);
+    factor_context_label_->setWordWrap(true);
+    factor_context_label_->setStyleSheet(
+        QStringLiteral("color: palette(mid);"));
+    // END V14-FACTOR
     section_layout->addWidget(source_label_);
     tabs_->addTab(section_page, tr("连井剖面"));
 
@@ -302,6 +314,9 @@ bool VizBCrossWellDock::load_wells_from_json(const QString& path,
     }
     register_well_identities();
     update_source_label();
+    // BEGIN V14-FACTOR
+    refresh_factor_context();
+    // END V14-FACTOR
     emit status_message(
         tr("已加载 %1 口井").arg(static_cast<int>(wells_.size())));
     return true;
@@ -463,6 +478,74 @@ void VizBCrossWellDock::register_well_identities() {
             .register_well(well.name, "cross_well");
     }
 }
+
+// BEGIN V14-FACTOR
+void VizBCrossWellDock::refresh_factor_context() {
+    if (factor_context_label_ == nullptr) return;
+    factor_context_ = Json::array();
+#if PWB_WITH_FACTOR_KERNEL
+    // Resolve the closure context (live grids + provenance rail) through
+    // the owning window; sample every complete factor task at the loaded
+    // well positions.
+    auto* owner = window();
+    if (owner == nullptr || well_coords_cache_.empty()) {
+        factor_context_label_->setText(tr("因子上下文：无工程或无井坐标"));
+        return;
+    }
+    const QVariant stored = owner->property("closure_mapping_context");
+    auto* context_obj = stored.value<QObject*>();
+    if (context_obj == nullptr) {
+        factor_context_label_->setText(tr("因子上下文：制备页未安装"));
+        return;
+    }
+    // The closure context type is internal to the mapping install; reach
+    // the grids/catalog through the documented properties instead of an
+    // intrusive dynamic_cast: the install exposes them as window
+    // properties (see closure_mapping_install.cpp V14-FACTOR block).
+    auto* grids = owner->property("closure_factor_grids")
+                      .value<pwb::factor_production::LiveFactorGridStore*>();
+    auto* catalog =
+        owner->property("closure_factor_catalog")
+            .value<pwb::factor_production::PersistentRuntimeCatalog*>();
+    std::vector<std::pair<std::string, std::array<double, 2>>> wells;
+    for (const auto& w : well_coords_cache_) {
+        wells.emplace_back(w.value("name", std::string()),
+                           std::array<double, 2>{w.value("lng", 0.0),
+                                                 w.value("lat", 0.0)});
+    }
+    // The project document rides the store the mapping install exposes.
+    const Json* root = nullptr;
+    if (auto* store = owner->property("closure_project_store")
+                          .value<pwb::application::PwbDataStore*>();
+        store != nullptr) {
+        root = &store->document().root();
+    }
+    if (root == nullptr) {
+        factor_context_label_->setText(tr("因子上下文：工程未绑定"));
+        return;
+    }
+    const auto samples = pwb::factor_production::sample_factor_context(
+        *root, wells, grids, catalog);
+    std::map<std::string, std::pair<int, int>> per_factor;
+    for (const auto& sample : samples) {
+        auto& [hits, total] = per_factor[sample.factor_type];
+        ++total;
+        if (std::isfinite(sample.value)) ++hits;
+    }
+    QString summary;
+    for (const auto& [factor, counts] : per_factor) {
+        if (!summary.isEmpty()) summary += QStringLiteral(" ｜ ");
+        summary += tr("%1：%2/%3 井")
+                       .arg(QString::fromStdString(factor))
+                       .arg(counts.first)
+                       .arg(counts.second);
+    }
+    factor_context_label_->setText(
+        summary.isEmpty() ? tr("因子上下文：暂无完成的单因素图")
+                          : tr("因子上下文：") + summary);
+#endif
+}
+// END V14-FACTOR
 
 void VizBCrossWellDock::update_source_label() {
     if (source_label_ == nullptr) return;

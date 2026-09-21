@@ -106,6 +106,11 @@ struct FactorTaskView {
     std::string input_snapshot_hash;  // "" = none
     std::string grid_artifact_path;   // "" = none
     bool has_live_factor_grid = false;
+    // V14-CONSTRAINT-FACTOR: a catalog-registered grid version (the
+    // C++ register_factor_map_run path stamps grid_artifact_version_id;
+    // the version payload IS the numerical output, so it counts exactly
+    // like a file artifact). "" = none.
+    std::string grid_artifact_version_id;
 };
 
 // Recover previously stored component fingerprints, if present; nullopt for

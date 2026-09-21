@@ -115,6 +115,13 @@ class VizBCrossWellDock : public QDockWidget {
     void register_well_identities();
     // 数据/结果来源显示（用户可见的出处：井文件来源 + 最近计算结果）。
     void update_source_label();
+
+    // BEGIN V14-FACTOR: cross-well factor context (linkage provider
+    // consumer). Samples every complete factor task's grid at the loaded
+    // well positions (bilinear) and surfaces the summary; the JSON stash
+    // feeds future track rendering. No well-engine or rendering changes.
+    void refresh_factor_context();
+    // END V14-FACTOR
     void apply_dtw_results(
         const std::vector<std::pair<std::string, double>>& pairs,
         const std::string& formation);
@@ -135,6 +142,10 @@ class VizBCrossWellDock : public QDockWidget {
     QComboBox* tie_well_selector_ = nullptr;
     QLabel* tie_readout_ = nullptr;
     QLabel* source_label_ = nullptr;  // 05 线：井来源 + 最近结果出处
+    // BEGIN V14-FACTOR
+    QLabel* factor_context_label_ = nullptr;
+    pwb::domain::Json factor_context_ = pwb::domain::Json::array();
+    // END V14-FACTOR
 
     // Jobs.
     JobCenter* job_center_ = nullptr;  // fresh JobOwner per submission

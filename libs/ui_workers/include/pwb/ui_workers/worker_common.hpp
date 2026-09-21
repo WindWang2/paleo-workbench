@@ -27,6 +27,7 @@
 #include <utility>
 #include <vector>
 
+#include <pwb/domain/json.hpp>
 #include <pwb/job_runtime/job_contract.hpp>
 
 namespace pwb::ui_workers {
@@ -227,6 +228,14 @@ struct FactorTaskSlice {
     std::map<std::string, std::any> grid_metadata;
     std::string input_snapshot_hash;
     std::string grid_artifact_path;
+
+    // V14-CONSTRAINT-FACTOR: the task's original project JSON (set by the
+    // production slice builder). The kernel binding patches this document
+    // instead of the any-maps so the host commit can replace the live task
+    // wholesale — unknown fields survive the round trip exactly like
+    // Python's deep-copy patch. Absent for scheduler-synthesized default
+    // tasks (the slice fields are the whole task).
+    std::optional<pwb::domain::Json> source_json;
 
     // Resolved factor grid (factor_grid_result_for_task output collected
     // host-side): 1-D x/y coordinate axes + 2-D z. nullopt when the
