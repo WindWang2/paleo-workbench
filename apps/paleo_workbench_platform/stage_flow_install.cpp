@@ -473,6 +473,27 @@ void MainWindow::installStageFlow() {
                                 };
                             scan_array("factor_map_tasks");
                             scan_array("constraint_layers");
+                            // stratigraphy.sequence_boundaries is the
+                            // authoritative horizon source in Python
+                            // (workflow/stratigraphy.py horizon_choices);
+                            // without it a project with only a sequence
+                            // framework (no factor tasks yet) had an
+                            // empty combo again (#1453).
+                            const auto strat = root.find("stratigraphy");
+                            if (strat != root.end()
+                                && strat->is_object()) {
+                                const auto bounds =
+                                    strat->find("sequence_boundaries");
+                                if (bounds != strat->end()
+                                    && bounds->is_array()) {
+                                    for (const auto& bound : *bounds) {
+                                        if (bound.is_string()) {
+                                            add_option(QString::fromStdString(
+                                                bound.get<std::string>()));
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     bar->set_horizon_state(

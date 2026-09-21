@@ -224,6 +224,11 @@ public:
 #endif
 #endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
+    // Stage-commit EVERY open dirty edit session (the save/close paths;
+    // #1453 — switching the active layer never stops another session).
+    // Empty return on success; otherwise the first failure message and
+    // the caller must not save/close (edits stay staged).
+    QString commitAllDirtyLayers(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
 
     // Dirty-close three-way decision (Save/Discard/Cancel). Production
