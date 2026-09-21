@@ -118,10 +118,15 @@ void check_stage_switch_and_layout(MainWindow& window) {
         }
     }
 
-    // Stage 1: prediction context — seismic/well surfaces back.
+    // Stage 1: prediction context. The seismic/well docks carry no real
+    // panel factory in this composition — a stage profile must not
+    // present their "(占位页, 待实现)" placeholder as the stage's work
+    // surface (#1450): the profile asks for visible, the frame keeps a
+    // factoryless dock hidden.
     flow->request_stage("facies_calibration");
     if (seismic_dock != nullptr) {
-        PWB_CHECK(seismic_dock->isVisible());
+        PWB_CHECK(!seismic_dock->isVisible());
+        PWB_CHECK(!shell->workstation()->has_panel_factory("seismic"));
     }
     PWB_CHECK(!input_dock->isVisible());
 
@@ -143,16 +148,22 @@ void check_user_preference_override(MainWindow& window) {
     auto* seismic_dock = shell->workstation()->dock("seismic");
     if (seismic_dock == nullptr) return;  // capability-off degrade
     PWB_CHECK(!seismic_dock->isVisible());
-    // User re-enables the seismic dock for stage 2; the override wins and
-    // survives a stage round-trip within the window.
+    // A user override cannot resurrect a factoryless placeholder either
+    // — the honest surface is hidden until a real panel factory joins
+    // (#1450). The override itself round-trips through the preference
+    // store; assert it against a dock WITH a factory instead (tasks).
     flow->set_panel_visible("workstation.seismic", true);
-    PWB_CHECK(seismic_dock->isVisible());
-    flow->request_stage("integrated_compilation");
-    flow->request_stage("constraint_factor");
-    PWB_CHECK(seismic_dock->isVisible());
-    // Reset restores the profile default.
-    flow->reset_stage_preferences();
     PWB_CHECK(!seismic_dock->isVisible());
+    auto* tasks_dock = shell->workstation()->dock("tasks");
+    if (tasks_dock != nullptr
+        && shell->workstation()->has_panel_factory("tasks")) {
+        flow->set_panel_visible("workstation.tasks", false);
+        PWB_CHECK(!tasks_dock->isVisible());
+        flow->request_stage("integrated_compilation");
+        flow->request_stage("constraint_factor");
+        PWB_CHECK(!tasks_dock->isVisible());
+        flow->reset_stage_preferences();
+    }
 }
 
 void check_task_center_provider(MainWindow& window) {

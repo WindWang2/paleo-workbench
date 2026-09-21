@@ -25,7 +25,7 @@ CONV_27/CLOSURE_MAPPING/CONV_16 闭合）。因此以下路径**本机未编译*
   「unwired SelectionBus」状态从「零实例」推进到「实例+sink 就绪」。
 - **层位 combo 无候选列表**：install 只回填当前 target_horizon，不提供
   层序格架 options（依赖 stratigraphy sections 结构，跨线）。
-- **命令面板无 map:* 工具命令**：本线注册 17 条 shell/导航/面板命令；
+- **命令面板无 map:* 工具命令**：本线注册 16 条 shell/导航/面板命令；
   map 工具族命令属 tool-policy 线已有 details provider 生态。
 - **surface_state 词汇无生产消费者**：统一状态模型 + QSS 选择器已备，
   页面接入属后续迭代（当前页面继续用既有 Pwb* 组件直构）。

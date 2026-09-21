@@ -206,13 +206,15 @@ void ProjectControllerCore::run_catalog_maintenance_(
     int generation, fs::path target, project::ProjectDocument* loaded,
     domain::Json resources_snapshot,
     std::shared_ptr<std::atomic<bool>> cancel) {
+    // Worker-side staleness reads ATOMICS ONLY (#1449): the host's
+    // document()/project_path() std::function members are mutated on the
+    // GUI thread — calling them here was a data race. The generation
+    // covers those mutations (every session change increments it), and
+    // the GUI-side kickoff still does the live doc/path comparison.
     auto stale = [&]() {
-        auto* live_doc = host_.document ? host_.document() : nullptr;
-        const auto live_path =
-            host_.project_path ? host_.project_path() : std::nullopt;
-        return generation != session_generation_ ||
-               (cancel && cancel->load()) || live_doc != loaded ||
-               live_path != target;
+        return generation != session_generation_.load(
+                                std::memory_order_acquire)
+               || (cancel && cancel->load());
     };
     if (stale()) return;
     CatalogServiceApi* service = nullptr;

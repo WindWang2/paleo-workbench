@@ -111,6 +111,16 @@ public:
 
     bool editing(const std::string& layer_id) const;
     bool dirty(const std::string& layer_id) const;
+    // Domain ids of every layer with an open edit session (map order).
+    // The dirty-close/save paths must protect ALL of these, not just the
+    // active layer (#1447: non-active edit buffers used to be silently
+    // discarded on window close).
+    std::vector<std::string> editing_layer_ids() const;
+    // Disconnect every capture WITHOUT destroying the controller —
+    // ProjectSession::close() keeps the session object reusable (the
+    // controller used to be reset to null, so edit() dereferenced null
+    // for the rest of the window's life; #1447).
+    void detach_all();
     bool can_undo(const std::string& layer_id) const;
     bool can_redo(const std::string& layer_id) const;
 

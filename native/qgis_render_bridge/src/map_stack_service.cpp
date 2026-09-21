@@ -2253,8 +2253,12 @@ namespace {
 void applyScaleRange(QgsMapLayer* layer, double min_scale, double max_scale) {
   if (layer == nullptr) return;
   const bool enabled = min_scale > 0.0 || max_scale > 0.0;
-  if (min_scale > 0.0) layer->setMinimumScale(min_scale);
-  if (max_scale > 0.0) layer->setMaximumScale(max_scale);
+  // Unconditional on both sides (#1453): the conditional form kept the
+  // previous publication's bound when a side switched to 0 (QGIS 0 =
+  // that side disabled), so a (0, X) republication could leave a stale
+  // minimum window behind. Same shape as mirror_snapshot / bridge.
+  layer->setMinimumScale(min_scale);
+  layer->setMaximumScale(max_scale);
   layer->setScaleBasedVisibility(enabled);
 }
 }  // namespace
@@ -3024,8 +3028,11 @@ std::vector<std::string> QgisMapStack::mirrorTreeOrderTopFirst() const {
 
 std::string QgisMapStack::layoutMapLayerOrder() const {
   // 与 layout_spec_exec::execute_layout_spec 的 map 图层装配同源
-  // （mirror 解析 + 全树走查；layoutExport 已委托给共享执行器
-  // 反转）；任一处改装配逻辑必须同步改这里（注释交叉引用）。
+  // （mirror 解析 + 全树走查）。layout_spec_exec 直传 top-first 给
+  // QgsLayoutItemMap::setLayers（QGIS 语义 index 0 = 顶，#1445）；本
+  // JSON 是测试/外部消费者的 bottom-first 应用序视图——
+  // tests/test_order_contract_v13.py 钉死 reversed(native_top_first)。
+  // 任一处改装配逻辑必须同步改这里。
   const std::vector<std::string> order = mirrorTreeOrderTopFirst();
   QJsonArray array;
   for (auto it = order.rbegin(); it != order.rend(); ++it) {
@@ -5101,10 +5108,16 @@ void QgisMapStack::setSnappingConfig(std::uintptr_t canvas_addr,
             .value(QStringLiteral("minimum_scale"))
             .toDouble(0.0);
     if (minimum_scale > 0.0) {
-      // vendored QGIS 3.14+：Global 模式 = 比例尺分母 >= minimum_scale 才参与。
+      // vendored QGIS（qgssnappingutils.cpp:324-328 的权威注释）：
+      // snapping 配置里 maximumScale 是【最小】分母（放大边界）、
+      // minimumScale 是【最大】分母（缩小边界）——与 QgsMapLayer 的
+      // 命名正好相反。Global 生效条件 scale <= minimumScale &&
+      // scale >= maximumScale；因此「分母 >= X 才捕捉」(ScaleGreaterThan)
+      // 必须落在 maximumScale=X 上（此前误写 setMinimumScale，方向整反：
+      // 放大才捕、缩小不捕）(#1445)。
       config.setScaleDependencyMode(
           QgsSnappingConfig::ScaleDependencyMode::Global);
-      config.setMinimumScale(minimum_scale);
+      config.setMaximumScale(minimum_scale);
     }
   }
   config.setTypeFlag(parseSnappingTypes(

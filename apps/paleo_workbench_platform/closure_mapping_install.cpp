@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <any>
 #include <atomic>
+#include <cstdint>
 #include <chrono>
 #include <filesystem>
 #include <limits>
@@ -103,14 +104,24 @@ public:
         target_ = target;
         busy_.store(true);
         cancelled_.store(false);
-        // V14-FACTOR fix: a normally-finished body must release busy_ —
-        // Python OwnedWorkerJob.is_running tracks the live thread. Without
-        // this, the SECOND action (e.g. 等值线初稿 after 批量生成) hit the
-        // "正在生成中" modal guard forever, even though the worker ended.
-        thread_ = std::thread([this, body = std::move(body)]() {
+        // Reset the finished latch BEFORE spawning (#1449): a stale
+        // finished_==true from a PREVIOUS run made wait_join's first
+        // check pass instantly and fall into an unbounded join() of the
+        // CURRENT thread — the bounded shutdown contract (wait_ms) only
+        // held until the second run.
+        finished_.store(false, std::memory_order_relaxed);
+        // Generation guard (#1449): a shutdown-timeout DETACHED body used
+        // to clear busy_ on exit, clobbering the flag of the run that
+        // replaced it (guard defeat → double submit). Only the current
+        // generation may release the latch/busy state.
+        const std::uint64_t generation = ++generation_;
+        thread_ = std::thread([this, body = std::move(body),
+                               generation]() {
             body();
-            finished_.store(true, std::memory_order_release);
-            busy_.store(false);
+            if (generation_.load(std::memory_order_acquire) == generation) {
+                finished_.store(true, std::memory_order_release);
+                busy_.store(false);
+            }
         });
     }
 
@@ -136,6 +147,10 @@ public:
                 return true;
             }
             thread_.detach();  // abandoned; guards discard its result
+            // Bump the generation: the abandoned body's trailing
+            // finished_/busy_ writes are now ignored (#1449).
+            generation_.fetch_add(1, std::memory_order_acq_rel);
+            finished_.store(false, std::memory_order_relaxed);
             busy_.store(false);
             target_ = nullptr;
             return false;
@@ -182,6 +197,9 @@ public:
     ~WorkerHost() override { join(); }
 
 private:
+    // Monotonic run generation; only the current generation's body may
+    // clear the finished latch / busy flag (#1449).
+    std::atomic<std::uint64_t> generation_{0};
     std::thread thread_;
     std::atomic<bool> cancelled_{false};
     std::atomic<bool> busy_{false};
