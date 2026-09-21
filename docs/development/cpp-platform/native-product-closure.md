@@ -182,3 +182,26 @@ note）使全部证据采集自同一台已知会偶发损坏的主机；PR 合�
 叠分析显示本 worktree 构建目录曾出现过一次超过 -j2 的并行段（疑似早
 期等待锁循环期间的遗留，无法归因到具体调用）；后续全部构建/测试均经
 invoke-resource-gate.sh（2 jobs + ≥8 GiB + 共享锁），无绕过记录。
+
+## 2026-09-20 final-closure re-audit
+
+The historical results above are retained as historical evidence. The current
+final-closure branch does not reuse them as proof of the current revision.
+
+`PWB_BUILD_NATIVE_PRODUCT` now participates in the declarative feature
+fixpoint before subdirectories are configured. Its product closure includes
+the already wired QGIS editing, workflow runtime, data lifecycle, seismic
+service, native composition export, job runtime, provider service, prediction
+closure, Geo3D, and cross-well surfaces. `AppContext` owns and runtime-probes
+the native provider service.
+
+Run the current acceptance sequence with:
+
+```bash
+scripts/cpp-migration/final-closure-gate.sh all
+```
+
+On the present environment the feature fixpoint completes and configuration
+then fails closed at missing Qt 6.8. Current product runtime/package acceptance
+therefore remains pending rather than inheriting the older 65/65 and 12/12
+counts.

@@ -390,6 +390,21 @@ polygonize_class(const Grid& grid,
         groups.push_back(Polygon{std::move(ext), {}});
     }
     assign_holes_to_exteriors(groups, holes, qc);
+
+    // repair_invalid_geometry's coordinate-level closure (topology.py:
+    // `if r[0] != r[-1]: r.append(list(r[0]))`) — Python runs it per
+    // geom even when shapely is absent, so a chain that closed at
+    // key-level (1e-6 bucket) but whose raw endpoints differ gets an
+    // exact first==last (#1358).
+    for (Polygon& geom : groups) {
+        if (geom.exterior.size() >= 3
+            && geom.exterior.front() != geom.exterior.back())
+            geom.exterior.push_back(geom.exterior.front());
+        for (Ring& hole : geom.holes) {
+            if (hole.size() >= 3 && hole.front() != hole.back())
+                hole.push_back(hole.front());
+        }
+    }
     return {std::move(groups), qc};
 }
 

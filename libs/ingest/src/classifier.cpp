@@ -1,5 +1,7 @@
 #include "pwb/ingest/classifier.hpp"
 
+#include <pwb/domain/text.hpp>
+
 #include <set>
 
 #include "pwb/ingest/py_compat.hpp"
@@ -11,10 +13,7 @@ namespace pwb::ingest {
 namespace {
 
 std::string lower_ascii(std::string s) {
-    for (char& c : s) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
-    }
-    return s;
+    return domain::lower_ascii(s);  // shared impl (#1392)
 }
 
 bool in(std::initializer_list<std::string_view> set, const std::string& value) {

@@ -3259,6 +3259,38 @@
    ]
   },
   {
+   "name": "trailing_comma_call",
+   "expr": "abs(GR,)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "expected": [
+    10.0,
+    50.0
+   ]
+  },
+  {
+   "name": "trailing_comma_two_args",
+   "expr": "min(GR, RT,)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ],
+    "RT": [
+     1.0,
+     4.0
+    ]
+   },
+   "expected": [
+    1.0,
+    4.0
+   ]
+  },
+  {
    "name": "pytest:unknown_name",
    "expr": "DT + 1",
    "variables": {
@@ -3430,6 +3462,45 @@
    "raises": true,
    "message": "expression element List is not allowed",
    "match_mode": "prefix"
+  },
+  {
+   "name": "attr_call_disallowed",
+   "expr": "GR.abs()",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "raises": true,
+   "message": "function '?' not allowed; supported: ['abs', 'clip', 'cos', 'exp', 'log', 'log10', 'log2', 'max', 'min', 'sin', 'sqrt', 'tan', 'where']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "attr_call_unknown_object",
+   "expr": "np.abs(GR)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "raises": true,
+   "message": "function '?' not allowed; supported: ['abs', 'clip', 'cos', 'exp', 'log', 'log10', 'log2', 'max', 'min', 'sin', 'sqrt', 'tan', 'where']",
+   "match_mode": "exact"
+  },
+  {
+   "name": "attr_chain_call",
+   "expr": "GR.x.y(1)",
+   "variables": {
+    "GR": [
+     10.0,
+     50.0
+    ]
+   },
+   "raises": true,
+   "message": "function '?' not allowed; supported: ['abs', 'clip', 'cos', 'exp', 'log', 'log10', 'log2', 'max', 'min', 'sin', 'sqrt', 'tan', 'where']",
+   "match_mode": "exact"
   },
   {
    "name": "min_three_args",

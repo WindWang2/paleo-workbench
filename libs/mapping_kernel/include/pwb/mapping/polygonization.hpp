@@ -22,8 +22,13 @@
 //   * facies class_grid int16: zeros, then class_grid[z >= th] =
 //     min(idx+1, n_names-1); default thresholds 0.333/0.666 of span.
 //
+//   * repair_invalid_geometry's coordinate-level closure is ported:
+//     exterior + hole rings get `if front != back: append front`
+//     (exact first==last) after hole assignment (#1358).
+//
 // Shapely repair_invalid_geometry (make_valid / orient) and clip-to-ring
-// are NOT ported. The oracle monkeypatches repair to identity.
+// are NOT ported. The oracle stubs repair to the coordinate-level
+// closure only.
 // Qt-free, Python-free, numpy-free.
 
 #include <pwb/mapping/contouring.hpp>

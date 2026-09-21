@@ -94,9 +94,9 @@ public:
     const std::vector<AssetRow>& selected_assets() const {
         return selected_assets_;
     }
-    const std::vector<AssetRow>& visible_assets() const {
-        return visible_assets_;
-    }
+    // Materialized copy — the widget stores row POINTERS (#1388), so
+    // this resolves them on demand instead of deep-copying per reset.
+    std::vector<AssetRow> visible_assets() const;
     void set_selected_asset(const AssetRow* asset);
 
     std::vector<std::string> visible_column_keys() const {
@@ -148,7 +148,10 @@ private:
     void install_model(AssetRowSource* model);
 
     std::vector<AssetRow> assets_;            // canonical source order
-    std::vector<AssetRow> visible_assets_;
+    // Row pointers into assets_ / the active model's rows — the cache is
+    // selection/highlight matching only, so storing values paid a full
+    // AssetRow deep copy per row on every model reset (#1388).
+    std::vector<const AssetRow*> visible_assets_;
     std::optional<AssetRow> selected_asset_;
     std::vector<AssetRow> selected_assets_;
     FilterQuery filter_query_;

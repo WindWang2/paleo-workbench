@@ -241,6 +241,19 @@ struct JobSpec {
     // per-report progress hook (worker thread; exceptions swallowed so a
     // bad observer can never kill a task).
     std::function<void(double, const std::string&)> on_progress;
+
+    // CONV-34: admission-time resource estimates — the C++ counterpart of
+    // Python TaskSpec.payload["resources"] (a dict the governor hook reads
+    // for estimated_cpu_cores / estimated_ram_bytes / estimated_vram_bytes
+    // / io_weight). Absent fields fall back to the category policy
+    // defaults, same as missing dict keys in Python.
+    struct ResourceEstimates {
+        std::optional<double> cpu_cores;
+        std::optional<std::int64_t> ram_bytes;
+        std::optional<std::int64_t> vram_bytes;
+        std::optional<double> io_weight;
+    };
+    std::optional<ResourceEstimates> resources;
 };
 
 // ------------------------------------------------------------- handle --

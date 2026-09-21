@@ -24,6 +24,12 @@ constexpr double kNan = std::numeric_limits<double>::quiet_NaN();
     throw CurveOpError("invalid expression: " + detail);
 }
 
+// sorted(_ALLOWED_FUNCS) repr — shared by the whitelist refusal and the
+// "function '?'" attribute-call refusal (#1357).
+constexpr const char* kAllowedFuncsText =
+    "['abs', 'clip', 'cos', 'exp', 'log', 'log10', 'log2', 'max', 'min', "
+    "'sin', 'sqrt', 'tan', 'where']";
+
 // ---------------------------------------------------------------------------
 // Tokenizer
 // ---------------------------------------------------------------------------
@@ -508,8 +514,7 @@ private:
             return apply_binary(Tok::DoubleStar, base, exponent);
         }
         // trailing postfix that the whitelist refuses — exact node names
-        if (peek().kind == Tok::Dot)
-            throw CurveOpError("expression element Attribute is not allowed");
+        if (peek().kind == Tok::Dot) attribute_postfix_error();
         if (peek().kind == Tok::LBracket)
             throw CurveOpError("expression element Subscript is not allowed");
         if (peek().kind == Tok::At || peek().kind == Tok::Shl ||
@@ -517,6 +522,31 @@ private:
             peek().kind == Tok::BitOr || peek().kind == Tok::BitXor)
             throw CurveOpError("expression element BinOp is not allowed");
         return base;
+    }
+
+    // Tokens from `i` form an attribute chain ending in a call:
+    // (Dot Name)+ LParen. CPython parses `x.f(y)` as Call(func=Attribute),
+    // which the visitor refuses as "function '?'" — node.func carries no
+    // `.id`, and the refusal happens BEFORE the object/name resolves
+    // (#1357).
+    bool attribute_call_ahead(std::size_t i) const {
+        if (i >= toks_.size() || toks_[i].kind != Tok::Dot) return false;
+        while (i + 1 < toks_.size() && toks_[i].kind == Tok::Dot &&
+               toks_[i + 1].kind == Tok::Name)
+            i += 2;
+        return i < toks_.size() && toks_[i].kind == Tok::LParen;
+    }
+
+    // A postfix '.' on the primary: `x.5` / `x.` are CPython SyntaxErrors;
+    // `x.f(...)` is the visitor's "function '?'" refusal; a bare `x.f` is
+    // the Attribute refusal (#1357).
+    [[noreturn]] void attribute_postfix_error() {
+        if (pos_ + 1 >= toks_.size() || toks_[pos_ + 1].kind != Tok::Name)
+            syntax_error("invalid syntax");
+        if (attribute_call_ahead(pos_))
+            throw CurveOpError(std::string("function '?' not allowed; supported: ") +
+                               kAllowedFuncsText);
+        throw CurveOpError("expression element Attribute is not allowed");
     }
 
     Value parse_primary() {
@@ -535,6 +565,10 @@ private:
                     throw CurveOpError("constant None not allowed (numbers only)");
                 advance();
                 if (peek().kind == Tok::LParen) return parse_call(t.text);
+                // The visitor refuses an attribute access/call without
+                // evaluating the object — `np.abs(GR)` is "function '?'",
+                // never "unknown curve name 'np'" (#1357).
+                if (peek().kind == Tok::Dot) attribute_postfix_error();
                 return lookup(t.text);
             }
             case Tok::LParen: {
@@ -561,9 +595,6 @@ private:
 
     Value parse_call(const std::string& name) {
         advance();  // '('
-        static const char* kAllowed =
-            "['abs', 'clip', 'cos', 'exp', 'log', 'log10', 'log2', 'max', 'min', "
-            "'sin', 'sqrt', 'tan', 'where']";
         const bool whitelisted = name == "abs" || name == "clip" || name == "cos" ||
                                  name == "exp" || name == "log" || name == "log10" ||
                                  name == "log2" || name == "max" || name == "min" ||
@@ -571,7 +602,8 @@ private:
                                  name == "where";
         if (!whitelisted)
             throw CurveOpError("function '" + name +
-                               "' not allowed; supported: " + kAllowed);
+                               "' not allowed; supported: " +
+                               kAllowedFuncsText);
         // The Python visitor checks node.keywords BEFORE visiting any
         // argument: `clip(NOPE, a_min=0)` refuses on keywords, not the name.
         // The scan must skip nested calls (paren depth), so
@@ -596,7 +628,11 @@ private:
         }
         while (true) {
             args.push_back(parse_or());
-            if (accept(Tok::Comma)) continue;
+            if (accept(Tok::Comma)) {
+                // Python tolerates a trailing comma: f(a,) == f(a) (#1357).
+                if (accept(Tok::RParen)) break;
+                continue;
+            }
             if (accept(Tok::RParen)) break;
             syntax_error("expected ',' or ')' in argument list");
         }

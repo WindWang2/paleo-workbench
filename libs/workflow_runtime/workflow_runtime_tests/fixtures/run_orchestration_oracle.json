@@ -1,0 +1,203 @@
+{
+  "resolve_input_versions": {
+    "resolved": [
+      "ver_a",
+      "ver_b"
+    ],
+    "empty": []
+  },
+  "fail_run": {
+    "status_after": "failed",
+    "calls_when_raising": [
+      {
+        "op": "begin_run",
+        "kwargs": {
+          "operation": "op"
+        }
+      }
+    ]
+  },
+  "annotate_output_port": {
+    "calls": [
+      {
+        "op": "set_run_ports",
+        "run_id": "run_1",
+        "input_ports": null,
+        "output_ports": [
+          {
+            "role": "primary",
+            "version_id": "ver_9"
+          }
+        ]
+      }
+    ],
+    "raising_calls": []
+  },
+  "annotate_input_ports": {
+    "calls": [
+      {
+        "op": "set_run_ports",
+        "run_id": "run_1",
+        "input_ports": [
+          {
+            "role": "source",
+            "version_id": "ver_a",
+            "ordinal": 0,
+            "entity_type": "well",
+            "entity_id": "w1"
+          },
+          {
+            "role": "source",
+            "version_id": "ver_b",
+            "ordinal": 1
+          }
+        ],
+        "output_ports": null
+      }
+    ],
+    "raising_calls": []
+  },
+  "versions_for_domain_tasks": {
+    "resolved": [
+      "out_a2",
+      "out_c"
+    ],
+    "subset": [
+      "out_a2"
+    ],
+    "empty": [],
+    "boom": "catalog down"
+  },
+  "factor_map_run": {
+    "with_intermediate": {
+      "run_id": "run_0001",
+      "version_id": "ver_0001",
+      "run_status": "complete",
+      "calls": [
+        {
+          "op": "begin_run",
+          "kwargs": {
+            "operation": "factor_map",
+            "input_version_ids": [
+              "ver_res_a",
+              "ver_extra"
+            ],
+            "parameters": {
+              "factor_type": "porosity",
+              "target_horizon": "H1",
+              "method": "idw"
+            },
+            "generator_version": "gen-v9",
+            "domain_task_id": "fmt_1",
+            "input_snapshot_hash": "snap123"
+          }
+        },
+        {
+          "op": "register_intermediate",
+          "kwargs": {
+            "run_id": "run_0001",
+            "name": "孔隙度成图 grid",
+            "path": "artifacts/grid.npz",
+            "checksum": "abc",
+            "kind": "factor_map_grid",
+            "format": "npz",
+            "tags": [
+              "porosity"
+            ]
+          }
+        },
+        {
+          "op": "complete_run",
+          "run_id": "run_0001",
+          "status": "complete",
+          "kwargs": {}
+        }
+      ]
+    },
+    "no_intermediate": {
+      "run_id": "run_0001",
+      "version_id": null,
+      "run_status": "complete",
+      "calls": [
+        {
+          "op": "begin_run",
+          "kwargs": {
+            "operation": "factor_map",
+            "input_version_ids": [
+              "ver_res_a"
+            ],
+            "parameters": {
+              "factor_type": "porosity",
+              "target_horizon": "H1",
+              "method": "idw"
+            },
+            "generator_version": "gen-v9",
+            "domain_task_id": "fmt_1",
+            "input_snapshot_hash": "snap123"
+          }
+        },
+        {
+          "op": "complete_run",
+          "run_id": "run_0001",
+          "status": "complete",
+          "kwargs": {}
+        }
+      ]
+    },
+    "horizon_collect": {
+      "input_version_ids": [
+        "ver_interp_key",
+        "ver_interp_name"
+      ]
+    },
+    "intermediate_failure": {
+      "raised": "register_intermediate refused",
+      "run_statuses": [
+        "failed"
+      ],
+      "calls": [
+        {
+          "op": "begin_run",
+          "kwargs": {
+            "operation": "factor_map",
+            "input_version_ids": [],
+            "parameters": {
+              "factor_type": "porosity",
+              "target_horizon": "H1",
+              "method": "idw"
+            },
+            "generator_version": "gen-v9",
+            "domain_task_id": "fmt_1",
+            "input_snapshot_hash": "snap123"
+          }
+        },
+        {
+          "op": "complete_run",
+          "run_id": "run_0001",
+          "status": "failed",
+          "kwargs": {}
+        }
+      ]
+    },
+    "fail_run_swallow": {
+      "raised": "register_intermediate refused",
+      "calls": [
+        {
+          "op": "begin_run",
+          "kwargs": {
+            "operation": "factor_map",
+            "input_version_ids": [],
+            "parameters": {
+              "factor_type": "porosity",
+              "target_horizon": "H1",
+              "method": "idw"
+            },
+            "generator_version": "gen-v9",
+            "domain_task_id": "fmt_1",
+            "input_snapshot_hash": "snap123"
+          }
+        }
+      ]
+    }
+  }
+}

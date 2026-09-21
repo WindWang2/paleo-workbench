@@ -748,19 +748,11 @@ bool QgisCanvasShim::set_snapping_config(const QVariantMap& config) {
         config.value(QStringLiteral("layers")).toMap();
     if (!layers.isEmpty()) {
         cfg.setMode(Qgis::SnappingMode::AdvancedConfiguration);
+        const QHash<QString, QgsMapLayer*> doc_index =
+            build_doc_id_index(*session_->project());
         for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-            QgsMapLayer* ml = nullptr;
-            const auto map_layers = session_->project()->mapLayers();
-            for (auto lit = map_layers.constBegin();
-                 lit != map_layers.constEnd(); ++lit) {
-                if (lit.value()->customProperty(
-                        QString::fromLatin1(kDocIdProperty))
-                        .toString() == it.key()) {
-                    ml = lit.value();
-                    break;
-                }
-            }
-            auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+            auto* vl = qobject_cast<QgsVectorLayer*>(
+                doc_index.value(it.key()));
             if (vl == nullptr) continue;
             const QVariantMap lc = it.value().toMap();
             Qgis::SnappingTypes lt;
@@ -816,15 +808,8 @@ void QgisCanvasShim::set_current_layer(const QString& doc_id) {
         pushed_current_layer_.clear();
         return;
     }
-    QgsMapLayer* found = nullptr;
-    const auto layers = session_->project()->mapLayers();
-    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        if (it.value()->customProperty(QString::fromLatin1(kDocIdProperty))
-                .toString() == doc_id) {
-            found = it.value();
-            break;
-        }
-    }
+    QgsMapLayer* found =
+        find_mirror_layer(*session_->project(), doc_id);
     if (found == nullptr) {
         // Not mirrored yet / already removed: shadow keeps its old
         // value and the caller's idempotent re-push relies on that
@@ -1044,15 +1029,8 @@ QVariantMap QgisCanvasShim::mirror_provider_facts(
         return {};
     }
     QVariantMap facts;
-    QgsMapLayer* found = nullptr;
-    const auto layers = session_->project()->mapLayers();
-    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        if (it.value()->customProperty(QString::fromLatin1(kDocIdProperty))
-                .toString() == doc_id) {
-            found = it.value();
-            break;
-        }
-    }
+    QgsMapLayer* found =
+        find_mirror_layer(*session_->project(), doc_id);
     facts.insert(QStringLiteral("exists"), found != nullptr);
     facts.insert(QStringLiteral("is_valid"),
                  found != nullptr && found->isValid());
@@ -1556,16 +1534,8 @@ void QgisCanvasShim::apply_highlight(const QString& doc_id,
     if (feature_ids.isEmpty()) {
         return;
     }
-    QgsMapLayer* ml = nullptr;
-    const auto layers = session_->project()->mapLayers();
-    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        if (it.value()->customProperty(QString::fromLatin1(kDocIdProperty))
-                .toString() == doc_id) {
-            ml = it.value();
-            break;
-        }
-    }
-    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+    auto* vl = qobject_cast<QgsVectorLayer*>(
+        find_mirror_layer(*session_->project(), doc_id));
     if (vl == nullptr) return;
     const int fid_idx =
         vl->fields().indexOf(QString::fromLatin1(kPwbFidField));
