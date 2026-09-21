@@ -359,6 +359,15 @@ public:
                 *error_text = "已有推断在运行";
                 return;
             }
+            // A previous worker that finished (worker_active_ == false)
+            // was never joined — the only join lives in shutdown(). A
+            // joinable std::thread must be joined before it is assigned
+            // over, or the assignment calls std::terminate() (#1443).
+            // The finished thread no longer touches this mutex, so the
+            // join under the lock returns promptly.
+            if (worker_.joinable()) {
+                worker_.join();
+            }
             cancel_requested_ = false;
             worker_active_ = true;
             worker_ = std::thread(
