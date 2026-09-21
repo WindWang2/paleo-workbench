@@ -319,9 +319,11 @@ def test_prepare_worker_count_clamped(monkeypatch):
     # Pin the governor's background allowance: the value is RAM-scaled, so on
     # a 16 GB CI runner the env override of 99 clamps below 4 — this test
     # pins the 1..4 env contract, not runner-sized shedding.
+    # #1427: logical_cores=8 — ResourceBudget() auto-detects and a 2-core
+    # runner clamps the allowance to 1 before the 1..4 contract applies.
     from paleo_workbench.runtime import ResourceBudget, ResourceGovernor, set_governor
 
-    set_governor(ResourceGovernor(ResourceBudget()))
+    set_governor(ResourceGovernor(ResourceBudget(logical_cores=8)))
     try:
         monkeypatch.setenv("PALEO_PREPARE_WORKERS", "99")
         assert prepare_worker_count() == 4

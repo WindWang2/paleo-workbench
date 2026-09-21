@@ -269,6 +269,11 @@ class EntityAssetLink(BaseModel):
     role: str = "other"
     is_primary: bool = False
     unresolved: bool = False  # True when entity matching was ambiguous
+    # V14-DATA-LINEAGE: role-internal ordering (multi-LAS load order...).
+    # The C++ data fabric writes this field; the Python model must carry it
+    # so an open→save round-trip in either app never reverts ordinals to 0
+    # (pydantic's default extra='ignore' would drop it otherwise).
+    ordinal: int = 0
     note: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = ""

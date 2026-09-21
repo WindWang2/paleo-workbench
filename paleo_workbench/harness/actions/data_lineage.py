@@ -66,6 +66,27 @@ def register(registry) -> None:
             version="1.0",
             resource_profile={"estimated_cpu_cores": 1.0, "estimated_ram_bytes": 0,
                               "io_weight": 1.0},
+            # #1428: registry policy gates require WRITE actions to declare
+            # side effects and all producing actions a typed output shape.
+            side_effect_notes=(
+                "writes catalog versions + entity bindings into the project "
+                "store; idempotent — re-running skips already-imported paths"
+            ),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "object"},
+                    "decisions_applied": {"type": "integer"},
+                    "imported_version_ids": {"type": "array",
+                                           "items": {"type": "string"}},
+                    "skipped": {"type": "array"},
+                    "bound_links": {"type": "integer"},
+                    "created_entities": {"type": "array"},
+                    "issues": {"type": "array"},
+                    "cancelled": {"type": "boolean"},
+                },
+                "required": ["imported_version_ids"],
+            },
             required_context=("project",),
             input_schema={
                 "type": "object",
@@ -95,6 +116,17 @@ def register(registry) -> None:
             version="1.0",
             resource_profile={"estimated_cpu_cores": 0.2, "estimated_ram_bytes": 0,
                               "io_weight": 0.5},
+            # #1428: materializes a mutable file copy + registry row; never
+            # overwrites an existing working copy (#1211 contract).
+            side_effect_notes=(
+                "materializes a working-copy file on disk and registers it "
+                "in the catalog working_copies table (reuses an active copy)"
+            ),
+            output_schema={
+                "type": "object",
+                "properties": {"working_path": {"type": "string"}},
+                "required": ["working_path"],
+            },
             input_schema={
                 "type": "object",
                 "properties": {"version_id": {"type": "string", "minLength": 1}},
@@ -117,6 +149,22 @@ def register(registry) -> None:
             version="1.0",
             resource_profile={"estimated_cpu_cores": 1.0, "estimated_ram_bytes": 0,
                               "io_weight": 1.0},
+            # #1428: commits a new immutable version + manual_edit DataRun.
+            side_effect_notes=(
+                "commits the working copy as a new immutable catalog version "
+                "(same-asset bump or new asset) and registers a manual_edit "
+                "DataRun; removes the working-copy registry row"
+            ),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "version_id": {"type": "string"},
+                    "asset_id": {"type": "string"},
+                    "stage": {"type": "string", "enum": _STAGE_VALUES},
+                    "run_id": {"type": "string"},
+                },
+                "required": ["version_id", "asset_id"],
+            },
             input_schema={
                 "type": "object",
                 "properties": {
@@ -176,6 +224,25 @@ def register(registry) -> None:
             version="1.0",
             resource_profile={"estimated_cpu_cores": 4.0, "estimated_ram_bytes": 0,
                               "io_weight": 1.0},
+            # #1428: COMPUTE actions must declare their output shape; the
+            # payload differs between dry_run (plan only) and execution.
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "dry_run": {"type": "boolean"},
+                    "steps": {"type": "array"},
+                    "completed_run_ids": {"type": "array",
+                                          "items": {"type": "string"}},
+                    "failed_run_ids": {"type": "array",
+                                       "items": {"type": "string"}},
+                    "skipped_run_ids": {"type": "array",
+                                        "items": {"type": "string"}},
+                    "messages": {"type": "array"},
+                    "stopped_early": {"type": "boolean"},
+                    "updated_tasks": {"type": "array"},
+                },
+                "required": ["dry_run"],
+            },
             required_context=("project",),
             input_schema={
                 "type": "object",

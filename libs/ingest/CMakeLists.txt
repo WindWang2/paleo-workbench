@@ -40,6 +40,11 @@ add_library(pwb_ingest STATIC
     src/preview/office.cpp
     src/preview/las_preview.cpp
     src/preview/registry.cpp)
+# PWB-V14-DATA-LINEAGE: source files carry UTF-8 literals (zh labels,
+# em-dash sentinels); MSVC needs the explicit codepage or C2001 ensues.
+if(MSVC)
+    target_compile_options(pwb_ingest PRIVATE /utf-8)
+endif()
 add_library(Pwb::Ingest ALIAS pwb_ingest)
 target_include_directories(pwb_ingest PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)

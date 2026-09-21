@@ -15,6 +15,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(MSVC)
     # Sources carry Chinese reason strings and comments: force UTF-8 parsing.
     add_compile_options(/utf-8 /EHsc /W3 /bigobj)
+    # math constants (M_PI and friends) are guarded behind this feature
+    # macro on MSVC; the Linux builds get them from glibc's math.h by
+    # default (V14-THREE-STAGE-UX: fresh-configure parity).
+    add_compile_definitions(_USE_MATH_DEFINES)
 endif()
 
 # ------------------------------------------------------------ feature graph --
@@ -186,7 +190,13 @@ option(PWB_BUILD_CONV_25
     "Build the CONV-25 workflow graph + evidence kernel (libs/workflow_graph; implies PWB_BUILD_DATA)" OFF)
 if(PWB_BUILD_CONV_25)
     set(PWB_BUILD_DATA ON)
-    add_subdirectory(libs/workflow_graph)
+    # BEGIN V14-COMPILATION-PUBLISH — the once-guard so the UI-14-IMPLY
+    # block's pwb_add_subdirectory_once(libs/workflow_graph) does not
+    # collide with this raw add (a configure error that blocked every
+    # PWB_BUILD_CPP_CLOSE_02=ON configuration, reproduced on a clean
+    # main@412d8baf worktree).
+    pwb_add_subdirectory_once(libs/workflow_graph)
+    # END V14-COMPILATION-PUBLISH
 endif()
 # END CONV-25
 # BEGIN CLOSURE-SCIENCE — line-03 science/prediction product loop: the
@@ -227,7 +237,9 @@ if(PWB_BUILD_CONV_28)
     set(PWB_BUILD_CONV_24 ON)   # factor fusion + units
     set(PWB_BUILD_CONV_09 ON)   # well science (DTW + curve ops)
     set(PWB_BUILD_CONV_22 ON)   # geomodel contracts (implies 12 + 19)
-    if(NOT TARGET pwb_science)
+    if(PWB_BUILD_SCIENCE AND NOT TARGET pwb_science)
+        add_subdirectory(libs/science_suite)
+    elseif(NOT TARGET pwb_science)
         add_subdirectory(libs/algorithms)
     endif()
     if(NOT TARGET pwb_workflow)
@@ -391,7 +403,9 @@ if(PWB_BUILD_SCIENCE)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/science_suite/CMakeLists.txt")
         message(FATAL_ERROR "PWB_BUILD_SCIENCE=ON but libs/science_suite is not merged on this branch")
     endif()
-    add_subdirectory(libs/science_suite)
+    if(NOT TARGET pwb_science)
+        add_subdirectory(libs/science_suite)
+    endif()
 endif()
 
 # ---------------------------------------------------- D/E fail-closed gates --
@@ -533,9 +547,14 @@ if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
     endforeach()
     # CONV-26B's own imply-if ran earlier (its option block sits above
     # this point), so land the downstream switches it would have set.
-    # CONV-06/07/08 option blocks still lie ahead — normal-variable sets
+    # CONV-06/07 option blocks still lie ahead — normal-variable sets
     # shadow them (CMP0077) and their subdirectory adds run on time.
     # CONV-25's add_subdirectory already passed, so mount it directly.
+    # V14-THREE-STAGE-UX: CONV-26B also sets PWB_BUILD_MAPPING_KERNEL —
+    # without it the CONV-07 option block below fatals on any fresh
+    # PLATFORM+DATA configure that did not pass the kernel flag by hand
+    # (the presets masked this by passing it explicitly).
+    set(PWB_BUILD_MAPPING_KERNEL ON)
     set(PWB_BUILD_CONV_06 ON)
     set(PWB_BUILD_CONV_07 ON)
     set(PWB_BUILD_CONV_08 ON)
@@ -883,6 +902,10 @@ if(PWB_BUILD_PLATFORM)
     # UI-12 — workstation shell slice: dock composition frame + panel
     # widgets over the UI-01 shell substrate (pages stay injected).
     add_subdirectory(libs/ui_workstation)
+    # V14-THREE-STAGE-UX — stage presentation projection (snapshot/layout
+    # profiles/preference codec + unified surface state model) with a Qt
+    # controller shell; authority stays in ProjectSession/tool_policy.
+    add_subdirectory(libs/ui_stageflow)
     # UI-13 — workstation-composite slice: Qt-free composite-editor
     # cores (vector layers/edit sessions, topology, merge, CRS gate,
     # snapping, map tools, controller) + Qt/QGIS shells as they land.
@@ -1202,6 +1225,84 @@ if(TARGET pwb-platform
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
             TIMEOUT 300)
 
+        # BEGIN PWB-V14-THREE-STAGE — three-stage workbench install
+        # (V14-THREE-STAGE-UX): the stage bar mount, StageFlowController
+        # seams, production command set, task-center providers and the
+        # selection bus. Requires the full AppShell closure (UI-17 above)
+        # plus the stage-flow projection lib; the selection bus leg joins
+        # additionally when UI-14's controller targets are in the closure.
+        if(TARGET Pwb::UiStageflowQt)
+            target_sources(pwb-platform PRIVATE
+                apps/paleo_workbench_platform/stage_flow_install.cpp)
+            target_link_libraries(pwb-platform PRIVATE Pwb::UiStageflowQt)
+            target_compile_definitions(pwb-platform PRIVATE
+                PWB_WITH_STAGE_FLOW=1)
+            if(TARGET Pwb::UiControllersQt)
+                target_link_libraries(pwb-platform PRIVATE
+                    Pwb::UiControllers Pwb::UiControllersQt)
+                target_compile_definitions(pwb-platform PRIVATE
+                    PWB_WITH_UI_CONTROLLERS=1)
+            endif()
+            # Integration battery: the full shell WITH the stage-flow
+            # install compiled in, same defines as the app.
+            add_executable(platform_three_stage_flow
+                tests/cpp/platform/test_three_stage_flow.cpp
+                apps/paleo_workbench_platform/main_window.cpp
+                apps/paleo_workbench_platform/app_context.cpp
+                apps/paleo_workbench_platform/diagnostics.cpp
+                apps/paleo_workbench_platform/app_shell.cpp
+                apps/paleo_workbench_platform/stage_flow_install.cpp)
+            if(COMMAND pwb_link_job_runtime)
+                pwb_link_job_runtime(platform_three_stage_flow)
+            endif()
+            set_target_properties(platform_three_stage_flow
+                PROPERTIES AUTOMOC ON)
+            target_compile_features(platform_three_stage_flow
+                PRIVATE cxx_std_20)
+            target_include_directories(platform_three_stage_flow PRIVATE
+                tests/cpp/platform
+                apps/paleo_workbench_platform
+                ${CMAKE_BINARY_DIR}/generated)
+            target_link_libraries(platform_three_stage_flow PRIVATE
+                Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+                Pwb::PlatformServices Pwb::UiStageflowQt
+                Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+            target_compile_definitions(platform_three_stage_flow PRIVATE
+                PWB_WITH_APP_SHELL=1
+                PWB_WITH_STAGE_FLOW=1
+                PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+            if(TARGET Pwb::UiControllersQt)
+                target_link_libraries(platform_three_stage_flow PRIVATE
+                    Pwb::UiControllers Pwb::UiControllersQt)
+                target_compile_definitions(platform_three_stage_flow
+                    PRIVATE PWB_WITH_UI_CONTROLLERS=1)
+            endif()
+            # Mirror pwb_application's own adapter condition exactly: the
+            # data-integration surface (PwbDataStore::open, project store)
+            # compiles only with the full B/C closure; a reduced configure
+            # keeps the test honest rather than link-broken.
+            if(TARGET Pwb::Data AND TARGET Pwb::Science
+               AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
+                target_link_libraries(platform_three_stage_flow PRIVATE
+                    Pwb::Data)
+                target_compile_definitions(platform_three_stage_flow
+                    PRIVATE PWB_WITH_DATA_INTEGRATION=1)
+                # main_window.cpp references the 12-line project actions
+                # once the data closure is in (platform_app_shell parity).
+                target_sources(platform_three_stage_flow PRIVATE
+                    apps/paleo_workbench_platform/shell_project_actions.cpp)
+            endif()
+            add_test(NAME platform.three_stage_flow
+                     COMMAND platform_three_stage_flow)
+            set_tests_properties(platform.three_stage_flow PROPERTIES
+                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+                TIMEOUT 300)
+        endif()
+        # END PWB-V14-THREE-STAGE
+
         # BEGIN CLOSURE-REVIEW (line 09)
         # Review/publish closure install battery: the real MainWindow +
         # AppShell path WITH the closure installer compiled in
@@ -1209,20 +1310,19 @@ if(TARGET pwb-platform
         # plus the document save seam and a reopen traceability round.
         # Needs the project-data closure (Pwb::Data) for the store.
         if(TARGET Pwb::ClosureReview AND TARGET Pwb::Data)
+            # BEGIN V14-COMPILATION-PUBLISH — baseline link fix (same shape
+            # as platform_closure_mapping above): main_window.cpp references
+            # shell_project_actions (12-line #1421) but this target's source
+            # list never carried the TU.
             add_executable(platform_closure_review_install
                 tests/cpp/platform/test_closure_review_install.cpp
                 apps/paleo_workbench_platform/main_window.cpp
                 apps/paleo_workbench_platform/app_context.cpp
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
+                apps/paleo_workbench_platform/shell_project_actions.cpp
                 apps/paleo_workbench_platform/closure_review_install.cpp)
-            # main_window.cpp references the shell project-action bodies
-            # under the PUBLIC PWB_WITH_DATA_INTEGRATION define (same
-            # baseline link gap as platform_closure_mapping).
-            if(TARGET Pwb::Data)
-                target_sources(platform_closure_review_install PRIVATE
-                    apps/paleo_workbench_platform/shell_project_actions.cpp)
-            endif()
+            # END V14-COMPILATION-PUBLISH
             if(COMMAND pwb_link_job_runtime)
                 pwb_link_job_runtime(platform_closure_review_install)
             endif()
@@ -1297,7 +1397,12 @@ endif()
 # additionally needs the UI-07/UI-15 Qt closure (Pwb::UiCanvas pulls
 # Pwb::UiPagesPreviewQt).
 if(TARGET pwb-platform)
-    if(TARGET Pwb::Data)
+    # V14-THREE-STAGE-UX: Pwb::Data alone does NOT imply
+    # PWB_WITH_DATA_INTEGRATION (that define lands on Pwb::Application only
+    # with the full B/C adapter closure); mirror the adapter condition or
+    # shell_project_actions.cpp references surfaces the reduced build never
+    # declared.
+    if(TARGET Pwb::Data AND TARGET Pwb::Science AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
         target_sources(pwb-platform PRIVATE
             apps/paleo_workbench_platform/shell_project_actions.cpp)
     endif()
@@ -1308,7 +1413,7 @@ if(TARGET pwb-platform)
     endif()
 endif()
 if(TARGET platform_app_shell)
-    if(TARGET Pwb::Data)
+    if(TARGET Pwb::Data AND TARGET Pwb::Science AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
         target_sources(platform_app_shell PRIVATE
             apps/paleo_workbench_platform/shell_project_actions.cpp)
     endif()
@@ -1319,14 +1424,16 @@ if(TARGET platform_app_shell)
     endif()
     # cpp-close-12 — shell project-actions battery: the four deferred
     # surfaces against a real store (save/reopen roundtrip, sample
-    # bootstrap through the run lifecycle, properties summary).
-    if(BUILD_TESTING)
+    # bootstrap through the run lifecycle, properties summary). Needs the
+    # full B/C adapter closure (the store surface under test).
+    if(BUILD_TESTING AND TARGET Pwb::Data AND TARGET Pwb::Science
+       AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
         add_executable(platform_shell_project_actions
             tests/cpp/platform/test_shell_project_actions.cpp
             apps/paleo_workbench_platform/main_window.cpp
             apps/paleo_workbench_platform/app_context.cpp
             apps/paleo_workbench_platform/diagnostics.cpp)
-        if(TARGET Pwb::Data)
+        if(TARGET Pwb::Data AND TARGET Pwb::Science AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
             target_sources(platform_shell_project_actions PRIVATE
                 apps/paleo_workbench_platform/shell_project_actions.cpp)
         endif()
@@ -1343,7 +1450,7 @@ if(TARGET platform_app_shell)
             ${CMAKE_BINARY_DIR}/generated)
         target_link_libraries(platform_shell_project_actions PRIVATE
             Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
-            Pwb::PlatformServices)
+            Pwb::PlatformServices Pwb::Data Pwb::Catalog)
         if(TARGET Pwb::UiCanvas)
             target_link_libraries(platform_shell_project_actions PRIVATE
                 Pwb::UiCanvas)
@@ -1505,6 +1612,10 @@ endif()
 # kernel the preparation seam binds). Guarded on the full closure; LayoutExport
 # (CONV-29, default OFF) is intentionally not required — the composition
 # export engine wiring is a registered follow-up.
+# V14-THREE-STAGE-UX: Pwb::Data added to the guard — the install's
+# store_getter returns PwbDataStore (a data-integration surface; the
+# define lands on Pwb::Application only with the full B/C adapter
+# closure, so the mount mirrors that condition).
 if(TARGET pwb-platform
    AND TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt
    AND TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt
@@ -1512,7 +1623,9 @@ if(TARGET pwb-platform
    AND TARGET Pwb::UiWellseisQt AND TARGET Pwb::UiPagesMapedit
    AND TARGET Pwb::Application AND TARGET Pwb::Project
    AND TARGET Pwb::UiWorkers AND TARGET Pwb::MappingDocument
-   AND TARGET Pwb::VizCharts)
+   AND TARGET Pwb::VizCharts
+   AND TARGET Pwb::Data AND TARGET Pwb::Science
+   AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
     # Product wiring: the closure sources join pwb-platform (install call
     # in main_window.cpp compiles under PWB_WITH_CLOSURE_MAPPING).
     target_sources(pwb-platform PRIVATE
@@ -1560,20 +1673,21 @@ if(TARGET pwb-platform
     endif()
     # END V14-FACTOR
 
+    # BEGIN V14-COMPILATION-PUBLISH — baseline link fix: main_window.cpp
+    # references shell_project_actions (12-line #1421 surface) but this
+    # test target's source list never carried the TU, so the target could
+    # not link at 412d8baf (reproduced on a clean main worktree; A/B
+    # evidence in docs/development/v14-compilation-publish/
+    # 09-verification-report.md).
     add_executable(platform_closure_mapping tests/cpp/platform/test_closure_mapping.cpp
         apps/paleo_workbench_platform/app_shell.cpp
         apps/paleo_workbench_platform/main_window.cpp
         apps/paleo_workbench_platform/app_context.cpp
         apps/paleo_workbench_platform/diagnostics.cpp
+        apps/paleo_workbench_platform/shell_project_actions.cpp
         apps/paleo_workbench_platform/closure_mapping_document.cpp
         apps/paleo_workbench_platform/closure_mapping_install.cpp)
-    # main_window.cpp references the shell project-action bodies whenever
-    # PWB_WITH_DATA_INTEGRATION propagates from Pwb::Application (PUBLIC
-    # define) — the same source the app shell and its battery compile.
-    if(TARGET Pwb::Data)
-        target_sources(platform_closure_mapping PRIVATE
-            apps/paleo_workbench_platform/shell_project_actions.cpp)
-    endif()
+    # END V14-COMPILATION-PUBLISH
     pwb_link_job_runtime(platform_closure_mapping)
     set_target_properties(platform_closure_mapping PROPERTIES AUTOMOC ON)
     target_compile_features(platform_closure_mapping PRIVATE cxx_std_20)
@@ -1737,10 +1851,23 @@ if(TARGET pwb-platform AND TARGET Pwb::VizChartsQt
         target_compile_definitions(pwb-platform
             PRIVATE PWB_WELL_PRESENTERS_HAVE_TIE=1)
     endif()
+    # BEGIN V14-COMPILATION-PUBLISH — baseline configure fix: the mount
+    # condition must match tests/cpp/well_crosswell's own guard, which also
+    # requires Pwb::UiWorkersWleLoad. Without it every configuration with
+    # the default PWB_BUILD_VIZ_B=ON and BUILD_TESTING=ON (WLE absent)
+    # failed at configure time (reproduced on a clean main@412d8baf
+    # worktree with the documented linux-ninja option set — A/B evidence in
+    # docs/development/v14-compilation-publish/09-verification-report.md).
     if(BUILD_TESTING AND TARGET Pwb::VisualizationCrossWell
-       AND TARGET Pwb::UiPagesDataQt)
+       AND TARGET Pwb::UiPagesDataQt
+       AND TARGET Pwb::UiWorkersWleLoad)
+        # V14-THREE-STAGE-UX: UiWorkersWleLoad only exists when the WLE
+        # viewer closure joined the build (science_suite viewer track);
+        # without it the tests' own first fail-closed check would abort
+        # every fresh PLATFORM+DATA+VIZ-B testing configure.
         add_subdirectory(tests/cpp/well_crosswell)
     endif()
+    # END V14-COMPILATION-PUBLISH
 endif()
 # END 05
 

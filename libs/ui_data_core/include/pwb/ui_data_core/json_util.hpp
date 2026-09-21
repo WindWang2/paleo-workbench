@@ -3,6 +3,7 @@
 #pragma once
 
 #include "pwb/domain/json.hpp"
+#include "pwb/domain/text.hpp"
 
 #include <cstdio>
 #include <optional>
@@ -13,12 +14,7 @@ namespace pwb::ui_data_core {
 
 // Python str.strip() — whitespace-trimmed copy (ASCII whitespace set).
 inline std::string strip_copy(std::string_view value) {
-    const auto begin = value.find_first_not_of(" \t\n\r\v\f");
-    if (begin == std::string_view::npos) {
-        return {};
-    }
-    const auto end = value.find_last_not_of(" \t\n\r\v\f");
-    return std::string(value.substr(begin, end - begin + 1));
+    return domain::strip_ascii(value);  // shared impl (#1392)
 }
 
 // dict.get(key, default) for a JSON object; non-object or missing → default.

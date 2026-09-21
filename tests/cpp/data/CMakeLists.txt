@@ -56,13 +56,15 @@ pwb_data_test(data_run_lifecycle run_lifecycle_test.cpp data.run_lifecycle)
 pwb_data_test(data_run_recovery run_recovery_test.cpp data.run_recovery)
 pwb_data_test(data_oracle_compare oracle_compare_test.cpp
     data.oracle_compare)
-pwb_data_test(data_cli_inspect cli_inspect_test.cpp data.cli_inspect
-    --exe "$<TARGET_FILE:pwb-inspect>")
-pwb_data_test(data_cli_migrate cli_migrate_test.cpp data.cli_migrate
-    --exe "$<TARGET_FILE:pwb-migrate>")
-pwb_data_test(data_consumer_loop consumer_loop_test.cpp data.consumer_loop
-    --loop "$<TARGET_FILE:pwb-data-loop>"
-    --inspect "$<TARGET_FILE:pwb-inspect>")
+if(TARGET pwb-inspect AND TARGET pwb-migrate)
+    pwb_data_test(data_cli_inspect cli_inspect_test.cpp data.cli_inspect
+        --exe "$<TARGET_FILE:pwb-inspect>")
+    pwb_data_test(data_cli_migrate cli_migrate_test.cpp data.cli_migrate
+        --exe "$<TARGET_FILE:pwb-migrate>")
+    pwb_data_test(data_consumer_loop consumer_loop_test.cpp data.consumer_loop
+        --loop "$<TARGET_FILE:pwb-data-loop>"
+        --inspect "$<TARGET_FILE:pwb-inspect>")
+endif()
 
 # The crash test has its own main (child mode intercepts argv before the
 # case registry runs), so it cannot use the shared test_main.cpp.
@@ -79,36 +81,38 @@ endif()
 add_test(NAME data.crash_recovery COMMAND data_crash_recovery)
 set_tests_properties(data.crash_recovery PROPERTIES TIMEOUT 300)
 
-# The Python oracle readback is REQUIRED (v3-contracts.md §9): configure
-# fails loudly when the interpreter or pydantic is missing — never skipped.
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-set(PWB_ORACLE_READBACK_SCRIPT
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/oracle/readback_v3.py"
-    CACHE FILEPATH "Read-only Python oracle readback script")
-if(NOT EXISTS "${PWB_ORACLE_READBACK_SCRIPT}")
-    message(FATAL_ERROR "data.oracle_readback: readback script missing: "
-        "${PWB_ORACLE_READBACK_SCRIPT}")
-endif()
-execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "import pydantic"
-    RESULT_VARIABLE _pwb_oracle_pydantic)
-if(NOT _pwb_oracle_pydantic EQUAL 0)
-    message(FATAL_ERROR "data.oracle_readback needs pydantic in "
-        "${Python3_EXECUTABLE} (the fixed Python oracle is a required gate)")
-endif()
-pwb_data_test(data_oracle_readback oracle_readback_test.cpp
-    data.oracle_readback
-    --loop "$<TARGET_FILE:pwb-data-loop>"
-    --python "${Python3_EXECUTABLE}"
-    --readback "${PWB_ORACLE_READBACK_SCRIPT}"
-    --inspect "$<TARGET_FILE:pwb-inspect>")
+if(TARGET pwb-inspect AND TARGET pwb-migrate)
+    # The Python oracle readback is required whenever the data CLI closure is
+    # present; a tools-free library/test configuration has no readback host.
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(PWB_ORACLE_READBACK_SCRIPT
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/oracle/readback_v3.py"
+        CACHE FILEPATH "Read-only Python oracle readback script")
+    if(NOT EXISTS "${PWB_ORACLE_READBACK_SCRIPT}")
+        message(FATAL_ERROR "data.oracle_readback: readback script missing: "
+            "${PWB_ORACLE_READBACK_SCRIPT}")
+    endif()
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import pydantic"
+        RESULT_VARIABLE _pwb_oracle_pydantic)
+    if(NOT _pwb_oracle_pydantic EQUAL 0)
+        message(FATAL_ERROR "data.oracle_readback needs pydantic in "
+            "${Python3_EXECUTABLE} (the fixed Python oracle is a required gate)")
+    endif()
+    pwb_data_test(data_oracle_readback oracle_readback_test.cpp
+        data.oracle_readback
+        --loop "$<TARGET_FILE:pwb-data-loop>"
+        --python "${Python3_EXECUTABLE}"
+        --readback "${PWB_ORACLE_READBACK_SCRIPT}"
+        --inspect "$<TARGET_FILE:pwb-inspect>")
 
-pwb_data_test(data_build_hygiene build_hygiene_test.cpp data.build_hygiene
-    ${PWB_HYGIENE_ARGS}
-    "$<TARGET_FILE:data_build_hygiene>"
-    "$<TARGET_FILE:pwb-inspect>"
-    "$<TARGET_FILE:pwb-migrate>"
-    "$<TARGET_FILE:pwb-data-loop>")
+    pwb_data_test(data_build_hygiene build_hygiene_test.cpp data.build_hygiene
+        ${PWB_HYGIENE_ARGS}
+        "$<TARGET_FILE:data_build_hygiene>"
+        "$<TARGET_FILE:pwb-inspect>"
+        "$<TARGET_FILE:pwb-migrate>"
+        "$<TARGET_FILE:pwb-data-loop>")
+endif()
 pwb_data_test(data_manifest_export manifest_export_test.cpp data.manifest_export)
 
 # BEGIN CONV-15
@@ -147,14 +151,40 @@ pwb_data_test(data_catalog_service catalog_service_test.cpp data.catalog_service
 # concurrent revision conflict / project switch) and the real change feed.
 # The adapter TUs are compiled into the test — the same sources the
 # platform app links under PWB_BUILD_CATALOG_CLOSURE.
-pwb_data_test(data_catalog_closure catalog_closure_test.cpp
-    data.catalog_closure)
-target_sources(data_catalog_closure PRIVATE
-    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_catalog_service.cpp
-    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_catalog_install.cpp)
-target_include_directories(data_catalog_closure PRIVATE
-    ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
-    ${CMAKE_SOURCE_DIR}/libs/ui_review/include)
-target_link_libraries(data_catalog_closure PRIVATE
-    Pwb::UiControllers Pwb::UiDataCore)
+# PWB-V14-DATA-LINEAGE: guarded — the closure test needs the ROOT source
+# tree (apps/ + ui_controllers/ui_review/ui_data_core targets) and only
+# configures in the integrated build; the standalone data-suite entry
+# skips it instead of failing configure (01 ledger A12 follow-up).
+if(TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore)
+    pwb_data_test(data_catalog_closure catalog_closure_test.cpp
+        data.catalog_closure)
+    target_sources(data_catalog_closure PRIVATE
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_catalog_service.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_catalog_install.cpp)
+    target_include_directories(data_catalog_closure PRIVATE
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
+        ${CMAKE_SOURCE_DIR}/libs/ui_review/include)
+    target_link_libraries(data_catalog_closure PRIVATE
+        Pwb::UiControllers Pwb::UiDataCore)
+endif()
 # END cpp-close-01
+
+# BEGIN PWB-V14-DATA-LINEAGE
+# V14 domain layer: role registry + entity↔asset link ordinals/read views +
+# remove/prune family; entity workspace read model (fake/throwing catalog
+# seam, slot assembly, stale attribution, honest degrade); manual-edit
+# provenance run assembly/completion + artifact lifecycle enforcement.
+pwb_data_test(data_entity_domain_ops entity_domain_ops_test.cpp
+    data.entity_domain_ops)
+pwb_data_test(data_entity_workspace entity_workspace_test.cpp
+    data.entity_workspace)
+# Scale / structural layer over the same read model: 10k wells + 100k links
+# with a throwing source (zero catalog reads, O(W+L) index ceiling), bounded
+# expand-one-well point lookups, project-switch isolation, snapshot guard.
+pwb_data_test(data_entity_workspace_scale entity_workspace_scale_test.cpp
+    data.entity_workspace_scale)
+pwb_data_test(data_manual_edit manual_edit_provenance_test.cpp
+    data.manual_edit)
+pwb_data_test(data_fabric_e2e data_fabric_e2e_test.cpp data.data_fabric_e2e)
+# END PWB-V14-DATA-LINEAGE
+

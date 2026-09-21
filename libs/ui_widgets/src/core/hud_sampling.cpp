@@ -96,7 +96,11 @@ std::optional<double> local_slope_degrees(const GridView& grid, double x,
     if (!east || !west || !north || !south) return std::nullopt;
     const double dz_dx = (*east - *west) / std::max(east_x - west_x, 1e-12);
     const double dz_dy = (*north - *south) / std::max(north_y - south_y, 1e-12);
-    return std::atan(std::hypot(dz_dx, dz_dy)) * 180.0 / M_PI;
+    // PWB-V14-DATA-LINEAGE: M_PI is POSIX-only (MSVC needs
+    // _USE_MATH_DEFINES before <cmath>); a local constant keeps the file
+    // include-order-clean and identical on both platforms.
+    constexpr double kPi = 3.14159265358979323846;
+    return std::atan(std::hypot(dz_dx, dz_dy)) * 180.0 / kPi;
 }
 
 std::optional<double> confidence_from_variance(

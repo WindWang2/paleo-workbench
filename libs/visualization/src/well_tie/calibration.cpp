@@ -1,7 +1,13 @@
+// PWB-V14-DATA-LINEAGE: std::to_string / std::invalid_argument
+// were used without their headers (g++ pulled them in transitively).
+#include <stdexcept>
+#include <string>
 #include <pwb/viz/well_tie/calibration.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 namespace pwb::viz::well_tie {
 

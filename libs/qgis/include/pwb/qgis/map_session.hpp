@@ -71,6 +71,13 @@ public:
     void refreshCanvases();
     void zoomToFullExtent(QgsMapCanvas* canvas);
 
+    // BEGIN V14-QGIS-CONTROL
+    // Live canvases for the layer-tree stack's transaction window
+    // (render suppression during the batch, single deferred sync at
+    // close).
+    std::vector<QgsMapCanvas*> canvases() const;
+    // END V14-QGIS-CONTROL
+
     // Ordered teardown, also invoked by the destructor.
     void close();
 

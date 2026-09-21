@@ -38,7 +38,8 @@ void append_escaped(std::string& out, const std::string& text) {
     out += '"';
 }
 
-void encode(std::string& out, const pwb::domain::Json& value) {
+void encode(std::string& out, const pwb::domain::Json& value,
+            bool sort_keys) {
     if (value.is_null()) {
         out += "null";
     } else if (value.is_boolean()) {
@@ -55,7 +56,7 @@ void encode(std::string& out, const pwb::domain::Json& value) {
         for (const auto& item : value) {
             if (!first) out += ", ";
             first = false;
-            encode(out, item);
+            encode(out, item, sort_keys);
         }
         out += ']';
     } else if (value.is_object()) {
@@ -64,10 +65,12 @@ void encode(std::string& out, const pwb::domain::Json& value) {
         for (auto it = value.begin(); it != value.end(); ++it) {
             keys.push_back(&it.key());
         }
-        std::sort(keys.begin(), keys.end(),
-                  [](const std::string* a, const std::string* b) {
-                      return *a < *b;
-                  });
+        if (sort_keys) {
+            std::sort(keys.begin(), keys.end(),
+                      [](const std::string* a, const std::string* b) {
+                          return *a < *b;
+                      });
+        }
         out += '{';
         bool first = true;
         for (const std::string* key : keys) {
@@ -75,7 +78,7 @@ void encode(std::string& out, const pwb::domain::Json& value) {
             first = false;
             append_escaped(out, *key);
             out += ": ";
-            encode(out, value.at(*key));
+            encode(out, value.at(*key), sort_keys);
         }
         out += '}';
     }
@@ -85,7 +88,13 @@ void encode(std::string& out, const pwb::domain::Json& value) {
 
 std::string python_dumps_sorted(const pwb::domain::Json& value) {
     std::string out;
-    encode(out, value);
+    encode(out, value, true);
+    return out;
+}
+
+std::string python_dumps(const pwb::domain::Json& value) {
+    std::string out;
+    encode(out, value, false);
     return out;
 }
 

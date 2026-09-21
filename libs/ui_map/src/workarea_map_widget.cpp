@@ -28,7 +28,8 @@ WorkAreaMapWidget::WorkAreaMapWidget(QWidget* parent, std::string title,
     layout->setSpacing(0);
 
     map_canvas_ = new DisplayMapCanvas(this);
-    map_canvas_->set_overlay_provider([this] { return overlay_state(); });
+    map_canvas_->set_overlay_provider(
+        [this]() -> const Json& { return overlay_state(); });
     connect(map_canvas_, &DisplayMapCanvas::map_clicked, this,
             [this](double x, double y) { on_map_clicked(x, y); });
     layout->addWidget(map_canvas_, 1);
@@ -46,6 +47,7 @@ void WorkAreaMapWidget::set_project(
     if (project.is_null()) {
         snapshot_ = Json(nullptr);
         signature_ = Json(nullptr);
+        overlay_state_dirty_ = true;
         return;
     }
     const Json signature = domain_signature(project);
@@ -56,6 +58,7 @@ void WorkAreaMapWidget::set_project(
     Json snapshot =
         snapshot_builder ? snapshot_builder(project) : Json(nullptr);
     snapshot_ = snapshot;
+    overlay_state_dirty_ = true;
     map_canvas_->set_layer_snapshot(snapshot);
     const std::optional<Extent> extent = workarea_view_extent(snapshot);
     if (extent.has_value()) {
@@ -80,6 +83,7 @@ void WorkAreaMapWidget::zoom_to_all() {
 void WorkAreaMapWidget::select_well(const std::string& well_id, bool zoom,
                                     bool emit_signal) {
     selected_well_id_ = well_id;
+    overlay_state_dirty_ = true;  // well_feature() feeds the overlay
     const Json feature = well_feature(well_id);
     if (zoom && feature.is_object()) {
         const Json coords = field_value(
@@ -108,9 +112,13 @@ void WorkAreaMapWidget::select_well(const std::string& well_id, bool zoom,
 // internals
 // ---------------------------------------------------------------------------
 
-Json WorkAreaMapWidget::overlay_state() const {
-    return workarea_overlay_state(title_, show_legend_,
-                                  well_feature(selected_well_id_));
+const Json& WorkAreaMapWidget::overlay_state() const {
+    if (overlay_state_dirty_) {
+        overlay_state_cache_ = workarea_overlay_state(
+            title_, show_legend_, well_feature(selected_well_id_));
+        overlay_state_dirty_ = false;
+    }
+    return overlay_state_cache_;
 }
 
 Json WorkAreaMapWidget::well_feature(const std::string& well_id) const {

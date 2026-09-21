@@ -38,6 +38,20 @@ add_executable(interchange.delivery delivery_test.cpp)
 target_compile_features(interchange.delivery PRIVATE cxx_std_20)
 target_link_libraries(interchange.delivery PRIVATE
     Pwb::Interchange Pwb::Domain)
+
+# resources/exporters.py oracle replay (converter table + Qt-free converters).
+# The test reaches into src/ for the internal xlsx grid reader.
+add_executable(interchange.exporters exporters_test.cpp)
+target_compile_features(interchange.exporters PRIVATE cxx_std_20)
+target_link_libraries(interchange.exporters PRIVATE
+    Pwb::Interchange Pwb::Domain Pwb::Ingest Pwb::SeismicIo)
+target_include_directories(interchange.exporters PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_compile_definitions(interchange.exporters PRIVATE
+    PWB_EXPORTERS_ORACLE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/exporters_oracle.json"
+    PWB_TINY_SEGY="${CMAKE_SOURCE_DIR}/tests/fixtures/realdata/tiny.sgy")
+add_test(NAME interchange.exporters COMMAND interchange.exporters)
+set_tests_properties(interchange.exporters PROPERTIES TIMEOUT 120)
 add_test(NAME interchange.delivery COMMAND interchange.delivery)
 set_tests_properties(interchange.delivery PROPERTIES TIMEOUT 300)
 

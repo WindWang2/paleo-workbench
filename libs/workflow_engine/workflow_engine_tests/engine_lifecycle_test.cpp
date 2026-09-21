@@ -152,10 +152,22 @@ std::string rid(int n) {  // Python: f"r{n:015d}" — 16 chars
 }
 
 std::filesystem::path make_tmpdir() {
+#if defined(_WIN32)
+    // mkdtemp is POSIX-only - same contract through temp_directory_path.
+    static unsigned seq = 0;
+    for (;;) {
+        const std::filesystem::path dir =
+            std::filesystem::temp_directory_path() /
+            ("pwb-wf-life-cpp-" + std::to_string(seq++));
+        std::error_code ec;
+        if (std::filesystem::create_directory(dir, ec)) return dir;
+    }
+#else
     std::string pattern = "/tmp/pwb-wf-life-cpp-XXXXXX";
     if (char* dir = mkdtemp(pattern.data()); dir != nullptr) return dir;
     std::perror("mkdtemp");
     std::exit(1);
+#endif
 }
 
 // ----------------------------------------------------------- harness --

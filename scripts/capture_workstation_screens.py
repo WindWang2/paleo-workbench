@@ -345,7 +345,20 @@ def main() -> int:
                     + (f" — {result.detail}" if result.detail else ""),
                     flush=True,
                 )
-        return 0
+        # 截图与检查工件已全部落盘。此处不能用正常返回：窗口树里仍挂着
+        # 页面定时器/调度器/引用环，解释器 finalization 的 PyGC_Collect
+        # 会在 Qt 侧已析构后遍历 shiboken 包装对象而 SIGSEGV（Windows CI
+        # 上为 AV，#1428/#1429 同族）。有序 close/deleteLater 已验证不够
+        # ——崩溃发生在 finalization GC 而非事件循环。产品侧的析构序
+        # 缺陷由 #1429 跟踪；截图 harness 的契约是"工件+退出码"，硬退出
+        # 跳过与测试无关的解释器收尾。
+        import os
+
+        stop["flag"] = True
+        window.close()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
 
     import subprocess
 

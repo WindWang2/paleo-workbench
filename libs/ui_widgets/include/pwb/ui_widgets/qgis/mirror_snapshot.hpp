@@ -24,6 +24,7 @@
 //    not part of this slice — they produce honest failure entries
 //    (never silently dropped, never substituted with wrong pixels).
 
+#include <QHash>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -132,5 +133,11 @@ MirrorResult mirror_snapshot_to_project(
 // The Python pwb/doc_id join key (QgsMapLayer custom property).
 inline const char* kDocIdProperty = "pwb/doc_id";
 inline const char* kPwbFidField = "__pwb_fid";
+
+// doc_id → mirror layer lookup over `project`. One traversal builds the
+// index; single lookups go through find_mirror_layer (#1385 — callers
+// used to each rescan project.mapLayers()).
+QHash<QString, QgsMapLayer*> build_doc_id_index(QgsProject& project);
+QgsMapLayer* find_mirror_layer(QgsProject& project, const QString& doc_id);
 
 }  // namespace pwb::ui_widgets::qgis

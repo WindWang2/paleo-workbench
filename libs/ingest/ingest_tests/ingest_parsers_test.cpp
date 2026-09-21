@@ -7,7 +7,10 @@
 // convention as the data-suite oracles).
 
 #include <sys/stat.h>
+#include <atomic>
+#if !defined(_WIN32)
 #include <unistd.h>
+#endif
 
 #include <cmath>
 #include <cstdio>
@@ -128,6 +131,21 @@ std::string b64_encode(const std::string& in) {
 }
 
 std::string make_tmp_dir() {
+#if defined(_WIN32)
+    // mkdtemp is POSIX-only — same contract (unique, created directory)
+    // through the std::filesystem temp root + a monotonic unique suffix.
+    static std::atomic<unsigned long long> counter{0};
+    for (int attempt = 0; attempt < 64; ++attempt) {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         ("ingest_oracle_" + std::to_string(counter++));
+        std::error_code ec;
+        if (std::filesystem::create_directory(dir, ec) && !ec) {
+            return dir.string();
+        }
+    }
+    std::perror("make_tmp_dir");
+    std::exit(2);
+#else
     std::string tmpl = "/tmp/ingest_oracle_XXXXXX";
     std::vector<char> buf(tmpl.begin(), tmpl.end());
     buf.push_back('\0');
@@ -136,6 +154,7 @@ std::string make_tmp_dir() {
         std::exit(2);
     }
     return std::string(buf.data());
+#endif
 }
 
 void write_file(const std::string& path, std::string_view bytes) {

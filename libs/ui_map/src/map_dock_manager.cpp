@@ -180,6 +180,10 @@ bool MapDockManager::is_panel_visible(const std::string& key) const {
            entry->button->isChecked();
 }
 
+bool MapDockManager::is_panel_registered(const std::string& key) const {
+    return entry_for(key) != nullptr;
+}
+
 QToolButton* MapDockManager::panel_button(const std::string& key) const {
     const PanelEntry* entry = entry_for(key);
     return entry != nullptr ? entry->button.data() : nullptr;

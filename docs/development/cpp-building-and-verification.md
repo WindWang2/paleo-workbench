@@ -334,3 +334,17 @@ unit as native complete + wired, native core not wired, partial native, native w
 origin recorded (infrastructure that was never ported), Python-only production, oracle/test-only
 Python, or legacy candidate — and it never needs hand maintenance. The committed Markdown
 snapshot is a generated artifact: re-run the generator instead of editing it.
+
+For final product closure, run:
+
+```bash
+scripts/cpp-migration/final-closure-gate.sh static
+scripts/cpp-migration/final-closure-gate.sh all
+```
+
+The first command regenerates and validates the one-row-per-Python-module
+matrix and source audits. The second configures, builds, tests twice, installs,
+deploys, runs product diagnostics, and audits binary dependencies. Heavy steps
+use `invoke-resource-gate.sh` with build/test parallelism 2 and
+`OMP_NUM_THREADS=1`. Native install and deploy trees fail if they contain
+Python source or bytecode.

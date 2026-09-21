@@ -2,6 +2,13 @@
 
 #include <cmath>
 
+// PWB-V14-DATA-LINEAGE: kPi is POSIX-only (MSVC lacks it without
+// _USE_MATH_DEFINES before <cmath>); one file-local constant.
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+}  // namespace
+
+
 namespace pwb::viz::well_tie {
 
 namespace {
@@ -19,7 +26,7 @@ std::vector<double> centred_times(int n_samples, double dt) {
 // np.sinc — the NORMALIZED sinc: sin(pi x) / (pi x), sinc(0) = 1.
 double np_sinc(double x) {
     if (x == 0.0) return 1.0;
-    const double px = M_PI * x;
+    const double px = kPi * x;
     return std::sin(px) / px;
 }
 
@@ -30,7 +37,7 @@ std::vector<float> ricker_wavelet(int n_samples, double dt,
     const std::vector<double> t = centred_times(n_samples, dt);
     std::vector<float> w(t.size());
     for (std::size_t i = 0; i < t.size(); ++i) {
-        const double p2 = std::pow(M_PI * peak_freq * t[i], 2.0);
+        const double p2 = std::pow(kPi * peak_freq * t[i], 2.0);
         w[i] = static_cast<float>((1.0 - 2.0 * p2) * std::exp(-p2));
     }
     return w;
@@ -52,7 +59,7 @@ std::vector<float> ormsby_wavelet(int n_samples, double dt, double f1,
             (f4 * f4 * s4 * s4 - f3 * f3 * s3 * s3) / high_denom;
         const double low =
             (f2 * f2 * s2 * s2 - f1 * f1 * s1 * s1) / low_denom;
-        w[i] = M_PI * (high - low);
+        w[i] = kPi * (high - low);
         peak = std::max(peak, std::abs(w[i]));
     }
     if (peak > 0.0) {

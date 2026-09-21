@@ -24,7 +24,12 @@ add_library(pwb_mapping_document STATIC
     src/edit_session_set.cpp
     src/edit_gesture_manager.cpp
     src/native_edit_session.cpp
-    src/render_snapshot.cpp)
+    src/render_snapshot.cpp
+    # V14-COMPILATION-PUBLISH — composer template library, SVG renderer and
+    # physical-size page export (composer/{templates,renderer,export}.py).
+    src/composer_templates.cpp
+    src/composer_renderer.cpp
+    src/composer_export.cpp)
 add_library(Pwb::MappingDocument ALIAS pwb_mapping_document)
 target_include_directories(pwb_mapping_document PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)

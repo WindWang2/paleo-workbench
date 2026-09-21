@@ -1,5 +1,6 @@
 // preview_cache.py port — see preview_cache.hpp.
 
+#include <chrono>
 #include "pwb/ui_data_core/preview_cache.hpp"
 
 #include "pwb/ui_data_core/json_util.hpp"
@@ -20,10 +21,17 @@ long long preview_result_weight(const PreviewResult& value) {
 
 std::optional<std::pair<long long, long long>> safe_file_stat(
     const std::filesystem::path& path) {
+#if defined(_WIN32)
+    struct _stat64 st {};
+    if (_wstat64(path.c_str(), &st) != 0) {
+        return std::nullopt;
+    }
+#else
     struct stat st {};
     if (::stat(path.c_str(), &st) != 0) {
         return std::nullopt;
     }
+#endif
     long long mtime_ns;
 #ifdef st_mtime  // glibc macro → st_mtim.tv_sec
     mtime_ns = static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL +
@@ -197,6 +205,10 @@ const PreviewResult* PreviewCache::get(const std::string& key) {
 }
 
 void PreviewCache::put(const std::string& key, const PreviewResult& value) {
+    put(key, PreviewResult(value));
+}
+
+void PreviewCache::put(const std::string& key, PreviewResult&& value) {
     if (const auto it = map_.find(key); it != map_.end()) {
         current_bytes_ -= it->second->second.second;
         lru_.erase(it->second);
@@ -206,7 +218,7 @@ void PreviewCache::put(const std::string& key, const PreviewResult& value) {
     if (weight > max_bytes_) {
         return;
     }
-    lru_.emplace_back(key, std::make_pair(value, weight));
+    lru_.emplace_back(key, std::make_pair(std::move(value), weight));
     map_[key] = std::prev(lru_.end());
     current_bytes_ += weight;
     while (static_cast<long long>(map_.size()) > max_size_ ||

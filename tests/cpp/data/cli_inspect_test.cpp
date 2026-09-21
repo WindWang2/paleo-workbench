@@ -4,7 +4,9 @@
 
 #include <array>
 #include <cstdio>
+#ifndef _WIN32
 #include <sys/wait.h>
+#endif  // sys/wait.h is POSIX-only (WIFEXITED); the Windows path uses _pclose directly
 #include <filesystem>
 #include <string>
 

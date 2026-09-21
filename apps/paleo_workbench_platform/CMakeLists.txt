@@ -118,6 +118,36 @@ if(PWB_BUILD_CATALOG_CLOSURE
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CATALOG_CLOSURE=1)
 endif()
 # END cpp-close-01
+# BEGIN PWB-V14-DATA-LINEAGE (P4 product wiring)
+# closure_data_workspace — nav-tree population from the live project
+# document, the WellDetailPanel producer (ui_wellseis), lineage/impact
+# read helpers and the two-phase ingest (toolbar 计划导入). Compiled into
+# the app when the data closure AND the data pages are present.
+# ui_wellseis ordering: this directory is processed BEFORE the root UI-09
+# block adds libs/ui_wellseis, so Pwb::UiWellseisQt cannot be probed yet.
+# The guard mirrors UI-09's own gate (Pwb::UiWorkers exists iff CONV_22 +
+# GeoModel + Domain + JobRuntime — all resolved before this directory),
+# and the link uses the PLAIN target name pwb_ui_wellseis_qt: CMake
+# resolves target names in target_link_libraries at generate time, so
+# the later add_subdirectory satisfies it.
+set(PWB_V14_WELLSEIS OFF)
+if(TARGET Pwb::UiWellseisQt)
+    set(PWB_V14_WELLSEIS ON)
+elseif(PWB_BUILD_CONV_22 AND TARGET Pwb::GeoModel
+       AND TARGET Pwb::Domain AND TARGET Pwb::JobRuntime
+       AND TARGET Qt6::Widgets)
+    set(PWB_V14_WELLSEIS ON)
+endif()
+if(TARGET Pwb::Data AND TARGET Pwb::UiPagesDataQt AND PWB_V14_WELLSEIS)
+    target_sources(pwb-platform PRIVATE
+        closure_data_workspace.cpp
+        closure_data_workspace.hpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::Data Pwb::UiPagesDataQt Pwb::UiWellseis pwb_ui_wellseis_qt)
+    target_compile_definitions(pwb-platform PRIVATE
+        PWB_WITH_V14_DATA_LINEAGE=1)
+endif()
+# END PWB-V14-DATA-LINEAGE
 # BEGIN native-product closure
 # Minimal DAG workflow engine (CONV-07) in the product link closure: the
 # self-check battery drives a 4-node diamond through it, proving the
@@ -203,6 +233,22 @@ if(PWB_ENABLE_PACKAGING AND (TARGET Pwb::Ui OR TARGET Pwb::Application))
     endif()
 endif()
 # END PWB-PACKAGING
+
+# BEGIN V14-COMPILATION-PUBLISH
+# The composition install's colour-ramp seam resolves through the
+# cartography authority (composer PALETTE_ALIASES → get_color_ramp).
+if(TARGET Pwb::Cartography)
+    target_link_libraries(pwb-platform PRIVATE Pwb::Cartography)
+endif()
+# The QC provenance registrar rides the workflow provenance rail when the
+# closure_workflow slice is in the build; otherwise the seam stays unbound
+# and the QC report keeps its honest provenance_registered=false marker.
+if(TARGET Pwb::ClosureWorkflow)
+    target_sources(pwb-platform PRIVATE closure_review_install.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::ClosureWorkflow)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_WORKFLOW=1)
+endif()
+# END V14-COMPILATION-PUBLISH
 
 # BEGIN CONV-29
 # Composition/Layout/Export C++ closure: the export dialog routes through

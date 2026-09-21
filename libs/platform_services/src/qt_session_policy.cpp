@@ -8,6 +8,23 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+// PWB-V14-DATA-LINEAGE: setenv/unsetenv are POSIX-only; MSVC equivalent
+// through the CRT (process environment).
+#if defined(_WIN32)
+#include <stdlib.h>
+inline int pwb_env_set(const char* name, const char* value, int overwrite) {
+    (void)overwrite;
+    return _putenv_s(name, value);
+}
+inline int pwb_env_unset(const char* name) { return _putenv_s(name, ""); }
+#else
+#include <stdlib.h>
+inline int pwb_env_set(const char* name, const char* value, int overwrite) {
+    return pwb_env_set(name, value, overwrite);
+}
+inline int pwb_env_unset(const char* name) { return pwb_env_unset(name); }
+#endif
+
 
 namespace pwb::platform_services {
 namespace {
@@ -86,7 +103,7 @@ std::string pin_mesa_egl_on_wayland(
         std::error_code ec;
         if (std::filesystem::is_regular_file(candidate, ec)) {
 #if defined(Q_OS_UNIX)
-            setenv("__EGL_VENDOR_LIBRARY_FILENAMES", candidate.c_str(), 1);
+            pwb_env_set("__EGL_VENDOR_LIBRARY_FILENAMES", candidate.c_str(), 1);
             std::fprintf(
                 stderr,
                 "paleo-workbench: pinned EGL to Mesa (%s) — NVIDIA EGL "
@@ -112,7 +129,7 @@ std::string configure_qt_platform_for_session() {
             return plat;
         }
 #if defined(Q_OS_UNIX)
-        unsetenv("QT_QPA_PLATFORM");
+        pwb_env_unset("QT_QPA_PLATFORM");
 #else
         _putenv_s("QT_QPA_PLATFORM", "");
 #endif

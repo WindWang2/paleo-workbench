@@ -112,6 +112,14 @@ domain::Json cartographic_issues(const domain::Json& root,
 // compilation run, and returns the stored report. Unknown doc → NotFound.
 domain::Result<domain::Json> run_map_qc_on_document(
     domain::Json& root, const std::string& doc_id, const QcInputs& inputs,
-    const CartographicQaDelegate* cartographic, const std::string& iso_now);
+    const CartographicQaDelegate* cartographic, const std::string& iso_now,
+    // BEGIN V14-COMPILATION-PUBLISH — optional QC provenance registrar
+    // (the catalog DataRun registration Python performs in qc.py). Null
+    // ⇒ the report keeps the honest provenance_registered=false marker;
+    // a registrar that returns an empty id (registration failed) keeps it
+    // false too — the flag never claims a run that does not exist.
+    const std::function<std::string(const domain::Json& report)>* provenance =
+        nullptr);
+// END V14-COMPILATION-PUBLISH
 
 }  // namespace pwb::closure_review

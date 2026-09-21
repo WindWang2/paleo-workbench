@@ -29,6 +29,16 @@ add_test(NAME workflow_runtime.service
          COMMAND workflow_runtime_service_test
                  ${WORKFLOW_RUNTIME_FIXTURE_DIR}/workflow_service_oracle.json)
 
+add_executable(workflow_runtime_run_orchestration_test
+               run_orchestration_test.cpp)
+target_compile_features(workflow_runtime_run_orchestration_test
+                        PRIVATE cxx_std_20)
+target_link_libraries(workflow_runtime_run_orchestration_test
+                      PRIVATE Pwb::WorkflowRuntime)
+add_test(NAME workflow_runtime.run_orchestration
+         COMMAND workflow_runtime_run_orchestration_test
+                 ${WORKFLOW_RUNTIME_FIXTURE_DIR}/run_orchestration_oracle.json)
+
 add_executable(workflow_runtime_versioning_test versioning_test.cpp)
 target_compile_features(workflow_runtime_versioning_test PRIVATE cxx_std_20)
 target_link_libraries(workflow_runtime_versioning_test PRIVATE Pwb::WorkflowRuntime)

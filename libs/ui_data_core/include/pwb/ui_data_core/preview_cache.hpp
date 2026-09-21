@@ -55,6 +55,9 @@ public:
 
     const PreviewResult* get(const std::string& key);
     void put(const std::string& key, const PreviewResult& value);
+    // Move overload (#1392): PreviewResult carries image/pdf payloads up
+    // to MB scale — rvalue callers move straight into the list node.
+    void put(const std::string& key, PreviewResult&& value);
     void clear();
 
     long long current_bytes() const { return current_bytes_; }

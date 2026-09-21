@@ -92,12 +92,14 @@ def test_map_toolbars_cover_all_tool_groups(document):
     # 孤立构造（无 shell 宿主）：条暂挂 document 名下，随其析构。
     assert top.parent() is document
     assert bottom.parent() is document
+    # V12: geometry moved to the bottom/overflow bar — the grown geometry
+    # family would blow the 1440px top-bar sizeHint (#1428 test drift).
     assert document._toolbar_top_groups == (
         "navigate", "selection", "inspection", "edit_session",
-        "capture", "geometry",
+        "capture",
     )
     assert document._toolbar_bottom_groups == (
-        "snapping", "layer", "symbology", "factor", "qa",
+        "geometry", "snapping", "layer", "symbology", "factor", "qa",
         "layout_export",
     )
     top_ids = _toolbar_action_ids(top)

@@ -32,6 +32,21 @@ void TablePreviewModel::set_table(std::vector<std::string> headers,
     rows_ = std::move(rows);
     depth_col_ = depth_column(headers_);
     curve_def_ = is_curve_definition(headers_);
+    // Precompute text + kind once (#1388): delegates request 4-6 roles
+    // per visible cell and the same trim/kind was redone each time.
+    cell_texts_.resize(rows_.size());
+    cell_kinds_.resize(rows_.size());
+    for (std::size_t r = 0; r < rows_.size(); ++r) {
+        cell_texts_[r].resize(headers_.size());
+        cell_kinds_[r].resize(headers_.size());
+        for (std::size_t c = 0; c < headers_.size(); ++c) {
+            const std::string text =
+                c < rows_[r].size() ? table_cell_text(rows_[r][c]) : "";
+            cell_kinds_[r][c] =
+                cell_kind(text, static_cast<int>(c), depth_col_, curve_def_);
+            cell_texts_[r][c] = text;
+        }
+    }
     endResetModel();
 }
 
@@ -65,18 +80,14 @@ QVariant TablePreviewModel::data(const QModelIndex& index, int role) const {
         column < 0 || column >= static_cast<int>(headers_.size())) {
         return {};
     }
-    const auto& source = rows_[row];
     // Python: val_str = str(raw).strip() — cells render stripped.
-    const std::string text =
-        column < static_cast<int>(source.size())
-            ? table_cell_text(source[column])
-            : "";
+    const std::string& text = cell_texts_[size_t(row)][size_t(column)];
 
     if (role == Qt::DisplayRole) {
         return QString::fromStdString(text);
     }
 
-    const CellKind kind = cell_kind(text, column, depth_col_, curve_def_);
+    const CellKind kind = cell_kinds_[size_t(row)][size_t(column)];
     switch (kind) {
     case CellKind::depth:
         if (role == Qt::FontRole) return mono_bold_;

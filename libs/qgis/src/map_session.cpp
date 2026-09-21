@@ -206,6 +206,17 @@ void MapSession::refreshCanvases() {
     }
 }
 
+// BEGIN V14-QGIS-CONTROL
+std::vector<QgsMapCanvas*> MapSession::canvases() const {
+    std::vector<QgsMapCanvas*> out;
+    out.reserve(canvases_.size());
+    for (const QPointer<QgsMapCanvas>& canvas : canvases_) {
+        if (canvas != nullptr) out.push_back(canvas.data());
+    }
+    return out;
+}
+// END V14-QGIS-CONTROL
+
 void MapSession::zoomToFullExtent(QgsMapCanvas* canvas) {
     if (canvas != nullptr) canvas->zoomToFullExtent();
 }

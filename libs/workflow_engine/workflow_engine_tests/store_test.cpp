@@ -78,12 +78,27 @@ std::filesystem::path make_root() {
             }
         }) == 0;
     (void)cleanup_registered;
+#if defined(_WIN32)
+    // mkdtemp is POSIX-only - same contract through temp_directory_path.
+    static unsigned seq = 0;
+    for (;;) {
+        const std::filesystem::path root =
+            std::filesystem::temp_directory_path() /
+            ("pwb-store-test-" + std::to_string(seq++));
+        std::error_code ec;
+        if (std::filesystem::create_directory(root, ec)) {
+            roots.push_back(root);
+            return root;
+        }
+    }
+#else
     std::string tmpl = "/tmp/pwb-store-test-XXXXXX";
     if (char* dir = ::mkdtemp(tmpl.data())) {
         const std::filesystem::path root(dir);
         roots.push_back(root);
         return root;
     }
+#endif
     std::fprintf(stderr, "FAIL cannot create temp store root\n");
     std::exit(2);
 }

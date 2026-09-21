@@ -1,5 +1,7 @@
 #include "semantics.hpp"
 
+#include <pwb/domain/text.hpp>
+
 namespace pwb::factor_host::detail {
 
 bool json_truthy(const Json* value) {
@@ -89,7 +91,7 @@ std::string strip_impl(const std::string& text, bool numeric_set) {
 }  // namespace
 
 std::string python_strip(const std::string& text) {
-    return strip_impl(text, false);
+    return domain::python_strip(text);  // shared impl (#1392)
 }
 
 std::string python_strip_number(const std::string& text) {

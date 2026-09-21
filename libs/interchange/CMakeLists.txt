@@ -22,7 +22,11 @@ add_library(pwb_interchange STATIC
     # ports). delivery/audit only need the catalog seams; batch/closure need
     # the native model-adapter service and follow its GeoModel gating below.
     src/dependency_audit.cpp
-    src/delivery.cpp)
+    src/delivery.cpp
+    # resources/exporters.py port: converter table + Qt-free file→file
+    # converters (LAS/CSV/GeoJSON/TXT/SEGY + bounded OOXML xlsx read/write).
+    src/exporters.cpp
+    src/xlsx_io.cpp)
 add_library(Pwb::Interchange ALIAS pwb_interchange)
 target_include_directories(pwb_interchange PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -33,6 +37,15 @@ if(NOT TARGET Pwb::Domain)
         "(configure with -DPWB_BUILD_DATA=ON)")
 endif()
 target_link_libraries(pwb_interchange PUBLIC Pwb::Domain ZLIB::ZLIB)
+
+# exporters needs the ingest CSV/XML readers and the SEGY inspector; both are
+# leaf libs (Domain-only deps) so the link is cycle-free.
+if(TARGET Pwb::Ingest AND TARGET Pwb::SeismicIo)
+    target_link_libraries(pwb_interchange PUBLIC Pwb::Ingest Pwb::SeismicIo)
+else()
+    message(FATAL_ERROR
+        "pwb_interchange exporters require Pwb::Ingest + Pwb::SeismicIo")
+endif()
 
 # model_adapters/service reuses the CONV-22 geomodel export writers (never a
 # re-implementation). Kept OPTIONAL so pre-existing consumers of the pure

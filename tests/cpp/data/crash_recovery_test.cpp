@@ -22,7 +22,9 @@
 #if defined(_WIN32)
 #include <process.h>
 #else
+#ifndef _WIN32
 #include <sys/wait.h>
+#endif  // sys/wait.h is POSIX-only (WIFEXITED); the Windows path uses _pclose directly
 #include <unistd.h>
 #endif
 

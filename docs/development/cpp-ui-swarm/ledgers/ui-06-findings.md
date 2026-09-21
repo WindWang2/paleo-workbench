@@ -136,6 +136,12 @@
 - ctest `ui_pages_data.*` 100% pass;Qt widget smoke(offscreen)未实现(缺口,
   widget 面仅经编译验证)。
 
+## 接线状态备注（2026-09，#1392 台账）
+
+- `ResourceTable`/`ResourceTableModel`（src/qt/resource_table.cpp 整 TU）
+  截至本日期全仓**零调用方**（未接线死代码）；保留备后续资源面板接线，
+  勿与 `DataAssetTable` 双份维护。
+
 ## 根 CMake 变更登记
 
 `if(PWB_BUILD_PLATFORM)` 块内 `add_subdirectory(libs/ui_shell)` 之后追加一行

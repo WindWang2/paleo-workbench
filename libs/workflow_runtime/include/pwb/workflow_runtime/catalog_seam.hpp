@@ -156,6 +156,23 @@ public:
     virtual void attach_run_output(const std::string& run_id,
                                    const std::string& version_id) = 0;
 
+    // catalog.lifecycle resolve_legacy_resource parity: the version a
+    // legacy ResourceItem id was bridged to (None → nullopt). Default:
+    // linear scan over version metadata["legacy_resource_id"]; stores
+    // with a bridge index override.
+    virtual std::optional<VersionRecord> resolve_legacy_resource(
+        const std::string& resource_id);
+
+    // catalog.lifecycle set_run_ports parity: V11 typed-port annotation.
+    // Accept-and-ignore by contract — backends without typed-port support
+    // ignore the call and the flat id lists remain authoritative, so the
+    // default is a no-op. `input_ports`/`output_ports` are Json arrays of
+    // {role, version_id, ordinal, ...} dicts; a null Json leaves that side
+    // untouched (Python passes only the side being annotated).
+    virtual void set_run_ports(const std::string& run_id,
+                               const Json& input_ports,
+                               const Json& output_ports);
+
     // Project selection pointer (asset tip).
     virtual void set_current_version(const std::string& asset_id,
                                      const std::string& version_id) = 0;
@@ -226,6 +243,8 @@ public:
     // keeps it explicit so the provenance publish path is visible).
     void attach_run_output(const std::string& run_id,
                            const std::string& version_id) override;
+    void set_run_ports(const std::string& run_id, const Json& input_ports,
+                       const Json& output_ports) override;
 
     [[nodiscard]] const std::vector<VersionRecord>& versions() const {
         return versions_;

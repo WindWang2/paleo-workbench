@@ -1,0 +1,3589 @@
+{
+ "schema": "pwb.workspace.layer_control.oracle/1",
+ "expectation_source": "python-product",
+ "key_cases": {
+  "index_keys": [
+   [
+    0,
+    "aaaaaaac"
+   ],
+   [
+    1,
+    "aaaaaaad"
+   ],
+   [
+    2,
+    "aaaaaaae"
+   ],
+   [
+    25,
+    "aaaaaabb"
+   ],
+   [
+    26,
+    "aaaaaabc"
+   ],
+   [
+    27,
+    "aaaaaabd"
+   ],
+   [
+    675,
+    "aaaaabab"
+   ],
+   [
+    676,
+    "aaaaabac"
+   ],
+   [
+    1000,
+    "aaaaabmo"
+   ],
+   [
+    100000,
+    "aaaafryg"
+   ],
+   [
+    8000000000,
+    "azxikdnu"
+   ]
+  ],
+  "index_error": -1,
+  "sequence_count": 6,
+  "sequence_keys": [
+   "aaaaaaac",
+   "aaaaaaad",
+   "aaaaaaae",
+   "aaaaaaaf",
+   "aaaaaaag",
+   "aaaaaaah"
+  ],
+  "between": [
+   {
+    "a": "aaaaaaab",
+    "b": "aaaaaaac",
+    "key": "aaaaaaabb"
+   },
+   {
+    "a": "a",
+    "b": "ab",
+    "key": "aa"
+   },
+   {
+    "a": "a",
+    "b": "c",
+    "key": "ab"
+   },
+   {
+    "a": "az",
+    "b": "b",
+    "key": "azb"
+   },
+   {
+    "a": "aaaaaaaz",
+    "b": "aaaaaaba",
+    "key": "aaaaaaazb"
+   },
+   {
+    "a": "y",
+    "b": "z",
+    "key": "yb"
+   },
+   {
+    "a": "m",
+    "b": "mb",
+    "key": "ma"
+   },
+   {
+    "a": "aabb",
+    "b": "aabbz",
+    "key": "aabbb"
+   },
+   {
+    "a": "x",
+    "b": "xaba",
+    "key": "xaaz"
+   },
+   {
+    "a": "x",
+    "b": "xaa",
+    "key": "xa"
+   },
+   {
+    "a": "ab",
+    "b": "abaaa",
+    "key": "abaa"
+   },
+   {
+    "a": "zzb",
+    "b": "zzbaa",
+    "key": "zzba"
+   }
+  ],
+  "between_exhausted": [
+   {
+    "a": "x",
+    "b": "xa"
+   },
+   {
+    "a": "abc",
+    "b": "abca"
+   },
+   {
+    "a": "zzb",
+    "b": "zzba"
+   }
+  ],
+  "after": [
+   {
+    "a": "",
+    "key": "aaaaaaac"
+   },
+   {
+    "a": "a",
+    "key": "ab"
+   },
+   {
+    "a": "abc",
+    "key": "abcb"
+   },
+   {
+    "a": "zzzzzzzz",
+    "key": "zzzzzzzzb"
+   }
+  ],
+  "before": [
+   {
+    "b": "b",
+    "key": "a"
+   },
+   {
+    "b": "c",
+    "key": "b"
+   },
+   {
+    "b": "ab",
+    "key": "aa"
+   },
+   {
+    "b": "aaaaaaac",
+    "key": "aaaaaaab"
+   },
+   {
+    "b": "zaa",
+    "key": "yzz"
+   },
+   {
+    "b": "baa",
+    "key": "azz"
+   },
+   {
+    "b": "abca",
+    "key": "abbz"
+   }
+  ],
+  "before_exhausted": [
+   "a"
+  ],
+  "valid": [
+   {
+    "key": "",
+    "valid": true
+   },
+   {
+    "key": "abc",
+    "valid": true
+   },
+   {
+    "key": "aaaaaaac",
+    "valid": true
+   },
+   {
+    "key": "aXc",
+    "valid": false
+   },
+   {
+    "key": "abc ",
+    "valid": false
+   }
+  ]
+ },
+ "assign_cases": [
+  {
+   "name": "fresh_container_defaults",
+   "ordered": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ],
+   "existing": {},
+   "expected": {
+    "a": "aaaaaaac",
+    "b": "aaaaaaad",
+    "c": "aaaaaaae",
+    "d": "aaaaaaaf"
+   }
+  },
+  {
+   "name": "lis_keeps_consistent_keys",
+   "ordered": [
+    "a",
+    "b",
+    "c"
+   ],
+   "existing": {
+    "a": "k1",
+    "b": "k3",
+    "c": "k5"
+   },
+   "expected": {
+    "a": "k1",
+    "b": "k3",
+    "c": "k5"
+   }
+  },
+  {
+   "name": "single_drag_midpoint",
+   "ordered": [
+    "a",
+    "c",
+    "b"
+   ],
+   "existing": {
+    "a": "m",
+    "b": "n",
+    "c": "q"
+   },
+   "expected": {
+    "a": "m",
+    "c": "mb",
+    "b": "n"
+   }
+  },
+  {
+   "name": "unkeyed_between_keepers",
+   "ordered": [
+    "a",
+    "x",
+    "y",
+    "b"
+   ],
+   "existing": {
+    "a": "r",
+    "b": "t"
+   },
+   "expected": {
+    "a": "r",
+    "x": "rb",
+    "y": "rbb",
+    "b": "t"
+   }
+  },
+  {
+   "name": "pending_at_head",
+   "ordered": [
+    "x",
+    "a",
+    "b"
+   ],
+   "existing": {
+    "a": "s",
+    "b": "u"
+   },
+   "expected": {
+    "x": "rb",
+    "a": "s",
+    "b": "u"
+   }
+  },
+  {
+   "name": "pending_at_tail",
+   "ordered": [
+    "a",
+    "b",
+    "z1",
+    "z2"
+   ],
+   "existing": {
+    "a": "s",
+    "b": "u"
+   },
+   "expected": {
+    "a": "s",
+    "b": "u",
+    "z1": "ub",
+    "z2": "ubb"
+   }
+  },
+  {
+   "name": "drag_below_all",
+   "ordered": [
+    "x",
+    "lo"
+   ],
+   "existing": {
+    "lo": "lz"
+   },
+   "expected": {
+    "x": "lyb",
+    "lo": "lz"
+   }
+  },
+  {
+   "name": "disagree_rekeys_minority",
+   "ordered": [
+    "p",
+    "q",
+    "r",
+    "s"
+   ],
+   "existing": {
+    "p": "d",
+    "q": "c",
+    "r": "b",
+    "s": "a"
+   },
+   "expected": {
+    "p": "aaaaaaac",
+    "q": "aaaaaaad",
+    "r": "aaaaaaae",
+    "s": "aaaaaaaf"
+   }
+  },
+  {
+   "name": "none_values_filtered",
+   "ordered": [
+    "a",
+    "b"
+   ],
+   "existing": {
+    "a": null,
+    "b": "z"
+   },
+   "expected": {
+    "a": "yb",
+    "b": "z"
+   }
+  },
+  {
+   "name": "exhaustion_rebalances",
+   "ordered": [
+    "keep1",
+    "mid",
+    "keep2"
+   ],
+   "existing": {
+    "keep1": "x",
+    "keep2": "xa"
+   },
+   "expected": {
+    "keep1": "aaaaaaac",
+    "mid": "aaaaaaad",
+    "keep2": "aaaaaaae"
+   }
+  },
+  {
+   "name": "oversized_key_rebalances",
+   "ordered": [
+    "a",
+    "b",
+    "c"
+   ],
+   "existing": {
+    "a": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "b": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
+   },
+   "expected": {
+    "a": "aaaaaaac",
+    "b": "aaaaaaad",
+    "c": "aaaaaaae"
+   }
+  },
+  {
+   "name": "empty",
+   "ordered": [],
+   "existing": {},
+   "expected": {}
+  }
+ ],
+ "band_cases": {
+  "roles": [
+   {
+    "role": "analysis_aid",
+    "band": 140
+   },
+   {
+    "role": "base_reference",
+    "band": 150
+   },
+   {
+    "role": "distribution_line",
+    "band": 82
+   },
+   {
+    "role": "facies_boundary",
+    "band": 60
+   },
+   {
+    "role": "factor_classification",
+    "band": 96
+   },
+   {
+    "role": "factor_contour",
+    "band": 94
+   },
+   {
+    "role": "factor_grid",
+    "band": 92
+   },
+   {
+    "role": "factor_input",
+    "band": 90
+   },
+   {
+    "role": "factor_qc",
+    "band": 100
+   },
+   {
+    "role": "factor_uncertainty",
+    "band": 98
+   },
+   {
+    "role": "fault_constraint",
+    "band": 61
+   },
+   {
+    "role": "initial_facies_draft",
+    "band": 70
+   },
+   {
+    "role": "initial_facies_source",
+    "band": 130
+   },
+   {
+    "role": "integrated_boundary",
+    "band": 51
+   },
+   {
+    "role": "integrated_facies",
+    "band": 50
+   },
+   {
+    "role": "interpolation_boundary",
+    "band": 84
+   },
+   {
+    "role": "interpretation_annotation",
+    "band": 71
+   },
+   {
+    "role": "legacy_unclassified",
+    "band": 158
+   },
+   {
+    "role": "map_annotation",
+    "band": 30
+   },
+   {
+    "role": "map_reference",
+    "band": 41
+   },
+   {
+    "role": "map_symbol",
+    "band": 40
+   },
+   {
+    "role": "mask_boundary",
+    "band": 85
+   },
+   {
+    "role": "paleo_shoreline",
+    "band": 83
+   },
+   {
+    "role": "pending_review_area",
+    "band": 79
+   },
+   {
+    "role": "provenance_direction",
+    "band": 80
+   },
+   {
+    "role": "provenance_line",
+    "band": 81
+   },
+   {
+    "role": "qc_conflict",
+    "band": 21
+   },
+   {
+    "role": "qc_warning",
+    "band": 20
+   },
+   {
+    "role": "seismic_facies_confidence",
+    "band": 126
+   },
+   {
+    "role": "seismic_facies_prediction",
+    "band": 124
+   },
+   {
+    "role": "user_general",
+    "band": 155
+   },
+   {
+    "role": "well_facies_confidence",
+    "band": 122
+   },
+   {
+    "role": "well_facies_prediction",
+    "band": 120
+   }
+  ],
+  "unknown_band": 150,
+  "factor_ranks": [
+   {
+    "role": "factor_input",
+    "rank": 0
+   },
+   {
+    "role": "factor_grid",
+    "rank": 1
+   },
+   {
+    "role": "factor_contour",
+    "rank": 2
+   },
+   {
+    "role": "factor_classification",
+    "rank": 3
+   },
+   {
+    "role": "factor_uncertainty",
+    "rank": 4
+   },
+   {
+    "role": "factor_qc",
+    "rank": 5
+   }
+  ],
+  "unknown_factor_rank": 99,
+  "band_sort_keys": [
+   {
+    "role": "qc_warning",
+    "sub": 0,
+    "node": "n1",
+    "key": [
+     20,
+     0,
+     "n1"
+    ]
+   },
+   {
+    "role": "base_reference",
+    "sub": 0,
+    "node": "n1",
+    "key": [
+     150,
+     0,
+     "n1"
+    ]
+   },
+   {
+    "role": "unknown_role",
+    "sub": 5,
+    "node": "n2",
+    "key": [
+     150,
+     5,
+     "n2"
+    ]
+   },
+   {
+    "role": "factor_grid",
+    "sub": 2,
+    "node": "n3",
+    "key": [
+     92,
+     2,
+     "n3"
+    ]
+   }
+  ]
+ },
+ "tree_cases": [
+  {
+   "name": "mixed_tree",
+   "input": {
+    "source": "domain",
+    "children": [
+     {
+      "type": "group",
+      "id": "phase1.initial_facies",
+      "name": "初始相",
+      "kind": "system",
+      "expanded": true,
+      "locked": false,
+      "visible": true,
+      "children": [
+       {
+        "type": "layer",
+        "id": "l1",
+        "order_key": "aaaaaaac"
+       },
+       {
+        "type": "layer",
+        "id": "l2"
+       }
+      ]
+     },
+     {
+      "type": "group",
+      "id": "user.1",
+      "name": "我的组",
+      "kind": "user",
+      "expanded": false,
+      "locked": true,
+      "visible": false,
+      "children": [
+       {
+        "type": "group",
+        "id": "user.2",
+        "name": "嵌套",
+        "kind": "user",
+        "children": [
+         {
+          "type": "layer",
+          "id": "l3",
+          "order_key": "zz"
+         }
+        ]
+       },
+       {
+        "type": "layer",
+        "id": "l4"
+       }
+      ]
+     },
+     {
+      "type": "layer",
+      "id": "l_root",
+      "note": ""
+     }
+    ]
+   },
+   "probes": {
+    "layer_ids": [
+     "l1",
+     "l2",
+     "l3",
+     "l4",
+     "l_root"
+    ],
+    "group_ids": [
+     "phase1.initial_facies",
+     "user.1",
+     "user.2"
+    ],
+    "parent_of": {
+     "l1": "phase1.initial_facies",
+     "l2": "phase1.initial_facies",
+     "l3": "user.2",
+     "l4": "user.1",
+     "l_root": null
+    }
+   },
+   "roundtrip": {
+    "source": "domain",
+    "children": [
+     {
+      "type": "group",
+      "id": "phase1.initial_facies",
+      "name": "初始相",
+      "kind": "system",
+      "expanded": true,
+      "locked": false,
+      "visible": true,
+      "children": [
+       {
+        "type": "layer",
+        "id": "l1",
+        "order_key": "aaaaaaac"
+       },
+       {
+        "type": "layer",
+        "id": "l2"
+       }
+      ]
+     },
+     {
+      "type": "group",
+      "id": "user.1",
+      "name": "我的组",
+      "kind": "user",
+      "expanded": false,
+      "locked": true,
+      "visible": false,
+      "children": [
+       {
+        "type": "group",
+        "id": "user.2",
+        "name": "嵌套",
+        "kind": "user",
+        "expanded": true,
+        "locked": false,
+        "visible": true,
+        "children": [
+         {
+          "type": "layer",
+          "id": "l3",
+          "order_key": "zz"
+         }
+        ]
+       },
+       {
+        "type": "layer",
+        "id": "l4"
+       }
+      ]
+     },
+     {
+      "type": "layer",
+      "id": "l_root"
+     }
+    ]
+   },
+   "flatten": {
+    "snapshot_ids": [
+     "l4",
+     "l1",
+     "l_new",
+     "l3",
+     "l2",
+     "l_root"
+    ],
+    "ordered": [
+     "l1",
+     "l2",
+     "l3",
+     "l4",
+     "l_root",
+     "l_new"
+    ]
+   }
+  },
+  {
+   "name": "empty_tree",
+   "input": {
+    "source": "domain",
+    "children": []
+   },
+   "probes": {
+    "layer_ids": [],
+    "group_ids": [],
+    "parent_of": {}
+   },
+   "roundtrip": {
+    "source": "domain",
+    "children": []
+   },
+   "flatten": {
+    "snapshot_ids": [
+     "x"
+    ],
+    "ordered": [
+     "x"
+    ]
+   }
+  }
+ ],
+ "tree_from_nodes_cases": [
+  {
+   "name": "bridge_nodes",
+   "nodes": [
+    {
+     "type": "group",
+     "id": "phase1.initial_facies",
+     "name": "初始相",
+     "expanded": true,
+     "children": [
+      {
+       "type": "layer",
+       "id": "m1"
+      },
+      {
+       "type": "group",
+       "id": "user.deadbeef",
+       "name": "用户组",
+       "children": [
+        {
+         "type": "layer",
+         "id": "m2"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "layer",
+     "id": "m3"
+    }
+   ],
+   "roundtrip": {
+    "source": "qgis",
+    "children": [
+     {
+      "type": "group",
+      "id": "phase1.initial_facies",
+      "name": "初始相",
+      "kind": "system",
+      "expanded": true,
+      "locked": false,
+      "visible": true,
+      "children": [
+       {
+        "type": "layer",
+        "id": "m1"
+       },
+       {
+        "type": "group",
+        "id": "user.deadbeef",
+        "name": "用户组",
+        "kind": "user",
+        "expanded": true,
+        "locked": false,
+        "visible": true,
+        "children": [
+         {
+          "type": "layer",
+          "id": "m2"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "layer",
+      "id": "m3"
+     }
+    ]
+   },
+   "source": "qgis"
+  }
+ ],
+ "diff_cases": [
+  {
+   "name": "identical",
+   "current": {
+    "children": [
+     {
+      "type": "group",
+      "id": "g1",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "a"
+       },
+       {
+        "type": "layer",
+        "id": "b"
+       }
+      ]
+     }
+    ]
+   },
+   "desired": {
+    "children": [
+     {
+      "type": "group",
+      "id": "g1",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "a"
+       },
+       {
+        "type": "layer",
+        "id": "b"
+       }
+      ]
+     }
+    ]
+   },
+   "expected": {
+    "creates": [],
+    "removes": [],
+    "renames": [],
+    "group_moves": [],
+    "layer_moves": [],
+    "states": []
+   }
+  },
+  {
+   "name": "reorder_in_group_lcs_keeps_two",
+   "current": {
+    "children": [
+     {
+      "type": "group",
+      "id": "g1",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "a"
+       },
+       {
+        "type": "layer",
+        "id": "b"
+       },
+       {
+        "type": "layer",
+        "id": "c"
+       },
+       {
+        "type": "layer",
+        "id": "d"
+       }
+      ]
+     }
+    ]
+   },
+   "desired": {
+    "children": [
+     {
+      "type": "group",
+      "id": "g1",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "a"
+       },
+       {
+        "type": "layer",
+        "id": "c"
+       },
+       {
+        "type": "layer",
+        "id": "b"
+       },
+       {
+        "type": "layer",
+        "id": "d"
+       }
+      ]
+     }
+    ]
+   },
+   "expected": {
+    "creates": [],
+    "removes": [],
+    "renames": [],
+    "group_moves": [],
+    "layer_moves": [
+     {
+      "layer_id": "c",
+      "new_parent": "g1",
+      "new_index": 1
+     }
+    ],
+    "states": []
+   }
+  },
+  {
+   "name": "cross_container_move",
+   "current": {
+    "children": [
+     {
+      "type": "group",
+      "id": "g1",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "a"
+       },
+       {
+        "type": "layer",
+        "id": "b"
+       }
+      ]
+     },
+     {
+      "type": "group",
+      "id": "g2",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "c"
+       }
+      ]
+     }
+    ]
+   },
+   "desired": {
+    "children": [
+     {
+      "type": "group",
+      "id": "g1",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "a"
+       }
+      ]
+     },
+     {
+      "type": "group",
+      "id": "g2",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "c"
+       },
+       {
+        "type": "layer",
+        "id": "b"
+       }
+      ]
+     }
+    ]
+   },
+   "expected": {
+    "creates": [],
+    "removes": [],
+    "renames": [],
+    "group_moves": [],
+    "layer_moves": [
+     {
+      "layer_id": "b",
+      "new_parent": "g2",
+      "new_index": 1
+     }
+    ],
+    "states": []
+   }
+  },
+  {
+   "name": "create_remove_rename_state",
+   "current": {
+    "children": [
+     {
+      "type": "group",
+      "id": "g1",
+      "name": "旧名",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "a"
+       }
+      ],
+      "visible": false
+     },
+     {
+      "type": "group",
+      "id": "gone",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "z"
+       }
+      ]
+     }
+    ]
+   },
+   "desired": {
+    "children": [
+     {
+      "type": "group",
+      "id": "g1",
+      "name": "新名",
+      "kind": "system",
+      "children": [
+       {
+        "type": "layer",
+        "id": "a"
+       }
+      ],
+      "visible": true,
+      "expanded": false
+     },
+     {
+      "type": "group",
+      "id": "new",
+      "name": "N",
+      "kind": "system",
+      "children": []
+     }
+    ]
+   },
+   "expected": {
+    "creates": [
+     {
+      "group_id": "new",
+      "name": "N",
+      "parent": ""
+     }
+    ],
+    "removes": [
+     "gone"
+    ],
+    "renames": [
+     {
+      "group_id": "g1",
+      "new_name": "新名"
+     }
+    ],
+    "group_moves": [
+     {
+      "group_id": "new",
+      "new_parent": "",
+      "new_index": 1
+     }
+    ],
+    "layer_moves": [],
+    "states": [
+     {
+      "group_id": "g1",
+      "kind": "visible",
+      "value": true
+     },
+     {
+      "group_id": "g1",
+      "kind": "expanded",
+      "value": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "group_move_between_parents",
+   "current": {
+    "children": [
+     {
+      "type": "group",
+      "id": "p1",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "group",
+        "id": "child1",
+        "name": "C1",
+        "kind": "system",
+        "children": [
+         {
+          "type": "layer",
+          "id": "a"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "group",
+      "id": "p2",
+      "name": "G",
+      "kind": "system",
+      "children": []
+     }
+    ]
+   },
+   "desired": {
+    "children": [
+     {
+      "type": "group",
+      "id": "p1",
+      "name": "G",
+      "kind": "system",
+      "children": []
+     },
+     {
+      "type": "group",
+      "id": "p2",
+      "name": "G",
+      "kind": "system",
+      "children": [
+       {
+        "type": "group",
+        "id": "child1",
+        "name": "C1",
+        "kind": "system",
+        "children": [
+         {
+          "type": "layer",
+          "id": "a"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "expected": {
+    "creates": [],
+    "removes": [],
+    "renames": [],
+    "group_moves": [
+     {
+      "group_id": "child1",
+      "new_parent": "p2",
+      "new_index": 0
+     }
+    ],
+    "layer_moves": [],
+    "states": []
+   }
+  },
+  {
+   "name": "root_level_reorder",
+   "current": {
+    "children": [
+     {
+      "type": "layer",
+      "id": "r1"
+     },
+     {
+      "type": "layer",
+      "id": "r2"
+     },
+     {
+      "type": "layer",
+      "id": "r3"
+     }
+    ]
+   },
+   "desired": {
+    "children": [
+     {
+      "type": "layer",
+      "id": "r2"
+     },
+     {
+      "type": "layer",
+      "id": "r1"
+     },
+     {
+      "type": "layer",
+      "id": "r3"
+     }
+    ]
+   },
+   "expected": {
+    "creates": [],
+    "removes": [],
+    "renames": [],
+    "group_moves": [],
+    "layer_moves": [
+     {
+      "layer_id": "r2",
+      "new_parent": "",
+      "new_index": 0
+     }
+    ],
+    "states": []
+   }
+  }
+ ],
+ "usage_cases": {
+  "workspace": {
+   "schema_version": 1,
+   "memberships": {
+    "layer_map": {
+     "role": "facies_boundary",
+     "source_version_id": "v1",
+     "source_asset_id": "asset_1",
+     "binding_kind": "catalog_version",
+     "created_stage": "constraint_factor"
+    },
+    "layer_direct_asset": {
+     "role": "well_facies_prediction",
+     "source_version_id": "v9",
+     "source_asset_id": "asset_2"
+    },
+    "layer_fp": {
+     "role": "fault_constraint",
+     "binding_kind": "content_fingerprint"
+    }
+   }
+  },
+  "project": {
+   "factor_map_tasks": [
+    {
+     "id": "task_1",
+     "name": "GR 网格",
+     "grid_artifact_version_id": "v2"
+    },
+    {
+     "id": "task_2",
+     "grid_artifact_version_id": ""
+    }
+   ],
+   "compilation_input_sets": [
+    {
+     "id": "set_1",
+     "name": "最终编图输入",
+     "frozen": true,
+     "entries": [
+      {
+       "pinned_version_id": "v1"
+      },
+      {
+       "pinned_version_id": "v3",
+       "resolved_asset_id": "asset_2"
+      }
+     ]
+    },
+    {
+     "id": "set_2",
+     "entries": [
+      {
+       "pinned_version_id": "v2"
+      }
+     ]
+    }
+   ],
+   "map_products": [
+    {
+     "id": "prod_1",
+     "product_name": "P1",
+     "output_version_id": "v3",
+     "run_id": "run_map",
+     "lifecycle": "published"
+    },
+    {
+     "id": "prod_2",
+     "product_name": "",
+     "output_version_id": "v0",
+     "run_id": "run_map",
+     "lifecycle": ""
+    }
+   ]
+  },
+  "catalog": {
+   "run_inputs": {
+    "run_map": [
+     "v1",
+     "v2"
+    ],
+    "run_wide": [
+     "v0",
+     "v1",
+     "v2",
+     "v3",
+     "v4",
+     "v5",
+     "v6",
+     "v7",
+     "v8",
+     "v9",
+     "v10",
+     "v11",
+     "v12",
+     "v13",
+     "v14",
+     "v15",
+     "v16",
+     "v17",
+     "v18",
+     "v19",
+     "v20",
+     "v21",
+     "v22",
+     "v23",
+     "v24",
+     "v25",
+     "v26",
+     "v27",
+     "v28",
+     "v29",
+     "v30",
+     "v31",
+     "v32",
+     "v33",
+     "v34",
+     "v35",
+     "v36",
+     "v37",
+     "v38",
+     "v39",
+     "v40",
+     "v41",
+     "v42",
+     "v43",
+     "v44",
+     "v45",
+     "v46",
+     "v47",
+     "v48",
+     "v49",
+     "v50",
+     "v51",
+     "v52",
+     "v53",
+     "v54",
+     "v55",
+     "v56",
+     "v57",
+     "v58",
+     "v59",
+     "v60",
+     "v61",
+     "v62",
+     "v63",
+     "v64",
+     "v65",
+     "v66",
+     "v67",
+     "v68",
+     "v69",
+     "v70",
+     "v71",
+     "v72",
+     "v73",
+     "v74",
+     "v75",
+     "v76",
+     "v77",
+     "v78",
+     "v79",
+     "v80",
+     "v81",
+     "v82",
+     "v83",
+     "v84",
+     "v85",
+     "v86",
+     "v87",
+     "v88",
+     "v89",
+     "v90",
+     "v91",
+     "v92",
+     "v93",
+     "v94",
+     "v95",
+     "v96",
+     "v97",
+     "v98",
+     "v99",
+     "v100",
+     "v101",
+     "v102",
+     "v103",
+     "v104",
+     "v105",
+     "v106",
+     "v107",
+     "v108",
+     "v109",
+     "v110",
+     "v111",
+     "v112",
+     "v113",
+     "v114",
+     "v115",
+     "v116",
+     "v117",
+     "v118",
+     "v119",
+     "v120",
+     "v121",
+     "v122",
+     "v123",
+     "v124",
+     "v125",
+     "v126",
+     "v127",
+     "v128",
+     "v129",
+     "v130",
+     "v131",
+     "v132",
+     "v133",
+     "v134",
+     "v135",
+     "v136",
+     "v137",
+     "v138",
+     "v139",
+     "v140",
+     "v141",
+     "v142",
+     "v143",
+     "v144",
+     "v145",
+     "v146",
+     "v147",
+     "v148",
+     "v149",
+     "v150",
+     "v151",
+     "v152",
+     "v153",
+     "v154",
+     "v155",
+     "v156",
+     "v157",
+     "v158",
+     "v159",
+     "v160",
+     "v161",
+     "v162",
+     "v163",
+     "v164",
+     "v165",
+     "v166",
+     "v167",
+     "v168",
+     "v169",
+     "v170",
+     "v171",
+     "v172",
+     "v173",
+     "v174",
+     "v175",
+     "v176",
+     "v177",
+     "v178",
+     "v179",
+     "v180",
+     "v181",
+     "v182",
+     "v183",
+     "v184",
+     "v185",
+     "v186",
+     "v187",
+     "v188",
+     "v189",
+     "v190",
+     "v191",
+     "v192",
+     "v193",
+     "v194",
+     "v195",
+     "v196",
+     "v197",
+     "v198",
+     "v199"
+    ]
+   },
+   "runs_consuming": {
+    "v1": [
+     "run_map",
+     "run_other"
+    ],
+    "v2": [
+     "run_wide"
+    ],
+    "v3": [
+     "run_cap_0",
+     "run_cap_1",
+     "run_cap_2",
+     "run_cap_3",
+     "run_cap_4",
+     "run_cap_5",
+     "run_cap_6",
+     "run_cap_7",
+     "run_cap_8",
+     "run_cap_9",
+     "run_cap_10",
+     "run_cap_11",
+     "run_cap_12",
+     "run_cap_13",
+     "run_cap_14",
+     "run_cap_15",
+     "run_cap_16",
+     "run_cap_17",
+     "run_cap_18",
+     "run_cap_19",
+     "run_cap_20",
+     "run_cap_21",
+     "run_cap_22",
+     "run_cap_23",
+     "run_cap_24",
+     "run_cap_25",
+     "run_cap_26",
+     "run_cap_27",
+     "run_cap_28",
+     "run_cap_29",
+     "run_cap_30",
+     "run_cap_31",
+     "run_cap_32",
+     "run_cap_33",
+     "run_cap_34",
+     "run_cap_35",
+     "run_cap_36",
+     "run_cap_37",
+     "run_cap_38",
+     "run_cap_39",
+     "run_cap_40",
+     "run_cap_41",
+     "run_cap_42",
+     "run_cap_43",
+     "run_cap_44",
+     "run_cap_45",
+     "run_cap_46",
+     "run_cap_47",
+     "run_cap_48",
+     "run_cap_49",
+     "run_cap_50",
+     "run_cap_51",
+     "run_cap_52",
+     "run_cap_53",
+     "run_cap_54",
+     "run_cap_55",
+     "run_cap_56",
+     "run_cap_57",
+     "run_cap_58",
+     "run_cap_59",
+     "run_cap_60",
+     "run_cap_61",
+     "run_cap_62",
+     "run_cap_63",
+     "run_cap_64",
+     "run_cap_65",
+     "run_cap_66",
+     "run_cap_67",
+     "run_cap_68",
+     "run_cap_69",
+     "run_cap_70",
+     "run_cap_71",
+     "run_cap_72",
+     "run_cap_73",
+     "run_cap_74",
+     "run_cap_75",
+     "run_cap_76",
+     "run_cap_77",
+     "run_cap_78",
+     "run_cap_79",
+     "run_cap_80",
+     "run_cap_81",
+     "run_cap_82",
+     "run_cap_83",
+     "run_cap_84",
+     "run_cap_85",
+     "run_cap_86",
+     "run_cap_87",
+     "run_cap_88",
+     "run_cap_89",
+     "run_cap_90",
+     "run_cap_91",
+     "run_cap_92",
+     "run_cap_93",
+     "run_cap_94",
+     "run_cap_95",
+     "run_cap_96",
+     "run_cap_97",
+     "run_cap_98",
+     "run_cap_99",
+     "run_cap_100",
+     "run_cap_101",
+     "run_cap_102",
+     "run_cap_103",
+     "run_cap_104",
+     "run_cap_105",
+     "run_cap_106",
+     "run_cap_107",
+     "run_cap_108",
+     "run_cap_109",
+     "run_cap_110",
+     "run_cap_111",
+     "run_cap_112",
+     "run_cap_113",
+     "run_cap_114",
+     "run_cap_115",
+     "run_cap_116",
+     "run_cap_117",
+     "run_cap_118",
+     "run_cap_119"
+    ]
+   },
+   "versions_by_asset": {
+    "asset_1": [
+     "v1",
+     "v2"
+    ],
+    "asset_2": [
+     "v3"
+    ]
+   },
+   "run_meta": {
+    "run_map": [
+     "export_map",
+     "finished"
+    ],
+    "run_wide": [
+     "predict",
+     "running"
+    ],
+    "run_other": [
+     "import",
+     "finished"
+    ],
+    "run_cap_0": [
+     "batch_0",
+     "finished"
+    ],
+    "run_cap_1": [
+     "batch_1",
+     "finished"
+    ],
+    "run_cap_2": [
+     "batch_2",
+     "finished"
+    ],
+    "run_cap_3": [
+     "batch_3",
+     "finished"
+    ],
+    "run_cap_4": [
+     "batch_4",
+     "finished"
+    ],
+    "run_cap_5": [
+     "batch_5",
+     "finished"
+    ],
+    "run_cap_6": [
+     "batch_6",
+     "finished"
+    ],
+    "run_cap_7": [
+     "batch_7",
+     "finished"
+    ],
+    "run_cap_8": [
+     "batch_8",
+     "finished"
+    ],
+    "run_cap_9": [
+     "batch_9",
+     "finished"
+    ],
+    "run_cap_10": [
+     "batch_10",
+     "finished"
+    ],
+    "run_cap_11": [
+     "batch_11",
+     "finished"
+    ],
+    "run_cap_12": [
+     "batch_12",
+     "finished"
+    ],
+    "run_cap_13": [
+     "batch_13",
+     "finished"
+    ],
+    "run_cap_14": [
+     "batch_14",
+     "finished"
+    ],
+    "run_cap_15": [
+     "batch_15",
+     "finished"
+    ],
+    "run_cap_16": [
+     "batch_16",
+     "finished"
+    ],
+    "run_cap_17": [
+     "batch_17",
+     "finished"
+    ],
+    "run_cap_18": [
+     "batch_18",
+     "finished"
+    ],
+    "run_cap_19": [
+     "batch_19",
+     "finished"
+    ],
+    "run_cap_20": [
+     "batch_20",
+     "finished"
+    ],
+    "run_cap_21": [
+     "batch_21",
+     "finished"
+    ],
+    "run_cap_22": [
+     "batch_22",
+     "finished"
+    ],
+    "run_cap_23": [
+     "batch_23",
+     "finished"
+    ],
+    "run_cap_24": [
+     "batch_24",
+     "finished"
+    ],
+    "run_cap_25": [
+     "batch_25",
+     "finished"
+    ],
+    "run_cap_26": [
+     "batch_26",
+     "finished"
+    ],
+    "run_cap_27": [
+     "batch_27",
+     "finished"
+    ],
+    "run_cap_28": [
+     "batch_28",
+     "finished"
+    ],
+    "run_cap_29": [
+     "batch_29",
+     "finished"
+    ],
+    "run_cap_30": [
+     "batch_30",
+     "finished"
+    ],
+    "run_cap_31": [
+     "batch_31",
+     "finished"
+    ],
+    "run_cap_32": [
+     "batch_32",
+     "finished"
+    ],
+    "run_cap_33": [
+     "batch_33",
+     "finished"
+    ],
+    "run_cap_34": [
+     "batch_34",
+     "finished"
+    ],
+    "run_cap_35": [
+     "batch_35",
+     "finished"
+    ],
+    "run_cap_36": [
+     "batch_36",
+     "finished"
+    ],
+    "run_cap_37": [
+     "batch_37",
+     "finished"
+    ],
+    "run_cap_38": [
+     "batch_38",
+     "finished"
+    ],
+    "run_cap_39": [
+     "batch_39",
+     "finished"
+    ],
+    "run_cap_40": [
+     "batch_40",
+     "finished"
+    ],
+    "run_cap_41": [
+     "batch_41",
+     "finished"
+    ],
+    "run_cap_42": [
+     "batch_42",
+     "finished"
+    ],
+    "run_cap_43": [
+     "batch_43",
+     "finished"
+    ],
+    "run_cap_44": [
+     "batch_44",
+     "finished"
+    ],
+    "run_cap_45": [
+     "batch_45",
+     "finished"
+    ],
+    "run_cap_46": [
+     "batch_46",
+     "finished"
+    ],
+    "run_cap_47": [
+     "batch_47",
+     "finished"
+    ],
+    "run_cap_48": [
+     "batch_48",
+     "finished"
+    ],
+    "run_cap_49": [
+     "batch_49",
+     "finished"
+    ],
+    "run_cap_50": [
+     "batch_50",
+     "finished"
+    ],
+    "run_cap_51": [
+     "batch_51",
+     "finished"
+    ],
+    "run_cap_52": [
+     "batch_52",
+     "finished"
+    ],
+    "run_cap_53": [
+     "batch_53",
+     "finished"
+    ],
+    "run_cap_54": [
+     "batch_54",
+     "finished"
+    ],
+    "run_cap_55": [
+     "batch_55",
+     "finished"
+    ],
+    "run_cap_56": [
+     "batch_56",
+     "finished"
+    ],
+    "run_cap_57": [
+     "batch_57",
+     "finished"
+    ],
+    "run_cap_58": [
+     "batch_58",
+     "finished"
+    ],
+    "run_cap_59": [
+     "batch_59",
+     "finished"
+    ],
+    "run_cap_60": [
+     "batch_60",
+     "finished"
+    ],
+    "run_cap_61": [
+     "batch_61",
+     "finished"
+    ],
+    "run_cap_62": [
+     "batch_62",
+     "finished"
+    ],
+    "run_cap_63": [
+     "batch_63",
+     "finished"
+    ],
+    "run_cap_64": [
+     "batch_64",
+     "finished"
+    ],
+    "run_cap_65": [
+     "batch_65",
+     "finished"
+    ],
+    "run_cap_66": [
+     "batch_66",
+     "finished"
+    ],
+    "run_cap_67": [
+     "batch_67",
+     "finished"
+    ],
+    "run_cap_68": [
+     "batch_68",
+     "finished"
+    ],
+    "run_cap_69": [
+     "batch_69",
+     "finished"
+    ],
+    "run_cap_70": [
+     "batch_70",
+     "finished"
+    ],
+    "run_cap_71": [
+     "batch_71",
+     "finished"
+    ],
+    "run_cap_72": [
+     "batch_72",
+     "finished"
+    ],
+    "run_cap_73": [
+     "batch_73",
+     "finished"
+    ],
+    "run_cap_74": [
+     "batch_74",
+     "finished"
+    ],
+    "run_cap_75": [
+     "batch_75",
+     "finished"
+    ],
+    "run_cap_76": [
+     "batch_76",
+     "finished"
+    ],
+    "run_cap_77": [
+     "batch_77",
+     "finished"
+    ],
+    "run_cap_78": [
+     "batch_78",
+     "finished"
+    ],
+    "run_cap_79": [
+     "batch_79",
+     "finished"
+    ],
+    "run_cap_80": [
+     "batch_80",
+     "finished"
+    ],
+    "run_cap_81": [
+     "batch_81",
+     "finished"
+    ],
+    "run_cap_82": [
+     "batch_82",
+     "finished"
+    ],
+    "run_cap_83": [
+     "batch_83",
+     "finished"
+    ],
+    "run_cap_84": [
+     "batch_84",
+     "finished"
+    ],
+    "run_cap_85": [
+     "batch_85",
+     "finished"
+    ],
+    "run_cap_86": [
+     "batch_86",
+     "finished"
+    ],
+    "run_cap_87": [
+     "batch_87",
+     "finished"
+    ],
+    "run_cap_88": [
+     "batch_88",
+     "finished"
+    ],
+    "run_cap_89": [
+     "batch_89",
+     "finished"
+    ],
+    "run_cap_90": [
+     "batch_90",
+     "finished"
+    ],
+    "run_cap_91": [
+     "batch_91",
+     "finished"
+    ],
+    "run_cap_92": [
+     "batch_92",
+     "finished"
+    ],
+    "run_cap_93": [
+     "batch_93",
+     "finished"
+    ],
+    "run_cap_94": [
+     "batch_94",
+     "finished"
+    ],
+    "run_cap_95": [
+     "batch_95",
+     "finished"
+    ],
+    "run_cap_96": [
+     "batch_96",
+     "finished"
+    ],
+    "run_cap_97": [
+     "batch_97",
+     "finished"
+    ],
+    "run_cap_98": [
+     "batch_98",
+     "finished"
+    ],
+    "run_cap_99": [
+     "batch_99",
+     "finished"
+    ],
+    "run_cap_100": [
+     "batch_100",
+     "finished"
+    ],
+    "run_cap_101": [
+     "batch_101",
+     "finished"
+    ],
+    "run_cap_102": [
+     "batch_102",
+     "finished"
+    ],
+    "run_cap_103": [
+     "batch_103",
+     "finished"
+    ],
+    "run_cap_104": [
+     "batch_104",
+     "finished"
+    ],
+    "run_cap_105": [
+     "batch_105",
+     "finished"
+    ],
+    "run_cap_106": [
+     "batch_106",
+     "finished"
+    ],
+    "run_cap_107": [
+     "batch_107",
+     "finished"
+    ],
+    "run_cap_108": [
+     "batch_108",
+     "finished"
+    ],
+    "run_cap_109": [
+     "batch_109",
+     "finished"
+    ],
+    "run_cap_110": [
+     "batch_110",
+     "finished"
+    ],
+    "run_cap_111": [
+     "batch_111",
+     "finished"
+    ],
+    "run_cap_112": [
+     "batch_112",
+     "finished"
+    ],
+    "run_cap_113": [
+     "batch_113",
+     "finished"
+    ],
+    "run_cap_114": [
+     "batch_114",
+     "finished"
+    ],
+    "run_cap_115": [
+     "batch_115",
+     "finished"
+    ],
+    "run_cap_116": [
+     "batch_116",
+     "finished"
+    ],
+    "run_cap_117": [
+     "batch_117",
+     "finished"
+    ],
+    "run_cap_118": [
+     "batch_118",
+     "finished"
+    ],
+    "run_cap_119": [
+     "batch_119",
+     "finished"
+    ]
+   }
+  },
+  "version_queries": [
+   {
+    "version_id": "v1",
+    "include_runs": true,
+    "with_project": true,
+    "expected": [
+     {
+      "kind": "layer",
+      "ref_id": "layer_map",
+      "label": "图层 layer_map",
+      "version_id": "v1",
+      "stage": "constraint_factor",
+      "role": "facies_boundary",
+      "status": ""
+     },
+     {
+      "kind": "compilation_input",
+      "ref_id": "set_1",
+      "label": "最终编图输入",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": "frozen"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_1",
+      "label": "P1",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": "published"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_2",
+      "label": "prod_2",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": ""
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_map",
+      "label": "run export_map",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_other",
+      "label": "run import",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     }
+    ],
+    "truncated": false
+   },
+   {
+    "version_id": "v2",
+    "include_runs": true,
+    "with_project": true,
+    "expected": [
+     {
+      "kind": "factor_grid",
+      "ref_id": "task_1",
+      "label": "GR 网格",
+      "version_id": "v2",
+      "stage": "",
+      "role": "factor_grid",
+      "status": ""
+     },
+     {
+      "kind": "compilation_input",
+      "ref_id": "set_2",
+      "label": "set_2",
+      "version_id": "v2",
+      "stage": "",
+      "role": "",
+      "status": "draft"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_1",
+      "label": "P1",
+      "version_id": "v2",
+      "stage": "",
+      "role": "",
+      "status": "published"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_2",
+      "label": "prod_2",
+      "version_id": "v2",
+      "stage": "",
+      "role": "",
+      "status": ""
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_wide",
+      "label": "run predict",
+      "version_id": "v2",
+      "stage": "",
+      "role": "",
+      "status": "running"
+     }
+    ],
+    "truncated": false
+   },
+   {
+    "version_id": "v3",
+    "include_runs": true,
+    "with_project": true,
+    "expected": [
+     {
+      "kind": "compilation_input",
+      "ref_id": "set_1",
+      "label": "最终编图输入",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "frozen"
+     },
+     {
+      "kind": "map_product_output",
+      "ref_id": "prod_1",
+      "label": "P1",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "published"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_0",
+      "label": "run batch_0",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_1",
+      "label": "run batch_1",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_2",
+      "label": "run batch_2",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_3",
+      "label": "run batch_3",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_4",
+      "label": "run batch_4",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_5",
+      "label": "run batch_5",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_6",
+      "label": "run batch_6",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_7",
+      "label": "run batch_7",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_8",
+      "label": "run batch_8",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_9",
+      "label": "run batch_9",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_10",
+      "label": "run batch_10",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_11",
+      "label": "run batch_11",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_12",
+      "label": "run batch_12",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_13",
+      "label": "run batch_13",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_14",
+      "label": "run batch_14",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_15",
+      "label": "run batch_15",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_16",
+      "label": "run batch_16",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_17",
+      "label": "run batch_17",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_18",
+      "label": "run batch_18",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_19",
+      "label": "run batch_19",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_20",
+      "label": "run batch_20",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_21",
+      "label": "run batch_21",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_22",
+      "label": "run batch_22",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_23",
+      "label": "run batch_23",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_24",
+      "label": "run batch_24",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_25",
+      "label": "run batch_25",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_26",
+      "label": "run batch_26",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_27",
+      "label": "run batch_27",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_28",
+      "label": "run batch_28",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_29",
+      "label": "run batch_29",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_30",
+      "label": "run batch_30",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_31",
+      "label": "run batch_31",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_32",
+      "label": "run batch_32",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_33",
+      "label": "run batch_33",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_34",
+      "label": "run batch_34",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_35",
+      "label": "run batch_35",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_36",
+      "label": "run batch_36",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_37",
+      "label": "run batch_37",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_38",
+      "label": "run batch_38",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_39",
+      "label": "run batch_39",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_40",
+      "label": "run batch_40",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_41",
+      "label": "run batch_41",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_42",
+      "label": "run batch_42",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_43",
+      "label": "run batch_43",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_44",
+      "label": "run batch_44",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_45",
+      "label": "run batch_45",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_46",
+      "label": "run batch_46",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_47",
+      "label": "run batch_47",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_48",
+      "label": "run batch_48",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_49",
+      "label": "run batch_49",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_50",
+      "label": "run batch_50",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_51",
+      "label": "run batch_51",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_52",
+      "label": "run batch_52",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_53",
+      "label": "run batch_53",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_54",
+      "label": "run batch_54",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_55",
+      "label": "run batch_55",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_56",
+      "label": "run batch_56",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_57",
+      "label": "run batch_57",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_58",
+      "label": "run batch_58",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_59",
+      "label": "run batch_59",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_60",
+      "label": "run batch_60",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_61",
+      "label": "run batch_61",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_62",
+      "label": "run batch_62",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_63",
+      "label": "run batch_63",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_64",
+      "label": "run batch_64",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_65",
+      "label": "run batch_65",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_66",
+      "label": "run batch_66",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_67",
+      "label": "run batch_67",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_68",
+      "label": "run batch_68",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_69",
+      "label": "run batch_69",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_70",
+      "label": "run batch_70",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_71",
+      "label": "run batch_71",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_72",
+      "label": "run batch_72",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_73",
+      "label": "run batch_73",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_74",
+      "label": "run batch_74",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_75",
+      "label": "run batch_75",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_76",
+      "label": "run batch_76",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_77",
+      "label": "run batch_77",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_78",
+      "label": "run batch_78",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_79",
+      "label": "run batch_79",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_80",
+      "label": "run batch_80",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_81",
+      "label": "run batch_81",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_82",
+      "label": "run batch_82",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_83",
+      "label": "run batch_83",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_84",
+      "label": "run batch_84",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_85",
+      "label": "run batch_85",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_86",
+      "label": "run batch_86",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_87",
+      "label": "run batch_87",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_88",
+      "label": "run batch_88",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_89",
+      "label": "run batch_89",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_90",
+      "label": "run batch_90",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_91",
+      "label": "run batch_91",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_92",
+      "label": "run batch_92",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_93",
+      "label": "run batch_93",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_94",
+      "label": "run batch_94",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_95",
+      "label": "run batch_95",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_96",
+      "label": "run batch_96",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_97",
+      "label": "run batch_97",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_98",
+      "label": "run batch_98",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     },
+     {
+      "kind": "run_input",
+      "ref_id": "run_cap_99",
+      "label": "run batch_99",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "finished"
+     }
+    ],
+    "truncated": true
+   },
+   {
+    "version_id": "v9",
+    "include_runs": true,
+    "with_project": true,
+    "expected": [
+     {
+      "kind": "layer",
+      "ref_id": "layer_direct_asset",
+      "label": "图层 layer_direct_asset",
+      "version_id": "v9",
+      "stage": "",
+      "role": "well_facies_prediction",
+      "status": ""
+     }
+    ],
+    "truncated": false
+   },
+   {
+    "version_id": "missing",
+    "include_runs": true,
+    "with_project": false,
+    "expected": [],
+    "truncated": false
+   },
+   {
+    "version_id": "",
+    "include_runs": true,
+    "with_project": true,
+    "expected": [],
+    "truncated": false
+   },
+   {
+    "version_id": "v1",
+    "include_runs": false,
+    "with_project": true,
+    "expected": [
+     {
+      "kind": "layer",
+      "ref_id": "layer_map",
+      "label": "图层 layer_map",
+      "version_id": "v1",
+      "stage": "constraint_factor",
+      "role": "facies_boundary",
+      "status": ""
+     },
+     {
+      "kind": "compilation_input",
+      "ref_id": "set_1",
+      "label": "最终编图输入",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": "frozen"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_1",
+      "label": "P1",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": "published"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_2",
+      "label": "prod_2",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": ""
+     }
+    ],
+    "truncated": false
+   }
+  ],
+  "asset_queries": [
+   {
+    "asset_id": "asset_1",
+    "with_catalog": true,
+    "with_project": true,
+    "expected": [
+     {
+      "kind": "layer",
+      "ref_id": "layer_map",
+      "label": "图层 layer_map",
+      "version_id": "v1",
+      "stage": "constraint_factor",
+      "role": "facies_boundary",
+      "status": ""
+     },
+     {
+      "kind": "compilation_input",
+      "ref_id": "set_1",
+      "label": "最终编图输入",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": "frozen"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_1",
+      "label": "P1",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": "published"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_2",
+      "label": "prod_2",
+      "version_id": "v1",
+      "stage": "",
+      "role": "",
+      "status": ""
+     },
+     {
+      "kind": "factor_grid",
+      "ref_id": "task_1",
+      "label": "GR 网格",
+      "version_id": "v2",
+      "stage": "",
+      "role": "factor_grid",
+      "status": ""
+     },
+     {
+      "kind": "compilation_input",
+      "ref_id": "set_2",
+      "label": "set_2",
+      "version_id": "v2",
+      "stage": "",
+      "role": "",
+      "status": "draft"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_1",
+      "label": "P1",
+      "version_id": "v2",
+      "stage": "",
+      "role": "",
+      "status": "published"
+     },
+     {
+      "kind": "map_product_input",
+      "ref_id": "prod_2",
+      "label": "prod_2",
+      "version_id": "v2",
+      "stage": "",
+      "role": "",
+      "status": ""
+     }
+    ]
+   },
+   {
+    "asset_id": "asset_2",
+    "with_catalog": true,
+    "with_project": true,
+    "expected": [
+     {
+      "kind": "compilation_input",
+      "ref_id": "set_1",
+      "label": "最终编图输入",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "frozen"
+     },
+     {
+      "kind": "map_product_output",
+      "ref_id": "prod_1",
+      "label": "P1",
+      "version_id": "v3",
+      "stage": "",
+      "role": "",
+      "status": "published"
+     },
+     {
+      "kind": "layer",
+      "ref_id": "layer_direct_asset",
+      "label": "图层 layer_direct_asset",
+      "version_id": "v9",
+      "stage": "",
+      "role": "well_facies_prediction",
+      "status": ""
+     }
+    ]
+   },
+   {
+    "asset_id": "asset_none",
+    "with_catalog": true,
+    "with_project": true,
+    "expected": []
+   },
+   {
+    "asset_id": "",
+    "with_catalog": true,
+    "with_project": true,
+    "expected": []
+   },
+   {
+    "asset_id": "asset_1",
+    "with_catalog": false,
+    "with_project": true,
+    "expected": [
+     {
+      "kind": "layer",
+      "ref_id": "layer_map",
+      "label": "图层 layer_map",
+      "version_id": "v1",
+      "stage": "constraint_factor",
+      "role": "facies_boundary",
+      "status": ""
+     }
+    ]
+   },
+   {
+    "asset_id": "asset_1",
+    "with_catalog": false,
+    "with_project": false,
+    "expected": [
+     {
+      "kind": "layer",
+      "ref_id": "layer_map",
+      "label": "图层 layer_map",
+      "version_id": "v1",
+      "stage": "constraint_factor",
+      "role": "facies_boundary",
+      "status": ""
+     }
+    ]
+   }
+  ]
+ },
+ "stage_view_cases": {
+  "effective": {
+   "view": {
+    "stage": "constraint_factor",
+    "group_visibility": {
+     "g1": true,
+     "g2": null,
+     "g3": false
+    },
+    "layer_opacity": {
+     "l1": 0.3,
+     "l2": 2.0
+    },
+    "customized": false
+   },
+   "defaults": {
+    "g1": false,
+    "g2": true,
+    "g4": true
+   },
+   "expected": {
+    "g1": true,
+    "g2": true,
+    "g4": true,
+    "g3": false
+   }
+  },
+  "records": {
+   "ops": [
+    {
+     "kind": "group_visibility",
+     "id": "gA",
+     "value": true
+    },
+    {
+     "kind": "layer_visibility",
+     "id": "l1",
+     "value": false
+    },
+    {
+     "kind": "layer_opacity",
+     "id": "l1",
+     "value": 0.03
+    },
+    {
+     "kind": "layer_opacity",
+     "id": "l2",
+     "value": 5.0
+    }
+   ],
+   "effective_defaults": {},
+   "expected_effective": {
+    "gA": true
+   },
+   "expected_visibility": {
+    "l1": false
+   },
+   "expected_opacity": {
+    "l1": 0.05,
+    "l2": 1.0
+   },
+   "customized": true
+  },
+  "reset": {
+   "view": {
+    "stage": "constraint_factor",
+    "group_visibility": {
+     "g1": true
+    },
+    "layer_visibility": {
+     "l1": false
+    },
+    "layer_opacity": {
+     "l1": 0.5
+    },
+    "customized": true
+   },
+   "defaults": {
+    "g0": false
+   },
+   "expected_effective": {
+    "g0": false
+   },
+   "customized": false
+  }
+ }
+}

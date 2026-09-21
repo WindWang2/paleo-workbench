@@ -17,8 +17,12 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <process.h>  // _getpid
+#define PWB_TEST_PID() (_getpid())
+#else
 #include <unistd.h>
+#define PWB_TEST_PID() (::getpid())
 #endif
 
 namespace {
@@ -37,7 +41,7 @@ std::string arg_value(const char* flag) {
 
 int run_capture(const std::string& command, std::string* out) {
     const fs::path out_file = fs::temp_directory_path() /
-        ("pwb_consumer_" + std::to_string(::getpid()) + ".txt");
+        ("pwb_consumer_" + std::to_string(PWB_TEST_PID()) + ".txt");
     const std::string full = command + " >'" + out_file.string() + "' 2>&1";
     const int code = std::system(full.c_str());
     if (out != nullptr) {

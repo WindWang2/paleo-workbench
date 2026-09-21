@@ -34,6 +34,29 @@
 #include <pwb/qgis/qgis_runtime.hpp>
 
 #include "test_framework.hpp"
+// PWB-V14-DATA-LINEAGE: setenv/unsetenv are POSIX-only; MSVC equivalent
+// through the CRT (process environment), same semantics for this test.
+#if defined(_WIN32)
+#include <stdlib.h>
+inline int pwb_setenv(const char* name, const char* value, int overwrite) {
+    char* existing = nullptr;
+    std::size_t size = 0;
+    if (!overwrite && _dupenv_s(&existing, &size, name) == 0 &&
+        existing != nullptr) {
+        free(existing);
+        return 0;
+    }
+    return _putenv_s(name, value);
+}
+inline int pwb_unsetenv(const char* name) { return _putenv_s(name, ""); }
+#else
+#include <stdlib.h>
+inline int pwb_setenv(const char* name, const char* value, int overwrite) {
+    return ::setenv(name, value, overwrite);
+}
+inline int pwb_unsetenv(const char* name) { return ::unsetenv(name); }
+#endif
+
 
 namespace {
 
@@ -467,50 +490,56 @@ void check_session_policy() {
         if (const char* v = std::getenv(key)) {
             saved.insert(key, v);
         }
-        unsetenv(key);
+        pwb_unsetenv(key);
     }
     auto restore_env = [saved, keys]() {
-        for (const char* key : keys) unsetenv(key);
+        for (const char* key : keys) pwb_unsetenv(key);
         for (auto it = saved.begin(); it != saved.end(); ++it) {
-            setenv(it.key().toLatin1().constData(),
+            pwb_setenv(it.key().toLatin1().constData(),
                    it.value().toLatin1().constData(), 1);
         }
     };
 
-    setenv("QT_QPA_PLATFORM", "offscreen", 1);
+    pwb_setenv("QT_QPA_PLATFORM", "offscreen", 1);
     PWB_CHECK(configure_qt_platform_for_session() == "offscreen");
     PWB_CHECK(effective_qt_platform_hint() == "offscreen");
 
     // xcb on a Wayland session is cleared unless forced.
-    setenv("QT_QPA_PLATFORM", "xcb", 1);
-    setenv("WAYLAND_DISPLAY", "wayland-0", 1);
+    pwb_setenv("QT_QPA_PLATFORM", "xcb", 1);
+    pwb_setenv("WAYLAND_DISPLAY", "wayland-0", 1);
     PWB_CHECK(configure_qt_platform_for_session() == "");
     // The first configure already cleared the variable (one-time contract):
     // a forced run must re-set it before checking the opt-out.
-    setenv("QT_QPA_PLATFORM", "xcb", 1);
-    setenv("PALEO_FORCE_XCB", "1", 1);
+    pwb_setenv("QT_QPA_PLATFORM", "xcb", 1);
+    pwb_setenv("PALEO_FORCE_XCB", "1", 1);
     PWB_CHECK(configure_qt_platform_for_session() == "xcb");
     PWB_CHECK(effective_qt_platform_hint().find("forced")
               != std::string::npos);
-    unsetenv("PALEO_FORCE_XCB");
+    pwb_unsetenv("PALEO_FORCE_XCB");
 
-    // Mesa EGL pin on Wayland with an injected existing candidate.
+    // Mesa EGL pin on Wayland with an injected existing candidate. The
+    // pin's environment write is Q_OS_UNIX-only (a Wayland/NVIDIA EGL
+    // mitigation); on Windows the function can never pin, so the pin
+    // assertions would be vacuous failures (V14-THREE-STAGE-UX guard —
+    // the test had never run on this platform).
     QTemporaryDir dir;
     const std::string vendor_json =
         (dir.filePath("50_mesa.json")).toStdString();
     { QFile f(QString::fromStdString(vendor_json)); f.open(QIODevice::WriteOnly); }
-    unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");  // configure() may have pinned
-    setenv("QT_QPA_PLATFORM", "offscreen", 1);
+    pwb_unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");  // configure() may have pinned
+    pwb_setenv("QT_QPA_PLATFORM", "offscreen", 1);
+#if !defined(Q_OS_WIN)
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json}) == vendor_json);
     PWB_CHECK(std::getenv("__EGL_VENDOR_LIBRARY_FILENAMES") != nullptr);
     // Already pinned -> untouched; opt-out -> untouched.
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json + "x"}) == "");
-    setenv("PALEO_ALLOW_NVIDIA_EGL", "1", 1);
-    unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");
+    pwb_setenv("PALEO_ALLOW_NVIDIA_EGL", "1", 1);
+    pwb_unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json}) == "");
-    unsetenv("PALEO_ALLOW_NVIDIA_EGL");
+    pwb_unsetenv("PALEO_ALLOW_NVIDIA_EGL");
     // No Wayland session -> untouched.
-    unsetenv("WAYLAND_DISPLAY");
+    pwb_unsetenv("WAYLAND_DISPLAY");
+#endif
     PWB_CHECK(pin_mesa_egl_on_wayland({vendor_json}) == "");
 
     restore_env();

@@ -28,6 +28,7 @@
 // Registration timestamps are local-time ISO seconds (db.py
 // datetime.now().isoformat(timespec="seconds")); entity created_at uses
 // domain::now_iso8601() (models.py _now_iso, UTC shape).
+#include "posix_shim.hpp"
 #include "pwb/catalog/working_copy.hpp"
 
 #include "pwb/catalog/dedup.hpp"       // place_managed_file
@@ -83,17 +84,13 @@ void safe_unlink_best_effort(const fs::path& path) {
     fs::remove(path, ec);
 }
 
-// st_mtim ns (findings B-16; Windows falls back to the second-granular
-// st_mtime, matching the 100 ns tick mapping note).
+// st_mtim ns (findings B-16; Windows maps the 100 ns file-time ticks —
+// the second-granular fallback note is superseded by the fs probe, same
+// direction as repository.cpp disk_mtime_ns).
 std::optional<std::int64_t> mtime_ns_of(const fs::path& path) {
-    struct ::stat st {};
-    if (::stat(path.c_str(), &st) != 0) return std::nullopt;
-#if defined(_WIN32)
-    return static_cast<std::int64_t>(st.st_mtime) * 1000000000LL;
-#else
-    return static_cast<std::int64_t>(st.st_mtim.tv_sec) * 1000000000LL
-         + st.st_mtim.tv_nsec;
-#endif
+    const posix_shim::FileStat st = posix_shim::stat_path(path);
+    if (!st.exists) return std::nullopt;
+    return st.mtime_ns;
 }
 
 // Python Path.relative_to(project_dir) → posix string; nullopt when the

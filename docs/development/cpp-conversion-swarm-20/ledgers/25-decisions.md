@@ -12,7 +12,7 @@ dependency_graph 全量 + evidence 全量（含全部 resolver)。`freshness.py`
 ## D3 dict 序与集合语义
 
 - `self.runs`/`versions`/`consumers` 等均保插入序（C++ `vector`+`map` 组合或有序结构）;`find_reuse_run` 的 `reversed(list(runs.values()))` 用插入序反向遍历。
-- `_detect_cycle_nodes` 的 `nodes` set 遍历起点不影响 cycle 成员集合（结论确定性）；返回 `frozenset`→`std::set`。
+- `_detect_cycle_nodes` 只标记 DFS 回边的两端点（`{node, nxt}`）：对 ≥3 节点环，成员集合**取决于 DFS 遍历起点**（Python 以 hash 序 set 遍历、跨进程不确定；C++ `std::set` 按序遍历、确定性）。修正 #1342 指出的错误论断：原"遍历起点不影响成员集合"不成立——只在简单 2 环/自环下成立。Oracle 对 ≥3 环仅冻结 `has_cycle`+非空（`"*"` sentinel），不冻结成员集合。返回 `frozenset`→`std::set`。
 - `_PREFIX_KINDS` 按声明序线性匹配（draft→factor→prediction→constraints→version)——`constraints:current` 特判在前。
 - `topological_runs` Kahn 队列 init 与邻接均 `sorted`(UTF-8 字节序 = code point 序）。
 

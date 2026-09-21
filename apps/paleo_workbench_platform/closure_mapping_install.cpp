@@ -8,6 +8,11 @@
 
 #include <QMainWindow>
 
+#include <QBuffer>
+#include <QGuiApplication>
+#include <QIODevice>
+#include <QSize>
+
 #include "app_shell.hpp"
 
 #include <pwb/ui_map/mapping_page.hpp>
@@ -19,10 +24,15 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <algorithm>
+#include <any>
 #include <atomic>
+#include <chrono>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <memory>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -33,12 +43,18 @@
 #endif
 
 #include <pwb/application/adapters/data_store.hpp>
+#include <pwb/cartography/color_ramps.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/job_runtime/job_contract.hpp>
+#include <pwb/layout_export/layout_export.hpp>
 #include <pwb/mapping_document/composition.hpp>
 #include <pwb/mapping_document/composition_session.hpp>
+#include <pwb/mapping_document/composer_export.hpp>
+#include <pwb/mapping_document/composer_renderer.hpp>
+#include <pwb/mapping_document/composer_templates.hpp>
 #include <pwb/mapping_document/document_io.hpp>
 #include <pwb/project/manager.hpp>
+#include <pwb/ui_map/display_map_canvas.hpp>
 #include <pwb/ui_pages_data/qt/preparation_page.hpp>
 #include <pwb/ui_pages_mapedit/boundary_panel.hpp>
 #include <pwb/ui_pages_mapedit/factor_preview_grid.hpp>
@@ -48,6 +64,7 @@
 #include <pwb/ui_pages_mapedit/map_workbench_bottom.hpp>
 #include <pwb/ui_seqviz/factor_state.hpp>
 #include <pwb/ui_seqviz/qt/composition_panel.hpp>
+#include <pwb/ui_seqviz/qt/composition_replay.hpp>
 #include <pwb/ui_seqviz/qt/factor_panels.hpp>
 #include <pwb/ui_workers/contour_draft.hpp>
 #include <pwb/ui_workers/factor_prepare.hpp>
@@ -549,7 +566,246 @@ public:
     // keeps its entries; a switch clears them — #848).
     std::filesystem::path factor_grids_project_;
 #endif
+
+    // BEGIN V14-COMPILATION-PUBLISH
+    // Element ids the user explicitly bound to the live map document
+    // (set_main_map); the preview seam honours them.
+    std::set<std::string> bound_map_elements;
+    // END V14-COMPILATION-PUBLISH
 };
+
+// BEGIN V14-COMPILATION-PUBLISH
+namespace {
+
+// ---------------------------------------------------------------------------
+// Live-content seams for the native composer renderer (D-V14-01).
+//
+// The composition document is JSON; the live map document of the mapping
+// page is not. These bridges let the renderer show the REAL map content
+// (the canvas frame + its layer snapshot) inside MAIN_MAP / INSET_MAP
+// frames and build the legend from the live layer order. When the canvas
+// has no content the seam reports "not bound" and the renderer falls back
+// to the dict-layer vector path or an honest placeholder — never a
+// fabricated map.
+// ---------------------------------------------------------------------------
+
+// A short-lived frame cache: composition interactions (element drags,
+// property edits) refresh the preview far more often than the canvas
+// content changes, so the grabbed frame is reused for 300ms. The cache is
+// keyed by the canvas widget and invalidated on size change; a canvas
+// repaint (pan/zoom) picks up within the TTL.
+constexpr auto kFrameCacheTtl = std::chrono::milliseconds(300);
+
+struct FrameCacheEntry {
+    std::chrono::steady_clock::time_point at{};
+    QSize size;
+    std::string png_b64;
+};
+
+std::string grab_canvas_frame_b64(const QWidget* canvas) {
+    if (canvas == nullptr) return "";
+    auto* mutable_canvas = const_cast<QWidget*>(canvas);
+    static std::map<const QWidget*, FrameCacheEntry> cache;
+    const QSize current = mutable_canvas->size();
+    FrameCacheEntry& entry = cache[mutable_canvas];
+    const auto now = std::chrono::steady_clock::now();
+    if (!entry.png_b64.empty() && entry.size == current &&
+        now - entry.at < kFrameCacheTtl) {
+        return entry.png_b64;
+    }
+    const QPixmap pixmap = mutable_canvas->grab();
+    if (pixmap.isNull()) return "";
+    QBuffer buffer;
+    buffer.open(QIODevice::WriteOnly);
+    if (!pixmap.toImage().save(&buffer, "PNG")) return "";
+    entry.at = now;
+    entry.size = current;
+    entry.png_b64 = buffer.data().toBase64().toStdString();
+    return entry.png_b64;
+}
+
+// Canvas layer snapshot → legend entries (the snapshot order IS the canvas
+// draw order — the host's canonical layer order, Prompt3's authority).
+std::vector<pwb::mapping_document::ComposerLegendEntry> canvas_legend_entries(
+    const QWidget* canvas) {
+    std::vector<pwb::mapping_document::ComposerLegendEntry> entries;
+    auto* display = canvas == nullptr
+                        ? nullptr
+                        : canvas->findChild<pwb::ui_map::DisplayMapCanvas*>();
+    if (display == nullptr) return entries;
+    const Json& snapshot = display->snapshot();
+    if (!snapshot.is_object() || !snapshot.contains("layers") ||
+        !snapshot["layers"].is_array()) {
+        return entries;
+    }
+    for (const Json& layer : snapshot["layers"]) {
+        if (!layer.is_object()) continue;
+        if (layer.contains("visible") && !layer["visible"].is_boolean()) continue;
+        if (layer.contains("visible") && !layer["visible"].get<bool>()) continue;
+        pwb::mapping_document::ComposerLegendEntry entry;
+        entry.label = layer.value("name", std::string());
+        const Json style = layer.value("style", Json::object());
+        const std::string fill = style.is_object() ? style.value("fill", std::string())
+                                                   : std::string();
+        const std::string stroke =
+            style.is_object() ? style.value("stroke", std::string()) : std::string();
+        entry.color = !fill.empty() ? fill : (!stroke.empty() ? stroke : "#6c8ebf");
+        const std::string layer_type = layer.value("layer_type", std::string());
+        entry.symbol_type = layer_type == "well" || layer_type == "well_point" ? "point"
+                            : layer_type == "contour"                  ? "line"
+                                                                        : "polygon";
+        entry.stroke_color = !stroke.empty() ? stroke : "#333333";
+        entries.push_back(std::move(entry));
+    }
+    return entries;
+}
+
+bool canvas_has_content(const QWidget* canvas) {
+    if (canvas == nullptr) return false;
+    auto* display = canvas->findChild<pwb::ui_map::DisplayMapCanvas*>();
+    if (display == nullptr) return false;
+    const Json& snapshot = display->snapshot();
+    return snapshot.is_object() && snapshot.contains("layers") &&
+           snapshot["layers"].is_array() && !snapshot["layers"].empty();
+}
+
+pwb::mapping_document::ComposerRenderSeams make_render_seams(const QWidget* canvas) {
+    pwb::mapping_document::ComposerRenderSeams seams;
+    if (canvas != nullptr) {
+        seams.frame_content =
+            [canvas](const pwb::mapping_document::ComposerElement& frame)
+            -> pwb::mapping_document::ComposerRenderSeams::FrameContent {
+            pwb::mapping_document::ComposerRenderSeams::FrameContent content;
+            // Only map frames take live content; every other element type
+            // renders from its own JSON properties.
+            const std::string& type = frame.element_type;
+            const bool is_map_frame =
+                type == "main_map" || type == "inset_map" || type == "profile";
+            if (!is_map_frame || !canvas_has_content(canvas)) return content;
+            content.bound = true;
+            content.png_b64 = grab_canvas_frame_b64(canvas);
+            return content;
+        };
+        seams.legend_entries =
+            [canvas](const pwb::mapping_document::ComposerElement&)
+            -> std::vector<pwb::mapping_document::ComposerLegendEntry> {
+            return canvas_legend_entries(canvas);
+        };
+    }
+    // Colour-ramp resolution through the cartography authority (Python
+    // composer registry PALETTE_ALIASES → get_color_ramp).
+    seams.palette_stops =
+        [](const std::string& name,
+           pwb::mapping_document::ComposerRenderSeams::ColorStops& stops) {
+            std::string key = name;
+            if (key == "lithofacies-v1") key = "jet";
+            else if (key == "paleogeographic-v1") key = "water_depth";
+            const pwb::cartography::ColorRamp ramp =
+                pwb::cartography::get_color_ramp(key);
+            for (const auto& stop : ramp.stops) {
+                stops.emplace_back(stop.position, stop.color);
+            }
+            return !stops.empty();
+        };
+    return seams;
+}
+
+// The panel's export seam: pixel budget → native QGIS layout executor
+// (when the platform bound one) → native composer engine (SVG + Qt
+// PNG/PDF replay). The engine label in the report says which path
+// produced the file (D-V14-03: the layout_export D-03 "no composer
+// fallback" decision is superseded by the native engine).
+std::function<pwb::ui_seqviz::qt::CompositionExportResult(
+    const pwb::mapping_document::Composition&, const std::string&,
+    const std::string&, double)>
+make_export_fn(const Install& platform_install, const QWidget* canvas) {
+    return [platform_install, canvas](
+               const pwb::mapping_document::Composition& document,
+               const std::string& path, const std::string& fmt,
+               double dpi) -> pwb::ui_seqviz::qt::CompositionExportResult {
+        pwb::ui_seqviz::qt::CompositionExportResult result;
+        result.path = path;
+        std::string format = fmt;
+        if (format.empty()) {
+            const std::filesystem::path target(path);
+            format = target.has_extension() ? target.extension().string() : "";
+            if (!format.empty() && format.front() == '.') format.erase(0, 1);
+        }
+        if (format.empty()) format = "png";
+        std::transform(format.begin(), format.end(), format.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (format != "svg" && format != "png" && format != "pdf") {
+            result.message = "unsupported composition export format '" + format + "'";
+            return result;
+        }
+        // 1. Export pixel budget (layout_export.py MAX_EXPORT_PIXELS) — a
+        //    budget breach is a caller error, never an engine fallback.
+        try {
+            pwb::layout_export::check_pixel_budget(document, dpi);
+        } catch (const std::invalid_argument& ex) {
+            result.message = ex.what();
+            return result;
+        }
+        const pwb::mapping_document::ComposerRenderSeams render_seams =
+            make_render_seams(canvas);
+        // 2. Native QGIS layout executor (vector map output).
+        if (platform_install.layout_export) {
+            Json report = Json::object();
+            try {
+                report = platform_install.layout_export(
+                    pwb::mapping_document::dump_composition(document), path, format,
+                    dpi);
+            } catch (const std::exception& ex) {
+                // The QGIS path refused by raising: fall through to the
+                // composer engine with the reason recorded.
+                result.message = ex.what();
+                report = Json::object();
+                report["ok"] = false;
+                report["failure"] = ex.what();
+            }
+            const bool ok = report.is_object() && report.value("ok", false);
+            if (ok) {
+                result.ok = true;
+                result.engine = report.value("engine", std::string("qgis_layout"));
+                const Json warnings = report.value("warnings", Json::array());
+                if (warnings.is_array()) {
+                    for (const Json& warning : warnings) {
+                        if (warning.is_string()) result.warnings.push_back(warning.get<std::string>());
+                    }
+                }
+                return result;
+            }
+            // The QGIS path refused (hybrid elements, no session, …):
+            // remember why, then try the composer engine — the same
+            // document, a different writer.
+            const std::string failure =
+                report.is_object() ? report.value("failure", std::string()) : std::string();
+            result.message = failure;
+        }
+        // 3. Composer engine (native SVG; PNG/PDF replayed on Qt).
+        const pwb::mapping_document::ComposerReplaySeams replay =
+            pwb::ui_seqviz::qt::make_composition_replay_seams();
+        pwb::mapping_document::CompositionExportReport report;
+        try {
+            report = pwb::mapping_document::export_composition_page(
+                document, path, format, dpi, render_seams, replay);
+        } catch (const std::exception& ex) {
+            result.ok = false;
+            result.message = std::string("composition export failed: ") + ex.what();
+            return result;
+        }
+        result.ok = report.ok;
+        result.engine = report.engine;
+        result.message = report.message;
+        if (!report.ok && result.message.empty()) {
+            result.message = "composition export failed";
+        }
+        return result;
+    };
+}
+
+}  // namespace
+// END V14-COMPILATION-PUBLISH
 
 // ---------------------------------------------------------------------------
 // install
@@ -581,6 +837,16 @@ bool install(const Install& install) {
     auto* composition_panel =
         new pwb::ui_seqviz::qt::CompositionPanel(mapping_page);
     mapping_page->adopt_composition_panel(composition_panel);
+
+    // BEGIN V14-COMPILATION-PUBLISH
+    // The per-window context is created before the composition seams so
+    // the main-map binding seam can record its element ids on it.
+    auto* context = new ClosureContext(install.window);
+    context->install = Install{install.window, install.shell, store_getter};
+    install.window->setProperty(
+        "closure_mapping_context",
+        QVariant::fromValue(static_cast<QObject*>(context)));
+    // END V14-COMPILATION-PUBLISH
 
     pwb::ui_seqviz::qt::CompositionRegistrySeams seams;
     seams.element_menu = [] {
@@ -636,20 +902,137 @@ bool install(const Install& install) {
         return it != table.end() ? &it->second : nullptr;
     });
     composition_panel->set_factory(factory);
+    // BEGIN V14-COMPILATION-PUBLISH
+    // Composer template library + preview renderer + export executor —
+    // the native ports of composer/{templates,renderer,export}.py close
+    // the three gaps #1433 registered (blank A4 start / 预览渲染失败 /
+    // 导出引擎不可用). Live map content reaches the renderer through host
+    // seams (D-V14-01); nothing here fabricates map content.
+    seams.template_library = [] {
+        std::vector<pwb::ui_seqviz::qt::CompositionTemplateEntry> entries;
+        for (const auto& tpl : pwb::mapping_document::composer_template_library()) {
+            entries.push_back({tpl.template_id, tpl.label, tpl.description});
+        }
+        return entries;
+    };
+    seams.instantiate_template =
+        [factory](const std::string& template_id) -> pwb::mapping_document::Composition {
+        return pwb::mapping_document::instantiate_composer_template(factory, template_id);
+    };
+    // Preview: the native renderer with the live-canvas seams.
+    seams.render_svg =
+        [render_seams = make_render_seams(mapping_page)](
+            const pwb::mapping_document::Composition& document) -> std::string {
+        return pwb::mapping_document::render_composition_to_svg(document, render_seams);
+    };
+    // Export: budget → QGIS layout executor → composer engine.
+    seams.export_fn = make_export_fn(install, mapping_page);
+    // Provenance: best-effort export-ledger write into the live project.
+    seams.project_provider = [store_getter]() -> std::any {
+        const auto store = store_getter ? store_getter() : nullptr;
+        if (store == nullptr) return {};
+        return std::make_any<std::shared_ptr<pwb::application::PwbDataStore>>(store);
+    };
+    seams.record_export = [](const std::any& project_any,
+                             const std::string& path) {
+        // Pointer-form any_cast: an empty/mismatched payload is a nullptr,
+        // never a thrown bad_any_cast.
+        auto* store_holder =
+            std::any_cast<std::shared_ptr<pwb::application::PwbDataStore>>(
+                &project_any);
+        auto store = store_holder != nullptr ? *store_holder : nullptr;
+        if (store == nullptr) return;
+        // The format is derived from the artifact path (the export ledger
+        // records what was actually written, never a hardcoded guess).
+        std::string format = "json";
+        const std::filesystem::path target(path);
+        if (target.has_extension()) {
+            format = target.extension().string();
+            if (!format.empty() && format.front() == '.') format.erase(0, 1);
+        }
+        Json& root = store->document().root();
+        if (!root.is_object()) return;
+        if (!root.contains("export_artifacts") || !root["export_artifacts"].is_array()) {
+            root["export_artifacts"] = Json::array();
+        }
+        Json artifact = Json::object();
+        artifact["id"] = "artifact_" + std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        artifact["linked_id"] = "composition";
+        artifact["format"] = format;
+        artifact["output_path"] = path;
+        artifact["options"] = Json::object();
+        artifact["included_map_elements"] = Json::array();
+        artifact["generated_at"] = pwb::domain::now_iso8601();
+        artifact["source_task_ids"] = Json::array();
+        // Honest degradation: no catalog OUTPUT registration from this
+        // seam (registered=false), never a fabricated version id.
+        artifact["catalog_version_id"] = Json(nullptr);
+        root["export_artifacts"].push_back(std::move(artifact));
+    };
+    // set_main_map: bind the live map document to this composition's main
+    // map frame (host-side; a live document cannot ride inside JSON
+    // properties). The panel hands over the session + document, so the
+    // host resolves the frame: the first visible MAIN_MAP, else the first
+    // visible INSET_MAP. An empty any unbinds.
+    seams.main_map_bind_fn =
+        [context](pwb::mapping_document::CompositionEditSession& session,
+                  pwb::mapping_document::Composition& document,
+                  const std::any& map_doc) -> bool {
+        (void)session;
+        const pwb::mapping_document::ComposerElement* target = nullptr;
+        for (const auto& element : document.elements) {
+            if (element.element_type == "main_map" && element.visible) {
+                target = &element;
+                break;
+            }
+        }
+        if (target == nullptr) {
+            for (const auto& element : document.elements) {
+                if (element.element_type == "inset_map" && element.visible) {
+                    target = &element;
+                    break;
+                }
+            }
+        }
+        if (target == nullptr) return false;
+        auto* element = pwb::mapping_document::find_element(document, target->id);
+        if (element == nullptr) return false;
+        const bool bind = map_doc.has_value();
+        if (!element->properties.is_object()) element->properties = Json::object();
+        element->properties["map_bound"] = bind;
+        if (bind) {
+            context->bound_map_elements.insert(element->id);
+        } else {
+            context->bound_map_elements.erase(element->id);
+        }
+        return true;
+    };
     composition_panel->set_registry(std::move(seams));
-    // The panel opens on a blank A4 document: no template library is
-    // ported yet (模板新建 stays honest-empty until that slice); 载入 JSON
-    // and the full edit surface are live.
-    composition_panel->set_document(factory.create_document("未命名组图"));
+    // The panel opens on the first template document (Python
+    // composition_panel __init__ materialises the default template) — the
+    // blank A4 start is gone.
+    const std::string default_template_id =
+        pwb::mapping_document::composer_template_library().empty()
+            ? std::string()
+            : pwb::mapping_document::composer_template_library().front().template_id;
+    if (!default_template_id.empty()) {
+        composition_panel->set_document(
+            pwb::mapping_document::instantiate_composer_template(factory,
+                                                                 default_template_id));
+    } else {
+        composition_panel->set_document(factory.create_document("未命名组图"));
+    }
+    // END V14-COMPILATION-PUBLISH
 
     // ---- 2. document bank -------------------------------------------------
     auto* bank = new MapDocumentBank(scene, view, install.window);
-    auto* context = new ClosureContext(install.window);
-    context->install = Install{install.window, install.shell, store_getter};
+    // BEGIN V14-COMPILATION-PUBLISH — the context was created before the
+    // composition seams (the main-map binding seam records on it); only
+    // the bank back-pointer is set here now.
     context->bank = bank;
-    install.window->setProperty(
-        "closure_mapping_context",
-        QVariant::fromValue(static_cast<QObject*>(context)));
+    // END V14-COMPILATION-PUBLISH
     bank->set_persist_fn([store_getter, store](std::string*) -> bool {
         const auto persisted =
             store != nullptr ? store
@@ -1304,6 +1687,16 @@ bool save_documents(QMainWindow* window, std::string* error) {
         return false;
     }
     return true;
+}
+
+// V14-THREE-STAGE-UX — read-only bank access for the stage-flow
+// presentation wiring (bank signals → MappingPage state).
+MapDocumentBank* document_bank(QMainWindow* window) {
+    if (window == nullptr) return nullptr;
+    const QVariant stored = window->property("closure_mapping_context");
+    auto* context = stored.value<QObject*>();
+    auto* self = dynamic_cast<ClosureContext*>(context);
+    return self != nullptr ? self->bank : nullptr;
 }
 
 }  // namespace pwb::app::closure_mapping

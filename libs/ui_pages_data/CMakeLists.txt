@@ -41,6 +41,25 @@ target_compile_features(pwb_ui_pages_data PUBLIC cxx_std_20)
 # Python state (dashboard_state, report dicts, saved-filter payloads).
 target_link_libraries(pwb_ui_pages_data PUBLIC Pwb::Domain)
 
+# BEGIN PWB-V14-DATA-LINEAGE (P4 product wiring)
+# Ingest-plan review core: Qt-free AND Pwb::Data-free — the model speaks
+# plain PlanItemRow DTOs so this target's link surface (Pwb::Domain only)
+# is unchanged. ingest_plan_rows.cpp is the ONLY file that sees
+# pwb::data::IngestPlan; it compiles solely in configures where
+# libs/data_suite already joined (root CMake adds it under
+# PWB_BUILD_DATA, always before this directory in platform configures),
+# and links Pwb::Data PRIVATE (header-only consumers stay clean).
+target_sources(pwb_ui_pages_data PRIVATE
+    src/ingest_plan_model.cpp
+    include/pwb/ui_pages_data/ingest_plan_model.hpp)
+if(TARGET Pwb::Data)
+    target_sources(pwb_ui_pages_data PRIVATE
+        src/ingest_plan_rows.cpp
+        include/pwb/ui_pages_data/ingest_plan_rows.hpp)
+    target_link_libraries(pwb_ui_pages_data PRIVATE Pwb::Data)
+endif()
+# END PWB-V14-DATA-LINEAGE
+
 # Qt Widgets shells (UI-06): navigation tree, filter chips bar, data
 # toolbar, module relationship canvas, cards, action header, overview
 # panel, hub switcher, asset context menu, reader panel, workspace shell,
@@ -100,6 +119,11 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_pages_data/qt/asset_selection_bus.hpp
         include/pwb/ui_pages_data/qt/vector_asset_row_source.hpp
         include/pwb/ui_pages_data/qt/preparation_page.hpp
+        # BEGIN PWB-V14-DATA-LINEAGE (P4): ingest-plan review dialog over
+        # the Qt-free IngestPlanModel (callback-seamed, offscreen-testable).
+        src/qt/ingest_plan_dialog.cpp
+        include/pwb/ui_pages_data/qt/ingest_plan_dialog.hpp
+        # END PWB-V14-DATA-LINEAGE
     )
     add_library(Pwb::UiPagesDataQt ALIAS pwb_ui_pages_data_qt)
     set_target_properties(pwb_ui_pages_data_qt PROPERTIES AUTOMOC ON)

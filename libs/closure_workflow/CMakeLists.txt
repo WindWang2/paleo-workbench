@@ -8,7 +8,10 @@ add_library(pwb_closure_workflow STATIC
     src/python_json.cpp
     src/persistent_catalog.cpp
     src/map_product.cpp
+    src/map_compile.cpp
     src/integrated_compilation.cpp
+    # V14-COMPILATION-PUBLISH — production fusion grid-loading seams.
+    src/grid_seams.cpp
     src/workflow_scheduler.cpp
     src/cache_run_rail.cpp
     src/host_bindings.cpp
@@ -29,6 +32,7 @@ target_link_libraries(pwb_closure_workflow
         Pwb::WorkflowInterpretation
         Pwb::FactorFusion
         Pwb::MappingKernel
+        Pwb::Prediction
         Pwb::JobRuntime
     PRIVATE
         Pwb::FactorHost  # python_repr_double (src/ only)

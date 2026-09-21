@@ -12,6 +12,7 @@
 // ui_seqviz widgets.
 
 #include <QApplication>
+#include <QComboBox>
 #include <QLabel>
 #include <QPointF>
 #include <QStackedWidget>
@@ -22,6 +23,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <set>
 #include <string>
@@ -50,6 +52,67 @@
 
 using pwb::app::AppShell;
 using pwb::app::MainWindow;
+
+// BEGIN V14-COMPILATION-PUBLISH
+namespace {
+
+// The composition panel battery: the three surfaces #1433 registered as
+// unwired (template library / preview renderer / export executor) must be
+// live on the installed panel.
+void composition_battery(pwb::ui_seqviz::qt::CompositionPanel& panel) {
+    using pwb::mapping_document::Composition;
+    // 1. Template library: the combo carries the nine built-in templates.
+    PWB_CHECK_MSG(panel.template_combo()->count() == 9,
+                  ("template library: nine built-in templates (got " +
+                   std::to_string(panel.template_combo()->count()) + ")")
+                      .c_str());
+    // 2. The panel opens on a template document, not the blank A4 start.
+    const Composition* doc = panel.document();
+    PWB_CHECK(doc != nullptr);
+    PWB_CHECK_MSG(doc->title != "未命名组图",
+                  ("panel opens on a template document (got '" + doc->title + "')")
+                      .c_str());
+    PWB_CHECK_MSG(doc->metadata.is_object() &&
+                      doc->metadata.contains("template_id"),
+                  "template document metadata carries template_id");
+    const std::size_t elements = doc->elements.size();
+    PWB_CHECK_MSG(elements >= 5,
+                  ("template document carries its elements (got " +
+                   std::to_string(elements) + ")")
+                      .c_str());
+
+    // 3. Preview: a real render (the label holds a pixmap and no failure
+    //    text) — the SVG engine ran over the document.
+    panel.refresh_all();
+    PWB_CHECK_MSG(!panel.preview_label()->pixmap().isNull(),
+                  "preview renders the composition (no 预览渲染失败)");
+    PWB_CHECK_MSG(panel.preview_label()->text().isEmpty(),
+                  "preview label carries no failure text");
+
+    // 4. Export executor: a real SVG file with the physical-size contract.
+    const std::string out_path =
+        (std::filesystem::temp_directory_path() / "pwb_v14_composition_test.svg")
+            .string();
+    std::filesystem::remove(out_path);
+    const pwb::ui_seqviz::qt::CompositionExportResult report =
+        panel.export_to(out_path, "svg", 150.0);
+    PWB_CHECK_MSG(report.ok,
+                  ("composition export succeeded: " + report.message).c_str());
+    PWB_CHECK_MSG(std::filesystem::exists(out_path),
+                  "composition export wrote the file");
+    std::ifstream in(out_path);
+    std::string svg((std::istreambuf_iterator<char>(in)),
+                    std::istreambuf_iterator<char>());
+    PWB_CHECK_MSG(svg.rfind("<svg", 0) == 0, "export is an SVG document");
+    PWB_CHECK_MSG(svg.find("mm\"") != std::string::npos,
+                  "export carries the physical mm anchors");
+    PWB_CHECK_MSG(svg.find("</svg>") != std::string::npos,
+                  "export is a complete SVG document");
+    std::filesystem::remove(out_path);
+}
+
+}  // namespace
+// END V14-COMPILATION-PUBLISH
 #endif
 
 using pwb::domain::Json;
@@ -232,6 +295,12 @@ int install_battery() {
     // -- save routing: no project store bound -> honest failure -----------
     std::string error;
     PWB_CHECK(!pwb::app::closure_mapping::save_documents(&window, &error));
+
+    // BEGIN V14-COMPILATION-PUBLISH — the composition panel's three
+    // previously-unwired surfaces (template library / preview renderer /
+    // export executor) must be live, not the honest-failure texts.
+    composition_battery(*composition);
+    // END V14-COMPILATION-PUBLISH
     return pwb::test::failure_count();
 }
 

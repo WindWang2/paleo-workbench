@@ -4,6 +4,10 @@
 // Also replays the dat parsing oracle frozen from the Python backend
 // (tools/oracle/generate_viz_e_dat_fixtures.py) and exercises the external
 // presenter registration contract with a real presenter.
+// PWB-V14-DATA-LINEAGE: the assertions below drive
+// DataWorkspace::asset_table() — DataAssetTable needs its full definition
+// (the workspace header only forward-declares it).
+#include <pwb/ui_pages_data/qt/data_asset_table.hpp>
 #include "job_center.hpp"
 #include "viz_e_dat_preview.hpp"
 
@@ -781,7 +785,7 @@ int main(int argc, char** argv) {
         // environment capability, asserted unavailable here).
         const QString media = assets.filePath("clip.mp4");
         { QFile f(media); f.open(QIODevice::WriteOnly);
-          f.write("\x00\x00\x00\x18ftypmp42", 12); f.close(); }
+          f.write(" " " " " " "" "ftypmp42", 12); f.close(); }
         bus->set_assets({row_with(media, "A9", "mp4")},
                         QStringLiteral("proj-1"));
         bus->set_current_asset(bus->assets()[0]);
