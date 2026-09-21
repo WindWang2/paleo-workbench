@@ -272,17 +272,9 @@ endif()
 # END CONV-PROVIDERS
 
 # BEGIN VIZ-B
-# Cross-well correlation & well-tie dock (line B): joins the platform
-# when the viz-B cores + the UI-04 workers (DTW job) + the UI-09 link
-# editor/export dialog all resolved in this configure.
-if(TARGET Pwb::VisualizationCrossWellQt AND TARGET Pwb::VisualizationWellTieQt
-   AND TARGET Pwb::UiWorkers AND TARGET Pwb::UiWellseisQt)
-    target_sources(pwb-platform PRIVATE viz_b_cross_well_dock.cpp)
-    target_link_libraries(pwb-platform PRIVATE
-        Pwb::VisualizationCrossWellQt Pwb::VisualizationWellTieQt
-        Pwb::UiWorkers Pwb::UiWellseisQt)
-    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_B=1)
-endif()
+# Cross-well correlation & well-tie dock (line B): the wiring moved to the
+# root VIZ-B block — apps/ is processed before the cross_well/well_tie/
+# ui_workers/ui_wellseis slices, so a TARGET gate here could never fire.
 # END VIZ-B
 
 # BEGIN 05 — viz_b real LAS path: joins the dock when the VIZ-A WLE load

@@ -10,6 +10,8 @@
 
 #include <cmath>
 
+#include <nlohmann/json.hpp>
+
 #include <qgscoordinatereferencesystem.h>
 #include <qgsfeature.h>
 #include <qgsfields.h>

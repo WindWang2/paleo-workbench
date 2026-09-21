@@ -37,9 +37,9 @@ inline int pwb_env_unset(const char* name) { return _putenv_s(name, ""); }
 #else
 #include <stdlib.h>
 inline int pwb_env_set(const char* name, const char* value, int overwrite) {
-    return pwb_env_set(name, value, overwrite);
+    return ::setenv(name, value, overwrite);
 }
-inline int pwb_env_unset(const char* name) { return pwb_env_unset(name); }
+inline int pwb_env_unset(const char* name) { return ::unsetenv(name); }
 #endif
 
 
