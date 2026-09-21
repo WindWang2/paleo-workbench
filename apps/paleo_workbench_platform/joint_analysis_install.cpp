@@ -435,11 +435,7 @@ std::optional<pwb::ui_wellseis::JointAnalysisSlice> load_stored(
     return read_stored_state(deps);
 }
 
-void install(const JointAnalysisInstall& deps) {
-    Page* page = deps.page;
-    if (page == nullptr) {
-        return;
-    }
+Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
     auto state = std::make_shared<JointAnalysisInstall>(deps);
 
     Geo3DAnalysisHooks hooks;
@@ -482,6 +478,7 @@ void install(const JointAnalysisInstall& deps) {
                 return;
             }
             pwb::ui_workers::StratalInput input;
+            input.demo = demo;
             input.fractions = fractions;
             const Registration* reg =
                 state->host != nullptr
@@ -528,13 +525,14 @@ void install(const JointAnalysisInstall& deps) {
             auto spec = pwb::ui_workers::make_stratal_job_spec(
                 std::move(input),
                 [state, demo](const pwb::ui_workers::StratalResult& result) {
-                    Page* the_page = state->page;
-                    if (the_page == nullptr) {
-                        return;
-                    }
+                    // Overlays are scene state, not page state: add them
+                    // regardless of the page (a null page only drops the
+                    // status line — the test rig drives the same path).
                     if (state->scene_objects == nullptr) {
-                        the_page->set_stratal_status(QStringLiteral(
-                            "3D 视口尚未就绪，无法预览。"));
+                        if (state->page != nullptr) {
+                            state->page->set_stratal_status(QStringLiteral(
+                                "3D 视口尚未就绪，无法预览。"));
+                        }
                         return;
                     }
                     const Registration* reg =
@@ -550,14 +548,16 @@ void install(const JointAnalysisInstall& deps) {
                                             result.labels[k],
                                             result.surfaces[k], reg);
                     }
-                    the_page->set_stratal_status(
-                        demo
-                            ? QStringLiteral(
-                                  "已用合成演示体生成 %1 张比例切片（演示预览"
-                                  "模式）。")
-                                  .arg(result.surfaces.size())
-                            : QStringLiteral("已生成 %1 张比例地层切片。")
-                                  .arg(result.surfaces.size()));
+                    if (state->page != nullptr) {
+                        state->page->set_stratal_status(
+                            demo
+                                ? QStringLiteral(
+                                      "已用合成演示体生成 %1 张比例切片（演示"
+                                      "预览模式）。")
+                                      .arg(result.surfaces.size())
+                                : QStringLiteral("已生成 %1 张比例地层切片。")
+                                      .arg(result.surfaces.size()));
+                    }
                 },
                 [the_page](const std::string& error) {
                     if (the_page != nullptr) {
@@ -766,7 +766,15 @@ void install(const JointAnalysisInstall& deps) {
                     [](const pwb::job::qtbridge::JobOutcome&) {});
     };
 
-    page->set_analysis_hooks(hooks);
+    return hooks;
+}
+
+void install(const JointAnalysisInstall& deps) {
+    Page* page = deps.page;
+    if (page == nullptr) {
+        return;
+    }
+    page->set_analysis_hooks(make_hooks(deps));
 }
 
 }  // namespace pwb::app::joint_analysis

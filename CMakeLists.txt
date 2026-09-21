@@ -1638,6 +1638,38 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
         add_test(NAME viz_c.joint3d_closure COMMAND viz_c_joint3d_closure)
         set_tests_properties(viz_c.joint3d_closure PROPERTIES TIMEOUT 300
             ENVIRONMENT "MALLOC_CHECK_=3;QT_QPA_PLATFORM=offscreen")
+
+        # geoviz final closure — joint-analysis install tests (hook
+        # contract: sidecar persistence, RGB overlay, demo stratal path).
+        if(TARGET Pwb::UiWorkers AND TARGET Pwb::SeismicViewer AND
+           TARGET Pwb::VisualizationWellTie AND TARGET Pwb::GeoModel)
+            add_executable(viz_c_joint_analysis
+                tests/cpp/viz_c/joint_analysis_test.cpp
+                tests/cpp/viz_c/test_main.cpp
+                apps/paleo_workbench_platform/joint_analysis_install.cpp
+                apps/paleo_workbench_platform/job_center.cpp)
+            set_target_properties(viz_c_joint_analysis PROPERTIES AUTOMOC ON)
+            target_compile_features(viz_c_joint_analysis PRIVATE cxx_std_20)
+            target_link_libraries(viz_c_joint_analysis PRIVATE
+                Pwb::Geo3DViz Pwb::UiWellseisQt Pwb::UiWorkers
+                Pwb::SeismicViewer Pwb::VisualizationWellTie Pwb::GeoModel
+                Pwb::SeismicService Pwb::JobQt Qt6::Widgets)
+            target_include_directories(viz_c_joint_analysis PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/viz_c
+                ${CMAKE_CURRENT_SOURCE_DIR}/apps/paleo_workbench_platform)
+            target_compile_definitions(viz_c_joint_analysis PRIVATE
+                PWB_WITH_UI_WELLSEIS=1)
+            if(MSVC)
+                target_compile_options(viz_c_joint_analysis PRIVATE
+                    /utf-8 /W3)
+            else()
+                target_compile_options(viz_c_joint_analysis PRIVATE
+                    -Wall -Wextra)
+            endif()
+            add_test(NAME viz_c.joint_analysis COMMAND viz_c_joint_analysis)
+            set_tests_properties(viz_c.joint_analysis PROPERTIES TIMEOUT 300
+                ENVIRONMENT "MALLOC_CHECK_=3;QT_QPA_PLATFORM=offscreen")
+        endif()
     endif()
 endif()
 # END VIZ-C-host

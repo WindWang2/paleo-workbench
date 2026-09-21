@@ -5,6 +5,7 @@
 // SEG-Y volume).
 #include "pwb_test.hpp"
 
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDeadlineTimer>
 #include <QSettings>
@@ -21,6 +22,7 @@
 #include "closure_joint3d_install.hpp"
 #include "job_center.hpp"
 #include "viz_c_joint_host.hpp"
+#include "viz_c_time_map.hpp"
 
 #include <pwb/catalog/models.hpp>
 #include <pwb/data/facade.hpp>
@@ -43,8 +45,10 @@ using pwb::app::viz_c::VizCJointHost;
 
 namespace {
 
-QCoreApplication* ensure_qt_app() {
-    static QCoreApplication* app = [] {
+// QApplication (offscreen): the well-click wiring test creates the 2D
+// time-map widget, which needs the GUI application object.
+QApplication* ensure_qt_app() {
+    static QApplication* app = [] {
         static int fake_argc = 1;
         static char fake_argv0[] = "joint3d_closure_test";
         static char* fake_argv[] = {fake_argv0, nullptr};
@@ -53,7 +57,7 @@ QCoreApplication* ensure_qt_app() {
         // set separately).
         QCoreApplication::setOrganizationName("pwb-test");
         QCoreApplication::setApplicationName("joint3d-closure");
-        return new QCoreApplication(fake_argc, fake_argv);
+        return new QApplication(fake_argc, fake_argv);
     }();
     return app;
 }
@@ -242,6 +246,64 @@ PWB_TEST(multi_fence_visibility_and_activation) {
     rig.host->activate_fence(fence1);
     PWB_CHECK(rig.host->scene_snapshot().active_fence_id == fence1);
     PWB_CHECK(rig.host->shutdown(2000));
+}
+
+PWB_TEST(time_map_well_click_appends_fence) {
+    // The VIZ-C port left VizCTimeSliceMap::well_clicked with ZERO
+    // consumers — the documented click-to-fence flow (joint_widget.py:115)
+    // was unreachable from the UI. joint_widget() now connects the signal
+    // to the scene's append_fence_well; this regression freezes that
+    // wiring (signal emission -> well-order fence grows, duplicates
+    // ignored, non-piercing refused by the scene itself).
+    HostRig rig;
+    const fs::path volume = fs::path(JOINT3D_FIXTURE_VOLUME);
+    JOINT_REQUIRE((rig.host->open_volume(make_service(), volume, nullptr)));
+    JOINT_REQUIRE(wait_until([&] {
+        return rig.host->scene_snapshot().n_inline > 0;
+    }));
+    const auto snap0 = rig.host->scene_snapshot();
+    auto wells = three_wells(snap0.time_max_ms);
+    rig.host->set_wells(std::move(wells.first), std::move(wells.second));
+    JOINT_REQUIRE(wait_until([&] {
+        return rig.host->scene_snapshot().well_presentations.size() == 3;
+    }));
+    rig.host->add_time_slice(snap0.time_max_ms / 2.0);
+    JOINT_REQUIRE(wait_until([&] {
+        return rig.host->scene_snapshot().active_time_ms.has_value();
+    }));
+    auto* map = static_cast<pwb::app::viz_c::VizCTimeSliceMap*>(
+        rig.host->joint_widget(nullptr));
+    JOINT_REQUIRE(map != nullptr);
+    // Signals are public in Qt6: emitting the map's own signal runs the
+    // product connection exactly like a real click handler would.
+    emit map->well_clicked(QStringLiteral("W0"));
+    // One well: the well-order list holds it, but the fence itself only
+    // materializes with >= 2 wells (a single vertex is no fence).
+    JOINT_REQUIRE(wait_until([&] {
+        const auto snap = rig.host->scene_snapshot();
+        return snap.fence_well_ids.size() == 1;
+    }));
+    {
+        const auto snap = rig.host->scene_snapshot();
+        PWB_CHECK(snap.fence_well_ids[0] == "W0");
+        PWB_CHECK(snap.fences.empty());
+    }
+    // Duplicate append: ignored (append_fence_well contract).
+    emit map->well_clicked(QStringLiteral("W0"));
+    QThread::msleep(50);
+    ensure_qt_app()->processEvents();
+    {
+        const auto snap = rig.host->scene_snapshot();
+        PWB_CHECK(snap.fence_well_ids.size() == 1);
+    }
+    // Second well materializes the well-order fence.
+    emit map->well_clicked(QStringLiteral("W1"));
+    JOINT_REQUIRE(wait_until([&] {
+        const auto snap = rig.host->scene_snapshot();
+        return snap.fence_well_ids.size() == 2 && snap.fences.size() == 1;
+    }));
+    PWB_CHECK(rig.host->shutdown(2000));
+    delete map;
 }
 
 PWB_TEST(project_identity_scopes_persisted_state) {

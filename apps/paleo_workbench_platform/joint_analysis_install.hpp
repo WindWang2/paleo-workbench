@@ -67,6 +67,11 @@ struct JointAnalysisInstall {
     std::function<QString()> project_directory;
 };
 
+// Builds the full hook set for the deps (product install + tests drive
+// the same closure-backed hooks).
+pwb::ui_wellseis::qt::Geo3DAnalysisHooks make_hooks(
+    const JointAnalysisInstall& deps);
+
 // Fills the page hooks; safe to call once after AppShell construction.
 void install(const JointAnalysisInstall& deps);
 

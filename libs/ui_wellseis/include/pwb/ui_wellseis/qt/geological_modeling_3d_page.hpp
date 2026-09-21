@@ -101,6 +101,9 @@ public:
     // Stratal tab status line / joint top-bar status (host hooks report).
     void set_stratal_status(const QString& text);
     void set_status_text(const QString& text);
+    // Test/verification surface: the stratal tab status line text
+    // (definition in the .cpp — QLabel is only forward-declared here).
+    [[nodiscard]] QString stratal_status_text() const;
 
     // Page navigation entry (activate_page + showEvent parity).
     void activate_page();

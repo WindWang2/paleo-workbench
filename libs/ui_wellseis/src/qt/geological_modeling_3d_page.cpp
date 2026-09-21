@@ -1871,6 +1871,10 @@ void GeologicalModeling3DPage::set_stratal_status(const QString& text) {
     }
 }
 
+QString GeologicalModeling3DPage::stratal_status_text() const {
+    return stratal_status_ != nullptr ? stratal_status_->text() : QString();
+}
+
 void GeologicalModeling3DPage::set_status_text(const QString& text) {
     if (status_ != nullptr) {
         status_->setText(text);
