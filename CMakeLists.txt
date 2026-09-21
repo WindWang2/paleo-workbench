@@ -486,9 +486,13 @@ if(PWB_BUILD_CONV_17 AND NOT PWB_BUILD_MAPPING_KERNEL)
 endif()
 # END CONV-17
 
-if(PWB_BUILD_MAPPING_KERNEL)
-    add_subdirectory(libs/mapping_kernel)
-endif()
+# NOTE: libs/mapping_kernel is mounted AFTER the UI-14-IMPLY block below.
+# UI-14 (platform+data) implies the kernel for the controller pages, and
+# the kernel's only mount point used to sit above that implication — so
+# any configure that did not pass PWB_BUILD_MAPPING_KERNEL=ON by hand
+# reached the CONV-07 workflow_engine block with the flag ON but the
+# Pwb::MappingKernel target missing (generate failure; the presets masked
+# it by passing the flag explicitly) (#1444).
 
 # BEGIN CONV-01
 # Swarm task 01: wire the frozen mapping_kernel into the platform's
@@ -562,6 +566,13 @@ if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA)
     pwb_add_subdirectory_once(libs/workflow_graph)
 endif()
 # END UI-14-IMPLY
+
+# The kernel mount, now after every imply-block that can turn it on
+# (CONV-03/05/17 above, UI-14-IMPLY above) and before every consumer
+# (CONV-02 mapping_document, CONV-07 workflow_engine, factor_host, …).
+if(PWB_BUILD_MAPPING_KERNEL)
+    add_subdirectory(libs/mapping_kernel)
+endif()
 
 # BEGIN CONV-02
 # Qt-free MapDocument / MapCompositionDocument JSON kernel (swarm
@@ -796,13 +807,34 @@ if(PWB_BUILD_CONV_13)
     add_subdirectory(libs/prediction)
 endif()
 # END CONV-13
-# BEGIN CONV-14
-option(PWB_BUILD_CONV_14
-    "Build the interchange path-safety/manifest/preflight kernel (conv-14)" OFF)
+# BEGIN CONV-14-DEPS — libs/interchange's exporters hard-require the
+# ingest CSV/XML readers and the SEGY inspector (fail-closed inside
+# libs/interchange/CMakeLists.txt). CONV-14 can be turned on below this
+# point by the CONV-21 imply chain (UI-14 platform+data), so resolve the
+# dependency implication HERE — after every writer of PWB_BUILD_CONV_14
+# and before the ingest/interchange mounts — and mount seismic_io late
+# when this chain pulled it in after its early block passed (#1444).
 if(PWB_BUILD_CONV_14)
-    add_subdirectory(libs/interchange)
+    if(NOT PWB_BUILD_CONV_19)
+        set(PWB_BUILD_CONV_19 ON)
+        message(STATUS
+            "CONV-14: implying PWB_BUILD_CONV_19=ON — interchange "
+            "exporters need the ingest readers")
+    endif()
+    if(NOT PWB_BUILD_SEISMIC_IO)
+        set(PWB_BUILD_SEISMIC_IO ON)
+        message(STATUS
+            "CONV-14: implying PWB_BUILD_SEISMIC_IO=ON — interchange "
+            "exporters need the SEGY inspector")
+    endif()
+    if(PWB_BUILD_SEISMIC_IO AND NOT TARGET pwb_seismic_io)
+        add_subdirectory(libs/seismic_io)
+        if(BUILD_TESTING AND TARGET pwb_seismic_io)
+            add_subdirectory(libs/seismic_io/seismic_io_tests)
+        endif()
+    endif()
 endif()
-# END CONV-14
+# END CONV-14-DEPS
 # BEGIN CONV-19
 # Resource-scan / well-tops / well-location-XML / preview parse cores
 # (libs/ingest), ported from paleo_workbench.resources and frozen against the
@@ -821,6 +853,13 @@ if(PWB_BUILD_CONV_19)
     endif()
 endif()
 # END CONV-19
+# BEGIN CONV-14
+option(PWB_BUILD_CONV_14
+    "Build the interchange path-safety/manifest/preflight kernel (conv-14)" OFF)
+if(PWB_BUILD_CONV_14)
+    add_subdirectory(libs/interchange)
+endif()
+# END CONV-14
 # BEGIN LINE-14 — mount the bench tool only when its library closure
 # resolved (fail-closed like the D/E gates; never a stub bench).
 if(PWB_BUILD_BENCH)
@@ -982,6 +1021,22 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-09
 
+# BEGIN CLOSURE-SEISMIC (07) — app install, post-hoc. Pwb::UiWellseisQt
+# only exists after the UI-09 mount above, and apps/ is processed before
+# UI-09 — the in-app TARGET gate could never fire, so the seismic
+# prediction page binding never compiled into the product (the TU only
+# lived in the viz_d.closure test target) (#1444).
+if(TARGET Pwb::SeismicViewer AND TARGET Pwb::SeismicService
+        AND TARGET Pwb::SeismicAttributes AND TARGET Pwb::UiWellseisQt
+        AND TARGET pwb-platform)
+    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicService
+                                               Pwb::SeismicAttributes)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_SEISMIC=1)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/closure_seismic_install.cpp)
+endif()
+# END CLOSURE-SEISMIC
+
 # BEGIN UI-11 — qt-review-gov slice (libs/ui_review): Qt-free semantic
 # cores + thin Qt Widgets shells for the review/governance cluster
 # (review export page, governance metadata, catalog health, lineage
@@ -1092,6 +1147,24 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-14
 
+# BEGIN UI-13/14 seam — linked_workspace panel, post-hoc. The gate inside
+# libs/ui_composite (processed at the UI-13 mount, far above) can never see
+# Pwb::UiControllersQt because that target is only created by the UI-14
+# mount right above — so the panel never compiled and the smoke test's
+# PWB_HAVE_LINKED_WORKSPACE half was silently skipped (#1444).
+if(TARGET pwb_ui_composite_qt AND TARGET Pwb::UiControllersQt)
+    target_sources(pwb_ui_composite_qt PRIVATE
+        libs/ui_composite/src/linked_workspace.cpp
+        libs/ui_composite/include/pwb/ui_composite/linked_workspace.hpp)
+    target_link_libraries(pwb_ui_composite_qt PUBLIC
+        Pwb::UiControllersQt)
+    if(TARGET ui_composite.qt_widgets_smoke)
+        target_compile_definitions(ui_composite.qt_widgets_smoke
+            PRIVATE PWB_HAVE_LINKED_WORKSPACE=1)
+    endif()
+endif()
+# END UI-13/14 seam
+
 # BEGIN UI-16 — visual-QA slice (libs/ui_visualqa): Qt-free check/state/
 # snapshot cores + thin Qt Widgets shells for the visual_qa_v{6..11}.py
 # harness semantics + the non-production dual-volume overlay prototype.
@@ -1184,6 +1257,19 @@ if(TARGET pwb-platform
 endif()
 # END VIZ-B
 
+# BEGIN 05 (LAS real-load path) — post-hoc: Pwb::UiWorkersWleLoad exists
+# only after the ui_workers slice above; the apps-local gate could never
+# fire, keeping the cross-well dock's real LAS loading permanently in the
+# "LAS 解析内核未接入" degraded state (#1444).
+if(TARGET Pwb::UiWorkersWleLoad AND TARGET Pwb::IngestLasWle
+        AND TARGET pwb-platform)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/viz_b_well_source.cpp)
+    target_link_libraries(pwb-platform PRIVATE Pwb::UiWorkersWleLoad)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_B_LAS=1)
+endif()
+# END 05
+
 # BEGIN UI-17 — W5 application-shell wiring
 # (apps/paleo_workbench_platform/app_shell.*): the page-navigation
 # composition root — WorkstationFrame + CompositeDocument hosting the
@@ -1206,6 +1292,25 @@ if(TARGET pwb-platform
         Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt Pwb::UiSeqvizQt
         Pwb::UiWellseisQt)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_APP_SHELL=1)
+    # BEGIN PWB-V14-THREE-STAGE — product wiring. This is PRODUCTION
+    # surface, not test surface: a BUILD_TESTING=OFF release configure
+    # must still ship the three-stage workbench (it used to nest inside
+    # if(BUILD_TESTING) below and silently vanish) (#1444).
+    if(TARGET Pwb::UiStageflowQt)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/stage_flow_install.cpp
+            apps/paleo_workbench_platform/constraint_authoring.cpp)
+        target_link_libraries(pwb-platform PRIVATE Pwb::UiStageflowQt)
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_STAGE_FLOW=1)
+        if(TARGET Pwb::UiControllersQt)
+            target_link_libraries(pwb-platform PRIVATE
+                Pwb::UiControllers Pwb::UiControllersQt)
+            target_compile_definitions(pwb-platform PRIVATE
+                PWB_WITH_UI_CONTROLLERS=1)
+        endif()
+    endif()
+    # END PWB-V14-THREE-STAGE (product wiring; test battery below)
     if(BUILD_TESTING)
         # App-shell wiring battery: the full shell path compiles the real
         # MainWindow + AppShell with the same define the app gets — the
@@ -1242,7 +1347,8 @@ if(TARGET pwb-platform
         if(TARGET Pwb::Data AND TARGET Pwb::Science
            AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
             target_sources(platform_app_shell PRIVATE
-                apps/paleo_workbench_platform/shell_project_actions.cpp)
+                apps/paleo_workbench_platform/shell_project_actions.cpp
+                apps/paleo_workbench_platform/constraint_authoring.cpp)
         endif()
         add_test(NAME platform.app_shell COMMAND platform_app_shell)
         set_tests_properties(platform.app_shell PROPERTIES
@@ -1250,24 +1356,11 @@ if(TARGET pwb-platform
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
             TIMEOUT 300)
 
-        # BEGIN PWB-V14-THREE-STAGE — three-stage workbench install
-        # (V14-THREE-STAGE-UX): the stage bar mount, StageFlowController
-        # seams, production command set, task-center providers and the
-        # selection bus. Requires the full AppShell closure (UI-17 above)
-        # plus the stage-flow projection lib; the selection bus leg joins
-        # additionally when UI-14's controller targets are in the closure.
+        # BEGIN PWB-V14-THREE-STAGE — integration battery. The PRODUCT
+        # wiring (sources + PWB_WITH_STAGE_FLOW for pwb-platform) now
+        # lives above, outside if(BUILD_TESTING); this half is the test
+        # executable only.
         if(TARGET Pwb::UiStageflowQt)
-            target_sources(pwb-platform PRIVATE
-                apps/paleo_workbench_platform/stage_flow_install.cpp)
-            target_link_libraries(pwb-platform PRIVATE Pwb::UiStageflowQt)
-            target_compile_definitions(pwb-platform PRIVATE
-                PWB_WITH_STAGE_FLOW=1)
-            if(TARGET Pwb::UiControllersQt)
-                target_link_libraries(pwb-platform PRIVATE
-                    Pwb::UiControllers Pwb::UiControllersQt)
-                target_compile_definitions(pwb-platform PRIVATE
-                    PWB_WITH_UI_CONTROLLERS=1)
-            endif()
             # Integration battery: the full shell WITH the stage-flow
             # install compiled in, same defines as the app.
             add_executable(platform_three_stage_flow
@@ -1293,7 +1386,8 @@ if(TARGET pwb-platform
                 Pwb::PlatformServices Pwb::UiStageflowQt
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
                 Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
-                Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt
+                Pwb::FactorHost)
             target_compile_definitions(platform_three_stage_flow PRIVATE
                 PWB_WITH_APP_SHELL=1
                 PWB_WITH_STAGE_FLOW=1
@@ -1317,10 +1411,65 @@ if(TARGET pwb-platform
                 # main_window.cpp references the 12-line project actions
                 # once the data closure is in (platform_app_shell parity).
                 target_sources(platform_three_stage_flow PRIVATE
-                    apps/paleo_workbench_platform/shell_project_actions.cpp)
+                    apps/paleo_workbench_platform/shell_project_actions.cpp
+                    apps/paleo_workbench_platform/constraint_authoring.cpp)
             endif()
             add_test(NAME platform.three_stage_flow
                      COMMAND platform_three_stage_flow)
+
+        # V14 constraint authoring chain regression (#1446): create →
+        # digitize → harvest → document truth, through the real window.
+        add_executable(platform_constraint_authoring
+            tests/cpp/platform/test_constraint_authoring.cpp
+            apps/paleo_workbench_platform/main_window.cpp
+            apps/paleo_workbench_platform/app_context.cpp
+            apps/paleo_workbench_platform/diagnostics.cpp
+            apps/paleo_workbench_platform/app_shell.cpp
+            apps/paleo_workbench_platform/stage_flow_install.cpp
+            apps/paleo_workbench_platform/constraint_authoring.cpp)
+        if(COMMAND pwb_link_job_runtime)
+            pwb_link_job_runtime(platform_constraint_authoring)
+        endif()
+        set_target_properties(platform_constraint_authoring
+            PROPERTIES AUTOMOC ON)
+        target_compile_features(platform_constraint_authoring
+            PRIVATE cxx_std_20)
+        target_include_directories(platform_constraint_authoring PRIVATE
+            tests/cpp/platform
+            apps/paleo_workbench_platform
+            ${CMAKE_BINARY_DIR}/generated)
+        target_link_libraries(platform_constraint_authoring PRIVATE
+            Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+            Pwb::PlatformServices Pwb::UiStageflowQt
+            Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+            Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+            Pwb::UiSeqvizQt Pwb::UiWellseisQt
+            Pwb::FactorHost)
+        target_compile_definitions(platform_constraint_authoring PRIVATE
+            PWB_WITH_APP_SHELL=1
+            PWB_WITH_STAGE_FLOW=1
+            PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+        if(TARGET Pwb::UiControllersQt)
+            target_link_libraries(platform_constraint_authoring PRIVATE
+                Pwb::UiControllers Pwb::UiControllersQt)
+            target_compile_definitions(platform_constraint_authoring
+                PRIVATE PWB_WITH_UI_CONTROLLERS=1)
+        endif()
+        if(TARGET Pwb::Data AND TARGET Pwb::Science
+           AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
+            target_link_libraries(platform_constraint_authoring PRIVATE
+                Pwb::Data)
+            target_compile_definitions(platform_constraint_authoring
+                PRIVATE PWB_WITH_DATA_INTEGRATION=1)
+            target_sources(platform_constraint_authoring PRIVATE
+                apps/paleo_workbench_platform/shell_project_actions.cpp)
+        endif()
+        add_test(NAME platform.constraint_authoring
+                 COMMAND platform_constraint_authoring)
+        set_tests_properties(platform.constraint_authoring PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+            TIMEOUT 300)
             set_tests_properties(platform.three_stage_flow PROPERTIES
                 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
                 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"

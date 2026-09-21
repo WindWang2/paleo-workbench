@@ -29,8 +29,50 @@
 #include <qgsvectorlayer.h>
 #include <qgsvectorlayerlabeling.h>
 
+#include <qgslayertreeregistrybridge.h>
+
 namespace pwb::ui_widgets::qgis {
 namespace {
+
+// #1154 dance (same contract as libs/qgis/src/layer_tree_stack.cpp): the
+// registry bridge's removal accounting is not gated by setEnabled, so
+// during takeChild/insertChildNode windows the root connections must be
+// severed and re-attached verbatim on destruction (#1445).
+class RegistryBridgeDetach {
+public:
+    explicit RegistryBridgeDetach(QgsProject* project,
+                                  QgsLayerTreeGroup* treeRoot)
+        : root_(treeRoot),
+          bridge_(project ? project->layerTreeRegistryBridge() : nullptr) {
+        if (bridge_ == nullptr || root_ == nullptr) return;
+        wasEnabled_ = bridge_->isEnabled();
+        if (wasEnabled_) bridge_->setEnabled(false);
+        detached_ = QObject::disconnect(root_, nullptr, bridge_, nullptr);
+    }
+
+    ~RegistryBridgeDetach() {
+        if (bridge_ == nullptr) return;
+        if (detached_) {
+            QObject::connect(
+                root_, SIGNAL(willRemoveChildren(QgsLayerTreeNode*, int, int)),
+                bridge_,
+                SLOT(groupWillRemoveChildren(QgsLayerTreeNode*, int, int)));
+            QObject::connect(
+                root_, SIGNAL(removedChildren(QgsLayerTreeNode*, int, int)),
+                bridge_, SLOT(groupRemovedChildren()));
+        }
+        if (wasEnabled_) bridge_->setEnabled(true);
+    }
+
+    RegistryBridgeDetach(const RegistryBridgeDetach&) = delete;
+    RegistryBridgeDetach& operator=(const RegistryBridgeDetach&) = delete;
+
+private:
+    QgsLayerTreeGroup* root_ = nullptr;
+    QgsLayerTreeRegistryBridge* bridge_ = nullptr;
+    bool detached_ = false;
+    bool wasEnabled_ = false;
+};
 
 // _normalize_crs_name parity: leading "EPSG:<digits>" token uppercased
 // is the stable comparison key; anything else stays raw.
@@ -702,11 +744,15 @@ MirrorResult mirror_snapshot_to_project(QgsProject& project,
         vl->setName(layer.name.isEmpty() ? layer.id : layer.name);
         vl->setOpacity(layer.opacity);
         if (layer.min_scale > 0.0 || layer.max_scale > 0.0) {
+            // QgsMapLayer::isInScaleRange: visible iff scale >= minScale
+            // && scale < maxScale (denominators) — min_scale is the
+            // zoomed-IN bound, max_scale the zoomed-OUT bound. The
+            // previous swap emptied the window (layer never rendered)
+            // (#1445).
             vl->setScaleBasedVisibility(true);
-            vl->setMinimumScale(layer.max_scale > 0.0 ? layer.max_scale
-                                                      : layer.min_scale);
-            vl->setMaximumScale(layer.min_scale > 0.0 ? layer.min_scale
-                                                      : layer.max_scale);
+            // 0 on either side disables that bound (QGIS semantics).
+            vl->setMinimumScale(layer.min_scale);
+            vl->setMaximumScale(layer.max_scale);
         } else {
             vl->setScaleBasedVisibility(false);
         }
@@ -750,24 +796,36 @@ MirrorResult mirror_snapshot_to_project(QgsProject& project,
         project.removeMapLayers(remove_ids);
     }
 
-    // Flat root order (groups=False): the snapshot layer order becomes
-    // the root's top-to-bottom order. Nodes are taken and re-inserted
-    // (identity preserved — checked state/custom props survive).
+    // Flat root order (groups=False): Python pushes the snapshot through
+    // set_mirror_layer_order(list(reversed(seen))) — the root's
+    // top-to-bottom order is the REVERSED snapshot (the snapshot is
+    // assembly-order bottom-up, and root index 0 renders on top) (#1445).
+    // Nodes are TAKEN and re-inserted through the #1154 dance: the old
+    // clone+removeChildNode form deleted the original node and armed the
+    // registry bridge's queued removal (the clone was not yet in the tree
+    // when the bridge looked, so the live mirror layer — and any open
+    // edit buffer — got dropped from the project); takeChild under a
+    // detached bridge preserves node identity.
     if (!options.groups) {
         if (QgsLayerTreeGroup* root = project.layerTreeRoot()) {
-            int position = 0;
+            RegistryBridgeDetach detach(
+                &project, root);
             const QHash<QString, QgsMapLayer*> doc_index =
                 build_doc_id_index(project);
-            for (const MirrorLayerSpec& layer : snapshot.layers) {
-                QgsMapLayer* ml = doc_index.value(layer.id);
+            int position = 0;
+            for (auto it = snapshot.layers.rbegin();
+                 it != snapshot.layers.rend(); ++it) {
+                QgsMapLayer* ml = doc_index.value(it->id);
                 if (ml == nullptr) continue;
                 QgsLayerTreeLayer* node = root->findLayer(ml->id());
                 if (node == nullptr) continue;
                 const int current = root->children().indexOf(node);
                 if (current != position) {
-                    QgsLayerTreeNode* taken = node->clone();
-                    root->removeChildNode(node);
-                    root->insertChildNode(position, taken);
+                    // takeChild returns bool (node detached, identity
+                    // preserved) — re-insert the same node pointer.
+                    if (root->takeChild(node)) {
+                        root->insertChildNode(position, node);
+                    }
                 }
                 ++position;
             }

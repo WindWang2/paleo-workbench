@@ -9,8 +9,15 @@
 #include <QString>
 #include <qgsapplication.h>
 #include <qgsmapcanvas.h>
+#include <qgsproject.h>
+
+#include <filesystem>
+#include <fstream>
+#include <unistd.h>
 
 #include <pwb/application/project_session.hpp>
+#include <pwb/application/adapters/data_store.hpp>
+#include <pwb/domain/json.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 #include <pwb/ui_pages_data/qt/hub_page.hpp>
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
@@ -19,6 +26,7 @@
 #include <pwb/ui_shell/navigation.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
+#include "app_context.hpp"
 #include "app_shell.hpp"
 #include "main_window.hpp"
 
@@ -162,6 +170,70 @@ int main(int argc, char** argv) {
         second.show();
         check_shell(second);
     }
+
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // -- project switch lifecycle (#1447) --------------------------------
+    // One window, two projects: openProject used to refuse with 已有工程
+    //打开 (switching required a process restart). close-then-open must
+    // rebind the store, drop the previous project's layers, and
+    // closeProject must be idempotent.
+    {
+        namespace fs = std::filesystem;
+        const auto make_project = [](const fs::path& file,
+                                     const char* name) {
+            fs::create_directories(file.parent_path());
+            std::ofstream out(file, std::ios::binary | std::ios::trunc);
+            out << pwb::domain::Json{
+                {"schema_version", 1},
+                {"meta", pwb::domain::Json{
+                             {"name", name},
+                             {"project_root", "."},
+                             {"created_at", "2026-09-21T00:00:00+00:00"},
+                             {"updated_at", "2026-09-21T00:00:00+00:00"}}},
+                {"coordinate", pwb::domain::Json{{"project_crs",
+                                                  "EPSG:32650"}}},
+                {"stratigraphy",
+                 pwb::domain::Json{{"target_horizon", "C6"}}},
+                {"constraint_layers", pwb::domain::Json::array()},
+                {"factor_map_tasks", pwb::domain::Json::array()},
+                {"paleomap_documents", pwb::domain::Json::array()},
+                {"contour_drafts", pwb::domain::Json::array()},
+                {"well_tables", pwb::domain::Json::array()},
+                {"resources", pwb::domain::Json::array()}}
+                           .dump();
+        };
+        const fs::path dir = fs::temp_directory_path()
+            / ("pwb_project_switch_" + std::to_string(::getpid()));
+        const fs::path file_a = dir / "switch-a.paleo.json";
+        const fs::path file_b = dir / "switch-b.paleo.json";
+        make_project(file_a, "切换工程A");
+        make_project(file_b, "切换工程B");
+
+        MainWindow window;
+        window.show();
+        const QString open_a = window.openProject(
+            QString::fromStdString(file_a.string()));
+        PWB_CHECK_MSG(open_a.isEmpty(), open_a.toStdString());
+        PWB_CHECK(window.context().session().store() != nullptr);
+        // Switch: no restart, no refusal — the old "已有工程打开" path
+        // is gone.
+        const QString open_b = window.openProject(
+            QString::fromStdString(file_b.string()));
+        PWB_CHECK_MSG(open_b.isEmpty(), open_b.toStdString());
+        PWB_CHECK(window.context().projectStore() != nullptr);
+        PWB_CHECK(window.context().projectStore()->project_file()
+                      .filename().string() == "switch-b.paleo.json");
+
+        // Explicit close: idempotent (second call is a clean no-op).
+        PWB_CHECK(window.closeProject().isEmpty());
+        PWB_CHECK(window.context().session().store() == nullptr);
+        PWB_CHECK(window.context().session().map().layerIdsTopFirst()
+                      .empty());
+        PWB_CHECK(window.closeProject().isEmpty());
+
+        fs::remove_all(dir);
+    }
+#endif  // PWB_WITH_DATA_INTEGRATION
 
     pwb::qgis::QgisRuntime::release();
     return ::pwb::test::report("platform.app_shell");

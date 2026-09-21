@@ -164,6 +164,14 @@ int main(int argc, char** argv) {
     auto restored = binding->restored_tasks();
     check(restored.size() == 1, "journal restores the recorded task");
 
+    // Second demo run: the finished worker thread was never joined (the
+    // only join lives in shutdown), so re-launching used to move-assign
+    // over a joinable std::thread and std::terminate() the whole process
+    // (#1443). The regression proof is simply surviving to completion.
+    seismic_page.on_demo();
+    check(wait_for_signal(updated_spy, 2, 30000),
+          "second demo run survives the unjoined previous worker");
+
     // Production run without a promoted model: honest modal warning, no
     // task fabricated.
     QSignalSpy run_spy(&seismic_page,

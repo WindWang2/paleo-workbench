@@ -60,6 +60,13 @@ public:
     // override individual ids before build().
     void set_panel_factory(const std::string& dock_id,
                            PanelFactory factory);
+    // True when a real panel factory is registered for this dock — a
+    // dock without one renders a "(占位页, 待实现)" placeholder and must
+    // not be force-shown by a stage profile (#1450).
+    bool has_panel_factory(const std::string& dock_id) const {
+        const auto it = factories_.find(dock_id);
+        return it != factories_.end() && static_cast<bool>(it->second);
+    }
     void install_default_panels();
     // Build every dock from the registry (idempotent — re-call is a
     // no-op).

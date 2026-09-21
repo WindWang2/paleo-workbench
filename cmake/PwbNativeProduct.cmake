@@ -62,7 +62,7 @@ set(PWB_NATIVE_PRODUCT_CAPABILITIES
     "well_log_viewer|WLE 测井 dock|Pwb::VisualizationWellLog|optional"
     "geomodel_kernel|地质建模内核 仅内核未接线|Pwb::Geomodel|kernel"
     "well_science_kernel|井科学对比内核 仅内核未接线|Pwb::WellScience|kernel"
-    "factor_fusion_kernel|因子融合内核 仅内核未接线|Pwb::FactorFusion|kernel"
+    "factor_fusion_kernel|因子融合内核 经science_service接入产品|Pwb::FactorFusion|kernel"
     "ingest_kernel|资源解析内核 仅内核未接线|Pwb::Ingest|kernel"
     "interchange_kernel|交换/清单内核 仅内核未接线|Pwb::Interchange|kernel"
     "workflow_contracts_kernel|工作流契约内核 仅内核未接线|Pwb::WorkflowContracts|kernel"

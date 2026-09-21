@@ -184,6 +184,12 @@ public:
     // Creates a fresh project (B's document factory + empty catalog + one
     // bootstrap boundary asset via B's run lifecycle) and opens it.
     QString newProject(const QString& dir_path, const QString& name);
+    // Closes the open project (dirty-confirmed over every edit session,
+    // workers flushed, layers dropped, all closures re-notified) so the
+    // window can open another project without a process restart (#1447).
+    // Empty return on success/idempotent-no-store; non-empty = the user
+    // cancelled or a dirty save failed (project stays open).
+    QString closeProject();
 #endif
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
     // Imports one post-stack SEG-Y file as a new Raw seismic_volume asset
@@ -218,6 +224,11 @@ public:
 #endif
 #endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
+    // Stage-commit EVERY open dirty edit session (the save/close paths;
+    // #1453 — switching the active layer never stops another session).
+    // Empty return on success; otherwise the first failure message and
+    // the caller must not save/close (edits stay staged).
+    QString commitAllDirtyLayers(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
 
     // Dirty-close three-way decision (Save/Discard/Cancel). Production
@@ -361,6 +372,19 @@ public:
     }
     // Registered production command count (test assertion surface).
     int stageFlowCommandCount() const { return stage_flow_command_count_; }
+
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // V14 constraint authoring (#1446) — the Stage-2 constraint buttons'
+    // production side (body in constraint_authoring.cpp):
+    //   createStageConstraint — create a bound, role-registered
+    //     constraint layer + document line entry (Python
+    //     stage_actions.create_constraint parity);
+    //   syncConstraintGeometryOnSave — harvest the live layer features
+    //     into the linked ConstraintLine coordinates + fingerprints at
+    //     save (Python constraints_sync.py parity). Returns lines synced.
+    void createStageConstraint(const QString& kind_value);
+    int syncConstraintGeometryOnSave();
+#endif
 
 private:
     void applyStageVisibility(const std::map<std::string, bool>& visibility);

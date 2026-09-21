@@ -45,12 +45,14 @@ std::string LayoutService::export_layout(const LayoutSpec& spec,
         map_item->setCrs(QgsCoordinateReferenceSystem(
             QString::fromStdString(spec.map.crs)));
     }
-    // Layer order: full tree order top-first reversed = bottom-first draw
-    // order consumed by QgsLayoutItemMap (V11 parity).
+    // Layer order: the tree's top-first order is passed through
+    // VERBATIM — QgsMapSettings::setLayers stores index 0 = TOP, and
+    // QgsLayoutItemMap::layersToRender() forwards the stored list
+    // untouched (#1445; the old rbegin-reversal stacked every exported
+    // page opposite to the screen — same fix as execute_layout_spec).
     QList<QgsMapLayer*> ordered;
     const QList<QgsMapLayer*> tree_order = project->layerTreeRoot()->layerOrder();
-    for (auto it = tree_order.rbegin(); it != tree_order.rend(); ++it) {
-        QgsMapLayer* layer = *it;
+    for (QgsMapLayer* layer : tree_order) {
         if (layer == nullptr || !layer->isSpatial()) continue;
         ordered.append(layer);
     }

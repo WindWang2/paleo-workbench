@@ -60,6 +60,11 @@ public:
     // Active/current/edit layer unification (invariant 10.3-1): one setter,
     // all three resolve to the same domain layer id.
     void set_active_layer(const DomainLayerFacts& facts);
+    // Reset the active selection to the none-valid state (a close/switch
+    // or a layer-removal path must let the next open's auto-activation
+    // fire again) — #1453: assigning an empty DomainLayerFacts leaves
+    // has_value() true forever.
+    void clear_active_layer() { active_facts_.reset(); }
     const std::optional<DomainLayerFacts>& active_layer() const {
         return active_facts_;
     }

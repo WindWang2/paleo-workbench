@@ -24,7 +24,7 @@ this development goal.**
   lifecycle_cycles/edit_cycle/qgis_smoke/toolpolicy_*/services/
   ui_services/... 全绿）。
 - 新增：`ui_stageflow.core`（9 用例）、`ui_stageflow.qt_widgets_smoke`
-  （5 用例）、`platform.three_stage_flow`（安装幂等/注册 17 命令/palette
+  （5 用例）、`platform.three_stage_flow`（安装幂等/注册 16 命令/palette
   find/阶段门控/三阶段布局矩阵 + canvas 指针恒等/偏好持久化+重置/
   任务中心 provider 安全性/第二窗口生命周期/析构后注册表存活）。
 - Not Run ×2（closure_review_install/project_session）：需 DATA_INTEGRATION

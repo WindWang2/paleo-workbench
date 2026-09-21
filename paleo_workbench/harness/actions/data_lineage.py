@@ -81,7 +81,9 @@ def register(registry) -> None:
                                            "items": {"type": "string"}},
                     "skipped": {"type": "array"},
                     "bound_links": {"type": "integer"},
-                    "created_entities": {"type": "array"},
+                    # IngestExecuteReport.created_entities is an int count
+                    # (wells_created + entity upserts), not a list.
+                    "created_entities": {"type": "integer"},
                     "issues": {"type": "array"},
                     "cancelled": {"type": "boolean"},
                 },

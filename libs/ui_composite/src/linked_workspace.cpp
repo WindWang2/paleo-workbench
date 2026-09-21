@@ -1,5 +1,7 @@
 #include <pwb/ui_composite/linked_workspace.hpp>
 
+#include <tuple>
+
 #include <pwb/ui_controllers/qt/view_coordination_controller.hpp>
 #include <pwb/ui_controllers/selection_bus.hpp>
 #include <pwb/ui_controllers/view_coordination.hpp>
@@ -304,13 +306,13 @@ bool LinkedInterpretationWorkspace::apply_link_cursor(
     if (!linked_ || well_name.empty()) return false;
     bool driven = false;
     std::vector<std::tuple<DocumentPane*, std::string, LinkedWellPanel*>>
-        slots;
-    slots.emplace_back(well_pane, active_well_name_, &well_panel);
+        link_slots;
+    link_slots.emplace_back(well_pane, active_well_name_, &well_panel);
     for (auto& pane : extra_well_panes_) {
-        slots.emplace_back(pane.get(), well_names_[pane.get()],
+        link_slots.emplace_back(pane.get(), well_names_[pane.get()],
                            &well_panels_[pane.get()]);
     }
-    for (auto& [_pane, bound, panel] : slots) {
+    for (auto& [_pane, bound, panel] : link_slots) {
         if (panel == nullptr || bound != well_name ||
             !panel->set_link_cursor) {
             continue;
