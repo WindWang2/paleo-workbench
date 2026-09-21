@@ -27,6 +27,8 @@
 #include <functional>
 #include <memory>
 
+#include <pwb/domain/json.hpp>
+
 class QMainWindow;
 
 namespace pwb::app {
@@ -47,6 +49,20 @@ struct Install {
     // save) until a project is opened.
     std::function<std::shared_ptr<pwb::application::PwbDataStore>()>
         store_getter;
+
+    // BEGIN V14-COMPILATION-PUBLISH
+    // Optional native QGIS layout executor for composition export: the
+    // platform binds its CompositionLayoutService (session-backed; the
+    // extent / CRS / mirror-layer description is resolved on the platform
+    // side). When absent — or when it refuses (hybrid elements, no
+    // session, …) — the export falls back to the native composer engine
+    // (SVG + Qt PNG/PDF replay) and the report's engine label says which
+    // path produced the file. Never a silent no-op, never a fake file.
+    std::function<pwb::domain::Json(const std::string& composition_json,
+                                    const std::string& path,
+                                    const std::string& format, double dpi)>
+        layout_export;
+    // END V14-COMPILATION-PUBLISH
 };
 
 // Installs the mapping-page adopt set + preparation page. Safe to call

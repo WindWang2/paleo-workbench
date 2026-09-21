@@ -290,6 +290,38 @@ bool CompositionPanel::set_main_map(const std::any& map_document) {
     return ok;
 }
 
+// BEGIN V14-COMPILATION-PUBLISH — headless export (do_export without the
+// file dialog): the same seam, the same honest refusal.
+CompositionExportResult CompositionPanel::export_to(const std::string& path,
+                                                    const std::string& format,
+                                                    double dpi) {
+    CompositionExportResult result;
+    if (!document_) {
+        result.message = "no composition document";
+        return result;
+    }
+    if (!seams_.export_fn) {
+        result.message = "no composition export engine wired";
+        return result;
+    }
+    try {
+        result = seams_.export_fn(*document_, path, format, dpi);
+    } catch (const std::exception& ex) {
+        // The host engine must never crash the panel: a refusal with the
+        // reason is the honest outcome (the preview path behaves the same).
+        result.ok = false;
+        result.message = ex.what();
+        return result;
+    }
+    if (result.ok) {
+        register_catalog_export(result.path.empty() ? path : result.path);
+        emit composition_exported(
+            qstr(result.path.empty() ? path : result.path));
+    }
+    return result;
+}
+// END V14-COMPILATION-PUBLISH
+
 // -- template row -------------------------------------------------------------
 
 void CompositionPanel::build_add_menu() {

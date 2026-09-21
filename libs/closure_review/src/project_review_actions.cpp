@@ -54,8 +54,11 @@ domain::DataError ProjectReviewActions::run_map_qc(
     const QcInputs inputs = delegates_.qc_inputs != nullptr
                                 ? delegates_.qc_inputs()
                                 : QcInputs{};
-    auto result = run_map_qc_on_document(
-        *doc, doc_id, inputs, cartographic_delegate(), iso_now());
+    const std::function<std::string(const domain::Json& report)>* provenance =
+        delegates_.provenance != nullptr ? &delegates_.provenance : nullptr;
+    auto result = run_map_qc_on_document(*doc, doc_id, inputs,
+                                         cartographic_delegate(), iso_now(),
+                                         provenance);
     if (!result.is_ok()) {
         return result.error();
     }

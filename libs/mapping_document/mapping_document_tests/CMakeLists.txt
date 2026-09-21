@@ -27,3 +27,24 @@ target_compile_definitions(mapping_document.bridge_session PRIVATE
     PWB_MAPPING_DOCUMENT_BRIDGE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/map_document_bridge_oracle.json")
 add_test(NAME mapping_document.bridge_session COMMAND mapping_document.bridge_session)
 set_tests_properties(mapping_document.bridge_session PROPERTIES TIMEOUT 120)
+
+# V14-COMPILATION-PUBLISH — composer template library / SVG renderer /
+# physical-size export, frozen against the Python composer oracle.
+add_executable(mapping_document.composer_oracle composer_oracle_test.cpp)
+target_compile_features(mapping_document.composer_oracle PRIVATE cxx_std_20)
+target_link_libraries(mapping_document.composer_oracle PRIVATE
+    Pwb::MappingDocument Pwb::Domain)
+target_compile_definitions(mapping_document.composer_oracle PRIVATE
+    PWB_COMPOSER_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/composer_oracle.json")
+add_test(NAME mapping_document.composer_oracle COMMAND mapping_document.composer_oracle)
+set_tests_properties(mapping_document.composer_oracle PROPERTIES TIMEOUT 120)
+
+# V14-COMPILATION-PUBLISH — composer scale/performance structural
+# assertions (linear element/legend scaling, deterministic ids, pixel
+# budget, unsupported-format refusal).
+add_executable(mapping_document.composer_scale composer_scale_test.cpp)
+target_compile_features(mapping_document.composer_scale PRIVATE cxx_std_20)
+target_link_libraries(mapping_document.composer_scale PRIVATE
+    Pwb::MappingDocument Pwb::Domain Pwb::LayoutExport)
+add_test(NAME mapping_document.composer_scale COMMAND mapping_document.composer_scale)
+set_tests_properties(mapping_document.composer_scale PROPERTIES TIMEOUT 120)
