@@ -172,7 +172,11 @@ close()` / 任何 QGIS API** —— 与 Python `_mark_disposed`「析构期纯
 2. `map_chrome` 是 unified_map_canvas 帮助函数子集抽取（见缝 6）；
    UI-15 复用而非重转。
 3. shiboken 包装面（widgets.py）消解 —— C++ 无 wrapInstance 语义。
-4. 本切片**不接线** MainWindow/AppContext（taskbook §2.2：接线是
+4. `EpochTimelineController`（stratigraphic_timeline_slider.cpp:294-542）
+   截至 2026-09 全仓**零调用方**（未接线死代码，#1392）。接线前先修
+   `apply_onion` 每层 `raise_layer_to_top` 内部重取 `layers()` 快照的
+   O(n²) 拷贝。
+5. 本切片**不接线** MainWindow/AppContext（taskbook §2.2：接线是
    后续集成片）；只交付 库+测试。
 
 ## 冲突面声明（merge 时）

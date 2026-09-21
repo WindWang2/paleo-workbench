@@ -93,7 +93,7 @@ MappingPage::MappingPage(QWidget* parent) : QWidget(parent) {
     canvas_panel_ = new MapCanvasPanel();
     unified_canvas_ = new DisplayMapCanvas();
     unified_canvas_->set_overlay_provider(
-        [this] { return unified_overlay_state(); });
+        [this]() -> const Json& { return unified_overlay_state(); });
     preview_canvas_stack_->addWidget(canvas_panel_);
     preview_canvas_stack_->addWidget(unified_canvas_);
     preview_layout->addWidget(preview_canvas_stack_, 1);
@@ -246,6 +246,7 @@ void MappingPage::update_state(const std::vector<Json>& documents,
             ? field_value_str(*active_document_, "id", "")
             : std::string();
     documents_ = documents;
+    overlay_state_dirty_ = true;  // document set replaced (#1392)
     std::string prefer = prefer_id;
     if (prefer.empty()) {
         prefer = previous_id;
@@ -432,6 +433,7 @@ void MappingPage::on_document_selected(const Json& document) {
             if (field_value_str(doc, "id", "") ==
                 field_value_str(document, "id", "")) {
                 active_document_ = &doc;
+                overlay_state_dirty_ = true;  // active doc repointed
                 break;
             }
         }
@@ -448,6 +450,7 @@ void MappingPage::on_chrome_changed(const Json& payload) {
     for (auto& doc : documents_) {
         if (&doc == active_document_) {
             doc["map_chrome"] = payload;
+            overlay_state_dirty_ = true;  // chrome payload replaced
             break;
         }
     }
@@ -465,7 +468,10 @@ void MappingPage::refresh_preview() {
     canvas_panel_->update_state(*active_document_);
 }
 
-Json MappingPage::unified_overlay_state() const {
+const Json& MappingPage::unified_overlay_state() const {
+    if (!overlay_state_dirty_) {
+        return overlay_state_cache_;
+    }
     const Json chrome =
         active_document_ != nullptr
             ? field_value(*active_document_, "map_chrome", Json::object())
@@ -474,8 +480,10 @@ Json MappingPage::unified_overlay_state() const {
         active_document_ != nullptr
             ? field_value_str(*active_document_, "name", "")
             : std::string();
-    return pwb::ui_map::unified_overlay_state(
+    overlay_state_cache_ = pwb::ui_map::unified_overlay_state(
         Json::array(), Json::array(), Json(nullptr), chrome, name, {});
+    overlay_state_dirty_ = false;
+    return overlay_state_cache_;
 }
 
 void MappingPage::emit_mapping_context() {
