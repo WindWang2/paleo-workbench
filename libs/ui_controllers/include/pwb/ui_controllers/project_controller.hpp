@@ -179,7 +179,10 @@ private:
     ProjectSaveApiFactory save_factory_;
     UiJobRunner* save_runner_;  // non-owning — the shell owns the runner
 
-    int session_generation_ = 0;
+    // Atomic (#1449): the catalog-maintenance std::async worker reads it
+    // for staleness while the GUI thread increments it — a plain int was
+    // a data race (UB).
+    std::atomic<int> session_generation_{0};
     std::string last_open_error_;
     // The save task state a drain inspects (survives runner shutdown).
     std::shared_ptr<ProjectSaveTaskState> save_task_state_;
