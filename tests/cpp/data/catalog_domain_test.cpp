@@ -69,6 +69,20 @@ void ensure_init() {
             ? fs::path(fixture_dir)
             : fs::path(__FILE__).parent_path() / "fixtures";
     g_oracle = load_json(fixtures / "catalog_domain" / "oracle.json");
+#if defined(_WIN32)
+    // mkdtemp is POSIX-only - same contract (unique created
+    // directory) through the std::filesystem temp root + unique suffix.
+    static unsigned seq = 0;
+    for (;;) {
+        const fs::path dir = fs::temp_directory_path() /
+            ("catalog-domain-replay-" + std::to_string(seq++));
+        std::error_code ec;
+        if (fs::create_directory(dir, ec)) {
+            g_root = dir.string();
+            break;
+        }
+    }
+#else
     char pattern[] = "/tmp/catalog-domain-replay-XXXXXX";
     char* made = mkdtemp(pattern);
     if (made == nullptr) {
@@ -76,6 +90,7 @@ void ensure_init() {
         std::exit(2);
     }
     g_root = made;
+#endif
 }
 
 std::string rooted(const std::string& text) {

@@ -276,6 +276,24 @@ public:
     void update_run_status(const std::string& run_id,
                            const std::string& status) override;
 
+    // ---- manual-edit provenance (V14; lifecycle.py register/complete) ----
+    // register BEFORE committing the working copy (status "running", typed
+    // input ports, business context); complete attaches the committed
+    // versions as manual_edit output ports and closes the run (failed when
+    // nothing landed — no phantom RUNNING rows). nullopt/throw on
+    // validation failure; callers treat bookkeeping failure as a
+    // run_id-less continuation so the commit itself is never blocked.
+    std::optional<catalog::DataRun> register_manual_edit_run(
+        const std::vector<std::string>& source_version_ids,
+        const std::string& entity_type, const std::string& entity_id,
+        const std::string& business_role, const std::string& actor,
+        const std::string& note, bool as_new_asset,
+        const domain::Json& extra_parameters);
+    void complete_manual_edit_run(
+        const std::string& run_id,
+        const std::vector<std::string>& committed_version_ids,
+        const std::string& business_role, int failed_count);
+
     void add_tag(const std::string& name,
                  const std::optional<std::string>& asset_id,
                  const std::optional<std::string>& version_id) override;

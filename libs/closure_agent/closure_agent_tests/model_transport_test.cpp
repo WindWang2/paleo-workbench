@@ -11,6 +11,23 @@
 #include <cstdlib>
 
 #include <pwb/domain/sha256.hpp>
+// PWB-V14-DATA-LINEAGE: setenv/unsetenv are POSIX-only; the MSVC CRT
+// equivalent (process environment) with the same semantics for tests.
+#if defined(_WIN32)
+#include <stdlib.h>
+inline int pwb_env_set(const char* name, const char* value, int overwrite) {
+    (void)overwrite;
+    return _putenv_s(name, value);
+}
+inline int pwb_env_unset(const char* name) { return _putenv_s(name, ""); }
+#else
+#include <stdlib.h>
+inline int pwb_env_set(const char* name, const char* value, int overwrite) {
+    return pwb_env_set(name, value, overwrite);
+}
+inline int pwb_env_unset(const char* name) { return pwb_env_unset(name); }
+#endif
+
 
 using namespace pwb::closure_agent;
 
@@ -111,7 +128,7 @@ int main() {
 
         // Transport injected but no credentials -> honest unavailability, and
         // the endpoint is never contacted.
-        ::setenv("PWB_CLOSURE_AGENT_TEST_KEY", "", 1);
+        pwb_env_set("PWB_CLOSURE_AGENT_TEST_KEY", "", 1);
         bool contacted = false;
         RemoteChatModel no_key(config, [&](const std::string&, const std::string&,
                                            const std::string&, std::string&) {
@@ -129,7 +146,7 @@ int main() {
         // TLS-enabled host build injects; online verification requires real
         // credentials and is honestly reported as not executed in the
         // line-11 acceptance ledger).
-        ::setenv("PWB_CLOSURE_AGENT_TEST_KEY", "test-key-123", 1);
+        pwb_env_set("PWB_CLOSURE_AGENT_TEST_KEY", "test-key-123", 1);
         std::string seen_endpoint;
         std::string seen_key;
         RemoteChatModel online(config,
@@ -147,7 +164,7 @@ int main() {
         check(reply["content"] == "remote-ok", "injected exchange round trip");
         check(seen_endpoint == config.endpoint, "exchange hit the endpoint");
         check(seen_key == "test-key-123", "exchange carried the env key");
-        ::unsetenv("PWB_CLOSURE_AGENT_TEST_KEY");
+        pwb_env_unset("PWB_CLOSURE_AGENT_TEST_KEY");
     }
 
     // ---- tool source: schemas + guarded execution ---------------------------

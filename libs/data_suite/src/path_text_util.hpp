@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <filesystem>
+
+#include <pwb/domain/text.hpp>
 #include <string>
 
 namespace pwb::data::util {
@@ -10,10 +12,7 @@ namespace pwb::data::util {
 namespace fs = std::filesystem;
 
 inline std::string lower_ascii(std::string text) {
-    for (char& c : text) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    }
-    return text;
+    return domain::lower_ascii(text);  // shared impl (#1392)
 }
 
 // Path.suffix.lower() — extension WITH dot, "" when none.

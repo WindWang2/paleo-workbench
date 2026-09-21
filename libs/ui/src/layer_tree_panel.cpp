@@ -123,6 +123,13 @@ void LayerTreePanel::refresh_indicators() {
                 if (facts->frozen) lines.append(QObject::tr("已冻结（只读）"));
                 if (facts->raw_locked) lines.append(QObject::tr("RAW 锁定"));
                 if (facts->write_granted) lines.append(QObject::tr("可编辑"));
+                // BEGIN V14-QGIS-CONTROL
+                // Layer control-plane projection (contracts 03 §9): the
+                // stable flag vocabulary rides the same metadata channel.
+                if (!facts->status_summary.empty()) {
+                    lines.append(QString::fromStdString(facts->status_summary));
+                }
+                // END V14-QGIS-CONTROL
                 facts_abstract = lines.join(QStringLiteral("\n"));
             }
         }

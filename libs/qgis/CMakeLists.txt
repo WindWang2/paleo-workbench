@@ -9,12 +9,21 @@ add_library(pwb_qgis STATIC
     src/map_session.cpp
     src/edit_controller.cpp
     src/layout_service.cpp
+    # V14-QGIS-CONTROL: the ILayerTreeStack applier over this session's
+    # QgsLayerTree (group upsert / keep-set sweep / indexed batch
+    # placements / transaction window).
+    src/layer_tree_stack.cpp
 )
 add_library(Pwb::Qgis ALIAS pwb_qgis)
 target_include_directories(pwb_qgis PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pwb_qgis PUBLIC cxx_std_20)
 target_link_libraries(pwb_qgis PUBLIC PwbQgis::Sdk)
+# BEGIN V14-QGIS-CONTROL
+# layer_tree_stack implements pwb::ui_composite::ILayerTreeStack over the
+# MapSession project (Qt-free controller core, QGIS-side applier).
+target_link_libraries(pwb_qgis PUBLIC Pwb::UiComposite)
+# END V14-QGIS-CONTROL
 # canvas_state_json/map_session.cpp use pwb::domain::Json unconditionally —
 # the link cannot wait for the CONV_29 LayoutExport chain (linux-ninja
 # configures without it and the TU fails on the missing include path).

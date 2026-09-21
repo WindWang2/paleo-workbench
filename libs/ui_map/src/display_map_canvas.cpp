@@ -127,23 +127,25 @@ protected:
         if (host == nullptr) {
             return;
         }
-        Json state;
+        // Provider returns a cached const& (#1392) — the paint path used
+        // to pay a full JSON-tree copy + rebuild every frame.
+        Json fallback = Json::object();
+        const Json* state = &fallback;
         if (host->overlay_provider_) {
             try {
-                state = host->overlay_provider_();
+                state = &host->overlay_provider_();
             } catch (...) {
                 // #1001 parity: an overlay-provider failure inside paintEvent
                 // must degrade to an empty state, never abort the painter.
-                state = Json::object();
             }
         }
-        if (!state.is_object()) {
-            state = Json::object();
+        if (!state->is_object()) {
+            state = &fallback;
         }
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, true);
         const Json selected =
-            field_value(state, "selected_features", Json::array());
+            field_value(*state, "selected_features", Json::array());
         if (selected.is_array() && !selected.empty()) {
             // Python uses the theme CANVAS_SELECTION token; the style
             // registry exposes it through the palette when bound — fall
@@ -171,7 +173,7 @@ protected:
             }
         }
         const Json decorations =
-            field_value(state, "decorations", Json::object());
+            field_value(*state, "decorations", Json::object());
         paint_map_decorations(painter, decorations, width(), height(),
                               host->view_extent(), 0.0,
                               /*dark_chrome=*/true);
@@ -458,7 +460,7 @@ std::vector<std::string> DisplayMapCanvas::snapshot_source_version_ids()
 }
 
 void DisplayMapCanvas::set_overlay_provider(
-    std::function<Json()> provider) {
+    std::function<const Json&()> provider) {
     overlay_provider_ = std::move(provider);
     if (overlay_ != nullptr) {
         overlay_->update();

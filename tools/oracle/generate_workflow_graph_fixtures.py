@@ -211,9 +211,73 @@ for cid, vs, rs in [
         {"run_id": "r2", "operation": "op", "input_version_ids": [],
          "output_version_ids": ["v1"]},
     ]),
+    # #1340: duplicated run_id — dict semantics: first-key order kept, LAST
+    # record stored (status/outputs come from the second row).
+    ("graph_dup_run", [
+        {"version_id": "v1", "asset_id": "a1"},
+    ], [
+        {"run_id": "r1", "operation": "op", "input_version_ids": ["v1"],
+         "output_version_ids": ["v2"], "status": "failed",
+         "started_at": "2026-01-01T01:00:00"},
+        {"run_id": "r1", "operation": "op", "input_version_ids": ["v1"],
+         "output_version_ids": ["v3"], "status": "complete",
+         "started_at": "2026-01-01T02:00:00"},
+    ]),
+    # #1340: duplicated version_id — last record wins for version()/
+    # version_asset; declared producing_run_id from the winning row applies;
+    # asset_versions still accumulates one entry per listing row.
+    ("graph_dup_version", [
+        {"version_id": "v1", "asset_id": "a1"},
+        {"version_id": "v1", "asset_id": "a2", "producing_run_id": "rx"},
+    ], []),
+    # #1340: setdefault — a version_id first SEEN with an empty declared
+    # producer must NOT be overwritten by the run-output producer.
+    ("graph_producing_empty_declared", [
+        {"version_id": "v1", "asset_id": "a1", "producing_run_id": ""},
+    ], [
+        {"run_id": "r1", "operation": "op", "input_version_ids": [],
+         "output_version_ids": ["v1"]},
+    ]),
 ]:
     add(cid, "graph_rebuild", {"versions": vs, "runs": rs},
         capture(lambda v=vs, r=rs: freeze_graph(make_graph(v, r))))
+
+# #1342: a >=3-node cycle — membership is traversal-order dependent (Python
+# iterates a hash-randomised set), so freeze has_cycle + non-emptiness only;
+# the harness treats the literal "*" as "assert nonempty, skip set compare".
+_THREE_CYCLE_V = [{"version_id": f"v{i}", "asset_id": "a"}
+                  for i in range(1, 4)]
+_THREE_CYCLE_R = [
+    {"run_id": "r1", "operation": "op", "input_version_ids": ["v1"],
+     "output_version_ids": ["v2"]},
+    {"run_id": "r2", "operation": "op", "input_version_ids": ["v2"],
+     "output_version_ids": ["v3"]},
+    {"run_id": "r3", "operation": "op", "input_version_ids": ["v3"],
+     "output_version_ids": ["v1"]},
+]
+_3c = capture(lambda: freeze_graph(
+    make_graph(_THREE_CYCLE_V, _THREE_CYCLE_R)))
+_3c["result"]["cycle_nodes"] = "*"
+add("graph_three_cycle", "graph_rebuild",
+    {"versions": _THREE_CYCLE_V, "runs": _THREE_CYCLE_R}, _3c)
+
+# #1344: rebuild() must fully reset state — the graph object is reusable.
+def rebuild_twice(inp):
+    g = make_graph(inp["versions"], inp["runs"])
+    g.rebuild(_Catalog(
+        versions=[make_version(v) for v in inp.get("versions2",
+                                                   inp["versions"])],
+        runs=[make_run(r) for r in inp.get("runs2", inp["runs"])]))
+    return freeze_graph(g)
+
+
+_RB2 = {"versions": V_BASIC, "runs": R_BASIC,
+        "versions2": [{"version_id": "w1", "asset_id": "b1"}],
+        "runs2": [{"run_id": "rw", "operation": "op",
+                   "input_version_ids": ["w1"],
+                   "output_version_ids": ["w2"]}]}
+add("graph_rebuild_twice", "graph_rebuild_twice", _RB2,
+    capture(lambda: rebuild_twice(_RB2)))
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +391,23 @@ for cid, kw in [
         capture(lambda k=kw: (lambda r: r.run_id if r else None)(
             make_graph(V_BASIC, R_REUSE).find_reuse_run(**k))))
 
+# #1340: duplicated run_id — runs.values() keeps only the LAST record; the
+# failed duplicate must hide the earlier complete row entirely.
+R_REUSE_DUP = [
+    {"run_id": "dup", "operation": "idw", "input_version_ids": ["v1"],
+     "output_version_ids": ["v9"], "status": "complete",
+     "started_at": "2026-01-01T01:00:00"},
+    {"run_id": "dup", "operation": "idw", "input_version_ids": ["v1"],
+     "output_version_ids": ["v9"], "status": "failed",
+     "started_at": "2026-01-01T02:00:00"},
+]
+add("reuse_dup_last_wins", "find_reuse_run",
+    {"versions": V_BASIC, "runs": R_REUSE_DUP,
+     "query": {"operation": "idw", "input_version_ids": ["v1"]}},
+    capture(lambda: (lambda r: r.run_id if r else None)(
+        make_graph(V_BASIC, R_REUSE_DUP)
+        .find_reuse_run(operation="idw", input_version_ids=["v1"]))))
+
 
 # ---------------------------------------------------------------------------
 # topological_runs
@@ -396,6 +477,41 @@ for cid, vs, rs, ids, tc in [
          "domain_task_id": "t-b",
          "parameters": {"linked_prediction_task_id": "t-a"}},
     ], ["r1", "r2"], None),
+    # #1343 item 3: str(1.0) == "1.0" — a float task id must bind to the
+    # domain task literally named "1.0" (the old %g path produced "1").
+    ("topo_synth_float_tid", V_BASIC, [
+        {"run_id": "rp", "operation": "predict", "input_version_ids": [],
+         "output_version_ids": [], "domain_task_id": "1.0",
+         "started_at": "2026-01-01T01:00:00"},
+        {"run_id": "mc", "operation": "map_compile",
+         "input_version_ids": [], "output_version_ids": ["vm"],
+         "domain_task_id": "t-map",
+         "parameters": {"linked_prediction_task_id": 1.0},
+         "started_at": "2026-01-02T00:00:00"},
+    ], ["mc", "rp"], None),
+    # #1343 item 4: iterating a dict source_task_ids yields its KEYS.
+    ("topo_synth_dict_src", V_BASIC, [
+        {"run_id": "ra", "operation": "idw", "input_version_ids": [],
+         "output_version_ids": [], "domain_task_id": "t-a",
+         "started_at": "2026-01-01T01:00:00"},
+        {"run_id": "rb", "operation": "idw", "input_version_ids": [],
+         "output_version_ids": [], "domain_task_id": "t-b",
+         "started_at": "2026-01-01T01:30:00"},
+        {"run_id": "mc", "operation": "map_compile",
+         "input_version_ids": [], "output_version_ids": ["vm"],
+         "domain_task_id": "t-map",
+         "parameters": {"source_task_ids": {"t-b": 1, "t-a": 2}},
+         "started_at": "2026-01-02T00:00:00"},
+    ], ["mc", "ra", "rb"], None),
+    # #1343 item 4: a truthy non-iterable scalar makes `for s in 5` raise
+    # TypeError — propagate, never swallow.
+    ("topo_synth_scalar_src", V_BASIC, [
+        {"run_id": "mc", "operation": "map_compile",
+         "input_version_ids": [], "output_version_ids": ["vm"],
+         "domain_task_id": "t-map",
+         "parameters": {"source_task_ids": 5},
+         "started_at": "2026-01-02T00:00:00"},
+    ], ["mc"], None),
 ]:
     add(cid, "topological_runs",
         {"versions": vs, "runs": rs, "run_ids": ids,
@@ -460,6 +576,11 @@ for cid, text in [
     ("parse_bare_sha", "sha:01234567-89ab-cdef-0123-456789abcdef"),
     ("parse_bare_short_dash", "ab-cd"),
     ("parse_ws", "  factor:task-1  "),
+    # #1343 item 1: str.strip() covers Unicode whitespace — U+3000 must
+    # strip exactly like ASCII space.
+    ("parse_unicode_ws", "　factor:task-1　"),
+    # #1343 item 2: repr() switches to double quotes when the text holds '.
+    ("parse_repr_quote", "factor:it's:x:y"),
     ("parse_empty", ""),
     ("parse_none", None),
     ("parse_int", 42),
@@ -552,6 +673,8 @@ VERDICTS = {
     "missing": {"status": "missing", "detail": "no such group"},
     "unknown": {"status": "unknown", "detail": "never committed"},
     "weird": {"status": "unexpected-word", "detail": "unmapped"},
+    # #1344: explicit null detail — str(None or "") must freeze "".
+    "null_detail": {"status": "clean", "detail": None},
 }
 
 
@@ -589,6 +712,12 @@ def make_resolve(value, doc_spec, catalog_spec, ws_spec, verdict):
 
     if verdict is None:
         resolver = None
+    elif "absent" in verdict:
+        resolver = "ABSENT"  # seam attr deleted — ImportError state
+    elif "verbatim" in verdict:
+        # #1344: a NON-DICT verdict — verdict.get(...) raises AttributeError.
+        def resolver(document, catalog, ref, _v=verdict["verbatim"]):
+            return _v
     elif "raise" in verdict:
         def resolver(document, catalog, ref, _m=verdict["raise"]):
             raise RuntimeError(_m)
@@ -596,7 +725,17 @@ def make_resolve(value, doc_spec, catalog_spec, ws_spec, verdict):
         def resolver(document, catalog, ref, _v=verdict):
             return dict(_v)
 
-    if resolver is not None:
+    if resolver == "ABSENT":
+        orig = getattr(_cv_mod, "resolve_constraint_ref", None)
+        if orig is not None:
+            del _cv_mod.resolve_constraint_ref
+        try:
+            return resolve_evidence(
+                document, value, catalog=catalog, workspace_state=workspace)
+        finally:
+            if orig is not None:
+                _cv_mod.resolve_constraint_ref = orig
+    elif resolver is not None:
         orig = getattr(_cv_mod, "resolve_constraint_ref", None)
         _cv_mod.resolve_constraint_ref = resolver
         try:
@@ -690,6 +829,65 @@ resolve_case("res_ver_missing", "version:ver_zzz", catalog_spec=CAT)
 resolve_case("res_bare_ver", "ver_x", catalog_spec=CAT)
 resolve_case("res_raise_parse", "mystery:thing", catalog_spec=CAT)
 
+# --- #1339: falsy scalar fields collapse via `or ""` ------------------------
+DOC_FALSY = {
+    "user_vector_layers": [{"id": "l-fals", "name": []}],
+    "factor_map_tasks": [
+        {"id": "t-fals", "name": [], "status": "complete",
+         "grid_artifact_version_id": 0, "quality_metrics": {},
+         "source_kind": "real"},
+    ],
+    "prediction_tasks": [
+        {"id": "p-fals", "name": False, "status": False,
+         "adapter_kind": "real", "probability_summary": {}},
+        {"id": None, "name": "无名", "status": "complete",
+         "adapter_kind": "real", "probability_summary": {}},
+    ],
+    "constraint_layers": [],
+}
+# name=[] falsy -> display falls back to ref_id; grid_artifact_version_id=0
+# falsy -> "" -> UNPINNED (not a "0" version lookup).
+resolve_case("res_factor_falsy_fields", "factor:t-fals",
+             doc_spec=DOC_FALSY, catalog_spec=CAT)
+# status=False falsy -> "" -> proceeds to UNPINNED; name=False falsy ->
+# ref_id display.
+resolve_case("res_pred_falsy_status", "prediction:p-fals",
+             doc_spec=DOC_FALSY, catalog_spec=CAT)
+# task.id=None -> str(None) == "None" — matches the literal selector.
+resolve_case("res_pred_id_none", "prediction:None",
+             doc_spec=DOC_FALSY, catalog_spec=CAT)
+# falsy layer name -> display falls back to the layer id.
+resolve_case("res_draft_falsy_name", "draft:l-fals", doc_spec=DOC_FALSY,
+             ws_spec={"membership": {"l-fals": {"source_version_id": ""}}})
+# falsy membership pin -> UNPINNED.
+resolve_case("res_draft_falsy_pin", "draft:layer-9",
+             ws_spec={"membership": {"layer-9": {"source_version_id": 0}}},
+             catalog_spec=CAT)
+
+# --- #1344: verdict edge shapes ---------------------------------------------
+resolve_case("res_cg_null_detail", "constraints:current",
+             verdict=VERDICTS["null_detail"])
+# Non-dict verdict: verdict.get raises AttributeError OUT of resolve_evidence.
+resolve_case("res_cg_verdict_scalar", "constraints:current",
+             verdict={"verbatim": "oops"})
+resolve_case("res_cg_verdict_list", "constraints:g1:ver_2",
+             verdict={"verbatim": ["clean"]})
+
+# #1343 item 5 / #1344: absent resolver — Python's `from ... import` raises
+# ImportError BEFORE the try; message embeds the module path (mask with "*").
+def _resolve_absent(cid, value):
+    inp = {"value": value, "document": DOC, "catalog": None,
+           "workspace": None, "verdict": {"absent": True}}
+    exp = capture(lambda: make_resolve(value, DOC, None, None,
+                                       {"absent": True}))
+    if "raise" in exp and exp["raise"]["python_class"] == "ImportError":
+        exp["raise"]["message"] = "*"  # module-path-dependent text
+    add(cid, "resolve", inp, exp)
+
+
+_resolve_absent("res_cg_absent_float", "constraints:current")
+_resolve_absent("res_cg_absent_named", "constraints:g1:ver_2")
+
 # selector-object input (not str) — EvidenceSelector passes straight through.
 add("res_selector_obj", "resolve_selector_obj",
     {"kind": "catalog_version", "ref_id": "ver_x", "version_id": "ver_x",
@@ -710,7 +908,19 @@ def _with_resolver(verdict, fn):
     verdict, not the real subsystem's internals — D7)."""
     if verdict is None:
         return fn()
-    if "raise" in verdict:
+    if "absent" in verdict:
+        orig = getattr(_cv_mod, "resolve_constraint_ref", None)
+        if orig is not None:
+            del _cv_mod.resolve_constraint_ref
+        try:
+            return fn()
+        finally:
+            if orig is not None:
+                _cv_mod.resolve_constraint_ref = orig
+    if "verbatim" in verdict:
+        def resolver(document, catalog, ref, _v=verdict["verbatim"]):
+            return _v
+    elif "raise" in verdict:
         def resolver(document, catalog, ref, _m=verdict["raise"]):
             raise RuntimeError(_m)
     else:
@@ -741,12 +951,60 @@ for cid, doc_spec, ws_spec, verdict in [
         "prediction_tasks": DOC["prediction_tasks"],
         "constraint_layers": [],
     }, None, None),
+    # #1341: ids containing ":" enter through the STRING selector path —
+    # "prediction:a:b" parses to ref="a", version="b" (a direct selector
+    # would have kept ref="a:b" verbatim).
+    ("avail_pred_colon_id", {
+        "user_vector_layers": [],
+        "factor_map_tasks": [],
+        "prediction_tasks": [
+            {"id": "a:b", "name": "x", "status": "complete",
+             "adapter_kind": "real", "probability_summary": {}},
+        ],
+        "constraint_layers": [],
+    }, None, None),
+    # #1341: draft layer ids keep the whole body (colons included).
+    ("avail_draft_colon_id", {
+        "user_vector_layers": [{"id": "l:x", "name": "草稿"}],
+        "factor_map_tasks": [], "prediction_tasks": [],
+        "constraint_layers": [],
+    }, {"membership": {}, "roles": {"initial_facies_draft": ["l:x"]}},
+        None),
+    # #1341: an empty task id produces "prediction:" — a parse ValueError
+    # that propagates out of available_evidence (a direct selector would
+    # have silently produced a Missing result).
+    ("avail_pred_empty_id", {
+        "user_vector_layers": [], "factor_map_tasks": [],
+        "prediction_tasks": [
+            {"id": "", "name": "x", "status": "complete",
+             "adapter_kind": "real", "probability_summary": {}},
+        ],
+        "constraint_layers": [],
+    }, None, None),
+    # #1341: a colon-bearing factor id turns "factor:f:1:ver_x" into a
+    # 3-segment selector — parse rejects it, the whole listing raises.
+    ("avail_factor_colon_id", {
+        "user_vector_layers": [],
+        "factor_map_tasks": [
+            {"id": "f:1", "name": "x", "status": "complete",
+             "grid_artifact_version_id": "ver_x", "quality_metrics": {},
+             "source_kind": "real"},
+        ],
+        "prediction_tasks": [], "constraint_layers": [],
+    }, None, None),
+    # #1344: absent resolver seam reached via the constraints entry.
+    ("avail_absent_resolver", {
+        "user_vector_layers": [], "factor_map_tasks": [],
+        "prediction_tasks": [], "constraint_layers": [{"id": "g", "name": "c"}],
+    }, None, {"absent": True}),
 ]:
     inp = {"document": doc_spec, "workspace": ws_spec, "verdict": verdict}
-    add(cid, "available_evidence", inp,
-        capture(lambda d=doc_spec, w=ws_spec, v=verdict: _with_resolver(
-            v, lambda: [r.to_dict() for r in available_evidence(
-                make_doc(d), workspace_state=make_ws(w))])))
+    exp = capture(lambda d=doc_spec, w=ws_spec, v=verdict: _with_resolver(
+        v, lambda: [r.to_dict() for r in available_evidence(
+            make_doc(d), workspace_state=make_ws(w))]))
+    if ("raise" in exp and exp["raise"]["python_class"] == "ImportError"):
+        exp["raise"]["message"] = "*"  # module-path-dependent (#1344)
+    add(cid, "available_evidence", inp, exp)
 
 
 # ---------------------------------------------------------------------------

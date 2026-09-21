@@ -9,6 +9,8 @@
 #include <QString>
 #include <vector>
 
+#include <pwb/ui_pages_preview/preview_table.hpp>  // CellKind
+
 namespace pwb::ui_pages_preview {
 
 class TablePreviewModel : public QAbstractTableModel {
@@ -33,6 +35,10 @@ public:
 private:
     std::vector<std::string> headers_;
     std::vector<std::vector<std::string>> rows_;
+    // Precomputed at set_table (#1388): data() serves 4-6 roles per
+    // visible cell; trim + cell_kind were recomputed per role.
+    std::vector<std::vector<std::string>> cell_texts_;
+    std::vector<std::vector<CellKind>> cell_kinds_;
     int depth_col_ = -1;
     bool curve_def_ = false;
     QFont mono_;

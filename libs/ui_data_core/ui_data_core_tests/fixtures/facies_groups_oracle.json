@@ -1,0 +1,1846 @@
+{
+  "schema": "pwb.facies_groups_oracle/1",
+  "source": "paleo_workbench/resources/geojson_layers.py",
+  "normalize": [
+    {
+      "value": "facies",
+      "role": "facies"
+    },
+    {
+      "value": "Facies",
+      "role": "facies"
+    },
+    {
+      "value": " 微相 ",
+      "role": "microfacies"
+    },
+    {
+      "value": "MICRO-FACIES",
+      "role": "microfacies"
+    },
+    {
+      "value": "sub_facies",
+      "role": "subfacies"
+    },
+    {
+      "value": "亚相",
+      "role": "subfacies"
+    },
+    {
+      "value": "相图",
+      "role": "facies"
+    },
+    {
+      "value": " 相",
+      "role": "facies"
+    },
+    {
+      "value": "",
+      "role": null
+    },
+    {
+      "value": null,
+      "role": null
+    },
+    {
+      "value": 0,
+      "role": null
+    },
+    {
+      "value": "unknown",
+      "role": null
+    },
+    {
+      "value": "sub",
+      "role": null
+    },
+    {
+      "value": "MICROFACIES",
+      "role": "microfacies"
+    },
+    {
+      "value": "Facies ",
+      "role": "facies"
+    },
+    {
+      "value": "micro facies",
+      "role": null
+    },
+    {
+      "value": "subfacies_",
+      "role": null
+    },
+    {
+      "value": 5,
+      "role": null
+    },
+    {
+      "value": true,
+      "role": null
+    },
+    {
+      "value": [
+        "facies"
+      ],
+      "role": null
+    },
+    {
+      "value": {
+        "x": 1
+      },
+      "role": null
+    }
+  ],
+  "from_name": [
+    {
+      "filename": "facies.geojson",
+      "role": "facies",
+      "summary": {
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1
+      }
+    },
+    {
+      "filename": "subfacies.geojson",
+      "role": "subfacies",
+      "summary": {
+        "geojson_layer_role": "subfacies",
+        "geojson_layer_label": "亚相",
+        "geojson_layer_level": 2
+      }
+    },
+    {
+      "filename": "microfacies.geojson",
+      "role": "microfacies",
+      "summary": {
+        "geojson_layer_role": "microfacies",
+        "geojson_layer_label": "微相",
+        "geojson_layer_level": 3
+      }
+    },
+    {
+      "filename": "盆地相图.json",
+      "role": "facies",
+      "summary": {
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1
+      }
+    },
+    {
+      "filename": "洼陷亚相.geojson",
+      "role": "subfacies",
+      "summary": {
+        "geojson_layer_role": "subfacies",
+        "geojson_layer_label": "亚相",
+        "geojson_layer_level": 2
+      }
+    },
+    {
+      "filename": "洼陷微相.geojson",
+      "role": "microfacies",
+      "summary": {
+        "geojson_layer_role": "microfacies",
+        "geojson_layer_label": "微相",
+        "geojson_layer_level": 3
+      }
+    },
+    {
+      "filename": "Sub_Facies.geojson",
+      "role": "subfacies",
+      "summary": {
+        "geojson_layer_role": "subfacies",
+        "geojson_layer_label": "亚相",
+        "geojson_layer_level": 2
+      }
+    },
+    {
+      "filename": "MICRO-facies.geojson",
+      "role": "microfacies",
+      "summary": {
+        "geojson_layer_role": "microfacies",
+        "geojson_layer_label": "微相",
+        "geojson_layer_level": 3
+      }
+    },
+    {
+      "filename": "product_facies_result.geojson",
+      "role": "facies",
+      "summary": {
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1
+      }
+    },
+    {
+      "filename": "plain.geojson",
+      "role": null,
+      "summary": {}
+    },
+    {
+      "filename": "Facies_Subfacies.geojson",
+      "role": "subfacies",
+      "summary": {
+        "geojson_layer_role": "subfacies",
+        "geojson_layer_label": "亚相",
+        "geojson_layer_level": 2
+      }
+    },
+    {
+      "filename": "微相亚相.geojson",
+      "role": "microfacies",
+      "summary": {
+        "geojson_layer_role": "microfacies",
+        "geojson_layer_label": "微相",
+        "geojson_layer_level": 3
+      }
+    },
+    {
+      "filename": "dir/洼陷微相.geojson",
+      "role": "microfacies",
+      "summary": {
+        "geojson_layer_role": "microfacies",
+        "geojson_layer_label": "微相",
+        "geojson_layer_level": 3
+      }
+    },
+    {
+      "filename": "nofacieslayer.geojson",
+      "role": "facies",
+      "summary": {
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1
+      }
+    },
+    {
+      "filename": "facies.GEOJSON",
+      "role": "facies",
+      "summary": {
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1
+      }
+    },
+    {
+      "filename": "微相.geojson",
+      "role": "microfacies",
+      "summary": {
+        "geojson_layer_role": "microfacies",
+        "geojson_layer_label": "微相",
+        "geojson_layer_level": 3
+      }
+    },
+    {
+      "filename": "相图_backup.geojson",
+      "role": "facies",
+      "summary": {
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1
+      }
+    }
+  ],
+  "doc_summary": [
+    {
+      "name": "not_object",
+      "payload": [
+        1,
+        2
+      ],
+      "filename": "x.geojson",
+      "summary": {
+        "geojson_valid": false,
+        "geojson_error": "根节点不是对象"
+      }
+    },
+    {
+      "name": "not_fc",
+      "payload": {
+        "type": "Feature"
+      },
+      "filename": "x.geojson",
+      "summary": {
+        "geojson_valid": false,
+        "geojson_error": "根节点必须是 FeatureCollection"
+      }
+    },
+    {
+      "name": "fc_no_features",
+      "payload": {
+        "type": "FeatureCollection"
+      },
+      "filename": "x.geojson",
+      "summary": {
+        "geojson_valid": false,
+        "geojson_error": "根节点必须是 FeatureCollection"
+      }
+    },
+    {
+      "name": "fc_features_not_list",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": {}
+      },
+      "filename": "x.geojson",
+      "summary": {
+        "geojson_valid": false,
+        "geojson_error": "根节点必须是 FeatureCollection"
+      }
+    },
+    {
+      "name": "basic",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": {
+              "type": "Polygon"
+            },
+            "properties": {}
+          },
+          {
+            "type": "Feature",
+            "geometry": {
+              "type": "Point"
+            },
+            "properties": {}
+          },
+          {
+            "type": "Feature",
+            "geometry": null,
+            "properties": {}
+          },
+          "not-a-dict"
+        ]
+      },
+      "filename": "plain.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [
+          "Point",
+          "Polygon"
+        ]
+      }
+    },
+    {
+      "name": "geometry_types_sorted",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "geometry": {
+              "type": "Polygon"
+            }
+          },
+          {
+            "geometry": {
+              "type": "LineString"
+            }
+          },
+          {
+            "geometry": {
+              "type": "Polygon"
+            }
+          },
+          {
+            "geometry": {}
+          }
+        ]
+      },
+      "filename": "x.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [
+          "LineString",
+          "Polygon"
+        ]
+      }
+    },
+    {
+      "name": "role_from_metadata",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "metadata": {
+          "layer_role": "subfacies"
+        }
+      },
+      "filename": "plain.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "subfacies",
+        "geojson_layer_label": "亚相",
+        "geojson_layer_level": 2
+      }
+    },
+    {
+      "name": "role_from_payload_key",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "facies_level": "microfacies"
+      },
+      "filename": "plain.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "microfacies",
+        "geojson_layer_label": "微相",
+        "geojson_layer_level": 3
+      }
+    },
+    {
+      "name": "role_metadata_beats_filename",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "metadata": {
+          "level": "microfacies"
+        }
+      },
+      "filename": "facies.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "microfacies",
+        "geojson_layer_label": "微相",
+        "geojson_layer_level": 3
+      }
+    },
+    {
+      "name": "role_from_filename",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": []
+      },
+      "filename": "洼陷亚相.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "subfacies",
+        "geojson_layer_label": "亚相",
+        "geojson_layer_level": 2
+      }
+    },
+    {
+      "name": "role_key_order",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "metadata": {
+          "facies_level": "subfacies"
+        },
+        "level": "microfacies"
+      },
+      "filename": "plain.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "subfacies",
+        "geojson_layer_label": "亚相",
+        "geojson_layer_level": 2
+      }
+    },
+    {
+      "name": "role_bad_then_good_key",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "metadata": {
+          "layer_role": "garbage",
+          "facies_level": "亚相"
+        }
+      },
+      "filename": "plain.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "subfacies",
+        "geojson_layer_label": "亚相",
+        "geojson_layer_level": 2
+      }
+    },
+    {
+      "name": "product_id",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "metadata": {
+          "product_id": "  prod-42  "
+        }
+      },
+      "filename": "facies.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1,
+        "facies_product_source_id": "prod-42"
+      }
+    },
+    {
+      "name": "product_id_payload",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "result_id": "res-9"
+      },
+      "filename": "plain.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "facies_product_source_id": "res-9"
+      }
+    },
+    {
+      "name": "product_id_empty_skipped",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "metadata": {
+          "product_id": "   "
+        }
+      },
+      "filename": "plain.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": []
+      }
+    },
+    {
+      "name": "metadata_not_dict",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "metadata": "oops"
+      },
+      "filename": "facies.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1
+      }
+    },
+    {
+      "name": "metadata_null_value_falls_to_payload",
+      "payload": {
+        "type": "FeatureCollection",
+        "features": [],
+        "metadata": {
+          "layer_role": null
+        },
+        "level": "facies"
+      },
+      "filename": "plain.geojson",
+      "summary": {
+        "geojson_valid": true,
+        "geometry_types": [],
+        "geojson_layer_role": "facies",
+        "geojson_layer_label": "相",
+        "geojson_layer_level": 1
+      }
+    }
+  ],
+  "grouping": [
+    {
+      "name": "standalone_no_role",
+      "added": [
+        {
+          "name": "plain.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "plain.geojson",
+            "path": "plain.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true
+            },
+            "artifact_role": null
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "complete_group_by_filename",
+      "added": [
+        {
+          "name": "facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "facies.geojson",
+            "path": "facies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "subfacies.geojson",
+            "path": "subfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "亚相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "microfacies.geojson",
+            "path": "microfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "微相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "microfacies",
+              "geojson_layer_label": "微相",
+              "geojson_layer_level": 3,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "missing_microfacies",
+      "added": [
+        {
+          "name": "facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [
+        "GeoJSON 相图成果组不完整（缺少微相）"
+      ],
+      "after": {
+        "added": [
+          {
+            "name": "facies.geojson",
+            "path": "facies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 2
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "subfacies.geojson",
+            "path": "subfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 2
+            },
+            "artifact_role": null
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "duplicate_role",
+      "added": [
+        {
+          "name": "facies_a.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "facies_b.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [
+        "GeoJSON 相图成果组不完整（缺少相）"
+      ],
+      "after": {
+        "added": [
+          {
+            "name": "facies_a.geojson",
+            "path": "facies_a.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_d750c743cb4a7206",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 1
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "facies_b.geojson",
+            "path": "facies_b.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_328fe369e0ef0959",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 1
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "subfacies.geojson",
+            "path": "subfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 2
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "microfacies.geojson",
+            "path": "microfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "microfacies",
+              "geojson_layer_label": "微相",
+              "geojson_layer_level": 3,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 2
+            },
+            "artifact_role": null
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "missing_and_duplicate",
+      "added": [
+        {
+          "name": "facies_a.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "facies_b.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "facies_a.geojson",
+            "path": "facies_a.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_d750c743cb4a7206",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 1
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "facies_b.geojson",
+            "path": "facies_b.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_328fe369e0ef0959",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 1
+            },
+            "artifact_role": null
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "same_product_id_explicit",
+      "added": [
+        {
+          "name": "a.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "geojson_layer_role": "facies",
+            "facies_product_source_id": "P1"
+          }
+        },
+        {
+          "name": "b.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "geojson_layer_role": "subfacies",
+            "facies_product_source_id": "P1"
+          }
+        },
+        {
+          "name": "c.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "geojson_layer_role": "microfacies",
+            "facies_product_source_id": "P1"
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "a.geojson",
+            "path": "a.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "facies_product_source_id": "P1",
+              "facies_product_group_id": "facies_product_b3970d62ce4cf35c",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "b.geojson",
+            "path": "b.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "亚相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "facies_product_source_id": "P1",
+              "facies_product_group_id": "facies_product_b3970d62ce4cf35c",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "c.geojson",
+            "path": "c.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "微相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "microfacies",
+              "facies_product_source_id": "P1",
+              "facies_product_group_id": "facies_product_b3970d62ce4cf35c",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "parse_failure_never_promoted",
+      "added": [
+        {
+          "name": "facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": false
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [
+        "GeoJSON 相图成果组不完整（缺少相）"
+      ],
+      "after": {
+        "added": [
+          {
+            "name": "facies.geojson",
+            "path": "facies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": false
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "subfacies.geojson",
+            "path": "subfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 2
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "microfacies.geojson",
+            "path": "microfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "microfacies",
+              "geojson_layer_label": "微相",
+              "geojson_layer_level": 3,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 2
+            },
+            "artifact_role": null
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "existing_completes_added",
+      "added": [
+        {
+          "name": "microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [
+        {
+          "name": "facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "microfacies.geojson",
+            "path": "microfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "微相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "microfacies",
+              "geojson_layer_label": "微相",
+              "geojson_layer_level": 3,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          }
+        ],
+        "existing": [
+          {
+            "name": "facies.geojson",
+            "path": "facies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "subfacies.geojson",
+            "path": "subfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "亚相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          }
+        ]
+      }
+    },
+    {
+      "name": "incomplete_existing_no_warning",
+      "added": [],
+      "existing": [
+        {
+          "name": "facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "warnings": [],
+      "after": {
+        "added": [],
+        "existing": [
+          {
+            "name": "facies.geojson",
+            "path": "facies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 2
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "subfacies.geojson",
+            "path": "subfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 2
+            },
+            "artifact_role": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "non_geojson_ignored",
+      "added": [
+        {
+          "name": "facies.geojson",
+          "type": "vector",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "facies2.geojson",
+          "format": "txt",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "facies.geojson",
+            "path": "facies.geojson",
+            "type": "vector",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "facies2.geojson",
+            "path": "facies2.geojson",
+            "type": "geojson",
+            "format": "txt",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true
+            },
+            "artifact_role": null
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "subdir_scopes_group",
+      "added": [
+        {
+          "name": "facies.geojson",
+          "path": "a/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "facies.geojson",
+          "path": "b/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "path": "a/subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "microfacies.geojson",
+          "path": "a/microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "facies.geojson",
+            "path": "a/facies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_5143ce7c63e94930",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "facies.geojson",
+            "path": "b/facies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_6d3e726382d65309",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 1
+            },
+            "artifact_role": null
+          },
+          {
+            "name": "subfacies.geojson",
+            "path": "a/subfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "亚相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_5143ce7c63e94930",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "microfacies.geojson",
+            "path": "a/microfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "微相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "microfacies",
+              "geojson_layer_label": "微相",
+              "geojson_layer_level": 3,
+              "facies_product_group_id": "facies_product_5143ce7c63e94930",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "stem_words_stripped",
+      "added": [
+        {
+          "name": "盆地facies图层.geojson",
+          "path": "p/盆地facies图层.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "盆地亚相图.geojson",
+          "path": "p/盆地亚相图.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "盆地微相.geojson",
+          "path": "p/盆地微相.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "盆地facies图层.geojson",
+            "path": "p/盆地facies图层.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_b1d609173d61893f",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "盆地亚相图.geojson",
+            "path": "p/盆地亚相图.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "亚相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_b1d609173d61893f",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "盆地微相.geojson",
+            "path": "p/盆地微相.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "微相"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "microfacies",
+              "geojson_layer_label": "微相",
+              "geojson_layer_level": 3,
+              "facies_product_group_id": "facies_product_b1d609173d61893f",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "preannotated_group_id",
+      "added": [
+        {
+          "name": "x.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "geojson_layer_role": "facies",
+            "facies_product_group_id": "facies_product_FIXED"
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "x.geojson",
+            "path": "x.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "facies_product_group_id": "facies_product_34b9d9ff99198ed0",
+              "facies_product_complete": false,
+              "facies_product_layer_count": 1
+            },
+            "artifact_role": null
+          }
+        ],
+        "existing": []
+      }
+    },
+    {
+      "name": "tags_rewritten",
+      "added": [
+        {
+          "name": "facies.geojson",
+          "tags": [
+            "input",
+            "custom",
+            "reference"
+          ],
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "tags": [
+            "custom"
+          ],
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "microfacies.geojson",
+          "tags": [
+            "output",
+            "other"
+          ],
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "existing": [],
+      "warnings": [],
+      "after": {
+        "added": [
+          {
+            "name": "facies.geojson",
+            "path": "facies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "相",
+              "custom"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "facies",
+              "geojson_layer_label": "相",
+              "geojson_layer_level": 1,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "subfacies.geojson",
+            "path": "subfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "亚相",
+              "custom"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "subfacies",
+              "geojson_layer_label": "亚相",
+              "geojson_layer_level": 2,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          },
+          {
+            "name": "microfacies.geojson",
+            "path": "microfacies.geojson",
+            "type": "geojson",
+            "format": "geojson",
+            "tags": [
+              "output",
+              "facies-map",
+              "微相",
+              "other"
+            ],
+            "parsed_summary": {
+              "geojson_valid": true,
+              "geojson_layer_role": "microfacies",
+              "geojson_layer_label": "微相",
+              "geojson_layer_level": 3,
+              "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+              "facies_product_complete": true,
+              "facies_product_layer_count": 3
+            },
+            "artifact_role": "output"
+          }
+        ],
+        "existing": []
+      }
+    }
+  ],
+  "members": [
+    {
+      "name": "click_microfacies_orders_facies_first",
+      "clicked": {
+        "name": "microfacies.geojson",
+        "path": "a/microfacies.geojson",
+        "parsed_summary": {
+          "geojson_valid": true,
+          "facies_product_group_id": "facies_product_G"
+        }
+      },
+      "pool": [
+        {
+          "name": "microfacies.geojson",
+          "path": "a/microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "facies.geojson",
+          "path": "a/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "path": "a/subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "unrelated.geojson",
+          "path": "a/unrelated.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "facies.geojson",
+          "path": "b/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "member_names": [
+        "facies.geojson",
+        "subfacies.geojson",
+        "microfacies.geojson"
+      ]
+    },
+    {
+      "name": "click_unrelated_returns_alone",
+      "clicked": {
+        "name": "unrelated.geojson",
+        "path": "a/unrelated.geojson",
+        "parsed_summary": {
+          "geojson_valid": true
+        }
+      },
+      "pool": [
+        {
+          "name": "microfacies.geojson",
+          "path": "a/microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "facies.geojson",
+          "path": "a/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "path": "a/subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "unrelated.geojson",
+          "path": "a/unrelated.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "facies.geojson",
+          "path": "b/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "member_names": [
+        "unrelated.geojson"
+      ]
+    },
+    {
+      "name": "no_role_clicked_returns_alone",
+      "clicked": {
+        "name": "x.geojson",
+        "parsed_summary": {}
+      },
+      "pool": [
+        {
+          "name": "microfacies.geojson",
+          "path": "a/microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "facies.geojson",
+          "path": "a/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "path": "a/subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "unrelated.geojson",
+          "path": "a/unrelated.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "facies.geojson",
+          "path": "b/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "member_names": [
+        "x.geojson"
+      ]
+    },
+    {
+      "name": "digest_group_by_path",
+      "clicked": {
+        "name": "facies.geojson",
+        "path": "z/facies.geojson",
+        "parsed_summary": {
+          "geojson_valid": true
+        }
+      },
+      "pool": [
+        {
+          "name": "facies.geojson",
+          "path": "z/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        },
+        {
+          "name": "microfacies.geojson",
+          "path": "a/microfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "facies.geojson",
+          "path": "a/facies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "subfacies.geojson",
+          "path": "a/subfacies.geojson",
+          "parsed_summary": {
+            "geojson_valid": true,
+            "facies_product_group_id": "facies_product_G"
+          }
+        },
+        {
+          "name": "unrelated.geojson",
+          "path": "a/unrelated.geojson",
+          "parsed_summary": {
+            "geojson_valid": true
+          }
+        }
+      ],
+      "member_names": [
+        "facies.geojson"
+      ]
+    }
+  ]
+}

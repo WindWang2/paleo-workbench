@@ -1,3 +1,4 @@
+#include "posix_shim.hpp"
 #include "pwb/catalog/trash.hpp"
 
 #include "pwb/catalog/models.hpp"
@@ -5,10 +6,14 @@
 #include "pwb/project/paths.hpp"
 
 #include <cstdio>
+#if !defined(_WIN32)
 #include <fcntl.h>
+#endif
 #include <fstream>
 #include <sys/stat.h>
+#if !defined(_WIN32)
 #include <unistd.h>
+#endif
 #include <vector>
 
 namespace pwb::catalog {
@@ -31,22 +36,24 @@ fs::path artifacts_root(const fs::path& project_path) {
 }
 
 void fsync_dir_best_effort(const fs::path& directory) {
+#if !defined(_WIN32)
     int fd = ::open(directory.c_str(), O_RDONLY | O_DIRECTORY);
     if (fd < 0) return;
     ::fsync(fd);
     ::close(fd);
+#else
+    // storage.py returns early on Windows (B-31); no directory-fsync
+    // equivalent exists there.
+    (void)directory;
+#endif
 }
 
 void make_readonly_best_effort(const fs::path& path) {
-    struct ::stat st {};
-    if (::stat(path.c_str(), &st) != 0) return;
-    ::chmod(path.c_str(), st.st_mode & ~(S_IWUSR | S_IWGRP | S_IWOTH));
+    posix_shim::make_readonly_best_effort(path);
 }
 
 void make_writable_best_effort(const fs::path& path) {
-    struct ::stat st {};
-    if (::stat(path.c_str(), &st) != 0) return;
-    ::chmod(path.c_str(), st.st_mode | S_IWUSR);
+    posix_shim::make_writable_best_effort(path);
 }
 
 void prune_empty_ancestors(const fs::path& directory, int levels) {
@@ -229,19 +236,20 @@ domain::Result<fs::path> create_working_copy(const fs::path& project_path,
     }
     const fs::path target = target_dir / version_path.filename();
 
-    // #1219-style unique temp per writer (mkstemp) under the target dir.
-    std::string pattern = (target_dir / ".work-XXXXXX").string();
-    std::vector<char> pat(pattern.begin(), pattern.end());
-    pat.push_back('\0');
-    int fd = ::mkstemp(pat.data());
-    if (fd < 0) {
-        return DataError(ErrorCode::IoError, "working-copy temp create failed");
-    }
-    fs::path temp(pat.data());
+    // #1219-style unique temp per writer under the target dir - portable
+    // staged write (temp + rename). POSIX additionally fsyncs the payload
+    // before the rename (crash-safety parity with the mkstemp original);
+    // Windows has no mkstemp/fsync equivalent (storage.py B-31 note).
+    fs::path temp = posix_shim::temp_file_path(target_dir, ".work-");
     do {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            fs::remove(temp, ec);
+            return DataError(ErrorCode::IoError,
+                             "working-copy temp create failed");
+        }
         std::ifstream in(version_path, std::ios::binary);
         if (!in) {
-            ::close(fd);
             fs::remove(temp, ec);
             return DataError(ErrorCode::NotFound,
                              "Managed payload not found: " + version_path.string());
@@ -249,20 +257,29 @@ domain::Result<fs::path> create_working_copy(const fs::path& project_path,
         char chunk[1 << 20];
         while (in) {
             in.read(chunk, sizeof(chunk));
-            if (in.gcount() > 0 &&
-                ::write(fd, chunk, static_cast<unsigned>(in.gcount())) < 0) {
-                ::close(fd);
-                fs::remove(temp, ec);
-                return DataError(ErrorCode::IoError, "working-copy write failed");
+            if (in.gcount() > 0) {
+                out.write(chunk, in.gcount());
             }
         }
-        if (::fsync(fd) != 0) {
-            ::close(fd);
+        out.flush();
+        if (!out) {
             fs::remove(temp, ec);
-            return DataError(ErrorCode::IoError, "working-copy fsync failed");
+            return DataError(ErrorCode::IoError, "working-copy write failed");
         }
+#if !defined(_WIN32)
+        out.close();
+        const int fd = ::open(temp.c_str(), O_RDONLY);
+        if (fd >= 0) {
+            const int synced = ::fsync(fd);
+            ::close(fd);
+            if (synced != 0) {
+                fs::remove(temp, ec);
+                return DataError(ErrorCode::IoError,
+                                 "working-copy fsync failed");
+            }
+        }
+#endif
     } while (false);
-    ::close(fd);
 
     make_writable_best_effort(target);  // replace over a stale read-only copy
     fs::rename(temp, target, ec);

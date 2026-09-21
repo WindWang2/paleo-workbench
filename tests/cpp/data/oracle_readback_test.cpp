@@ -21,7 +21,9 @@
 #include <string>
 #include <sys/types.h>
 #include <vector>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <process.h>  // _getpid
+#else
 #include <unistd.h>
 #endif
 

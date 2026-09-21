@@ -1,3 +1,4 @@
+#include "posix_shim.hpp"
 #include "pwb/catalog/telemetry.hpp"
 
 #include "pwb/project/paths.hpp"
@@ -68,7 +69,7 @@ bool record_catalog_event(const std::filesystem::path& project_path,
         payload["event"] = event;
         std::time_t now = std::time(nullptr);
         std::tm local{};
-        localtime_r(&now, &local);
+        posix_shim::localtime_compat(now, &local);
         char stamp[32];
         std::strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &local);
         payload["at"] = stamp;

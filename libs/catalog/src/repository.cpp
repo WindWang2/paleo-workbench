@@ -1,3 +1,4 @@
+#include "posix_shim.hpp"
 #include "pwb/catalog/repository.hpp"
 
 #include "row_mapping.hpp"
@@ -280,19 +281,9 @@ std::string random_hex(std::size_t characters) {
 // exact ticks, seconds-grade stat is forbidden. Windows maps the 100ns
 // file-time ticks (best-effort, same direction as Python's st_mtime_ns).
 std::optional<std::int64_t> disk_mtime_ns(const std::filesystem::path& path) {
-#if defined(_WIN32)
-    std::error_code ec;
-    const auto written = std::filesystem::last_write_time(path, ec);
-    if (ec) return std::nullopt;
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-               written.time_since_epoch())
-        .count();
-#else
-    struct stat st {};
-    if (::stat(path.c_str(), &st) != 0) return std::nullopt;
-    return static_cast<std::int64_t>(st.st_mtim.tv_sec) * 1000000000LL
-         + static_cast<std::int64_t>(st.st_mtim.tv_nsec);
-#endif
+    const posix_shim::FileStat st = posix_shim::stat_path(path);
+    if (!st.exists) return std::nullopt;
+    return st.mtime_ns;
 }
 
 // storage.py fsync_dir: best-effort so rename metadata survives a crash;

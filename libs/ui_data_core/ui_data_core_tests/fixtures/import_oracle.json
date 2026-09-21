@@ -1,0 +1,2123 @@
+{
+ "files": {
+  "well1.las": "~V\nVERS. 2.0\n~W\nWELL. W1\nNULL. -999.25\n~C\nDEPT.M :d\nGR.API :g\n~A\n1.0 2.0\n",
+  "seismic.sgy": "c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300",
+  "table.csv": "a,b\n1,2\n3,4\n",
+  "doc.md": "# 标题\n内容\n",
+  "notes.txt": "line1\nline2\n",
+  "map.geojson": "{\"type\":\"FeatureCollection\",\"features\":[]}",
+  "data.json": "{\"type\":\"FeatureCollection\",\"features\":[]}",
+  "plain.json": "{\"a\": 1}",
+  "arr.json": "[1, 2, 3]",
+  "broken.json": "{bad",
+  "bad.geojson": "{bad",
+  "empty.csv": "",
+  "._fork.txt": "apple double file",
+  "sub/inner.csv": "x,y\n5,6\n",
+  "sub/deep/layer.dat": "1 2 3\n",
+  "image.png": "89504e470d0a1a0a0000000000000000000000000000000000000000000000000000000000000000",
+  "weird.xyz": "unknown ext\n",
+  "noext": "no extension\n",
+  "相图-相.geojson": "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"Polygon\",\"coordinates\":[]},\"properties\":{}}]}",
+  "相图-亚相.geojson": "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"Polygon\",\"coordinates\":[]},\"properties\":{}}]}"
+ },
+ "binary_names": [
+  "seismic.sgy",
+  "image.png"
+ ],
+ "mtime": 1700000000,
+ "cases": [
+  {
+   "id": "scan.basic",
+   "kind": "scan",
+   "items": [
+    {
+     "path": "arr.json",
+     "name": "arr.json",
+     "type": "tabular",
+     "format": "json",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "a36b1f2c3f84522dd1005145646617d7054c0851e97c72a039c0bdfac9fa07f3",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 9
+     }
+    },
+    {
+     "path": "bad.geojson",
+     "name": "bad.geojson",
+     "type": "geojson",
+     "format": "geojson",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "17eed55d881c0dd5fe0935a98d89dd9e52d62aed941f3fb7d17bd490e5aa3e8f",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 4
+     }
+    },
+    {
+     "path": "broken.json",
+     "name": "broken.json",
+     "type": "tabular",
+     "format": "json",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "17eed55d881c0dd5fe0935a98d89dd9e52d62aed941f3fb7d17bd490e5aa3e8f",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 4
+     }
+    },
+    {
+     "path": "data.json",
+     "name": "data.json",
+     "type": "tabular",
+     "format": "json",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "ed778c73ea51338d6576fb5992b189f2b94d9f3d5e199f46c1af520d6b0b3e6c",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 42
+     }
+    },
+    {
+     "path": "doc.md",
+     "name": "doc.md",
+     "type": "document",
+     "format": "md",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "8ede57feb5465153440b178360a98b3618f4872a087d64ebe73f0a78db04a7bf",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 16
+     }
+    },
+    {
+     "path": "empty.csv",
+     "name": "empty.csv",
+     "type": "tabular",
+     "format": "csv",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 0
+     }
+    },
+    {
+     "path": "image.png",
+     "name": "image.png",
+     "type": "image_reference",
+     "format": "png",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "629f4275ec7728373546c2565e62bc8bfa5577c1d8aa82a340c0436aa5c4eccf",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 40
+     }
+    },
+    {
+     "path": "map.geojson",
+     "name": "map.geojson",
+     "type": "geojson",
+     "format": "geojson",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "ed778c73ea51338d6576fb5992b189f2b94d9f3d5e199f46c1af520d6b0b3e6c",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 42
+     }
+    },
+    {
+     "path": "noext",
+     "name": "noext",
+     "type": "unknown",
+     "format": "none",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "578c05eae46cb1dfaf27d47f7a5ccb7876c2eb5aa6fa93671ea2724f00349f95",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 13
+     }
+    },
+    {
+     "path": "notes.txt",
+     "name": "notes.txt",
+     "type": "unknown",
+     "format": "txt",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "2751a3a2f303ad21752038085e2b8c5f98ecff61a2e4ebbd43506a941725be80",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 12
+     }
+    },
+    {
+     "path": "plain.json",
+     "name": "plain.json",
+     "type": "tabular",
+     "format": "json",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "f9d86028c6e0d64e225186f96acb69338b2c59764df79162107f5c4bb34d1310",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 8
+     }
+    },
+    {
+     "path": "seismic.sgy",
+     "name": "seismic.sgy",
+     "type": "seismic",
+     "format": "sgy",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "b1fd99eb7483da3461a9a247a0627bb79e05f25d687f9bb31cb63b1c7aa5a623",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 8000
+     }
+    },
+    {
+     "path": "sub/deep/layer.dat",
+     "name": "layer.dat",
+     "type": "tabular",
+     "format": "dat",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "1def07dbe06eeb097aafec8a40329937cd20c93a83634b8221ea2b41a894310c",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 6
+     }
+    },
+    {
+     "path": "sub/inner.csv",
+     "name": "inner.csv",
+     "type": "tabular",
+     "format": "csv",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "35d93c69ac08f1dc013240da89b47d87a810260e20591ea3e5844d3f5c7c4d7c",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 8
+     }
+    },
+    {
+     "path": "table.csv",
+     "name": "table.csv",
+     "type": "tabular",
+     "format": "csv",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "b9485148546419a0f6a85e8d708c923557c15d7f3c7d078ef1fa7f7c0f57d5a5",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 12
+     }
+    },
+    {
+     "path": "weird.xyz",
+     "name": "weird.xyz",
+     "type": "unknown",
+     "format": "xyz",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "e3cbe9c80b5e7b6a4c3a0dcb1122b8c4947605e7ed1618eafd88d1fc068f28d4",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 12
+     }
+    },
+    {
+     "path": "well1.las",
+     "name": "well1.las",
+     "type": "well_log",
+     "format": "las",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "8cef57b0977e1be81f5d97e300907bbdc196b014209b39649d05e194a1257690",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 73
+     }
+    },
+    {
+     "path": "相图-亚相.geojson",
+     "name": "相图-亚相.geojson",
+     "type": "geojson",
+     "format": "geojson",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "d653d7d6488d788f6dd4b5a9ef894f158b61f663c43497dc701dddaa268a5588",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 123
+     }
+    },
+    {
+     "path": "相图-相.geojson",
+     "name": "相图-相.geojson",
+     "type": "geojson",
+     "format": "geojson",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "d653d7d6488d788f6dd4b5a9ef894f158b61f663c43497dc701dddaa268a5588",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 123
+     }
+    }
+   ]
+  },
+  {
+   "id": "scan.skip_checksum",
+   "kind": "scan",
+   "items": [
+    {
+     "path": "arr.json",
+     "name": "arr.json",
+     "type": "tabular",
+     "format": "json",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "a36b1f2c3f84522dd1005145646617d7054c0851e97c72a039c0bdfac9fa07f3",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 9
+     }
+    },
+    {
+     "path": "bad.geojson",
+     "name": "bad.geojson",
+     "type": "geojson",
+     "format": "geojson",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "17eed55d881c0dd5fe0935a98d89dd9e52d62aed941f3fb7d17bd490e5aa3e8f",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 4
+     }
+    },
+    {
+     "path": "broken.json",
+     "name": "broken.json",
+     "type": "tabular",
+     "format": "json",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "17eed55d881c0dd5fe0935a98d89dd9e52d62aed941f3fb7d17bd490e5aa3e8f",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 4
+     }
+    },
+    {
+     "path": "data.json",
+     "name": "data.json",
+     "type": "tabular",
+     "format": "json",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "ed778c73ea51338d6576fb5992b189f2b94d9f3d5e199f46c1af520d6b0b3e6c",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 42
+     }
+    },
+    {
+     "path": "doc.md",
+     "name": "doc.md",
+     "type": "document",
+     "format": "md",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "8ede57feb5465153440b178360a98b3618f4872a087d64ebe73f0a78db04a7bf",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 16
+     }
+    },
+    {
+     "path": "empty.csv",
+     "name": "empty.csv",
+     "type": "tabular",
+     "format": "csv",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 0
+     }
+    },
+    {
+     "path": "image.png",
+     "name": "image.png",
+     "type": "image_reference",
+     "format": "png",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "629f4275ec7728373546c2565e62bc8bfa5577c1d8aa82a340c0436aa5c4eccf",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 40
+     }
+    },
+    {
+     "path": "map.geojson",
+     "name": "map.geojson",
+     "type": "geojson",
+     "format": "geojson",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "ed778c73ea51338d6576fb5992b189f2b94d9f3d5e199f46c1af520d6b0b3e6c",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 42
+     }
+    },
+    {
+     "path": "noext",
+     "name": "noext",
+     "type": "unknown",
+     "format": "none",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "578c05eae46cb1dfaf27d47f7a5ccb7876c2eb5aa6fa93671ea2724f00349f95",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 13
+     }
+    },
+    {
+     "path": "notes.txt",
+     "name": "notes.txt",
+     "type": "unknown",
+     "format": "txt",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "2751a3a2f303ad21752038085e2b8c5f98ecff61a2e4ebbd43506a941725be80",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 12
+     }
+    },
+    {
+     "path": "plain.json",
+     "name": "plain.json",
+     "type": "tabular",
+     "format": "json",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "f9d86028c6e0d64e225186f96acb69338b2c59764df79162107f5c4bb34d1310",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 8
+     }
+    },
+    {
+     "path": "seismic.sgy",
+     "name": "seismic.sgy",
+     "type": "seismic",
+     "format": "sgy",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": null,
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 8000,
+      "checksum_skipped": true
+     }
+    },
+    {
+     "path": "sub/deep/layer.dat",
+     "name": "layer.dat",
+     "type": "tabular",
+     "format": "dat",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "1def07dbe06eeb097aafec8a40329937cd20c93a83634b8221ea2b41a894310c",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 6
+     }
+    },
+    {
+     "path": "sub/inner.csv",
+     "name": "inner.csv",
+     "type": "tabular",
+     "format": "csv",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "35d93c69ac08f1dc013240da89b47d87a810260e20591ea3e5844d3f5c7c4d7c",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 8
+     }
+    },
+    {
+     "path": "table.csv",
+     "name": "table.csv",
+     "type": "tabular",
+     "format": "csv",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "b9485148546419a0f6a85e8d708c923557c15d7f3c7d078ef1fa7f7c0f57d5a5",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 12
+     }
+    },
+    {
+     "path": "weird.xyz",
+     "name": "weird.xyz",
+     "type": "unknown",
+     "format": "xyz",
+     "status": "indexed_reference",
+     "source": "scan",
+     "external": false,
+     "checksum": "e3cbe9c80b5e7b6a4c3a0dcb1122b8c4947605e7ed1618eafd88d1fc068f28d4",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 12
+     }
+    },
+    {
+     "path": "well1.las",
+     "name": "well1.las",
+     "type": "well_log",
+     "format": "las",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": "8cef57b0977e1be81f5d97e300907bbdc196b014209b39649d05e194a1257690",
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 73
+     }
+    },
+    {
+     "path": "相图-亚相.geojson",
+     "name": "相图-亚相.geojson",
+     "type": "geojson",
+     "format": "geojson",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": null,
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 123,
+      "checksum_skipped": true
+     }
+    },
+    {
+     "path": "相图-相.geojson",
+     "name": "相图-相.geojson",
+     "type": "geojson",
+     "format": "geojson",
+     "status": "indexed",
+     "source": "scan",
+     "external": false,
+     "checksum": null,
+     "artifact_role": null,
+     "tags": [],
+     "parsed_summary": {
+      "size_bytes": 123,
+      "checksum_skipped": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "folder.basic",
+   "kind": "folder",
+   "workers": 1,
+   "report": {
+    "added": [
+     {
+      "path": "arr.json",
+      "name": "arr.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 9,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1,
+       "json_type": "array",
+       "row_count": 3
+      }
+     },
+     {
+      "path": "bad.geojson",
+      "name": "bad.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 4,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "geojson_valid": false,
+       "geojson_error": "JSONDecodeError"
+      }
+     },
+     {
+      "path": "broken.json",
+      "name": "broken.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 4,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1
+      }
+     },
+     {
+      "path": "data.json",
+      "name": "data.json",
+      "type": "geojson",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 42,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 0,
+       "geojson_valid": true,
+       "geometry_types": []
+      }
+     },
+     {
+      "path": "doc.md",
+      "name": "doc.md",
+      "type": "document",
+      "format": "md",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 16,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "md",
+       "type_label": "文档",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "image.png",
+      "name": "image.png",
+      "type": "image_reference",
+      "format": "png",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 40,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "png",
+       "type_label": "影像"
+      }
+     },
+     {
+      "path": "map.geojson",
+      "name": "map.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 42,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 0,
+       "geojson_valid": true,
+       "geometry_types": []
+      }
+     },
+     {
+      "path": "noext",
+      "name": "noext",
+      "type": "unknown",
+      "format": "none",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 13,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "none",
+       "type_label": "未知"
+      }
+     },
+     {
+      "path": "notes.txt",
+      "name": "notes.txt",
+      "type": "unknown",
+      "format": "txt",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "txt",
+       "type_label": "未知",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "plain.json",
+      "name": "plain.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1,
+       "json_type": "object"
+      }
+     },
+     {
+      "path": "seismic.sgy",
+      "name": "seismic.sgy",
+      "type": "seismic",
+      "format": "sgy",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8000,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "sgy",
+       "type_label": "地震"
+      }
+     },
+     {
+      "path": "sub/deep/layer.dat",
+      "name": "layer.dat",
+      "type": "tabular",
+      "format": "dat",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 6,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "dat",
+       "type_label": "表格"
+      }
+     },
+     {
+      "path": "sub/inner.csv",
+      "name": "inner.csv",
+      "type": "tabular",
+      "format": "csv",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "csv",
+       "type_label": "表格",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "table.csv",
+      "name": "table.csv",
+      "type": "tabular",
+      "format": "csv",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "csv",
+       "type_label": "表格",
+       "line_count": 3
+      }
+     },
+     {
+      "path": "weird.xyz",
+      "name": "weird.xyz",
+      "type": "unknown",
+      "format": "xyz",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "xyz",
+       "type_label": "未知"
+      }
+     },
+     {
+      "path": "well1.las",
+      "name": "well1.las",
+      "type": "well_log",
+      "format": "las",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 73,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "las",
+       "type_label": "测井"
+      }
+     },
+     {
+      "path": "相图-亚相.geojson",
+      "name": "相图-亚相.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 123,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 1,
+       "geojson_valid": true,
+       "geometry_types": [
+        "Polygon"
+       ],
+       "geojson_layer_role": "subfacies",
+       "geojson_layer_label": "亚相",
+       "geojson_layer_level": 2,
+       "facies_product_group_id": "facies_product_dc8fd957941145e4",
+       "facies_product_complete": false,
+       "facies_product_layer_count": 1
+      }
+     },
+     {
+      "path": "相图-相.geojson",
+      "name": "相图-相.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 123,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 1,
+       "geojson_valid": true,
+       "geometry_types": [
+        "Polygon"
+       ],
+       "geojson_layer_role": "facies",
+       "geojson_layer_label": "相",
+       "geojson_layer_level": 1,
+       "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+       "facies_product_complete": false,
+       "facies_product_layer_count": 1
+      }
+     }
+    ],
+    "skipped_path": [],
+    "skipped_checksum": [],
+    "skipped_filter": [
+     "empty.csv"
+    ],
+    "warnings": [
+     "empty.csv: 空文件已跳过"
+    ],
+    "added_count": 18,
+    "skipped_count": 1,
+    "by_type": {
+     "tabular": 6,
+     "geojson": 5,
+     "document": 1,
+     "image_reference": 1,
+     "unknown": 3,
+     "seismic": 1,
+     "well_log": 1
+    },
+    "facies_product_count": 0,
+    "summary_text": "新增 18 · 过滤跳过 1 · 警告 1 · 类型: 表格 6, GeoJSON矢量 5, 未知 3, 文档 1"
+   }
+  },
+  {
+   "id": "folder.preferred_only",
+   "kind": "folder",
+   "workers": 1,
+   "preferred_only": true,
+   "report": {
+    "added": [
+     {
+      "path": "arr.json",
+      "name": "arr.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 9,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1,
+       "json_type": "array",
+       "row_count": 3
+      }
+     },
+     {
+      "path": "bad.geojson",
+      "name": "bad.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 4,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "geojson_valid": false,
+       "geojson_error": "JSONDecodeError"
+      }
+     },
+     {
+      "path": "broken.json",
+      "name": "broken.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 4,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1
+      }
+     },
+     {
+      "path": "data.json",
+      "name": "data.json",
+      "type": "geojson",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 42,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 0,
+       "geojson_valid": true,
+       "geometry_types": []
+      }
+     },
+     {
+      "path": "doc.md",
+      "name": "doc.md",
+      "type": "document",
+      "format": "md",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 16,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "md",
+       "type_label": "文档",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "image.png",
+      "name": "image.png",
+      "type": "image_reference",
+      "format": "png",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 40,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "png",
+       "type_label": "影像"
+      }
+     },
+     {
+      "path": "map.geojson",
+      "name": "map.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 42,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 0,
+       "geojson_valid": true,
+       "geometry_types": []
+      }
+     },
+     {
+      "path": "noext",
+      "name": "noext",
+      "type": "unknown",
+      "format": "none",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 13,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "none",
+       "type_label": "未知"
+      }
+     },
+     {
+      "path": "notes.txt",
+      "name": "notes.txt",
+      "type": "unknown",
+      "format": "txt",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "txt",
+       "type_label": "未知",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "plain.json",
+      "name": "plain.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1,
+       "json_type": "object"
+      }
+     },
+     {
+      "path": "seismic.sgy",
+      "name": "seismic.sgy",
+      "type": "seismic",
+      "format": "sgy",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8000,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "sgy",
+       "type_label": "地震"
+      }
+     },
+     {
+      "path": "sub/deep/layer.dat",
+      "name": "layer.dat",
+      "type": "tabular",
+      "format": "dat",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 6,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "dat",
+       "type_label": "表格"
+      }
+     },
+     {
+      "path": "sub/inner.csv",
+      "name": "inner.csv",
+      "type": "tabular",
+      "format": "csv",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "csv",
+       "type_label": "表格",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "table.csv",
+      "name": "table.csv",
+      "type": "tabular",
+      "format": "csv",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "csv",
+       "type_label": "表格",
+       "line_count": 3
+      }
+     },
+     {
+      "path": "well1.las",
+      "name": "well1.las",
+      "type": "well_log",
+      "format": "las",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 73,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "las",
+       "type_label": "测井"
+      }
+     },
+     {
+      "path": "相图-亚相.geojson",
+      "name": "相图-亚相.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 123,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 1,
+       "geojson_valid": true,
+       "geometry_types": [
+        "Polygon"
+       ],
+       "geojson_layer_role": "subfacies",
+       "geojson_layer_label": "亚相",
+       "geojson_layer_level": 2,
+       "facies_product_group_id": "facies_product_dc8fd957941145e4",
+       "facies_product_complete": false,
+       "facies_product_layer_count": 1
+      }
+     },
+     {
+      "path": "相图-相.geojson",
+      "name": "相图-相.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 123,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 1,
+       "geojson_valid": true,
+       "geometry_types": [
+        "Polygon"
+       ],
+       "geojson_layer_role": "facies",
+       "geojson_layer_label": "相",
+       "geojson_layer_level": 1,
+       "facies_product_group_id": "facies_product_1b7d6430cc961cbc",
+       "facies_product_complete": false,
+       "facies_product_layer_count": 1
+      }
+     }
+    ],
+    "skipped_path": [],
+    "skipped_checksum": [],
+    "skipped_filter": [
+     "empty.csv",
+     "weird.xyz"
+    ],
+    "warnings": [
+     "empty.csv: 空文件已跳过"
+    ],
+    "added_count": 17,
+    "skipped_count": 2,
+    "by_type": {
+     "tabular": 6,
+     "geojson": 5,
+     "document": 1,
+     "image_reference": 1,
+     "unknown": 2,
+     "seismic": 1,
+     "well_log": 1
+    },
+    "facies_product_count": 0,
+    "summary_text": "新增 17 · 过滤跳过 2 · 警告 1 · 类型: 表格 6, GeoJSON矢量 5, 未知 2, 文档 1"
+   }
+  },
+  {
+   "id": "folder.dedup_existing",
+   "kind": "folder",
+   "workers": 1,
+   "existing_count": 18,
+   "report": {
+    "added": [],
+    "skipped_path": [
+     "arr.json",
+     "bad.geojson",
+     "broken.json",
+     "data.json",
+     "doc.md",
+     "image.png",
+     "map.geojson",
+     "noext",
+     "notes.txt",
+     "plain.json",
+     "seismic.sgy",
+     "sub/deep/layer.dat",
+     "sub/inner.csv",
+     "table.csv",
+     "weird.xyz",
+     "well1.las",
+     "相图-亚相.geojson",
+     "相图-相.geojson"
+    ],
+    "skipped_checksum": [],
+    "skipped_filter": [
+     "empty.csv"
+    ],
+    "warnings": [
+     "empty.csv: 空文件已跳过"
+    ],
+    "added_count": 0,
+    "skipped_count": 19,
+    "by_type": {},
+    "facies_product_count": 0,
+    "summary_text": "新增 0 · 路径重复跳过 18 · 过滤跳过 1 · 警告 1"
+   }
+  },
+  {
+   "id": "files.explicit",
+   "kind": "files",
+   "workers": 1,
+   "paths": [
+    "well1.las",
+    "missing.las",
+    "empty.csv",
+    "._fork.txt",
+    "sub",
+    "weird.xyz"
+   ],
+   "report": {
+    "added": [
+     {
+      "path": "well1.las",
+      "name": "well1.las",
+      "type": "well_log",
+      "format": "las",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 73,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "las",
+       "type_label": "测井"
+      }
+     },
+     {
+      "path": "._fork.txt",
+      "name": "._fork.txt",
+      "type": "unknown",
+      "format": "txt",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 17,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "txt",
+       "type_label": "未知",
+       "line_count": 1
+      }
+     },
+     {
+      "path": "weird.xyz",
+      "name": "weird.xyz",
+      "type": "unknown",
+      "format": "xyz",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "xyz",
+       "type_label": "未知"
+      }
+     }
+    ],
+    "skipped_path": [],
+    "skipped_checksum": [],
+    "skipped_filter": [
+     "empty.csv"
+    ],
+    "warnings": [
+     "missing.las: 不是文件",
+     "empty.csv: 空文件已跳过",
+     "sub: 不是文件"
+    ],
+    "added_count": 3,
+    "skipped_count": 1,
+    "by_type": {
+     "well_log": 1,
+     "unknown": 2
+    },
+    "facies_product_count": 0,
+    "summary_text": "新增 3 · 过滤跳过 1 · 警告 3 · 类型: 未知 2, 测井 1"
+   }
+  },
+  {
+   "id": "files.preferred_only",
+   "kind": "files",
+   "workers": 1,
+   "preferred_only": true,
+   "paths": [
+    "well1.las",
+    "weird.xyz",
+    "table.csv"
+   ],
+   "report": {
+    "added": [
+     {
+      "path": "well1.las",
+      "name": "well1.las",
+      "type": "well_log",
+      "format": "las",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 73,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "las",
+       "type_label": "测井"
+      }
+     },
+     {
+      "path": "table.csv",
+      "name": "table.csv",
+      "type": "tabular",
+      "format": "csv",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "csv",
+       "type_label": "表格",
+       "line_count": 3
+      }
+     }
+    ],
+    "skipped_path": [],
+    "skipped_checksum": [],
+    "skipped_filter": [
+     "weird.xyz"
+    ],
+    "warnings": [],
+    "added_count": 2,
+    "skipped_count": 1,
+    "by_type": {
+     "well_log": 1,
+     "tabular": 1
+    },
+    "facies_product_count": 0,
+    "summary_text": "新增 2 · 过滤跳过 1 · 类型: 测井 1, 表格 1"
+   }
+  },
+  {
+   "id": "folder.project_relative",
+   "kind": "folder",
+   "workers": 1,
+   "project_path": "data/../project.pwb",
+   "report": {
+    "added": [
+     {
+      "path": "data/arr.json",
+      "name": "arr.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 9,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1,
+       "json_type": "array",
+       "row_count": 3
+      }
+     },
+     {
+      "path": "data/bad.geojson",
+      "name": "bad.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 4,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "geojson_valid": false,
+       "geojson_error": "JSONDecodeError"
+      }
+     },
+     {
+      "path": "data/broken.json",
+      "name": "broken.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 4,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1
+      }
+     },
+     {
+      "path": "data/data.json",
+      "name": "data.json",
+      "type": "geojson",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 42,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 0,
+       "geojson_valid": true,
+       "geometry_types": []
+      }
+     },
+     {
+      "path": "data/doc.md",
+      "name": "doc.md",
+      "type": "document",
+      "format": "md",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 16,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "md",
+       "type_label": "文档",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "data/image.png",
+      "name": "image.png",
+      "type": "image_reference",
+      "format": "png",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 40,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "png",
+       "type_label": "影像"
+      }
+     },
+     {
+      "path": "data/map.geojson",
+      "name": "map.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 42,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 0,
+       "geojson_valid": true,
+       "geometry_types": []
+      }
+     },
+     {
+      "path": "data/noext",
+      "name": "noext",
+      "type": "unknown",
+      "format": "none",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 13,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "none",
+       "type_label": "未知"
+      }
+     },
+     {
+      "path": "data/notes.txt",
+      "name": "notes.txt",
+      "type": "unknown",
+      "format": "txt",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "txt",
+       "type_label": "未知",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "data/plain.json",
+      "name": "plain.json",
+      "type": "tabular",
+      "format": "json",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "json",
+       "type_label": "表格",
+       "line_count": 1,
+       "json_type": "object"
+      }
+     },
+     {
+      "path": "data/seismic.sgy",
+      "name": "seismic.sgy",
+      "type": "seismic",
+      "format": "sgy",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8000,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "sgy",
+       "type_label": "地震"
+      }
+     },
+     {
+      "path": "data/sub/deep/layer.dat",
+      "name": "layer.dat",
+      "type": "tabular",
+      "format": "dat",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 6,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "dat",
+       "type_label": "表格"
+      }
+     },
+     {
+      "path": "data/sub/inner.csv",
+      "name": "inner.csv",
+      "type": "tabular",
+      "format": "csv",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 8,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "csv",
+       "type_label": "表格",
+       "line_count": 2
+      }
+     },
+     {
+      "path": "data/table.csv",
+      "name": "table.csv",
+      "type": "tabular",
+      "format": "csv",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "csv",
+       "type_label": "表格",
+       "line_count": 3
+      }
+     },
+     {
+      "path": "data/weird.xyz",
+      "name": "weird.xyz",
+      "type": "unknown",
+      "format": "xyz",
+      "status": "indexed_reference",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "reference",
+      "tags": [
+       "reference"
+      ],
+      "parsed_summary": {
+       "size_bytes": 12,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "xyz",
+       "type_label": "未知"
+      }
+     },
+     {
+      "path": "data/well1.las",
+      "name": "well1.las",
+      "type": "well_log",
+      "format": "las",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 73,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "las",
+       "type_label": "测井"
+      }
+     },
+     {
+      "path": "data/相图-亚相.geojson",
+      "name": "相图-亚相.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 123,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 1,
+       "geojson_valid": true,
+       "geometry_types": [
+        "Polygon"
+       ],
+       "geojson_layer_role": "subfacies",
+       "geojson_layer_label": "亚相",
+       "geojson_layer_level": 2,
+       "facies_product_group_id": "facies_product_c683281233f68cff",
+       "facies_product_complete": false,
+       "facies_product_layer_count": 1
+      }
+     },
+     {
+      "path": "data/相图-相.geojson",
+      "name": "相图-相.geojson",
+      "type": "geojson",
+      "format": "geojson",
+      "status": "indexed",
+      "source": "import",
+      "external": false,
+      "checksum": null,
+      "artifact_role": "input",
+      "tags": [
+       "input"
+      ],
+      "parsed_summary": {
+       "size_bytes": 123,
+       "mtime": "2023-11-14T22:13:20+00:00",
+       "extension": "geojson",
+       "type_label": "GeoJSON矢量",
+       "line_count": 1,
+       "json_type": "FeatureCollection",
+       "feature_count": 1,
+       "geojson_valid": true,
+       "geometry_types": [
+        "Polygon"
+       ],
+       "geojson_layer_role": "facies",
+       "geojson_layer_label": "相",
+       "geojson_layer_level": 1,
+       "facies_product_group_id": "facies_product_a9bd3503f283e476",
+       "facies_product_complete": false,
+       "facies_product_layer_count": 1
+      }
+     }
+    ],
+    "skipped_path": [],
+    "skipped_checksum": [],
+    "skipped_filter": [
+     "empty.csv"
+    ],
+    "warnings": [
+     "empty.csv: 空文件已跳过"
+    ],
+    "added_count": 18,
+    "skipped_count": 1,
+    "by_type": {
+     "tabular": 6,
+     "geojson": 5,
+     "document": 1,
+     "image_reference": 1,
+     "unknown": 3,
+     "seismic": 1,
+     "well_log": 1
+    },
+    "facies_product_count": 0,
+    "summary_text": "新增 18 · 过滤跳过 1 · 警告 1 · 类型: 表格 6, GeoJSON矢量 5, 未知 3, 文档 1"
+   }
+  }
+ ]
+}

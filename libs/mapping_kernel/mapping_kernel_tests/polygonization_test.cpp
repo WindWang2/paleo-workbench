@@ -110,12 +110,18 @@ void check_polys(const std::vector<Polygon>& got, const Json& want_json,
               + std::to_string(want.size()));
     for (std::size_t i = 0; i < got.size() && i < want.size(); ++i) {
         const std::string pfx = what + " p" + std::to_string(i);
+        // repair_invalid_geometry's exact ring closure (#1358): every
+        // emitted ring must satisfy front == back bit-exactly.
+        check(got[i].exterior.front() == got[i].exterior.back(),
+              pfx + " exterior exactly closed");
         check_ring(got[i].exterior, want[i].exterior, pfx + " exterior");
         check(got[i].holes.size() == want[i].holes.size(),
               pfx + " hole count " + std::to_string(got[i].holes.size())
                   + " vs " + std::to_string(want[i].holes.size()));
         for (std::size_t h = 0; h < got[i].holes.size() && h < want[i].holes.size();
              ++h) {
+            check(got[i].holes[h].front() == got[i].holes[h].back(),
+                  pfx + " hole" + std::to_string(h) + " exactly closed");
             check_ring(got[i].holes[h], want[i].holes[h],
                        pfx + " hole" + std::to_string(h));
         }

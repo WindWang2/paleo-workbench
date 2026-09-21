@@ -246,6 +246,17 @@ void WorkstationFrame::apply_first_run_sizes() {
     ui_shell::apply_first_run_sizes(dock_host_, docks_);
 }
 
+bool WorkstationFrame::mount_top_bar(QWidget* bar) {
+    if (bar == nullptr || top_bar_ != nullptr || app_bar_toolbar_ == nullptr) {
+        return false;
+    }
+    if (bar == app_bar_) return false;
+    top_bar_ = bar;
+    bar->setParent(app_bar_toolbar_);
+    app_bar_toolbar_->addWidget(bar);
+    return true;
+}
+
 void WorkstationFrame::set_explorer_expanded(bool expanded) {
     explorer_expanded_ = expanded;
     if (explorer_ != nullptr) explorer_->setVisible(expanded);

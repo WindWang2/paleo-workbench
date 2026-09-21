@@ -79,11 +79,15 @@ pwb_declare_feature(PWB_BUILD_DATA
 pwb_declare_feature(PWB_BUILD_SCIENCE
     "Link the CPP-C algorithm/viz modules (fails when absent)" OFF)
 pwb_declare_feature(PWB_BUILD_SEISMIC_VIEWER
-    "Build the CPP-D seismic 2D viewer (fails when absent)" OFF)
+    "Build the CPP-D seismic 2D viewer (fails when absent)" OFF
+    IMPLIES PWB_BUILD_SEISMIC_ATTRIBUTES)
 pwb_declare_feature(PWB_BUILD_SEISMIC_ATTRIBUTES
     "Build the CPP-E seismic attribute library (fails when absent)" OFF)
 pwb_declare_feature(PWB_BUILD_SEISMIC_IO
     "Build the post-stack SEG-Y reader (libs/seismic_io)" OFF)
+pwb_declare_feature(PWB_BUILD_SEISMIC_SERVICE
+    "Build the native seismic volume service" OFF
+    IMPLIES PWB_BUILD_SEISMIC_IO;PWB_BUILD_DATA)
 pwb_declare_feature(PWB_BUILD_MAPPING_KERNEL
     "Build the contouring+interpolator kernel ported from the Python mapping pipeline" OFF)
 pwb_declare_feature(PWB_BUILD_INTEGRATION_TESTS
@@ -109,7 +113,7 @@ pwb_declare_feature(PWB_BUILD_CONV_06
     "CONV-06 workflow_spec DAG model/validator" OFF)
 pwb_declare_feature(PWB_BUILD_CONV_07
     "CONV-07 in-memory DAG workflow engine" OFF
-    REQUIRES PWB_BUILD_MAPPING_KERNEL)
+    IMPLIES PWB_BUILD_MAPPING_KERNEL;PWB_BUILD_CONV_06)
 # BEGIN CLOSURE-AGENT (line 11) — agent/harness closure core. Declares the
 # provider SDK switch in the graph (the legacy CONV-PROVIDERS option block
 # below restates the same implications) so the resolver can chain
@@ -170,6 +174,81 @@ pwb_declare_feature(PWB_BUILD_CONV_24
 pwb_declare_feature(PWB_BUILD_CONV_25
     "CONV-25 workflow graph + evidence kernel" OFF
     IMPLIES PWB_BUILD_DATA)
+pwb_declare_feature(PWB_BUILD_CONV_26
+    "CONV-26 data lifecycle closure cores" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_CONV_19)
+pwb_declare_feature(PWB_BUILD_CONV_26B
+    "CONV-26B workflow runtime closure" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_MAPPING_KERNEL;PWB_BUILD_CONV_07;PWB_BUILD_CONV_08;PWB_BUILD_CONV_25)
+pwb_declare_feature(PWB_BUILD_CONV_27
+    "CONV-27 QGIS workbench UI closure" OFF
+    REQUIRES PWB_BUILD_PLATFORM)
+pwb_declare_feature(PWB_BUILD_CONV_27B
+    "CONV-27b mapping document edit-session/snapshot/IO layer" OFF
+    IMPLIES PWB_BUILD_CONV_02)
+pwb_declare_feature(PWB_BUILD_CONV_27C
+    "CONV-27c cartography style/template registry" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_CONV_02)
+pwb_declare_feature(PWB_BUILD_CONV_28
+    "CONV-28 native science service layer" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_MAPPING_KERNEL;PWB_BUILD_CONV_05;PWB_BUILD_CONV_17;PWB_BUILD_CONV_18;PWB_BUILD_CONV_08;PWB_BUILD_CONV_24;PWB_BUILD_CONV_09;PWB_BUILD_CONV_22)
+pwb_declare_feature(PWB_BUILD_CONV_29
+    "CONV-29 composer/layout/export C++ chain" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_PLATFORM;PWB_BUILD_CONV_02)
+pwb_declare_feature(PWB_BUILD_CONV_30
+    "CONV-30 async job runtime" ON
+    IMPLIES PWB_BUILD_DATA)
+pwb_declare_feature(PWB_BUILD_CONV_32
+    "CONV-32 workflow interpretation core" OFF
+    IMPLIES PWB_BUILD_CONV_25;PWB_BUILD_CONV_26B;PWB_BUILD_CONV_24)
+pwb_declare_feature(PWB_BUILD_CONV_33
+    "CONV-33 workflow orchestration surfaces" OFF
+    IMPLIES PWB_BUILD_CONV_26B;PWB_BUILD_CONV_06)
+
+# Product closure and product-adjacent lines. These declarations make the
+# dependency graph resolve before any add_subdirectory() is evaluated.
+pwb_declare_feature(PWB_BUILD_CPP_CLOSE_02
+    "Build the workflow closure consumers" OFF
+    IMPLIES PWB_BUILD_CONV_33;PWB_BUILD_CONV_32;PWB_BUILD_CONV_24;PWB_BUILD_CONV_30)
+pwb_declare_feature(PWB_BUILD_CLOSURE_SCIENCE
+    "Build the science/prediction product closure" OFF
+    IMPLIES PWB_BUILD_CONV_28;PWB_BUILD_PREDICTION_RUNTIME)
+pwb_declare_feature(PWB_BUILD_PREDICTION_RUNTIME
+    "Build the native prediction runtime" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_CONV_21)
+pwb_declare_feature(PWB_BUILD_GEO3D_VIZ
+    "Build the native 3D geomodel viewer" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_CONV_22)
+pwb_declare_feature(PWB_BUILD_VIZ_B
+    "Build the cross-well correlation and well-tie visualization cores" ON)
+pwb_declare_feature(PWB_BUILD_BENCH
+    "Build the native benchmark tool" OFF
+    IMPLIES PWB_BUILD_DATA;PWB_BUILD_CONV_13;PWB_BUILD_SEISMIC_IO)
+pwb_declare_feature(PWB_BUILD_NATIVE_PRODUCT
+    "Build the formal native C++ product closure" OFF
+    IMPLIES
+        PWB_BUILD_PLATFORM
+        PWB_BUILD_DATA
+        PWB_BUILD_SCIENCE
+        PWB_BUILD_SEISMIC_VIEWER
+        PWB_BUILD_SEISMIC_ATTRIBUTES
+        PWB_BUILD_SEISMIC_IO
+        PWB_BUILD_SEISMIC_SERVICE
+        PWB_BUILD_MAPPING_KERNEL
+        PWB_BUILD_CONV_01
+        PWB_BUILD_CONV_07
+        PWB_BUILD_CONV_16
+        PWB_BUILD_CONV_26
+        PWB_BUILD_CONV_26B
+        PWB_BUILD_CONV_27
+        PWB_BUILD_CONV_27B
+        PWB_BUILD_CONV_27C
+        PWB_BUILD_CONV_29
+        PWB_BUILD_CONV_30
+        PWB_BUILD_PROVIDERS
+        PWB_BUILD_CLOSURE_SCIENCE
+        PWB_BUILD_GEO3D_VIZ
+        PWB_BUILD_VIZ_B)
 
 # Switches owned by a *subdirectory* (they are consumed only inside the library
 # that declares them, so root ordering cannot bite). They must NOT be re-declared

@@ -8,6 +8,10 @@
 #include "app_shell.hpp"
 #include "job_center.hpp"
 
+#ifdef PWB_WITH_V14_DATA_LINEAGE
+#include "closure_data_workspace.hpp"
+#endif
+
 #include <pwb/ui_seqviz/qt/visualization_page.hpp>
 #include "viz_e_install.hpp"
 
@@ -399,6 +403,15 @@ pwb::viz_e::VizEDataPage* install(const Install& parts) {
             RefreshEntry{QPointer<updqt::AssetSelectionBus>(bus),
                          parts.store});
     }
+#ifdef PWB_WITH_V14_DATA_LINEAGE
+    // BEGIN PWB-V14-DATA-LINEAGE (P4): nav-tree population from the live
+    // store document, the well-detail panel producer, and the two-phase
+    // ingest (toolbar 计划导入 → build → review dialog → execute). The
+    // module rides this install's refresh through the bus signal.
+    pwb::app::v14_lineage::install_data_workspace(*page->workspace(), bus,
+                                                  parts.store, page);
+// END PWB-V14-DATA-LINEAGE
+#endif
     notify_project_store_changed();
     return page;
 }

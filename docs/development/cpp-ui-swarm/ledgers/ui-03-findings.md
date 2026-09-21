@@ -13,7 +13,7 @@ rate-limited before first compile; this ledger reflects the as-built state).
 
 | Python source | State | C++ |
 |---|---|---|
-| pages/asset_table_model.py | ported (core) + qt shell **deferred** | asset_table_core.{hpp,cpp}; qt shell pending UI-06 consumer |
+| pages/asset_table_model.py | ported (core) + qt shell **deferred** | asset_table_core.{hpp,cpp}; qt shell pending UI-06 consumer — 截至 2026-09 全仓零调用方（#1392 台账）；接线前先修 #1388 排序反模式（已在本批修复：decorate-sort-undecorate） |
 | pages/paged_asset_model.py | ported (core) + qt shell **deferred** | paged_asset_core.{hpp,cpp} |
 | pages/data_view_models.py | ported | asset_view.{hpp,cpp} (AssetView/VersionView/LineageView + CatalogReadService seam + compute_catalog_row_overview) |
 | pages/data_table_columns.py | ported | data_table_columns.hpp |

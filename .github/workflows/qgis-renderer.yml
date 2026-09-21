@@ -29,9 +29,12 @@ name: QGIS renderer
 #   6.11.1 and the whole 6.11.1 Qt runtime in ONE prefix, and the test steps
 #   put that prefix's lib/ first on LD_LIBRARY_PATH so every libQt6*.so.6 —
 #   Core5Compat included — resolves to the same 6.11.1 build.
-# - BUILD AND RUNTIME use the same conda Qt prefix (CMAKE_PREFIX_PATH=/tmp/qgisqt)
-#   so vendored QGIS gui links conda Qt6Multimedia instead of noble 6.4 private
-#   ABI. setup.py forwards CMAKE_PREFIX_PATH / PALEO_QGIS_CMAKE_PREFIX.
+# - BUILD uses ONLY the system Qt 6.4 (apt qt6-*-dev set above): #1430 —
+#   passing CMAKE_PREFIX_PATH=/tmp/qgisqt at build time mixed conda's
+#   6.11.1 host tools (moc) with system 6.4 headers. Qt sonames carry no
+#   minor version, so the 6.4-compiled bridge + vendored QGIS load the
+#   conda 6.11.1 runtime via LD_LIBRARY_PATH (forward-compatible).
+#   setup.py forwards CMAKE_PREFIX_PATH / PALEO_QGIS_CMAKE_PREFIX when set.
 #
 # Note: the system package list below follows QGIS 4.x build requirements
 # (core + gui + analysis, WITH_AUTH=ON). If a future QGIS vendor bump changes
@@ -167,11 +170,16 @@ jobs:
           QT_QPA_PLATFORM=offscreen /tmp/qgisqt/bin/python -c "from PySide6.QtCore import qVersion; from PySide6.QtWidgets import QApplication; QApplication([]); print('qgisqt runtime OK, Qt', qVersion())"
 
       - name: Build vendored QGIS + qgis_render_bridge (opt-in)
+        # #1430: deliberately NO CMAKE_PREFIX_PATH=/tmp/qgisqt here. The
+        # vendored build must resolve ONE Qt — the system 6.4 from the apt
+        # qt6-*-dev packages above (it links libQt6*.so.6 by soname, so the
+        # conda 6.11.1 runtime below stays forward-compatible). With the
+        # conda prefix on the search path, Qt6CoreTools resolved to the
+        # 6.11.1 moc while headers came from system 6.4: version-guard
+        # errors + duplicate qt_noop definitions.
         env:
           PALEO_WITH_QGIS_RENDERER: "1"
           PALEO_QGIS_BUILD_JOBS: "4"
-          CMAKE_PREFIX_PATH: /tmp/qgisqt
-          PKG_CONFIG_PATH: /tmp/qgisqt/lib/pkgconfig
         run: |
           /tmp/qgisqt/bin/python -m pip install -e native/qgis_render_bridge
 

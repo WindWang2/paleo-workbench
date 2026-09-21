@@ -4,6 +4,7 @@
 // The run row only turns terminal after payload, catalog rows and project
 // bindings are all durable.
 #include "pwb/data/commit_coordinator.hpp"
+#include "pwb/data/lifecycle_enforcement.hpp"
 
 #include "coordinator_detail.hpp"
 
@@ -215,6 +216,17 @@ Json CommitCoordinator::document_section(
     return *section;
 }
 
+void CommitCoordinator::set_document_section(
+    std::string_view key, const domain::Json& section,
+    project::ProjectDocument& document) const {
+    // Same serialization as every other document mutation — the read twin
+    // above documents why an unlocked write is UB against worker
+    // publishes (V14-THREE-STAGE-UX; presentation-layer section writes
+    // route through here).
+    const std::lock_guard<std::recursive_mutex> lock(mutex_);
+    document.root()[std::string(key)] = section;
+}
+
 Result<RunStateV1> CommitCoordinator::finish_run(
     const domain::RunId& run_id, RunTerminalStatus terminal,
     Json extra_parameters) {
@@ -356,6 +368,17 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
         return receipt;
     }
 
+    // BEGIN PWB-V14-DATA-LINEAGE: lifecycle fail-closed gate — artifact
+    // kinds the frozen table classifies as must-not-register (ephemeral
+    // task files) are refused BEFORE any write; nothing gets catalogized
+    // just because it landed in a temp dir.
+    if (auto lifecycle_error =
+            lifecycle_registration_error(request.artifact_kind)) {
+        receipt.diagnostics.push_back(Diagnostic::error(
+            "artifact_lifecycle_refused", *lifecycle_error));
+        return receipt;
+    }
+
     // ---- Idempotency: same operation id → replay or resume.
     if (auto existing = find_journal(request.operation_id)) {
         if (existing->kind != JournalKind::RunPublish) {
@@ -484,13 +507,22 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
     DataVersion version;
     version.id = domain::VersionId(domain::make_id("ver_"));
     version.asset_id = target_asset;
-    version.stage = request.stage;
+    const LifecycleDecision lifecycle =
+        lifecycle_for_artifact(request.artifact_kind);
+    // Resolve the stage ONCE: the policy stage for a known artifact kind
+    // wins over the caller's default, and BOTH the payload directory and
+    // the version row must agree (a row saying INTERMEDIATE over bytes
+    // parked under derived/ mis-attributes every stage-aware consumer).
+    const domain::DataStage effective_stage =
+        resolve_publish_stage(request.artifact_kind, request.stage);
+    version.stage = effective_stage;
     version.managed = true;
     version.source_uri = pwb::project::path_to_u8(
         fs::weakly_canonical(staged.source_path));
     version.format = staged.format;
     version.run_id = request.run_id;
     version.metadata = request.result_metadata;
+    stamp_lifecycle_metadata(version.metadata, lifecycle);
     version.created_at = now();
     version.parent_version_ids = current_run->input_version_ids;
     receipt.asset_id = target_asset;
@@ -533,7 +565,7 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
 
     // Phase 2: payload placement.
     auto placed = detail::place_payload(staged.source_path, manager_.path(),
-                                        request.stage, target_asset,
+                                        effective_stage, target_asset,
                                         version.id);
     if (!placed.is_ok()) {
         receipt.diagnostics.push_back(

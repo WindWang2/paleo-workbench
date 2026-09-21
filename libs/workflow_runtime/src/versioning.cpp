@@ -24,6 +24,7 @@
 #include <pwb/workflow_runtime/versioning.hpp>
 
 #include <pwb/domain/sha256.hpp>
+#include <pwb/domain/text.hpp>
 #include <pwb/factor_host/canonical_json.hpp>
 
 #include "python_compat.hpp"
@@ -101,10 +102,7 @@ std::optional<std::string> nullable_string_field(const Json& obj,
 }
 
 std::string lower_ascii(std::string value) {
-    for (char& c : value) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return value;
+    return domain::lower_ascii(value);  // shared impl (#1392)
 }
 
 // _linked_qc_report (L44): last report (reversed scan) linked to the map.

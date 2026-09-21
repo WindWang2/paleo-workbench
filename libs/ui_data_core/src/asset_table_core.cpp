@@ -426,15 +426,24 @@ void AssetTableCore::apply_last_sort() {
         return;
     }
     const std::string key = column_keys_[static_cast<std::size_t>(column)];
-    std::stable_sort(filtered_rows_.begin(), filtered_rows_.end(),
-                     [&](int lhs, int rhs) {
-                         const AssetSortKey ka =
-                             asset_sort_key(views_[static_cast<std::size_t>(lhs)], key);
-                         const AssetSortKey kb =
-                             asset_sort_key(views_[static_cast<std::size_t>(rhs)], key);
-                         const int cmp = asset_sort_key_compare(ka, kb);
+    // decorate-sort-undecorate (#1388): one AssetSortKey per row —
+    // asset_sort_key deep-copies view.tags and scans digit runs, so
+    // building it inside the comparator costs 2·n·log n copies.
+    std::vector<std::pair<AssetSortKey, int>> decorated;
+    decorated.reserve(filtered_rows_.size());
+    for (const int row : filtered_rows_) {
+        decorated.emplace_back(
+            asset_sort_key(views_[static_cast<std::size_t>(row)], key), row);
+    }
+    std::stable_sort(decorated.begin(), decorated.end(),
+                     [descending](const auto& a, const auto& b) {
+                         const int cmp =
+                             asset_sort_key_compare(a.first, b.first);
                          return descending ? cmp > 0 : cmp < 0;
                      });
+    for (std::size_t i = 0; i < decorated.size(); ++i) {
+        filtered_rows_[i] = decorated[i].second;
+    }
 }
 
 void AssetTableCore::sort(int column, bool descending) {

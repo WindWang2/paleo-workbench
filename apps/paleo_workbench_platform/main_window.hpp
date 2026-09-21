@@ -33,6 +33,21 @@
 #include <pwb/ui/edit_tool_controller.hpp>
 #include <pwb/ui/layer_tree_panel.hpp>
 #include <pwb/ui/stage_dock.hpp>
+// BEGIN V14-QGIS-CONTROL
+// Native layer control plane: domain group controller + stage policy +
+// target model over the session map (docs/development/
+// qgis-v14-layer-control/02-architecture.md §D). Wiring scope: open-time
+// reconcile + stage switches + save-time user-edit adoption; real-time
+// tree-model signal write-back is the Prompt-2 integration point
+// (08-known-limitations §2).
+#include <pwb/qgis/layer_tree_stack.hpp>
+#include <pwb/ui_composite/layer_group_controller.hpp>
+#include <pwb/ui_composite/layer_presentation.hpp>
+#include <pwb/ui_composite/layer_stage_controller.hpp>
+#include <pwb/ui_composite/layer_targets.hpp>
+#include <pwb/workspace/state.hpp>
+#include <pwb/workspace/state_ops.hpp>
+// END V14-QGIS-CONTROL
 #include <pwb/ui/workbench_layout.hpp>
 #endif
 
@@ -90,6 +105,14 @@ class JobCenter;
 namespace pwb::seismic_viewer {
 class SeismicSliceWidget;
 }
+namespace pwb::ui_stageflow::qt {
+class StageFlowController;
+}
+#ifdef PWB_WITH_UI_CONTROLLERS
+namespace pwb::ui_controllers::qt {
+class ViewCoordinationController;
+}
+#endif
 
 namespace pwb::app {
 
@@ -153,8 +176,12 @@ public:
     // <project>/.pwb-working/ — catalog payloads are never edited in
     // place. Returns "" on success; the store stays attached so save_edits
     // goes through the real catalog transaction.
-    QString openProject(const QString& project_file);
+    // V14-THREE-STAGE-UX: the definition compiles only in the
+    // data-integration closure (PwbDataStore/recovery types), so the
+    // declaration is gated to match — a reduced configure keeps the
+    // honest no-store surface instead of a link error.
 #ifdef PWB_WITH_DATA_INTEGRATION
+    QString openProject(const QString& project_file);
     // Creates a fresh project (B's document factory + empty catalog + one
     // bootstrap boundary asset via B's run lifecycle) and opens it.
     QString newProject(const QString& dir_path, const QString& name);
@@ -317,6 +344,44 @@ public:
                               const pwb::mapping::GridStatistics& stats);
 #endif
 
+// BEGIN PWB-V14-THREE-STAGE (V14-THREE-STAGE-UX: three-stage workbench —
+// stage bar mount, StageFlowController seams, production command set,
+// task-center providers, selection/focus bus. Body in
+// stage_flow_install.cpp.)
+#ifdef PWB_WITH_STAGE_FLOW
+public:
+    // One-shot install (idempotent). Called from buildUi after the app
+    // shell exists; test entry point as well.
+    void installStageFlow();
+    // Restore the mapping stage from the opened project document
+    // (mapping_workspace.current_stage, lenient fallback). Called on the
+    // openProject success path.
+    void restoreStageFromProject();
+    pwb::ui_stageflow::qt::StageFlowController* stageFlow() const {
+        return stage_flow_;
+    }
+    // Registered production command count (test assertion surface).
+    int stageFlowCommandCount() const { return stage_flow_command_count_; }
+
+private:
+    void applyStageVisibility(const std::map<std::string, bool>& visibility);
+    pwb::ui_stageflow::qt::StageFlowController* stage_flow_ = nullptr;
+    int stage_flow_command_count_ = 0;
+    // Registered production command ids (unregistered in the destructor:
+    // the registry is process-global while the callbacks capture this
+    // window — a closed window must not leave dangling closures for the
+    // next window's palette to invoke).
+    std::vector<std::string> stage_flow_command_ids_;
+    // Well-log dock captured for the selection-bus sink (local in buildUi
+    // under PWB_WITH_WELL_LOG).
+    QDockWidget* stage_flow_well_log_dock_ = nullptr;
+#ifdef PWB_WITH_UI_CONTROLLERS
+    pwb::ui_controllers::qt::ViewCoordinationController*
+        stage_flow_coordination_ = nullptr;
+#endif
+#endif
+// END PWB-V14-THREE-STAGE
+
 protected:
     void closeEvent(QCloseEvent* event) override;
 
@@ -476,6 +541,31 @@ private:
     // Domain facts per registered layer id (module-only authority: layers
     // opened by this shell carry write grants here until B bindings exist).
     std::map<std::string, pwb::application::DomainLayerFacts> facts_;
+
+    // BEGIN V14-QGIS-CONTROL
+public:
+    // Persist the live layer-control workspace state into the project
+    // document's mapping_workspace section (called by the save path
+    // before ProjectManager::prepare_save).
+    void syncLayerControlOnSave();
+
+private:
+    // Build/attach the control plane over the freshly opened project's
+    // live workspace state + session map, reconcile the desired tree and
+    // restore the stage view (openProject success path).
+    void applyLayerControlForOpen();
+    pwb::qgis::QgsLayerTreeStack* layerTreeStackForTest() {
+        return layer_tree_stack_.get();
+    }
+    std::unique_ptr<pwb::workspace::MappingWorkspaceState> layer_workspace_;
+    std::unique_ptr<pwb::qgis::QgsLayerTreeStack> layer_tree_stack_;
+    std::unique_ptr<pwb::ui_composite::LayerGroupController> layer_groups_;
+    std::unique_ptr<pwb::ui_composite::LayerStageController> layer_stage_;
+    std::unique_ptr<pwb::ui_composite::LayerTargets> layer_targets_;
+    // Last composition snapshots (drives the save-time re-reconcile that
+    // persists adopted user tree edits).
+    std::vector<pwb::ui_composite::LayerSnapshotInput> layer_snapshots_;
+    // END V14-QGIS-CONTROL
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;
     std::function<void(const QString&)> properties_responder_;

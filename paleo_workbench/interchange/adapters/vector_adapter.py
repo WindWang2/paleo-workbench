@@ -43,6 +43,38 @@ def gdal_available() -> bool:
     return True
 
 
+_GEOS_PROBE: bool | None = None
+
+
+def ogr_geometry_validation_available() -> bool:
+    """Whether ``OGRGeometry.IsValid()`` is a real verdict in this build.
+
+    The vendored GDAL compiles ``GDAL_USE_EXTERNAL_LIBS=OFF`` — no GEOS —
+    and a GEOS-less OGR ``IsValid()`` is a capability stub that reports
+    FALSE for every geometry (#1431: six valid fixture points were all
+    flagged "无效几何" on CI). Probe known-good canary geometries once per
+    process (a point AND a polygon — some builds answer True for points
+    only); when a canary fails, validation is unavailable and the invalid-
+    geometry warning must be skipped rather than emit false diagnostics.
+    """
+    global _GEOS_PROBE
+    if _GEOS_PROBE is None:
+        try:
+            from osgeo import ogr
+
+            point = ogr.Geometry(ogr.wkbPoint)
+            point.AddPoint_2D(0.0, 0.0)
+            ring = ogr.Geometry(ogr.wkbLinearRing)
+            for x, y in ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)):
+                ring.AddPoint_2D(x, y)
+            polygon = ogr.Geometry(ogr.wkbPolygon)
+            polygon.AddGeometry(ring)
+            _GEOS_PROBE = bool(point.IsValid()) and bool(polygon.IsValid())
+        except Exception:
+            _GEOS_PROBE = False
+    return _GEOS_PROBE
+
+
 class VectorAdapter(FormatAdapter):
     format_id = "vector_gdal"
     display_name = "GIS 矢量（GDAL）"
@@ -140,9 +172,12 @@ class VectorAdapter(FormatAdapter):
                     result.warnings.append(
                         f"图层 {layer.GetName()} 混合几何类型: {', '.join(sorted(geometry_types))}"
                     )
-                invalid = self._count_invalid_geometries(layer)
-                if invalid:
-                    result.warnings.append(f"图层 {layer.GetName()} 含 {invalid} 个无效几何")
+                # GEOS-less OGR reports every geometry invalid (#1431) —
+                # gate the warning on real validation capability.
+                if ogr_geometry_validation_available():
+                    invalid = self._count_invalid_geometries(layer)
+                    if invalid:
+                        result.warnings.append(f"图层 {layer.GetName()} 含 {invalid} 个无效几何")
                 if truncated_fields:
                     result.warnings.append(
                         f"字段名超过 Shapefile 10 字节限制（可能被截断）: {', '.join(truncated_fields)}"

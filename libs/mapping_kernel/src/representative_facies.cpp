@@ -1,5 +1,6 @@
 #include <pwb/mapping/representative_facies.hpp>
 
+#include <pwb/domain/text.hpp>
 #include <pwb/mapping/crs_policy.hpp>
 
 #include <algorithm>
@@ -14,59 +15,11 @@
 namespace pwb::mapping {
 namespace {
 
-// Python str.isspace() membership for the code point at `at` (UTF-8 decoded;
-// nlohmann input is always valid UTF-8). `next` receives the following byte.
-bool python_isspace_at(const std::string& text, std::size_t at,
-                       std::size_t* next) {
-    const auto byte = [&text](std::size_t i) {
-        return static_cast<unsigned char>(text[i]);
-    };
-    const unsigned char lead = byte(at);
-    std::size_t len = 1;
-    std::uint32_t cp = lead;
-    if (lead >= 0xF0) {
-        len = 4;
-        cp = lead & 0x07u;
-    } else if (lead >= 0xE0) {
-        len = 3;
-        cp = lead & 0x0Fu;
-    } else if (lead >= 0xC0) {
-        len = 2;
-        cp = lead & 0x1Fu;
-    }
-    for (std::size_t i = 1; i < len && at + i < text.size(); ++i) {
-        cp = (cp << 6) | (byte(at + i) & 0x3Fu);
-    }
-    *next = at + len;
-    return cp == 0x20 || (cp >= 0x09 && cp <= 0x0D) ||
-           (cp >= 0x1C && cp <= 0x1F) || cp == 0x85 || cp == 0xA0 ||
-           cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200A) ||
-           cp == 0x2028 || cp == 0x2029 || cp == 0x202F || cp == 0x205F ||
-           cp == 0x3000;
-}
-
 // Python str.strip(): Unicode whitespace, including the ideographic space
 // that CJK facies names actually use. Digit characters inside
 // parse_python_float stay ASCII-bounded (documented in 10-decisions.md).
 std::string strip(const std::string& text) {
-    std::size_t begin = 0;
-    while (begin < text.size()) {
-        std::size_t next = begin + 1;
-        if (!python_isspace_at(text, begin, &next)) break;
-        begin = next;
-    }
-    std::size_t end = text.size();
-    while (end > begin) {
-        std::size_t prev = end - 1;
-        while (prev > begin &&
-               (static_cast<unsigned char>(text[prev]) & 0xC0) == 0x80) {
-            --prev;
-        }
-        std::size_t next = prev + 1;
-        if (!python_isspace_at(text, prev, &next)) break;
-        end = prev;
-    }
-    return text.substr(begin, end - begin);
+    return domain::python_strip(text);  // shared impl (#1392)
 }
 
 // Python truthiness for JSON scalars/containers in `or` chains.

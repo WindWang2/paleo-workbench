@@ -90,7 +90,7 @@ if [ -n "$GdalData" ] && [ -d "$GdalData" ]; then
     cp -R "$GdalData" "$DistDir/share/gdal"
 fi
 # Optional: the geo SDK's gdal driver plugins (raster import/export reach).
-for gdal_plugins in "$PWB_LOCAL_SDK/lib/gdalplugins" \
+for gdal_plugins in "${PWB_LOCAL_SDK:+$PWB_LOCAL_SDK/lib/gdalplugins}" \
                     "${PWB_DEPLOY_GDAL_PLUGINS:-}"; do
     if [ -n "$gdal_plugins" ] && [ -d "$gdal_plugins" ]; then
         mkdir -p "$DistDir/lib"

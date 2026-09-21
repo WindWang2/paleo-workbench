@@ -213,11 +213,79 @@ std::vector<int> FilterIndex::filter(const std::string& category,
     return filter_query(parse_legacy_category(category, search_text));
 }
 
+// Query-level constants resolved once per filter_query (#1388): the
+// stage_any comma set, the legacy_category label lookup, the "other"
+// categorized-type set, and the normalized tag targets all depend on the
+// query alone — building them inside the per-row matcher costs n parses
+// per search.
+struct FilterIndex::QueryPlan {
+    const FilterQuery& query;
+    std::string node_value;
+    bool has_node_value = false;
+    std::set<std::string> stage_any;           // node_type == "stage_any"
+    bool legacy_known = false;                 // node_type == "legacy_category"
+    std::optional<std::string> legacy_target;
+    std::set<std::string> categorized_types;   // node_value == "other"
+    std::set<std::string> tag_targets;         // normalized criteria
+
+    explicit QueryPlan(const FilterQuery& q) : query(q) {
+        node_value = q.node_value.value_or("");
+        has_node_value = q.node_value.has_value() && !q.node_value->empty();
+        if (q.node_type == "stage_any") {
+            std::size_t pos = 0;
+            while (pos <= node_value.size()) {
+                const auto comma = node_value.find(',', pos);
+                const std::string part = strip_copy(node_value.substr(
+                    pos, comma == std::string::npos ? std::string::npos
+                                                  : comma - pos));
+                if (!part.empty()) {
+                    stage_any.insert(part);
+                }
+                if (comma == std::string::npos) {
+                    break;
+                }
+                pos = comma + 1;
+            }
+        }
+        if (q.node_type == "type" && has_node_value && node_value == "other") {
+            for (const auto& [label, type] : categories()) {
+                if (type.has_value()) categorized_types.insert(*type);
+            }
+        }
+        if (q.node_type == "legacy_category" && has_node_value &&
+            node_value != "全部") {
+            for (const auto& [label, type] : categories()) {
+                if (label == node_value) {
+                    legacy_target = type;
+                    legacy_known = true;
+                    break;
+                }
+            }
+        }
+        // [t for t in tags if t and str(t).strip()] + [tag] if present
+        std::vector<std::string> tag_criteria;
+        for (const auto& tag : q.tags) {
+            if (!tag.empty() && !strip_copy(tag).empty()) {
+                tag_criteria.push_back(tag);
+            }
+        }
+        if (q.tag.has_value()) {
+            tag_criteria.push_back(*q.tag);
+        }
+        for (const auto& tag : tag_criteria) {
+            if (!strip_copy(tag).empty()) {
+                tag_targets.insert(catalog::normalize_tag_name(tag));
+            }
+        }
+    }
+};
+
 std::vector<int> FilterIndex::filter_query(const FilterQuery& query) const {
+    const QueryPlan plan(query);
     const std::string needle = lower_search_text(strip_copy(query.search_text));
     std::vector<int> rows;
     for (std::size_t i = 0; i < views_.size(); ++i) {
-        if (!matches_query(views_[i], query)) {
+        if (!matches_planned(views_[i], plan)) {
             continue;
         }
         if (!needle.empty() && haystacks_[i].find(needle) == std::string::npos) {
@@ -230,6 +298,13 @@ std::vector<int> FilterIndex::filter_query(const FilterQuery& query) const {
 
 bool FilterIndex::matches_query(const AssetView& view,
                                 const FilterQuery& query) const {
+    const QueryPlan plan(query);
+    return matches_planned(view, plan);
+}
+
+bool FilterIndex::matches_planned(const AssetView& view,
+                                  const QueryPlan& plan) const {
+    const FilterQuery& query = plan.query;
     // Trash separation: trashed rows only appear under node_type "trash".
     if (query.node_type == "trash") {
         if (!view.trashed) {
@@ -239,49 +314,27 @@ bool FilterIndex::matches_query(const AssetView& view,
         return false;
     }
 
-    const std::string node_value = query.node_value.value_or("");
+    const std::string& node_value = plan.node_value;
     const std::string stage_value = std::string(domain::to_string(view.stage));
     const std::string integrity_value =
         std::string(integrity_state_value(view.integrity_state));
 
     // `if query.node_value` — a present-but-empty value is FALSY (skips the
     // check entirely), not a match on "".
-    const bool has_node_value =
-        query.node_value.has_value() && !query.node_value->empty();
+    const bool has_node_value = plan.has_node_value;
     if (query.node_type == "stage") {
         if (has_node_value && stage_value != node_value) {
             return false;
         }
     } else if (query.node_type == "stage_any") {
-        std::set<std::string> stages;
-        std::size_t pos = 0;
-        while (pos <= node_value.size()) {
-            const auto comma = node_value.find(',', pos);
-            const std::string part = strip_copy(node_value.substr(
-                pos, comma == std::string::npos ? std::string::npos
-                                              : comma - pos));
-            if (!part.empty()) {
-                stages.insert(part);
-            }
-            if (comma == std::string::npos) {
-                break;
-            }
-            pos = comma + 1;
-        }
-        if (stages.empty() || stages.count(stage_value) == 0) {
+        if (plan.stage_any.empty() ||
+            plan.stage_any.count(stage_value) == 0) {
             return false;
         }
     } else if (query.node_type == "type") {
         if (has_node_value && view.type != node_value) {
             if (node_value == "other") {
-                bool categorized = false;
-                for (const auto& [label, type] : categories()) {
-                    if (type.has_value() && *type == view.type) {
-                        categorized = true;
-                        break;
-                    }
-                }
-                if (categorized) {
+                if (plan.categorized_types.count(view.type) != 0) {
                     return false;
                 }
             } else if (view.type != node_value) {
@@ -316,19 +369,11 @@ bool FilterIndex::matches_query(const AssetView& view,
             }
             // CATEGORIES.get(node_value) — miss → None → view.type != None
             // is always true → row excluded.
-            std::optional<std::string> target;
-            bool known = false;
-            for (const auto& [label, type] : categories()) {
-                if (label == node_value) {
-                    target = type;
-                    known = true;
-                    break;
-                }
-            }
-            if (!known) {
+            if (!plan.legacy_known) {
                 return false;
             }
-            if (!target.has_value() || view.type != *target) {
+            if (!plan.legacy_target.has_value() ||
+                view.type != *plan.legacy_target) {
                 return false;
             }
         }
@@ -361,40 +406,22 @@ bool FilterIndex::matches_query(const AssetView& view,
         view.type != *query.data_type) {
         return false;
     }
-    std::vector<std::string> tag_criteria;
-    for (const auto& tag : query.tags) {
-        // [t for t in tags if t and str(t).strip()]
-        if (!tag.empty() && !strip_copy(tag).empty()) {
-            tag_criteria.push_back(tag);
-        }
-    }
-    if (query.tag.has_value()) {
-        tag_criteria.push_back(*query.tag);
-    }
-    if (!tag_criteria.empty()) {
-        std::set<std::string> targets;
-        for (const auto& tag : tag_criteria) {
-            if (!strip_copy(tag).empty()) {
-                targets.insert(catalog::normalize_tag_name(tag));
+    if (!plan.tag_targets.empty()) {
+        if (query.tag_operator == "or") {
+            bool any = false;
+            for (const auto& t : plan.tag_targets) {
+                if (view.normalized_tags.count(t) != 0) {
+                    any = true;
+                    break;
+                }
             }
-        }
-        if (!targets.empty()) {
-            if (query.tag_operator == "or") {
-                bool any = false;
-                for (const auto& t : targets) {
-                    if (view.normalized_tags.count(t) != 0) {
-                        any = true;
-                        break;
-                    }
-                }
-                if (!any) {
+            if (!any) {
+                return false;
+            }
+        } else {
+            for (const auto& t : plan.tag_targets) {
+                if (view.normalized_tags.count(t) == 0) {
                     return false;
-                }
-            } else {
-                for (const auto& t : targets) {
-                    if (view.normalized_tags.count(t) == 0) {
-                        return false;
-                    }
                 }
             }
         }

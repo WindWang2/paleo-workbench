@@ -95,6 +95,17 @@ target_sources(pwb_data PRIVATE
 )
 # END CONV-26
 
+# BEGIN PWB-V14-DATA-LINEAGE
+# Role registry (project/roles.py parity), entity domain ops + link ordinal
+# (entity_identity extension) and the entity workspace read model
+# (catalog/entity_views.py parity).
+target_sources(pwb_data PRIVATE
+    src/role_registry.cpp
+    src/entity_workspace.cpp
+    src/lifecycle_enforcement.cpp
+)
+# END PWB-V14-DATA-LINEAGE
+
 if(BUILD_TESTING)
     enable_testing()
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../tests/cpp/data

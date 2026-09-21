@@ -1,8 +1,10 @@
+#include "posix_shim.hpp"
 #include "pwb/catalog/sources.hpp"
 #include "pwb/catalog/checksum.hpp"
 #include "pwb/catalog/refs.hpp"
 #include "pwb/catalog/trash.hpp"
 
+#include <chrono>
 #include <sys/stat.h>
 
 namespace pwb::catalog {
@@ -43,9 +45,8 @@ MissingSourceReport find_missing_sources(
         report.scanned += 1;
         const DataAsset* asset = index.asset(version.asset_id.str());
         const std::filesystem::path probe = missing_probe_path(project_path, version);
-        struct ::stat probe_stat {};
-        const bool resolved =
-            ::stat(probe.c_str(), &probe_stat) == 0 && S_ISREG(probe_stat.st_mode);
+        const posix_shim::FileStat probe_stat = posix_shim::stat_path(probe);
+        const bool resolved = probe_stat.exists && probe_stat.is_regular;
         if (resolved) continue;
         MissingSource entry;
         entry.version_id = version.id.str();
@@ -77,14 +78,14 @@ std::optional<std::string> relink_identity_proof(
     if (version.metadata.is_object() && version.metadata.contains(kExternalStatKey) &&
         version.metadata[kExternalStatKey].is_object()) {
         const auto& fingerprint = version.metadata[kExternalStatKey];
-        struct ::stat st {};
-        if (::stat(candidate.c_str(), &st) == 0 &&
+        const posix_shim::FileStat st = posix_shim::stat_path(candidate);
+        if (st.exists &&
             fingerprint.contains("size") && fingerprint.contains("mtime_ns") &&
             fingerprint["size"].is_number_integer() &&
             fingerprint["mtime_ns"].is_number_integer() &&
-            fingerprint["size"].get<std::int64_t>() == st.st_size &&
-            fingerprint["mtime_ns"].get<std::int64_t>() ==
-                static_cast<std::int64_t>(st.st_mtim.tv_nsec)) {
+            fingerprint["size"].get<std::int64_t>() ==
+                static_cast<std::int64_t>(st.size) &&
+            fingerprint["mtime_ns"].get<std::int64_t>() == st.mtime_ns_frac) {
             return std::string("stat_fingerprint");
         }
     }
@@ -113,9 +114,8 @@ domain::DataError relink_external_source(
         return DataError(ErrorCode::InvalidArgument,
                          "只有外部 RAW 版本支持 relink；派生数据请重新生成");
     }
-    struct ::stat candidate_stat {};
-    if (::stat(new_path.c_str(), &candidate_stat) != 0 ||
-        !S_ISREG(candidate_stat.st_mode)) {
+    const posix_shim::FileStat candidate_stat = posix_shim::stat_path(new_path);
+    if (!candidate_stat.exists || !candidate_stat.is_regular) {
         return DataError(ErrorCode::InvalidArgument,
                          "Candidate file not found: " + new_path.string());
     }
@@ -136,11 +136,12 @@ domain::DataError relink_external_source(
         std::filesystem::weakly_canonical(new_path).string();
     version->path = posix_path;
     version->source_uri = posix_path;
-    version->size_bytes = candidate_stat.st_size;
+    version->size_bytes =
+        static_cast<std::int64_t>(candidate_stat.size);
     if (!version->metadata.is_object()) version->metadata = domain::Json::object();
     domain::Json stat_json = domain::Json::object();
-    stat_json["size"] = candidate_stat.st_size;
-    stat_json["mtime_ns"] = static_cast<std::int64_t>(candidate_stat.st_mtim.tv_nsec);
+    stat_json["size"] = static_cast<std::int64_t>(candidate_stat.size);
+    stat_json["mtime_ns"] = candidate_stat.mtime_ns_frac;
     version->metadata[kExternalStatKey] = std::move(stat_json);
     domain::Json history = domain::Json::array();
     if (version->metadata.contains(kRelinkHistoryKey) &&

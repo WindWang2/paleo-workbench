@@ -25,7 +25,11 @@ std::string utc_now_iso() {
     const std::time_t secs = system_clock::to_time_t(now);
     const auto usec = duration_cast<microseconds>(now.time_since_epoch()).count() % 1'000'000;
     std::tm tm{};
+#ifdef _WIN32
+    gmtime_s(&tm, &secs);
+#else
     gmtime_r(&secs, &tm);
+#endif
     char buffer[64];
     std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02dT%02d:%02d:%02d.%06lld+00:00",
                   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min,
@@ -221,9 +225,11 @@ std::optional<domain::Json> version_display_payload(
         auto resolver = context.resolve_path ? context.resolve_path
                                              : &default_resolve;
         std::filesystem::path payload = resolver(*version);
-        struct ::stat probe {};
-        if (!payload.empty() && ::stat(payload.c_str(), &probe) == 0 &&
-            S_ISREG(probe.st_mode)) {
+        std::error_code probe_ec;
+        const bool payload_is_file =
+            !payload.empty() && std::filesystem::is_regular_file(payload,
+                                                                 probe_ec);
+        if (payload_is_file) {
             if (version->sha256.has_value() && !version->sha256->empty()) {
                 auto digest = sha256_file(payload);
                 integrity_label = (digest.is_ok() && digest.value() == *version->sha256)

@@ -23,4 +23,11 @@ namespace pwb::closure_workflow {
 
 [[nodiscard]] std::string python_dumps_sorted(const pwb::domain::Json& value);
 
+// json.dumps(payload, ensure_ascii=False) WITHOUT sort_keys — insertion
+// order preserved (ordered_json declaration order). This is the byte
+// stream compile_map_production writes to the staged payload file
+// (compile_map_production.py json.dump(payload, handle,
+// ensure_ascii=False)).
+[[nodiscard]] std::string python_dumps(const pwb::domain::Json& value);
+
 }  // namespace pwb::closure_workflow

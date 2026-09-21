@@ -2,6 +2,8 @@
 
 #include "pwb/ui_data_core/preview_strategy.hpp"
 
+#include <pwb/domain/text.hpp>
+
 #include "pwb/ui_data_core/json_util.hpp"
 
 #include <algorithm>
@@ -273,8 +275,7 @@ std::pair<std::vector<std::string>, std::string> strategy_read_preview_lines(
 namespace {
 
 std::string lower_ascii(std::string v) {
-    for (auto& c : v) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return v;
+    return domain::lower_ascii(v);  // shared impl (#1392)
 }
 
 }  // namespace

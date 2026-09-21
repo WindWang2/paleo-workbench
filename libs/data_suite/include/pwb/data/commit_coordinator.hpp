@@ -154,6 +154,12 @@ struct PublishRequestV1 {
     // units, approximation flags, display hints. B owns the bytes and the
     // transaction, never the numeric encoding (that stays with A).
     domain::Json result_metadata = domain::Json::object();
+    // V14-DATA-LINEAGE: artifact kind for lifecycle classification. Empty
+    // → no enforcement (caller's stage/metadata stand verbatim). A known
+    // kind's policy stage + retention win and metadata gains an idempotent
+    // "lifecycle" record; must_register=false kinds are refused before any
+    // write (see data/lifecycle_enforcement.hpp).
+    std::string artifact_kind;
     std::optional<domain::LayerId> rebind_layer;  // optional workspace rebind
 };
 
@@ -249,6 +255,15 @@ public:
     domain::Json document_section(
         std::string_view key,
         const project::ProjectDocument& document) const;
+    // Serialized single-section mutation (V14-THREE-STAGE-UX): replaces
+    // document.sections[key] under the same whole-body mutex every other
+    // document-mutating method takes. Presentation-layer writes that
+    // would otherwise reach for the raw root (stratigraphy.target_horizon
+    // is the first consumer) MUST go through here — an unlocked
+    // operator[] on the shared tree races worker publishes (UB).
+    void set_document_section(std::string_view key,
+                              const domain::Json& section,
+                              project::ProjectDocument& document) const;
     // Resume/roll back every unfinished journal. Must run at startup before
     // any new commit. Never guesses silently: unresolvable journals land in
     // RecoveryReportV1::pending and BLOCK conflicting new writes until an

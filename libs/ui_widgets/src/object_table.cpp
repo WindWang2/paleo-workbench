@@ -186,13 +186,24 @@ void ObjectTableModel::sort(int column, Qt::SortOrder order) {
     // keys keep their original relative order in both directions.
     emit layoutAboutToBeChanged();
     const bool descending = order == Qt::DescendingOrder;
-    std::stable_sort(rows_.begin(), rows_.end(),
-                     [&](const QVariant& a, const QVariant& b) {
-                         const SortKey ka = sort_key_of(sort_value(a));
-                         const SortKey kb = sort_key_of(sort_value(b));
-                         return descending ? sort_key_less(kb, ka)
-                                           : sort_key_less(ka, kb);
+    // decorate-sort-undecorate (#1388): one key build per row instead of
+    // two per comparison; equal keys still keep original order.
+    std::vector<std::pair<SortKey, std::size_t>> keys;
+    keys.reserve(rows_.size());
+    for (std::size_t i = 0; i < rows_.size(); ++i) {
+        keys.emplace_back(sort_key_of(sort_value(rows_[i])), i);
+    }
+    std::stable_sort(keys.begin(), keys.end(),
+                     [descending](const auto& a, const auto& b) {
+                         return descending ? sort_key_less(b.first, a.first)
+                                           : sort_key_less(a.first, b.first);
                      });
+    std::vector<QVariant> sorted;
+    sorted.reserve(rows_.size());
+    for (const auto& k : keys) {
+        sorted.push_back(std::move(rows_[k.second]));
+    }
+    rows_ = std::move(sorted);
     reindex();
 
     // key -> queue of new positions (duplicate keys disambiguate in

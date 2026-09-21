@@ -44,6 +44,23 @@
 #include <thread>
 #include <utility>
 #include <vector>
+// PWB-V14-DATA-LINEAGE: setenv/unsetenv are POSIX-only; the MSVC CRT
+// equivalent (process environment) with the same semantics for tests.
+#if defined(_WIN32)
+#include <stdlib.h>
+inline int pwb_env_set(const char* name, const char* value, int overwrite) {
+    (void)overwrite;
+    return _putenv_s(name, value);
+}
+inline int pwb_env_unset(const char* name) { return _putenv_s(name, ""); }
+#else
+#include <stdlib.h>
+inline int pwb_env_set(const char* name, const char* value, int overwrite) {
+    return pwb_env_set(name, value, overwrite);
+}
+inline int pwb_env_unset(const char* name) { return pwb_env_unset(name); }
+#endif
+
 
 namespace {
 
@@ -427,11 +444,11 @@ void run_np_linspace(const Json& c) {
 
 void run_env_int(const Json& c) {
     const auto& in = c.at("input");
-    ::setenv("PWB_ORACLE_ENV_INT",
+    pwb_env_set("PWB_ORACLE_ENV_INT",
              in.at("raw").get<std::string>().c_str(), 1);
     const int got =
         uw::env_int("PWB_ORACLE_ENV_INT", in.at("fallback").get<int>());
-    ::unsetenv("PWB_ORACLE_ENV_INT");
+    pwb_env_unset("PWB_ORACLE_ENV_INT");
     check(got == c.at("expected").get<int>(), "env_int mismatch");
 }
 

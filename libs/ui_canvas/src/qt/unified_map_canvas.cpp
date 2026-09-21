@@ -1,6 +1,7 @@
 // UI-15 — primary renderer-neutral map canvas (unified_map_canvas.py
 // UnifiedMapCanvas parity).
 
+#include <pwb/ui_canvas/qt/fallback_map_backend.hpp>
 #include <pwb/ui_canvas/qt/unified_map_canvas.hpp>
 
 #include <pwb/ui_canvas/qt/qt_meta.hpp>
@@ -45,12 +46,19 @@ QPointF to_qpoint(std::pair<double, double> point) {
     return QPointF(point.first, point.second);
 }
 
+// Python create_map_render_backend() has the fallback built in; the C++
+// registry needs the factory installed before selection (idempotent).
+std::shared_ptr<MapRenderBackend> default_backend() {
+    qt::install_fallback_backend_factory();
+    return create_map_render_backend();
+}
+
 }  // namespace
 
 UnifiedMapCanvas::UnifiedMapCanvas(
     std::shared_ptr<MapRenderBackend> backend, QWidget* parent)
     : QWidget(parent),
-      backend_(backend ? std::move(backend) : create_map_render_backend()) {
+      backend_(backend ? std::move(backend) : default_backend()) {
     setObjectName(QStringLiteral("UnifiedMapCanvas"));
     setMinimumSize(240, 180);
     setMouseTracking(true);

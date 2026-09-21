@@ -1,10 +1,17 @@
 #include <pwb/workflow_graph/graph.hpp>
 
+#include "py_text.hpp"
+
 #include <algorithm>
 #include <deque>
 #include <unordered_set>
 
 namespace pwb::workflow_graph {
+
+using detail::py_str;
+using detail::truthy;
+using detail::utf8_code_point;
+
 namespace {
 
 // dict.setdefault on insertion-ordered tables.
@@ -19,36 +26,6 @@ V& slot(std::vector<std::pair<std::string, V>>& table,
         return table.back().second;
     }
     return table[it->second].second;
-}
-
-// Python str() on a scalar parameter value.
-std::string param_str(const Json& v) {
-    if (v.is_string()) return v.get<std::string>();
-    if (v.is_boolean()) return v.get<bool>() ? "True" : "False";
-    if (v.is_number_integer()) return std::to_string(v.get<long long>());
-    if (v.is_number_unsigned())
-        return std::to_string(v.get<unsigned long long>());
-    if (v.is_number_float()) {
-        double d = v.get<double>();
-        char buf[40];
-        std::snprintf(buf, sizeof buf, "%.17g", d);
-        std::string s = buf;
-        // %.17g may carry trailing noise; prefer shortest round-trip.
-        char buf2[40];
-        std::snprintf(buf2, sizeof buf2, "%.15g", d);
-        if (std::strtod(buf2, nullptr) == d) s = buf2;
-        return s;
-    }
-    return "";
-}
-
-// Python truthiness for Json scalars/containers.
-bool truthy(const Json& v) {
-    if (v.is_null()) return false;
-    if (v.is_boolean()) return v.get<bool>();
-    if (v.is_number()) return v.get<double>() != 0.0;
-    if (v.is_string()) return !v.get<std::string>().empty();
-    return !v.empty();
 }
 
 // _reachable(adj, src, dst) — DFS over producer->consumer adjacency.
@@ -75,12 +52,12 @@ bool reachable(
 
 void DependencyGraph::rebuild(const std::vector<DataVersionRef>& versions,
                               const std::vector<DataRunRef>& runs) {
-    versions_ = versions;
-    runs_ = runs;
+    versions_.clear();
+    runs_.clear();
     version_index_.clear();
     run_index_.clear();
     producing_run_.clear();
-    producing_index_.clear();
+    producing_run_index_.clear();
     consumers_.clear();
     consumers_index_.clear();
     run_inputs_.clear();
@@ -94,23 +71,38 @@ void DependencyGraph::rebuild(const std::vector<DataVersionRef>& versions,
     domain_task_runs_.clear();
     domain_task_index_.clear();
     edges_.clear();
-    cycle_nodes.clear();
+    cycle_nodes_.clear();
 
-    for (const auto& ver : versions_) {
-        version_index_.emplace(ver.version_id, version_index_.size());
+    // self.versions/self.runs are Python DICTS — assignment keeps the
+    // first-key position but stores the LAST record for duplicated ids
+    // (#1340).
+    for (const auto& ver : versions) {
+        auto [it, inserted] = version_index_.try_emplace(ver.version_id,
+                                                         versions_.size());
+        if (inserted) {
+            versions_.push_back(ver);
+        } else {
+            versions_[it->second] = ver;
+        }
         slot(version_asset_, version_asset_index_, ver.version_id) =
             ver.asset_id;
         slot(asset_versions_, asset_versions_index_, ver.asset_id)
             .push_back(ver.version_id);
         if (ver.producing_run_id.has_value() &&
             !ver.producing_run_id->empty()) {
-            slot(producing_run_, producing_index_, ver.version_id) =
+            slot(producing_run_, producing_run_index_, ver.version_id) =
                 *ver.producing_run_id;
         }
     }
 
-    for (const auto& run : runs_) {
-        run_index_.emplace(run.run_id, run_index_.size());
+    for (const auto& run : runs) {
+        auto [it, inserted] =
+            run_index_.try_emplace(run.run_id, runs_.size());
+        if (inserted) {
+            runs_.push_back(run);
+        } else {
+            runs_[it->second] = run;
+        }
         slot(run_inputs_, run_inputs_index_, run.run_id) =
             run.input_version_ids;
         slot(run_outputs_, run_outputs_index_, run.run_id) =
@@ -118,10 +110,10 @@ void DependencyGraph::rebuild(const std::vector<DataVersionRef>& versions,
         for (const auto& vid : run.input_version_ids)
             slot(consumers_, consumers_index_, vid).push_back(run.run_id);
         for (const auto& vid : run.output_version_ids) {
-            // dict.setdefault — first producer wins, never overwrites.
-            auto& ref =
-                slot(producing_run_, producing_index_, vid);
-            if (ref.empty()) ref = run.run_id;
+            // dict.setdefault — installs only when the key is ABSENT; an
+            // existing "" value must survive (#1340).
+            if (!producing_run_index_.count(vid))
+                slot(producing_run_, producing_run_index_, vid) = run.run_id;
         }
         if (run.domain_task_id.has_value() && !run.domain_task_id->empty())
             slot(domain_task_runs_, domain_task_index_, *run.domain_task_id)
@@ -132,7 +124,7 @@ void DependencyGraph::rebuild(const std::vector<DataVersionRef>& versions,
                                            run.operation});
     }
 
-    cycle_nodes = detect_cycle_nodes();
+    cycle_nodes_ = detect_cycle_nodes();
 }
 
 const DataRunRef* DependencyGraph::run(const std::string& run_id) const {
@@ -232,6 +224,8 @@ const DataRunRef* DependencyGraph::find_reuse_run(
     const Json& parameters, bool require_outputs) const {
     const bool filter_params =
         parameters.is_object() && !parameters.empty();
+    // Python iterates reversed(list(self.runs.values())) — runs_ is the
+    // deduplicated dict-values view (first-key order, last record) (#1340).
     for (auto it = runs_.rbegin(); it != runs_.rend(); ++it) {
         const auto& r = *it;
         if (r.operation != operation) continue;
@@ -392,26 +386,32 @@ std::vector<const DataRunRef*> DependencyGraph::topological_runs(
             if (params.contains("linked_prediction_task_id") &&
                 truthy(params.at("linked_prediction_task_id"))) {
                 producer_tids.push_back(
-                    param_str(params.at("linked_prediction_task_id")));
+                    py_str(params.at("linked_prediction_task_id")));
             }
             if (params.contains("source_task_ids") &&
                 truthy(params.at("source_task_ids"))) {
                 const Json& s = params.at("source_task_ids");
                 if (s.is_array()) {
                     for (const auto& el : s)
-                        producer_tids.push_back(param_str(el));
+                        producer_tids.push_back(py_str(el));
                 } else if (s.is_string()) {
                     // Python iterates a string into characters.
                     const std::string& sv = s.get_ref<const std::string&>();
                     for (std::size_t i = 0; i < sv.size();) {
-                        unsigned char c = sv[i];
-                        std::size_t len = c < 0x80   ? 1
-                                          : c < 0xE0 ? 2
-                                          : c < 0xF0 ? 3
-                                                     : 4;
+                        const auto d = utf8_code_point(sv, i);
+                        const std::size_t len = d ? d->size : 1;
                         producer_tids.push_back(sv.substr(i, len));
                         i += len;
                     }
+                } else if (s.is_object()) {
+                    // Iterating a dict yields its KEYS (#1343 item 4).
+                    for (const auto& [k, _] : s.items())
+                        producer_tids.push_back(k);
+                } else {
+                    // Truthy non-iterable scalar: `for s in <scalar>` raises
+                    // TypeError in Python — do not silently swallow (#1343).
+                    throw WorkflowTypeError("'" + detail::py_type_name(s) +
+                                            "' object is not iterable");
                 }
             }
             add_synthetic(rid, producer_tids);

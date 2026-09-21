@@ -130,6 +130,11 @@ function(pwb_install_resources)
         if(EXISTS "${_src}")
             install(DIRECTORY "${_src}"
                     DESTINATION "${CMAKE_INSTALL_DATADIR}/paleo-workbench"
+                    FILES_MATCHING
+                    PATTERN "*"
+                    PATTERN "*.py" EXCLUDE
+                    PATTERN "*.pyc" EXCLUDE
+                    PATTERN "__pycache__" EXCLUDE
                     PATTERN ".git" EXCLUDE)
             message(STATUS "PwbInstall: installing resource dir ${_rel}")
         else()

@@ -53,10 +53,13 @@
 
 #include <sys/stat.h>
 #include <sys/types.h>
+#if !defined(_WIN32)
 #include <utime.h>
 #include <fcntl.h>
+#endif
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -118,6 +121,20 @@ void ensure_init() {
             ? fs::path(fixture_dir)
             : fs::path(__FILE__).parent_path() / "fixtures";
     g_oracle = load_json(fixtures / "catalog_service" / "oracle.json");
+#if defined(_WIN32)
+    // mkdtemp is POSIX-only - same contract (unique created
+    // directory) through the std::filesystem temp root + unique suffix.
+    static unsigned seq = 0;
+    for (;;) {
+        const fs::path dir = fs::temp_directory_path() /
+            ("catalog-service-replay-" + std::to_string(seq++));
+        std::error_code ec;
+        if (fs::create_directory(dir, ec)) {
+            g_root = dir.string();
+            break;
+        }
+    }
+#else
     char pattern[] = "/tmp/catalog-service-replay-XXXXXX";
     char* made = mkdtemp(pattern);
     if (made == nullptr) {
@@ -125,6 +142,7 @@ void ensure_init() {
         std::exit(2);
     }
     g_root = made;
+#endif
 }
 
 std::string rooted(const std::string& text) {
@@ -208,10 +226,18 @@ std::string sha_bytes(const std::string& bytes) {
 }
 
 std::optional<std::int64_t> mtime_ns_of(const fs::path& path) {
+#if defined(_WIN32)
+    // st_mtim is POSIX-only — same policy as libs/catalog/src/posix_shim:
+    // second-granular mtime via _stat64 (no sub-second field exists).
+    struct _stat64 st {};
+    if (_wstat64(path.c_str(), &st) != 0) return std::nullopt;
+    return static_cast<std::int64_t>(st.st_mtime) * 1000000000LL;
+#else
     struct ::stat st {};
     if (::stat(path.c_str(), &st) != 0) return std::nullopt;
     return static_cast<std::int64_t>(st.st_mtim.tv_sec) * 1000000000LL +
            static_cast<std::int64_t>(st.st_mtim.tv_nsec);
+#endif
 }
 
 // ---- raw sqlite helpers (generator touch #3 equivalents) ------------------
@@ -2185,9 +2211,18 @@ PWB_CASE(manifest_ladder) {
                                      mtime_ns_of(bak) == bak_mtime_before;
         // External modification defeats the mtime guard → rewrite.
         const auto old = mtime_ns_of(manifest).value_or(0);
+#if defined(_WIN32)
+        // ::utime is POSIX-only; the same +10s "touch" through std::chrono
+        // -based last_write_time (mtime guard cares about CHANGE, and the
+        // _stat64 mtime is second-granular either way).
+        std::error_code ec;
+        std::filesystem::last_write_time(
+            manifest, fs::file_time_type::clock::now() + std::chrono::seconds(10), ec);
+#else
         struct ::utimbuf times{static_cast<time_t>(old / 1000000000LL + 10),
                                static_cast<time_t>(old / 1000000000LL + 10)};
         ::utime(manifest.c_str(), &times);
+#endif
         PWB_TEST_ASSERT(save_manifest(manifest, doc2, false, &state).code ==
                             domain::ErrorCode::Ok,
                         "save doc2 after touch");
@@ -3095,6 +3130,19 @@ PWB_CASE(working_copy_lifecycle) {
     // dirty_hint matrix: mtime drift flags, restore clears, committing
     // never flags.
     {
+#if defined(_WIN32)
+        // utimensat/utimbuf are POSIX-only; the Windows shim's st_mtime
+        // is second-granular, so the same +5s drift through last_write_time.
+        const bool mtime_drift = [&] {
+            const auto before = std::filesystem::last_write_time(wc_path);
+            std::error_code ec;
+            std::filesystem::last_write_time(
+                wc_path, before + std::chrono::seconds(5), ec);
+            const bool drifted = dirty_hint_of(wc_path);
+            std::filesystem::last_write_time(wc_path, before, ec);
+            return drifted;
+        }();
+#else
         const bool mtime_drift = [&] {
             struct ::stat st {};
             PWB_TEST_ASSERT(::stat(wc_path.c_str(), &st) == 0, "stat wc");
@@ -3109,6 +3157,7 @@ PWB_CASE(working_copy_lifecycle) {
             ::utimensat(AT_FDCWD, wc_path.c_str(), back_times, 0);
             return drifted;
         }();
+#endif
         const bool restored = !dirty_hint_of(wc_path);
         raw_exec(sqlite_of(p),
                  "UPDATE working_copies SET state = 'committing'");

@@ -1,8 +1,5 @@
 #include "pwb/interchange/atomic_file.hpp"
 
-#include <fcntl.h>
-#include <unistd.h>
-
 #include <cerrno>
 #include <mutex>
 #include <random>
@@ -12,6 +9,12 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace pwb::interchange {
@@ -93,13 +96,29 @@ AtomicOutputFile::AtomicOutputFile(const std::filesystem::path& target)
         if (!suffix.empty() && suffix[0] != '.') suffix = "." + suffix;
         const std::string candidate =
             (parent / (prefix + rand_chars + suffix)).string();
+#if defined(_WIN32)
+        // MSVC has no open()/O_EXCL; _wopen with _O_CREAT|_O_EXCL|_O_WRONLY
+        // gives the same create-or-fail reservation (mode 0600 → _S_IWRITE).
+        const int fd = _wopen(
+            std::filesystem::path(candidate).c_str(),
+            _O_CREAT | _O_EXCL | _O_WRONLY, _S_IWRITE);
+#else
         const int fd = ::open(candidate.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
+#endif
         if (fd >= 0) {
+#if defined(_WIN32)
+            _close(fd);
+#else
             ::close(fd);
+#endif
             temp_path_ = candidate;
             return;
         }
+#if defined(_WIN32)
         if (errno != EEXIST) {
+#else
+        if (errno != EEXIST) {
+#endif
             throw std::runtime_error("cannot create temp file beside " +
                                      target.string() + ": " + errno_message());
         }
