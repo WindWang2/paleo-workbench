@@ -78,14 +78,10 @@ endif()
 
 # BEGIN CLOSURE-SEISMIC (07) — product binding: ui_wellseis prediction page
 # <-> real seismic viewer + volume service + E-line attribute kernels.
-if(TARGET Pwb::SeismicViewer AND TARGET Pwb::SeismicService
-        AND TARGET Pwb::SeismicAttributes AND TARGET Pwb::UiWellseisQt)
-    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicService
-                                               Pwb::SeismicAttributes)
-    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_SEISMIC=1)
-    target_sources(pwb-platform PRIVATE closure_seismic_install.cpp)
-endif()
-# END CLOSURE-SEISMIC
+# NOTE: this gate is mounted POST-HOC from the root CMakeLists (after
+# libs/ui_wellseis exists — the apps/ directory is processed before that
+# mount, so an in-app if(TARGET Pwb::UiWellseisQt) can never fire here;
+# #1444, same ordering class #1442 fixed for the VIZ-B dock).
 
 # BEGIN CONV-01
 # Swarm task 01: the 地质因子图 action compiles into the app when the slice
@@ -101,22 +97,16 @@ endif()
 # stays with line 12; this block only ships the files + link closure.
 # The option is declared here (NOT in PwbFeatures.cmake) so line 01 never
 # touches the shared feature gate; 12 can hoist it verbatim later.
-option(PWB_BUILD_CATALOG_CLOSURE
-    "Line-01 catalog/project closure adapter inside pwb-platform" ON)
-if(PWB_BUILD_CATALOG_CLOSURE
-        AND TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore
-        AND TARGET Pwb::Catalog AND TARGET Pwb::Project)
-    target_sources(pwb-platform PRIVATE
-        closure_catalog_service.cpp
-        closure_catalog_install.cpp)
-    target_link_libraries(pwb-platform PRIVATE
-        Pwb::UiControllers Pwb::UiDataCore Pwb::Catalog Pwb::Project)
-    # ICatalogApi is a Qt-free header; the seam is consumed via the include
-    # path only (no link dep on the Qt-side ui_review library).
-    target_include_directories(pwb-platform PRIVATE
-        ${CMAKE_SOURCE_DIR}/libs/ui_review/include)
-    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CATALOG_CLOSURE=1)
-endif()
+# cpp-close-01's app-side gate was removed (#1444): Pwb::UiControllers is
+# created after apps/ is processed, so the TARGET gate below could never
+# fire — closure_catalog_{service,install}.cpp never joined pwb-platform
+# and PWB_WITH_CATALOG_CLOSURE was never defined (nor referenced
+# anywhere). The adapter itself remains covered by
+# tests/cpp/data/catalog_closure_test.cpp, which compiles the TUs
+# directly. The production composition-root call
+# (InstalledCatalogClosure::install from the project-open path) is the
+# still-open line-12 wiring task — see
+# docs/development/cpp-final-postmerge-audit/08-known-limitations.md.
 # END cpp-close-01
 # BEGIN PWB-V14-DATA-LINEAGE (P4 product wiring)
 # closure_data_workspace — nav-tree population from the live project
@@ -280,11 +270,9 @@ endif()
 # BEGIN 05 — viz_b real LAS path: joins the dock when the VIZ-A WLE load
 # bridge participates in this configure. Without it the dock keeps the
 # honest "LAS 解析内核未接入" path (fail-closed, never a fake load).
-if(TARGET Pwb::UiWorkersWleLoad AND TARGET Pwb::IngestLasWle)
-    target_sources(pwb-platform PRIVATE viz_b_well_source.cpp)
-    target_link_libraries(pwb-platform PRIVATE Pwb::UiWorkersWleLoad)
-    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_B_LAS=1)
-endif()
+# NOTE: mounted POST-HOC from the root CMakeLists after libs/ui_workers —
+# Pwb::UiWorkersWleLoad only exists once that slice is in, and apps/ is
+# processed before it (#1444).
 # END 05
 
 # BEGIN CONV-GEO3D

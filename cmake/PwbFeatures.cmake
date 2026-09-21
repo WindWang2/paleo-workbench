@@ -144,7 +144,11 @@ pwb_declare_feature(PWB_BUILD_CONV_12
 pwb_declare_feature(PWB_BUILD_CONV_13
     "CONV-13 tiled ONNX inference geometry" OFF)
 pwb_declare_feature(PWB_BUILD_CONV_14
-    "CONV-14 interchange path-safety/manifest/preflight kernel" OFF)
+    "CONV-14 interchange path-safety/manifest/preflight kernel" OFF
+    # libs/interchange's exporters hard-require the ingest readers and the
+    # SEGY inspector (#1444) — keep the resolver's view in sync with the
+    # build's actual requirements.
+    IMPLIES PWB_BUILD_CONV_19;PWB_BUILD_SEISMIC_IO)
 pwb_declare_feature(PWB_BUILD_CONV_16
     "CONV-16 factor statistics HUD cluster" OFF
     REQUIRES PWB_BUILD_MAPPING_KERNEL)

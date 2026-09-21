@@ -23,6 +23,8 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QVBoxLayout>
+
+class QComboBox;
 #include <QWidget>
 
 namespace pwb::ui_controllers {
@@ -203,7 +205,7 @@ private:
     void on_depth_cursor_from(LinkedWellPanel* panel, double depth);
     void apply_well_overlay(const std::string& well_name);
     void on_orientation_changed_for(LinkedSeismicPanel* panel,
-                                    class QComboBox* combo, int index);
+                                    ::QComboBox* combo, int index);
     void install_profile_orientation_selector(
         DocumentPane* pane, LinkedSeismicPanel* panel);
 
