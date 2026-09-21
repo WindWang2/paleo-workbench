@@ -9,6 +9,9 @@
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
 #include <pwb/seismic_attributes/attributes.hpp>
 #endif
+#ifdef PWB_WITH_PROVIDERS
+#include <pwb/providers/service.hpp>
+#endif
 
 namespace pwb::app {
 
@@ -20,11 +23,17 @@ struct AppContext::Impl {
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     std::unique_ptr<pwb::application::AlgorithmRunner> attribute_runner;
 #endif
+#ifdef PWB_WITH_PROVIDERS
+    std::unique_ptr<pwb::providers::ProviderService> provider_service;
+#endif
     bool closed = false;
 };
 
 AppContext::AppContext() : impl_(std::make_unique<Impl>()) {
     impl_->session = std::make_unique<pwb::application::ProjectSession>();
+#ifdef PWB_WITH_PROVIDERS
+    impl_->provider_service = std::make_unique<pwb::providers::ProviderService>();
+#endif
     registerProductKernels();
     diagnostics::info(diagnostics::LogArea::Startup,
                       QStringLiteral("app context started"));
@@ -156,6 +165,23 @@ QVector<AppContext::RuntimeCapability> AppContext::capabilities() const {
                                        : QStringLiteral("idle"));
 #else
             cap.detail = QStringLiteral("module-only build");
+#endif
+        } else if (cap.id == QLatin1String("provider_runtime")) {
+#ifdef PWB_WITH_PROVIDERS
+            if (impl_->provider_service != nullptr) {
+                const auto report = impl_->provider_service->capability_report();
+                cap.runtime_ok = !report.empty();
+                cap.detail = cap.runtime_ok
+                    ? QStringLiteral("%1 providers registered")
+                          .arg(QString::number(report.size()))
+                    : QStringLiteral("no native providers registered");
+            } else {
+                cap.runtime_ok = false;
+                cap.detail = QStringLiteral("provider service is not available");
+            }
+#else
+            cap.runtime_ok = false;
+            cap.detail = QStringLiteral("provider service is not linked");
 #endif
         }
         result.append(cap);
