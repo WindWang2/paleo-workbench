@@ -25,7 +25,7 @@
 inline int pwb_test_pid() { return _getpid(); }
 #else
 #include <unistd.h>
-inline int pwb_test_pid() { return static_cast<int>(pwb_test_pid()); }
+inline int pwb_test_pid() { return static_cast<int>(::getpid()); }
 #endif
 
 using namespace pwb;

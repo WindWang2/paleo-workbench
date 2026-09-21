@@ -169,12 +169,13 @@ void VizEDataPage::bind_selection_bus(updqt::AssetSelectionBus* bus) {
                 }
                 // Deletion / project switch: the stale preview must go —
                 // the honest empty state, never a ghost asset's payload
-                // (Python preview(None) parity).
+                // (Python preview(None) parity). No preview_rendered: the
+                // signal means a real preview landed (deliver_base_preview
+                // suppresses empty/message the same way).
                 updqt::PreviewResultView empty;
                 empty.mode = "empty";
                 active_target_ = QStringLiteral("empty");
                 workspace_->reader_panel()->render(empty);
-                Q_EMIT preview_rendered(active_target_);
             });
 }
 
@@ -305,7 +306,11 @@ void VizEDataPage::present_base_preview(
     pwb::job::JobSpec spec;
     spec.kind = "preview.registry_base";
     spec.title = pwb::ui_pages_data::loading_title(row.view.name);
-    spec.task_key = "preview.registry_base";
+    // A superseded job can still be running/cancelling when the next
+    // selection submits; the scheduler throws duplicate.task_key for a
+    // still-active key. Scoping the key to the generation keeps dedupe
+    // per selection instead of colliding with the outgoing job's shutdown.
+    spec.task_key = "preview.registry_base.g" + std::to_string(generation);
     spec.run = [row, fn = base_builder_](
                    pwb::job::JobContext& ctx) -> std::any {
         BasePreviewOutcome outcome;
@@ -496,7 +501,9 @@ void VizEDataPage::present_horizon(const QString& path,
     pwb::job::JobSpec spec;
     spec.kind = "compute.viz_e.surface_preview";
     spec.title = "曲面预览插值";
-    spec.task_key = "viz_e.surface_preview";
+    // Same duplicate.task_key hazard as the base preview: a still-running
+    // predecessor must not make the next selection throw.
+    spec.task_key = "viz_e.surface_preview.g" + std::to_string(generation);
     spec.run = [request](pwb::job::JobContext& ctx) -> std::any {
         return compute_factor_preview(request, ctx);
     };

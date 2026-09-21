@@ -54,6 +54,10 @@
 #include "app_shell.hpp"
 #include "job_center.hpp"
 
+#ifdef PWB_WITH_CONV_16
+#include "factor_stats_dock.hpp"
+#endif
+
 #ifdef PWB_WITH_CLOSURE_MAPPING
 #include "closure_mapping_document.hpp"
 #include "closure_mapping_install.hpp"

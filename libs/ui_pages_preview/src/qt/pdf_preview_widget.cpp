@@ -54,7 +54,6 @@ PdfPreviewWidget::PdfPreviewWidget(QWidget* parent)
     if (pdf_view_ != nullptr) {
         pdf_view_->setDocument(document_);
         content_stack_->addWidget(pdf_view_);
-#endif
     }
 #endif
 #if defined(PWB_UI_PAGES_PREVIEW_HAVE_PDF)
@@ -299,9 +298,6 @@ bool PdfPreviewWidget::eventFilter(QObject* obj, QEvent* event) {
     }
 #endif
     return QWidget::eventFilter(obj, event);
-#else
-    return QWidget::eventFilter(obj, event);
-#endif
 }
 
 void PdfPreviewWidget::apply_settings(const PreviewSettings& settings) {

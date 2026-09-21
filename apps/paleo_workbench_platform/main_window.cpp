@@ -66,6 +66,10 @@
 #include "factor_stats_dock.hpp"
 #endif
 
+#ifdef PWB_WITH_STAGE_FLOW
+#include <pwb/ui_stageflow/qt/stage_flow_controller.hpp>
+#endif
+
 #ifdef PWB_WITH_CONV_27
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
@@ -1449,10 +1453,12 @@ QString MainWindow::openProject(const QString& project_file) {
         ++opened;
     }
 // BEGIN V14-QGIS-CONTROL
+#ifdef PWB_WITH_CONV_27
     // Desired-tree reconcile + stage-view restore over the opened
     // project's live workspace state (QGIS stays the runtime authority;
     // the domain state is the persistence/semantics authority).
     applyLayerControlForOpen();
+#endif
 // END V14-QGIS-CONTROL
     refreshActionStates();
     QString summary = tr("工程已打开：%1 个绑定图层（%2 跳过）")
@@ -3550,6 +3556,7 @@ void MainWindow::resetLayoutState() {
 #endif
 
 // BEGIN V14-QGIS-CONTROL
+#ifdef PWB_WITH_CONV_27
 // Native layer control plane glue — see docs/development/
 // qgis-v14-layer-control/02-architecture.md §D. The live workspace state
 // is the single domain authority (loaded from the project document's
@@ -3697,6 +3704,7 @@ void MainWindow::syncLayerControlOnSave() {
     pwb::workspace::write_mapping_workspace(store->document().root(),
                                             *layer_workspace_);
 }
+#endif
 // END V14-QGIS-CONTROL
 
 }  // namespace pwb::app

@@ -1166,6 +1166,22 @@ if(PWB_BUILD_VIZ_B)
     add_subdirectory(libs/visualization/src/well_tie)
     add_subdirectory(libs/visualization/src/cross_well)
 endif()
+
+# VIZ-B app-side dock wiring lives HERE (root, after the viz cores) — the
+# apps/paleo_workbench_platform subdirectory is processed before the
+# cross_well/well_tie/ui_workers/ui_wellseis slices exist, so a TARGET-gated
+# block inside it could never fire. Same post-slices pattern as UI-17 below.
+if(TARGET pwb-platform
+   AND TARGET Pwb::VisualizationCrossWellQt
+   AND TARGET Pwb::VisualizationWellTieQt
+   AND TARGET Pwb::UiWorkers AND TARGET Pwb::UiWellseisQt)
+    target_sources(pwb-platform PRIVATE
+        apps/paleo_workbench_platform/viz_b_cross_well_dock.cpp)
+    target_link_libraries(pwb-platform PRIVATE
+        Pwb::VisualizationCrossWellQt Pwb::VisualizationWellTieQt
+        Pwb::UiWorkers Pwb::UiWellseisQt)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_B=1)
+endif()
 # END VIZ-B
 
 # BEGIN UI-17 — W5 application-shell wiring
@@ -1219,6 +1235,15 @@ if(TARGET pwb-platform
         target_compile_definitions(platform_app_shell PRIVATE
             PWB_WITH_APP_SHELL=1
             PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+        # Pwb::Application exports PWB_WITH_DATA_INTEGRATION PUBLIC once the
+        # B/C closure exists; main_window.cpp then references the
+        # shell_project_actions symbols (same gate as
+        # platform_three_stage_flow below).
+        if(TARGET Pwb::Data AND TARGET Pwb::Science
+           AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
+            target_sources(platform_app_shell PRIVATE
+                apps/paleo_workbench_platform/shell_project_actions.cpp)
+        endif()
         add_test(NAME platform.app_shell COMMAND platform_app_shell)
         set_tests_properties(platform.app_shell PROPERTIES
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
@@ -1815,6 +1840,14 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
                 PWB_WITH_APP_SHELL=1 PWB_WITH_VIZ_E=1 PWB_WITH_CONV_30=1
                 PWB_WITH_CLOSURE_PREVIEW=1
                 PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+            # main_window.cpp references shell_project_actions symbols once
+            # PWB_WITH_DATA_INTEGRATION propagates from Pwb::Application
+            # (same gate as platform_three_stage_flow above).
+            if(TARGET Pwb::Data AND TARGET Pwb::Science
+               AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
+                target_sources(platform_closure_preview PRIVATE
+                    apps/paleo_workbench_platform/shell_project_actions.cpp)
+            endif()
             add_test(NAME platform.closure_preview
                      COMMAND platform_closure_preview)
             set_tests_properties(platform.closure_preview PROPERTIES

@@ -246,7 +246,9 @@ int main(int argc, char** argv) {
             registry, "integration-build");
     PWB_CHECK_MSG(registration.rejection.empty(),
                   "registration rejected: " + registration.rejection);
-    PWB_CHECK(registration.registered_ids.size() == 4);
+    // envelope/phase/frequency/rms + the S-line volume kernels — the
+    // registration contract is "size 10 on success" (attributes.hpp).
+    PWB_CHECK(registration.registered_ids.size() == 10);
     for (const std::string& id : registration.registered_ids) {
         PWB_CHECK(registry.find(id) != nullptr);
     }

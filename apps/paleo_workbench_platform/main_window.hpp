@@ -45,6 +45,7 @@
 #include <pwb/ui_composite/layer_presentation.hpp>
 #include <pwb/ui_composite/layer_stage_controller.hpp>
 #include <pwb/ui_composite/layer_targets.hpp>
+#include <pwb/workspace/mutations.hpp>
 #include <pwb/workspace/state.hpp>
 #include <pwb/workspace/state_ops.hpp>
 // END V14-QGIS-CONTROL
@@ -127,9 +128,7 @@ class FactorStatsDock;
 
 // BEGIN VIZ-B
 #ifdef PWB_WITH_VIZ_B
-namespace pwb::app {
 class VizBCrossWellDock;
-}  // namespace pwb::app
 #endif
 // END VIZ-B
 
@@ -543,6 +542,7 @@ private:
     std::map<std::string, pwb::application::DomainLayerFacts> facts_;
 
     // BEGIN V14-QGIS-CONTROL
+#ifdef PWB_WITH_CONV_27
 public:
     // Persist the live layer-control workspace state into the project
     // document's mapping_workspace section (called by the save path
@@ -565,6 +565,7 @@ private:
     // Last composition snapshots (drives the save-time re-reconcile that
     // persists adopted user tree edits).
     std::vector<pwb::ui_composite::LayerSnapshotInput> layer_snapshots_;
+#endif
     // END V14-QGIS-CONTROL
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;

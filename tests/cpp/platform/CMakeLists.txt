@@ -171,6 +171,15 @@ if(TARGET Pwb::SeismicAttributes AND TARGET Pwb::Data
     target_compile_definitions(platform_app_context PRIVATE
         PWB_WITH_SEISMIC_ATTRIBUTES=1)
 endif()
+# CONV-PROVIDERS: the generated capability table reports provider_runtime
+# hard/in_closure once Pwb::Providers exists, so this battery needs the
+# same PWB_WITH_PROVIDERS wiring the app gets or the runtime probe and the
+# service audit both fail.
+if(TARGET Pwb::Providers)
+    target_link_libraries(platform_app_context PRIVATE Pwb::Providers)
+    target_compile_definitions(platform_app_context PRIVATE
+        PWB_WITH_PROVIDERS=1)
+endif()
 
 # UI wiring test compiles the real MainWindow (moc included) next to the app.
 add_executable(platform_ui_wiring test_ui_wiring.cpp
@@ -432,7 +441,8 @@ add_executable(platform_ui_closure test_ui_closure.cpp
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
         ${CMAKE_BINARY_DIR}/generated)
     target_link_libraries(platform_ui_closure PRIVATE
-        Pwb::UiWorkbench Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy)
+        Pwb::UiWorkbench Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+        Pwb::PlatformServices)
     target_compile_definitions(platform_ui_closure PRIVATE
         PWB_TEST_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         PWB_WITH_CONV_27=1)

@@ -243,6 +243,7 @@
       "is_primary": true,
       "metadata": {},
       "note": "",
+      "ordinal": 0,
       "role": "seismic_volume",
       "unresolved": false
     },
@@ -255,6 +256,7 @@
       "is_primary": true,
       "metadata": {},
       "note": "",
+      "ordinal": 0,
       "role": "well_log",
       "unresolved": false
     },
@@ -267,6 +269,7 @@
       "is_primary": false,
       "metadata": {},
       "note": "",
+      "ordinal": 0,
       "role": "well_log",
       "unresolved": false
     },
@@ -279,6 +282,7 @@
       "is_primary": true,
       "metadata": {},
       "note": "",
+      "ordinal": 0,
       "role": "trajectory",
       "unresolved": false
     },
@@ -291,6 +295,7 @@
       "is_primary": true,
       "metadata": {},
       "note": "",
+      "ordinal": 0,
       "role": "tops",
       "unresolved": false
     }

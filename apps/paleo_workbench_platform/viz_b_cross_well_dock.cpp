@@ -45,6 +45,11 @@
 #include <fstream>
 #include <utility>
 
+#if PWB_WITH_FACTOR_KERNEL
+#include "factor_prepare_production.hpp"
+#include <pwb/application/adapters/data_store.hpp>
+#endif
+
 namespace pwb::app {
 
 using pwb::domain::Json;
@@ -54,11 +59,6 @@ using pwb::viz::cross_well::WellCoord;
 using pwb::viz::cross_well::WellCurve;
 using pwb::viz::well_tie::qt::WellTieReportInputs;
 using pwb::viz::well_tie::qt::export_well_tie_report;
-
-#if PWB_WITH_FACTOR_KERNEL
-#include "factor_prepare_production.hpp"
-#include <pwb/application/adapters/data_store.hpp>
-#endif
 
 namespace {
 
