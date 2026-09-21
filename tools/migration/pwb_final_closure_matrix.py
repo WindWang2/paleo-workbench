@@ -72,8 +72,19 @@ def python_modules(repo_root: Path) -> list[str]:
     )
 
 
-def target_name(unit: dict[str, Any]) -> str:
-    return unit.get("alias") or unit.get("target") or ""
+def target_names(unit: dict[str, Any]) -> list[str]:
+    """All native target identities of a unit: every Pwb:: alias plus every
+    bare add_library name (#1448: a single unit may expose several aliases and
+    wiring may go through any of them)."""
+    names: list[str] = []
+    for key in ("aliases", "targets", "alias", "target"):
+        value = unit.get(key)
+        if isinstance(value, str):
+            value = [value]
+        for name in value or []:
+            if name and name not in names:
+                names.append(name)
+    return names
 
 
 def classify(units: list[dict[str, Any]]) -> str:
@@ -101,8 +112,12 @@ def build_matrix(repo_root: Path) -> dict[str, Any]:
     for source in python_modules(repo_root):
         units = sorted(units_by_origin.get(source, []), key=lambda unit: unit["unit"])
         classification = classify(units)
-        targets = sorted({target_name(unit) for unit in units if target_name(unit)})
+        targets = sorted({name for unit in units for name in target_names(unit)})
         wired_units = [unit for unit in units if unit["wired"]]
+        # TU-level product consumer evidence (#1448 A-2): linked alone is not
+        # product wiring; a product TU must actually include the unit's public
+        # headers for runtime_reachable to hold.
+        tu_reachable_units = [unit for unit in units if unit.get("tu_reachable")]
         tests = sorted({test for unit in units for test in unit["tests"]})
         fixtures = sorted({fixture for unit in units for fixture in unit["fixtures"]})
         wiring_evidence = sorted(
@@ -110,7 +125,9 @@ def build_matrix(repo_root: Path) -> dict[str, Any]:
         )
 
         target_exists = bool(targets)
-        product_wired = classification == "NATIVE_PRODUCT" and bool(wired_units)
+        product_wired = classification == "NATIVE_PRODUCT" and bool(
+            tu_reachable_units
+        )
         target_built = False
         runtime_reachable = product_wired
         oracle_covered = bool(fixtures)
@@ -124,6 +141,13 @@ def build_matrix(repo_root: Path) -> dict[str, Any]:
             )
             evidence.extend(wiring_evidence[:4])
             evidence.extend(fixtures[:2])
+            if tu_reachable_units:
+                sample_consumers = sorted(
+                    {c for unit in tu_reachable_units for c in unit.get("tu_consumers", [])}
+                )[:4]
+                evidence.append(
+                    "TU consumers: " + (", ".join(sample_consumers) or "—")
+                )
         else:
             evidence.append(
                 "No native origin attribution in the generated libs/* inventory"
@@ -172,14 +196,18 @@ def build_matrix(repo_root: Path) -> dict[str, Any]:
 
     counts = Counter(row["final_classification"] for row in rows)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": "all tracked paleo_workbench/**/*.py modules",
         "policy": {
             "classification_vocabulary": list(CLASSIFICATIONS),
             "native_product_rule": (
                 "Every attributed native unit for the Python module must be "
-                "classified native_complete_wired. A partial or unwired "
-                "attribution wins over a wired attribution."
+                "classified native_complete_wired, which since schema 2 "
+                "requires TU-level consumer evidence: the unit must be linked "
+                "into the pwb-platform closure through an unconditional path "
+                "AND at least one product translation unit must include its "
+                "public headers. A partial or unwired attribution wins over a "
+                "wired attribution."
             ),
             "build_evidence_rule": (
                 "The committed matrix does not infer a successful build or "

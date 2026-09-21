@@ -58,6 +58,16 @@ public:
     pwb::app::viz_c::VizCJointHost* joint_host();
 #endif
 
+    // ---- project persistence (the cross_well_workspace.json pattern) ------
+    // The controller's seven-key Geo3DWorkspaceState payload (objects/
+    // measurements/display/clip/camera/views/selected) stored as a sidecar
+    // in the project directory. restore_project_workspace() after a
+    // project open (missing sidecar = fresh workspace, same as VIZ-B);
+    // persist_project_workspace() on project close / window close.
+    void set_project_directory(const QString& directory);
+    void restore_project_workspace();
+    void persist_project_workspace();
+
 signals:
     // 2D map synchronization seam (selected well name).
     void well_selected(const QString& well_name);
@@ -79,6 +89,7 @@ private:
     QSlider* clip_slider_[3] = {nullptr, nullptr, nullptr};
     QCheckBox* clip_invert_[3] = {nullptr, nullptr, nullptr};
     QComboBox* measure_combo_ = nullptr;
+    QString project_directory_;
 #ifdef PWB_WITH_UI_WELLSEIS
     std::unique_ptr<pwb::app::viz_c::VizCJointHost> joint_host_;
 #endif

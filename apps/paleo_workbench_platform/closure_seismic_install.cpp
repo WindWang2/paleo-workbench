@@ -41,13 +41,18 @@ using Viewer = pwb::seismic_viewer::SeismicSliceWidget;
 constexpr const char* kRgbFusionLabel = "RGB融合";
 
 // The single-trace (E line) kernels computable on a 2-D section: each trace
-// is an independent 1-D chain. Structural kernels (sweetness, relative
-// impedance, dips, azimuth, curvature, C3) need cross-trace neighborhoods
-// and are declined on sections — an honest capability boundary, not a stub.
+// is an independent 1-D chain — envelope/rms/phase/freq PLUS sweetness and
+// relative impedance (round-1 review: those two are also per-trace chains
+// in the Python panel, attribute_pipeline kind="trace"; refusing them with
+// the "needs 3-D neighborhood" text was wrong). The genuinely structural
+// kernels (dips, azimuth, curvature, C3) need cross-trace neighborhoods
+// and are declined on sections — an honest capability boundary, not a
+// stub; they stay reachable through the volume-level 计算属性 dialog.
 bool is_section_kernel(const std::string& kernel_id) {
     return kernel_id == "envelope" || kernel_id == "rms_amplitude" ||
            kernel_id == "instantaneous_phase" ||
-           kernel_id == "instantaneous_frequency";
+           kernel_id == "instantaneous_frequency" ||
+           kernel_id == "sweetness" || kernel_id == "relative_impedance";
 }
 
 // Deterministic section-attribute run: wrap the canonical plane
@@ -217,6 +222,17 @@ struct SeismicPageBinding::Impl {
             note_unavailable("未知属性：" + label);
             return;
         }
+        // 振幅 leaf: restore the raw amplitude display. This is the user
+        // reachability path for clear_attribute_view() — without it the
+        // export refusal ("请先清除属性视图") pointed at an action no menu
+        // or panel entry ever exposed.
+        if (kernel == "amplitude") {
+            if (widget->attribute_active()) {
+                widget->clear_attribute_view();
+            }
+            note_unavailable("");
+            return;
+        }
 
         // Sample interval for the kernels (seconds). Depth volumes decline
         // the one time-based kernel instead of producing nonsense units.
@@ -226,8 +242,13 @@ struct SeismicPageBinding::Impl {
             sample_interval_s = std::abs(geometry.step[2]) / 1000.0;
         } else if (geometry.unit == "s") {
             sample_interval_s = std::abs(geometry.step[2]);
-        } else if (kernel == "instantaneous_frequency") {
-            note_unavailable("瞬时频率需要时间轴数据体（ms/s），当前体为深度域");
+        } else if (kernel == "instantaneous_frequency" ||
+                   kernel == "sweetness") {
+            // sweetness = envelope / sqrt(instantaneous frequency): the
+            // frequency chain needs a time axis exactly like the freq
+            // kernel (round-2 review — it silently produced wrong-unit
+            // values on depth volumes before this gate).
+            note_unavailable("该属性需要时间轴数据体（ms/s），当前体为深度域");
             return;
         }
 
@@ -265,7 +286,8 @@ struct SeismicPageBinding::Impl {
         }
 
         if (!is_section_kernel(kernel)) {
-            note_unavailable("该属性需三维邻域计算，2D 剖面暂不支持：" + label);
+            note_unavailable("该属性需三维邻域计算，2D 剖面暂不支持，请使用"
+                             "「计算属性」进行体级计算：" + label);
             return;
         }
         std::vector<float> attribute;

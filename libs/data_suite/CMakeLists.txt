@@ -23,10 +23,19 @@ option(PWB_BUILD_TOOLS "Build pwb-inspect / pwb-migrate" ON)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../domain
-                 ${CMAKE_CURRENT_BINARY_DIR}/domain)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../project
-                 ${CMAKE_CURRENT_BINARY_DIR}/project)
+# Target guards: when data_suite is reached from the root build (e.g.
+# PWB_BUILD_NATIVE_PRODUCT + PWB_BUILD_CONV_22 both pull the data kernels)
+# domain/project may already be defined by an earlier once-guarded add —
+# skip our own instead of colliding on CMP0002 (same idiom as
+# geo3d_viz/seismic_io/seismic_viewer).
+if(NOT TARGET Pwb::Domain)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../domain
+                     ${CMAKE_CURRENT_BINARY_DIR}/domain)
+endif()
+if(NOT TARGET Pwb::Project)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../project
+                     ${CMAKE_CURRENT_BINARY_DIR}/project)
+endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../workspace
                  ${CMAKE_CURRENT_BINARY_DIR}/workspace)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../catalog

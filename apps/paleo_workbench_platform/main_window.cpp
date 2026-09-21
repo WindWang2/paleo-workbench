@@ -81,6 +81,7 @@
 #include "geo3d_dock.hpp"
 #include "closure_joint3d_install.hpp"
 #ifdef PWB_WITH_UI_WELLSEIS
+#include "joint_analysis_install.hpp"
 #include "viz_c_joint_host.hpp"
 #endif
 #endif
@@ -667,6 +668,28 @@ void MainWindow::buildUi() {
     // END CLOSURE-PREVIEW
 #endif
     // END VIZ-E
+// BEGIN JOINT-ANALYSIS (geoviz final closure) — the 井震联合 3D page's
+// analysis hooks (stratal demo/.dat, RGB fusion overlay, crossplot,
+// FLAC3D/Abaqus export, advisor, joint-analysis sidecar persistence).
+// Every kernel already existed natively; this is the product wiring the
+// empty-hook fallbacks ("未接入") were waiting for.
+#ifdef PWB_WITH_JOINT_ANALYSIS
+    if (geo3d_dock_ != nullptr && app_shell_ != nullptr &&
+        app_shell_->geomodel_page() != nullptr && job_center_ != nullptr) {
+        pwb::app::joint_analysis::JointAnalysisInstall joint_deps;
+        joint_deps.page = app_shell_->geomodel_page();
+        joint_deps.host = geo3d_dock_->joint_host();
+        joint_deps.scene_objects =
+            &geo3d_dock_->viewport()->scene_manager();
+        joint_deps.jobs = job_center_.get();
+        joint_deps.dialog_parent = this;
+        joint_deps.project_directory = [this] {
+            return joint_project_directory_;
+        };
+        pwb::app::joint_analysis::install(joint_deps);
+    }
+#endif
+// END JOINT-ANALYSIS
 
     // Tools are canvas-parented; MapSession teardown unsets them first.
     pan_tool_ = new QgsMapToolPan(canvas_);
@@ -1519,6 +1542,26 @@ QString MainWindow::openProject(const QString& project_file) {
     }
 #endif
 // END VIZ-B
+// BEGIN JOINT-ANALYSIS flush/restore (same sidecar discipline as VIZ-B:
+// flush the OLD project before rebinding directories — including the
+// joint host's own QSettings scene state so click-added fences survive a
+// window close, which previously only flushed on volume load/switch).
+#if defined(PWB_WITH_GEO3D_VIZ)
+    if (geo3d_dock_ != nullptr) {
+        geo3d_dock_->persist_project_workspace();
+#ifdef PWB_WITH_UI_WELLSEIS
+        if (geo3d_dock_->joint_host() != nullptr) {
+            geo3d_dock_->joint_host()->save_state();
+        }
+#endif
+    }
+#endif
+#ifdef PWB_WITH_JOINT_ANALYSIS
+    if (app_shell_ != nullptr && app_shell_->geomodel_page() != nullptr) {
+        app_shell_->geomodel_page()->save_joint_analysis_to_project();
+    }
+#endif
+// END JOINT-ANALYSIS flush
 // BEGIN CLOSURE-PREVIEW (task 04) — the data page re-reads the catalog
 // from the CURRENT store (rows replaced, selection cleared on switch).
 #if defined(PWB_WITH_CLOSURE_PREVIEW)
@@ -1546,6 +1589,29 @@ QString MainWindow::openProject(const QString& project_file) {
     }
 #endif
 // END CLOSURE-JOINT3D
+// BEGIN JOINT-ANALYSIS restore — geo3d seven-key workspace sidecar +
+// joint-analysis state sidecar for the NEW project.
+#if defined(PWB_WITH_GEO3D_VIZ)
+    if (geo3d_dock_ != nullptr) {
+        geo3d_dock_->set_project_directory(
+            QString::fromStdString(project_dir.string()));
+        geo3d_dock_->restore_project_workspace();
+    }
+#endif
+#ifdef PWB_WITH_JOINT_ANALYSIS
+    if (app_shell_ != nullptr && app_shell_->geomodel_page() != nullptr) {
+        joint_project_directory_ =
+            QString::fromStdString(project_dir.string());
+        auto* joint_page = app_shell_->geomodel_page();
+        joint_page->set_project_path(joint_project_directory_);
+        joint_project_slice_ = pwb::ui_wellseis::ProjectSlice{};
+        joint_project_slice_.project_root = project_dir.string();
+        joint_page->set_project(
+            &joint_project_slice_,
+            pwb::app::joint_analysis::load_stored(joint_project_directory_));
+    }
+#endif
+// END JOINT-ANALYSIS restore
 // BEGIN CLOSURE-REVIEW — the review page re-binds to the live document
 // (project_bound + reports/documents/artifacts refresh). Placed on the
 // SUCCESS tail only: every earlier failure return leaves the page in its
@@ -2357,6 +2423,23 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
 #endif
 // END VIZ-B
+// BEGIN JOINT-ANALYSIS close flush (same cancel-gate discipline).
+#if defined(PWB_WITH_GEO3D_VIZ)
+    if (geo3d_dock_ != nullptr) {
+        geo3d_dock_->persist_project_workspace();
+#ifdef PWB_WITH_UI_WELLSEIS
+        if (geo3d_dock_->joint_host() != nullptr) {
+            geo3d_dock_->joint_host()->save_state();
+        }
+#endif
+    }
+#endif
+#ifdef PWB_WITH_JOINT_ANALYSIS
+    if (app_shell_ != nullptr && app_shell_->geomodel_page() != nullptr) {
+        app_shell_->geomodel_page()->save_joint_analysis_to_project();
+    }
+#endif
+// END JOINT-ANALYSIS close flush
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — window close while a task runs: bounded cancel+wait for
     // every owned job (AppShell.shutdown_workers parity); a job that

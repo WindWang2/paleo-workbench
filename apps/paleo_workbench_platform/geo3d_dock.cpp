@@ -1,5 +1,7 @@
 #include "geo3d_dock.hpp"
 
+#include <pwb/domain/json.hpp>
+
 #ifdef PWB_WITH_UI_WELLSEIS
 #include <QMainWindow>
 #include <QMetaType>
@@ -12,6 +14,8 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
+#include <QSaveFile>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -250,3 +254,70 @@ pwb::app::viz_c::VizCJointHost* Geo3DDock::joint_host() {
     return joint_host_.get();
 }
 #endif
+
+// ---- project persistence (cross_well_workspace.json pattern) ----------------
+
+void Geo3DDock::set_project_directory(const QString& directory) {
+    project_directory_ = directory;
+}
+
+void Geo3DDock::restore_project_workspace() {
+    if (controller_ == nullptr) {
+        return;
+    }
+    if (project_directory_.isEmpty()) {
+        return;
+    }
+    const QString path =
+        project_directory_ + QStringLiteral("/geo3d_workspace.json");
+    QFile file(path);
+    if (!file.exists()) {
+        // New project without a sidecar: fresh workspace — never inherit
+        // the previous project's objects across a switch.
+        controller_->reset();
+        show_status(tr("新工程无三维工作区，已重置"));
+        return;
+    }
+    if (!file.open(QIODevice::ReadOnly)) {
+        // Unreadable sidecar (permissions/lock): same isolation as the
+        // corrupt case — reset, never inherit the previous project's
+        // objects (round-1 review P2).
+        controller_->reset();
+        refresh_objects();
+        show_status(tr("三维工作区不可读，已重置"));
+        return;
+    }
+    try {
+        const auto restored = controller_->restore_state(
+            pwb::domain::Json::parse(file.readAll().toStdString()));
+        refresh_objects();
+        show_status(restored.empty()
+                        ? tr("已恢复三维工作区")
+                        : tr("已恢复三维工作区（%1 项降级）").arg(
+                              restored.size()));
+    } catch (const std::exception&) {
+        // Corrupt but readable: same isolation as missing/unreadable —
+        // reset, never keep the previous project's objects (the round-2
+        // review caught this half of the isolation doing nothing).
+        controller_->reset();
+        refresh_objects();
+        show_status(tr("三维工作区损坏，已重置"));
+    }
+}
+
+void Geo3DDock::persist_project_workspace() {
+    if (controller_ == nullptr || project_directory_.isEmpty()) {
+        return;
+    }
+    const QString path =
+        project_directory_ + QStringLiteral("/geo3d_workspace.json");
+    // QSaveFile: atomic temp+rename — a crash mid-write never leaves a
+    // truncated sidecar behind.
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        return;
+    }
+    file.write(QByteArray::fromStdString(
+        controller_->save_state().dump(2)));
+    file.commit();
+}

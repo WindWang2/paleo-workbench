@@ -122,6 +122,37 @@ TEST(display_mode_switching_and_wiggle_geometry) {
     PWB_CHECK(widget.display_mode() == DisplayMode::variable_density);
 }
 
+TEST(wiggle_switch_abandons_pinned_attribute) {
+    // Regression (geoviz final closure): the wiggle renderer never
+    // composites the attribute image, so a pinned attribute that stayed
+    // "active" while invisible refused npy/csv export and kept the
+    // colorbar pinned. Switching to wiggle must abandon the pin.
+    SeismicSliceWidget widget;
+    widget.resize(640, 480);
+    widget.show();
+    widget.set_volume(pattern_volume({12, 9, 40}, 11),
+                      VolumeIdentity{"viz-d", 1}, 3);
+    PWB_CHECK(wait_gui([&] { return widget.state() == ViewerState::ok; }));
+    const auto plane = widget.retained_plane();
+    PWB_CHECK(!plane.values.empty());
+    std::vector<float> attribute(plane.values.size());
+    for (std::size_t i = 0; i < attribute.size(); ++i) {
+        attribute[i] = 2.0f * plane.values[i];  // varied, like a real kernel
+    }
+    const bool pinned = widget.set_attribute_plane(
+        attribute, plane.rows, plane.cols, "grayscale", "包络");
+    PWB_CHECK_MSG(pinned, widget.last_diagnostic().c_str());
+    PWB_CHECK(widget.attribute_active());
+    widget.set_display_mode(DisplayMode::wiggle);
+    PWB_CHECK(widget.display_mode() == DisplayMode::wiggle);
+    PWB_CHECK_MSG(!widget.attribute_active(),
+                  "wiggle switch must clear the pinned attribute view");
+    // And back on VD the amplitude image is the display again.
+    widget.set_display_mode(DisplayMode::variable_density);
+    PWB_CHECK(!widget.attribute_active());
+    PWB_CHECK(!widget.slice_image().isNull());
+}
+
 TEST(clip_percentile_display_path_and_polarity) {
     SeismicSliceWidget widget;
     widget.resize(640, 480);

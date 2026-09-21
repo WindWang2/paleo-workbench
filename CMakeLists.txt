@@ -714,7 +714,13 @@ endif()
 option(PWB_BUILD_CONV_09
     "Build the CONV-09 well_science DTW kernel (M8 first slice)" OFF)
 if(PWB_BUILD_CONV_09)
-    pwb_add_subdirectory_once(libs/well_science)
+    # TARGET guard, not just the once-guard: with the WLE viewer stack on,
+    # science_suite (added at the NATIVE_PRODUCT imply block, before this
+    # line) already pulls libs/well_science for the well-log adapter — the
+    # once-guard's bookkeeping cannot see that add (same idiom as CONV-11).
+    if(NOT TARGET pwb_well_science)
+        pwb_add_subdirectory_once(libs/well_science)
+    endif()
 endif()
 # END CONV-09
 # BEGIN CONV-11
@@ -1689,6 +1695,33 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
     target_link_libraries(pwb-platform PRIVATE Pwb::UiWellseisQt)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_UI_WELLSEIS=1)
 
+    # BEGIN JOINT-ANALYSIS (geoviz final closure) — the 井震联合 3D page
+    # analysis hooks. Nested TARGET gate (fail-closed): every kernel lib
+    # the hooks call must exist, AND the AppShell composition must be in
+    # (the install consumes app_shell->geomodel_page()); otherwise the TU
+    # stays out and PWB_WITH_JOINT_ANALYSIS stays undefined so
+    # main_window.cpp compiles the page's honest 未接入 fallbacks instead
+    # of referencing symbols that would not link (round-1 review: a
+    # reduced SEISMIC_VIEWER=OFF configure linked-failed before the
+    # define existed).
+    if(TARGET Pwb::UiWorkers AND TARGET Pwb::SeismicViewer AND
+       TARGET Pwb::GeoModel AND
+       TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt AND
+       TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt AND
+       TARGET Pwb::UiMapQgis AND TARGET Pwb::UiReviewQt AND
+       TARGET Pwb::UiSeqvizQt)
+        # (No Pwb::VisualizationWellTie here: the auto-tie hook is an
+        # honest refusal until real logs reach the joint page — the kernel
+        # link survived a rewrite that removed its last include.)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/joint_analysis_install.cpp)
+        target_link_libraries(pwb-platform PRIVATE
+            Pwb::UiWorkers Pwb::SeismicViewer Pwb::GeoModel)
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_JOINT_ANALYSIS=1)
+    endif()
+    # END JOINT-ANALYSIS
+
     # Runnable production seam: real PWBVOL1 through the tiled service
     # into the joint scene (frozen seismic_io oracle fixture; override by
     # passing a volume path).
@@ -1767,6 +1800,42 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
         add_test(NAME viz_c.joint3d_closure COMMAND viz_c_joint3d_closure)
         set_tests_properties(viz_c.joint3d_closure PROPERTIES TIMEOUT 300
             ENVIRONMENT "MALLOC_CHECK_=3;QT_QPA_PLATFORM=offscreen")
+
+        # geoviz final closure — joint-analysis install tests (hook
+        # contract: sidecar persistence, RGB overlay, demo stratal path).
+        if(TARGET Pwb::UiWorkers AND TARGET Pwb::SeismicViewer AND
+           TARGET Pwb::GeoModel)
+            add_executable(viz_c_joint_analysis
+                tests/cpp/viz_c/joint_analysis_test.cpp
+                tests/cpp/viz_c/test_main.cpp
+                apps/paleo_workbench_platform/joint_analysis_install.cpp
+                apps/paleo_workbench_platform/job_center.cpp
+                apps/paleo_workbench_platform/viz_c_joint_host.cpp
+                apps/paleo_workbench_platform/viz_c_joint_volume.cpp
+                apps/paleo_workbench_platform/viz_c_time_map.cpp)
+            set_target_properties(viz_c_joint_analysis PROPERTIES AUTOMOC ON)
+            target_compile_features(viz_c_joint_analysis PRIVATE cxx_std_20)
+            target_link_libraries(viz_c_joint_analysis PRIVATE
+                Pwb::Geo3DViz Pwb::UiWellseisQt Pwb::UiWorkers
+                Pwb::SeismicViewer Pwb::GeoModel
+                Pwb::SeismicService Pwb::JobQt Qt6::Widgets)
+            target_include_directories(viz_c_joint_analysis PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/viz_c
+                ${CMAKE_CURRENT_SOURCE_DIR}/apps/paleo_workbench_platform)
+            target_compile_definitions(viz_c_joint_analysis PRIVATE
+                PWB_WITH_UI_WELLSEIS=1
+                JOINT_ANALYSIS_FIXTURE_VOLUME="${VIZ_C_EXAMPLE_VOLUME}")
+            if(MSVC)
+                target_compile_options(viz_c_joint_analysis PRIVATE
+                    /utf-8 /W3)
+            else()
+                target_compile_options(viz_c_joint_analysis PRIVATE
+                    -Wall -Wextra)
+            endif()
+            add_test(NAME viz_c.joint_analysis COMMAND viz_c_joint_analysis)
+            set_tests_properties(viz_c.joint_analysis PROPERTIES TIMEOUT 300
+                ENVIRONMENT "MALLOC_CHECK_=3;QT_QPA_PLATFORM=offscreen")
+        endif()
     endif()
 endif()
 # END VIZ-C-host

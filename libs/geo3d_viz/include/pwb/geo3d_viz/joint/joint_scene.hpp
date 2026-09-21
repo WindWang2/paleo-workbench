@@ -121,6 +121,9 @@ public:
     // ---- Wells -------------------------------------------------------------
     void set_wells(std::vector<WellHead> wells,
                    std::map<std::string, TimeDepthTable> td_tables = {});
+    // Read access for product wiring (analysis hooks build borehole records
+    // from the loaded heads; the scene itself stays immutable through it).
+    const std::vector<WellHead>& wells() const { return wells_; }
     std::vector<JointWellPresentation> well_presentations() const;
     void set_well_visibility(const JointWellId& well_id, bool visible);
     std::map<JointWellId, WellTrajectory3D> well_trajectories(

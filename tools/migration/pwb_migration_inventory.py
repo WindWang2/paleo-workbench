@@ -66,6 +66,12 @@ RE_BEGIN_SLICE = re.compile(r"#\s*BEGIN\s+(CONV-\d+)")
 RE_LIB_TARGET = re.compile(r"add_library\(\s*([A-Za-z0-9_:]+)")
 RE_PWB_LINK = re.compile(r"\b(Pwb::[A-Za-z0-9]+)")
 RE_CONV_DEFINE = re.compile(r"\b(PWB_WITH_CONV_\d+)\b")
+RE_INCLUDE = re.compile(r'#\s*include\s*[<"]([^<">]+)[>"]')
+RE_TOKEN = re.compile(r"[A-Za-z0-9_:.+-]+")
+LINK_KEYWORDS = {
+    "LINK_PUBLIC", "LINK_PRIVATE", "LINK_INTERFACE_LIBRARIES",
+    "INTERFACE", "PUBLIC", "PRIVATE", "debug", "optimized", "general",
+}
 
 STATUS_LABELS: Dict[str, str] = {
     "native_complete_wired": "Native complete + wired",
@@ -202,14 +208,15 @@ class UnitFact:
     root_dir: str
     target: Optional[str] = None
     alias: Optional[str] = None
-    # Every Pwb:: alias declared in the unit's CMakeLists (#1448): the
-    # single `alias` field kept only the LAST one, so a unit exporting
-    # both Pwb::UiDataCore and Pwb::UiDataQt became matchable only by
-    # the Qt alias — the product links the base alias, and the wiring
-    # scan reported not_wired.
+    # All add_library names / all Pwb:: aliases defined by the unit's CMake
+    # files. The single-target/alias fields above stay for schema continuity;
+    # wiring resolution must consult the full sets (a unit may expose several
+    # aliases, and only some of them may be linked).
+    targets: List[str] = field(default_factory=list)
     aliases: List[str] = field(default_factory=list)
     sources: List[str] = field(default_factory=list)
     headers: List[str] = field(default_factory=list)
+    public_include_keys: List[str] = field(default_factory=list)
     python_origins: List[str] = field(default_factory=list)
     python_origins_present: List[str] = field(default_factory=list)
     python_origins_absent: List[str] = field(default_factory=list)
@@ -221,13 +228,11 @@ class UnitFact:
     wired: bool = False
     wiring_mode: str = "not_wired"
     wiring_evidence: List[str] = field(default_factory=list)
-    # Production TU include evidence (#1448): headers under this unit's
-    # public namespace included by apps/** or another lib's src/include
-    # (outside the unit itself and outside tests). A unit can be linked
-    # into the closure yet have ZERO production consumers — the matrix
-    # must not call that NATIVE_PRODUCT (retiring the Python side would
-    # orphan the capability).
-    production_includes: List[str] = field(default_factory=list)
+    # TU-level consumer evidence (#1448): which units/apps translation units
+    # actually include this unit's public headers, and whether that include
+    # graph reaches the unit from an apps/ TU.
+    tu_consumers: List[str] = field(default_factory=list)
+    tu_reachable: bool = False
     status: str = "partial_native"
     notes: List[str] = field(default_factory=list)
 
@@ -264,11 +269,14 @@ def scan_units(root: str) -> Dict[str, UnitFact]:
             text = read_text(path)
             for target in RE_LIB_TARGET.findall(text):
                 if target.startswith("Pwb::"):
-                    fact.alias = target
                     if target not in fact.aliases:
                         fact.aliases.append(target)
-                elif fact.target is None:
-                    fact.target = target
+                elif target not in fact.targets:
+                    fact.targets.append(target)
+        fact.alias = fact.aliases[0] if fact.aliases else None
+        fact.target = fact.targets[0] if fact.targets else None
+        for path in cml_files:
+            text = read_text(path)
             fact.tests.extend(RE_ADD_TEST.findall(text))
         fact.tests = sorted(set(fact.tests))
         fact.slices = scan_slices(cml_files)
@@ -398,97 +406,307 @@ def attribute_generators(
     return {k: sorted(set(v)) for k, v in by_unit.items()}, sorted(set(tests_tier)), sorted(unattributed)
 
 
-def scan_wiring(root: str) -> Dict[str, Tuple[str, List[str]]]:
-    """alias -> (mode, evidence) where mode is 'always' or 'conditional'.
+def _cmake_command_spans(text: str) -> Iterable[Tuple[str, List[str], int, bool]]:
+    """Yield (command, args, line_no, inside_conditional_block) for a CMake text.
 
-    A link found inside an ``if(PWB_BUILD_*)`` block is *conditional*: the unit
-    only reaches the product binary when that switch is on, which is materially
-    different from an unconditional link.
+    Only the commands the wiring scan cares about (add_library,
+    add_executable, target_link_libraries) are emitted. The conditional flag
+    mirrors the legacy line-based rule: a block guarded by ``if(PWB_...)`` is
+    conditional; ``else/elseif`` inversion is intentionally not modelled (the
+    conservative direction — such links stay "conditional").
     """
-    out: Dict[str, Tuple[str, List[str]]] = {}
-    candidates: List[str] = []
-    for dirpath, filenames in walk_files(root, "apps"):
-        for fn in filenames:
-            if fn == "CMakeLists.txt":
-                candidates.append(os.path.join(dirpath, fn))
-    root_cml = os.path.join(root, "CMakeLists.txt")
-    if os.path.exists(root_cml):
-        candidates.append(root_cml)
-    # libs/*/CMakeLists.txt link edges (#1448): the product's link
-    # closure is transitive — libs/ui_data_core PUBLIC-linking
-    # Pwb::Interchange reaches pwb-platform without any direct edge.
-    # These edges seed the transitive closure below; a link found only
-    # here (never from apps/) is marked conditional.
-    libs_edges: Dict[str, List[str]] = {}
-    libs_root = os.path.join(root, "libs")
-    if os.path.isdir(libs_root):
-        for entry in sorted(os.listdir(libs_root)):
-            unit_dir = os.path.join(libs_root, entry)
-            if not os.path.isdir(unit_dir):
-                continue
-            for dirpath, _dirnames, filenames in os.walk(unit_dir):
-                if "CMakeLists.txt" not in filenames:
-                    continue
-                path = os.path.join(dirpath, "CMakeLists.txt")
-                rel = repo_rel(root, path)
-                # which alias does THIS CMakeLists declare?
-                text0 = read_text(path)
-                declared = [
-                    t for t in RE_LIB_TARGET.findall(text0)
-                    if t.startswith("Pwb::")
-                ]
-                if not declared:
-                    continue
-                for line in text0.splitlines():
-                    stripped = line.strip()
-                    for alias in RE_PWB_LINK.findall(stripped):
-                        for decl in declared:
-                            libs_edges.setdefault(alias, []).append(
-                                f"{rel}: {stripped} (via {decl})"
-                            )
-    for path in candidates:
-        rel = repo_rel(root, path)
-        stack: List[str] = []
-        for line in read_text(path).splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if RE_ELSE.match(line):
-                continue
+    lines = text.splitlines()
+    # Per-line PWB_ condition tokens plus line start offsets, so a command
+    # span can union the guards of every line it touches.
+    line_tokens: List[frozenset] = []
+    line_starts: List[int] = []
+    stack: List[str] = []
+    pos = 0
+    for line in lines:
+        stripped = line.strip()
+        tokens: Set[str] = set()
+        if stripped and not stripped.startswith("#"):
             m_if = RE_IF.match(line)
             if m_if:
                 stack.append(m_if.group(1))
-                continue
-            if RE_ENDIF.match(line):
+            elif RE_ENDIF.match(line):
                 if stack:
                     stack.pop()
-                continue
-            conditional = any("PWB_BUILD" in cond or "PWB_WITH" in cond for cond in stack)
-            for alias in RE_PWB_LINK.findall(stripped):
-                mode = "conditional" if conditional else "always"
-                prev_mode, evidence = out.get(alias, ("conditional", []))
-                # 'always' wins over 'conditional' for the same alias.
-                mode = "always" if prev_mode == "always" or mode == "always" else "conditional"
-                evidence.append(f"{rel}: {stripped}")
-                out[alias] = (mode, evidence)
-    # Transitive closure (#1448): walk libs_edges from every directly
-    # linked alias; each newly reached alias is wired 'conditional'
-    # (it rides the linking lib's own gate) with the path as evidence.
-    frontier = list(out.keys())
-    seen = set(out.keys())
+            tokens = {
+                token
+                for cond in stack
+                for token in re.findall(r"PWB_[A-Z0-9_]+", cond)
+            }
+        line_starts.append(pos)
+        line_tokens.append(frozenset(tokens))
+        pos += len(line) + 1
+
+    def guards_of(start: int, end: int) -> Set[str]:
+        out: Set[str] = set()
+        for index, line_start in enumerate(line_starts):
+            if line_start > end:
+                break
+            if line_start + len(lines[index]) >= start:
+                out |= line_tokens[index]
+        return out
+    for m in re.finditer(
+        r"\b(add_library|add_executable|target_link_libraries)\s*\(", text
+    ):
+        command = m.group(1)
+        # Find the matching close paren.
+        depth = 1
+        end = m.end()
+        while end < len(text) and depth:
+            ch = text[end]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            end += 1
+        inner = text[m.end():end - 1]
+        args = RE_TOKEN.findall(inner)
+        line_no = text.count("\n", 0, m.start()) + 1
+        yield command, args, line_no, guards_of(m.start(), end)
+
+
+def scan_product_implied_switches(root: str) -> Set[str]:
+    """Transitive closure of the switches PWB_BUILD_NATIVE_PRODUCT turns on.
+
+    ``cmake/PwbFeatures.cmake`` declares the feature graph
+    (``pwb_declare_feature(<NAME> ... IMPLIES a;b ...)``); the formal native
+    product closure is the closure of NATIVE_PRODUCT's IMPLIES set. A link
+    edge guarded only by switches in this set is ON in every formal product
+    configuration, so it must not be reported as opt-in conditional wiring.
+    """
+    text = read_text(os.path.join(root, "cmake", "PwbFeatures.cmake"))
+    implies: Dict[str, List[str]] = {}
+    for m in re.finditer(r"pwb_declare_feature\(\s*([A-Z][A-Z0-9_]*)", text):
+        name = m.group(1)
+        depth = 1
+        end = m.end()
+        while end < len(text) and depth:
+            ch = text[end]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            end += 1
+        body = text[m.end():end - 1]
+        # Everything before REQUIRES (if present) belongs to IMPLIES when the
+        # keyword is present; otherwise there is no implies list.
+        if "IMPLIES" in body:
+            implies_tail = body.split("IMPLIES", 1)[1]
+            implies_tail = implies_tail.split("REQUIRES", 1)[0]
+            implies[name] = re.findall(r"PWB_BUILD_[A-Z0-9_]+", implies_tail)
+        else:
+            implies[name] = []
+    closure: Set[str] = set()
+    frontier = ["PWB_BUILD_NATIVE_PRODUCT"]
     while frontier:
-        alias = frontier.pop()
-        for dep, ev in libs_edges.items():
-            if dep in seen:
+        name = frontier.pop()
+        for nxt in implies.get(name, []):
+            if nxt not in closure:
+                closure.add(nxt)
+                frontier.append(nxt)
+    return closure
+
+
+def scan_link_graph(
+    root: str, units: Dict[str, UnitFact]
+) -> Dict[str, Dict[str, object]]:
+    """Whole-repository link graph with transitive closure from the product.
+
+    Replaces the legacy apps/-only direct scan (#1448 A-3): every
+    ``target_link_libraries`` edge in the repository (root, apps/, libs/,
+    tests/) is collected, tokens are resolved to ``libs/<unit>`` through the
+    *full* alias and target sets of each unit, and product wiring is the
+    transitive closure from the ``pwb-platform`` executable.
+
+    Returns unit -> {wired, wiring_mode, wiring_evidence} where mode is
+    'always' (an all-unconditional-edge path exists), 'product' (every guard
+    on the best path is a switch PWB_BUILD_NATIVE_PRODUCT implies, so the link
+    is present in every formal product configuration), 'conditional' (only
+    genuinely opt-in paths), or the unit is absent when unreachable.
+    """
+    # token -> unit resolution table (aliases + bare target names).
+    token_unit: Dict[str, str] = {}
+    for name, fact in units.items():
+        for token in list(fact.aliases) + list(fact.targets):
+            token_unit.setdefault(token, name)
+
+    edges: Dict[str, List[Tuple[str, str, str]]] = {}
+    implied = scan_product_implied_switches(root)
+    for dirpath, filenames in walk_files(root, ""):
+        for fn in filenames:
+            if fn != "CMakeLists.txt":
                 continue
-            if any(f"(via {alias})" in e for e in ev):
-                # dep is linked by the unit that declares `alias`
-                mode, evidence = out.get(dep, ("conditional", []))
-                evidence = evidence + [f"transitive via {alias}: {ev[0]}"]
-                out[dep] = ("conditional", evidence)
-                seen.add(dep)
-                frontier.append(dep)
+            path = os.path.join(dirpath, fn)
+            rel = repo_rel(root, path)
+            text = read_text(path)
+            for command, args, line_no, cond_tokens in _cmake_command_spans(text):
+                if command in ("add_library", "add_executable"):
+                    continue
+                if len(args) < 2:
+                    continue
+                src = args[0]
+                if cond_tokens and cond_tokens <= implied:
+                    category = "product"
+                elif cond_tokens:
+                    category = "optin"
+                else:
+                    category = "always"
+                for token in args[1:]:
+                    if token in LINK_KEYWORDS:
+                        continue
+                    dst = token_unit.get(token)
+                    if dst is None:
+                        continue
+                    edges.setdefault(src, []).append(
+                        (dst, category, f"{rel}:{line_no} ({token})")
+                    )
+
+    product_root = "pwb-platform"
+    allowed: Dict[str, Set[str]] = {
+        "always": {"always"},
+        "product": {"always", "product"},
+        "all": {"always", "product", "optin"},
+    }
+
+    def closure(level: str) -> Dict[str, Tuple[str, str]]:
+        found: Dict[str, Tuple[str, str]] = {}
+        queue: List[Tuple[str, str, str]] = [(product_root, "", "")]
+        seen_targets = {product_root}
+        permit = allowed[level]
+        while queue:
+            src, via_unit, via_ev = queue.pop(0)
+            for dst, category, ev in edges.get(src, []):
+                if category not in permit:
+                    continue
+                evidence = (f"{src} -> {ev}" if not via_ev else f"{via_ev} -> {ev}")
+                if dst not in found or (len(evidence) < len(found[dst][1])):
+                    found[dst] = (via_unit or "apps", evidence)
+                # Traverse onward through any target name of the destination
+                # unit so transitive edges resolve.
+                if dst in seen_targets:
+                    continue
+                seen_targets.add(dst)
+                fact = units.get(dst)
+                names = ([fact.alias] if fact and fact.alias else []) + (
+                    fact.targets if fact else []
+                )
+                for name in names:
+                    if name not in seen_targets:
+                        seen_targets.add(name)
+                        queue.append((name, dst, evidence))
+        return found
+
+    always = closure("always")
+    product = closure("product")
+    all_paths = closure("all")
+    out: Dict[str, Dict[str, object]] = {}
+    for unit, (origin, evidence) in all_paths.items():
+        if unit in always:
+            mode = "always"
+        elif unit in product:
+            mode = "product"
+        else:
+            mode = "conditional"
+        out[unit] = {
+            "wired": True,
+            "wiring_mode": mode,
+            "wiring_evidence": [evidence],
+            "link_origin": origin,
+        }
     return out
+
+
+def scan_tu_consumers(root: str, units: Dict[str, UnitFact]) -> None:
+    """TU-level consumer evidence (#1448 A-2): fill ``tu_consumers`` and
+    ``tu_reachable`` on each unit.
+
+    A unit is consumed by a translation unit when that TU #includes one of the
+    unit's public headers (``libs/<unit>/include/**``). A unit is
+    TU-reachable when some apps/ TU reaches it through the include graph
+    (apps TU -> unit -> that unit's own TUs -> further units). Link-time
+    presence without a TU consumer is exactly the false-NATIVE_PRODUCT shape
+    issue #1448 describes, so this scan is what backs the promoted
+    classification.
+    """
+    include_key_unit: Dict[str, Set[str]] = {}
+    for name, fact in units.items():
+        prefix = f"libs/{name}/include/"
+        for header in fact.headers:
+            if not header.startswith(prefix):
+                continue
+            key = header[len(prefix):]
+            fact.public_include_keys.append(key)
+            include_key_unit.setdefault(key, set()).add(name)
+
+    def units_included_by(rel_path: str) -> Set[str]:
+        text = read_text(os.path.join(root, rel_path))
+        found: Set[str] = set()
+        for m in RE_INCLUDE.finditer(text):
+            inc = normalise(m.group(1))
+            # Exact public-key match, or suffix match for angled includes
+            # rooted elsewhere (e.g. "pwb/seismic_io/reader.hpp").
+            if inc in include_key_unit:
+                found.update(include_key_unit[inc])
+                continue
+            marker = "pwb/"
+            idx = inc.find(marker)
+            if idx >= 0:
+                suffix = inc[idx:]
+                if suffix in include_key_unit:
+                    found.update(include_key_unit[suffix])
+        return found
+
+    # file -> directly included units.
+    file_units: Dict[str, Set[str]] = {}
+    app_files: List[str] = []
+    unit_files: Dict[str, List[str]] = {name: [] for name in units}
+    for dirpath, filenames in walk_files(root, ""):
+        rel_dir = repo_rel(root, dirpath)
+        for fn in filenames:
+            if not fn.endswith((".cpp", ".cc", ".cxx", ".hpp", ".h")):
+                continue
+            rel = f"{rel_dir}/{fn}"
+            if rel_dir == "apps" or rel_dir.startswith("apps/"):
+                app_files.append(rel)
+            m = re.match(r"libs/([^/]+)/", rel_dir)
+            if m and m.group(1) in unit_files:
+                unit_files[m.group(1)].append(rel)
+    for rel in app_files:
+        file_units[rel] = units_included_by(rel)
+    for name, files in unit_files.items():
+        for rel in files:
+            file_units[rel] = units_included_by(rel)
+
+    # BFS over apps TU -> unit -> unit TUs -> ...
+    reached: Set[str] = set()
+    consumers: Dict[str, Set[str]] = {name: set() for name in units}
+    queue: List[str] = []
+    for rel in app_files:
+        for unit in file_units.get(rel, ()):  # apps TU directly includes unit
+            if unit not in consumers or rel.startswith(f"libs/{unit}/"):
+                continue
+            consumers[unit].add(rel)
+            if unit not in reached:
+                reached.add(unit)
+                queue.append(unit)
+    while queue:
+        unit = queue.pop(0)
+        for rel in unit_files.get(unit, []):
+            for nxt in file_units.get(rel, ()):
+                if nxt == unit or nxt not in consumers:
+                    continue
+                consumers[nxt].add(f"libs/{unit}")
+                if nxt not in reached:
+                    reached.add(nxt)
+                    queue.append(nxt)
+
+    for name, fact in units.items():
+        fact.tu_consumers = sorted(consumers.get(name, ()))
+        fact.tu_reachable = name in reached
 
 
 def scan_conv_defines(root: str) -> Set[str]:
@@ -522,20 +740,13 @@ def scan_python_packages(root: str) -> List[str]:
 
 def classify(fact: UnitFact) -> str:
     has_oracle = bool(fact.fixtures) or bool(fact.oracle_generators)
-    if fact.wired and has_oracle and fact.production_includes:
-        # Wired covers both a direct apps/root link ('always') and the
-        # transitive link closure through a gated lib ('conditional') —
-        # both reach the product binary in the native-product configure.
-        # NATIVE_PRODUCT additionally requires a production TU consumer
-        # (#1448): linked-but-never-included cores (the integrated
-        # compilation family) stay NATIVE_LIBRARY_NOT_WIRED so retiring
-        # the Python side cannot orphan the capability.
+    # NATIVE_PRODUCT requires TU-level product consumer evidence (#1448 A-2):
+    # linked-but-never-included is a library, not a product capability.
+    # wiring_mode 'product' means every guarding switch on the link path is
+    # implied by PWB_BUILD_NATIVE_PRODUCT (on in every formal product build).
+    product_linked = fact.wiring_mode in ("always", "product")
+    if product_linked and fact.wired and fact.tu_reachable and has_oracle:
         return "native_complete_wired"
-    if fact.wired and has_oracle and not fact.production_includes:
-        fact.notes.append(
-            "linked into the product closure but no production TU "
-            "includes its headers (test-only consumers do not count)"
-        )
     if has_oracle:
         return "native_core_not_wired"
     # Infrastructure libraries that were never ported from Python (domain,
@@ -561,23 +772,10 @@ def build_inventory(root: str) -> dict:
     generators, tests_tier, unattributed = attribute_generators(
         root, sorted(units), fixtures_by_unit, tests_fixtures, units_by_origin
     )
-    wiring = scan_wiring(root)
+    wiring = scan_link_graph(root, units)
     conv_defines = scan_conv_defines(root)
-    # Production sources for include evidence: apps/** plus every lib's
-    # src (tests/ fixtures excluded — test-only consumers do not make a
-    # unit a product capability).
-    production_sources: Set[str] = set()
-    apps_src_root = os.path.join(root, "apps")
-    for dirpath, _dirnames, filenames in os.walk(apps_src_root):
-        for fn in filenames:
-            if fn.endswith((".cpp", ".cc", ".cxx")):
-                production_sources.add(
-                    repo_rel(root, os.path.join(dirpath, fn)))
-    for other in units.values():
-        for src in other.sources:
-            if "/tests/" not in src.replace("\\", "/") and "_tests/" not in src:
-                production_sources.add(src)
     python_packages = scan_python_packages(root)
+    scan_tu_consumers(root, units)
 
     for name, fact in units.items():
         fact.fixtures = fixtures_by_unit.get(name, [])
@@ -589,33 +787,13 @@ def build_inventory(root: str) -> dict:
             if opt in options:
                 options[opt].gates_subdirs.append(subdir)
 
-        # Production TU include evidence (#1448): the unit's public
-        # namespace prefix (pwb/<ns>/ from its first header path) scanned
-        # across every OTHER unit's sources and apps/** sources.
-        if fact.headers:
-            import re as _re
-            header = fact.headers[0]
-            mprefix = _re.search(r"include/(pwb/[^/]+(?:/[^/]+)*)/", header)
-            if mprefix:
-                ns = mprefix.group(1) + "/"
-                for other_name, other in units.items():
-                    if other_name == name:
-                        continue
-                    for src in other.sources:
-                        if src in production_sources:
-                            try:
-                                text = read_text(os.path.join(root, src))
-                            except OSError:
-                                continue
-                            if ns in text:
-                                fact.production_includes.append(src)
-        for alias in set(fact.aliases + [fact.alias, fact.target]) - {None}:
-            if alias in wiring:
-                mode, evidence = wiring[alias]
-                if not fact.wired or fact.wiring_mode == "conditional":
-                    fact.wired = True
-                    fact.wiring_mode = mode
-                fact.wiring_evidence.extend(evidence[:4])
+        link_info = wiring.get(name)
+        if link_info:
+            fact.wired = True
+            fact.wiring_mode = str(link_info["wiring_mode"])
+            fact.wiring_evidence.extend(
+                str(ev) for ev in link_info["wiring_evidence"]
+            )
         for slice_id in fact.slices:
             define = "PWB_WITH_" + slice_id.replace("-", "_")
             if define in conv_defines:
@@ -624,7 +802,6 @@ def build_inventory(root: str) -> dict:
                     fact.wiring_mode = "conditional"
                 fact.wiring_evidence.append(f"compile definition {define} in apps/")
         fact.wiring_evidence = sorted(set(fact.wiring_evidence))
-        fact.production_includes = sorted(set(fact.production_includes))
         fact.status = classify(fact)
 
         if not fact.python_origins:
@@ -640,6 +817,11 @@ def build_inventory(root: str) -> dict:
             fact.notes.append("no PWB_BUILD_* switch gates this unit (always configured)")
         if fact.wiring_mode == "conditional":
             fact.notes.append("app link is conditional on an opt-in switch")
+        if fact.wired and not fact.tu_reachable:
+            fact.notes.append(
+                "linked into the product closure but no product TU includes its "
+                "public headers (transitive-only link, no TU consumer)"
+            )
 
     covered: Set[str] = set()
     for fact in units.values():
@@ -690,7 +872,7 @@ def build_inventory(root: str) -> dict:
     distinct_fixtures = sorted({f for v in fixtures_by_unit.values() for f in v} | set(tests_fixtures))
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_from": {
             "libs_units": len(units),
             "cmake_options": len(options),
@@ -751,11 +933,14 @@ def render_markdown(inv: dict) -> str:
 
     out.append("## Conversion units")
     out.append("")
-    out.append("| Unit | Status | Switch | Slices | Oracle | Tests | Wiring |")
-    out.append("| --- | --- | --- | --- | --- | --- | --- |")
+    out.append(
+        "| Unit | Status | Switch | Slices | Oracle | Tests | Wiring | "
+        "TU consumers | TU reachable |"
+    )
+    out.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for u in inv["units"]:
         out.append(
-            "| `{unit}` | `{status}` | {switch} | {slices} | {oracle} | {tests} | {wiring} |".format(
+            "| `{unit}` | `{status}` | {switch} | {slices} | {oracle} | {tests} | {wiring} | {tu_consumers} | {tu_reachable} |".format(
                 unit=u["unit"],
                 status=u["status"],
                 switch=", ".join(f"`{o}`" for o in u["options"]) or "—",
@@ -763,6 +948,8 @@ def render_markdown(inv: dict) -> str:
                 oracle="yes" if u["fixtures"] else "—",
                 tests=len(u["tests"]),
                 wiring=u["wiring_mode"].replace("_", " "),
+                tu_consumers=len(u.get("tu_consumers", [])),
+                tu_reachable="yes" if u.get("tu_reachable") else "no",
             )
         )
     out.append("")
