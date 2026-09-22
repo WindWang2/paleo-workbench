@@ -18,7 +18,7 @@ git diff --name-only origin/main...HEAD   # docs paths only on this PR branch
 
 ## PR
 
-- URL: _filled after create_pull_request_
+- URL: https://github.com/WindWang2/paleo-workbench/pull/1474
 - Base: `main`
 - Head: `docs/project-documentation-refresh-2026`
 - Merge: **not** performed (documentation refresh only)
