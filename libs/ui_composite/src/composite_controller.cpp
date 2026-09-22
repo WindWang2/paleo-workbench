@@ -961,8 +961,10 @@ std::pair<bool, std::string> CompositeEditController::apply_facies_selection(
     }
     auto [session, reason] = ensure_layer_session(layer_id);
     if (session == nullptr) return {false, reason};
+    // R2-28: begin OUTSIDE the try (a nested-begin throw must not destroy
+    // an outer command in our catch).
+    session->begin_edit_command();
     try {
-        session->begin_edit_command();
         for (const auto& fid : ids)
             for (auto it = payload.begin(); it != payload.end(); ++it)
                 session->change_attribute(fid, it.key(), it.value());

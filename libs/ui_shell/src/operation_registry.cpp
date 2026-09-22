@@ -125,13 +125,22 @@ bool OperationRegistry::request_cancel(const std::string& op_id) {
         it->second.state == OperationState::Cancelling || !it->second.cancel) {
         return false;
     }
-    OperationRecord& record = it->second;
+    // R2-25: the hook is arbitrary user code — it may reenter the registry
+    // (cancel → project close → clear()) and free this node while we still
+    // hold the reference. Snapshot the hook, drop the reference across the
+    // call, and re-lookup afterwards.
+    auto cancel_hook = it->second.cancel;
     try {
-        record.cancel();
+        cancel_hook();
     } catch (...) {
         // Cancel hook failure does not hide the original state.
         return false;
     }
+    it = ops_.find(op_id);
+    if (it == ops_.end()) {
+        return true;  // the hook cleared the registry — nothing to mark
+    }
+    OperationRecord& record = it->second;
     // The hook may synchronously finish the task — terminal state does not
     // regress (review P2-4 parity).
     if (operation_state_terminal(record.state)) {

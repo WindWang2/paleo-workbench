@@ -358,7 +358,21 @@ PredictionTaskResult PredictionTaskRuntime::execute() {
     } guard{&running_};
 
     const Clock::time_point start = Clock::now();
-    cancel_requested_.store(false);
+    // R2-21: do NOT clear a cancel that landed between construction/
+    // validate and execute — the documented lifecycle loses such cancels
+    // and the task runs to completion against the user's intent. The flag
+    // now stays as-is; execute() on an already-cancelled task fails fast
+    // below via the cooperative checks.
+    if (cancel_requested_.load()) {
+        update_snapshot(PredictionTaskStatus::Cancelled, 0, 0, 0.0,
+                        "cancelled before start");
+        PredictionTaskResult cancelled;
+        cancelled.status = PredictionTaskStatus::Cancelled;
+        cancelled.diagnostics = Json::array(
+            {Json{{"code", "cancelled_before_start"},
+                  {"message", "request_cancel() preceded execute()"}}});
+        return cancelled;
+    }
     update_snapshot(PredictionTaskStatus::Running, 0, 0, 0.0,
                     "loading model package");
 

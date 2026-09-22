@@ -255,12 +255,17 @@ class QgisRenderBridge::Impl {
             parsed.push_back({feature_spec.id, std::move(geometry), &feature_spec});
         }
 
+        // R2-17: collect ids first, erase the fid index only AFTER the
+        // provider delete succeeds — erasing first forgot ids whose
+        // features still existed when the delete failed, orphaning them
+        // from later deltas until a full reship.
         QgsFeatureIds remove_fids;
+        std::vector<std::string> removed_host_ids;
         for (const std::string& host_id : delta.removed_ids) {
             const auto it = mirror.host_feature_ids.find(host_id);
             if (it != mirror.host_feature_ids.end()) {
                 remove_fids.insert(it->second);
-                mirror.host_feature_ids.erase(it);
+                removed_host_ids.push_back(host_id);
             }
         }
         // Changed features are delete + re-add: identical rendering outcome,
@@ -269,12 +274,15 @@ class QgisRenderBridge::Impl {
             const auto it = mirror.host_feature_ids.find(item.host_id);
             if (it != mirror.host_feature_ids.end()) {
                 remove_fids.insert(it->second);
-                mirror.host_feature_ids.erase(it);
+                removed_host_ids.push_back(item.host_id);
             }
         }
         if (!remove_fids.empty() && !provider->deleteFeatures(remove_fids)) {
             throw std::runtime_error(
                 "QGIS could not delete delta features from layer " + layer_id);
+        }
+        for (const std::string& host_id : removed_host_ids) {
+            mirror.host_feature_ids.erase(host_id);
         }
         QgsFeatureList features;
         for (const ParsedDeltaFeature& item : parsed) {
@@ -341,6 +349,32 @@ class QgisRenderBridge::Impl {
                 throw std::runtime_error(
                     "stale mirror for feature delta on layer " + spec.id
                 );
+            }
+        }
+        // R2-16: rebuild-branch fallibles validate up front too — the loop
+        // interleaves in-place mutation of reused mirrors with rebuilds, so
+        // a raster that fails to open or a malformed WKT mid-loop left
+        // earlier mirrors at the NEW revision with deltas applied while the
+        // snapshot as a whole threw (transiently rendering a state the host
+        // never committed; converges only on reship).
+        for (const VectorLayerSpec& spec : layers) {
+            if (spec.kind == VectorLayerSpec::Kind::Raster) {
+                const QString path = QString::fromStdString(spec.source_path);
+                QgsRasterLayer probe(path, QStringLiteral("probe"),
+                                     QStringLiteral("gdal"));
+                if (!probe.isValid()) {
+                    throw std::runtime_error(
+                        "QGIS could not open raster layer " + spec.id);
+                }
+            } else {
+                for (const FeatureSpec& feature_spec : spec.features) {
+                    if (QgsGeometry::fromWkt(
+                            QString::fromStdString(feature_spec.wkt))
+                            .isNull()) {
+                        throw std::invalid_argument(
+                            "invalid WKT for QGIS layer " + spec.id);
+                    }
+                }
             }
         }
         // #1133: mirror-map mutation must not interleave with a sync render
@@ -828,6 +862,11 @@ std::size_t QgisRenderBridge::export_vector(const std::string& path,
         throw;
     }
     painter.end();
+    // R2-12: the device (QSvgGenerator/QPdfWriter) still holds the buffered
+    // tail (SVG closing tags / PDF xref) until its destructor — measuring
+    // size before that returns 0/short and the host reports a good export
+    // as failure. Flush the writer explicitly before the stat.
+    device.reset();
 
     QFile output(QString::fromStdString(path));
     return output.exists() ? static_cast<std::size_t>(output.size()) : 0;

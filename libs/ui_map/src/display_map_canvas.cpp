@@ -382,7 +382,17 @@ void DisplayMapCanvas::set_extent(const Extent& extent, bool record_history,
                                         extent[3]));
         canvas_->refresh();
     }
-    emit extent_changed(extent);
+    // R2-29: emit ONCE — the extentsChanged signal (consumed above) already
+    // reports the applied extent; the direct emit made every programmatic
+    // move fire extent_changed twice. When QGIS no-ops an equal extent
+    // (no signal), the flag is expired eagerly below so the NEXT genuine
+    // user pan is not swallowed as "programmatic" (its history entry was
+    // silently lost before).
+    if (canvas_ == nullptr
+        || to_extent(canvas_->extent()) == extent) {
+        pending_programmatic_ = false;
+        emit extent_changed(extent);
+    }
     if (overlay_ != nullptr) {
         overlay_->update();
     }

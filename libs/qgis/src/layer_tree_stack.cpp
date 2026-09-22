@@ -421,7 +421,7 @@ std::optional<std::int64_t> QgsLayerTreeStack::begin_tree_update() {
         for (QgsMapCanvas* canvas : session_.canvases()) {
             if (canvas != nullptr && canvas->renderFlag()) {
                 canvas->setRenderFlag(false);
-                render_flags_suppressed_ = true;
+                render_suppressed_canvases_.push_back(canvas);
             }
         }
     }
@@ -454,13 +454,13 @@ pwb::ui_composite::TreeUpdateResult QgsLayerTreeStack::end_tree_update(
 void QgsLayerTreeStack::sync_close() {
     // The deferred single sync: restore rendering (if this stack
     // suppressed it), then one refresh across every canvas.
-    if (render_flags_suppressed_) {
-        render_flags_suppressed_ = false;
-        for (QgsMapCanvas* canvas : session_.canvases()) {
+    if (!render_suppressed_canvases_.empty()) {
+        for (QgsMapCanvas* canvas : render_suppressed_canvases_) {
             if (canvas != nullptr && !canvas->renderFlag()) {
                 canvas->setRenderFlag(true);
             }
         }
+        render_suppressed_canvases_.clear();
     }
     session_.refreshCanvases();
 }

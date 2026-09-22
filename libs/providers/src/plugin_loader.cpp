@@ -169,10 +169,15 @@ struct PluginLoader::ModuleState {
     // done here (it would destroy provider objects under a stack frame the
     // SDK executor is still using); the next loader entry point sweeps it.
     struct Token {
-        ModuleState* state;
+        // R2-24: shared ownership — the raw ModuleState* dangled when the
+        // loader was destroyed with the lease outstanding (its own dtor
+        // acknowledges that path). The shared_ptr keeps the record alive
+        // for the lease's remainder.
+        std::shared_ptr<ModuleState> state;
     };
     static void token_deleter(void* raw) {
         std::unique_ptr<Token> token(static_cast<Token*>(raw));
+        if (token->state == nullptr) return;
         ModuleState& state = *token->state;
         std::lock_guard<std::mutex> guard(state.mutex);
         state.leases -= 1;
@@ -358,7 +363,7 @@ PluginInfo PluginLoader::load(const std::filesystem::path& module_path) {
         throw PluginDescriptorError(path_text, "", "模块未声明 provider");
     }
 
-    auto state = std::make_unique<ModuleState>();
+    auto state = std::make_shared<ModuleState>();
     state->handle = handle;
     state->shutdown = shutdown;
     state->owner = this;
@@ -485,12 +490,12 @@ bool PluginLoader::is_unload_pending(const std::string& plugin_id) const {
 
 PluginLoader::Lease PluginLoader::acquire(const std::string& plugin_id) {
     sweep_pending();
-    ModuleState* state = nullptr;
+    std::shared_ptr<ModuleState> state;
     {
         std::lock_guard<std::mutex> guard(mutex_);
         for (auto& [id, candidate] : modules_) {
             if (id == plugin_id && candidate != nullptr) {
-                state = candidate.get();
+                state = candidate;  // R2-24: shared — the lease keeps it alive
                 break;
             }
         }
@@ -506,8 +511,9 @@ PluginLoader::Lease PluginLoader::acquire(const std::string& plugin_id) {
         throw PluginUnloadPendingError(plugin_id);
     }
     state->leases += 1;
-    return Lease(std::shared_ptr<void>(new ModuleState::Token{state},
-                                       &ModuleState::token_deleter));
+    return Lease(std::shared_ptr<void>(
+        new ModuleState::Token{std::move(state)},
+        &ModuleState::token_deleter));
 }
 
 // --- PluginProvider ----------------------------------------------------------

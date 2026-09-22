@@ -74,6 +74,14 @@ std::string EditController::start_editing(const std::string& layer_id) {
     Capture capture;
     capture.delta = delta;
 
+    // R2-15: a layer destroyed mid-session (removeAllMapLayers during a
+    // snapshot rebuild) auto-disconnects the capture signals but leaves the
+    // stale captures_ entry — the next start_editing(same id) then
+    // early-returned "" without restarting, and edits against the fresh
+    // layer produced an empty delta. Reap entries whose layer is gone.
+    QObject::connect(layer, &QObject::destroyed, layer,
+                     [this, layer_id] { captures_.erase(layer_id); });
+
     const QString q_layer_id = QString::fromStdString(layer_id);
     capture.connections.push_back(QObject::connect(
         layer, &QgsVectorLayer::committedFeaturesAdded, layer,

@@ -131,7 +131,13 @@ private:
     ProviderRegistry& registry_;
     HostCapabilities capabilities_;
     mutable std::mutex mutex_;
-    std::vector<std::pair<std::string, std::unique_ptr<ModuleState>>> modules_;  // insertion order
+    // R2-24: shared ownership — an outstanding Lease's token_deleter
+    // locks/decrements the ModuleState after ~PluginLoader ran (the dtor
+    // acknowledges that path), which was a UAF under unique_ptr. Leases
+    // hold shared_ptrs; the loader dropping its reference leaves the
+    // record alive (finalized, code unmapped or flagged) for the lease's
+    // remainder.
+    std::vector<std::pair<std::string, std::shared_ptr<ModuleState>>> modules_;  // insertion order
 
     friend struct ModuleState;
 };

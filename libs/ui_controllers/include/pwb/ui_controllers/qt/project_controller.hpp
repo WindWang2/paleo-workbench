@@ -95,3 +95,12 @@ private:
 };
 
 }  // namespace pwb::ui_controllers::qt
+
+namespace pwb::ui_controllers::qt {
+
+// R2-18: process-lifetime post target for contextless singleShot posts
+// (definition in project_controller.cpp) — gives queued lambdas an owner
+// with defined destruction semantics instead of never being dropped.
+QObject& app_lifetime_post_target();
+
+}  // namespace pwb::ui_controllers::qt

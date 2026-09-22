@@ -33,6 +33,8 @@
 #include <string>
 #include <vector>
 
+class QgsMapCanvas;
+
 class QgsLayerTree;
 class QgsLayerTreeNode;
 class QgsProject;
@@ -95,7 +97,10 @@ private:
     std::uint64_t revision_ = 0;
     int window_depth_ = 0;
     std::int64_t window_token_ = 0;
-    bool render_flags_suppressed_ = false;
+    // Per-canvas render-flag snapshot (R2-13): a single bool force-enabled
+    // every canvas on close, clobbering an intentionally non-rendering
+    // canvas's state. Restore exactly the canvases this batch suppressed.
+    std::vector<QgsMapCanvas*> render_suppressed_canvases_;
 };
 
 }  // namespace pwb::qgis

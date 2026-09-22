@@ -46,9 +46,16 @@ pwb::job::JobHandle WorkflowScheduler::submit(
     };
     // A job cancelled while QUEUED reaches its terminal state without
     // ever running spec.run — deregister the side channel there too.
-    spec.on_cancel = [this, run_id, done]() {
+    spec.on_cancel = [this, run_id, done, engine_token]() {
         std::lock_guard<std::mutex> lock(mutex_);
-        pending_.erase(run_id);
+        // R2-20: same epoch guard as deregister — a queued cancel of an
+        // OLD submission racing a fresh submit() of the same run_id must
+        // not erase the NEW registration (cancel then reports false for a
+        // live run whose token becomes unreachable).
+        const auto it = pending_.find(run_id);
+        if (it != pending_.end() && it->second == engine_token) {
+            pending_.erase(it);
+        }
         done->store(true, std::memory_order_release);
     };
     spec.run = [this, run_id, context, reverify, use_cache, resume,

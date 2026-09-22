@@ -13,12 +13,24 @@ namespace {
 
 constexpr const char* kProjectFilter = "Paleo 工程 (*.paleo.json)";
 
+}  // namespace
+
 // QTimer(0) parity — marshal onto the GUI thread's next event turn.
-void post_next_turn(std::function<void()> fn) {
-    QTimer::singleShot(0, [fn = std::move(fn)]() mutable { fn(); });
+// R2-18: the receiver matters — a contextless singleShot is NEVER dropped
+// when its target dies, so a posted lambda capturing a destroyed
+// controller ran anyway (UAF). A process-lifetime sentinel object gives
+// the post an owner whose destruction semantics we control (it outlives
+// all controllers; per-controller staleness is guarded by generation
+// checks inside the posted bodies).
+QObject& app_lifetime_post_target() {
+    static QObject sentinel;
+    return sentinel;
 }
 
-}  // namespace
+void post_next_turn(std::function<void()> fn) {
+    QTimer::singleShot(0, &app_lifetime_post_target(),
+                       [fn = std::move(fn)]() mutable { fn(); });
+}
 
 ProjectController::ProjectController(job::JobScheduler& scheduler,
                                      QObject* parent)
