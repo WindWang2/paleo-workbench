@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <stdexcept>
 #include <utility>
 
@@ -685,11 +686,17 @@ public:
                       std::string& error) override {
         // project/manager.py _write_payload: temp file in the target
         // directory, flush + fsync, main → bak, temp → main, dir fsync.
-        const std::string dir = parent_directory(path);
-        const std::string name = path.substr(path.find_last_of('/') + 1);
-        const std::string tmp = dir + "/.pwb-" + name + "-"
-                                + std::to_string(process_token()) + "-"
-                                + std::to_string(++sequence_) + ".tmp";
+        // std::filesystem split: a Windows absolute path has no '/'
+        // (the old find_last_of('/') turned the whole drive-qualified
+        // path into the "name", colons and all).
+        const std::filesystem::path target(path);
+        const std::string dir = target.parent_path().string();
+        const std::string name = target.filename().string();
+        const std::string tmp =
+            (std::filesystem::path(dir.empty() ? "." : dir) /
+             (".pwb-" + name + "-" + std::to_string(process_token()) +
+              "-" + std::to_string(++sequence_) + ".tmp"))
+                .string();
         const std::string bak = path + ".bak";
         std::FILE* file = std::fopen(tmp.c_str(), "wb");
         if (file == nullptr) {

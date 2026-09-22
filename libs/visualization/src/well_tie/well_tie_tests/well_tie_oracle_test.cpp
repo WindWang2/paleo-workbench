@@ -15,6 +15,7 @@
 #include <pwb/domain/json.hpp>
 #include <pwb/viz/well_tie/auto_tie.hpp>
 #include <pwb/viz/well_tie/calibration.hpp>
+#include <pwb/viz/well_tie/log_tie.hpp>
 #include <pwb/viz/well_tie/sonic_units.hpp>
 #include <pwb/viz/well_tie/synthetic.hpp>
 #include <pwb/viz/well_tie/tie_evaluator.hpp>
@@ -62,6 +63,11 @@ std::vector<float> read_floats(const Json& arr) {
 }
 
 // float32-amplitude parity: the C++ kernels return float vectors already.
+// Windows/MSVC note: the fixtures were frozen from the glibc/Python libm;
+// MSVC's libm differs only inside trig-cancellation tails (values below
+// 1e-12 against O(1) wavelet amplitudes). Exact equality everywhere; on
+// _WIN32 a declared 1e-12 absolute tolerance covers those tails
+// (tie_evaluator-residual tolerance precedent).
 bool same_float(const std::vector<float>& got, const Json& expected,
                 const std::string& label) {
     if (got.size() != expected.size()) {
@@ -74,10 +80,14 @@ bool same_float(const std::vector<float>& got, const Json& expected,
         if (std::isnan(want)) {
             check(std::isnan(got[i]), label + " [" + std::to_string(i) + "]");
         } else {
-            check(static_cast<double>(got[i]) == want,
-                  label + " [" + std::to_string(i) + "] got " +
-                      std::to_string(got[i]) + " want " +
-                      std::to_string(want));
+            const bool ok = static_cast<double>(got[i]) == want
+#ifdef _WIN32
+                            || std::abs(static_cast<double>(got[i]) - want) <= 1e-12
+#endif
+                ;
+            check(ok, label + " [" + std::to_string(i) + "] got " +
+                          std::to_string(got[i]) + " want " +
+                          std::to_string(want));
         }
     }
     return true;
@@ -397,6 +407,119 @@ int main() {
             cal.twt().end());
         same_double(twt_tail, w.at("from_sonic_twt_tail"),
                     w.at("name").get<std::string>() + ".twt_tail");
+    }
+
+    // log_tie closure (kernel composition has no Python fixture yet —
+    // the closure replays the tie against the kernel's own synthetic):
+    // a graded layered earth, checkshot-calibrated, tied against the
+    // synthetic it generates, then against a 10-sample delayed copy.
+    {
+        pwb::viz::well_tie::LogTieInput input;
+        for (double depth = 100.0; depth <= 1000.0; depth += 2.0) {
+            const double velocity = 2400.0 + 0.8 * depth;  // m/s
+            input.sonic.depth_m.push_back(depth);
+            input.sonic.values.push_back(1e6 / velocity);  // us/m
+            input.density.depth_m.push_back(depth);
+            input.density.values.push_back(2.2 + 2e-4 * depth);  // g/cm3
+        }
+        input.sonic.unit = "us/m";
+        input.density.unit = "g/cm3";
+        for (int k = 0; k < 9; ++k) {
+            const double depth = 100.0 + 112.5 * k;
+            input.checkshot_depth_m.push_back(depth);
+            input.checkshot_twt_ms.push_back(0.8 * depth);  // ms
+        }
+        input.dt_ms = 2.0;
+        input.t0_ms = 0.0;
+        input.frequency_hz = 30.0;
+        input.max_shift_ms = 100.0;
+        // Seed run: the synthetic only depends on the logs/calibration/
+        // wavelet, so any varying placeholder trace obtains it.
+        auto seed = input;
+        for (std::size_t j = 0; j < 501; ++j) {
+            seed.seismic.push_back(0.3 * std::sin(0.07 * static_cast<double>(j)));
+        }
+        const auto first = pwb::viz::well_tie::tie_logs_to_seismic(seed);
+        check(first.synthetic.size() == 501, "log_tie synthetic size");
+        // Exact self-tie: r == 1 at lag 0.
+        auto self = input;
+        self.seismic = first.synthetic;
+        const auto exact = pwb::viz::well_tie::tie_logs_to_seismic(self);
+        check(std::abs(exact.correlation - 1.0) < 1e-9,
+              "log_tie self correlation");
+        check(exact.shift_ms == 0.0, "log_tie self lag");
+        check(exact.overlap_samples >= 8, "log_tie overlap floor");
+        // 10-sample delayed seismic: recovered lag is +10 samples (the
+        // synthetic must move later by 20 ms), overlap excludes the
+        // delayed-in head.
+        auto delayed = input;
+        delayed.seismic.assign(501, 0.0);
+        for (std::size_t j = 10; j < delayed.seismic.size(); ++j) {
+            delayed.seismic[j] = first.synthetic[j - 10];
+        }
+        delayed.initial_shift_ms = 4.0;
+        const auto shifted = pwb::viz::well_tie::tie_logs_to_seismic(delayed);
+        check(std::abs(shifted.correlation - 1.0) < 1e-9,
+              "log_tie delayed correlation");
+        // initial_shift_ms is baked into the synthetic; shift_ms reports
+        // the TOTAL alignment (initial + residual lag), which recovers
+        // the true 10-sample delay independent of the initial guess.
+        check(std::abs(shifted.shift_ms - 10 * input.dt_ms) < 1e-9,
+              "log_tie delayed lag");
+        // Unit normalization: us/ft + kg/m3 inputs tie identically.
+        auto imperial = input;
+        for (auto& v : imperial.sonic.values) v /= pwb::viz::well_tie::kUsFtToUsM;
+        imperial.sonic.unit = "us/ft";
+        for (auto& v : imperial.density.values) v *= 1000.0;
+        imperial.density.unit = "kg/m3";
+        imperial.seismic = first.synthetic;
+        const auto normalized = pwb::viz::well_tie::tie_logs_to_seismic(imperial);
+        check(std::abs(normalized.correlation - exact.correlation) < 1e-9,
+              "log_tie unit-normalized correlation");
+        // Sonic-only calibration carries the checkshot warning.
+        auto sonic_only = input;
+        sonic_only.checkshot_depth_m.clear();
+        sonic_only.checkshot_twt_ms.clear();
+        sonic_only.seismic = first.synthetic;
+        const auto integrated = pwb::viz::well_tie::tie_logs_to_seismic(sonic_only);
+        check(integrated.warning.find("checkshots") != std::string::npos,
+              "log_tie sonic-only warning");
+        // Cancellation and refusal paths.
+        bool threw = false;
+        try {
+            (void)pwb::viz::well_tie::tie_logs_to_seismic(
+                self, [] { return true; });
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        check(threw, "log_tie cancellation throws");
+        threw = false;
+        try {
+            auto bad = self;
+            bad.density.unit = "banana";
+            (void)pwb::viz::well_tie::tie_logs_to_seismic(bad);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        check(threw, "log_tie unsupported density unit throws");
+        threw = false;
+        try {
+            auto bad = self;
+            bad.seismic.assign(4, 0.0);
+            (void)pwb::viz::well_tie::tie_logs_to_seismic(bad);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        check(threw, "log_tie short seismic throws");
+        threw = false;
+        try {
+            auto bad = self;
+            bad.density.depth_m.pop_back();
+            (void)pwb::viz::well_tie::tie_logs_to_seismic(bad);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        check(threw, "log_tie size mismatch throws");
     }
 
     negative_self_check(payload, PWB_VIZ_B_WELL_TIE_FIXTURE);

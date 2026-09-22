@@ -1,7 +1,7 @@
 // Plugin loading, negotiation and the lease/refcount unload policy — the
-// implementation of plugin_loader.hpp over plugin_abi.hpp. POSIX dlopen
-// implementation (the platform this line ships on); the C ABI surface makes
-// a LoadLibrary port mechanical without touching any other file.
+// implementation of plugin_loader.hpp over plugin_abi.hpp. dlopen on POSIX,
+// LoadLibrary on Windows (the C ABI surface keeps the two identical); the
+// dl_* shims below absorb the API delta so the loader body is shared.
 //
 // Locking: PluginLoader::mutex_ guards the module table; each ModuleState
 // has its own mutex for leases/pending/finalized transitions. The deferred
@@ -9,15 +9,58 @@
 // reverse), so there is no lock-order cycle.
 #include <pwb/providers/plugin_loader.hpp>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <string>
 
 namespace pwb::providers {
 
 namespace {
+
+// Platform dl shims: LoadLibrary uses HMODULE (an opaque handle that fits
+// void*) and has no error string query — GetLastError plus the failing
+// call name is the closest honest detail.
+void* dl_open(const char* path) {
+#ifdef _WIN32
+    return static_cast<void*>(::LoadLibraryA(path));
+#else
+    return ::dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#endif
+}
+
+void* dl_sym(void* handle, const char* symbol) {
+#ifdef _WIN32
+    return reinterpret_cast<void*>(::GetProcAddress(
+        static_cast<HMODULE>(handle), symbol));
+#else
+    return ::dlsym(handle, symbol);
+#endif
+}
+
+void dl_close(void* handle) {
+#ifdef _WIN32
+    ::FreeLibrary(static_cast<HMODULE>(handle));
+#else
+    ::dl_close(handle);
+#endif
+}
+
+std::string dl_error() {
+#ifdef _WIN32
+    return "LoadLibrary/GetProcAddress failed (GetLastError=" +
+           std::to_string(::GetLastError()) + ")";
+#else
+    const char* detail = ::dlerror();
+    return detail != nullptr ? std::string(detail) : std::string();
+#endif
+}
 
 Json parse_json_or_throw(const std::string& text, const std::string& path,
                          const std::string& provider_hint) {
@@ -194,7 +237,7 @@ void PluginLoader::finalize_module_now(ModuleState& state) const {
         if (state.finalized || state.leases > 0) return;  // raced: keep module
         if (state.shutdown != nullptr) state.shutdown();
         if (state.handle != nullptr) {
-            dlclose(state.handle);
+            dl_close(state.handle);
             state.handle = nullptr;
         }
         state.finalized = true;
@@ -264,7 +307,7 @@ PluginLoader::~PluginLoader() {
         }
         if (state->shutdown != nullptr) state->shutdown();
         if (state->handle != nullptr) {
-            dlclose(state->handle);
+            dl_close(state->handle);
             state->handle = nullptr;
         }
         state->finalized = true;
@@ -294,16 +337,14 @@ PluginInfo PluginLoader::load(const std::filesystem::path& module_path) {
         }
     }
 
-    void* handle = dlopen(path_text.c_str(), RTLD_NOW | RTLD_LOCAL);
+    void* handle = dl_open(path_text.c_str());
     if (handle == nullptr) {
-        const char* detail = dlerror();
-        throw PluginLoadError(path_text,
-                              detail != nullptr ? std::string(detail) : std::string());
+        throw PluginLoadError(path_text, dl_error());
     }
     auto resolve = [&](const char* symbol) -> void* {
-        void* address = dlsym(handle, symbol);
+        void* address = dl_sym(handle, symbol);
         if (address == nullptr) {
-            dlclose(handle);
+            dl_close(handle);
             throw PluginLoadError(path_text, std::string("缺少符号 ") + symbol);
         }
         return address;
@@ -322,11 +363,11 @@ PluginInfo PluginLoader::load(const std::filesystem::path& module_path) {
     // shutdown is optional (all modules with the glue export it; hand-rolled
     // C modules may not).
     auto* shutdown = reinterpret_cast<PwbFnPluginShutdown>(
-        dlsym(handle, "pwb_plugin_shutdown"));
+        dl_sym(handle, "pwb_plugin_shutdown"));
 
     const PwbPluginDescription* description = describe();
     if (description == nullptr) {
-        dlclose(handle);
+        dl_close(handle);
         throw PluginDescriptorError(path_text, "", "pwb_plugin_describe 返回空");
     }
     // Copy every field we still need BEFORE any dlclose: after it, module
@@ -339,7 +380,7 @@ PluginInfo PluginLoader::load(const std::filesystem::path& module_path) {
         }
     }
     if (module_abi != kPluginAbiVersion) {
-        dlclose(handle);
+        dl_close(handle);
         throw PluginAbiError(path_text, kPluginAbiVersion, module_abi);
     }
     std::vector<std::string> missing;
@@ -349,12 +390,12 @@ PluginInfo PluginLoader::load(const std::filesystem::path& module_path) {
         }
     }
     if (!missing.empty()) {
-        dlclose(handle);
+        dl_close(handle);
         throw PluginCapabilityError(path_text, std::move(missing));
     }
     const int count = provider_count();
     if (count <= 0) {
-        dlclose(handle);
+        dl_close(handle);
         throw PluginDescriptorError(path_text, "", "模块未声明 provider");
     }
 
@@ -409,7 +450,7 @@ PluginInfo PluginLoader::load(const std::filesystem::path& module_path) {
         for (const auto& provider_id : state->info.provider_ids) {
             registry_.unregister(provider_id);
         }
-        dlclose(handle);
+        dl_close(handle);
         throw;
     }
 

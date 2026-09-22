@@ -10,7 +10,18 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#ifdef _WIN32
+#include <process.h>  // _getpid
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(test_pid());
+#endif
+} }
 #include <filesystem>
 #include <string>
 
@@ -115,7 +126,7 @@ Json constraint_layers() {
 
 int main() {
     const fs::path dir = fs::temp_directory_path()
-        / ("fault_lifecycle_test_" + std::to_string(::getpid()));
+        / ("fault_lifecycle_test_" + std::to_string(test_pid()));
     fs::remove_all(dir);
     const fs::path fault_dir = dir / "faults";
     Json project = Json::object();

@@ -16,7 +16,18 @@
 
 #include <cstdio>
 #include <cstdlib>
+#ifdef _WIN32
+#include <process.h>  // _getpid
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(test_pid());
+#endif
+} }
 #include <filesystem>
 #include <string>
 
@@ -63,7 +74,7 @@ struct TestProject {
         TestProject project;
         project.dir = fs::temp_directory_path() /
                       ("closure_science_mock_" + name + "_" +
-                       std::to_string(static_cast<long long>(::getpid())));
+                       std::to_string(static_cast<long long>(test_pid())));
         fs::remove_all(project.dir);
         fs::create_directories(project.dir);
         project.project_file = project.dir / (name + ".paleo.json");

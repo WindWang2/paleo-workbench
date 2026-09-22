@@ -1778,14 +1778,16 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
        TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt AND
        TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt AND
        TARGET Pwb::UiMapQgis AND TARGET Pwb::UiReviewQt AND
-       TARGET Pwb::UiSeqvizQt)
-        # (No Pwb::VisualizationWellTie here: the auto-tie hook is an
-        # honest refusal until real logs reach the joint page — the kernel
-        # link survived a rewrite that removed its last include.)
+       TARGET Pwb::UiSeqvizQt AND
+       TARGET Pwb::VisualizationWellTie AND TARGET Pwb::VisualizationCrossWell)
+        # Auto-tie runs the real well_tie log-tie kernel on the VIZ-B
+        # workspace's LAS curves (cross_well WellColumnData snapshot).
         target_sources(pwb-platform PRIVATE
-            apps/paleo_workbench_platform/joint_analysis_install.cpp)
+            apps/paleo_workbench_platform/joint_analysis_install.cpp
+            apps/paleo_workbench_platform/horizon_interpretation_io.cpp)
         target_link_libraries(pwb-platform PRIVATE
-            Pwb::UiWorkers Pwb::SeismicViewer Pwb::GeoModel)
+            Pwb::UiWorkers Pwb::SeismicViewer Pwb::GeoModel Pwb::Interchange
+            Pwb::VisualizationWellTie Pwb::VisualizationCrossWell)
         target_compile_definitions(pwb-platform PRIVATE
             PWB_WITH_JOINT_ANALYSIS=1)
     endif()
@@ -1871,13 +1873,16 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
             ENVIRONMENT "MALLOC_CHECK_=3;QT_QPA_PLATFORM=offscreen")
 
         # geoviz final closure — joint-analysis install tests (hook
-        # contract: sidecar persistence, RGB overlay, demo stratal path).
+        # contract: sidecar persistence, RGB overlay, demo stratal path,
+        # real-log auto-tie on the fixture volume).
         if(TARGET Pwb::UiWorkers AND TARGET Pwb::SeismicViewer AND
-           TARGET Pwb::GeoModel)
+           TARGET Pwb::GeoModel AND TARGET Pwb::VisualizationWellTie AND
+           TARGET Pwb::VisualizationCrossWell)
             add_executable(viz_c_joint_analysis
                 tests/cpp/viz_c/joint_analysis_test.cpp
                 tests/cpp/viz_c/test_main.cpp
                 apps/paleo_workbench_platform/joint_analysis_install.cpp
+                apps/paleo_workbench_platform/horizon_interpretation_io.cpp
                 apps/paleo_workbench_platform/job_center.cpp
                 apps/paleo_workbench_platform/viz_c_joint_host.cpp
                 apps/paleo_workbench_platform/viz_c_joint_volume.cpp
@@ -1886,7 +1891,8 @@ if(TARGET pwb-platform AND TARGET Pwb::Geo3DViz
             target_compile_features(viz_c_joint_analysis PRIVATE cxx_std_20)
             target_link_libraries(viz_c_joint_analysis PRIVATE
                 Pwb::Geo3DViz Pwb::UiWellseisQt Pwb::UiWorkers
-                Pwb::SeismicViewer Pwb::GeoModel
+                Pwb::SeismicViewer Pwb::GeoModel Pwb::Interchange Pwb::Project
+                Pwb::VisualizationWellTie Pwb::VisualizationCrossWell
                 Pwb::SeismicService Pwb::JobQt Qt6::Widgets)
             target_include_directories(viz_c_joint_analysis PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/viz_c
@@ -2021,6 +2027,15 @@ if(TARGET pwb-platform
         target_link_libraries(pwb-platform PRIVATE
             Pwb::UiControllers Pwb::UiControllersQt
             Pwb::UiWorkstationQt Pwb::UiReviewQt Pwb::WorkflowRuntime)
+        # workflow_install's constraint capabilities join when the
+        # CONV-32 interpretation slice is in this configure.
+        if(TARGET Pwb::WorkflowInterpretation)
+            target_link_libraries(pwb-platform PRIVATE
+                Pwb::WorkflowInterpretation)
+        endif()
+        if(TARGET Pwb::FactorFusion)
+            target_link_libraries(pwb-platform PRIVATE Pwb::FactorFusion)
+        endif()
         # The compile/product services join when the closure_workflow
         # slice is in this configure (PWB_BUILD_CPP_CLOSE_02); without it
         # the seams stay unset and the core degrades honestly.

@@ -31,7 +31,18 @@
 #include <set>
 #include <string>
 #include <thread>
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(::getpid());
+#endif
+} }
 
 #include <pwb/domain/json.hpp>
 #include <pwb/ui_data_qt/map_edit_items.hpp>
@@ -69,11 +80,12 @@ namespace {
 // live on the installed panel.
 void composition_battery(pwb::ui_seqviz::qt::CompositionPanel& panel) {
     using pwb::mapping_document::Composition;
-    // 1. Template library: the combo carries the nine built-in templates.
-    PWB_CHECK_MSG(panel.template_combo()->count() == 9,
-                  ("template library: nine built-in templates (got " +
+    // 1. Template library includes the professional geographic product path.
+    PWB_CHECK_MSG(panel.template_combo()->count() == 10,
+                  ("template library: ten built-in templates (got " +
                    std::to_string(panel.template_combo()->count()) + ")")
                       .c_str());
+    PWB_CHECK(panel.template_combo()->findData(QStringLiteral("professional_geographic")) >= 0);
     // 2. The panel opens on a template document, not the blank A4 start.
     const Composition* doc = panel.document();
     PWB_CHECK(doc != nullptr);
@@ -321,7 +333,7 @@ int install_battery() {
 int factor_kernel_battery(QgsApplication& app) {
     namespace fs = std::filesystem;
     const fs::path tmp = fs::temp_directory_path()
-        / ("pwb_v14_factor_e2e_" + std::to_string(::getpid()));
+        / ("pwb_v14_factor_e2e_" + std::to_string(test_pid()));
     fs::create_directories(tmp);
     const fs::path project_file = tmp / "e2e.paleo.json";
 

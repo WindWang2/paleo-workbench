@@ -32,6 +32,10 @@ class QListWidget;
 class QPushButton;
 class QSlider;
 class QSpinBox;
+
+namespace pwb::seismic_viewer {
+class SectionProfileWidget;
+}  // namespace pwb::seismic_viewer
 class QSplitter;
 class QTabWidget;
 class QTextBrowser;
@@ -97,9 +101,13 @@ public:
     // Stratal tab status line / joint top-bar status (host hooks report).
     void set_stratal_status(const QString& text);
     void set_status_text(const QString& text);
+    // Well-tie tab result line (correlation/lag from the auto-tie hook).
+    void set_well_tie_status(const QString& text);
     // Test/verification surface: the stratal tab status line text
     // (definition in the .cpp — QLabel is only forward-declared here).
     [[nodiscard]] QString stratal_status_text() const;
+    // Well-tie tab result line text (same forward-declaration note).
+    [[nodiscard]] QString well_tie_status_text() const;
 
     // Page navigation entry (activate_page + showEvent parity).
     void activate_page();
@@ -136,6 +144,10 @@ private:
     void refresh_joint_fence_tree();
     void update_coordinate_note();
     void on_scene_updated();
+    // 2D fence profile: pulls the curtain's cached strip + projected
+    // wells through the host seam and feeds the raster profile widget
+    // (placeholder stays when there is no active fence).
+    void refresh_fence_profile();
     void fill_joint_well_combos();
     void rebuild_joint_well_combos(const QString& preferred_a,
                                    const QString& preferred_b);
@@ -200,6 +212,9 @@ private:
     QLabel* time_chip_ = nullptr;
     QLabel* coord_note_ = nullptr;  // 坐标/单位说明 (06)
     QLabel* joint_2d_placeholder_ = nullptr;
+    // 2D fence VD profile (raster seismic_viewer widget; definition in
+    // the .cpp — only this pointer crosses the header).
+    pwb::seismic_viewer::SectionProfileWidget* fence_profile_ = nullptr;
     bool depth_domain_2d_ = false;
     QComboBox* seismic_color_combo_ = nullptr;
     QComboBox* gr_color_combo_ = nullptr;

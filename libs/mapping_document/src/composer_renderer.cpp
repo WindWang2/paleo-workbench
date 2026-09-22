@@ -1265,6 +1265,8 @@ private:
     }
 
     std::string render_grid(const ComposerElement& elem) {
+        if (elem.properties.is_object() && elem.properties.value("geographic", false))
+            throw std::invalid_argument("geographic grids require the native QGIS layout renderer");
         const double x = elem.x_mm;
         const double y = elem.y_mm;
         const double w = elem.width_mm;

@@ -8,6 +8,7 @@
 add_library(pwb_visualization_well_tie STATIC
     auto_tie.cpp
     calibration.cpp
+    log_tie.cpp
     sonic_units.cpp
     synthetic.cpp
     tie_evaluator.cpp

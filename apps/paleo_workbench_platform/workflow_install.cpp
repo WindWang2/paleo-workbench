@@ -85,6 +85,7 @@
 #include <pwb/domain/diagnostics.hpp>
 #include <pwb/domain/ids.hpp>
 #include <pwb/factor_host/canonical_json.hpp>
+#include <pwb/factor_fusion/factor_grid.hpp>
 #include <pwb/mapping/representative_facies.hpp>
 #include <pwb/prediction/spatial_result.hpp>
 #include <pwb/ui_composite/composite_controller.hpp>
@@ -104,12 +105,17 @@
 #if defined(PWB_WITH_CLOSURE_WORKFLOW)
 #include <pwb/closure_workflow/grid_seams.hpp>
 #include <pwb/closure_workflow/integrated_compilation.hpp>
+#endif
+// The Qt-free interpretation headers are linked whenever the
+// CONV-32 slice is in the build (see the CMake conditional); the
+// science/catalog blocks below consume them in every shape.
 #include <pwb/workflow_interpretation/compilation.hpp>
 #include <pwb/workflow_interpretation/dependencies.hpp>
 #include <pwb/workflow_interpretation/integrated_interpretation.hpp>
 #include <pwb/workflow_interpretation/revision.hpp>
+// workflow_runtime is unconditionally linked; the constraint
+// commit block below (FACTOR_KERNEL guard) needs it in every shape.
 #include <pwb/workflow_runtime/constraint_versions.hpp>
-#endif
 #include <pwb/mapping/contouring.hpp>
 #include <pwb/mapping/factor_grid_io.hpp>
 #include <pwb/mapping/interpolator.hpp>

@@ -728,6 +728,20 @@ void MainWindow::buildUi() {
         joint_deps.project_directory = [this] {
             return joint_project_directory_;
         };
+        joint_deps.project_document = [this] {
+            const auto store = context_.projectStore();
+            return store ? store->document().root() : pwb::domain::Json::object();
+        };
+#ifdef PWB_WITH_VIZ_B
+        // Real LAS curves for the joint auto-tie (copied on the GUI
+        // thread by the hook before the tie job starts). Without VIZ-B
+        // the hook keeps its honest "no logs" refusal.
+        joint_deps.well_logs = [this] {
+            return viz_b_dock_ != nullptr
+                       ? viz_b_dock_->well_columns()
+                       : std::vector<pwb::viz::cross_well::WellColumnData>{};
+        };
+#endif
         pwb::app::joint_analysis::install(joint_deps);
     }
 #endif
@@ -764,6 +778,24 @@ void MainWindow::buildUi() {
             -> std::shared_ptr<pwb::application::PwbDataStore> {
             return context_.projectStore();
         };
+#ifdef PWB_WITH_CONV_29
+        closure_install.layout_export = [this](const std::string& composition,
+                const std::string& path, const std::string& format, double dpi) {
+            auto& map = context_.session().map();
+            const auto state = pwb::domain::Json::parse(map.canvas_state_json());
+            pwb::qgis::CompositionExportRequest request;
+            request.format = format;
+            request.dpi = dpi;
+            request.force_vector = format == "svg" || format == "pdf";
+            request.crs = state.value("crs", std::string());
+            if (state.contains("extent") && state["extent"].is_array() && state["extent"].size() == 4) {
+                request.has_extent = true;
+                for (int i = 0; i < 4; ++i) request.extent[i] = state["extent"][i].get<double>();
+            }
+            pwb::qgis::CompositionLayoutService service(map);
+            return service.export_layout(composition, std::filesystem::u8path(path), request);
+        };
+#endif
         pwb::app::closure_mapping::install(closure_install);
     }
 #endif

@@ -1,3 +1,10 @@
+#include <pwb/seismic_viewer/section_profile_widget.hpp>
+#include <QDialog>
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QRegularExpression>
+#include <QSettings>
+#include <stdexcept>
 #include <pwb/seismic_viewer/attribute_fusion_core.hpp>
 #include <pwb/seismic_viewer/color_maps.hpp>
 #include <pwb/seismic_viewer/seismic_slice_widget.hpp>
@@ -424,6 +431,7 @@ private:
 // SeismicSliceWidget::Impl
 // ---------------------------------------------------------------------------
 struct SeismicSliceWidget::Impl {
+    std::shared_ptr<pwb::viz::ISeismicVolume> source;
     std::unique_ptr<SliceController> controller;
     std::optional<pwb::viz::VolumeGeometryV1> geometry; // plain copy, not the volume
     ViewerState state{ViewerState::no_source};
@@ -789,6 +797,36 @@ SeismicSliceWidget::SeismicSliceWidget(QWidget* parent) : QWidget(parent) {
     toolbar->addWidget(impl_->range_min_spin);
     toolbar->addWidget(impl_->range_max_spin);
     toolbar->addWidget(impl_->reset_button);
+    auto* arbitrary_button = new QPushButton(tr("Arbitrary line..."), this);
+    arbitrary_button->setObjectName("arbitraryLineButton");
+    toolbar->addWidget(arbitrary_button);
+    connect(arbitrary_button, &QPushButton::clicked, this, [this] {
+        if (!impl_->geometry) return;
+        const auto& g = *impl_->geometry;
+        const QString key = "seismic/arbitrary/" + QString::fromUtf8(impl_->identity.volume_id).toUtf8().toHex();
+        const QString initial = QSettings().value(key,
+            QString("%1,%2\n%3,%4").arg(g.origin[0]).arg(g.origin[1])
+                .arg(g.axis_value(VolumeAxis::inline_, g.shape[0]-1))
+                .arg(g.axis_value(VolumeAxis::crossline, g.shape[1]-1))).toString();
+        bool accepted = false;
+        const auto text = QInputDialog::getMultiLineText(this, tr("Arbitrary seismic section"),
+            tr("Inline,crossline survey numbers; one vertex per line. All samples are retained."), initial, &accepted);
+        if (!accepted) return;
+        try {
+            std::vector<std::pair<double,double>> vertices;
+            for (const auto& line : text.split('\n', Qt::SkipEmptyParts)) {
+                const auto fields = line.trimmed().split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
+                bool ok_i = false, ok_x = false;
+                if (fields.size() != 2) throw std::invalid_argument("each vertex requires inline,crossline");
+                const double i = fields[0].toDouble(&ok_i), x = fields[1].toDouble(&ok_x);
+                if (!ok_i || !ok_x) throw std::invalid_argument("invalid survey coordinate");
+                vertices.emplace_back(i,x);
+            }
+            if (open_polyline_section(vertices)) QSettings().setValue(key,text);
+        } catch (const std::exception& ex) {
+            QMessageBox::warning(this,tr("Invalid arbitrary line"),QString::fromUtf8(ex.what()));
+        }
+    });
 
     auto* vizd_toolbar = new QHBoxLayout;
     vizd_toolbar->addWidget(mode_label);
@@ -970,6 +1008,10 @@ SeismicSliceWidget::~SeismicSliceWidget() {
 
 void SeismicSliceWidget::set_volume(std::shared_ptr<pwb::viz::ISeismicVolume> volume,
                                     VolumeIdentity identity, std::uint64_t revision) {
+    for (auto* dialog : findChildren<QDialog*>("arbitrarySectionDialog", Qt::FindDirectChildrenOnly))
+        delete dialog; // cancel/join extraction before releasing the old survey
+    volume = serialized_volume(std::move(volume));
+    impl_->source = volume;
     impl_->identity = std::move(identity);
     impl_->volume_revision_value = revision;
     impl_->geometry.reset();
@@ -1012,6 +1054,36 @@ void SeismicSliceWidget::set_volume(std::shared_ptr<pwb::viz::ISeismicVolume> vo
         QStringLiteral("volume %1 rev %2")
             .arg(QString::fromStdString(impl_->identity.volume_id))
             .arg(impl_->volume_revision_value));
+}
+
+SectionProfileWidget* SeismicSliceWidget::open_polyline_section(
+    const std::vector<std::pair<double,double>>& vertices) {
+    if (!impl_->source || !impl_->geometry) return nullptr;
+    const auto& geometry = *impl_->geometry;
+    if (vertices.size() < 2 || geometry.step[0] == 0 || geometry.step[1] == 0)
+        throw std::invalid_argument("a nondegenerate survey and at least two vertices are required");
+    std::vector<std::pair<double,double>> indices;
+    for (const auto& [il,xl] : vertices) {
+        const double i=(il-geometry.origin[0])/geometry.step[0];
+        const double x=(xl-geometry.origin[1])/geometry.step[1];
+        if (!std::isfinite(i)||!std::isfinite(x)||i<0||x<0||i>geometry.shape[0]-1||x>geometry.shape[1]-1)
+            throw std::invalid_argument("arbitrary-line vertex lies outside the survey");
+        indices.emplace_back(i,x);
+    }
+    bool distinct = false;
+    for(std::size_t k=1;k<indices.size();++k)
+        distinct = distinct || std::hypot(indices[k].first-indices[k-1].first,indices[k].second-indices[k-1].second)>=0.01;
+    if(!distinct) throw std::invalid_argument("arbitrary line has no nonzero segment");
+    auto* dialog = new QDialog(this);
+    dialog->setObjectName("arbitrarySectionDialog");
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(tr("Arbitrary section — %1").arg(QString::fromStdString(impl_->identity.volume_id)));
+    auto* profile = new SectionProfileWidget(dialog);
+    auto* layout = new QVBoxLayout(dialog); layout->addWidget(profile);
+    profile->set_color_map(impl_->color_map_name);
+    profile->load_polyline(impl_->source,std::move(indices));
+    dialog->resize(950,620); dialog->show();
+    return profile;
 }
 
 void SeismicSliceWidget::clear_volume() { set_volume(nullptr, VolumeIdentity{}, 0); }

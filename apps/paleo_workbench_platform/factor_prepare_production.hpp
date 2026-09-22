@@ -64,6 +64,18 @@ using pwb::domain::Json;
 int next_factor_prepare_generation();
 int current_factor_prepare_generation();
 
+// gmtime_r/gmtime_s shim (MSVC names the reentrant gmtime differently
+// and swaps the argument order).
+inline std::tm gmtime_utc(const std::time_t& now) {
+    std::tm tm{};
+#ifdef _WIN32
+    gmtime_s(&tm, &now);
+#else
+    gmtime_r(&now, &tm);
+#endif
+    return tm;
+}
+
 // ------------------------------------------------------------- live grids --
 
 // Sealed per-task grid payload (factor_grid_artifacts.py live-cache core:
@@ -194,8 +206,7 @@ public:
     PersistentRuntimeCatalog()
         : RuntimeStore([] {
               const std::time_t now = std::time(nullptr);
-              std::tm tm{};
-              gmtime_r(&now, &tm);
+              const std::tm tm = gmtime_utc(now);
               std::ostringstream out;
               out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S+00:00");
               return out.str();

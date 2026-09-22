@@ -72,6 +72,8 @@ enum class DisplayMode : std::uint8_t {
 // a volume mismatch still loads and is reported).
 enum class PicksLoadStatus : std::uint8_t { ok, mismatched_volume, error };
 
+class SectionProfileWidget;
+
 class SeismicSliceWidget final : public QWidget {
 public:
     using SelectionCallback = std::function<void(const SliceSelectionEvent&)>;
@@ -90,6 +92,12 @@ public:
     void set_volume(std::shared_ptr<pwb::viz::ISeismicVolume> volume,
                     VolumeIdentity identity, std::uint64_t revision);
     void clear_volume();
+    // Opens a native, asynchronous full-resolution arbitrary section. Vertices
+    // are physical inline/crossline numbers, converted through survey geometry.
+    // Throws for invalid/out-of-survey coordinates; no volume returns nullptr.
+    SectionProfileWidget* open_polyline_section(
+        const std::vector<std::pair<double, double>>& line_vertices);
+
 
     // --- view controls (programmatic mirrors of the on-widget UI) ---------
     void set_axis(pwb::viz::VolumeAxis axis); // clamps index, resubmits

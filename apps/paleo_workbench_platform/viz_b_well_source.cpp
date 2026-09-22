@@ -38,6 +38,8 @@ std::optional<pwb::viz::cross_well::WellColumnData> well_column_from_document(
         const std::size_t n = std::min(coords.length(), values.length());
         pwb::viz::cross_well::WellCurve out;
         out.name = curve.mnemonic;
+        out.unit = curve.unit;
+        out.depth_unit = axis->unit;
         for (std::size_t i = 0; i < n; ++i) {
             // 类型安全访问（stride/scalar 兼容），null 位图 = 缺测。
             const auto depth = coords.value_as_double(i);

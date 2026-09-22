@@ -9,7 +9,11 @@
 //   -> commit_contour_drafts_full / well-table bridge + QC.
 #include <cassert>
 #include <cmath>
+#ifdef _WIN32
+#include <process.h>  // _getpid
+#else
 #include <unistd.h>
+#endif
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -1017,7 +1021,14 @@ void test_factor_context_provider() {
 int main(int argc, char** argv) {
     std::filesystem::path tmp =
         std::filesystem::temp_directory_path()
-        / ("pwb_factor_prepare_" + std::to_string(::getpid()));
+        / ("pwb_factor_prepare_" +
+           std::to_string(
+#ifdef _WIN32
+               _getpid()
+#else
+               ::getpid()
+#endif
+               ));
     std::filesystem::create_directories(tmp);
 
     LiveFactorGridStore grids;

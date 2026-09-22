@@ -77,6 +77,9 @@ class VizBCrossWellDock : public QDockWidget {
     [[nodiscard]] std::size_t well_count() const {
         return wells_.size();
     }
+    [[nodiscard]] const std::vector<pwb::viz::cross_well::WellColumnData>& well_columns() const {
+        return wells_;
+    }
     [[nodiscard]] std::size_t pick_count() const {
         return picks_model_.all_picks().size();
     }

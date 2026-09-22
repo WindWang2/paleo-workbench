@@ -16,6 +16,9 @@
 // touches Qt, I/O or the volume lifecycle.
 
 #include <cstdint>
+#include <functional>
+
+namespace pwb::viz { class ISeismicVolume; }
 #include <span>
 #include <utility>
 #include <vector>
@@ -121,5 +124,14 @@ sample_polyline_slice(std::span<const float> volume, std::int64_t n_i,
                       std::int64_t n_x, std::int64_t n_s,
                       std::span<const std::pair<double, double>> points,
                       double samples_per_unit = 1.0);
+
+// Source-backed equivalent: at most two inline planes in addition to the output;
+// all sample positions and IEEE interpolation semantics match the dense oracle.
+// Caller serializes source access. Throws on invalid input, I/O failure or cancel.
+[[nodiscard]] PolylineSample sample_polyline_slice(
+    pwb::viz::ISeismicVolume& source,
+    std::span<const std::pair<double, double>> points,
+    double samples_per_unit = 1.0,
+    const std::function<bool()>& cancelled = {});
 
 } // namespace pwb::seismic_viewer::display

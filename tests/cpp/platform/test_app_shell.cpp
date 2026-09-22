@@ -20,7 +20,18 @@
 
 #include <filesystem>
 #include <fstream>
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(::getpid());
+#endif
+} }
 
 #include <pwb/application/project_session.hpp>
 #include <pwb/application/adapters/data_store.hpp>
@@ -349,7 +360,7 @@ int main(int argc, char** argv) {
                            .dump();
         };
         const fs::path dir = fs::temp_directory_path()
-            / ("pwb_project_switch_" + std::to_string(::getpid()));
+            / ("pwb_project_switch_" + std::to_string(test_pid()));
         const fs::path file_a = dir / "switch-a.paleo.json";
         const fs::path file_b = dir / "switch-b.paleo.json";
         make_project(file_a, "切换工程A");

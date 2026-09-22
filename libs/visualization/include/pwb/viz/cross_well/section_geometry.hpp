@@ -79,6 +79,8 @@ struct WellCurve {
     std::string name;
     std::vector<double> depths;
     std::vector<double> values;
+    std::string unit;
+    std::string depth_unit = "m";
 };
 [[nodiscard]] std::optional<WellCurve> extract_curve(
     const std::vector<WellCurve>& curves,

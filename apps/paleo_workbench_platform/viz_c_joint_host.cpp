@@ -26,6 +26,8 @@ using pwb::geo3d_viz::joint::VerticalDomain;
 using pwb::geo3d_viz::joint::WellSeismicScene;
 using pwb::seismic_service::SeismicVolumeService;
 using pwb::ui_wellseis::qt::JointHostController;
+using pwb::ui_wellseis::qt::JointFenceProfileStrip;
+using pwb::ui_wellseis::qt::JointFenceProfileWell;
 using pwb::ui_wellseis::qt::JointSceneSnapshot;
 
 namespace {
@@ -412,6 +414,37 @@ JointSceneSnapshot VizCJointHost::scene_snapshot() const {
 bool VizCJointHost::has_scene() const { return true; }
 
 std::string VizCJointHost::engine_error() const { return engine_error_; }
+
+std::optional<JointFenceProfileStrip>
+VizCJointHost::active_fence_strip() const {
+    // Same cached extraction the 3D curtain renders — the 2D view never
+    // re-reads the volume on its own.
+    const auto strip = scene_.extract_active_fence();
+    if (!strip) {
+        return std::nullopt;
+    }
+    JointFenceProfileStrip out;
+    out.amplitude = strip->amplitude;
+    out.arc_length_m = strip->arc_length_m;
+    out.sample_axis = strip->sample_axis;
+    out.sample_unit = scene_.vertical_domain() == VerticalDomain::Depth
+                          ? std::string("m")
+                          : std::string("ms");
+    return out;
+}
+
+std::vector<JointFenceProfileWell>
+VizCJointHost::active_fence_wells() const {
+    std::vector<JointFenceProfileWell> out;
+    for (const auto& hit : scene_.assemble_active_profile_wells()) {
+        JointFenceProfileWell well;
+        well.name = hit.display_name.empty() ? hit.name : hit.display_name;
+        well.distance_m = hit.s_m;
+        well.tops = hit.tops;
+        out.push_back(std::move(well));
+    }
+    return out;
+}
 
 std::vector<std::pair<std::string, std::string>>
 VizCJointHost::well_options() const {
