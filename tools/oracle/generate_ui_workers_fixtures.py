@@ -230,6 +230,8 @@ def gen_worker_common():
 # ---------------------------------------------------------------------------
 
 def gen_paths():
+    import _legacy_reference
+    _legacy_reference.ensure_legacy_reference()  # archived-reference shim
     from paleo_workbench.project.paths import is_within_directory
     from paleo_workbench.workflow.stratigraphy_correlation import _resource_path
     from paleo_workbench.viz.adapter import VizAdapter

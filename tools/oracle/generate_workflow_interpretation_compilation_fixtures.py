@@ -42,6 +42,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 import paleo_workbench  # noqa: E402
 
 assert str(paleo_workbench.__file__).startswith(str(ROOT)), (

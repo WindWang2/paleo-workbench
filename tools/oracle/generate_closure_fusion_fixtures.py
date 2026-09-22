@@ -31,6 +31,10 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 import paleo_workbench.catalog.grid_artifact as grid_artifact  # noqa: E402
 import paleo_workbench.project.factor_grid_artifacts as fga  # noqa: E402
 import paleo_workbench.project.models as pm  # noqa: E402

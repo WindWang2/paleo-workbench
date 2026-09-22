@@ -27,6 +27,10 @@ from types import SimpleNamespace
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.harness.registry import ActionRegistry, ActionRisk, ActionSpec  # noqa: E402
 from paleo_workbench.providers.execution import validate_parameters  # noqa: E402
 from paleo_workbench.workflow.dag import model as dag_model  # noqa: E402

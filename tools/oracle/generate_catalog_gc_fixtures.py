@@ -26,6 +26,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.catalog import dedup, gc
 from paleo_workbench.catalog.service import DataCatalogService
 from paleo_workbench.catalog.storage import place_managed_file

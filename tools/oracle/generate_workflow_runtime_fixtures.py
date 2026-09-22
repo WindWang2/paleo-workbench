@@ -27,6 +27,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.catalog.types import DataRunRef, DataVersionRef  # noqa: E402
 from paleo_workbench.workflow.current_context import (  # noqa: E402
     CurrentProjectVersionContext,

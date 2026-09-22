@@ -356,6 +356,8 @@ def _ns_to_dict(value):
 
 
 def gen_field_value() -> list:
+    import _legacy_reference
+    _legacy_reference.ensure_legacy_reference()  # archived-reference shim
     from paleo_workbench.viz.prediction_helpers import field_value
 
     cases = [

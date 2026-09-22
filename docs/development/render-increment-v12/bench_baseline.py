@@ -37,6 +37,12 @@ import numpy as np
 
 from PySide6.QtWidgets import QApplication
 
+import sys as _sys  # archived-reference shim (legacy/python_reference)
+
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / 'legacy' / 'python_reference' / 'product'))
+
 from paleo_workbench.mapping.map_render_backend import (
     FallbackMapRenderBackend,
     MapLayerSnapshot,

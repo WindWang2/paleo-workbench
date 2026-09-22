@@ -5,9 +5,11 @@ name: Perf gate (nightly)
 # nightly workflow closes the gap without touching the fast PR gate (ci.yml).
 #
 # Triggers: nightly schedule + manual dispatch only (never on PR push).
-# Scope: bench_interpolation (--quick) + render-engine benchmark + the
-# existing slow perf suite (tests/perf) share one job so native builds are
-# not duplicated. Thresholds below reference issues #933/#934 baselines:
+# Python-retirement note: bench_interpolation retired with the Python
+# product implementation (docs/development/python-retirement/); the gate now
+# covers the render-engine benchmark + the remaining slow perf suite
+# (tests/perf) in one job so native builds are not duplicated. Historical
+# thresholds referenced issues #933/#934 baselines:
 #   - #933: constrained IDW per-cell Python loop ~1.9s @200²×300w, target
 #           <300 ms after cell-batch vectorization.
 #   - #934: single-task IDW through plan kernel +31-53% vs naive (1940 vs
@@ -108,53 +110,10 @@ jobs:
           python -m pip install -e native/well_log_core
           python -c "import well_log_core; assert hasattr(well_log_core, 'fast_las_parse_data'), 'well_log_core symbols missing'"
 
-      - name: Run bench_interpolation (--quick) with threshold gate
-        env:
-          QT_QPA_PLATFORM: offscreen
-          PYTHONFAULTHANDLER: "1"
-        run: |
-          set -o pipefail
-          source native/gdal-vendored/install/env.sh
-          python scripts/bench_interpolation.py --quick --out /tmp/interp_bench.json 2>&1 | tee /tmp/interp_bench.txt
-          cat /tmp/interp_bench.json
-          python - <<'PY'
-          import json, sys
-          data = json.loads(open("/tmp/interp_bench.json").read())
-          # Loose nightly budgets (seconds) — intentionally above the
-          # #933/#934 tight targets so the gate is green today and can be
-          # tightened as optimizations land. Fail only on catastrophic drift.
-          # Thresholds mirror tests/perf/test_interpolation_perf.py soft budgets.
-          budgets = {
-              "S1_single_cold_idw": 8.0,   # 128²×40  (perf suite SMALL)
-              "S6_constrained": 30.0,      # 64²×30
-              "S5_live_cache_hits": 0.05,  # per-hit ms -> total ~ <50ms for 50 hits
-          }
-          failed = []
-          for r in data["results"]:
-              scen = r["scenario"]
-              median = r.get("median_s", r.get("total_s", 0))
-              # S5 uses total_s/per_hit_ms — normalize to total_s
-              if scen == "S5_live_cache_hits":
-                  median = r.get("total_s", 0)
-              # scenario names in bench are exact; budgets keyed by prefix
-              for prefix, budget in budgets.items():
-                  if scen.startswith(prefix):
-                      if median > budget:
-                          failed.append(f"{scen}: {median:.3f}s > budget {budget:.3f}s")
-                      else:
-                          print(f"ok {scen}: {median:.3f}s <= {budget:.3f}s")
-                      break
-          if failed:
-              print("::error::perf gate exceeded budgets:")
-              for f in failed:
-                  print("::error::  " + f)
-              sys.exit(1)
-          print("bench_interpolation gate: all budgets ok")
-          # #933/#934 informational: log multi-batch vs single for future tightening
-          for r in data["results"]:
-              if "multi" in r["scenario"].lower():
-                  print(f"info {r['scenario']}: median={r.get('median_s', 0):.3f}s")
-          PY
+      # (removed) "Run bench_interpolation (--quick) with threshold gate":
+      # scripts/bench_interpolation.py benchmarked the retired Python
+      # implementation (docs/development/python-retirement/); its budgets
+      # retired with it. The native render benchmark below stays.
 
       - name: Run render-engine benchmark with threshold gate
         env:
@@ -203,4 +162,4 @@ jobs:
           set -o pipefail
           source native/gdal-vendored/install/env.sh
           python -m pytest -v --tb=short --timeout=300 -m slow tests/perf/ 2>&1 | tee /tmp/perf-slow.txt
-          echo "perf slow suite: done (thresholds inside tests/perf/test_interpolation_perf.py)"
+          echo "perf slow suite: done (geoviz perf benches; the interpolation thresholds retired with the Python product)"

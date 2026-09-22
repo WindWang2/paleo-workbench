@@ -388,6 +388,8 @@ def reference_summary(classmap, probmap, classes, class_names, nodata_voxels,
 def run_production(volume, model_path, work_root, classes=CLASSES,
                    tile=TILE, overlap=OVERLAP, batch=1):
     """Calls the REAL production Python tiled inference (real ORT)."""
+    import _legacy_reference
+    _legacy_reference.ensure_legacy_reference()  # archived-reference shim
     from paleo_workbench.prediction.tiled_onnx import run_tiled_inference
     import zarr
 

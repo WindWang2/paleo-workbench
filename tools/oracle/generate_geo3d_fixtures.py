@@ -38,6 +38,10 @@ OUT_DIR = REPO / "tests" / "cpp" / "geo3d_viz" / "fixtures"
 def freeze_style_oracle() -> dict:
     import numpy as np
 
+    import _legacy_reference
+
+    _legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
     from paleo_workbench.viz.geomodel.scene_adapter import (
         ObjectStyle,
         _facies_face_colors,

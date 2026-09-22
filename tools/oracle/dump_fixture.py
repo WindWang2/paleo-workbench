@@ -63,6 +63,8 @@ def dump_project(fixdir: Path) -> None:
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
         # 主仓解释器运行时 paleo_workbench 已可导入（主仓根在 sys.path）
+        import _legacy_reference
+        _legacy_reference.ensure_legacy_reference()  # archived-reference shim
         from paleo_workbench.project.models import ProjectDocument
 
         doc = ProjectDocument.model_validate(data)

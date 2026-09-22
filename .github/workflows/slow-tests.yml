@@ -125,8 +125,13 @@ jobs:
           m = re.search(r"(?m)^(\d+)(?:/\d+)? tests? collected", text)
           print(int(m.group(1)) if m else 0)
           ')"
-          echo "slow tests collected: ${count} (baseline 15)"
-          test "${count}" -ge 15
+          echo "slow tests collected: ${count} (baseline 1)"
+          # Python-retirement: the product slow family (real-data e2e,
+          # interpolation perf, SEGY axis contracts, fence probe) retired
+          # with the Python suite (docs/development/python-retirement/).
+          # The remaining slow family is the geoviz realdata smoke + perf
+          # benches — presence stays fail-closed.
+          test "${count}" -ge 1
 
       - name: Run slow tests (real-data smoke + interpolation perf gates)
         env:
@@ -155,9 +160,8 @@ jobs:
               print(
                   "::error::packaging #442/#896: "
                   f"{absent} slow test(s) skipped - the representative "
-                  "data tree / demo SEGY is absent (see tests/test_geoviz_real_data_smoke.py, "
-                  "tests/test_seismic_timeslice_axis_contract.py, "
-                  "tests/test_well_seismic_fence_probe.py). Provide the data and "
+                  "data tree / demo SEGY is absent (see the geoviz realdata "
+                  "smoke family). Provide the data and "
                   "re-run this workflow manually - otherwise the only end-to-end "
                   "vendor-format / SEGY coverage never runs."
               )

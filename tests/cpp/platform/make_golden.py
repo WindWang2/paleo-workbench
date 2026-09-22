@@ -21,6 +21,12 @@ from pathlib import Path
 MAIN_REPO = r"C:/Users/wangj.KEVIN/projects/paleo-workbench"
 sys.path.insert(0, MAIN_REPO)
 
+import sys as _sys  # archived-reference shim (legacy/python_reference)
+
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / 'legacy' / 'python_reference' / 'product'))
+
 from paleo_workbench.mapping.tool_availability import (  # noqa: E402
     evaluate_all,
 )

@@ -56,6 +56,9 @@ class Counters:
 
 
 def make_service(tmp: Path, name: str):
+    import sys as _sys  # archived-reference shim (legacy/python_reference)
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / 'legacy' / 'python_reference' / 'product'))
     from paleo_workbench.catalog.service import DataCatalogService
 
     project_path = tmp / name / "demo.paleo.json"

@@ -560,14 +560,12 @@ void check_resource_locator() {
     PWB_CHECK(resource_file("").isEmpty());
 
     qunsetenv("PALEO_RESOURCES_DIR");
-    // Dev tree contract on this branch: the staged <source>/resources dir
-    // does not exist, but the Python product package tree
-    // (<source>/paleo_workbench, carrying ui/assets/icons) IS a valid
-    // resource root — the locator resolves it (M6 icon-asset wiring).
-    const bool source_tree_exists =
-        QDir(QStringLiteral(PWB_SOURCE_DIR) + "/resources").exists() ||
-        QDir(QStringLiteral(PWB_SOURCE_DIR) + "/paleo_workbench").exists();
-    PWB_CHECK(source_tree_exists || resources_root().isEmpty());
+    // Dev tree contract since the Python retirement: <source>/resources is
+    // the native-owned resource root (facies JSONs + ui/assets/icons); the
+    // retired package under legacy/python_reference is never probed.
+    const bool resources_tree_exists =
+        QDir(QStringLiteral(PWB_SOURCE_DIR) + "/resources").exists();
+    PWB_CHECK(resources_tree_exists || resources_root().isEmpty());
 }
 
 }  // namespace

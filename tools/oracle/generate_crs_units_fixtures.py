@@ -262,6 +262,8 @@ INFERENCE_CASES = [
 # ---------------------------------------------------------------------------
 
 def _collect() -> dict:
+    import _legacy_reference
+    _legacy_reference.ensure_legacy_reference()  # archived-reference shim
     from paleo_workbench.mapping.crs_contract import (
         CRSInference,
         coordinate_domain_mismatch,

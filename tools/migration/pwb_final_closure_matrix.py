@@ -63,10 +63,21 @@ def line_evidence(repo_root: Path, relative_path: str, needle: str) -> str:
     return relative_path
 
 
+def python_product_dir(repo_root: Path) -> Path:
+    """The retired package dir: active tree first, else the archive
+    (legacy/python_reference/product/paleo_workbench — retired with the
+    Python retirement; paths are reported in their pre-retirement form)."""
+    active = repo_root / "paleo_workbench"
+    if active.is_dir():
+        return active
+    return repo_root / "legacy" / "python_reference" / "product" / "paleo_workbench"
+
+
 def python_modules(repo_root: Path) -> list[str]:
-    root = repo_root / "paleo_workbench"
+    root = python_product_dir(repo_root)
+    prefix = "paleo_workbench/"
     return sorted(
-        path.relative_to(repo_root).as_posix()
+        prefix + path.relative_to(root).as_posix()
         for path in root.rglob("*.py")
         if "__pycache__" not in path.parts
     )
@@ -157,8 +168,9 @@ def build_matrix(repo_root: Path) -> dict[str, Any]:
 
         if classification == "NATIVE_PRODUCT":
             remaining_action = (
-                "Retire the legacy Python implementation after downstream "
-                "oracle and migration-tool consumers stop importing it."
+                "Retired: the module now lives under "
+                "legacy/python_reference/product (reference only; oracle "
+                "generators reach it through the sanctioned shim)."
             )
         elif classification == "NATIVE_LIBRARY_NOT_WIRED":
             remaining_action = (

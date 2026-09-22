@@ -47,14 +47,8 @@ on:
     paths:
       - "native/qgis_render_bridge/**"
       - "third_party/qgis/**"
-      - "paleo_workbench/mapping/**"
-      - "paleo_workbench/ui/map_*"
-      - "paleo_workbench/ui/qgis_stack/**"
-      - "paleo_workbench/ui/workstation/**"
-      - "paleo_workbench/qgis_runtime/**"
-      - "paleo_workbench/ui/pages/home_page.py"
-      - "paleo_workbench/ui/pages/workarea_map_widget.py"
-      - "paleo_workbench/ui/pages/mapping_page.py"
+      # (retired Python paths removed — the package lives under
+      # legacy/python_reference now; see docs/development/python-retirement/)
       - "tests/test_qgis_*"
       - "tests/qgis_support.py"
       - ".github/workflows/qgis-renderer.yml"
@@ -63,14 +57,8 @@ on:
     paths:
       - "native/qgis_render_bridge/**"
       - "third_party/qgis/**"
-      - "paleo_workbench/mapping/**"
-      - "paleo_workbench/ui/map_*"
-      - "paleo_workbench/ui/qgis_stack/**"
-      - "paleo_workbench/ui/workstation/**"
-      - "paleo_workbench/qgis_runtime/**"
-      - "paleo_workbench/ui/pages/home_page.py"
-      - "paleo_workbench/ui/pages/workarea_map_widget.py"
-      - "paleo_workbench/ui/pages/mapping_page.py"
+      # (retired Python paths removed — the package lives under
+      # legacy/python_reference now; see docs/development/python-retirement/)
       - "tests/test_qgis_*"
       - "tests/qgis_support.py"
       - ".github/workflows/qgis-renderer.yml"
@@ -154,10 +142,11 @@ jobs:
           /tmp/qgisqt/bin/python -m pip install --upgrade pip
           # Deps land in the SAME env. PySide6 itself comes from conda (NOT
           # pip) so its Qt stays the prefix's single 6.11.1 set.
-          # pydantic: tests/conftest.py's autouse session fixture imports the
-          # paleo_workbench package (project.models). gdal (sdist build against
-          # the libgdal-dev installed above, pinned to noble's gdal-config):
-          # the map backend's optional-import surface (bridge capability probe).
+          # (Python-retirement: the retired paleo_workbench package no longer
+          # drives these deps — kept for the remaining qgis bridge suite.)
+          # gdal (sdist build against the libgdal-dev installed above, pinned
+          # to noble's gdal-config): the bridge capability probe's
+          # optional-import surface.
           /tmp/qgisqt/bin/python -m pip install \
             "pybind11>=2.12" "ninja>=1.11" "pytest>=8.0" \
             "pytest-qt>=4.5.0" "pytest-timeout>=2.3.1" "numpy>=1.26" \

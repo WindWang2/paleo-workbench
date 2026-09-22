@@ -86,9 +86,32 @@ def git_ls_files(repo_root: str) -> tuple[list[str], bool]:
         return files, False
 
 
+ARCHIVE_PRODUCT_PREFIX = "legacy/python_reference/product/"
+
+
+def tracked_rel(path: str) -> str:
+    """Normalize archived product paths back to their pre-retirement form so
+    the audit keeps reasoning about ``paleo_workbench/...`` uniformly (the
+    package was retired to legacy/python_reference/product; see
+    docs/development/python-retirement/)."""
+    if path.startswith(ARCHIVE_PRODUCT_PREFIX):
+        return path[len(ARCHIVE_PRODUCT_PREFIX):]
+    return path
+
+
+def resolve_repo_path(repo_root: str, rel: str) -> str:
+    """Map a normalized product path to its on-disk location (active tree,
+    else the retirement archive)."""
+    if rel.startswith("paleo_workbench/"):
+        archived = os.path.join(repo_root, ARCHIVE_PRODUCT_PREFIX, rel)
+        if os.path.exists(archived):
+            return archived
+    return os.path.join(repo_root, rel)
+
+
 def read_lines(repo_root: str, rel: str) -> list[str]:
     try:
-        with open(os.path.join(repo_root, rel), encoding="utf-8", errors="replace") as fh:
+        with open(resolve_repo_path(repo_root, rel), encoding="utf-8", errors="replace") as fh:
             return fh.read().splitlines()
     except OSError:
         return []
@@ -261,6 +284,7 @@ def check_oracle_only_modules(tracked: list[str], repo_root: str) -> list[dict]:
 
 def run_scan(repo_root: str) -> dict:
     tracked, git_available = git_ls_files(repo_root)
+    tracked = [tracked_rel(t) for t in tracked]  # archived product paths -> pre-retirement form
     cmake = check_cmake_python(tracked, repo_root)
     packaging = check_packaging_python(tracked, repo_root)
     pybind = check_pybind_seams(tracked, repo_root)

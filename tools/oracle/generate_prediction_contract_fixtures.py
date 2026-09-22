@@ -33,6 +33,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from types import SimpleNamespace as _NS  # noqa: E402
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.prediction import (  # noqa: E402
     input_contract,
     model_package,

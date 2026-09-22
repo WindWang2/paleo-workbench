@@ -30,6 +30,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 
+import sys as _sys  # archived-reference shim (legacy/python_reference)
+
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / 'legacy' / 'python_reference' / 'product'))
+
 import paleo_workbench  # noqa: E402
 
 if not Path(paleo_workbench.__file__).resolve().is_relative_to(REPO):

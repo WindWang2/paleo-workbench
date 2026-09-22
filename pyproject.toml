@@ -1,7 +1,7 @@
 [project]
 name = "paleo-workbench"
 version = "0.2.17a0"
-description = "Paleogeographic map compilation desktop workbench"
+description = "Paleo Workbench — development tooling environment (the production application is the native C++ pwb-platform build; the retired Python implementation is archived under legacy/python_reference)"
 license = {file = "LICENSE"}
 # Project unified on CPython 3.12 only (cp312/cp313 mix previously caused .so shadowing; see #435/#851).
 requires-python = ">=3.12,<3.13"
@@ -72,30 +72,17 @@ qgis-renderer = [
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
-[project.scripts]
-# Installed-state entry points (packaging #440). `python -m paleo_workbench`
-# works via paleo_workbench/__main__.py; both enter paleo_workbench.main.main()
-# and exit with its status (SystemExit(2) with install guidance when geoviz is
-# unavailable). WellPlot Desktop (well-log-engine/apps/wellplot-desktop) is a
-# separate product not packaged from this tree.
-paleo-workbench = "paleo_workbench.main:main"
+# [project.scripts] — removed with the Python product retirement
+# (docs/development/python-retirement/): the production application is the
+# native C++ `pwb-platform` executable; no Python console entry points ship
+# from this tree anymore.
 
-[tool.setuptools.packages.find]
-include = ["paleo_workbench*"]
-
-# Non-.py package assets are loaded from the filesystem at runtime
-# (paleo_workbench/ui/icon_rail.py, menu_bar.py, mapping docs, vendored
-# ATTRIBUTION.md) — without this, wheels silently ship them missing and the
-# UI degrades to plain-text navigation (packaging #439). Keep in sync with
-# tests/test_wheel_assets.py.
-[tool.setuptools.package-data]
-paleo_workbench = [
-    "ui/assets/icons/*.svg",
-    "ui/assets/icons/map/*.svg",
-    "ui/pages/prototypes/*.html",
-    "mapping/*.md",
-    "_vendored/haiyou_constrained_idw/*.md",
-]
+# [tool.setuptools] packages/package-data — removed with the Python
+# product retirement: this project no longer packages any application code.
+# The distribution exists so `pip install -e ".[dev]"` provisions the
+# development environment (pytest, oracle/migration tooling and their
+# dependencies). The retired implementation lives only under
+# legacy/python_reference and is never packaged.
 
 [tool.pytest.ini_options]
 testpaths = [

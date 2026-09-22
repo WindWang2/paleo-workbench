@@ -1,5 +1,11 @@
 # Testing Infrastructure & E2E Test Suite Architecture
 
+> **Python-retirement status (2026-09-22):** the production Paleo Workbench
+> application is the native C++ product (`pwb-platform`). The Python
+> implementation described in this historical document is retired to
+> `legacy/python_reference/` (reference/oracle only). See
+> `docs/development/python-retirement/` for the retirement ledger.
+
 ## Overview
 
 The Paleogeography Workbench (Paleo Workbench) uses a 4-tier end-to-end (E2E) testing framework designed for rigorous verification across all architectural layers: Runtime Stability, Mapping Engine 2.0, Geological Pipeline, Multi-View Coordination, and Data Lifecycle & Provenance.

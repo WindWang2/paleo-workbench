@@ -48,6 +48,7 @@ run_static() {
         --markdown-out "$RepoRoot/build/final-closure-python-audit.md" \
         --quiet
     "$RepoRoot/scripts/cpp-migration/audit-python-runtime-deps.sh"
+    "$RepoRoot/scripts/cpp-migration/check-python-retirement.sh"
 
     if git -C "$RepoRoot" ls-files | grep -Eq \
         '(^|/)(__pycache__/|[^/]+\.py[co]$|\.pytest_cache/)'; then
@@ -96,6 +97,10 @@ run_package() {
     if find "$InstallDir" -type f \
         \( -name '*.py' -o -name '*.pyc' \) -print -quit | grep -q .; then
         echo "native install tree contains Python product modules" >&2
+        exit 1
+    fi
+    if find "$InstallDir" -path '*legacy*' -print -quit | grep -q .; then
+        echo "native install tree contains archived (legacy/) paths" >&2
         exit 1
     fi
     "$Gate" Exec -j "$Jobs" -- \

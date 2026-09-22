@@ -31,16 +31,13 @@ QString resources_root() {
             }
         }
     }
-    // 2. Compile-time source tree (dev runs and tests). Two dev layouts:
-    //    a) <source>/resources — the staged resource tree;
-    //    b) <source>/paleo_workbench — the Python product package whose
-    //       ui/assets/icons tree IS the canonical icon asset set (the C++
-    //       ribbon/toolbar tables reference these names verbatim; no
-    //       staged copy exists on a dev tree).
+    // 2. Compile-time source tree (dev runs and tests): <source>/resources —
+    //    the native-owned resource tree (facies data JSONs + the
+    //    ui/assets/icons set the C++ ribbon/toolbar tables reference
+    //    verbatim). The retired Python package is NOT probed: it lives
+    //    under legacy/python_reference and must never serve the product.
     QStringList source_candidates;
     source_candidates << QStringLiteral(PWB_SOURCE_DIR)
-                             + QStringLiteral("/paleo_workbench")
-                      << QStringLiteral(PWB_SOURCE_DIR)
                              + QStringLiteral("/resources");
     // 3. Install layout: <prefix>/share/paleo-workbench/resources.
     QStringList install_candidates;
@@ -84,8 +81,7 @@ QStringList resource_roots_probed() {
         probed << QString::fromLocal8Bit(override_dir);
     }
     probed << QStringLiteral(PWB_SOURCE_DIR) +
-                  QStringLiteral("/paleo_workbench")
-           << QStringLiteral(PWB_SOURCE_DIR) + QStringLiteral("/resources");
+                  QStringLiteral("/resources");
     const QString app_dir = QCoreApplication::applicationDirPath();
     if (!app_dir.isEmpty()) {
         probed << app_dir
