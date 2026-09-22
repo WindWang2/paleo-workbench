@@ -409,6 +409,32 @@ void test_kriging_nugget_covariance_contract() {
     check(worst_var < 1e-4,
           "nugget>0 variance matches the C(0)=total-sill oracle ("
               + std::to_string(worst_var) + ")");
+
+    // Review R1 coverage gap: the neighbourhood path's #1465 diagonal needs
+    // its own oracle. With k_eff == n (and no radius) the neighbourhood
+    // system is EXACTLY the global system — same cov, same Lagrange row —
+    // so both paths must produce the same estimate and variance grids.
+    InterpolateOptions neighborhood = options;
+    neighborhood.max_neighbors = n;  // 12 samples -> k_eff == n
+    const FactorGrid moving = pwb::mapping::interpolate_factor(points,
+                                                               neighborhood);
+    double worst_moving = 0.0;
+    double worst_moving_var = 0.0;
+    for (std::size_t i = 0; i < got.grid_z.size(); ++i) {
+        worst_moving = std::max(
+            worst_moving,
+            std::fabs(static_cast<double>(moving.grid_z[i] - got.grid_z[i])));
+        worst_moving_var = std::max(
+            worst_moving_var,
+            std::fabs(static_cast<double>(moving.variance_grid[i]
+                                          - got.variance_grid[i])));
+    }
+    check(worst_moving < 1e-4,
+          "nugget>0 neighbourhood (k=n) equals global estimate ("
+              + std::to_string(worst_moving) + ")");
+    check(worst_moving_var < 1e-4,
+          "nugget>0 neighbourhood (k=n) equals global variance ("
+              + std::to_string(worst_moving_var) + ")");
 }
 
 // grid_n ceiling (#1460 hardening family): a hostile grid_n must be
@@ -420,7 +446,7 @@ void test_grid_n_ceiling_rejects_hostile_requests() {
     };
     InterpolateOptions options;
     options.method = "idw";
-    options.grid_n = 2000000000;
+    options.grid_n = 10001;  // one over the cap
     bool threw = false;
     try {
         static_cast<void>(pwb::mapping::interpolate_factor(points, options));

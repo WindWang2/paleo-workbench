@@ -73,9 +73,15 @@ bool window_in_bounds(const VolumeDescriptor& descriptor,
         // Overflow-safe upper check (#1456): `origin + extent > shape` can
         // wrap int64 for hostile windows (origin = extent = INT64_MAX would
         // compare a wrapped negative and pass). `origin > shape - extent`
-        // cannot wrap — both operands are non-negative and at most int64
-        // range, and a negative right-hand side (extent > shape) correctly
-        // reads as out of bounds.
+        // cannot wrap — but only once the SHAPE is known non-negative too
+        // (review R1: a hand-built descriptor with ni = INT64_MIN made
+        // `shape - extent` itself signed-overflow UB, and the wrapped
+        // compare then ACCEPTED the window). Inspectors never emit
+        // non-positive axes; this guard is for hostile hand-built
+        // descriptors.
+        if (shape[axis] < 0) {
+            return false;
+        }
         if (window.origin[axis] > shape[axis] - window.extent[axis]) {
             return false;
         }
@@ -133,10 +139,13 @@ std::size_t read_segy_window(const SegyLayout& layout,
                 if (!sample_bytes.has_value()) return std::nullopt;
                 return checked::add(*with_header, *sample_bytes);
             }();
+            const auto read_end = trace_offset_opt.has_value()
+                ? checked::add(*trace_offset_opt, raw.size())
+                : std::optional<std::uint64_t>{};
             if (!trace_offset_opt.has_value()
                 || *trace_offset_opt > descriptor.file_size_bytes
-                || *trace_offset_opt + raw.size()
-                       > descriptor.file_size_bytes) {
+                || !read_end.has_value()
+                || *read_end > descriptor.file_size_bytes) {
                 if (error != nullptr) {
                     *error = "trace offset out of range";
                 }
@@ -393,10 +402,13 @@ std::size_t read_pwbvol_window(const PwbvolLayout& layout,
                 return checked::add(descriptor.payload_offset_bytes,
                                     *bytes);
             }();
+            const auto read_end = trace_offset.has_value()
+                ? checked::add(*trace_offset, raw.size())
+                : std::optional<std::uint64_t>{};
             if (!trace_offset.has_value()
                 || *trace_offset > descriptor.file_size_bytes
-                || *trace_offset + raw.size()
-                       > descriptor.file_size_bytes) {
+                || !read_end.has_value()
+                || *read_end > descriptor.file_size_bytes) {
                 if (error != nullptr) {
                     *error = "payload offset out of range";
                 }

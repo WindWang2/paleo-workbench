@@ -504,6 +504,17 @@ int main() {
             descriptor.nc = descriptor.ns = 1;
             check(!descriptor.elements().has_value(),
                   "negative axis returned nullopt");
+            // Review R1: a hand-built descriptor with an extreme negative
+            // axis used to make `shape - extent` signed-overflow UB in
+            // window_in_bounds, and the wrapped compare then ACCEPTED the
+            // window.
+            descriptor.ni = std::numeric_limits<std::int64_t>::min();
+            descriptor.nc = descriptor.ns = 4;
+            pwb::seismic_io::WindowSpec hostile;
+            hostile.origin = {0, 0, 0};
+            hostile.extent = {1, 1, 1};
+            check(!pwb::seismic_io::window_in_bounds(descriptor, hostile),
+                  "negative-axis descriptor refused by window_in_bounds");
         }
 
         // Hostile windows against the valid fixture volume: origin+extent

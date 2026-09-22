@@ -124,7 +124,10 @@ struct FiniteSamples {
                   const std::vector<double>& zs)
         : px(&xs), py(&ys), pz(&zs), n(xs.size()) {
         for (std::size_t s = 0; s < xs.size(); ++s) {
-            if (!std::isfinite(xs[s]) || !std::isfinite(ys[s])) {
+            // z is part of the trigger too (review R1): alias mode must not
+            // keep a non-finite value that filtered mode would drop.
+            if (!std::isfinite(xs[s]) || !std::isfinite(ys[s])
+                || !std::isfinite(zs[s])) {
                 build_filtered(xs, ys, zs);
                 return;
             }
@@ -644,7 +647,8 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
     // case a non-finite coordinate slipped past the public boundary).
     bool any_nonfinite = false;
     for (std::size_t s = 0; s < xs.size(); ++s) {
-        if (!std::isfinite(xs[s]) || !std::isfinite(ys[s])) {
+        if (!std::isfinite(xs[s]) || !std::isfinite(ys[s])
+            || !std::isfinite(zs[s])) {
             any_nonfinite = true;
             break;
         }
@@ -736,7 +740,11 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
         const int k_eff = effective_neighborhood_k(options.max_neighbors, n);
         const auto radius = positive_radius(options.search_radius);
         const int sys = k_eff + 1;
-        const double ridge = (sill > 0.0) ? 1e-10 * sill : 1e-10;
+        // Ridge scales with the covariance diagonal the system uses —
+        // total_sill under the #1465 contract (identical to the old
+        // psill-scaled value whenever the fitted nugget is 0).
+        const double ridge =
+            (total_sill > 0.0) ? 1e-10 * total_sill : 1e-10;
         std::fill(z_pred.begin(), z_pred.end(),
                   std::numeric_limits<double>::quiet_NaN());
         std::fill(variance.begin(), variance.end(),
@@ -783,13 +791,26 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
                         const bool kb = keep[static_cast<std::size_t>(b)] != 0;
                         double v = 0.0;
                         if (ka && kb) {
-                            const std::size_t ib =
-                                nb[static_cast<std::size_t>(b)].idx;
-                            const double dx =
-                                xs[ia] - xs[ib];
-                            const double dy =
-                                ys[ia] - ys[ib];
-                            v = cov(std::sqrt(dx * dx + dy * dy));
+                            // Branch-free cov for the matrix fill (review
+                            // R2: the cov() lambda's h<=0 test in this
+                            // O(k_eff^2) loop cost ~5-8% of the whole
+                            // neighbourhood run). Distinct deduped samples
+                            // are always > tol apart, so a != b implies
+                            // h > 0 exactly; the diagonal is total_sill by
+                            // the #1465 contract — values identical to
+                            // cov() on both branches.
+                            if (a == b) {
+                                v = total_sill;
+                            } else {
+                                const std::size_t ib =
+                                    nb[static_cast<std::size_t>(b)].idx;
+                                const double dx =
+                                    xs[ia] - xs[ib];
+                                const double dy =
+                                    ys[ia] - ys[ib];
+                                v = total_sill
+                                    - gamma(std::sqrt(dx * dx + dy * dy));
+                            }
                         } else if (a == b) {
                             v = 1.0;
                         }
