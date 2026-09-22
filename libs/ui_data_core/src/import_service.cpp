@@ -124,7 +124,8 @@ Json probe_summary(const fs::path& path, const std::string& resource_type,
     if (!ec) {
         // file_time → sys_time → epoch seconds+microseconds.
         const auto sys = std::chrono::time_point_cast<std::chrono::microseconds>(
-            std::chrono::clock_cast<std::chrono::system_clock>(mtime));
+            std::chrono::system_clock::now() +
+            (mtime - fs::file_time_type::clock::now()));
         const auto us = sys.time_since_epoch().count();
         summary["mtime"] = isoformat_utc(us / 1000000, us % 1000000);
     }

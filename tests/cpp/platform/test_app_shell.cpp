@@ -13,6 +13,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QString>
+#include <QToolBar>
 #include <QToolButton>
 #include <qgsapplication.h>
 #include <qgsmapcanvas.h>
@@ -37,6 +38,8 @@ namespace { long test_pid() {
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+#include <pwb/ui_composite/composite_document.hpp>
+#include <pwb/ui_composite/layer_manager_panel.hpp>
 #include <pwb/ui_pages_data/qt/hub_page.hpp>
 #include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
@@ -105,6 +108,22 @@ void check_shell(MainWindow& window) {
         PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
                       std::string("dock missing: ") + dock_id);
     }
+#ifdef PWB_WITH_CONV_27
+    auto* layer_dock = shell->workstation()->dock("composite_layer");
+    if (window.layerPanel() != nullptr) {
+        PWB_CHECK(static_cast<const void*>(layer_dock->widget()) ==
+                  static_cast<const void*>(window.layerPanel()));
+    }
+    PWB_CHECK(shell->composite()->layer_manager != nullptr);
+    PWB_CHECK(shell->composite()->layer_manager->parent() ==
+              shell->composite());
+    PWB_CHECK(shell->composite()->layer_manager->isHidden());
+
+    auto* map_toolbar = shell->composite()->map_toolbar();
+    PWB_CHECK(map_toolbar != nullptr && !map_toolbar->actions().isEmpty());
+    PWB_CHECK(map_toolbar->actions().contains(
+        window.governedAction(QStringLiteral("pan"))));
+#endif
 }
 
 void check_workspace_navigation(MainWindow& window) {

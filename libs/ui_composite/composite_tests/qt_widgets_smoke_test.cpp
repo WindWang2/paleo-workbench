@@ -4,9 +4,11 @@
 // models, dialogs) without a display.
 
 #include <QApplication>
+#include <QAction>
 #include <QDialog>
 #include <QLabel>
 #include <QListWidget>
+#include <QToolBar>
 
 #include <cstdio>
 #include <set>
@@ -219,9 +221,17 @@ int main(int argc, char** argv) {
         document.set_project_crs("EPSG:4326");
         auto* canvas = new QLabel(QStringLiteral("canvas"), &document);
         document.set_canvas(canvas, /*uses_native_stack=*/false);
+        QAction pan(QStringLiteral("平移"), &document);
+        QAction zoom(QStringLiteral("放大"), &document);
+        document.set_map_actions({&pan, nullptr, &zoom});
         document.update_empty_hint(/*has_content=*/false);
         check(document.canvas() == canvas,
               "document hosts injected canvas");
+        check(!document.map_toolbar()->isHidden() &&
+                  document.map_toolbar()->actions().size() == 3 &&
+                  document.map_toolbar()->actions().front() == &pan &&
+                  document.map_toolbar()->actions().back() == &zoom,
+              "document hosts canonical map actions with separators");
         check(document.edit_controller != nullptr,
               "document owns edit controller");
         QString stage;

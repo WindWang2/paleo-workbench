@@ -31,7 +31,8 @@ std::optional<double> epoch_mtime(const std::filesystem::path& path) {
     auto file_time = std::filesystem::last_write_time(path, ec);
     if (ec) return std::nullopt;
     const auto system_time =
-        std::chrono::clock_cast<std::chrono::system_clock>(file_time);
+        std::chrono::system_clock::now() +
+        (file_time - std::filesystem::file_time_type::clock::now());
     const auto since_epoch = system_time.time_since_epoch();
     return static_cast<double>(
                std::chrono::duration_cast<std::chrono::microseconds>(since_epoch)

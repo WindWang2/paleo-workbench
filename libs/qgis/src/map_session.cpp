@@ -52,6 +52,16 @@ QgsMapCanvas* MapSession::createCanvas(QWidget* parent) {
 QgsLayerTreeView* MapSession::createLayerTree(QWidget* parent) {
     auto* view = new QgsLayerTreeView(parent);
     auto* model = new QgsLayerTreeModel(project_->layerTreeRoot(), view);
+    model->setFlags(
+        QgsLayerTreeModel::ShowLegend |
+        QgsLayerTreeModel::ShowLegendAsTree |
+        QgsLayerTreeModel::DeferredLegendInvalidation |
+        QgsLayerTreeModel::UseTextFormatting |
+        QgsLayerTreeModel::AllowNodeReorder |
+        QgsLayerTreeModel::AllowNodeRename |
+        QgsLayerTreeModel::AllowNodeChangeVisibility |
+        QgsLayerTreeModel::AllowLegendChangeState |
+        QgsLayerTreeModel::ActionHierarchical);
     view->setModel(model);
     trees_.push_back(QPointer<QgsLayerTreeView>(view));
     return view;

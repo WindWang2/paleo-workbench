@@ -8,8 +8,10 @@
 
 #include <QAction>
 #include <QFile>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QSettings>
+#include <QSlider>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <qgsapplication.h>
@@ -55,6 +57,10 @@ int main(int argc, char** argv) {
     PWB_CHECK(window.layerPanel() != nullptr);
     PWB_CHECK(window.editTools() != nullptr);
     PWB_CHECK(window.constraintPanel() != nullptr);
+    PWB_CHECK(window.layerPanel()->findChild<QLineEdit*>(
+                  QStringLiteral("LayerTreeFilter")) != nullptr);
+    PWB_CHECK(window.layerPanel()->findChild<QSlider*>(
+                  QStringLiteral("LayerOpacity")) != nullptr);
 
     // Default stage is the Python default (facies_calibration).
     PWB_CHECK(session->mapping_stage().has_value());

@@ -1,11 +1,11 @@
 #pragma once
 
 // CONV-27 — Layer properties / symbology surface. Zero home-grown style
-// editors: the dialog is QGIS's own QgsRendererPropertiesDialog (native
-// classification/labels/opacity widgets), persistence is QGIS QML
-// serialization. Styles live as .qml sidecars next to the layer's own
-// data file (the QGIS convention), so the style follows the layer, not
-// the window.
+// editors: the dialogs are QGIS's complete QgsVectorLayerProperties and
+// QgsRasterLayerProperties surfaces (source, symbology, labels, fields,
+// forms, joins, diagrams, metadata, rendering and temporal settings), with
+// QGIS QML serialization. Styles live as .qml sidecars next to the layer's
+// own data file, so the style follows the layer instead of the window.
 
 #include <QString>
 
@@ -17,10 +17,11 @@ class QWidget;
 namespace pwb::ui {
 namespace layer_style {
 
-// Modal native renderer dialog for a vector layer. Returns true when the
-// user accepted (the layer then carries the configured renderer — QGIS
-// applies on OK). Raster layers return false with no dialog (the raster
-// surface stays QGIS-project-native for now).
+// Modal native vector/raster layer properties dialog. Returns true when the
+// user accepted and QGIS applied the layer settings.
+bool open_layer_properties(QgsMapLayer* layer, QgsMapCanvas* canvas,
+                           QWidget* parent);
+
 bool open_renderer_properties(QgsVectorLayer* layer, QgsMapCanvas* canvas,
                               QWidget* parent);
 
