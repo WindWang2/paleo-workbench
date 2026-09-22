@@ -25,9 +25,9 @@ Submodules:
 
 ### Requirements
 
-- CMake ≥ 3.24, Ninja, C++20 toolchain (GCC/Clang on Linux; MSVC 2022 on Windows)
+- CMake ≥ 3.27, Ninja, C++20 toolchain (GCC/Clang on Linux; MSVC 2022 on Windows)
 - Qt 6 (product presets target the project’s Qt 6.8+ workflow)
-- Vendored QGIS SDK build under `native/qgis_render_bridge/build/qgis-vendor/output` (see existing platform docs / CI for how that tree is produced)
+- Vendored QGIS SDK (typical tree under `native/qgis_render_bridge/build/qgis-vendor/output`; path resolution SoT: `cmake/PwbQgisSdk.cmake`)
 
 ### Configure, build, smoke
 
@@ -37,9 +37,11 @@ git submodule update --init --recursive
 cmake --preset linux-native-product          # or: windows-msvc-native-product
 cmake --build build/native-product -j$(nproc)
 
-# Headless product smoke (names vary slightly by build; both accepted by bootstrap)
+# Headless product smoke (bootstrap accepts --headless-self-check / --capabilities).
+# Exact binary path depends on generator layout; gates also accept bin/ and build root:
 build/native-product/apps/paleo_workbench_platform/pwb-platform --headless-self-check
 build/native-product/apps/paleo_workbench_platform/pwb-platform --capabilities
+# alternate layouts often seen: build/native-product/bin/pwb-platform
 ```
 
 Windows: use preset `windows-msvc-native-product` from a VS 2022 developer
@@ -50,8 +52,10 @@ resource gate). Heavy builds should go through
 
 ### Production UI
 
-The adopted shell is the **ribbon five-workspaces** layout (data management →
-智能预测 → 约束与单因素 → 综合编图 → 验证). Design authority:
+The adopted shell is the **ribbon five-workspaces** layout (UI labels from
+`libs/ui_ribbon`: **数据管理** → **1 智能预测** → **2 约束与单因素** →
+**3 综合编图** → **验证**). Design authority (behaviour rules; screenshots are
+design references — see status banners there):
 [`docs/ui-redesign/qt-ribbon-workspaces-2026-09-21/`](docs/ui-redesign/qt-ribbon-workspaces-2026-09-21/).
 Implementation: `libs/ui_ribbon` + app install seams (landed on `main` via
 `fa9ba744`).
@@ -72,6 +76,10 @@ present on your checkout) and `scripts/cpp-migration/final-closure-gate.sh`.
 ---
 
 ## Legacy Python product
+
+> **Not the recommended product entry.** Packaging’s default console script is
+> still `paleo-workbench` until the M12 entry switch; prefer `pwb-platform` for
+> new product work.
 
 Still installable for conversion parity and workflows not yet retired
 (M12). Prefer the native binary for new product work.
@@ -136,7 +144,9 @@ Karpathy guidelines in `agent/skills/karpathy-guidelines/SKILL.md`.
 ## WellPlot Desktop
 
 Standalone log-first app in `well-log-engine/apps/wellplot-desktop/` — not the
-paleogeography workbench.
+paleogeography workbench. Requires submodules initialized
+(`git submodule update --init --recursive`); the `well-log-engine/` directory is
+empty until that step.
 
 ```bash
 pip install -e well-log-engine/apps/wellplot-desktop

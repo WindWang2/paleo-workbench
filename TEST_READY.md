@@ -1,3 +1,7 @@
+> **Scope: legacy Python pytest track only.** Native product uses Qt 6.8 +
+> CTest / `pwb-platform` (see root [`README.md`](README.md)). This file is not
+> the native stack SoT.
+
 # TEST_READY — Paleo Workbench E2E Test Suite
 
 ## Status: COMPLETE & READY FOR REGRESSION / CI

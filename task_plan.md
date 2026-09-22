@@ -1,3 +1,5 @@
+> **HISTORICAL / scratch** — agent scratch / historical task plan. Not product documentation authority; see [`docs/README.md`](docs/README.md).
+
 # 当前任务入口 — C++ 全面转换收尾
 
 当前计划：[C++ task_plan](docs/development/cpp-conversion-planning/task_plan.md)；

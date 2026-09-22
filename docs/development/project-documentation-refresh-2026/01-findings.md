@@ -30,8 +30,15 @@
 | No docs index | `docs/README.md` |
 | README Python-first | rewrite dual-track |
 | PROJECT.md core-convergence only | rewrite native-first |
-| CONTEXT.md silent about C++ | dual-track banner |
+| CONTEXT.md silent about C++ | dual-track banner (landed in follow-up audit commit; verify file header) |
 | CLAUDE.md map-stack Python-only | native + legacy split |
 | No module map | `docs/architecture/module-map.md` |
 | No conversion snapshot | `docs/development/cpp-conversion-status.md` |
 | Ribbon plan status stale | status line → adopted on main |
+
+
+## Follow-up audit (2026-09-22)
+
+Documentation-to-code audit under `review/` corrected: CONTEXT dual-track banner
+was claimed here before it existed; banner is now required in CONTEXT.md.
+See `review/review_findings.md` for the full finding list and fixes.

@@ -18,7 +18,7 @@ Python console script until the M5/M12 entry-switch blockers are cleared.
 | Claim | Evidence |
 | --- | --- |
 | Native executable | `apps/paleo_workbench_platform` → target `pwb-platform` |
-| Product preset | CMake preset `linux-native-product` / `windows-msvc-native-product` (`PWB_BUILD_NATIVE_PRODUCT=ON`) |
+| Product preset | CMake preset `linux-native-product` / `windows-msvc-native-product` (`PWB_BUILD_NATIVE_PRODUCT=ON`); root `cmake_minimum_required` **3.27**; Qt **6.8** via `find_package(Qt6 6.8 …)` |
 | Ribbon shell on main | `fa9ba744` / merge `cebc9f0a` — `libs/ui_ribbon`, five workspaces |
 | GeoViz product runtime closure | [`geoviz-cpp-final-closure/12-final-verification.md`](geoviz-cpp-final-closure/12-final-verification.md) — 248/248 CTest, 14/14 self-check, 20 hard capabilities (on that branch HEAD) |
 | Python-free native closure | [`geoviz-cpp-final-closure/04-python-retirement.md`](geoviz-cpp-final-closure/04-python-retirement.md) |

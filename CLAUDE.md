@@ -2,7 +2,7 @@
 
 - **Native product** is `pwb-platform` (`apps/paleo_workbench_platform`), C++20/Qt/QGIS.
 - **Legacy Python** (`paleo_workbench/`) is oracle + parallel legacy app — do not add new production UI there (`docs/development` “Python 生产路径零新增”).
-- Doc IA: [`docs/README.md`](docs/README.md). Module map: [`docs/architecture/module-map.md`](docs/architecture/module-map.md).
+- Doc IA: [`docs/README.md`](docs/README.md). Module map: [`docs/architecture/module-map.md`](docs/architecture/module-map.md). Dual-track: [`docs/architecture/dual-track.md`](docs/architecture/dual-track.md).
 - Conversion snapshot: [`docs/development/cpp-conversion-status.md`](docs/development/cpp-conversion-status.md).
 
 ## Agent skills

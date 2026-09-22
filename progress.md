@@ -1,3 +1,5 @@
+> **HISTORICAL / scratch** — agent scratch / historical progress. Not product documentation authority; see [`docs/README.md`](docs/README.md).
+
 # 当前进度入口 — C++ 全面转换收尾
 
 当前执行日志：[C++ progress](docs/development/cpp-conversion-planning/progress.md)；

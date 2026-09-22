@@ -1,3 +1,7 @@
+> **Scope: legacy Python pytest / infra notes.** Native C++ product build/test:
+> root [`README.md`](README.md) and `docs/development/cpp-building-and-verification.md`
+> (when present). PySide6 versions below do **not** describe `pwb-platform`.
+
 # Testing Infrastructure & E2E Test Suite Architecture
 
 ## Overview

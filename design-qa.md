@@ -1,3 +1,5 @@
+> **HISTORICAL / scratch** — historical design QA notes. Not product documentation authority; see [`docs/README.md`](docs/README.md).
+
 # Workstation V3 Light Design QA
 
 ## Evidence

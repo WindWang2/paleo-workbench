@@ -1,6 +1,8 @@
 # Paleo Workbench：Qt 五工作区设计
 
-日期：2026-09-21。状态：视觉设计提案，尚未实现 C++ 界面。五张图是同一方案的五个页面，不是五个互斥候选。
+日期：2026-09-21。状态：**design authority (scientific views / behaviour / tokens)** — ribbon five-workspaces shell **adopted on `main`** (see [`../../development/ribbon-five-workspaces/STATUS.md`](../../development/ribbon-five-workspaces/STATUS.md)).
+
+**Screenshots**: `ACCEPTABLE_REFERENCE` design mockups, not live product captures. Five images are pages of one scheme, not five competing candidates.
 
 ## 设计依据
 

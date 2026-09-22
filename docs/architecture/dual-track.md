@@ -10,3 +10,11 @@ locations unless a native type is named. Module placement:
 
 This note exists so agents do not miss the dual-track rule even when browsing
 architecture docs first.
+
+## Related
+
+- Root [`CONTEXT.md`](../../CONTEXT.md) carries a dual-track banner: Python
+  paths there are domain/oracle vocabulary.
+- CMake `message(STATUS … Python pages remain the production path)` strings mean
+  an **optional UI slice was skipped in that configure**, not that Python is the
+  native product default.

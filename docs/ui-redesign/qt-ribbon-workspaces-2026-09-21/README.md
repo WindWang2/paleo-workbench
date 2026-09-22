@@ -1,6 +1,10 @@
 # Paleo Workbench：轻量 Ribbon 五工作区
 
-日期：2026-09-21。状态：设计稿，未修改 C++ 生产界面。基于用户提供的原始三界面，以及已完成的[五工作区设计](../qt-five-workspaces-2026-09-21/README.md)。本版用轻量 Ribbon 替换单排图标工具栏，其余科学视图和交互规范沿用上一版。
+日期：2026-09-21。状态：**design authority (behaviour rules)** — production shell **adopted on `main`** (`fa9ba744` / `cebc9f0a`; see [`../../development/ribbon-five-workspaces/STATUS.md`](../../development/ribbon-five-workspaces/STATUS.md)).
+
+**Screenshots below**: `ACCEPTABLE_REFERENCE` / design mockups — **not** live product captures. Prefer UI-visible labels and command ids from `libs/ui_ribbon` when docs and images disagree.
+
+Based on the earlier [五工作区设计](../qt-five-workspaces-2026-09-21/README.md). This revision replaces the single-row icon toolbar with a light Ribbon; scientific views and interaction rules otherwise carry forward.
 
 ## 页面预览
 

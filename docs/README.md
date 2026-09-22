@@ -11,13 +11,13 @@ not the native product runtime.
 
 | Layer | Paths | Authority | When to read |
 | --- | --- | --- | --- |
-| **Canonical product docs** | Root [`README.md`](../README.md), [`PROJECT.md`](../PROJECT.md), [`CONTEXT.md`](../CONTEXT.md), [`CLAUDE.md`](../CLAUDE.md), this file, [`architecture/`](architecture/) | Current product truth | First |
-| **Decisions** | [`adr/`](adr/) (ADR 0051–0068 and earlier) | Binding architecture decisions | Before changing a contract |
+| **Canonical product docs** | Root [`README.md`](../README.md), [`PROJECT.md`](../PROJECT.md), [`CLAUDE.md`](../CLAUDE.md), this file, [`architecture/`](architecture/) (incl. [`dual-track.md`](architecture/dual-track.md)); [`CONTEXT.md`](../CONTEXT.md) **with dual-track banner** (Python paths = domain/oracle) | Current product truth | First |
+| **Decisions** | [`adr/`](adr/) (33 ADR files at `18c674ef` snapshot) | Binding architecture decisions | Before changing a contract |
 | **Agent / process** | [`agents/`](agents/) | Issue tracker, triage, domain-doc rules | Before filing issues or exploring |
-| **UI design authority** | [`ui-redesign/qt-ribbon-workspaces-2026-09-21/`](ui-redesign/qt-ribbon-workspaces-2026-09-21/), [`ui-redesign/qt-five-workspaces-2026-09-21/`](ui-redesign/qt-five-workspaces-2026-09-21/) | Shell / ribbon / five-workspace behaviour | UI work |
+| **UI design authority** | [`ui-redesign/qt-ribbon-workspaces-2026-09-21/`](ui-redesign/qt-ribbon-workspaces-2026-09-21/), [`ui-redesign/qt-five-workspaces-2026-09-21/`](ui-redesign/qt-five-workspaces-2026-09-21/) + adoption [`development/ribbon-five-workspaces/STATUS.md`](development/ribbon-five-workspaces/STATUS.md) | Behaviour rules (screenshots = design refs) | UI work |
 | **Conversion & feature ledgers** | [`development/`](development/) (many dated goal-loop folders) | Historical + in-flight evidence | When verifying a claim against a SHA |
 | **Specs / research / audit** | [`specs/`](specs/), [`research/`](research/), [`audit/`](audit/), root `audit/` | Supporting material | As needed |
-| **Stale / superseded** | Old workstation-v3 notes, early Python-only root copy that conflict with C++ truth | **Not** product authority when they contradict the canonical layer | Only for archaeology |
+| **Stale / superseded** | Old workstation-v3 notes; root `FINAL_REPORT.md` / `TEST_*` / scratch `findings.md`·`progress.md`·`task_plan.md`·`design-qa.md` (now bannered); [`audit/`](audit/); early Python-only copy that conflicts with C++ truth | **Not** product authority when they contradict the canonical layer | Only for archaeology |
 
 **Precedence when docs disagree**
 
@@ -33,7 +33,8 @@ not the native product runtime.
 2. [PROJECT.md](../PROJECT.md) — architecture, module groups, entry points.
 3. [architecture/module-map.md](architecture/module-map.md) — `libs/*` / `apps/*` boundaries.
 4. [development/cpp-conversion-status.md](development/cpp-conversion-status.md) — C++ conversion reality snapshot.
-5. Domain glossary: [CONTEXT.md](../CONTEXT.md) (Python-era vocabulary still authoritative for catalog/workflow domain language; see the dual-track banner at the top).
+5. Dual-track honesty: [architecture/dual-track.md](architecture/dual-track.md).
+6. Domain glossary: [CONTEXT.md](../CONTEXT.md) (Python-era paths = domain/oracle vocabulary; read the dual-track banner first).
 
 ## Development ledgers worth knowing
 

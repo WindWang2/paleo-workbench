@@ -33,15 +33,19 @@ treat them as the live architecture map.
 
 ## Feature inventory (product-facing, native-first)
 
+Runtime truth for optional surfaces is `pwb-platform --capabilities` on your
+build — the table below is a module map, not a guarantee every row is linked
+in every preset.
+
 | # | Feature | Native home | Notes |
 |---|---------|-------------|--------|
 | F1 | Ribbon five workspaces | `libs/ui_ribbon` + app install | Adopted on main (`fa9ba744`) |
 | F2 | Project open/save/new | `libs/project`, catalog closure | `.paleo.json` + artifacts catalog |
 | F3 | Data management workspace | `ui_pages_data`, ingest, catalog | Import plan → commit |
 | F4 | QGIS map authoring | `libs/qgis`, `ui_composite` | Digitize / style / layer tree |
-| F5 | Factor prepare (IDW/kriging/…) | `mapping_kernel`, factor_* , closure_mapping | Oracle-backed kernels |
+| F5 | Factor prepare (IDW/kriging/…) | `mapping_kernel`, `factor_fusion` / `factor_host`, app `closure_mapping_install` + `closure_workflow` | Oracle-backed kernels |
 | F6 | Contour / facies products | `mapping_kernel` layer products | CONV-03 family |
-| F7 | Composer / layout export | `mapping_document`, `layout_export`, cartography | Geographic graticule follow-ups tracked in closure limitations / #1473 |
+| F7 | Composer / layout export | `mapping_document`, `layout_export`, `cartography` | Geographic graticule / unfinished items: see geo-viz `11-known-limitations.md`; open follow-up **#1473 is not merged** — do not treat as shipped |
 | F8 | Seismic import + attributes | `seismic_io`, `seismic_attributes`, `seismic_viewer` | SEG-Y → PWBVOL / attribute chain |
 | F9 | Well log / cross-well / well-tie | `visualization`, `well_science`, viz-b docks | WLE viewer stack optional capability |
 | F10 | Joint well-seismic 3D | `geo3d_viz`, `ui_wellseis` | Fence / stratal / analysis seams |

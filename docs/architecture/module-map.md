@@ -1,8 +1,10 @@
 # Module map — native product boundaries
 
 Baseline: `18c674ef` (2026-09-22). Counts are directory-level (`libs/` has
-**63** libraries). Qt-free domain logic lives under `libs/`; the host and
-product wiring live under `apps/paleo_workbench_platform/` (`pwb-platform`).
+**63** libraries). The tree below is a **grouped sketch** of boundaries, not an
+exhaustive per-library inventory — run `ls libs` on the SHA for the full set.
+Qt-free domain logic lives under `libs/`; the host and product wiring live under
+`apps/paleo_workbench_platform/` (`pwb-platform`).
 
 ## Runtime shape
 

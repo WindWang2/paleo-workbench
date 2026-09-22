@@ -1,5 +1,13 @@
 # Paleo Workbench Domain Model & Vocabulary
 
+> **Dual-track (2026-09-22)** — This glossary grew with the **legacy Python**
+> product (`paleo_workbench/…` paths below). Treat those paths as **domain
+> definitions and oracle locations**, not as the native product home.
+> **Native product**: `pwb-platform` (`apps/paleo_workbench_platform` + `libs/*`).
+> See [`docs/architecture/dual-track.md`](docs/architecture/dual-track.md) and
+> [`docs/architecture/module-map.md`](docs/architecture/module-map.md).
+> Doc IA: [`docs/README.md`](docs/README.md).
+
 This document records the ubiquitous domain language and module architecture for the Paleo Workbench codebase.
 
 ## Core Modules & Architecture Vocabulary
