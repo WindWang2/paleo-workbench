@@ -2610,7 +2610,18 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       if (!features.isEmpty()) {
         if (existing->dataProvider() == nullptr
             || !existing->dataProvider()->addFeatures(features)) {
-          throw std::runtime_error("mirror addFeatures failed for doc_id: " + doc_id);
+          // D-10: truncate already wiped the layer — an empty mirror on the
+          // canvas is a data-loss state that never self-heals (the revision
+          // bookkeeping looks current, and later full ships hit the same
+          // failed provider). Recover in the #1153 geometry-drift family:
+          // drop the corrupted mirror and rebuild it fresh from this
+          // payload once. Recursion is bounded at one level — the fresh
+          // path creates a new layer and throws on its own failures.
+          impl_->eraseMirrorByDocId(doc_id);
+          return upsertMirrorLayer(doc_id, name, geometry_type, crs_auth_id,
+                                   geojson_feature_collection, renderer_xml,
+                                   labeling_xml, legacy_style_json,
+                                   fields_json, min_scale, max_scale);
         }
       }
       recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
