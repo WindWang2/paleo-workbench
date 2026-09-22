@@ -550,6 +550,12 @@ void ZipWriter::add_file(const std::filesystem::path& file, const std::string& a
             bytes.append(buffer.data(), static_cast<std::size_t>(in.gcount()));
         }
     }
+    if (in.bad()) {
+        // A mid-file I/O error ends the loop silently and would zip a
+        // CRC-consistent TRUNCATED entry (review CP3) — refuse instead.
+        throw ZipError("read error mid-file (refusing truncated entry): " +
+                       file.string());
+    }
     add_bytes(arcname, bytes);
 }
 

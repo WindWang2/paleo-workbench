@@ -261,6 +261,14 @@ domain::Result<fs::path> create_working_copy(const fs::path& project_path,
                 out.write(chunk, in.gcount());
             }
         }
+        if (in.bad()) {
+            // Read-side failure truncated the copy while the write side
+            // still reports success (review CP8) — a user would open a
+            // silently truncated working copy.
+            fs::remove(temp, ec);
+            return DataError(ErrorCode::IoError,
+                             "working-copy read failed (source error)");
+        }
         out.flush();
         if (!out) {
             fs::remove(temp, ec);

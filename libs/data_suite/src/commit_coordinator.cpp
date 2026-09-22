@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <cstdio>
 
 namespace pwb::data {
 
@@ -173,19 +174,38 @@ Json CommitCoordinator::journal_json(const CommitRequestV1& request,
     return journal;
 }
 
+void CommitCoordinator::log_journal_failure(
+    const domain::DataError& error) const {
+    // CP7: phase-advance journal writes used to discard the DataError —
+    // a failure here degrades crash recovery (the ladder re-runs the
+    // phase forever); it must at least be visible, not silent.
+    std::fprintf(stderr, "pwb-commit: journal phase write failed: %s\n",
+                 error.message.c_str());
+}
+
 domain::DataError CommitCoordinator::write_journal(const Json& journal) {
     std::error_code ec;
     fs::create_directories(journal_dir_, ec);
-    const fs::path file =
-        journal_dir_ / (journal.value("operation_id", "") + ".json");
+    // Re-validate even on the recovery path: the interactive commit() gate
+    // checks operation_id, but finish/rollback/recover feed the id back
+    // from arbitrary journal-dir JSON — a planted "../.." id would write
+    // outside the journal directory (review CP6).
+    const std::string op_id = journal.value("operation_id", "");
+    if (!domain::is_safe_storage_segment(op_id)) {
+        return DataError(ErrorCode::InvalidArgument,
+                         "journal operation id failed the storage-segment "
+                         "safety gate: " + op_id);
+    }
+    const fs::path file = journal_dir_ / (op_id + ".json");
     // Atomic journal write: tmp + rename, fsync'd via flush.
-    const fs::path tmp = journal_dir_ /
-                         ("." + journal.value("operation_id", "") + ".tmp");
+    const fs::path tmp = journal_dir_ / ("." + op_id + ".tmp");
     if (!write_file_bytes(tmp, journal.dump(2))) {
         return DataError(ErrorCode::IoError, "journal write failed");
     }
     fs::rename(tmp, file, ec);
     if (ec) {
+        std::error_code cleanup_ec;
+        fs::remove(tmp, cleanup_ec);
         return DataError(ErrorCode::IoError,
                          "journal rename failed: " + ec.message());
     }
@@ -353,8 +373,9 @@ Result<CommitReceiptV1> CommitCoordinator::commit(
     if (!placed.is_ok()) {
         receipt.diagnostics.push_back(
             Diagnostic::error("payload_failure", placed.error().message));
-        write_journal(
-            journal_json(request, version, receipt, JournalPhase::Written));
+        if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::Written)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_journal_failure(journal_error);
+        }
         return receipt;
     }
     version.path = placed.value().rel_path;
@@ -414,8 +435,9 @@ Result<CommitReceiptV1> CommitCoordinator::finish_journal_phase4(
             "project_save_failure", saved.error().message));
         return receipt;
     }
-    write_journal(
-        journal_json(request, version, receipt, JournalPhase::ProjectSaved));
+    if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::ProjectSaved)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_journal_failure(journal_error);
+    }
     if (fault_hook_) {
         if (auto fault = fault_hook_(JournalPhase::ProjectSaved)) {
             receipt.status = CommitStatus::Failed;
@@ -425,12 +447,17 @@ Result<CommitReceiptV1> CommitCoordinator::finish_journal_phase4(
         }
     }
 
-    write_journal(
-        journal_json(request, version, receipt, JournalPhase::Rebound));
-    write_journal(
-        journal_json(request, version, receipt, JournalPhase::Completed));
-    write_journal(
-        journal_json(request, version, receipt, JournalPhase::CleanedUp));
+    if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::Rebound)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+
+        log_journal_failure(journal_error);
+
+    }
+    if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::Completed)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_journal_failure(journal_error);
+    }
+    if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::CleanedUp)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_journal_failure(journal_error);
+    }
 
     // Terminal journal removal: Completed is the durable success marker;
     // the journal file itself is evidence and stays until cleanup removes
@@ -528,14 +555,18 @@ Result<CommitReceiptV1> CommitCoordinator::finish_journal(
                 return receipt;
             }
         }
-        write_journal(journal_json(request, version, receipt,
-                                   JournalPhase::ProjectSaved));
-        write_journal(journal_json(request, version, receipt,
-                                   JournalPhase::Rebound));
-        write_journal(journal_json(request, version, receipt,
-                                   JournalPhase::Completed));
-        write_journal(journal_json(request, version, receipt,
-                                   JournalPhase::CleanedUp));
+        if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::ProjectSaved)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_journal_failure(journal_error);
+        }
+        if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::Rebound)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_journal_failure(journal_error);
+        }
+        if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::Completed)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_journal_failure(journal_error);
+        }
+        if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::CleanedUp)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_journal_failure(journal_error);
+        }
         return receipt;
     }
     if (record.phase == JournalPhase::PayloadStaged) {
@@ -567,8 +598,9 @@ Result<CommitReceiptV1> CommitCoordinator::finish_journal(
         }
         receipt.version_number = version.version_number;
         receipt.status = CommitStatus::Committed;
-        write_journal(journal_json(request, version, receipt,
-                                   JournalPhase::CatalogCommitted));
+        if (const auto journal_error = write_journal(journal_json(request, version, receipt, JournalPhase::CatalogCommitted)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_journal_failure(journal_error);
+        }
         return finish_journal_phase4(request, version, receipt, document);
     }
     if (record.phase == JournalPhase::Written) {
@@ -604,7 +636,9 @@ Result<CommitReceiptV1> CommitCoordinator::rollback_journal(
     receipt_json["sha256"] = receipt.sha256;
     receipt_json["size_bytes"] = receipt.size_bytes;
     journal["receipt"] = std::move(receipt_json);
-    write_journal(journal);
+    if (const auto journal_error = write_journal(journal); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_journal_failure(journal_error);
+    }
     receipt.diagnostics.push_back(Diagnostic::warning(
         "journal_rolled_back",
         "interrupted operation " + record.operation_id +

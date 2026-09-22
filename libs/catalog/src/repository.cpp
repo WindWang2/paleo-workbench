@@ -1315,20 +1315,15 @@ DataError CatalogRepository::export_manifest(
     const std::filesystem::path bak =
         manifest_path.parent_path()
         / (manifest_path.filename().generic_string() + ".bak");
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out.good()) {
-            return DataError(ErrorCode::IoError,
-                             "manifest temp file unwritable");
-        }
-        out.write(text.data(), static_cast<std::streamsize>(text.size()));
-        out.flush();
-        if (!out.good()) {
-            std::filesystem::remove(tmp, ec);
-            return DataError(ErrorCode::IoError, "manifest temp write failed");
-        }
+    // CP1: parity with save_manifest — fsync the payload before rename and
+    // restore the .bak when the final rename fails (the old form left
+    // catalog.json absent with the tmp orphaned).
+    if (!write_file_fsynced(tmp, text)) {
+        std::filesystem::remove(tmp, ec);
+        return DataError(ErrorCode::IoError, "manifest temp write failed");
     }
-    if (std::filesystem::exists(manifest_path, ec)) {
+    const bool had_previous = std::filesystem::exists(manifest_path, ec);
+    if (had_previous) {
         std::filesystem::rename(manifest_path, bak, ec);
         if (ec) {
             std::filesystem::remove(tmp, ec);
@@ -1338,6 +1333,12 @@ DataError CatalogRepository::export_manifest(
     }
     std::filesystem::rename(tmp, manifest_path, ec);
     if (ec) {
+        if (had_previous) {
+            // Restore: the previous revision is still complete in the .bak.
+            std::error_code restore_ec;
+            std::filesystem::rename(bak, manifest_path, restore_ec);
+        }
+        std::filesystem::remove(tmp, ec);
         return DataError(ErrorCode::IoError,
                          "manifest rename failed: " + ec.message());
     }

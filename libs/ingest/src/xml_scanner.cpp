@@ -92,8 +92,23 @@ const std::string* XmlNode::attr(std::string_view name) const {
 }
 
 void XmlNode::iter(std::vector<const XmlNode*>& out) const {
-    out.push_back(this);
-    for (const auto& child : children) child->iter(out);
+    // Hostile deeply-nested documents parse iteratively but this walk
+    // recursed once per level — a few million nested elements overflowed
+    // the call stack during ingest (review CP5). Iterative pre-order
+    // (self first, then children in order) with an explicit index stack.
+    std::vector<std::pair<const XmlNode*, std::size_t>> stack;
+    stack.push_back({this, 0});
+    while (!stack.empty()) {
+        auto& [node, index] = stack.back();
+        if (index == 0) out.push_back(node);
+        if (index < node->children.size()) {
+            const XmlNode* child = node->children[index].get();
+            ++index;
+            stack.push_back({child, 0});
+        } else {
+            stack.pop_back();
+        }
+    }
 }
 
 std::string XmlNode::itertext() const {
@@ -371,6 +386,14 @@ struct XmlScanner::Impl {
         BuildNode bn;
         bn.tag = tag;
         bn.attrib = attribs;
+        // Depth cap (CP5): a hostile document nested millions deep parses
+        // fine, but the resulting node tree destructs recursively (each
+        // ~XmlNode destroys its children) — beyond this bound the teardown
+        // itself overflows the stack. Legitimate well/project files nest a
+        // handful of levels; fail closed far above any real input.
+        if (stack.size() >= 4096) {
+            throw XmlError("ParseError", "xml nesting deeper than 4096 levels (hostile input)");
+        }
         stack.push_back(OpenElement{std::move(bn), std::move(ns), raw_name});
         if (self_closing) {
             OpenElement top = std::move(stack.back());

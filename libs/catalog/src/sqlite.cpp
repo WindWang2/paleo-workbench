@@ -102,7 +102,11 @@ Result<Database> Database::open(const std::filesystem::path& file,
 
 DataError Database::execute(std::string_view sql) {
     char* message = nullptr;
-    const int rc = sqlite3_exec(db_, sql.data(), nullptr, nullptr, &message);
+    // sqlite3_exec needs a C string; a string_view slice is not guaranteed
+    // NUL-terminated (review CP9 — latent hazard only, every current
+    // caller passes a literal, but the wrapper must stay safe to reuse).
+    const std::string owned(sql);
+    const int rc = sqlite3_exec(db_, owned.c_str(), nullptr, nullptr, &message);
     if (rc != SQLITE_OK) {
         DataError error(ErrorCode::CorruptDatabase,
                         "execute failed: " +

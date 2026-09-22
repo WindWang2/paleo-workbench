@@ -38,6 +38,7 @@
 #include <pwb/ingest/well_parsers.hpp>
 #include <pwb/ingest/classifier.hpp>
 #include <pwb/ingest/well_xml.hpp>
+#include "pwb/ingest/xml_scanner.hpp"
 
 using pwb::domain::Json;
 using namespace pwb::ingest;
@@ -902,6 +903,61 @@ void test_py_compat_unicode_space() {
           "py_parse_float must strip NEL + RS like Python float()");
 }
 
+
+void iter_walk_survives_deep_nesting() {
+    // CP5: hostile deeply-nested XML used to recurse in the descendant
+    // walk AND destruct the tree recursively — both overflow the stack.
+    // The walk is iterative now and the parser fails closed beyond 4096
+    // levels (the tree destructor is bounded with it).
+    const char* open = "<a>";
+    const char* close_tag = "</a>";
+    auto make = [](int depth) {
+        std::string xml;
+        xml.reserve(static_cast<std::size_t>(depth) * 8);
+        for (int i = 0; i < depth; ++i) xml += "<a>";
+        for (int i = 0; i < depth; ++i) xml += "</a>";
+        return xml;
+    };
+
+    // Within the cap: parse + full iterative walk.
+    {
+        const std::string xml = make(3000);
+        pwb::ingest::XmlScanner scanner(/*forbid_entities=*/true);
+        scanner.feed(xml);
+        scanner.mark_end();
+        pwb::ingest::XmlScanner::Event event;
+        pwb::ingest::XmlScanner::Attributes attrs;
+        const XmlNode* ended = nullptr;
+        const XmlNode* last_end = nullptr;
+        while (scanner.next(event, attrs, ended)) {
+            if (event == pwb::ingest::XmlScanner::Event::End) last_end = ended;
+        }
+        check(last_end != nullptr, "deep (in-cap) document parsed");
+        std::unique_ptr<XmlNode> root = scanner.take_root();
+        check(root != nullptr, "root taken");
+        std::vector<const XmlNode*> all;
+        root->iter(all);
+        check(static_cast<int>(all.size()) == 3000,
+              "iterative walk visits every node");
+    }
+
+    // Beyond the cap: fail closed, never a stack overflow.
+    {
+        const std::string xml = make(2000000);
+        pwb::ingest::XmlScanner scanner(/*forbid_entities=*/true);
+        scanner.feed(xml);
+        scanner.mark_end();
+        pwb::ingest::XmlScanner::Event event;
+        pwb::ingest::XmlScanner::Attributes attrs;
+        const XmlNode* ended = nullptr;
+        bool stopped = false;
+        while (scanner.next(event, attrs, ended)) {
+        }
+        stopped = scanner.failed();
+        check(stopped, "2M-deep hostile nesting fails closed (depth cap)");
+    }
+}
+
 }  // namespace
 
 template <typename F>
@@ -913,7 +969,9 @@ void run_group(const char* name, F&& fn) {
     }
 }
 
+
 int main() {
+    run_group("iter_walk_survives_deep_nesting", iter_walk_survives_deep_nesting);
     g_tmp = make_tmp_dir();
     Json fixture = load_fixture();
     run_group("test_constants", [&] { test_constants(fixture); });

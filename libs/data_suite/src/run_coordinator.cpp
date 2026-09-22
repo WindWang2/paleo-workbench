@@ -9,6 +9,18 @@
 #include "coordinator_detail.hpp"
 
 #include <algorithm>
+#include <cstdio>
+
+
+namespace {
+void log_run_journal_failure(const pwb::domain::DataError& error) {
+    // CP7: phase-advance journal writes must not discard their error — a
+    // failure degrades crash recovery (the ladder re-runs the phase).
+    std::fprintf(stderr, "pwb-run: journal phase write failed: %s\n",
+                 error.message.c_str());
+}
+}  // namespace
+
 
 namespace pwb::data {
 
@@ -570,10 +582,9 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
     if (!placed.is_ok()) {
         receipt.diagnostics.push_back(
             Diagnostic::error("payload_failure", placed.error().message));
-        write_journal(publish_journal_json(
-            request, target_asset, asset_created,
-            asset_created ? &new_asset : nullptr, version, receipt,
-            JournalPhase::Written));
+        if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::Written)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_run_journal_failure(journal_error);
+        }
         return receipt;
     }
     version.path = placed.value().rel_path;
@@ -633,10 +644,9 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
             "project_save_failure", saved.error().message));
         return receipt;
     }
-    write_journal(publish_journal_json(
-        request, target_asset, asset_created,
-        asset_created ? &new_asset : nullptr, version, receipt,
-        JournalPhase::ProjectSaved));
+    if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::ProjectSaved)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_run_journal_failure(journal_error);
+    }
     if (fault_hook_) {
         if (auto fault = fault_hook_(JournalPhase::ProjectSaved)) {
             receipt.diagnostics.push_back(
@@ -644,10 +654,9 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
             return receipt;
         }
     }
-    write_journal(publish_journal_json(
-        request, target_asset, asset_created,
-        asset_created ? &new_asset : nullptr, version, receipt,
-        JournalPhase::Rebound));
+    if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::Rebound)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_run_journal_failure(journal_error);
+    }
     if (fault_hook_) {
         if (auto fault = fault_hook_(JournalPhase::Rebound)) {
             receipt.diagnostics.push_back(
@@ -674,10 +683,9 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
             return receipt;
         }
     }
-    write_journal(publish_journal_json(
-        request, target_asset, asset_created,
-        asset_created ? &new_asset : nullptr, version, receipt,
-        JournalPhase::RunCompleted));
+    if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::RunCompleted)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_run_journal_failure(journal_error);
+    }
     if (fault_hook_) {
         if (auto fault = fault_hook_(JournalPhase::RunCompleted)) {
             receipt.diagnostics.push_back(
@@ -687,14 +695,12 @@ Result<PublishReceiptV1> CommitCoordinator::publish_run_result(
     }
 
     receipt.status = PublishStatus::Published;
-    write_journal(publish_journal_json(
-        request, target_asset, asset_created,
-        asset_created ? &new_asset : nullptr, version, receipt,
-        JournalPhase::Completed));
-    write_journal(publish_journal_json(
-        request, target_asset, asset_created,
-        asset_created ? &new_asset : nullptr, version, receipt,
-        JournalPhase::CleanedUp));
+    if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::Completed)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_run_journal_failure(journal_error);
+    }
+    if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::CleanedUp)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+        log_run_journal_failure(journal_error);
+    }
     return receipt;
 }
 
@@ -754,10 +760,9 @@ Result<PublishReceiptV1> CommitCoordinator::finish_publish_journal(
                     "project_save_failure", saved.error().message));
                 return receipt;
             }
-            write_journal(publish_journal_json(
-                request, target_asset, asset_created,
-                asset_created ? &new_asset : nullptr, version, receipt,
-                JournalPhase::ProjectSaved));
+            if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::ProjectSaved)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+                log_run_journal_failure(journal_error);
+            }
         }
         if (record.phase != JournalPhase::RunCompleted) {
             Json finished;
@@ -777,14 +782,12 @@ Result<PublishReceiptV1> CommitCoordinator::finish_publish_journal(
             }
         }
         receipt.status = PublishStatus::Published;
-        write_journal(publish_journal_json(
-            request, target_asset, asset_created,
-            asset_created ? &new_asset : nullptr, version, receipt,
-            JournalPhase::Completed));
-        write_journal(publish_journal_json(
-            request, target_asset, asset_created,
-            asset_created ? &new_asset : nullptr, version, receipt,
-            JournalPhase::CleanedUp));
+        if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::Completed)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_run_journal_failure(journal_error);
+        }
+        if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::CleanedUp)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_run_journal_failure(journal_error);
+        }
         return receipt;
     }
     if (record.phase == JournalPhase::PayloadStaged) {
@@ -820,10 +823,9 @@ Result<PublishReceiptV1> CommitCoordinator::finish_publish_journal(
             }
         }
         receipt.version_number = version.version_number;
-        write_journal(publish_journal_json(
-            request, target_asset, asset_created,
-            asset_created ? &new_asset : nullptr, version, receipt,
-            JournalPhase::CatalogCommitted));
+        if (const auto journal_error = write_journal(publish_journal_json( request, target_asset, asset_created, asset_created ? &new_asset : nullptr, version, receipt, JournalPhase::CatalogCommitted)); journal_error.code != pwb::domain::ErrorCode::Ok) {
+            log_run_journal_failure(journal_error);
+        }
         // Continue the durable tail: project save → run complete.
         record.phase = JournalPhase::CatalogCommitted;
         return finish_publish_journal(record, document);
