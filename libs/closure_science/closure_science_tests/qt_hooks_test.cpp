@@ -8,7 +8,18 @@
 //     "未配置生产模型" state (no task fabricated);
 //   * restore     -> the journal re-reads the recorded task.
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(::getpid());
+#endif
+} }
 
 #include <QApplication>
 #include <QTimer>
@@ -79,7 +90,7 @@ TestProject make_project(const std::string& name) {
     TestProject project;
     project.dir = fs::temp_directory_path() /
                   ("closure_science_qt_" + name + "_" +
-                   std::to_string(static_cast<long long>(::getpid())));
+                   std::to_string(static_cast<long long>(test_pid())));
     fs::remove_all(project.dir);
     fs::create_directories(project.dir);
     project.project_file = project.dir / (name + ".paleo.json");

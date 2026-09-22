@@ -308,6 +308,7 @@ job::JobSpec make_geological_modeling_job_spec(
 
 StratalResult run_stratal(const StratalInput& input, job::JobContext& ctx) {
     return with_plain_errors([&]() -> StratalResult {
+        ctx.check_cancelled();
         StratalResult result;
         result.demo = input.demo;
         for (double f : input.fractions) {
@@ -321,6 +322,10 @@ StratalResult run_stratal(const StratalInput& input, job::JobContext& ctx) {
             result.volume = vol;
             result.surfaces =
                 build_proportional_surfaces(top, bot, input.fractions);
+            for (const auto& surface : result.surfaces) {
+                ctx.check_cancelled();
+                result.amplitudes.push_back(extract_stratal_slice(vol, surface));
+            }
             return result;
         }
 
@@ -343,6 +348,18 @@ StratalResult run_stratal(const StratalInput& input, job::JobContext& ctx) {
                 "horizon 对全部倒转或无效，未生成切片。");
         }
         result.surfaces = std::move(out->first);
+        ctx.check_cancelled();
+        if (input.amplitudes_fn) {
+            result.amplitudes = input.amplitudes_fn(result.surfaces, ctx);
+            if (result.amplitudes.size() != result.surfaces.size())
+                throw std::runtime_error("stratal amplitude map count mismatch");
+            for (std::size_t k = 0; k < result.surfaces.size(); ++k) {
+                const auto& a = result.amplitudes[k];
+                const auto& s = result.surfaces[k];
+                if (a.rows != s.rows || a.cols != s.cols || a.data.size() != s.data.size())
+                    throw std::runtime_error("stratal amplitude map shape mismatch");
+            }
+        }
         return result;
     });
 }

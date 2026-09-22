@@ -202,7 +202,7 @@ bool make_symlink(const std::filesystem::path& link,
 void run_within_root(const Json& oracle) {
     const std::filesystem::path base =
         std::filesystem::temp_directory_path()
-        / ("pwb-conv14-replay-" + std::to_string(::getpid()));
+        / ("pwb-conv14-replay-" + std::to_string(pwb_test_pid()));
     std::filesystem::create_directories(base);
     int n = 0;
     for (const auto& scenario : oracle["within_root"]) {

@@ -12,6 +12,8 @@
 #include <string>
 #include <system_error>
 #include <filesystem>
+#include <cmath>
+#include <algorithm>
 
 #include <QColor>
 #include <QCoreApplication>
@@ -26,8 +28,11 @@
 #include <QSet>
 #include <QString>
 #include <QVariantMap>
+#include <QThread>
 #include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgscoordinatetransform.h>
+#include <qgslinesymbol.h>
 #include <qgslayout.h>
 #include <qgslayoutexporter.h>
 #include <qgslayoutitemlabel.h>
@@ -110,6 +115,8 @@ std::string execute_layout_spec(const ExecContext& context,
         "layout export requires an initialised QGIS application (bridge "
         "initialize() must run first)");
   }
+  if (QThread::currentThread() != QCoreApplication::instance()->thread())
+    throw std::runtime_error("layout export must run on the GUI thread");
   const QJsonDocument doc = QJsonDocument::fromJson(
       QByteArray::fromStdString(spec_json));
   if (!doc.isObject()) {
@@ -136,6 +143,7 @@ std::string execute_layout_spec(const ExecContext& context,
 
   std::map<std::string, QgsLayoutItemMap*> maps_by_key;
   int item_count = 0;
+  bool geographic_annotations = false;
   const QJsonArray items = spec.value(QStringLiteral("items")).toArray();
   for (const QJsonValue& value : items) {
     if (!value.isObject()) continue;
@@ -148,6 +156,7 @@ std::string execute_layout_spec(const ExecContext& context,
 
     if (type == QLatin1String("map")) {
       QgsLayoutItemMap* map = new QgsLayoutItemMap(&layout);
+      layout.addLayoutItem(map);  // owns the item even if CRS validation throws
       map->attemptMove(mmPoint(x, y));
       map->attemptResize(mmSize(w, h));
       const QString crs_id = item.value(QStringLiteral("crs")).toString();
@@ -200,8 +209,55 @@ std::string execute_layout_spec(const ExecContext& context,
         if (!crs_id.isEmpty()) {
           map_grid->setCrs(QgsCoordinateReferenceSystem(crs_id));
         }
+        if (grid.value(QStringLiteral("geographic")).toBool(false)) {
+          geographic_annotations = true;
+          // Let QGIS transform and clip curved meridians/parallels in the
+          // map's actual CRS; map-unit arithmetic cannot make a graticule.
+          const QgsCoordinateReferenceSystem geographic(QStringLiteral("EPSG:4326"));
+          if (!map->crs().isValid() || !context.project)
+            throw std::invalid_argument("geographic graticule requires a valid map CRS and project");
+          QgsCoordinateTransform transform(map->crs(), geographic, context.project);
+          const QgsRectangle bounds = transform.transformBoundingBox(map->extent());
+          double span = std::max(bounds.width(), bounds.height());
+          if (!std::isfinite(span) || span <= 0.0)
+            throw std::invalid_argument("map extent cannot be transformed to geographic coordinates");
+          double interval = grid.value(QStringLiteral("interval_x")).toDouble();
+          if (interval == 0.0) {
+            const double magnitude = std::pow(10.0, std::floor(std::log10(span / 5.0)));
+            const double normalized = span / 5.0 / magnitude;
+            interval = magnitude * (normalized <= 1.0 ? 1.0 : normalized <= 2.0 ? 2.0 : normalized <= 5.0 ? 5.0 : 10.0);
+          }
+          if (!std::isfinite(interval) || interval <= 0.0 || span / interval > 1000.0)
+            throw std::invalid_argument("geographic grid interval is invalid or creates over 1000 lines");
+          map_grid->setCrs(geographic);
+          map_grid->setIntervalX(interval);
+          map_grid->setIntervalY(interval);
+          map_grid->setAnnotationFormat(Qgis::MapGridAnnotationFormat::DegreeMinuteSecond);
+          map_grid->setAnnotationPrecision(0);
+          map_grid->setAnnotationDirection(Qgis::MapGridAnnotationDirection::Horizontal);
+          map_grid->setAnnotationFrameDistance(2.0);
+          for (const auto side : {Qgis::MapGridBorderSide::Left, Qgis::MapGridBorderSide::Right,
+                                 Qgis::MapGridBorderSide::Top, Qgis::MapGridBorderSide::Bottom})
+            map_grid->setAnnotationPosition(Qgis::MapGridAnnotationPosition::OutsideMapFrame, side);
+          QgsTextFormat text;
+          text.setSize(8.0);
+          text.setColor(Qt::black);
+          map_grid->setAnnotationTextFormat(text);
+          map_grid->setFrameStyle(Qgis::MapGridFrameStyle::Zebra);
+          map_grid->setFrameWidth(1.5);
+          map_grid->setFramePenSize(0.2);
+          map_grid->setFrameFillColor1(Qt::white);
+          map_grid->setFrameFillColor2(Qt::black);
+          const double line_width = grid.value(QStringLiteral("line_width_mm")).toDouble(0.15);
+          if (!std::isfinite(line_width) || line_width <= 0.0 || line_width > 5.0)
+            throw std::invalid_argument("graticule line width must be in (0, 5] mm");
+          auto line = QgsLineSymbol::createSimple(QVariantMap{
+              {QStringLiteral("line_color"), grid.value(QStringLiteral("color")).toString(QStringLiteral("#606060"))},
+              {QStringLiteral("line_width"), QString::number(line_width)},
+              {QStringLiteral("line_style"), QStringLiteral("dot")}});
+          map_grid->setLineSymbol(line.release());
+        }
       }
-      layout.addLayoutItem(map);
       const std::string key =
           item.value(QStringLiteral("key")).toString().toStdString();
       maps_by_key[key.empty() ? std::string("map") : key] = map;
@@ -283,6 +339,13 @@ std::string execute_layout_spec(const ExecContext& context,
       scalebar->setLinkedMap(linked_map);
       scalebar->applyDefaultSettings();
       scalebar->applyDefaultSize(Qgis::DistanceUnit::Meters);
+      if (item.contains(QStringLiteral("units"))) {
+        scalebar->setUnits(item.value(QStringLiteral("units")).toString() == QStringLiteral("km")
+            ? Qgis::DistanceUnit::Kilometers : Qgis::DistanceUnit::Meters);
+        scalebar->setNumberOfSegmentsLeft(0);
+        scalebar->setSegmentSizeMode(Qgis::ScaleBarSegmentSizeMode::Fixed);
+        scalebar->setHeight(2.0);
+      }
       const int segments = item.value(QStringLiteral("segments")).toInt(0);
       if (segments > 0) scalebar->setNumberOfSegments(segments);
       const double units_per_segment =
@@ -296,6 +359,15 @@ std::string execute_layout_spec(const ExecContext& context,
       scalebar->attemptMove(mmPoint(x, y));
       layout.addLayoutItem(scalebar);
       ++item_count;
+      if (item.value(QStringLiteral("numeric_scale")).toBool(false)) {
+        auto* numeric = new QgsLayoutItemScaleBar(&layout);
+        numeric->setLinkedMap(linked_map);
+        numeric->applyDefaultSettings();
+        numeric->setStyle(QStringLiteral("Numeric"));
+        numeric->attemptMove(mmPoint(x + w + 6.0, y));
+        layout.addLayoutItem(numeric);
+        ++item_count;
+      }
     } else if (type == QLatin1String("north_arrow") ||
                type == QLatin1String("picture")) {
       QString svg_path = item.value(QStringLiteral("svg_path"))
@@ -396,6 +468,7 @@ std::string execute_layout_spec(const ExecContext& context,
   } else if (format == QLatin1String("svg")) {
     QgsLayoutExporter::SvgExportSettings settings;
     settings.dpi = dpi;
+    if (geographic_annotations) settings.textRenderFormat = Qgis::TextRenderFormat::AlwaysText;
     settings.forceVectorOutput = force_vector;
     result = exporter.exportToSvg(QString::fromStdString(output_path),
                                   settings);

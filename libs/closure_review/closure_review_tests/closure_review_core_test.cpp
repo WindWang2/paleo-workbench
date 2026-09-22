@@ -723,7 +723,7 @@ PWB_TEST(actions_backend_closes_the_loop) {
     harness.document = project_from_text();
     const std::filesystem::path work =
         std::filesystem::temp_directory_path() /
-        ("pwb09_actions_" + std::to_string(::getpid()));
+        ("pwb09_actions_" + std::to_string(pwb_test_pid()));
     std::filesystem::create_directories(work);
     // A real .paleo.json-shaped project file path → exports land in the
     // sibling project.artifacts/exports directory (artifact_dir_for parity).

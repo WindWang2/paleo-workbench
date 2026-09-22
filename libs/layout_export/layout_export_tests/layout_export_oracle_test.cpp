@@ -20,6 +20,8 @@
 #include <pwb/domain/json.hpp>
 #include <pwb/layout_export/layout_export.hpp>
 #include <pwb/mapping_document/composition.hpp>
+#include <pwb/mapping_document/composer_templates.hpp>
+#include <pwb/mapping_document/composer_renderer.hpp>
 
 using pwb::domain::Json;
 using namespace pwb::layout_export;
@@ -394,6 +396,35 @@ void run_self_check() {
 }  // namespace
 
 int main() {
+    {
+        using namespace pwb::mapping_document;
+        auto document = instantiate_composer_template(CompositionFactory{}, "professional_geographic");
+        document = parse_composition(dump_composition(document));
+        BuildSpecInput input;
+        input.crs = "EPSG:3857";
+        input.map_extent = {12000000, 3500000, 13000000, 4000000};
+        const Json spec = build_layout_spec(document, input, nullptr);
+        check(spec["items"][0]["crs"] == "EPSG:3857", "projected map CRS retained");
+        check(spec["items"][0]["grid"]["crs"] == "EPSG:4326", "independent geographic grid CRS");
+        check(spec["items"][0]["grid"]["annotation_format"] == "dms", "DMS labels after project round trip");
+        bool scale = false;
+        for (const auto& item : spec["items"]) {
+            if (item["type"] != "scalebar") continue;
+            scale = item["units"] == "km" && item["units_per_segment"] == 2.5 && item["numeric_scale"] == true;
+        }
+        check(scale, "four calibrated segments span requested 10 km");
+        for (auto& element : document.elements) {
+            if (element.element_type == "grid") element.properties["interval_degrees"] = -1;
+        }
+        bool rejected = false;
+        try { build_layout_spec(document, input, nullptr); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected, "negative geographic interval is rejected");
+        rejected = false;
+        try { render_composition_to_svg(document, ComposerRenderSeams{}); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected, "plain SVG renderer cannot silently substitute decorative grid");
+    }
     run_spec_cases();
     run_hybrid_cases();
     run_report_cases();

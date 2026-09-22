@@ -6,7 +6,18 @@
 //   envelope files verifiable by a workflow adapter (node_request mapper).
 // Plus the failure and cancelled publication paths (publish-before-terminal).
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(::getpid());
+#endif
+} }
 
 #include <cmath>
 #include <cstdio>
@@ -66,7 +77,7 @@ Json catalog_like_dto() {
 int main() {
     const std::filesystem::path tmp =
         std::filesystem::temp_directory_path()
-        / ("pwb-science-service-e2e-" + std::to_string(::getpid()));
+        / ("pwb-science-service-e2e-" + std::to_string(test_pid()));
     std::filesystem::remove_all(tmp);
 
     // --- assemble the service closure --------------------------------------

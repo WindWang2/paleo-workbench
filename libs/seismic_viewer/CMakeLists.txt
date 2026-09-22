@@ -48,6 +48,7 @@ add_library(pwb_seismic_viewer
     src/colorbar_widget.cpp
     src/crossplot_core.cpp
     src/display_core.cpp
+    src/section_profile_widget.cpp
     src/horizon_core.cpp
     src/isosurface_core.cpp
     src/slice_controller.cpp

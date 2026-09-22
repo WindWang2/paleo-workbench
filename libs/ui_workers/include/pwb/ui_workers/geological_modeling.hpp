@@ -93,6 +93,9 @@ struct StratalInput {
         double stride_i, double stride_x, double dt_ms, double t0_ms,
         int sample_stride)>
         grids_fn;
+    // Worker-only, bounded volume reader; returns amplitude maps aligned to surfaces.
+    std::function<std::vector<Grid2D>(const std::vector<Grid2D>&,
+                                      job::JobContext&)> amplitudes_fn;
     // Registration parameters for the default grid path (ms-grids
     // already aligned to preview indices when provided directly).
     std::size_t n_i_prev = 0, n_x_prev = 0, n_s_prev = 0;
@@ -108,6 +111,7 @@ struct StratalResult {
     bool demo = false;
     std::optional<Volume3D> volume;  // demo path only
     std::vector<Grid2D> surfaces;
+    std::vector<Grid2D> amplitudes;
     std::vector<std::string> labels;  // "k=%.2f" per fraction
 };
 

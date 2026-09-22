@@ -12,7 +12,18 @@
 //   reopen restore + project-identity late-arrival guard; the
 //   science-service catalog loop (payload source + envelope publisher).
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(::getpid());
+#endif
+} }
 
 #include <cmath>
 #include <cstdio>
@@ -98,7 +109,7 @@ struct TestProject {
         TestProject project;
         project.dir = fs::temp_directory_path() /
                       ("closure_science_" + name + "_" +
-                       std::to_string(static_cast<long long>(::getpid())));
+                       std::to_string(static_cast<long long>(test_pid())));
         fs::remove_all(project.dir);
         fs::create_directories(project.dir);
         project.project_file = project.dir / (name + ".paleo.json");

@@ -94,6 +94,23 @@ struct JointSceneSnapshot {
     double time_opacity = 0.8;  // 0..1 (the card displays *100)
 };
 
+// ---- 2D fence profile view (#61/#62: profile_2d.py contract) ------------
+// The amplitude strip the 3D curtain already renders, plus the wells
+// projected onto the active fence — seam-local value types keep the
+// engine's geo3d types out of the shell.
+struct JointFenceProfileStrip {
+    std::vector<float> amplitude;   // n_along * n_sample, row-major
+    std::vector<double> arc_length_m;
+    std::vector<double> sample_axis;  // active-domain units
+    std::string sample_unit;          // "ms" or "m"
+};
+
+struct JointFenceProfileWell {
+    std::string name;
+    double distance_m = 0.0;
+    std::vector<std::pair<std::string, double>> tops;  // (name, z)
+};
+
 // WellSeismicJointHost — every method mirrors the Python host/scene calls
 // the pages make. The platform injects the real host; tests use a fake.
 class JointHostController : public QObject {
@@ -107,6 +124,17 @@ public:
     [[nodiscard]] virtual JointSceneSnapshot scene_snapshot() const = 0;
     [[nodiscard]] virtual bool has_scene() const = 0;
     [[nodiscard]] virtual std::string engine_error() const = 0;
+    // 2D fence profile: nullopt when there is no active fence or the
+    // volume/survey is not ready (the page keeps its honest placeholder).
+    [[nodiscard]] virtual std::optional<JointFenceProfileStrip>
+    active_fence_strip() const {
+        return std::nullopt;
+    }
+    // Wells projected onto the active fence (empty without one).
+    [[nodiscard]] virtual std::vector<JointFenceProfileWell>
+    active_fence_wells() const {
+        return {};
+    }
     // scene.well_presentations()-ordered (id, display) pairs; falls back to
     // host.well_names() when no scene/presentations exist.
     [[nodiscard]] virtual std::vector<std::pair<std::string, std::string>>

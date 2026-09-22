@@ -122,6 +122,13 @@ public:
         const override;
     [[nodiscard]] bool has_scene() const override;
     [[nodiscard]] std::string engine_error() const override;
+    // 2D fence profile view: the curtain's cached strip + projected wells.
+    [[nodiscard]] std::optional<
+        pwb::ui_wellseis::qt::JointFenceProfileStrip>
+    active_fence_strip() const override;
+    [[nodiscard]] std::vector<
+        pwb::ui_wellseis::qt::JointFenceProfileWell>
+    active_fence_wells() const override;
     [[nodiscard]] std::vector<std::pair<std::string, std::string>>
     well_options() const override;
     bool set_vertical_domain(const std::string& domain) override;

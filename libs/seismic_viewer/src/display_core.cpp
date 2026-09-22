@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <functional>
+#include <stdexcept>
+#include <pwb/viz/seismic_volume.hpp>
 
 namespace pwb::seismic_viewer::display {
 namespace {
@@ -283,10 +286,11 @@ WiggleGeometry wiggle_geometry(std::span<const float> data, std::int64_t n_sampl
 // Polyline sampling
 // ---------------------------------------------------------------------------
 
-PolylineSample sample_polyline_slice(std::span<const float> volume, std::int64_t n_i,
-                                     std::int64_t n_x, std::int64_t n_s,
-                                     std::span<const std::pair<double, double>> points,
-                                     double samples_per_unit) {
+static PolylineSample sample_polyline_impl(
+    std::int64_t n_i, std::int64_t n_x, std::int64_t n_s,
+    std::span<const std::pair<double, double>> points, double samples_per_unit,
+    const std::function<double(std::int64_t, std::int64_t, std::int64_t)>& at,
+    const std::function<bool()>& cancelled) {
     PolylineSample out;
     const auto zero_result = [&]() {
         out.n_samples = std::max<std::int64_t>(n_s, 0);
@@ -295,9 +299,14 @@ PolylineSample sample_polyline_slice(std::span<const float> volume, std::int64_t
         out.distances.assign(1, 0.0);
         return out;
     };
-    if (volume.size() != static_cast<std::size_t>(n_i * n_x * n_s) || n_i <= 0 ||
-        n_x <= 0 || n_s <= 0) {
+    if (n_i <= 0 || n_x <= 0 || n_s <= 0) {
         return zero_result();
+    }
+    if (!std::isfinite(samples_per_unit) || samples_per_unit <= 0)
+        throw std::invalid_argument("polyline sampling density must be positive and finite");
+    for (const auto& point : points) {
+        if (!std::isfinite(point.first) || !std::isfinite(point.second))
+            throw std::invalid_argument("polyline coordinates must be finite");
     }
     // Dense waypoints along the polyline: per segment n_pts =
     // max(2, int(seg_len * samples_per_unit)) samples on linspace(0, 1),
@@ -314,6 +323,8 @@ PolylineSample sample_polyline_slice(std::span<const float> volume, std::int64_t
         if (seg_len < 0.01) {
             continue;
         }
+        if (!std::isfinite(seg_len) || seg_len * samples_per_unit > 10000000.0)
+            throw std::length_error("polyline segment exceeds ten million traces");
         const std::int64_t n_pts =
             std::max<std::int64_t>(2, static_cast<std::int64_t>(seg_len * samples_per_unit));
         const bool last_seg = seg + 2 == points.size();
@@ -344,19 +355,12 @@ PolylineSample sample_polyline_slice(std::span<const float> volume, std::int64_t
         return zero_result();
     }
 
-    const auto at = [&](std::int64_t i, std::int64_t x, std::int64_t s) -> double {
-        return static_cast<double>(
-            volume[(static_cast<std::size_t>(i) * static_cast<std::size_t>(n_x) +
-                    static_cast<std::size_t>(x)) *
-                       static_cast<std::size_t>(n_s) +
-                   static_cast<std::size_t>(s)]);
-    };
-
     out.n_samples = n_s;
     out.n_points = static_cast<std::int64_t>(ils.size());
     out.distances = dists;
     out.section.assign(static_cast<std::size_t>(n_s * out.n_points), 0.0f);
     for (std::int64_t h = 0; h < out.n_points; ++h) {
+        if (cancelled && cancelled()) throw std::runtime_error("polyline extraction cancelled");
         const double fi = ils[static_cast<std::size_t>(h)];
         const double fj = xls[static_cast<std::size_t>(h)];
         // mode="constant", cval=0: coordinates outside a axis domain drop
@@ -391,6 +395,52 @@ PolylineSample sample_polyline_slice(std::span<const float> volume, std::int64_t
         }
     }
     return out;
+}
+
+PolylineSample sample_polyline_slice(std::span<const float> volume, std::int64_t n_i,
+    std::int64_t n_x, std::int64_t n_s,
+    std::span<const std::pair<double, double>> points, double samples_per_unit) {
+    if (n_i <= 0 || n_x <= 0 || n_s <= 0 ||
+        volume.size() / static_cast<std::size_t>(n_s) / static_cast<std::size_t>(n_x) != static_cast<std::size_t>(n_i) ||
+        volume.size() != static_cast<std::size_t>(n_i) * n_x * n_s) {
+        PolylineSample empty;
+        empty.n_samples = std::max<std::int64_t>(n_s, 0);
+        empty.n_points = 1;
+        empty.section.assign(static_cast<std::size_t>(empty.n_samples), 0.0f);
+        empty.distances = {0.0};
+        return empty;
+    }
+    return sample_polyline_impl(n_i, n_x, n_s, points, samples_per_unit,
+        [&](std::int64_t i, std::int64_t x, std::int64_t t) {
+            return static_cast<double>(volume[(i * n_x + x) * n_s + t]);
+        }, {});
+}
+
+PolylineSample sample_polyline_slice(pwb::viz::ISeismicVolume& source,
+    std::span<const std::pair<double, double>> points, double samples_per_unit,
+    const std::function<bool()>& cancelled) {
+    const auto geometry = source.geometry();
+    const auto [ni, nx, ns] = geometry.shape;
+    if (ni <= 0 || nx <= 0 || ns <= 0) throw std::invalid_argument("empty source volume");
+    // Two inline planes suffice for the interpolation stencil. This bounds
+    // memory independently of survey inline count and supports chunked readers.
+    std::array<std::vector<float>, 2> planes;
+    std::array<std::int64_t, 2> indices{-1, -1};
+    std::size_t next = 0;
+    return sample_polyline_impl(ni, nx, ns, points, samples_per_unit,
+        [&](std::int64_t i, std::int64_t x, std::int64_t t) {
+            std::size_t slot = indices[0] == i ? 0 : (indices[1] == i ? 1 : 2);
+            if (slot == 2) {
+                if (cancelled && cancelled()) throw std::runtime_error("polyline extraction cancelled");
+                slot = next;
+                next = 1 - next;
+                planes[slot].resize(static_cast<std::size_t>(nx) * ns);
+                if (source.read_slice(pwb::viz::VolumeAxis::inline_, i, planes[slot]) != planes[slot].size())
+                    throw std::runtime_error("polyline inline read failed");
+                indices[slot] = i;
+            }
+            return static_cast<double>(planes[slot][static_cast<std::size_t>(x) * ns + t]);
+        }, cancelled);
 }
 
 } // namespace pwb::seismic_viewer::display

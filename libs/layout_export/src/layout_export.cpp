@@ -398,6 +398,7 @@ Json build_layout_spec(const Composition& doc, const BuildSpecInput& input,
     Json items = Json::array();
     bool grid_present = false;
     double grid_spacing_units = 0.0;
+    Json geographic_grid;
     for (const ComposerElement* element : visible_elements(doc)) {
         if (element->width_mm <= 0.0 || element->height_mm <= 0.0) {
             throw std::invalid_argument(
@@ -468,6 +469,17 @@ Json build_layout_spec(const Composition& doc, const BuildSpecInput& input,
             item["map_item"] = "map";
             item["segments"] = py_int_json(4);
             item["unit_label"] = py_str_or(props, "units", "");
+            if (props.is_object() && props.value("calibrated", false)) {
+                const double length_km = py_float_or(props, "length_km", 10.0);
+                const std::string units = py_str_or(props, "units", "km");
+                if (!std::isfinite(length_km) || length_km <= 0.0 ||
+                    (units != "km" && units != "m")) {
+                    throw std::invalid_argument("calibrated scale requires positive length_km and km or m units");
+                }
+                item["units"] = units;
+                item["units_per_segment"] = length_km * (units == "m" ? 1000.0 : 1.0) / 4.0;
+                item["numeric_scale"] = props.value("numeric_scale", true);
+            }
             for (auto it = base.begin(); it != base.end(); ++it) item[it.key()] = it.value();
             items.push_back(std::move(item));
         } else if (type == "grid") {
@@ -481,6 +493,19 @@ Json build_layout_spec(const Composition& doc, const BuildSpecInput& input,
                 warn("grid element " + element->id
                      + " has no main map to attach to; dropped");
             } else {
+                geographic_grid = nullptr;
+                if (props.is_object() && props.value("geographic", false)) {
+                    const double interval = props.value("interval_degrees", 0.0);
+                    if (!std::isfinite(interval) || interval < 0.0 || interval > 180.0)
+                        throw std::invalid_argument("geographic interval_degrees must be 0 (automatic) or in (0, 180]");
+                    geographic_grid = Json{{"enabled", true}, {"crs", "EPSG:4326"},
+                        {"geographic", true}, {"interval_x", interval}, {"interval_y", interval},
+                        {"annotation", true}, {"annotation_format", "dms"}, {"frame_style", "zebra"},
+                        {"color", py_str_or(props, "color", "#606060")},
+                        {"line_width_mm", py_float_or(props, "line_width_mm", 0.15)}};
+                    grid_present = true;
+                    continue;
+                }
                 const double spacing_mm =
                     py_float_or(props, "spacing_mm", 10.0);
                 const double extent_width =
@@ -554,6 +579,7 @@ Json build_layout_spec(const Composition& doc, const BuildSpecInput& input,
                 grid["interval_x"] = grid_spacing_units;
                 grid["interval_y"] = grid_spacing_units;
                 grid["annotation"] = true;
+                if (geographic_grid.is_object()) grid = geographic_grid;
                 item["grid"] = grid;
             }
         }

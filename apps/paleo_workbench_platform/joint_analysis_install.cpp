@@ -2,19 +2,23 @@
 // wiring contract. Every hook below runs a native kernel that already
 // existed at this HEAD; this install is product wiring only.
 #include "joint_analysis_install.hpp"
+#include "horizon_interpretation_io.hpp"
 
 #ifdef PWB_WITH_UI_WELLSEIS
 
 #include <QDialog>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QPointer>
 #include <QSaveFile>
 #include <QTextBrowser>
 #include <QVBoxLayout>
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -27,6 +31,7 @@
 #include <pwb/domain/json.hpp>
 #include <pwb/geomodel/advisor_contract.hpp>
 #include <pwb/geo3d_viz/joint/joint_scene.hpp>
+#include <pwb/geo3d_viz/joint/color_scales.hpp>
 #include <pwb/geo3d_viz/joint/registration.hpp>
 #include <pwb/geo3d_viz/scene_object_manager.hpp>
 #include <pwb/job_runtime/qt/job_bridge.hpp>
@@ -34,6 +39,7 @@
 #include <pwb/seismic_viewer/horizon_core.hpp>
 #include <pwb/ui_workers/geological_modeling.hpp>
 #include <pwb/ui_wellseis/joint_state.hpp>
+#include <pwb/viz/well_tie/log_tie.hpp>
 
 #include "geo3d_dock.hpp"
 #include "job_center.hpp"
@@ -134,6 +140,45 @@ Json borehole_records(const pwb::app::viz_c::VizCJointHost* host) {
     return out;
 }
 
+// ---- well-tie curve selection (VIZ-B mnemonic parity) ----------------------
+
+// AC/DT = sonic, DEN/RHOB = density — the same upper-cased mnemonic sets
+// the cross-well dock calibration uses (on_well_tie_well_changed).
+const pwb::viz::cross_well::WellCurve* find_log_curve(
+    const std::vector<pwb::viz::cross_well::WellCurve>& curves, bool sonic) {
+    for (const auto& curve : curves) {
+        std::string upper;
+        for (unsigned char c : curve.name) {
+            upper.push_back(static_cast<char>(std::toupper(c)));
+        }
+        const bool hit = sonic ? (upper == "AC" || upper == "DT")
+                               : (upper == "DEN" || upper == "RHOB");
+        if (hit) {
+            return &curve;
+        }
+    }
+    return nullptr;
+}
+
+// Depth axis → metres (LAS axes may arrive in ft); curve values keep
+// their native units — the kernel normalizes sonic/density itself.
+pwb::viz::well_tie::LogTieCurve to_log_tie_curve(
+    const pwb::viz::cross_well::WellCurve& curve) {
+    std::string unit;
+    for (unsigned char c : curve.depth_unit) {
+        unit.push_back(static_cast<char>(std::tolower(c)));
+    }
+    const double scale = unit == "ft" || unit == "feet" ? 0.3048 : 1.0;
+    pwb::viz::well_tie::LogTieCurve out;
+    out.depth_m.reserve(curve.depths.size());
+    for (double depth : curve.depths) {
+        out.depth_m.push_back(depth * scale);
+    }
+    out.values = curve.values;
+    out.unit = curve.unit;
+    return out;
+}
+
 // ---- analysis overlays ------------------------------------------------------
 
 // One colored quad-grid mesh overlay from a sample-index surface grid
@@ -151,7 +196,8 @@ Json borehole_records(const pwb::app::viz_c::VizCJointHost* host) {
 // Python 0.8 alpha lives in the color and object.opacity stays 1.0
 // (0.8 x 0.8 = 0.64 would double-multiply).
 void add_stratal_overlay(SceneObjectManager& manager, const std::string& label,
-                         const Grid2D& surface, const Registration* reg) {
+                         const Grid2D& surface, const Grid2D& amplitude,
+                         const Registration* reg) {
     SceneObject object;
     object.name = kStratalOverlayPrefix + label;
     object.kind = ObjectKind::Horizon;
@@ -159,6 +205,8 @@ void add_stratal_overlay(SceneObjectManager& manager, const std::string& label,
     object.opacity = 1.0f;
     object.color = kStratalColor;
     object.pickable = false;
+    const std::vector<float> values(amplitude.data.begin(), amplitude.data.end());
+    const auto rgba = pwb::geo3d_viz::joint::colorize_amplitude(values);
     constexpr double kDemoSpan = 80.0;
     const double demo_k = 40.0 / 32.0;  // demo volume sample span
     object.verts.reserve(surface.rows * surface.cols);
@@ -205,8 +253,18 @@ void add_stratal_overlay(SceneObjectManager& manager, const std::string& label,
             if (!(finite(a) && finite(b) && finite(c) && finite(d))) {
                 continue;
             }
-            object.faces.push_back({a, b, c});
-            object.faces.push_back({b, d, c});
+            const auto add_face = [&](std::int64_t p, std::int64_t q, std::int64_t r) {
+                if (!std::isfinite(amplitude.data[p]) || !std::isfinite(amplitude.data[q]) ||
+                    !std::isfinite(amplitude.data[r])) return;
+                Rgba color{0, 0, 0, 0.8f};
+                for (auto index : {p, q, r})
+                    for (int channel = 0; channel < 3; ++channel)
+                        color[channel] += rgba[static_cast<std::size_t>(index)*4 + channel] / (255.0f*3.0f);
+                object.faces.push_back({p, q, r});
+                object.face_colors.push_back(color);
+            };
+            add_face(a, b, c);
+            add_face(b, d, c);
         }
     }
     if (object.faces.empty()) {
@@ -338,6 +396,23 @@ GridsFn make_grids_fn(std::string top_path, std::string bottom_path,
                                   xl * survey.xline_step);
         }
         const auto load = [&](const std::string& path) -> Grid2D {
+            if (path.rfind("interp:", 0) == 0) {
+                const auto artifact = read_horizon_interpretation(std::filesystem::u8path(path.substr(7)));
+                if (artifact.descriptor.value("vertical_domain", std::string("time")) != "time")
+                    throw std::runtime_error("stratal interpretation must use time (ms) coordinates");
+                if (artifact.z.rows != static_cast<std::size_t>(survey.n_inlines) ||
+                    artifact.z.cols != static_cast<std::size_t>(survey.n_crosslines))
+                    throw std::runtime_error("interpretation grid does not match survey axes");
+                Grid2D out = pwb::ui_workers::grid2d_filled(
+                    static_cast<std::size_t>(reg.n_inline()), static_cast<std::size_t>(reg.n_crossline()),
+                    std::numeric_limits<double>::quiet_NaN());
+                for (std::size_t i = 0; i < out.rows; ++i)
+                    for (std::size_t x = 0; x < out.cols; ++x) {
+                        const double ms = artifact.z.at(i*reg.strides()[0], x*reg.strides()[1]);
+                        if (std::isfinite(ms)) out.at(i,x) = reg.time_ms_to_sample_idx(ms);
+                    }
+                return out;
+            }
             QFile file(QString::fromStdString(path));
             if (!file.open(QIODevice::ReadOnly)) {
                 throw std::runtime_error("无法读取 horizon 文件：" + path);
@@ -479,14 +554,25 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
             state->dialog_parent, title, QString(),
             QStringLiteral("Horizon (*.dat);;所有文件 (*)"));
     };
-    // Versioned interpretation entries are not yet carried by the native
-    // project store schema (horizon_interpretations lives in the Python
-    // project document); the .dat browse path covers the native product
-    // flow and this seam stays honestly empty rather than fabricated.
-    hooks.horizon_interpretations =
-        [](const QString&) {
-            return std::vector<std::pair<std::string, std::string>>{};
-        };
+    hooks.horizon_interpretations = [state](const QString& project_path) {
+        std::vector<std::pair<std::string, std::string>> entries;
+        const Json document = state->project_document ? state->project_document() : Json::object();
+        const auto refs = document.find("horizon_interpretations");
+        if (refs == document.end() || !refs->is_array()) return entries;
+        const QString directory = state->project_directory ? state->project_directory()
+            : QFileInfo(project_path).absolutePath();
+        for (const auto& ref : *refs) {
+            if (!ref.is_object() || !ref.contains("artifact_path") || !ref["artifact_path"].is_string()) continue;
+            if (ref.value("vertical_domain", std::string("time")) != "time" ||
+                ref.value("status", std::string("clean")) == "invalid") continue;
+            QString path = QString::fromStdString(ref["artifact_path"].get<std::string>());
+            if (path.isEmpty()) continue;
+            if (QFileInfo(path).isRelative()) path = QDir(directory).absoluteFilePath(path);
+            entries.emplace_back(ref.value("name", std::string("Horizon")),
+                                 "interp:" + path.toStdString());
+        }
+        return entries;
+    };
 
     // ---- stratal -----------------------------------------------------------
     // Job plumbing follows the frozen viz_b contract: spec.on_done/on_fail
@@ -528,17 +614,46 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
                         "horizon。"));
                     return;
                 }
-                const auto trim = [](const std::string& entry) {
-                    const std::string prefix = "interp:";
-                    return entry.rfind(prefix, 0) == 0
-                               ? entry.substr(prefix.size())
-                               : entry;
-                };
                 // .dat parsing + nearest-fill + stride resampling run on
                 // the worker through the grids_fn seam (the hook only
                 // validates cheap preconditions here).
-                input.grids_fn = make_grids_fn(trim(top_entry),
-                                               trim(bottom_entry), *reg);
+                input.grids_fn = make_grids_fn(top_entry, bottom_entry, *reg);
+                const auto access = state->host->scene().volume_access_shared();
+                if (!access) {
+                    fail(QStringLiteral("体数据未就绪，无法采样地层切片。"));
+                    return;
+                }
+                input.amplitudes_fn = [access](const std::vector<Grid2D>& surfaces,
+                                               pwb::job::JobContext& ctx) {
+                    const auto shape = access->shape();
+                    const std::size_t ni = static_cast<std::size_t>(shape[0]);
+                    const std::size_t nx = static_cast<std::size_t>(shape[1]);
+                    const std::size_t ns = static_cast<std::size_t>(shape[2]);
+                    std::vector<Grid2D> maps;
+                    for (const auto& surface : surfaces) {
+                        if (surface.rows != ni || surface.cols != nx || ns == 0)
+                            throw std::runtime_error("stratal volume/registration shape mismatch");
+                        maps.push_back(pwb::ui_workers::grid2d_filled(ni, nx,
+                            std::numeric_limits<double>::quiet_NaN()));
+                    }
+                    // One inline at a time: retain O(nx*ns) samples, never a dense cube.
+                    for (std::size_t i = 0; i < ni; ++i) {
+                        ctx.check_cancelled();
+                        const auto strip = access->slice_inline(static_cast<std::int64_t>(i));
+                        if (strip.size() != nx*ns) throw std::runtime_error("invalid stratal inline payload");
+                        for (std::size_t k = 0; k < surfaces.size(); ++k)
+                            for (std::size_t x = 0; x < nx; ++x) {
+                                const double s = surfaces[k].at(i,x);
+                                if (!std::isfinite(s) || s < 0 || s > static_cast<double>(ns-1)) continue;
+                                const auto s0 = static_cast<std::size_t>(std::floor(s));
+                                const auto s1 = std::min(s0+1, ns-1);
+                                const double f = s-static_cast<double>(s0);
+                                maps[k].at(i,x) = strip[x*ns+s0]*(1-f) + strip[x*ns+s1]*f;
+                            }
+                        ctx.report_progress(static_cast<double>(i+1)/ni);
+                    }
+                    return maps;
+                };
                 input.n_i_prev =
                     static_cast<std::size_t>(reg->n_inline());
                 input.n_x_prev =
@@ -620,11 +735,13 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
                     clear_stratal_overlays(state->scene_objects);
                     for (std::size_t k = 0;
                          k < result->surfaces.size() &&
-                         k < result->labels.size();
+                         k < result->labels.size() &&
+                         k < result->amplitudes.size();
                          ++k) {
                         add_stratal_overlay(*state->scene_objects,
                                             result->labels[k],
-                                            result->surfaces[k], reg);
+                                            result->surfaces[k],
+                                            result->amplitudes[k], reg);
                     }
                     page->set_stratal_status(
                         demo
@@ -645,28 +762,208 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
     };
 
     // ---- well tie ----------------------------------------------------------
-    // Python parity: the joint page builds placeholder single-layer
-    // records ("未分层" → lithology defaults), so the synthetic is
-    // constant and the tie fails honestly. Real well tie runs on the
-    // VIZ-B dock with actual LAS logs (calibration + auto-tie + export).
-    hooks.tie_params_changed = [](int freq, int shift) {
-        Q_UNUSED(freq);
-        Q_UNUSED(shift);  // no rebuild consumer until real logs land here
+    // Real log tie: the cross-well workspace's LAS curves against the
+    // joint volume's trace at the well (log_tie kernel — unit-aware
+    // impedance, checkshot TD tables when the scene carries them, lag
+    // scan over measured overlap only). Placeholder bh records are not
+    // used: without real logs the hook refuses with instructions.
+    hooks.tie_params_changed = [state](int freq, int shift) {
+        state->tie_frequency_hz = freq;
+        state->tie_shift_ms = shift;
     };
     hooks.run_auto_tie = [state] {
         QWidget* parent = state->dialog_parent;
-        const Json wells = borehole_records(state->host);
-        if (wells.empty()) {
-            QMessageBox::information(
-                parent, QStringLiteral("提示"),
-                QStringLiteral("联合场景中没有井数据，无法进行井震标定。"));
+        if (state->page == nullptr || state->jobs == nullptr) {
             return;
         }
-        QMessageBox::information(
-            parent, QStringLiteral("提示"),
-            QStringLiteral(
-                "联合页井数据为占位记录（未分层，无声波/密度曲线），无法生成"
-                "合成地震记录。请使用连井标定页进行真实井震标定。"));
+        const auto columns = state->well_logs
+                                 ? state->well_logs()
+                                 : std::vector<pwb::viz::cross_well::WellColumnData>{};
+        std::vector<const pwb::viz::cross_well::WellColumnData*> candidates;
+        for (const auto& column : columns) {
+            if (find_log_curve(column.curves, /*sonic=*/true) != nullptr &&
+                find_log_curve(column.curves, /*sonic=*/false) != nullptr) {
+                candidates.push_back(&column);
+            }
+        }
+        if (candidates.empty()) {
+            QMessageBox::information(
+                parent, QStringLiteral("提示"),
+                QStringLiteral(
+                    "连井工作区未加载含声波（AC/DT）与密度（DEN/RHOB）曲线的"
+                    "测井，无法进行井震标定。请先在连井剖面工作区导入 LAS"
+                    "测井。"));
+            return;
+        }
+        const pwb::viz::cross_well::WellColumnData* selected = candidates.front();
+        if (candidates.size() > 1) {
+            QStringList names;
+            for (const auto* column : candidates) {
+                names << QString::fromStdString(column->name);
+            }
+            bool accepted = false;
+            const QString name = QInputDialog::getItem(
+                parent, QStringLiteral("选择标定井"),
+                QStringLiteral("多口井具备声波+密度曲线，选择标定井："),
+                names, 0, /*editable=*/false, &accepted);
+            if (!accepted) {
+                return;
+            }
+            for (const auto* column : candidates) {
+                if (QString::fromStdString(column->name) == name) {
+                    selected = column;
+                }
+            }
+        }
+        const QString well_name = QString::fromStdString(selected->name);
+        if (state->host == nullptr) {
+            QMessageBox::information(
+                parent, QStringLiteral("提示"),
+                QStringLiteral("联合场景未就绪，无法定位 %1 的地震道。")
+                    .arg(well_name));
+            return;
+        }
+        // Well position + checkshot: the joint scene well of the same
+        // name locates the trace and supplies the TD table when present.
+        const auto& scene = state->host->scene();
+        const pwb::geo3d_viz::joint::WellHead* head = nullptr;
+        for (const auto& well : scene.wells()) {
+            if (QString::compare(QString::fromStdString(well.name),
+                                 well_name, Qt::CaseInsensitive) == 0) {
+                head = &well;
+                break;
+            }
+        }
+        if (head == nullptr) {
+            QMessageBox::information(
+                parent, QStringLiteral("提示"),
+                QStringLiteral(
+                    "联合场景中没有名为 %1 的井（测井井名需与场景井一致"
+                    "以定位地震道）。")
+                    .arg(well_name));
+            return;
+        }
+        const Registration* reg = scene.registration();
+        const auto access = scene.volume_access_shared();
+        if (reg == nullptr || !access) {
+            QMessageBox::information(
+                parent, QStringLiteral("提示"),
+                QStringLiteral(
+                    "survey/registration 或体数据未就绪，无法提取标定"
+                    "地震道。"));
+            return;
+        }
+        const auto shape = access->shape();
+        if (shape[0] != reg->n_inline() || shape[1] != reg->n_crossline() ||
+            shape[2] != reg->n_sample()) {
+            QMessageBox::information(
+                parent, QStringLiteral("提示"),
+                QStringLiteral("体数据与 registration 形状不一致，无法标定。"));
+            return;
+        }
+        const auto [fi, fx] = reg->xy_to_volume_idx(head->x, head->y);
+        if (!std::isfinite(fi) || !std::isfinite(fx) || fi < -0.5 ||
+            fx < -0.5 || fi > static_cast<double>(shape[0]) - 0.5 ||
+            fx > static_cast<double>(shape[1]) - 0.5) {
+            QMessageBox::information(
+                parent, QStringLiteral("提示"),
+                QStringLiteral("井 %1 位于地震工区之外，无法提取标定道。")
+                    .arg(well_name));
+            return;
+        }
+        // GUI-thread snapshot: curves + anchors + sampling copied before
+        // the job starts; only the inline read happens on the worker.
+        pwb::viz::well_tie::LogTieInput input;
+        input.sonic = to_log_tie_curve(*find_log_curve(selected->curves, true));
+        input.density = to_log_tie_curve(*find_log_curve(selected->curves, false));
+        const auto& tables = scene.time_depth_tables();
+        const auto td = tables.find(head->name);
+        if (td != tables.end() && td->second.size() >= 2) {
+            input.checkshot_depth_m = td->second.md_m();
+            input.checkshot_twt_ms = td->second.time_ms();
+        }
+        input.t0_ms = reg->sample_idx_to_time_ms(0);
+        input.dt_ms =
+            reg->sample_idx_to_time_ms(1) - reg->sample_idx_to_time_ms(0);
+        if (!(input.dt_ms > 0.0)) {
+            QMessageBox::information(
+                parent, QStringLiteral("提示"),
+                QStringLiteral("地震采样率无效（dt≤0），无法标定。"));
+            return;
+        }
+        input.frequency_hz = state->tie_frequency_hz;
+        input.initial_shift_ms = state->tie_shift_ms;
+        input.max_shift_ms = 200.0;
+        const auto inline_index = std::llround(fi);
+        const auto crossline_index = std::llround(fx);
+        QPointer<Page> page = state->page;
+        page->set_well_tie_status(
+            QStringLiteral("正在标定 %1…").arg(well_name));
+        auto& owner = state->jobs->make_owner(parent);
+        pwb::job::JobSpec spec;
+        spec.kind = "compute";
+        spec.title = QStringLiteral("井震标定 %1").arg(well_name).toStdString();
+        spec.task_key = "joint/auto-tie";
+        spec.run = [access, input, inline_index, crossline_index, shape](
+                       pwb::job::JobContext& ctx) -> std::any {
+            ctx.check_cancelled();
+            // A single inline plane carries the trace — the same
+            // worker-side slice convention the stratal sampler uses.
+            const auto plane = access->slice_inline(inline_index);
+            const std::int64_t n_sample = shape[2];
+            if (static_cast<std::int64_t>(plane.size()) !=
+                shape[1] * n_sample) {
+                throw std::runtime_error("标定地震道读取失败");
+            }
+            auto tie_input = input;
+            tie_input.seismic.reserve(static_cast<std::size_t>(n_sample));
+            for (std::int64_t s = 0; s < n_sample; ++s) {
+                tie_input.seismic.push_back(
+                    plane[static_cast<std::size_t>(crossline_index) *
+                              static_cast<std::size_t>(n_sample) +
+                          static_cast<std::size_t>(s)]);
+            }
+            ctx.check_cancelled();
+            return pwb::viz::well_tie::tie_logs_to_seismic(
+                tie_input, [&ctx] { return ctx.token().is_cancelled(); });
+        };
+        owner.start(
+            state->jobs->scheduler(), std::move(spec),
+            [page, well_name](const pwb::job::qtbridge::JobOutcome& outcome) {
+                if (page == nullptr) {
+                    return;
+                }
+                using pwb::job::JobState;
+                if (outcome.state == JobState::failed) {
+                    page->set_well_tie_status(
+                        QStringLiteral("井震标定失败：%1")
+                            .arg(QString::fromStdString(outcome.error)));
+                    return;
+                }
+                if (outcome.state == JobState::cancelled) {
+                    page->set_well_tie_status(
+                        QStringLiteral("井震标定已取消。"));
+                    return;
+                }
+                const auto* result = std::any_cast<
+                    pwb::viz::well_tie::LogTieResult>(&outcome.result);
+                if (result == nullptr) {
+                    page->set_well_tie_status(
+                        QStringLiteral("标定结果类型异常"));
+                    return;
+                }
+                QString text =
+                    QStringLiteral("井 %1：R = %2，时移 = %3 ms（重叠 %4 采样）")
+                        .arg(well_name)
+                        .arg(result->correlation, 0, 'f', 3)
+                        .arg(result->shift_ms, 0, 'f', 1)
+                        .arg(result->overlap_samples);
+                if (!result->warning.empty()) {
+                    text += QStringLiteral("\n%1").arg(
+                        QString::fromStdString(result->warning));
+                }
+                page->set_well_tie_status(text);
+            });
     };
 
     // ---- facies ------------------------------------------------------------

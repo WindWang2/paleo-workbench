@@ -20,6 +20,7 @@
 #include "pwb/catalog/tags.hpp"
 #include "pwb/catalog/v11_policy.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -101,6 +102,17 @@ std::string rooted(const std::string& text) {
         out.replace(at, token.size(), g_root.string());
         at += g_root.string().size();
     }
+    // The oracle templates were frozen with POSIX separators; product
+    // messages carry native paths (std::filesystem joins). Normalise the
+    // substituted result to the platform's preferred separators so the
+    // comparison stays about content, not spelling.
+    std::replace(out.begin(), out.end(), '/',
+#ifdef _WIN32
+                 '\\'
+#else
+                 '/'
+#endif
+    );
     return out;
 }
 

@@ -12,7 +12,18 @@
 #include <qgsvectorlayer.h>
 
 #include <chrono>
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(::getpid());
+#endif
+} }
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -57,7 +68,7 @@ int main(int argc, char** argv) {
     // authoring path is what populates them).
     const fs::path dir = fs::temp_directory_path()
         / ("pwb_constraint_authoring_"
-           + std::to_string(::getpid()));
+           + std::to_string(test_pid()));
     fs::create_directories(dir);
     const fs::path project_file = dir / "constraints.paleo.json";
     {

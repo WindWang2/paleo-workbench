@@ -42,7 +42,7 @@ jobs:
             libqca-qt6-dev libqscintilla2-qt6-dev qtkeychain-qt6-dev \
             libgdal-dev libgeos-dev libproj-dev libsqlite3-dev libspatialite-dev \
             libpq-dev libxml2-dev libexpat1-dev libzip-dev zlib1g-dev \
-            libgsl-dev lib protobuf-dev libprotobuf-c-dev protobuf-compiler
+            libgsl-dev libprotobuf-dev libprotobuf-c-dev protobuf-compiler
 
       - name: Create the qgisqt runtime env (Qt 6.11.1 incl. Core5Compat)
         run: |

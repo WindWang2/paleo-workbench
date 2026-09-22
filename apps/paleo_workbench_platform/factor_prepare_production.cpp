@@ -105,8 +105,7 @@ namespace {
 [[nodiscard]] std::string now_iso() {
     // Python _now_iso: datetime.now(timezone.utc).isoformat(timespec="seconds")
     const std::time_t now = std::time(nullptr);
-    std::tm tm{};
-    gmtime_r(&now, &tm);
+    const std::tm tm = gmtime_utc(now);
     std::ostringstream out;
     out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S+00:00");
     return out.str();

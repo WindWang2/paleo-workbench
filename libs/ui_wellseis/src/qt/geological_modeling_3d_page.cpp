@@ -1,5 +1,7 @@
 #include <pwb/ui_wellseis/qt/geological_modeling_3d_page.hpp>
 
+#include <pwb/seismic_viewer/section_profile_widget.hpp>
+
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -662,6 +664,13 @@ GeologicalModeling3DPage::GeologicalModeling3DPage(
     joint_2d_placeholder_->setObjectName(
         QStringLiteral("Joint2DEmptyHint"));
     j2_host_layout->addWidget(joint_2d_placeholder_);
+    // The 2D fence VD profile consumes the strip the 3D curtain already
+    // extracted (profile_2d contract: amplitude + wells + tops + probe).
+    fence_profile_ = new pwb::seismic_viewer::SectionProfileWidget(
+        joint_2d_host_);
+    fence_profile_->setObjectName(QStringLiteral("JointFenceProfile"));
+    fence_profile_->setVisible(false);
+    j2_host_layout->addWidget(fence_profile_);
     j2_layout->addWidget(joint_2d_host_, 1);
     center_v_split->addWidget(joint_2d_panel_);
     center_v_split->setStretchFactor(0, 3);
@@ -1149,6 +1158,46 @@ void GeologicalModeling3DPage::on_scene_updated() {
     }
     sync_2d_time_chip();
     update_coordinate_note();
+    refresh_fence_profile();
+}
+
+void GeologicalModeling3DPage::refresh_fence_profile() {
+    if (fence_profile_ == nullptr) {
+        return;
+    }
+    if (host_ == nullptr) {
+        fence_profile_->setVisible(false);
+        joint_2d_placeholder_->setVisible(true);
+        return;
+    }
+    const auto strip = host_->active_fence_strip();
+    if (!strip) {
+        // No active fence (or volume not ready): the honest placeholder.
+        fence_profile_->clear(QStringLiteral(
+            "无活动剖面：先加载体数据并创建井间剖面。"));
+        fence_profile_->setVisible(false);
+        joint_2d_placeholder_->setVisible(true);
+        return;
+    }
+    pwb::seismic_viewer::SectionProfileData data;
+    data.amplitude = strip->amplitude;
+    data.distance = strip->arc_length_m;
+    data.distance_unit = "m";
+    data.samples = strip->sample_axis;
+    data.sample_unit = strip->sample_unit;
+    std::vector<pwb::seismic_viewer::SectionProfileWell> wells;
+    for (const auto& hit : host_->active_fence_wells()) {
+        pwb::seismic_viewer::SectionProfileWell well;
+        well.name = hit.name;
+        well.distance = hit.distance_m;
+        well.tops = hit.tops;
+        wells.push_back(std::move(well));
+    }
+    fence_profile_->setVisible(true);
+    joint_2d_placeholder_->setVisible(false);
+    if (fence_profile_->set_data(std::move(data))) {
+        fence_profile_->set_wells(std::move(wells));
+    }
 }
 
 void GeologicalModeling3DPage::fill_joint_well_combos() {
@@ -1364,14 +1413,20 @@ void GeologicalModeling3DPage::apply_display_settings() {
     if (host_ == nullptr) {
         return;
     }
-    host_->set_color_scales(
+    const QString seismic_map =
         seismic_color_combo_->currentData().isValid()
-            ? seismic_color_combo_->currentData().toString().toStdString()
-            : "blue-white-red",
+            ? seismic_color_combo_->currentData().toString()
+            : QStringLiteral("blue-white-red");
+    host_->set_color_scales(
+        seismic_map.toStdString(),
         gr_color_combo_->currentData().isValid()
             ? gr_color_combo_->currentData().toString().toStdString()
             : "viridis");
     host_->set_well_width(well_width_spin_->value());
+    // The 2D fence profile follows the same seismic color scale.
+    if (fence_profile_ != nullptr) {
+        fence_profile_->set_color_map(seismic_map.toStdString());
+    }
 }
 
 void GeologicalModeling3DPage::apply_joint_tree_checks_from_project() {
@@ -1858,9 +1913,19 @@ QString GeologicalModeling3DPage::stratal_status_text() const {
     return stratal_status_ != nullptr ? stratal_status_->text() : QString();
 }
 
+QString GeologicalModeling3DPage::well_tie_status_text() const {
+    return wtie_corr_label_ != nullptr ? wtie_corr_label_->text() : QString();
+}
+
 void GeologicalModeling3DPage::set_status_text(const QString& text) {
     if (status_ != nullptr) {
         status_->setText(text);
+    }
+}
+
+void GeologicalModeling3DPage::set_well_tie_status(const QString& text) {
+    if (wtie_corr_label_ != nullptr) {
+        wtie_corr_label_->setText(text);
     }
 }
 

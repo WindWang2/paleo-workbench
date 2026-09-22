@@ -509,6 +509,27 @@ std::vector<CompositionTemplate> build_library() {
         t.data_bindings = std::move(bindings);
         templates.push_back(std::move(t));
     }
+    {
+        CompositionTemplate t;
+        t.template_id = "professional_geographic";
+        t.category = "paleogeographic";
+        t.label = "专业地理图（经纬网）";
+        t.description = "真实坐标变换、度分秒方位标注、黑白分度图框与实地比例尺";
+        t.element_definitions = {
+            def("main_map", 24, 28, 249, 144, 10, Json::object()),
+            def("grid", 24, 28, 249, 144, 20,
+                Json{{"geographic", true}, {"interval_degrees", 0.0},
+                     {"color", "#606060"}, {"line_width_mm", 0.15}}),
+            def("title", 24, 6, 249, 12, 30,
+                Json{{"text", "专业地理图"}, {"font_size", 14}, {"align", "center"}}),
+            def("scale_bar", 24, 184, 80, 8, 30,
+                Json{{"calibrated", true}, {"numeric_scale", true},
+                     {"length_km", 10.0}, {"units", "km"}}),
+            def("north_arrow", 257, 35, 10, 14, 30, Json::object())};
+        t.style_bindings = common_style({});
+        t.data_bindings = Json::object();
+        templates.push_back(std::move(t));
+    }
     return templates;
 }
 

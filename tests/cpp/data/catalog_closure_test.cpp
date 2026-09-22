@@ -32,7 +32,11 @@
 #include <pwb/ui_controllers/project_controller.hpp>
 #include <pwb/ui_controllers/project_save.hpp>
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <fstream>

@@ -1,11 +1,16 @@
-// checkpoint.cpp — sha256-enveloped atomic session checkpoints (POSIX
-// durability: tmp file fsync, rename, directory fsync).
+// checkpoint.cpp — sha256-enveloped atomic session checkpoints (durable
+// write discipline: tmp file flush-to-disk, rename, directory flush).
 #include <pwb/closure_agent/checkpoint.hpp>
 
 #include <pwb/domain/sha256.hpp>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#else
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -22,15 +27,26 @@ std::string checksum_of(const std::string& raw) {
     return digest.hex_digest();
 }
 
-// Returns false when durability could not be established (open or fsync
+// Returns false when durability could not be established (open or flush
 // failed) — save() reports that as CheckpointStoreError, never success.
 bool fsync_path(const std::filesystem::path& path, bool directory) {
+#ifdef _WIN32
+    // MSVC has no O_DIRECTORY: directory-handle fsync does not exist on
+    // Windows (the interchange atomic_file precedent — best-effort skip).
+    if (directory) return true;
+    const int fd = _wopen(path.c_str(), _O_RDONLY | _O_BINARY);
+    if (fd < 0) return false;
+    const bool ok = _commit(fd) == 0;  // CRT flush-to-disk == fsync
+    _close(fd);
+    return ok;
+#else
     const int flags = directory ? (O_RDONLY | O_DIRECTORY) : O_RDONLY;
     const int fd = open(path.c_str(), flags);
     if (fd < 0) return false;
     const bool ok = fsync(fd) == 0;
     close(fd);
     return ok;
+#endif
 }
 
 }  // namespace
@@ -73,10 +89,17 @@ CheckpointRecord SessionCheckpointStore::save(const std::string& session_id,
     const std::string body = envelope.dump(1);
 
     const std::filesystem::path final_path = directory_ / (session_id + ".json");
+    const auto process_id = [] {
+#ifdef _WIN32
+        return static_cast<long>(_getpid());
+#else
+        return static_cast<long>(::getpid());
+#endif
+    };
     const std::filesystem::path tmp_path =
         final_path.parent_path() /
         ("." + final_path.filename().string() + ".tmp-" +
-         std::to_string(getpid()) + "-" + std::to_string(sequence));
+         std::to_string(process_id()) + "-" + std::to_string(sequence));
     {
         std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
         if (!out) {

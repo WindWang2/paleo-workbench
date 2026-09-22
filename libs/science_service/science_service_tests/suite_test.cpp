@@ -2,7 +2,18 @@
 // well services, fusion, geomodel services, payload source, publishers,
 // resource guards, cancellation, fingerprint determinism.
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+namespace { long test_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(::getpid());
+#endif
+} }
 
 #include <cmath>
 #include <cstdio>
@@ -683,7 +694,7 @@ void test_payload_source_and_publisher() {
     const std::filesystem::path tmp =
         std::filesystem::temp_directory_path()
         / ("pwb-science-service-test-"
-           + std::to_string(::getpid()));
+           + std::to_string(test_pid()));
     std::filesystem::remove_all(tmp);
     {
         DirectoryEnvelopePublisher publisher(tmp);

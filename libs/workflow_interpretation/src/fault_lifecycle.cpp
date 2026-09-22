@@ -486,7 +486,8 @@ save_fault_draft(FaultInterpretationDraft& draft, Json& project_root,
         std::error_code ignored;
         if (const auto rel =
                 std::filesystem::relative(resolved, base, ignored);
-            !ignored && !rel.empty() && rel.native().rfind("..", 0) != 0) {
+            !ignored && !rel.empty() &&
+            rel.generic_string().rfind("..", 0) != 0) {
             store_path = rel.generic_string();
         }
     }
