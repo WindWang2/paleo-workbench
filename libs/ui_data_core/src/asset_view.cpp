@@ -1393,11 +1393,19 @@ namespace {
 
 // _catalog_tag_maps (#1173): (tag_by_id, version_tag_map) cached per catalog
 // state — keyed on document identity + catalog_revision + mutation_serial.
+// R3-2: the cache COPIES the display strings instead of holding Tag*
+// into a document it does not own — the Python authority keeps the
+// document alive via a strong reference so an id can never be reused; the
+// raw-pointer port could serve stale maps (and enrich would deref freed
+// memory) when a destroyed service's replacement landed at the same
+// address with the same revision/serial (the close/reopen flow).
 struct CatalogTagMaps {
-    std::unordered_map<std::string, const catalog::Tag*> tag_by_id;
+    std::unordered_map<std::string, std::string> tag_name_by_id;
     std::unordered_map<std::string, std::vector<std::string>> version_tag_map;
 };
 struct CatalogTagMapsCacheEntry {
+    // Owning snapshot of the identity triple — the cached pointer is only
+    // an identity token for cache-hit comparison, never dereferenced.
     const catalog::CatalogDocument* document = nullptr;
     int revision = -1;
     int serial = -1;
@@ -1416,17 +1424,16 @@ const CatalogTagMaps& catalog_tag_maps(CatalogReadService& service) {
     }
     CatalogTagMaps maps;
     for (const auto& tag : document.tags) {
-        maps.tag_by_id[tag.id] = &tag;
+        maps.tag_name_by_id[tag.id] =
+            tag.display_name.has_value() && !tag.display_name->empty()
+                ? *tag.display_name
+                : tag.name;
     }
     try {
         for (const auto& [version_id, tag_id] : document.version_tags) {
-            const auto it = maps.tag_by_id.find(tag_id);
-            if (it != maps.tag_by_id.end()) {
-                maps.version_tag_map[version_id].push_back(
-                    it->second->display_name.has_value() &&
-                            !it->second->display_name->empty()
-                        ? *it->second->display_name
-                        : it->second->name);
+            const auto it = maps.tag_name_by_id.find(tag_id);
+            if (it != maps.tag_name_by_id.end()) {
+                maps.version_tag_map[version_id].push_back(it->second);
             }
         }
     } catch (...) {
@@ -1475,7 +1482,7 @@ void enrich_view_from_catalog(AssetView& view, CatalogReadService& service,
     }
     // Version-level tags come from the revision-keyed module cache (#1173).
     const CatalogTagMaps& tag_maps = catalog_tag_maps(service);
-    const auto& tag_by_id = tag_maps.tag_by_id;
+    const auto& tag_name_by_id = tag_maps.tag_name_by_id;
     const auto& version_tag_map = tag_maps.version_tag_map;
 
     const catalog::DataVersion* current_version = nullptr;
@@ -1534,13 +1541,9 @@ void enrich_view_from_catalog(AssetView& view, CatalogReadService& service,
             if (aid != asset_id) {
                 continue;
             }
-            const auto it = tag_by_id.find(tag_id);
-            if (it != tag_by_id.end()) {
-                catalog_tags.push_back(
-                    it->second->display_name.has_value() &&
-                            !it->second->display_name->empty()
-                        ? *it->second->display_name
-                        : it->second->name);
+            const auto it = tag_name_by_id.find(tag_id);
+            if (it != tag_name_by_id.end()) {
+                catalog_tags.push_back(it->second);
             }
         }
     } catch (...) {

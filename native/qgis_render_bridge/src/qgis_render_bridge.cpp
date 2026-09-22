@@ -319,6 +319,17 @@ class QgisRenderBridge::Impl {
         // that stay live when the update throws.
         for (const VectorLayerSpec& spec : layers) {
             auto existing = mirrors.find(spec.id);
+            // R3 (NEW-3): raster renderer XML validates for NEW mirrors
+            // too — the old form skipped validation when no mirror existed,
+            // so a malformed renderer on a new raster threw MID-LOOP after
+            // earlier specs had already mutated live mirrors (the exact
+            // partially-applied state this phase exists to prevent).
+            if (spec.kind == VectorLayerSpec::Kind::Raster
+                && !spec.raster_renderer_xml.empty()
+                && (existing == mirrors.end()
+                    || existing->second.style_revision != spec.style_revision)) {
+                validate_raster_renderer_xml(spec.raster_renderer_xml);
+            }
             if (existing == mirrors.end()) continue;
             const bool rebuild = existing->second.data_revision != spec.data_revision
                 || (spec.kind == VectorLayerSpec::Kind::Raster
@@ -328,13 +339,6 @@ class QgisRenderBridge::Impl {
             if (!rebuild && spec.kind == VectorLayerSpec::Kind::Vector
                 && existing->second.style_revision != spec.style_revision) {
                 validate_style_payloads(spec);
-            }
-            // v7 §5: raster renderer payloads validate up front too, so a
-            // malformed scalar style cannot half-apply to live mirrors.
-            if (spec.kind == VectorLayerSpec::Kind::Raster
-                && !spec.raster_renderer_xml.empty()
-                && existing->second.style_revision != spec.style_revision) {
-                validate_raster_renderer_xml(spec.raster_renderer_xml);
             }
         }
         // #932: feature deltas mutate live mirrors; validate every delta's

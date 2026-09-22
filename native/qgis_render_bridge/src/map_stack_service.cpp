@@ -7420,8 +7420,13 @@ std::string QgisMapStack::runIncrementalGeometryChecks(
       impl_->checker.error_geometry_json.remove(error);
       delete error;
     } else {
+      // Same epoch-tagged vocabulary as the full-run mint (R2-2 residual:
+      // a bare numeric id here could collide with a stale host-held id
+      // after a full re-run reset the counter).
       impl_->checker.error_ids.insert(
-          error, QString::number(impl_->checker.next_error_id++));
+          error,
+          QStringLiteral("e%1:%2").arg(impl_->checker.error_id_epoch).arg(
+              impl_->checker.next_error_id++));
       impl_->checker.native_errors.append(error);
     }
   }

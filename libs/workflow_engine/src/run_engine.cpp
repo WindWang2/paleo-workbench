@@ -345,25 +345,47 @@ workflow_spec::WorkflowRun RunEngine::create_run(const workflow_spec::WorkflowSp
 
 workflow_spec::WorkflowRun RunEngine::run(const std::string& run_id, const RunContext* context,
                            const RunOptions& options) {
+    // R3-1: reserve the run slot BEFORE the unguarded store_.load — the
+    // old two-critical-section form was a check-then-act TOCTOU (two
+    // threads both passed the check across the disk I/O window, the second
+    // insert overwrote the first, and both drove the run: nodes double-
+    // executed and both raced store_.save). Reservation is released on
+    // every early return below.
+    auto token = std::make_shared<CancelToken>();
     {
         std::lock_guard<std::mutex> lock(active_mutex_);
-        const auto active = active_.find(run_id);
-        if (active != active_.end()) {
+        const auto [slot, inserted] = active_.try_emplace(
+            run_id, ActiveRun{std::string(), token});
+        if (!inserted) {
             throw WorkflowValidationError(
-                active->second.workflow_id.empty() ? "unknown"
-                                                   : active->second.workflow_id,
+                slot->second.workflow_id.empty() ? "unknown"
+                                                 : slot->second.workflow_id,
                 {"run " + run_id + " is already executing in this process "
                  "(concurrent run/resume would double-execute nodes)"});
         }
     }
+    struct ReservationGuard {
+        RunEngine* engine;
+        const std::string* run_id;
+        ~ReservationGuard() {
+            if (engine != nullptr) {
+                std::lock_guard<std::mutex> lock(engine->active_mutex_);
+                engine->active_.erase(*run_id);
+            }
+        }
+    } reservation{this, &run_id};
     workflow_spec::WorkflowRun run = store_.load(run_id);
     if (run.state == workflow_spec::RunState::completed) return run;
     if (run.state == workflow_spec::RunState::cancelled) return run;
     check_project_match(run, context);
-    auto token = std::make_shared<CancelToken>();
     {
+        // Upgrade the reservation with the workflow id now that it is known
+        // (error messages stay informative; the token is unchanged).
         std::lock_guard<std::mutex> lock(active_mutex_);
-        active_[run_id] = ActiveRun{run.workflow.workflow_id, token};
+        const auto slot = active_.find(run_id);
+        if (slot != active_.end()) {
+            slot->second.workflow_id = run.workflow.workflow_id;
+        }
     }
     const domain::Json project_identity =
         context != nullptr ? context->project_identity : domain::Json(nullptr);

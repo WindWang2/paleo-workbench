@@ -26,6 +26,7 @@
 // bridge implementation it was ported from.
 
 #include <pwb/ui_composite/layer_group_controller.hpp>
+#include <QPointer>
 
 #include <cstdint>
 #include <map>
@@ -100,7 +101,7 @@ private:
     // Per-canvas render-flag snapshot (R2-13): a single bool force-enabled
     // every canvas on close, clobbering an intentionally non-rendering
     // canvas's state. Restore exactly the canvases this batch suppressed.
-    std::vector<QgsMapCanvas*> render_suppressed_canvases_;
+    std::vector<QPointer<QgsMapCanvas>> render_suppressed_canvases_;
 };
 
 }  // namespace pwb::qgis

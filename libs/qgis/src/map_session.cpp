@@ -39,7 +39,7 @@ QgsMapCanvas* MapSession::createCanvas(QWidget* parent) {
     // Tree-driven canvas layer set: the bridge keeps canvas == tree == legend
     // order in sync (V11 authority decision). Bridge dies with the canvas.
 // R2-14: a closed session must refuse, not deref a null project_.
-if (project_ == nullptr) {
+    if (project_ == nullptr) {
     throw std::runtime_error("MapSession::createCanvas after close()");
 }
     auto* bridge = new QgsLayerTreeMapCanvasBridge(project_->layerTreeRoot(),
@@ -74,7 +74,7 @@ QgsVectorLayer* MapSession::addVectorLayer(const std::string& uri,
     }
     layer_adapter::apply(layer, binding);
 // R2-14: a closed session must refuse, not deref a null project_.
-if (project_ == nullptr) {
+    if (project_ == nullptr) {
     throw std::runtime_error("MapSession::addVectorLayer after close()");
 }
     project_->addMapLayer(layer);
@@ -99,7 +99,7 @@ QgsRasterLayer* MapSession::addRasterLayer(const std::string& uri,
     }
     layer_adapter::apply(layer, binding);
 // R2-14: a closed session must refuse, not deref a null project_.
-if (project_ == nullptr) {
+    if (project_ == nullptr) {
     throw std::runtime_error("MapSession::addRasterLayer after close()");
 }
     project_->addMapLayer(layer);
@@ -207,7 +207,7 @@ void MapSession::setDestinationCrs(const std::string& auth_id, std::string* erro
         return;
     }
 // R2-14: a closed session must refuse, not deref a null project_.
-if (project_ == nullptr) {
+    if (project_ == nullptr) {
     throw std::runtime_error("MapSession::setDestinationCrs after close()");
 }
     project_->setCrs(crs);
@@ -244,7 +244,7 @@ void MapSession::syncCanvasLayers() {
         // bridge still gets an explicit layer set from the tree order.
         QList<QgsMapLayer*> layers;
 // R2-14: a closed session must refuse, not deref a null project_.
-if (project_ == nullptr) {
+    if (project_ == nullptr) {
     throw std::runtime_error("MapSession::syncCanvasLayers after close()");
 }
         const QList<QgsMapLayer*> order = project_->layerTreeRoot()->layerOrder();

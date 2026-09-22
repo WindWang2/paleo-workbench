@@ -23,8 +23,12 @@ constexpr const char* kProjectFilter = "Paleo 工程 (*.paleo.json)";
 // all controllers; per-controller staleness is guarded by generation
 // checks inside the posted bodies).
 QObject& app_lifetime_post_target() {
-    static QObject sentinel;
-    return sentinel;
+    // Deliberate leak: a function-local static would be destroyed after
+    // main() returns — i.e., after the stack-allocated QApplication —
+    // closing a destruction-order question nobody needs. Parentless,
+    // connection-free, tiny; leaked on purpose.
+    static auto* sentinel = new QObject();
+    return *sentinel;
 }
 
 void post_next_turn(std::function<void()> fn) {

@@ -253,8 +253,15 @@ void ProjectControllerCore::run_catalog_maintenance_(
             } catch (const std::exception&) {
             }
             try {
-                if (loaded != nullptr && catalog_.backfill_role_primaries)
-                    catalog_.backfill_role_primaries(loaded->root());
+                // NEW-2 (R3): the backfill WRITES is_primary through the
+                // reference it receives — passing the live root raced the
+                // GUI thread's edits (the exact hazard R2-8 closed for
+                // reads). Mutate a copy; the GUI re-reads primaries from
+                // its own document state.
+                if (loaded != nullptr && catalog_.backfill_role_primaries
+                    && !document_root_snapshot.is_null()
+                    && !document_root_snapshot.is_discarded())
+                    catalog_.backfill_role_primaries(document_root_snapshot);
             } catch (const std::exception&) {
             }
             try {
