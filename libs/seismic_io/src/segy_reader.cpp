@@ -1,5 +1,6 @@
 #include <pwb/seismic_io/segy_reader.hpp>
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -41,7 +42,21 @@ std::optional<SegyVolume> read_segy(const std::filesystem::path& file,
     volume.xline_step = descriptor.xline_step;
     volume.dt_ms = descriptor.sample_step;
     volume.unit = descriptor.sample_unit;
-    volume.samples.resize(static_cast<std::size_t>(descriptor.elements()));
+    // elements() is checked (#1456): a descriptor whose sample count does
+    // not exist as a size_t of floats is refused honestly instead of
+    // wrapping into a bogus resize.
+    const std::optional<std::int64_t> element_count = descriptor.elements();
+    if (!element_count.has_value()
+        || *element_count
+               > static_cast<std::int64_t>(
+                   std::numeric_limits<std::size_t>::max()
+                   / sizeof(float))) {
+        if (error != nullptr) {
+            *error = "volume exceeds the addressable sample count";
+        }
+        return std::nullopt;
+    }
+    volume.samples.resize(static_cast<std::size_t>(*element_count));
 
     if (read_segy_window(*layout, full, volume.samples, cancel, error)
         != volume.samples.size()) {

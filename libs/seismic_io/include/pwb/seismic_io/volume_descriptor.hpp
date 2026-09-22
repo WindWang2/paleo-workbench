@@ -27,6 +27,8 @@
 #include <string>
 #include <utility>
 
+#include <pwb/seismic_io/checked_arith.hpp>
+
 namespace pwb::seismic_io {
 
 // SEG-Y sample format codes this module supports (the repo's real data):
@@ -129,8 +131,19 @@ struct VolumeDescriptor {
     std::uint64_t payload_offset_bytes = 0;  // sample data start in the file
     std::uint64_t file_size_bytes = 0;
 
-    [[nodiscard]] std::int64_t elements() const noexcept {
-        return ni * nc * ns;
+    // ni * nc * ns, or nullopt when that product exceeds int64 range
+    // (#1456: the old `return ni * nc * ns;` was a bare signed multiply —
+    // UB for large axes, and a wrapped value callers would trust). Axis
+    // values of a descriptor produced by an inspector are validated, so
+    // callers may treat nullopt as a hostile/hand-built descriptor.
+    [[nodiscard]] std::optional<std::int64_t> elements() const noexcept {
+        const auto product = checked::shape_product(ni, nc, ns);
+        if (!product.has_value()
+            || *product > static_cast<std::uint64_t>(
+                              std::numeric_limits<std::int64_t>::max())) {
+            return std::nullopt;
+        }
+        return static_cast<std::int64_t>(*product);
     }
 };
 

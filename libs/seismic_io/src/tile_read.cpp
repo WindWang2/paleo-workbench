@@ -67,8 +67,16 @@ bool window_in_bounds(const VolumeDescriptor& descriptor,
         if (window.extent[axis] < 0) {
             return false;
         }
-        if (window.origin[axis] < 0
-            || window.origin[axis] + window.extent[axis] > shape[axis]) {
+        if (window.origin[axis] < 0) {
+            return false;
+        }
+        // Overflow-safe upper check (#1456): `origin + extent > shape` can
+        // wrap int64 for hostile windows (origin = extent = INT64_MAX would
+        // compare a wrapped negative and pass). `origin > shape - extent`
+        // cannot wrap — both operands are non-negative and at most int64
+        // range, and a negative right-hand side (extent > shape) correctly
+        // reads as out of bounds.
+        if (window.origin[axis] > shape[axis] - window.extent[axis]) {
             return false;
         }
     }
@@ -112,10 +120,29 @@ std::size_t read_segy_window(const SegyLayout& layout,
                 if (error != nullptr) *error = "cancelled";
                 return 0;
             }
-            const std::uint64_t offset =
-                layout.trace_offset(il, xl)
-                + kTraceHeaderBytes
-                + static_cast<std::uint64_t>(t0) * 4u;
+            // Checked offset chain (#1456 symmetry): trace_offset comes from
+            // the validated trace map, but the header/sample additions and
+            // the final streamoff cast still deserve wrap-free proof.
+            const auto trace_offset_opt = [&]() -> std::optional<std::uint64_t> {
+                const auto with_header =
+                    checked::add(layout.trace_offset(il, xl),
+                                 kTraceHeaderBytes);
+                if (!with_header.has_value()) return std::nullopt;
+                const auto sample_bytes = checked::mul(
+                    static_cast<std::uint64_t>(t0), 4u);
+                if (!sample_bytes.has_value()) return std::nullopt;
+                return checked::add(*with_header, *sample_bytes);
+            }();
+            if (!trace_offset_opt.has_value()
+                || *trace_offset_opt > descriptor.file_size_bytes
+                || *trace_offset_opt + raw.size()
+                       > descriptor.file_size_bytes) {
+                if (error != nullptr) {
+                    *error = "trace offset out of range";
+                }
+                return 0;
+            }
+            const std::uint64_t offset = *trace_offset_opt;
             input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
             input.read(reinterpret_cast<char*>(raw.data()),
                        static_cast<std::streamsize>(raw.size()));
@@ -274,25 +301,32 @@ std::optional<PwbvolLayout> inspect_pwbvol(const std::filesystem::path& file,
     descriptor.geometry_source = "pwbvol1-header";
     descriptor.payload_offset_bytes = 8u + 4u + header_size;
     descriptor.file_size_bytes = static_cast<std::uint64_t>(size);
-    // Overflow-checked expected size (hostile headers must be refused, not
-    // wrap around into a "plausible" size).
-    const std::uint64_t elements = static_cast<std::uint64_t>(descriptor.ni)
-        * static_cast<std::uint64_t>(descriptor.nc)
-        * static_cast<std::uint64_t>(descriptor.ns);
+    // Overflow-checked expected size (#1456): the axis product is checked
+    // BEFORE any comparison — the old code multiplied three uint64 (each
+    // axis capped only at 2^31, so the product could reach 2^93), compared
+    // the already-wrapped value and let hostile headers through.
     constexpr std::uint64_t kMaxElements =
         (std::numeric_limits<std::uint64_t>::max() - 12u) / 4u;
+    const auto elements = checked::shape_product(
+        descriptor.ni, descriptor.nc, descriptor.ns);
     if (descriptor.ni > (1LL << 31) || descriptor.nc > (1LL << 31)
-        || descriptor.ns > (1LL << 31) || elements > kMaxElements) {
+        || descriptor.ns > (1LL << 31) || !elements.has_value()
+        || *elements > kMaxElements) {
         if (error != nullptr) *error = "payload shape overflows";
         return std::nullopt;
     }
-    const std::uint64_t expected =
-        8u + 4u + header_size + elements * 4u;
-    if (static_cast<std::uint64_t>(size) < expected) {
+    const auto payload_bytes = checked::mul(*elements, 4u);
+    const auto expected = payload_bytes.has_value()
+        ? checked::add(8u + 4u + header_size, *payload_bytes)
+        : std::optional<std::uint64_t>{};
+    if (!expected.has_value()
+        || static_cast<std::uint64_t>(size) < *expected) {
         if (error != nullptr) {
-            *error = "payload shorter than the declared shape: file has "
-                + std::to_string(size) + " bytes, header needs "
-                + std::to_string(expected);
+            *error = !expected.has_value()
+                ? "payload shape overflows"
+                : "payload shorter than the declared shape: file has "
+                  + std::to_string(size) + " bytes, header needs "
+                  + std::to_string(*expected);
         }
         return std::nullopt;
     }
@@ -335,18 +369,51 @@ std::size_t read_pwbvol_window(const PwbvolLayout& layout,
                 if (error != nullptr) *error = "cancelled";
                 return 0;
             }
-            const std::uint64_t offset = descriptor.payload_offset_bytes
-                + (static_cast<std::uint64_t>(il * nc + xl)
-                       * static_cast<std::uint64_t>(ns)
-                   + static_cast<std::uint64_t>(t0))
-                      * 4u;
-            input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+            // Offset chain in checked uint64 (#1456): the old
+            // `il * nc + xl` was a bare signed multiply, and every product
+            // fed a streamoff cast that is only safe below int64 range.
+            // Rows come back in index order, so the byte bound below also
+            // proves `written + nt <= out.size()` for every row copy.
+            const auto trace_offset = [&]() -> std::optional<std::uint64_t> {
+                const auto row =
+                    checked::mul(static_cast<std::uint64_t>(il),
+                                 static_cast<std::uint64_t>(nc));
+                if (!row.has_value()) return std::nullopt;
+                const auto row_xl =
+                    checked::add(*row, static_cast<std::uint64_t>(xl));
+                if (!row_xl.has_value()) return std::nullopt;
+                const auto samples = checked::mul(
+                    *row_xl, static_cast<std::uint64_t>(ns));
+                if (!samples.has_value()) return std::nullopt;
+                const auto sample_index =
+                    checked::add(*samples, static_cast<std::uint64_t>(t0));
+                if (!sample_index.has_value()) return std::nullopt;
+                const auto bytes = checked::mul(*sample_index, 4u);
+                if (!bytes.has_value()) return std::nullopt;
+                return checked::add(descriptor.payload_offset_bytes,
+                                    *bytes);
+            }();
+            if (!trace_offset.has_value()
+                || *trace_offset > descriptor.file_size_bytes
+                || *trace_offset + raw.size()
+                       > descriptor.file_size_bytes) {
+                if (error != nullptr) {
+                    *error = "payload offset out of range";
+                }
+                return 0;
+            }
+            const std::uint64_t offset = *trace_offset;
+            input.seekg(static_cast<std::streamoff>(offset),
+                        std::ios::beg);
             input.read(reinterpret_cast<char*>(raw.data()),
                        static_cast<std::streamsize>(raw.size()));
             if (!input.good()) {
                 if (error != nullptr) *error = "payload samples unreadable";
                 return 0;
             }
+            // raw.size() == nt*4 was sized from the validated window, and
+            // written advances by exactly nt per row of extent[0]*extent[1]
+            // rows — both provably within out.size() == window.elements().
             float* dst = out.data() + written;
             if constexpr (std::endian::native == std::endian::little) {
                 std::memcpy(dst, raw.data(), raw.size());

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -116,6 +117,33 @@ struct WindowExpect {
     std::array<std::int64_t, 3> origin;
     std::array<std::int64_t, 3> extent;
 };
+
+// Craft a PWBVOL1 file with an arbitrary header (hostile shapes included)
+// and a chosen payload size — the bytes inspect_pwbvol must survive.
+void write_pwbvol(const fs::path& path, const std::string& header_json,
+                  std::size_t payload_bytes) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    const char magic[8] = {'P', 'W', 'B', 'V', 'O', 'L', '1', '\0'};
+    out.write(magic, 8);
+    const std::uint32_t header_size =
+        static_cast<std::uint32_t>(header_json.size());
+    const unsigned char size_le[4] = {
+        static_cast<unsigned char>(header_size & 0xff),
+        static_cast<unsigned char>((header_size >> 8) & 0xff),
+        static_cast<unsigned char>((header_size >> 16) & 0xff),
+        static_cast<unsigned char>((header_size >> 24) & 0xff)};
+    out.write(reinterpret_cast<const char*>(size_le), 4);
+    out.write(header_json.data(), header_size);
+    std::vector<char> payload(payload_bytes, '\0');
+    out.write(payload.data(), static_cast<std::streamsize>(payload_bytes));
+}
+
+std::string pwbvol_header(const std::string& shape) {
+    return std::string("{\"version\":1,\"shape\":") + shape
+        + ",\"axes\":[\"inline\",\"crossline\",\"sample\"],"
+          "\"layout\":\"c-order-f32\",\"axis_starts\":[1,1,0],"
+          "\"axis_steps\":[1,1,2],\"axis_units\":[\"1\",\"1\",\"ms\"]}";
+}
 
 // Window table mirrors the generator's expected_windows().
 std::vector<WindowExpect> windows_for(const std::array<std::int64_t, 3>& shape) {
@@ -400,6 +428,122 @@ int main() {
                   == 0
                   && error == "cancelled",
               "cancelled read refused");
+    }
+
+    // ---- #1456: hostile PWBVOL shapes must be refused BEFORE the size
+    // comparison — the old code compared the already-wrapped uint64
+    // product and let these headers through.
+    {
+        const fs::path hostile_dir = fs::temp_directory_path()
+            / "pwb_seismic_io_hostile";
+        fs::create_directories(hostile_dir);
+
+        // Per-axis caps all pass (2^31 each is allowed) but the product
+        // 2^31 * 2^31 * 4 == 2^64 wraps to 0 — the old inspector ACCEPTED
+        // this header and the window reader then read from wrapped offsets.
+        {
+            std::string error;
+            const fs::path file = hostile_dir / "wrap_shape.pwbvol";
+            write_pwbvol(file, pwbvol_header("[2147483648,2147483648,4]"),
+                         0);
+            const auto bad = pwb::seismic_io::inspect_pwbvol(file, &error);
+            check(!bad.has_value()
+                      && error.find("payload shape overflows")
+                             != std::string::npos,
+                  "wrapped shape product refused: " + error);
+        }
+        // A legal-looking huge product (1e18 elements) does not wrap, but
+        // needs 4e18 payload bytes — refused as truncated, not accepted.
+        {
+            std::string error;
+            const fs::path file = hostile_dir / "huge_shape.pwbvol";
+            write_pwbvol(file, pwbvol_header("[1000000,1000000,1000000]"),
+                         0);
+            const auto bad = pwb::seismic_io::inspect_pwbvol(file, &error);
+            check(!bad.has_value()
+                      && error.find("payload shorter")
+                             != std::string::npos,
+                  "huge-but-exact product refused by payload size: "
+                  + error);
+        }
+        // Truncated payload for an otherwise valid shape.
+        {
+            std::string error;
+            const fs::path file = hostile_dir / "short_payload.pwbvol";
+            write_pwbvol(file, pwbvol_header("[3,5,7]"), 10);
+            const auto bad = pwb::seismic_io::inspect_pwbvol(file, &error);
+            check(!bad.has_value()
+                      && error.find("payload shorter")
+                             != std::string::npos,
+                  "short payload refused: " + error);
+        }
+        // Negative axis.
+        {
+            std::string error;
+            const fs::path file = hostile_dir / "negative_axis.pwbvol";
+            write_pwbvol(file, pwbvol_header("[-1,5,7]"), 0);
+            const auto bad = pwb::seismic_io::inspect_pwbvol(file, &error);
+            check(!bad.has_value(), "negative axis refused");
+        }
+
+        // Descriptor elements() overflow semantics (public API contract).
+        {
+            pwb::seismic_io::VolumeDescriptor descriptor;
+            check(descriptor.elements().has_value()
+                      && *descriptor.elements() == 0,
+                  "default descriptor describes zero elements");
+            descriptor.ni = descriptor.nc = descriptor.ns = 1000000;
+            check(descriptor.elements().has_value()
+                      && *descriptor.elements() == 1000000000000000000LL,
+                  "legal large product returned exactly");
+            descriptor.ni = descriptor.nc = descriptor.ns =
+                (1LL << 40);
+            check(!descriptor.elements().has_value(),
+                  "overflowing product returned nullopt, never wrapped");
+            descriptor.ni = -5;
+            descriptor.nc = descriptor.ns = 1;
+            check(!descriptor.elements().has_value(),
+                  "negative axis returned nullopt");
+        }
+
+        // Hostile windows against the valid fixture volume: origin+extent
+        // must not wrap into a passing bounds check.
+        {
+            std::string error;
+            const auto layout = pwb::seismic_io::inspect_pwbvol(
+                fixtures / "io_oracle.pwbvol", &error);
+            check(layout.has_value(), "fixture pwbvol still inspects");
+            if (layout.has_value()) {
+                pwb::seismic_io::WindowSpec spec;
+                spec.origin = {0, 0, 0};
+                spec.extent = {2, 2,
+                               std::numeric_limits<std::int64_t>::max()};
+                check(spec.elements() == 0,
+                      "overflowing window elements() reports 0");
+                std::vector<float> out(4, 0.0f);
+                check(pwb::seismic_io::read_pwbvol_window(
+                          *layout, spec, out,
+                          pwb::seismic_io::CancelFlag(), &error)
+                          == 0,
+                      "overflowing extent window refused");
+                pwb::seismic_io::WindowSpec wrap_origin;
+                wrap_origin.origin = {
+                    std::numeric_limits<std::int64_t>::max(), 0, 0};
+                wrap_origin.extent = {2, 2, 2};
+                check(!pwb::seismic_io::window_in_bounds(
+                          layout->descriptor, wrap_origin),
+                      "origin+extent wrap window out of bounds");
+                pwb::seismic_io::WindowSpec int64min_extent;
+                int64min_extent.origin = {0, 0, 0};
+                int64min_extent.extent = {
+                    2, 2, std::numeric_limits<std::int64_t>::min()};
+                check(int64min_extent.elements() == 0,
+                      "INT64_MIN extent does not UB in elements()");
+                check(!pwb::seismic_io::window_in_bounds(
+                          layout->descriptor, int64min_extent),
+                      "INT64_MIN extent window out of bounds");
+            }
+        }
     }
 
     std::printf("%s: %d failure(s)\n", g_failures == 0 ? "PASS" : "FAIL",
