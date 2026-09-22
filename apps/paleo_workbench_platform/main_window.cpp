@@ -24,6 +24,7 @@
 #include <utility>
 #include "job_center.hpp"
 #include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/job_runtime/thread_join_guard.hpp>
 #endif
 // END CONV-30
 
@@ -3437,6 +3438,10 @@ std::string MainWindow::importSegyProgressed(
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     });
+    // read_segy (or the path ctor) throwing must still join the bridge: a
+    // joinable std::thread destroyed during unwinding terminates the process
+    // (#1451 B-10 family).
+    pwb::job::ThreadJoinGuard bridge_guard{read_done, bridge};
     auto volume = pwb::seismic_io::read_segy(
         std::filesystem::path(path.toStdWString()), error, flag);
     read_done.store(true, std::memory_order_relaxed);
@@ -3492,8 +3497,15 @@ void MainWindow::importSegyDialog() {
     std::string read_error;
     std::atomic<bool> done{false};
     std::thread worker([&]() {
-        volume = pwb::seismic_io::read_segy(
-            std::filesystem::path(path.toStdWString()), &read_error, cancel);
+        try {
+            volume = pwb::seismic_io::read_segy(
+                std::filesystem::path(path.toStdWString()), &read_error,
+                cancel);
+        } catch (const std::exception& ex) {
+            read_error = ex.what();
+        } catch (...) {
+            read_error = "cancelled";
+        }
         done.store(true);
     });
     while (!done.load()) {
@@ -3622,6 +3634,8 @@ void MainWindow::submitSegyJob(const QString& path) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
         });
+        // Same exception-safety contract as the sync import path above.
+        pwb::job::ThreadJoinGuard bridge_guard{read_done, bridge};
         auto volume = pwb::seismic_io::read_segy(source_path, &result.error,
                                                  flag);
         read_done.store(true, std::memory_order_relaxed);
