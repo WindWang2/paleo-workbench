@@ -30,14 +30,30 @@ pwb::job::JobHandle WorkflowScheduler::submit(
     const bool use_cache = options.use_cache;
     const bool resume = options.resume;
     std::weak_ptr<pwb::workflow_engine::CancelToken> weak_token = engine_token;
+    // Registration epoch (#1449): a fast run can reach its terminal
+    // erase BEFORE submit() registers the side channel — the stale
+    // entry then survived forever and cancel() reported success for an
+    // already-terminal run. The done latch (set under the mutex in the
+    // body's deregister) closes that window both ways.
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    const auto deregister = [this, run_id, engine_token, done]() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = pending_.find(run_id);
+        if (it != pending_.end() && it->second == engine_token) {
+            pending_.erase(it);
+        }
+        done->store(true, std::memory_order_release);
+    };
     // A job cancelled while QUEUED reaches its terminal state without
     // ever running spec.run — deregister the side channel there too.
-    spec.on_cancel = [this, run_id]() {
+    spec.on_cancel = [this, run_id, done]() {
         std::lock_guard<std::mutex> lock(mutex_);
         pending_.erase(run_id);
+        done->store(true, std::memory_order_release);
     };
     spec.run = [this, run_id, context, reverify, use_cache, resume,
-                weak_token](pwb::job::JobContext& ctx) -> std::any {
+                weak_token, done, deregister](pwb::job::JobContext& ctx)
+        -> std::any {
         // Scheduler-side cooperative cancellation propagates into the
         // engine token: the watcher flips the engine flag when the job
         // token cancels (the _SyncedToken parity; 20 ms poll granularity —
@@ -66,11 +82,9 @@ pwb::job::JobHandle WorkflowScheduler::submit(
                        : engine_.run(run_id, context, run_options);
             finished.store(true, std::memory_order_release);
             watcher.join();
-            // Deregister the side channel: the run is terminal in-process.
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                pending_.erase(run_id);
-            }
+            // Deregister the side channel: the run is terminal
+            // in-process (epoch-matched; see the done latch above).
+            deregister();
             WorkflowRunOutcome outcome;
             outcome.run_id = result.run_id;
             outcome.state = pwb::workflow_spec::to_string(result.state);
@@ -91,10 +105,7 @@ pwb::job::JobHandle WorkflowScheduler::submit(
         } catch (...) {
             finished.store(true, std::memory_order_release);
             watcher.join();
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                pending_.erase(run_id);
-            }
+            deregister();
             throw;
         }
     };
@@ -102,9 +113,13 @@ pwb::job::JobHandle WorkflowScheduler::submit(
     {
         // Register only after submit succeeded — a throwing submit
         // (duplicate.task_key / shutdown) leaves no stale entry, and a
-        // cancel() racing the claim window hits on_cancel's erase.
+        // cancel() racing the claim window hits on_cancel's erase. A run
+        // that already reached terminal state (done) is NOT registered
+        // (#1449).
         std::lock_guard<std::mutex> lock(mutex_);
-        pending_[run_id] = engine_token;
+        if (!done->load(std::memory_order_acquire)) {
+            pending_[run_id] = engine_token;
+        }
     }
     return handle;
 }

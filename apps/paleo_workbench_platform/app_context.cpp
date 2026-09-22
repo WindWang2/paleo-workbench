@@ -7,6 +7,7 @@
 #endif
 
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <pwb/science/algorithms/coherence_c3.hpp>
 #include <pwb/seismic_attributes/attributes.hpp>
 #endif
 #ifdef PWB_WITH_PROVIDERS
@@ -71,6 +72,13 @@ void AppContext::registerProductKernels() {
             pwb::seismic_attributes::make_dip_azimuth("pwb-platform")),
         impl_->attribute_runner->register_kernel(
             pwb::seismic_attributes::make_curvature_mean("pwb-platform")),
+        // C3 eigenstructure coherence — the science-suite kernel
+        // (pwb_science, oracle-frozen in tests/cpp/science/
+        // coherence_c3_oracle_test.cpp) joins the product runner; before
+        // this registration the kernel existed but no product path could
+        // run it (Python parity: seismic_view exposes 相干(C3)).
+        impl_->attribute_runner->register_kernel(
+            pwb::science::algorithms::make_coherence_c3("pwb-platform")),
     };
     for (const std::string& rejection : rejections) {
         if (!rejection.empty()) {
@@ -142,6 +150,21 @@ QVector<AppContext::RuntimeCapability> AppContext::capabilities() const {
                 : QStringLiteral("not in this build");
         }
         // Runtime refinement: services this context actually owns.
+        if (cap.id == QLatin1String("geomodel_kernel") &&
+            build.in_closure) {
+#if defined(PWB_WITH_JOINT_ANALYSIS)
+            // The joint-analysis install consumes the lithology tables /
+            // advisor rules at runtime (round-2 review: the generic
+            // kernel detail had gone stale).
+            cap.detail =
+                QStringLiteral("kernel present — consumed by the joint "
+                               "analysis hooks");
+#else
+            cap.detail =
+                QStringLiteral("kernel present, not wired into the "
+                               "product");
+#endif
+        }
         if (cap.id == QLatin1String("seismic_attributes")) {
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
             cap.runtime_ok = impl_->attribute_runner != nullptr

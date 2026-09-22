@@ -29,6 +29,7 @@
 #include <cstring>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -197,8 +198,17 @@ void MainWindow::applyStageVisibility(
             const std::string dock_id = key.substr(prefix.size());
             // Absent docks (capability-off degrade) are skipped, not
             // errors — honest degradation, never a crash.
+            //
+            // A dock WITHOUT a real panel factory renders a
+            // "(占位页, 待实现)" placeholder — a stage profile must not
+            // present that as the stage's work surface (#1450). Real
+            // content (factory present) follows the profile; factoryless
+            // docks stay hidden regardless.
             if (workstation->dock(dock_id) != nullptr) {
-                workstation->set_dock_visible(dock_id, visible);
+                workstation->set_dock_visible(
+                    dock_id, visible
+                                 && workstation->has_panel_factory(
+                                        dock_id));
             }
         }
     }
@@ -272,6 +282,16 @@ void MainWindow::installStageFlow() {
     auto* workstation = shell->workstation();
     auto* composite = shell->composite();
     if (workstation == nullptr || composite == nullptr) return;
+
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // V14 constraint authoring (#1446): the stage panel's eight
+    // constraint buttons used to emit constraint_requested with no
+    // consumer — dead UI on the flagship Stage-2 surface. Route them to
+    // the production creation path (constraint_authoring.cpp).
+    connect(composite,
+            &pwb::ui_composite::CompositeDocument::constraint_requested,
+            this, &MainWindow::createStageConstraint);
+#endif
 
     // -- controller + persistence sink --------------------------------------
     // buildUi() runs BEFORE the constructor's platform-services stage
@@ -424,10 +444,82 @@ void MainWindow::installStageFlow() {
                     // Empty horizon (project without stratigraphy) clears
                     // the combo — a stale horizon must not survive a
                     // project switch.
+                    //
+                    // Candidates come from the project document (#1450):
+                    // the stratigraphy target + every horizon named by a
+                    // factor task or a constraint group. The combo used
+                    // to ship with zero options and !editable, so the
+                    // readiness verdict 未设定编图层位 pointed at an
+                    // impossible remediation forever.
+                    std::vector<QString> options;
+                    std::set<QString> seen;
+                    const auto add_option =
+                        [&options, &seen](const QString& value) {
+                            if (value.isEmpty()) return;
+                            if (seen.insert(value).second) {
+                                options.push_back(value);
+                            }
+                        };
+                    if (snap.horizon.has_value()) {
+                        add_option(
+                            QString::fromStdString(*snap.horizon));
+                    }
+                    auto* store = context_.projectStore().get();
+                    if (store != nullptr) {
+                        const pwb::domain::Json& root =
+                            store->document().root();
+                        if (root.is_object()) {
+                            const auto scan_array =
+                                [&add_option,
+                                 &root](const char* key) {
+                                    const auto it = root.find(key);
+                                    if (it == root.end()
+                                        || !it->is_array()) {
+                                        return;
+                                    }
+                                    for (const auto& entry : *it) {
+                                        if (!entry.is_object()) continue;
+                                        const auto h =
+                                            entry.find("target_horizon");
+                                        if (h != entry.end()
+                                            && h->is_string()) {
+                                            add_option(
+                                                QString::fromStdString(
+                                                    h->template get<
+                                                        std::string>()));
+                                        }
+                                    }
+                                };
+                            scan_array("factor_map_tasks");
+                            scan_array("constraint_layers");
+                            // stratigraphy.sequence_boundaries is the
+                            // authoritative horizon source in Python
+                            // (workflow/stratigraphy.py horizon_choices);
+                            // without it a project with only a sequence
+                            // framework (no factor tasks yet) had an
+                            // empty combo again (#1453).
+                            const auto strat = root.find("stratigraphy");
+                            if (strat != root.end()
+                                && strat->is_object()) {
+                                const auto bounds =
+                                    strat->find("sequence_boundaries");
+                                if (bounds != strat->end()
+                                    && bounds->is_array()) {
+                                    for (const auto& bound : *bounds) {
+                                        if (bound.is_string()) {
+                                            add_option(QString::fromStdString(
+                                                bound.get<std::string>()));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     status->set_horizon_state(
                         snap.horizon.has_value()
                             ? QString::fromStdString(*snap.horizon)
-                            : QString());
+                            : QString(),
+                        options);
                 });
         status->set_horizon_state(
             stage_flow_->snapshot().horizon.has_value()

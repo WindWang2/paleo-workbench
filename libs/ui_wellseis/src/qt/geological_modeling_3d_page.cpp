@@ -1774,6 +1774,8 @@ QWidget* GeologicalModeling3DPage::build_facies_tab() {
     connect(rgb_btn, &QPushButton::clicked, this, [this] {
         if (hooks_.run_rgb_fusion) {
             hooks_.run_rgb_fusion();
+        } else if (status_ != nullptr) {
+            status_->setText(QStringLiteral("RGB 混色功能未接入"));
         }
     });
     row->addWidget(rgb_btn);
@@ -1782,6 +1784,8 @@ QWidget* GeologicalModeling3DPage::build_facies_tab() {
     connect(crossplot_btn, &QPushButton::clicked, this, [this] {
         if (hooks_.run_crossplot) {
             hooks_.run_crossplot();
+        } else if (status_ != nullptr) {
+            status_->setText(QStringLiteral("岩性交会功能未接入"));
         }
     });
     row->addWidget(crossplot_btn);
@@ -1806,6 +1810,8 @@ QWidget* GeologicalModeling3DPage::build_export_diag_tab() {
     connect(export_btn, &QPushButton::clicked, this, [this] {
         if (hooks_.run_export) {
             hooks_.run_export();
+        } else {
+            set_export_status(QStringLiteral("导出功能未接入"));
         }
     });
     row->addWidget(export_btn);
@@ -1814,14 +1820,48 @@ QWidget* GeologicalModeling3DPage::build_export_diag_tab() {
     connect(advisor_btn, &QPushButton::clicked, this, [this] {
         if (hooks_.run_advisor) {
             hooks_.run_advisor();
+        } else {
+            set_export_status(QStringLiteral("一致性诊断功能未接入"));
         }
     });
     layout->addLayout(row);
     auto* advisor_row = new QHBoxLayout();
     advisor_row->addWidget(advisor_btn);
     layout->addLayout(advisor_row);
+    export_status_ = new QLabel(QString(), tab);
+    export_status_->setWordWrap(true);
+    layout->addWidget(export_status_);
     layout->addStretch(1);
     return tab;
+}
+
+void GeologicalModeling3DPage::set_analysis_hooks(
+    const Geo3DAnalysisHooks& hooks) {
+    hooks_ = hooks;
+    populate_stratal_interpretations();
+    sync_analysis_actions();
+}
+
+void GeologicalModeling3DPage::set_export_status(const QString& text) {
+    if (export_status_ != nullptr) {
+        export_status_->setText(text);
+    }
+}
+
+void GeologicalModeling3DPage::set_stratal_status(const QString& text) {
+    if (stratal_status_ != nullptr) {
+        stratal_status_->setText(text);
+    }
+}
+
+QString GeologicalModeling3DPage::stratal_status_text() const {
+    return stratal_status_ != nullptr ? stratal_status_->text() : QString();
+}
+
+void GeologicalModeling3DPage::set_status_text(const QString& text) {
+    if (status_ != nullptr) {
+        status_->setText(text);
+    }
 }
 
 void GeologicalModeling3DPage::sync_analysis_actions() {

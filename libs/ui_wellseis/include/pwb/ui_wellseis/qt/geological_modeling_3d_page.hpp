@@ -56,7 +56,10 @@ struct Geo3DAnalysisHooks {
         horizon_interpretations;
     // Worker entry points — the host runs ui_workers run_* in a job and
     // reports status via set_status / the tab status labels.
-    std::function<void()> run_modeling;
+    // (No run_modeling seam: the Python page's modeling trigger lives on a
+    // permanently hidden card with no visible entry — porting a dead button
+    // would be wiring noise. The demo-scene generator itself stays available
+    // through ui_workers for tests/examples.)
     std::function<void(const std::string& top_entry,
                        const std::string& bottom_entry,
                        const std::vector<double>& fractions, bool demo)>
@@ -84,6 +87,19 @@ public:
                          joint_state);
     void set_project_path(const QString& path);
     bool shutdown_workers(int wait_ms = 3000);
+
+    // Composition-root hook injection (the product install fills every
+    // seam; reduced builds keep the honest 未接入 fallbacks). Replaces the
+    // hooks and refreshes the interpretation combos.
+    void set_analysis_hooks(const Geo3DAnalysisHooks& hooks);
+    // Export/diagnostics status line (the export tab's own label).
+    void set_export_status(const QString& text);
+    // Stratal tab status line / joint top-bar status (host hooks report).
+    void set_stratal_status(const QString& text);
+    void set_status_text(const QString& text);
+    // Test/verification surface: the stratal tab status line text
+    // (definition in the .cpp — QLabel is only forward-declared here).
+    [[nodiscard]] QString stratal_status_text() const;
 
     // Page navigation entry (activate_page + showEvent parity).
     void activate_page();
@@ -215,6 +231,7 @@ private:
     QSlider* wtie_freq_ = nullptr;
     QSlider* wtie_shift_ = nullptr;
     QLabel* wtie_corr_label_ = nullptr;
+    QLabel* export_status_ = nullptr;
 
     bool loaded_once_ = false;
 };

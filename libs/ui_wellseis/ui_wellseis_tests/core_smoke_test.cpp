@@ -639,6 +639,18 @@ PWB_TEST(seismic_attribute_vocabulary) {
     CHECK_EQ(kernel_for_label(text), kernel);
     CHECK_EQ(kernel_for_label("__nope__"), "");
     CHECK(seismic_display_modes().size() >= 2);
+    // The 振幅 leaf is the user-reachable "clear attribute view" entry
+    // (closure_seismic maps the pseudo-kernel to clear_attribute_view):
+    // it must live in the FIRST panel group with its own kernel id.
+    CHECK_EQ(kernel_for_label("振幅"), "amplitude");
+    bool amplitude_leaf = false;
+    for (const SeismicAttributeGroup& group :
+         seismic_attribute_panel_groups()) {
+        for (const std::string& leaf : group.attributes) {
+            amplitude_leaf = amplitude_leaf || leaf == "振幅";
+        }
+    }
+    CHECK(amplitude_leaf);
 }
 
 PWB_TEST(well_detail_rows) {

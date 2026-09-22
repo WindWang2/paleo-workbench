@@ -21,6 +21,10 @@
 #include <pwb/application/project_session.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/ui/tool_actions.hpp>
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+// Joint-analysis project binding (ProjectSlice value member).
+#include <pwb/ui_wellseis/slices.hpp>
+#endif
 #ifdef PWB_WITH_APP_SHELL
 // CommandContext for the palette context buffer below — must stay OUTSIDE
 // the pwb::app namespace block (a global-include, not a nested decl).
@@ -186,6 +190,12 @@ public:
     // Creates a fresh project (B's document factory + empty catalog + one
     // bootstrap boundary asset via B's run lifecycle) and opens it.
     QString newProject(const QString& dir_path, const QString& name);
+    // Closes the open project (dirty-confirmed over every edit session,
+    // workers flushed, layers dropped, all closures re-notified) so the
+    // window can open another project without a process restart (#1447).
+    // Empty return on success/idempotent-no-store; non-empty = the user
+    // cancelled or a dirty save failed (project stays open).
+    QString closeProject();
 #endif
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
     // Imports one post-stack SEG-Y file as a new Raw seismic_volume asset
@@ -220,6 +230,11 @@ public:
 #endif
 #endif
     QString commitActiveLayer(const std::filesystem::path& staged_dir);
+    // Stage-commit EVERY open dirty edit session (the save/close paths;
+    // #1453 — switching the active layer never stops another session).
+    // Empty return on success; otherwise the first failure message and
+    // the caller must not save/close (edits stay staged).
+    QString commitAllDirtyLayers(const std::filesystem::path& staged_dir);
     bool anyDirtyEditSession() const;
 
     // Dirty-close three-way decision (Save/Discard/Cancel). Production
@@ -377,6 +392,19 @@ public:
     }
     // Registered production command count (test assertion surface).
     int stageFlowCommandCount() const { return stage_flow_command_count_; }
+
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // V14 constraint authoring (#1446) — the Stage-2 constraint buttons'
+    // production side (body in constraint_authoring.cpp):
+    //   createStageConstraint — create a bound, role-registered
+    //     constraint layer + document line entry (Python
+    //     stage_actions.create_constraint parity);
+    //   syncConstraintGeometryOnSave — harvest the live layer features
+    //     into the linked ConstraintLine coordinates + fingerprints at
+    //     save (Python constraints_sync.py parity). Returns lines synced.
+    void createStageConstraint(const QString& kind_value);
+    int syncConstraintGeometryOnSave();
+#endif
 
 private:
     void applyStageVisibility(const std::map<std::string, bool>& visibility);
@@ -537,6 +565,14 @@ private:
 #ifdef PWB_WITH_GEO3D_VIZ
     Geo3DDock* geo3d_dock_ = nullptr;
 #endif
+// BEGIN JOINT-ANALYSIS (geoviz final closure) — the 井震联合 3D page's
+// project binding (sidecar directory + the ProjectSlice the page's
+// save_joint_analysis_to_project contract requires).
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+    QString joint_project_directory_;
+    pwb::ui_wellseis::ProjectSlice joint_project_slice_;
+#endif
+// END JOINT-ANALYSIS
 // BEGIN VIZ-B
 #ifdef PWB_WITH_VIZ_B
     VizBCrossWellDock* viz_b_dock_ = nullptr;

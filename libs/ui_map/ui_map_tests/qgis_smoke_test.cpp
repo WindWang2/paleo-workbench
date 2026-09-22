@@ -14,6 +14,8 @@
 
 #include <pwb/qgis/qgis_runtime.hpp>
 #include <pwb/ui_map/display_map_canvas.hpp>
+
+#include <pwb/qgis/map_session.hpp>
 #include <pwb/ui_map/map_canvas_panel.hpp>
 #include <pwb/ui_map/map_dock_manager.hpp>
 #include <pwb/ui_map/map_layer_tree.hpp>
@@ -87,6 +89,22 @@ PWB_TEST(display_canvas_backend) {
     CHECK(canvas.mirror_failures().empty());
     CHECK(canvas.snapshot().at("layers").size() == 2);
     CHECK(canvas.snapshot_source_version_ids().empty());
+
+    // Snapshot convention is assembly-order bottom-up: workarea_snapshot
+    // lists "home_workarea:wells" first (= bottom) and the flagged wells
+    // second (= top). The forward add order is what makes this stack
+    // correctly: QGIS's registry bridge inserts every newly added layer
+    // at the TOP of the tree (AboveInsertionPoint with no insertion
+    // point falls through to TopOfTree), so the LAST snapshot layer ends
+    // up at index 0 = top. This pins that contract (#1445 investigation:
+    // a proposed "reverse the adds" fix inverts the scene).
+    {
+        const std::vector<std::string> top_first =
+            canvas.session()->layerIdsTopFirst();
+        CHECK(top_first.size() == 2);
+        CHECK_EQ(top_first.at(0), std::string("home_workarea:wells_flagged"));
+        CHECK_EQ(top_first.at(1), std::string("home_workarea:wells"));
+    }
 
     // Extent + zoom + history navigation.
     canvas.set_extent(Extent{0.0, 0.0, 100.0, 100.0});

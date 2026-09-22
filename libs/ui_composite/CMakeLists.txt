@@ -104,9 +104,12 @@ if(TARGET Qt6::Widgets)
         target_link_libraries(pwb_ui_composite_qt PUBLIC
             Pwb::UiControllersQt)
     else()
+        # The root CMakeLists mounts this panel post-hoc once UI-14's
+        # controllers exist (they are created after this directory is
+        # processed) — see the UI-13/14 seam block there (#1444).
         message(STATUS
-            "UI-13: linked_workspace panel skipped — needs "
-            "Pwb::UiControllersQt (PWB_BUILD_CONV_30)")
+            "UI-13: linked_workspace panel deferred to the root "
+            "post-hoc seam (Pwb::UiControllersQt not yet defined here)")
     endif()
 endif()
 

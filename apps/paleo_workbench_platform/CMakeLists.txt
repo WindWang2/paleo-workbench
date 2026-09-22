@@ -78,14 +78,10 @@ endif()
 
 # BEGIN CLOSURE-SEISMIC (07) — product binding: ui_wellseis prediction page
 # <-> real seismic viewer + volume service + E-line attribute kernels.
-if(TARGET Pwb::SeismicViewer AND TARGET Pwb::SeismicService
-        AND TARGET Pwb::SeismicAttributes AND TARGET Pwb::UiWellseisQt)
-    target_link_libraries(pwb-platform PRIVATE Pwb::SeismicService
-                                               Pwb::SeismicAttributes)
-    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_SEISMIC=1)
-    target_sources(pwb-platform PRIVATE closure_seismic_install.cpp)
-endif()
-# END CLOSURE-SEISMIC
+# NOTE: this gate is mounted POST-HOC from the root CMakeLists (after
+# libs/ui_wellseis exists — the apps/ directory is processed before that
+# mount, so an in-app if(TARGET Pwb::UiWellseisQt) can never fire here;
+# #1444, same ordering class #1442 fixed for the VIZ-B dock).
 
 # BEGIN CONV-01
 # Swarm task 01: the 地质因子图 action compiles into the app when the slice
@@ -269,11 +265,9 @@ endif()
 # BEGIN 05 — viz_b real LAS path: joins the dock when the VIZ-A WLE load
 # bridge participates in this configure. Without it the dock keeps the
 # honest "LAS 解析内核未接入" path (fail-closed, never a fake load).
-if(TARGET Pwb::UiWorkersWleLoad AND TARGET Pwb::IngestLasWle)
-    target_sources(pwb-platform PRIVATE viz_b_well_source.cpp)
-    target_link_libraries(pwb-platform PRIVATE Pwb::UiWorkersWleLoad)
-    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_B_LAS=1)
-endif()
+# NOTE: mounted POST-HOC from the root CMakeLists after libs/ui_workers —
+# Pwb::UiWorkersWleLoad only exists once that slice is in, and apps/ is
+# processed before it (#1444).
 # END 05
 
 # BEGIN CONV-GEO3D
@@ -306,3 +300,9 @@ if(TARGET Pwb::Geo3DViz AND TARGET Pwb::SeismicService)
     # the host (never a fake seam).
 endif()
 # END VIZ-C
+# BEGIN JOINT-ANALYSIS (geoviz final closure)
+# joint_analysis_install.cpp + its kernel links are wired from the ROOT
+# CMakeLists after libs/ui_wellseis and libs/ui_workers exist (the same
+# ordering discipline as viz_c_joint_host.cpp above — a TARGET check in
+# this file would be forever-false because apps/ is processed first).
+# END JOINT-ANALYSIS

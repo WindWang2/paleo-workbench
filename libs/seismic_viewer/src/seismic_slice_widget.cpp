@@ -1480,6 +1480,13 @@ void SeismicSliceWidget::set_display_mode(DisplayMode mode) {
     if (mode == impl_->display_mode) {
         return;
     }
+    // The wiggle renderer draws waveforms only — a pinned attribute / fusion
+    // image is never composited in that branch. Abandon the pin on the mode
+    // switch instead of leaving an invisible-but-active attribute view that
+    // still refuses npy/csv export ("属性视图激活中") while painting nothing.
+    if (mode == DisplayMode::wiggle && impl_->attribute_active_flag) {
+        impl_->clear_attribute_view();
+    }
     impl_->display_mode = mode;
     impl_->updating_controls = true;
     impl_->mode_combo->setCurrentIndex(mode == DisplayMode::wiggle ? 1 : 0);

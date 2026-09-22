@@ -447,6 +447,15 @@ void validate_softmax_budget(int batch, int classes, const Tile3& tile) {
     const long long budget_mib = budget / 1024 / 1024;
     char message[512];
 
+    // Exported surface discipline (#1451): the internal callers reject
+    // classes<=0 before this function, but this budget validator is a
+    // public export — classes==0 would integer-divide by zero below.
+    if (classes <= 0) {
+        throw TiledInferenceError(
+            "classes must be > 0, got "
+            + std::to_string(classes));
+    }
+
     // Python ints are arbitrary precision; the fixed-width product is
     // overflow-checked so pathological tiles fail closed exactly like the
     // Python budget gate instead of wrapping (13-decisions.md D18).

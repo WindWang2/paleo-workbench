@@ -171,6 +171,12 @@ public:
     [[nodiscard]] bool prep_applied_state() const {
         return prep_applied_.has_value();
     }
+    // Read-only scene access for product wiring (the joint-analysis
+    // install reads well heads / registration / fences through it).
+    [[nodiscard]] const pwb::geo3d_viz::joint::WellSeismicScene& scene()
+        const {
+        return scene_;
+    }
 
 signals:
     void prep_applied();

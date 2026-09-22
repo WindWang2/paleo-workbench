@@ -447,7 +447,12 @@ void PreparationPage::on_contour_completed(void* result) {
     const int drafts = commit_contour_fn_
                            ? commit_contour_fn_(project_, result)
                            : 0;
+    // Terminal cleanup runs for EVERY host composition (#1451): the
+    // early return used to skip clear_contour_job() when no task panel
+    // was installed, leaving the generate button disabled forever after
+    // one run.
     if (task_panel_ == nullptr || task_panel_->summary_label() == nullptr) {
+        clear_contour_job();
         return;
     }
     if (drafts == 0) {

@@ -714,6 +714,28 @@ QWidget* VizCJointHost::joint_widget(QWidget* parent) {
     if (time_map_ == nullptr) {
         time_map_ = new VizCTimeSliceMap(parent);
         time_map_->set_scene(&scene_);
+        // joint_widget.py:115 parity — clicking a piercing well on the Time
+        // map appends it to the well-order fence. The scene side
+        // (append_fence_well / pop_fence_well) has existed 1:1 since the
+        // VIZ-C port; this connection is the product entry the seam lacked
+        // (the signal previously had zero consumers, so the documented
+        // click-to-fence flow was unreachable from the UI).
+        connect(time_map_, &VizCTimeSliceMap::well_clicked, this,
+                [this](const QString& well_id) {
+                    try {
+                        if (scene_.append_fence_well(well_id.toStdString())) {
+                            assemble_joint_objects();
+                            push_scene_to_widget();
+                            emit scene_updated();
+                            emit_status(
+                                tr("井点栅栏已追加：%1").arg(well_id));
+                        }
+                    } catch (const std::exception& ex) {
+                        // Python raises ValueError("无时深…") — surface the
+                        // same honest refusal instead of swallowing it.
+                        emit_status(QString::fromUtf8(ex.what()));
+                    }
+                });
     }
     return time_map_;
 }
