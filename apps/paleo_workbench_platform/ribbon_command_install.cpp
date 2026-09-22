@@ -615,9 +615,8 @@ void factor_commands(ui_shell::CommandRegistry& registry,
                   QStringLiteral("选井 well 连井"),
                   [c] {
                       c.shell->navigate_workspace(2);
-                      if (c.shell->stage_bottom_tabs() != nullptr) {
-                          c.shell->stage_bottom_tabs()->setCurrentIndex(0);
-                      }
+                      c.shell->focus_stage_dock(
+                          QStringLiteral("连井剖面"));
                   });
     register_disabled(registry, ids, "factor.crosswell_path",
                       QStringLiteral("连井路径"),

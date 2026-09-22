@@ -24,6 +24,38 @@ Qt::DockWidgetArea area_for(const std::string& area) {
     return Qt::DockWidgetArea::LeftDockWidgetArea;
 }
 
+// Dock 分组 —— finish_dock_layout 的成组依据 + adopt_dock 的归组锚
+//（build 后收编的 dock 必须落进同一行/组，而不是同区第一个 dock）。
+//   右栏组        = 原型右列单条 tab 面（各工作区显示其子集）
+//   底部阶段行    = dock 嵌套 row0（每工作区的阶段/预览面板）
+//   底部工具行    = row1 常驻工具条（任务|日志|验证记录|…）
+// ws0 的 数据属性/数据血缘 不在任何组 —— 它们在右栏竖向二分同显。
+constexpr const char* kRightGroup[] = {
+    "composite_layer", "inspector",      "constraint_panel",
+    "composite_input", "predict_compare", "reference_maps",
+    "facies_palette",  "map_decor",      "layout_output",
+    "hub",
+};
+constexpr const char* kStageRow[] = {
+    "data_preview",  "data_history",  "data_relations",
+    "pair_link",     "predict_task",  "seismic_predict",
+    "crosswell",     "data_prep",     "strat_compare",
+    "seq_frame",     "factor_refs",
+};
+constexpr const char* kUtilityRow[] = {
+    "tasks",      "logs",  "verify_records", "factor_stats",
+    "console",    "agent", "composite_linked", "well",
+    "seismic",
+};
+
+template <std::size_t N>
+bool in_group(const char* const (&ids)[N], const std::string& id) {
+    for (const char* group_id : ids) {
+        if (id == group_id) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 WorkstationFrame::WorkstationFrame(QWidget* parent) : QFrame(parent) {
@@ -43,6 +75,9 @@ WorkstationFrame::WorkstationFrame(QWidget* parent) : QFrame(parent) {
         QMainWindow::DockOption::AnimatedDocks |
         QMainWindow::DockOption::AllowNestedDocks |
         QMainWindow::DockOption::AllowTabbedDocks);
+    // 嵌套布局 —— 底部区需要两行（阶段/预览面板行 + 任务|日志 工具
+    // 行），右侧区需要竖向二分（ws0 数据属性/数据血缘 同显）。
+    dock_host_->setDockNestingEnabled(true);
     dock_host_->setTabPosition(
         Qt::DockWidgetArea::AllDockWidgetAreas,
         QTabWidget::TabPosition::North);
@@ -163,10 +198,9 @@ void WorkstationFrame::adopt_dock(const std::string& dock_id,
     adopted->setProperty("pwbDockId", QString::fromStdString(dock_id));
     adopted->setProperty("pwbAdopted", true);
     // 与固定面板同一 chrome 处理：标题栏并入 tab 组（原型右栏只见
-    // tab 条，无 dock 标题栏）。
-    auto* blank = new QWidget(adopted);
-    blank->setFixedSize(0, 0);
-    adopted->setTitleBarWidget(blank);
+    // tab 条，无 dock 标题栏）；悬浮时还原原生标题栏供拖动/关闭。
+    adopted->setProperty("pwbBlankTitle", true);
+    sync_titlebar_for_float(adopted, adopted->isFloating());
     const auto* desc =
         ui_shell::workstation_dock_registry().get(dock_id);
     dock_host_->addDockWidget(
@@ -180,20 +214,38 @@ void WorkstationFrame::adopt_dock(const std::string& dock_id,
                     note_user_layout_change();
                 }
             });
+    connect(adopted, &QDockWidget::topLevelChanged, this,
+            [this](bool floating) {
+                if (auto* d = qobject_cast<QDockWidget*>(sender())) {
+                    sync_titlebar_for_float(d, floating);
+                }
+            });
     if (tabs_built_ && desc != nullptr) {
-        // 组已建成 → 并进同区 tab 组的锚 dock（隐藏的注册成员在显示
-        // 时以 tab 现身，同延迟成组语义）。
-        for (const auto& other_desc :
-             ui_shell::workstation_dock_registry().descriptors()) {
-            if (other_desc.dock_id == dock_id) continue;
-            if (area_for(other_desc.preferred_area) !=
-                area_for(desc->preferred_area)) {
-                continue;
+        // 组已建成 → 并进所属分组的锚 dock（底部两行布局下，阶段行
+        // 收编必须落进 row0 组而非同区首个 dock —— 后者可能是工具行）。
+        QDockWidget* anchor = nullptr;
+        const auto area = area_for(desc->preferred_area);
+        if (in_group(kStageRow, dock_id)) {
+            for (const char* id : kStageRow) {
+                anchor = dock(id);
+                if (anchor != nullptr) break;
             }
-            if (auto* anchor = dock(other_desc.dock_id)) {
-                dock_host_->tabifyDockWidget(anchor, adopted);
-                break;
+        } else if (in_group(kUtilityRow, dock_id)) {
+            for (const char* id : kUtilityRow) {
+                anchor = dock(id);
+                if (anchor != nullptr) break;
             }
+        }
+        if (anchor == nullptr &&
+            area == Qt::DockWidgetArea::RightDockWidgetArea) {
+            for (const char* id : kRightGroup) {
+                if (dock_id == id) continue;
+                anchor = dock(id);
+                if (anchor != nullptr) break;
+            }
+        }
+        if (anchor != nullptr && anchor != adopted) {
+            dock_host_->tabifyDockWidget(anchor, adopted);
         }
     }
 }
@@ -310,6 +362,7 @@ QDockWidget* WorkstationFrame::make_dock(
                 } else {
                     dock->setMinimumSize(0, 0);
                 }
+                sync_titlebar_for_float(dock, floating);
             });
     return dock;
 }
@@ -335,19 +388,55 @@ void WorkstationFrame::build_docks() {
 
     // Prototype 面板自带标题（资源管理器/图层管理 headers）——固定布局
     // 面的原生 dock 标题栏是重复 chrome；显隐由 面板菜单/profile 管，
-    // tab 组仍有 tab bar。可选查看器（agent/console/well/seismic 等）
-    // 保留标题栏（浮动/关闭 UX）。
+    // tab 组仍有 tab bar。pwbBlankTitle 标记让悬浮切换还原原生标题栏
+    //（sync_titlebar_for_float：悬浮面板需要可拖动/关闭的 chrome）。
+    // 可选查看器（agent/console/well/seismic 等）保留标题栏。
     for (const char* id :
          {"nav", "inspector", "composite_layer", "facies_palette",
           "composite_input", "predict_compare", "reference_maps",
           "map_decor", "layout_output", "tasks", "logs",
-          "verify_records"}) {
+          "verify_records", "data_preview", "data_history",
+          "data_relations", "pair_link", "predict_task",
+          "seismic_predict", "crosswell", "data_prep",
+          "strat_compare", "seq_frame", "factor_refs", "data_props",
+          "data_lineage"}) {
         if (auto* d = dock(id)) {
+            d->setProperty("pwbBlankTitle", true);
             auto* blank = new QWidget(d);
             blank->setFixedSize(0, 0);
             d->setTitleBarWidget(blank);
         }
     }
+}
+
+void WorkstationFrame::sync_titlebar_for_float(QDockWidget* dock,
+                                               bool floating) {
+    if (dock == nullptr ||
+        !dock->property("pwbBlankTitle").toBool()) {
+        return;
+    }
+    if (floating) {
+        // 还原默认标题栏 —— 悬浮面板需要窗口 chrome（拖动/关闭/贴回）。
+        dock->setTitleBarWidget(nullptr);
+    } else {
+        auto* blank = new QWidget(dock);
+        blank->setFixedSize(0, 0);
+        dock->setTitleBarWidget(blank);
+    }
+}
+
+void WorkstationFrame::install_panel(const std::string& dock_id,
+                                     QWidget* content) {
+    auto* target = dock(dock_id);
+    if (target == nullptr || content == nullptr) return;
+    if (auto* old = target->widget()) {
+        // setWidget 不接管旧部件 —— 显式退役占位/旧内容。
+        old->setParent(nullptr);
+        old->deleteLater();
+    }
+    target->setWidget(content);
+    // 与 adopt_dock 同义：真实内容已注入，占位护栏视作 factory-backed。
+    target->setProperty("pwbAdopted", true);
 }
 
 void WorkstationFrame::finish_dock_layout() {
@@ -372,6 +461,7 @@ void WorkstationFrame::finish_dock_layout() {
                 dock_host_->tabifyDockWidget(anchor, other);
             }
         }
+        return anchor;
     };
     // 右栏组序 = 跨工作区原型页签的全序（每工作区只显示子集 ——
     // navigate_workspace 按目标页序重放显隐，顺序即 tab 顺序）：
@@ -380,19 +470,67 @@ void WorkstationFrame::finish_dock_layout() {
     tabify({"composite_layer", "inspector", "constraint_panel",
             "composite_input", "predict_compare", "reference_maps",
             "facies_palette", "map_decor", "layout_output", "hub"});
-    tabify({"tasks", "logs", "verify_records", "factor_stats",
-            "console", "agent", "composite_linked", "well", "seismic"});
+    // ws0 右列两片同显（数据属性 上 / 数据血缘 下）—— 竖向二分，
+    // 不并入 tab 组；两格默认隐藏 → ws0 之外不占地。
+    if (auto* props = dock("data_props")) {
+        if (auto* lineage = dock("data_lineage")) {
+            dock_host_->splitDockWidget(props, lineage, Qt::Vertical);
+        }
+    }
+    // 底部两行（DockNestingEnabled）：row0 = 阶段/预览面板组
+    // （每工作区投影成员，全隐时该行塌陷为 0），row1 = 任务|日志|…
+    // 工具条。Qt 怪癖：tabifyDockWidget 只对可见 dock 生效，且
+    // splitDockWidget 会把锚点拖出既有 tab 组 —— 所以顺序必须是：
+    // 临时显示全部阶段 dock → 工具条逐格竖分裂到 row1 → 两组各自
+    // 成 tab → 阶段组重新整组（锚点在 split 时离组）→ 全隐回默认。
+    // 全程在同一事件内完成，不产生可见闪烁。
+    static const char* kStageDocks[] = {
+        "data_preview", "data_history", "data_relations", "pair_link",
+        "predict_task", "seismic_predict", "crosswell", "data_prep",
+        "strat_compare", "seq_frame", "factor_refs"};
+    static const char* kUtilDocks[] = {
+        "logs", "verify_records", "factor_stats", "console", "agent",
+        "composite_linked", "well", "seismic"};
+    for (const char* id : kStageDocks) {
+        if (auto* d = dock(id)) d->setVisible(true);
+    }
+    auto* tasks_dock = dock("tasks");
+    if (auto* anchor = dock("data_preview"); anchor != nullptr &&
+        tasks_dock != nullptr) {
+        dock_host_->splitDockWidget(anchor, tasks_dock, Qt::Vertical);
+        for (const char* id : kUtilDocks) {
+            if (auto* u = dock(id)) {
+                dock_host_->splitDockWidget(tasks_dock, u, Qt::Horizontal);
+            }
+        }
+        tabify({"tasks", "logs", "verify_records", "factor_stats",
+                "console", "agent", "composite_linked", "well",
+                "seismic"});
+    }
+    tabify({"data_preview", "data_history", "data_relations",
+            "pair_link", "predict_task", "seismic_predict", "crosswell",
+            "data_prep", "strat_compare", "seq_frame", "factor_refs"});
+    for (const char* id : kStageDocks) {
+        if (auto* d = dock(id)) {
+            const auto* desc =
+                ui_shell::workstation_dock_registry().get(id);
+            if (desc != nullptr && !desc->default_visible) {
+                d->setVisible(false);
+            }
+        }
+    }
     // 底条默认当前页 = 任务（prototype parity）；右栏当前页由
     // navigate_workspace 按工作区首个成员抬起。
     if (auto* tasks = dock("tasks")) {
         tasks->raise();
     }
     // ctor 里跑过一次时宿主还是 0x0，resizeDocks 不落地 —— 首个布局
-    // 之后重放宽度（tabs_built_ 保证本函数只进一次）。高度不重放：
-    // 此刻底条已是 tab 组，强行 setSize 会挤压中央 science 分格的
-    // 65:35 种子比例（ribbon_visual 的 canvas:bottom 结构断言）。
+    // 之后重放（tabs_built_ 保证本函数只进一次）。宽度+高度都重放：
+    // 底部两行已就位，工具条 140px 常驻高、阶段行 preferred_height
+    // 记在隐藏 cell 上（显示时按描述符高出现）。
     ui_shell::apply_first_run_sizes(dock_host_, docks_,
-                                    /*include_heights=*/false);
+                                    /*include_heights=*/true);
+    emit dock_layout_ready();
 }
 
 QDockWidget* WorkstationFrame::dock(const std::string& dock_id) const {

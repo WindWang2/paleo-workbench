@@ -85,10 +85,13 @@ public:
     void set_dock_visible(const std::string& dock_id, bool visible);
     bool dock_visible(const std::string& dock_id) const;
     // 收编外部真实 QDockWidget（如窗口级 ConstraintPanel）进 dock 宿主
-    // —— 注销注册表占位 dock、按描述符区域停靠、并入同区 tab 组。
+    // —— 注销注册表占位 dock、按描述符区域停靠、并入所属分组锚。
     // dock_id 须是注册表 id；adopted dock 标 pwbAdopted，profile/
     // set_dock_visible/面板菜单照常驱动。
     void adopt_dock(const std::string& dock_id, QDockWidget* adopted);
+    // 向注册表 dock 注入真实内容部件（dock 本身保持注册表 chrome）：
+    // 占位/旧内容退役，标 pwbAdopted 使占位护栏视作 factory-backed。
+    void install_panel(const std::string& dock_id, QWidget* content);
 
     // 层位标签行（中央区上方，ws1-4 显示）：target_horizon 权威的又一
     // 视图/编辑器——与 StatusBar/Ribbon 尾部选择器同一权威，点击只发
@@ -145,6 +148,9 @@ signals:
     void layout_changed();
     // 层位标签行编辑请求（宿主接 stage_flow 权威写路径）。
     void horizon_requested(const QString& horizon);
+    // finish_dock_layout 完成（宿主首显之后）—— 供壳层重放需要
+    // 可见 dock 的分组/投影（tabifyDockWidget 对隐藏 dock 无效）。
+    void dock_layout_ready();
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
@@ -154,6 +160,9 @@ private:
     QWidget* content_for(const std::string& dock_id, QWidget* parent);
     void sync_floating_minimum(QDockWidget* dock,
                                const ui_shell::DockDescriptor& desc);
+    // pwbBlankTitle 面板：停靠态用 0x0 空白标题栏（tab 条即页签），
+    // 悬浮态还原原生标题栏供拖动/关闭。
+    void sync_titlebar_for_float(QDockWidget* dock, bool floating);
     void apply_inspector_policy(int width);
     // Deferred dock tab grouping — runs once after the dock host's
     // first Show (see eventFilter).

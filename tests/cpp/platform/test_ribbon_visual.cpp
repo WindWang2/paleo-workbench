@@ -116,51 +116,46 @@ void structural_gate(AppShell* shell, const QString& phase) {
     check(shell->status_bar() != nullptr &&
               shell->status_bar()->isVisibleTo(shell),
           phase + QStringLiteral(": status bar present"));
-    // 主图:底部 ≈ 65:35 (user-draggable — tolerance window).
-    // 主图:底部 ≈ 65:35 (user-draggable — tolerance window).
+    // 面板化改订 —— 画布:阶段行比例。科学页 = 纯画布；阶段面板是底
+    // 部 row0 dock（resizeDocks 播种行高，用户可拖）。工具行
+    // （任务|日志）是常驻第二行，不计入比值。
     if (qEnvironmentVariableIsSet("PWB_VIS_DEBUG")) {
-        std::fprintf(stderr, "[probe] bottom minHint=%dx%d splitter h=%d\n",
-                     shell->science_bottom()->minimumSizeHint().width(),
-                     shell->science_bottom()->minimumSizeHint().height(),
-                     shell->science_splitter()->height());
-        if (auto* t1 = shell->stage1_bottom_tabs()) {
-            std::fprintf(stderr, "[probe] ws1 tabs minHint=%dx%d\n",
-                         t1->minimumSizeHint().width(),
-                         t1->minimumSizeHint().height());
-            for (int i = 0; i < t1->count(); ++i)
-                std::fprintf(stderr, "[probe]   tab[%d] %s min=%dx%d\n", i,
-                             t1->tabText(i).toUtf8().constData(),
-                             t1->widget(i)->minimumSizeHint().width(),
-                             t1->widget(i)->minimumSizeHint().height());
-        }
-        if (auto* t2 = shell->stage_bottom_tabs()) {
-            std::fprintf(stderr, "[probe] ws2 tabs minHint=%dx%d\n",
-                         t2->minimumSizeHint().width(),
-                         t2->minimumSizeHint().height());
-            for (int i = 0; i < t2->count(); ++i)
-                std::fprintf(stderr, "[probe]   tab[%d] %s min=%dx%d\n", i,
-                             t2->tabText(i).toUtf8().constData(),
-                             t2->widget(i)->minimumSizeHint().width(),
-                             t2->widget(i)->minimumSizeHint().height());
+        for (const char* id :
+             {"data_preview", "pair_link", "crosswell", "data_prep",
+              "factor_refs"}) {
+            if (auto* d = shell->workstation()->dock(id)) {
+                std::fprintf(stderr,
+                             "[probe] dock %s vis=%d h=%d min=%dx%d\n",
+                             id, d->isVisible() ? 1 : 0, d->height(),
+                             d->minimumSizeHint().width(),
+                             d->minimumSizeHint().height());
+            }
         }
     }
-    // 主图:底部 ≈ 65:35 (user-draggable — tolerance window). Only
-    // meaningful while the science host page is current — hidden pages
-    // carry degenerate geometry.
-    const auto sizes =
+    const bool science_current =
         shell->workspace_host()->currentIndex() ==
-                pwb::app::WorkspaceHostWidget::kPageScience
-            ? shell->science_splitter()->sizes()
-            : QList<int>{};
-    if (sizes.size() == 2 && sizes[0] + sizes[1] > 100) {
-        const double ratio =
-            static_cast<double>(sizes[0]) / (sizes[0] + sizes[1]);
-        check(ratio > 0.5 && ratio < 0.85,
+        pwb::app::WorkspaceHostWidget::kPageScience;
+    int stage_row_h = 0;
+    for (const char* id :
+         {"pair_link", "predict_task", "seismic_predict", "crosswell",
+          "data_prep", "strat_compare", "seq_frame", "factor_refs"}) {
+        if (auto* d = shell->workstation()->dock(id);
+            d != nullptr && d->isVisible() && !d->isFloating()) {
+            stage_row_h = d->height();
+            break;
+        }
+    }
+    const int canvas_h = shell->composite()->height();
+    if (science_current && stage_row_h > 0 &&
+        canvas_h + stage_row_h > 100) {
+        const double ratio = static_cast<double>(canvas_h) /
+                             (canvas_h + stage_row_h);
+        check(ratio > 0.45 && ratio < 0.92,
               phase +
-                  QStringLiteral(": canvas:bottom ≈ 65:35 (actual %1, sizes %2/%3)")
+                  QStringLiteral(": canvas:stage-row ≈ 原型占比 (actual %1, %2/%3)")
                       .arg(ratio, 0, 'f', 2)
-                      .arg(sizes[0])
-                      .arg(sizes[1]));
+                      .arg(canvas_h)
+                      .arg(stage_row_h));
     }
     check_no_ribbon_clipping(shell);
     // 五区固定顺序 + 每区唯一主动作（registry presence）。
@@ -218,25 +213,21 @@ void run_matrix(MainWindow& window, const QString& tag) {
     pump();
     capture(shell, QStringLiteral("%1-validation-review").arg(tag));
 
-    // Compose mode in/out: the canvas must NOT be replaced (F:70).
+    // Compose mode in/out: the canvas must NOT be replaced (F:70) —
+    // 版式输出是右栏 dock，抬起它画布不动。
     shell->navigate_workspace(3);
     pump();
-    const int canvas_bottom_before =
-        shell->science_splitter()->sizes().value(0);
+    const bool canvas_visible_before = shell->composite()->isVisible();
     shell->set_compose_mode(true);
     pump();
     capture(shell, QStringLiteral("%1-compose-on").arg(tag));
-    check(shell->science_splitter()->widget(0) ==
-                  static_cast<QWidget*>(shell->composite()),
+    check(shell->composite()->isVisible() == canvas_visible_before,
           tag + QStringLiteral(": compose mode keeps the canvas host"));
     shell->set_compose_mode(false);
     pump();
     capture(shell, QStringLiteral("%1-compose-off").arg(tag));
-    check(shell->science_splitter()->widget(0) ==
-                  static_cast<QWidget*>(shell->composite()) &&
-              shell->science_splitter()->sizes().value(0) ==
-                  canvas_bottom_before,
-          tag + QStringLiteral(": compose mode restores the default bottom"));
+    check(shell->composite()->isVisible(),
+          tag + QStringLiteral(": compose mode restores the default"));
 }
 
 }  // namespace

@@ -28,6 +28,7 @@
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/ui_composite/composite_document.hpp>
+#include <pwb/ui_workstation/workstation_frame.hpp>
 
 #if defined(PWB_WITH_SEISMIC_VIEWER)
 #if defined(PWB_WITH_VIZ_B)
@@ -85,14 +86,19 @@ void hide_hint(QWidget* page) {
 // ---------------------------------------------------------------------------
 
 void compose_prediction_bottom(AppShell* shell) {
-    // M5-3: ws1 bottom = tabs [井震两联 | 预测任务 | 地震预测] — the
-    // 两联 placeholder swaps for the seismic+well split.
-    if (QTabWidget* tabs = shell->stage1_bottom_tabs(); tabs != nullptr) {
-        // NOTE: QTabWidget pages parent into its internal stacked widget —
-        // the name lookup must be recursive (direct-children misses).
-        QWidget* placeholder = tabs->findChild<QWidget*>(
-            QStringLiteral("PredictionPairPlaceholder"));
-        const int index = tabs->indexOf(placeholder);
+    // ws1 底部阶段行「井震两联」dock —— 地震+测井 split 注入 dock
+    // 宿主（PredictionPairHost），占位 hint 退役。
+    auto* frame = shell->workstation();
+    auto* pair_dock = frame != nullptr ? frame->dock("pair_link") : nullptr;
+    QWidget* host = pair_dock != nullptr ? pair_dock->widget() : nullptr;
+    if (host != nullptr) {
+        if (auto* hint = host->findChild<QLabel*>(
+                QStringLiteral("StageBottomHint"),
+                Qt::FindDirectChildrenOnly)) {
+            hint->hide();
+        }
+        auto* host_layout = qobject_cast<QVBoxLayout*>(host->layout());
+        if (host_layout == nullptr) return;
         auto* split = new QSplitter(Qt::Horizontal);
         split->setObjectName(QStringLiteral("PredictionBottomSplit"));
 #if defined(PWB_WITH_SEISMIC_VIEWER)
@@ -140,26 +146,8 @@ void compose_prediction_bottom(AppShell* shell) {
 #endif
         split->setStretchFactor(0, 1);
         split->setStretchFactor(1, 1);
-        if (index >= 0) {
-            tabs->removeTab(index);
-            delete placeholder;
-            tabs->insertTab(index, split, QStringLiteral("井震两联"));
-            tabs->setCurrentIndex(index);
-        } else {
-            tabs->addTab(split, QStringLiteral("井震两联"));
-        }
-        return;
+        host_layout->addWidget(split);
     }
-
-    // Reduced hosts without the tab composition keep the plain page.
-    QWidget* page = shell->science_bottom()->widget(0);
-    if (page == nullptr) return;
-    hide_hint(page);
-    auto* layout = qobject_cast<QVBoxLayout*>(page->layout());
-    if (layout == nullptr) return;
-    auto* split = new QSplitter(Qt::Horizontal, page);
-    split->setObjectName(QStringLiteral("PredictionBottomSplit"));
-    layout->addWidget(split);
 }
 
 // ---------------------------------------------------------------------------
@@ -168,16 +156,12 @@ void compose_prediction_bottom(AppShell* shell) {
 
 void compose_constraint_bottom(MainWindow* window, AppShell* shell) {
 #if defined(PWB_WITH_VIZ_B)
-    QTabWidget* tabs = shell->stage_bottom_tabs();
     auto* dock = window != nullptr ? window->vizBCrossWellDock() : nullptr;
-    if (tabs == nullptr || dock == nullptr) return;
-    if (QWidget* content = dock->widget()) {
-        // The section canvas moves INTO the ws2 bottom; the empty dock
-        // chrome steps aside (the bottom is the section's home now).
-        tabs->insertTab(0, content, QStringLiteral("连井剖面"));
-        tabs->setCurrentIndex(0);
-        dock->hide();
-    }
+    auto* frame = shell != nullptr ? shell->workstation() : nullptr;
+    if (dock == nullptr || frame == nullptr) return;
+    // 连井剖面 dock 整体收编进底部阶段行（dock 化后不再抽内容塞进
+    // 页签 —— 悬浮/停靠/复位都是原生 dock 语义）。
+    frame->adopt_dock("crosswell", dock);
 #else
     (void)window;
     (void)shell;
@@ -260,12 +244,12 @@ QPixmap render_factor_thumbnail(
 
 void compose_compilation_bottom(MainWindow* window, AppShell* shell,
                                 AppContext* context) {
-    // M5-2: the strip lives in the stage-3 bottom STACK page 0 (the
-    // default composition); the layout-compose panel rides page 1 and
-    // only shows in 版式模式 (F:70 — the default view stays untouched).
-    QWidget* page = shell->stage3_home() != nullptr
-                        ? shell->stage3_home()
-                        : shell->science_bottom()->widget(2);
+    // ws3 底部阶段行「单因素参考」dock —— FactorReferenceStrip 注入
+    // dock 宿主（StageBottomCompilationHome）。
+    auto* frame = shell->workstation();
+    auto* refs_dock = frame != nullptr ? frame->dock("factor_refs")
+                                       : nullptr;
+    QWidget* page = refs_dock != nullptr ? refs_dock->widget() : nullptr;
     if (page == nullptr) return;
     hide_hint(page);
     auto* layout = qobject_cast<QVBoxLayout*>(page->layout());

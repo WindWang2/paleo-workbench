@@ -296,6 +296,289 @@
         "remark": ""
       },
       {
+        "dock_id": "data_preview",
+        "title": "数据预览",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 240,
+        "workflow_tags": [
+          "data"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_数据预览",
+        "remark": ""
+      },
+      {
+        "dock_id": "data_history",
+        "title": "版本历史",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 240,
+        "workflow_tags": [
+          "data"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_版本历史",
+        "remark": ""
+      },
+      {
+        "dock_id": "data_relations",
+        "title": "关联关系",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 240,
+        "workflow_tags": [
+          "data"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_关联关系",
+        "remark": ""
+      },
+      {
+        "dock_id": "pair_link",
+        "title": "井震两联",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 300,
+        "workflow_tags": [
+          "prediction",
+          "interpretation"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_井震两联",
+        "remark": ""
+      },
+      {
+        "dock_id": "predict_task",
+        "title": "预测任务",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 300,
+        "workflow_tags": [
+          "prediction"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_预测任务",
+        "remark": ""
+      },
+      {
+        "dock_id": "seismic_predict",
+        "title": "地震预测",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 300,
+        "workflow_tags": [
+          "prediction",
+          "seismic"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_地震预测",
+        "remark": ""
+      },
+      {
+        "dock_id": "crosswell",
+        "title": "连井剖面",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 300,
+        "workflow_tags": [
+          "constraint",
+          "interpretation"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_连井剖面",
+        "remark": ""
+      },
+      {
+        "dock_id": "data_prep",
+        "title": "数据制备",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 300,
+        "workflow_tags": [
+          "constraint"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_数据制备",
+        "remark": ""
+      },
+      {
+        "dock_id": "strat_compare",
+        "title": "地层对比",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 300,
+        "workflow_tags": [
+          "constraint",
+          "interpretation"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_地层对比",
+        "remark": ""
+      },
+      {
+        "dock_id": "seq_frame",
+        "title": "层序格架",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 300,
+        "workflow_tags": [
+          "constraint"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_层序格架",
+        "remark": ""
+      },
+      {
+        "dock_id": "factor_refs",
+        "title": "单因素参考",
+        "preferred_area": "bottom",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 170,
+        "workflow_tags": [
+          "mapping"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_单因素参考",
+        "remark": ""
+      },
+      {
+        "dock_id": "data_props",
+        "title": "数据属性",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "data"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_数据属性",
+        "remark": ""
+      },
+      {
+        "dock_id": "data_lineage",
+        "title": "数据血缘",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "data"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_数据血缘",
+        "remark": ""
+      },
+      {
         "dock_id": "agent",
         "title": "Agent",
         "preferred_area": "bottom",
@@ -503,6 +786,19 @@
       "reference_maps",
       "map_decor",
       "layout_output",
+      "data_preview",
+      "data_history",
+      "data_relations",
+      "pair_link",
+      "predict_task",
+      "seismic_predict",
+      "crosswell",
+      "data_prep",
+      "strat_compare",
+      "seq_frame",
+      "factor_refs",
+      "data_props",
+      "data_lineage",
       "agent",
       "tasks",
       "logs",
@@ -527,7 +823,18 @@
       "constraint": [
         "constraint_panel",
         "reference_maps",
+        "crosswell",
+        "data_prep",
+        "strat_compare",
+        "seq_frame",
         "factor_stats"
+      ],
+      "data": [
+        "data_preview",
+        "data_history",
+        "data_relations",
+        "data_props",
+        "data_lineage"
       ],
       "diagnostics": [
         "logs",
@@ -536,6 +843,9 @@
         "console"
       ],
       "interpretation": [
+        "pair_link",
+        "crosswell",
+        "strat_compare",
         "composite_linked",
         "well",
         "seismic"
@@ -549,13 +859,17 @@
         "reference_maps",
         "map_decor",
         "layout_output",
+        "factor_refs",
         "composite_linked"
       ],
       "navigation": [
         "hub"
       ],
       "prediction": [
-        "predict_compare"
+        "predict_compare",
+        "pair_link",
+        "predict_task",
+        "seismic_predict"
       ],
       "review": [
         "composite_input",
@@ -563,6 +877,7 @@
         "verify_records"
       ],
       "seismic": [
+        "seismic_predict",
         "seismic"
       ],
       "well": [

@@ -827,9 +827,11 @@ void MainWindow::buildUi() {
 #endif
 // END UI-18 M5-2
 // BEGIN UI-18 M5-3 — 数据管理属性/血缘装配 + hub 轴解散（页面住进工作区）。
+#ifdef PWB_WITH_APP_SHELL
     if (app_shell_ != nullptr) {
         m5_data::install({this, app_shell_, &context_});
     }
+#endif
 // END UI-18 M5-3
 #ifdef PWB_WITH_APP_SHELL
     if (app_shell_ != nullptr) {

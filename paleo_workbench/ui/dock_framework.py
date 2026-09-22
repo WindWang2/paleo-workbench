@@ -194,6 +194,135 @@ WORKSTATION_DOCKS: tuple[DockDescriptor, ...] = (
         preferred_size=(300, 0),
         workflow_tags=("mapping",),
     ),
+    # ------------------------------------------------------------------
+    # 底部「阶段/预览行」（dock 嵌套 row0 —— 任务|日志 工具条之上）：
+    # 每格独立 dock，可单独悬浮/停靠/tab 化；navigate_workspace 按
+    # 工作区投影成员集合，非成员整组隐藏后该行塌陷。
+    # ------------------------------------------------------------------
+    DockDescriptor(
+        # ws0 数据管理底签：数据预览|版本历史|关联关系。
+        dock_id="data_preview",
+        title="数据预览",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=240,
+        workflow_tags=("data",),
+    ),
+    DockDescriptor(
+        dock_id="data_history",
+        title="版本历史",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=240,
+        workflow_tags=("data",),
+    ),
+    DockDescriptor(
+        dock_id="data_relations",
+        title="关联关系",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=240,
+        workflow_tags=("data",),
+    ),
+    DockDescriptor(
+        # ws1 智能预测底签：井震两联|预测任务|地震预测。
+        dock_id="pair_link",
+        title="井震两联",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=300,
+        workflow_tags=("prediction", "interpretation"),
+    ),
+    DockDescriptor(
+        dock_id="predict_task",
+        title="预测任务",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=300,
+        workflow_tags=("prediction",),
+    ),
+    DockDescriptor(
+        dock_id="seismic_predict",
+        title="地震预测",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=300,
+        workflow_tags=("prediction", "seismic"),
+    ),
+    DockDescriptor(
+        # ws2 约束与单因素底签：连井剖面|数据制备|地层对比|层序格架。
+        # 连井剖面 = 窗口级 VizBCrossWellDock 经 adopt_dock 收编。
+        dock_id="crosswell",
+        title="连井剖面",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=300,
+        workflow_tags=("constraint", "interpretation"),
+    ),
+    DockDescriptor(
+        dock_id="data_prep",
+        title="数据制备",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=300,
+        workflow_tags=("constraint",),
+    ),
+    DockDescriptor(
+        dock_id="strat_compare",
+        title="地层对比",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=300,
+        workflow_tags=("constraint", "interpretation"),
+    ),
+    DockDescriptor(
+        dock_id="seq_frame",
+        title="层序格架",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=300,
+        workflow_tags=("constraint",),
+    ),
+    DockDescriptor(
+        # ws3 综合编图底签：单因素参考缩略图带（更矮的一条）。
+        dock_id="factor_refs",
+        title="单因素参考",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_height=170,
+        workflow_tags=("mapping",),
+    ),
+    DockDescriptor(
+        # ws0 数据管理右列：数据属性(上)/数据血缘(下) —— 竖向二分，
+        # 不并入右栏 tab 组（原型两片同显）。
+        dock_id="data_props",
+        title="数据属性",
+        preferred_area=AREA_RIGHT,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_size=(300, 0),
+        workflow_tags=("data",),
+    ),
+    DockDescriptor(
+        dock_id="data_lineage",
+        title="数据血缘",
+        preferred_area=AREA_RIGHT,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_size=(300, 0),
+        workflow_tags=("data",),
+    ),
     DockDescriptor(
         dock_id="agent",
         title="Agent",
