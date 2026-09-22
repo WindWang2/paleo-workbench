@@ -9,6 +9,7 @@
 #include <QRectF>
 #include <QSize>
 
+#include <charconv>
 #include <cmath>
 #include <map>
 #include <set>

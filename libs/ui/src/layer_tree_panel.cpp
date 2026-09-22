@@ -18,6 +18,7 @@
 #include <qgslayertreeview.h>
 #include <qgslayertreeviewdefaultactions.h>
 #include <qgslayertreeviewindicator.h>
+#include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgslayermetadata.h>
 #include <qgsvectorlayer.h>

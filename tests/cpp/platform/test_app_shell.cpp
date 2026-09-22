@@ -108,6 +108,7 @@ void check_shell(MainWindow& window) {
         PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
                       std::string("dock missing: ") + dock_id);
     }
+#ifdef PWB_WITH_CONV_27
     auto* layer_dock = shell->workstation()->dock("composite_layer");
     if (window.layerPanel() != nullptr) {
         PWB_CHECK(static_cast<const void*>(layer_dock->widget()) ==
@@ -122,6 +123,7 @@ void check_shell(MainWindow& window) {
     PWB_CHECK(map_toolbar != nullptr && !map_toolbar->actions().isEmpty());
     PWB_CHECK(map_toolbar->actions().contains(
         window.governedAction(QStringLiteral("pan"))));
+#endif
 }
 
 void check_workspace_navigation(MainWindow& window) {

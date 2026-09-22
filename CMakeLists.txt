@@ -1384,6 +1384,11 @@ if(TARGET pwb-platform
         target_compile_definitions(platform_app_shell PRIVATE
             PWB_WITH_APP_SHELL=1
             PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+        if(PWB_BUILD_CONV_27)
+            target_link_libraries(platform_app_shell PRIVATE Pwb::UiWorkbench)
+            target_compile_definitions(platform_app_shell PRIVATE
+                PWB_WITH_CONV_27=1)
+        endif()
         # Pwb::Application exports PWB_WITH_DATA_INTEGRATION PUBLIC once the
         # B/C closure exists; main_window.cpp then references the
         # shell_project_actions symbols (same gate as

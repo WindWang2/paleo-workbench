@@ -2767,6 +2767,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             // stratigraphy) needs its own save or quitting silently
             // discards everything not yet flushed (same family as the
             // #1453 closeProject fix, which closeEvent never got).
+#ifdef PWB_WITH_DATA_INTEGRATION
             {
                 QString saved_to;
                 const QString save_error =
@@ -2779,6 +2780,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
                     return;
                 }
             }
+#endif
         } else {
             for (const std::string& layer_id :
                  context_.session().edit().editing_layer_ids()) {
