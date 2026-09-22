@@ -36,6 +36,17 @@ not the native product runtime.
 5. Dual-track honesty: [architecture/dual-track.md](architecture/dual-track.md).
 6. Domain glossary: [CONTEXT.md](../CONTEXT.md) (Python-era paths = domain/oracle vocabulary; read the dual-track banner first).
 
+## Depth pass (ribbon + modules)
+
+Pass-1 refreshed IA and dual-track honesty. Pass-2 (this branch) mastered ribbon + module code and added:
+
+| Doc | What it freezes |
+| --- | --- |
+| [architecture/ribbon-command-catalog.md](architecture/ribbon-command-catalog.md) | All **58** ribbon command ids, groups, primaries, effective real/disabled install |
+| [architecture/module-map-deep.md](architecture/module-map-deep.md) | Per-lib inventory for all **63** `libs/*` (Qt vs Qt-free + CMake one-liner) |
+| [architecture/app-install-seams.md](architecture/app-install-seams.md) | `apps/paleo_workbench_platform/*_install*` composition-root index |
+| [development/project-documentation-depth-2026/](development/project-documentation-depth-2026/) | Pass-2 baseline / findings / DoD / verification |
+
 ## Development ledgers worth knowing
 
 | Topic | Path |
@@ -44,7 +55,8 @@ not the native product runtime.
 | Entry-switch review (M5) | [development/cpp-entry-switch-review.md](development/cpp-entry-switch-review.md) |
 | GeoViz native closure | [development/geoviz-cpp-final-closure/](development/geoviz-cpp-final-closure/) |
 | Ribbon five-workspaces adoption | [development/ribbon-five-workspaces/](development/ribbon-five-workspaces/) |
-| This documentation refresh | [development/project-documentation-refresh-2026/](development/project-documentation-refresh-2026/) |
+| Documentation refresh (pass-1) | [development/project-documentation-refresh-2026/](development/project-documentation-refresh-2026/) |
+| Documentation depth (pass-2) | [development/project-documentation-depth-2026/](development/project-documentation-depth-2026/) |
 
 Ledgers under `docs/development/<feature>/` are **evidence packs** for a goal
 loop (baseline, findings, tests, limitations). They are not an alternate
