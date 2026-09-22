@@ -163,11 +163,18 @@ void RibbonBar::set_current_workspace(int index) {
 }
 
 void RibbonBar::set_mode(pwb::ui_ribbon::RibbonMode mode) {
-    bool changed = mode_state_.set_compact(mode == pwb::ui_ribbon::RibbonMode::
-                                                      Compact);
-    changed = mode_state_.set_collapsed(mode == pwb::ui_ribbon::RibbonMode::
-                                                        Collapsed) ||
-              changed;
+    // Collapse PRESERVES the compact preference (ribbon_state.hpp
+    // invariant; review R6): the old form reset compact to false, so
+    // collapsed+compact restored as standard.
+    bool changed = false;
+    if (mode == pwb::ui_ribbon::RibbonMode::Collapsed) {
+        changed = mode_state_.set_collapsed(true);
+    } else {
+        changed = mode_state_.set_collapsed(false);
+        changed = mode_state_.set_compact(
+                      mode == pwb::ui_ribbon::RibbonMode::Compact) ||
+                  changed;
+    }
     if (!changed) return;
     apply_mode();
     emit modeChanged(mode_state_.mode());
@@ -244,6 +251,10 @@ void RibbonBar::clear_context_group(int workspace, const QString& key) {
         delete it->group.frame;
         entries.erase(it);
         relayout_overflow();
+        // Availability tracked context commands: removing the group can
+        // remove disabled context entries — re-evaluate like
+        // set_context_group does (review R8).
+        refresh_command_availability();
         return;
     }
 }
@@ -780,7 +791,6 @@ QString RibbonBar::build_ribbon_qss() const {
                "RibbonBar { background: %1; }"
                "QWidget#ribbonNav { background: %1; }"
                "QStackedWidget#ribbonBand { background: %2; }"
-               "QFrame#ribbonGroup { border-right: 1px solid %3; }"
                "QFrame#ribbonSeparator { background: %3; }"
                "QLabel#ribbonGroupLabel { color: %4; }"
                "QToolButton { color: %5; border: 1px solid transparent;"

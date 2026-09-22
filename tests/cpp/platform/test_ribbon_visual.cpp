@@ -26,6 +26,7 @@
 #include <QSplitter>
 #include <QTabBar>
 #include <QTemporaryDir>
+#include <QRegularExpression>
 #include <QToolButton>
 #include <qgsapplication.h>
 
@@ -78,9 +79,14 @@ void check_no_ribbon_clipping(AppShell* shell) {
     check(band != nullptr, QStringLiteral("ribbon band present"));
     if (band == nullptr) return;
     const QRect band_rect = band->rect();
-    const auto buttons =
-        ribbon->findChildren<QToolButton*>(QStringLiteral("ribbonCommand_*"),
-                                           Qt::FindChildrenRecursively);
+    // QToolButton-name matching with a QString is EXACT, so the old
+    // "ribbonCommand_*" lookup matched nothing and the gate passed
+    // vacuously (review R3/G1); a regex actually finds the buttons.
+    const auto buttons = ribbon->findChildren<QToolButton*>(
+        QRegularExpression(QStringLiteral("^ribbonCommand_.*$")),
+        Qt::FindChildrenRecursively);
+    check(!buttons.isEmpty(),
+          QStringLiteral("ribbon command buttons exist for the layout gate"));
     int outside = 0;
     for (const auto* button : buttons) {
         if (!button->isVisibleTo(ribbon)) continue;

@@ -1583,6 +1583,16 @@ QString MainWindow::openProject(const QString& project_file) {
     pwb::app::workflow_wiring::notify_project_changed(this);
 #endif
 // END UI-14 WORKFLOW-WIRING
+#ifdef PWB_WITH_APP_SHELL
+    // Unbound project-gated commands (data.import / predict.run /
+    // factor.compute / verify.run …) evaluate availability only when the
+    // ribbon is asked to — after a project opens they stayed disabled with
+    // the "需要先打开工程" tooltip until an unrelated context-group
+    // injection happened to refresh them (review R2).
+    if (app_shell_ != nullptr && app_shell_->ribbon() != nullptr) {
+        app_shell_->ribbon()->refresh_command_availability();
+    }
+#endif
 
     // Materialize every bound GeoJSON layer as an explicit working copy —
     // the catalog payload file itself is read-only for the shell.
@@ -1876,6 +1886,13 @@ QString MainWindow::closeProject() {
     context_.session().set_store(nullptr);
     context_.setProjectStore(nullptr);
     facts_.clear();
+#ifdef PWB_WITH_APP_SHELL
+    // Mirror of the open path (review R2): project-gated availability must
+    // drop again once the project is closed, not stay stale-enabled.
+    if (app_shell_ != nullptr && app_shell_->ribbon() != nullptr) {
+        app_shell_->ribbon()->refresh_command_availability();
+    }
+#endif
 // BEGIN CLOSURE-MAPPING
 #ifdef PWB_WITH_CLOSURE_MAPPING
     pwb::app::closure_mapping::notify_project_changed(this);
@@ -2569,6 +2586,23 @@ void MainWindow::closeEvent(QCloseEvent* event) {
                     statusBar()->showMessage(
                         tr("保存失败（%1），关闭已取消")
                             .arg(QString::fromStdString(error)),
+                        10000);
+                    event->ignore();
+                    return;
+                }
+            }
+            // The staged commits only cover layer payloads — the project
+            // document (constraint registrations, workspace state,
+            // stratigraphy) needs its own save or quitting silently
+            // discards everything not yet flushed (same family as the
+            // #1453 closeProject fix, which closeEvent never got).
+            {
+                QString saved_to;
+                const QString save_error =
+                    shell_project_actions::save_open_project(*this, &saved_to);
+                if (!save_error.isEmpty()) {
+                    statusBar()->showMessage(
+                        tr("文档保存失败（%1），关闭已取消").arg(save_error),
                         10000);
                     event->ignore();
                     return;

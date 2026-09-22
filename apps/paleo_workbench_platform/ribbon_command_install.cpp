@@ -739,7 +739,8 @@ void map_commands(ui_shell::CommandRegistry& registry,
                           panel != nullptr) {
                           panel->template_selector()->showPopup();
                       }
-                  });
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "map.paper", QStringLiteral("纸张"),
                   QStringLiteral("纸张/方向/图框设置（版式模式）"),
                   QStringLiteral("纸张 paper"),
@@ -749,7 +750,8 @@ void map_commands(ui_shell::CommandRegistry& registry,
                           panel != nullptr) {
                           panel->paper_selector()->showPopup();
                       }
-                  });
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "map.preview", QStringLiteral("预览"),
                   QStringLiteral("版式预览（模板几何真实矢量重绘）"),
                   QStringLiteral("预览 preview"),
@@ -757,7 +759,8 @@ void map_commands(ui_shell::CommandRegistry& registry,
                       enter_compose_mode(c);
                       emit c.shell->status_message(
                           QStringLiteral("版式预览：底部为模板真实几何渲染"));
-                  });
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
 #else
     register_disabled(registry, ids, "map.opacity", QStringLiteral("透明度"),
                       QStringLiteral("参考图透明度"), QStringLiteral("透明度 opacity"),

@@ -92,6 +92,11 @@ private:
     Seams seams_;
     StagePreferenceStore preferences_;
     StagePresentationSnapshot snapshot_;
+    // A presentation profile (data management / validation) rewrites dock
+    // visibility WITHOUT touching the stage value — the next refresh() must
+    // re-apply the stage layout even for an unchanged stage, or returning
+    // to the same science workspace leaves it gutted (review R1).
+    bool layout_disturbed_ = false;
     size_t applied_visibility_count_ = 0;
 };
 
