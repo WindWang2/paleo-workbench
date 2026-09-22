@@ -82,8 +82,15 @@ std::optional<pwb::ui_wellseis::JointAnalysisSlice> read_stored_state(
     try {
         return pwb::ui_wellseis::joint_state_from_json(
             Json::parse(file.readAll().toStdString()));
-    } catch (const std::exception&) {
-        return std::nullopt;  // corrupt sidecar never blocks a project open
+    } catch (const std::exception& exc) {
+        // Corrupt sidecar never blocks a project open, but the reset must
+        // be visible (geo3d sibling reports; joint silently dropped the
+        // workspace before — N6). stderr + the caller's caller surfaces it
+        // through the page once available.
+        std::fprintf(stderr,
+                     "pwb-joint: corrupt joint-analysis sidecar reset: %s\n",
+                     exc.what());
+        return std::nullopt;
     }
 }
 

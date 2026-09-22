@@ -4201,9 +4201,13 @@ void MainWindow::applyLayerControlForOpen() {
         // Host guard (02-architecture §5): an applier throw must not
         // escape openProject — the plane degrades, the open proceeds.
         layer_groups_->reconcile(snapshots);
-    } catch (const std::exception&) {
-        // status surface notes the degraded reconcile; retry on the next
-        // composition change (V5 §78).
+    } catch (const std::exception& exc) {
+        // Degrade, but TELL the user (N8: the comment promised a status
+        // surface note that was never emitted — silent degradation).
+        statusBar()->showMessage(
+            tr("图层分组同步失败（%1），将继续重试")
+                .arg(QString::fromStdString(exc.what())),
+            10000);
     }
     // Drop targets referencing layers the runtime does not have (report
     // only — a fresh open cannot have dirty sessions yet).
@@ -4254,9 +4258,14 @@ void MainWindow::syncLayerControlOnSave() {
                 // No force: the diff runs against the pre-drag baseline
                 // and emits exactly the user's minimal move set.
                 layer_groups_->reconcile(layer_snapshots_);
-            } catch (const std::exception&) {
-                // save proceeds with the last persisted tree; the next
-                // successful reconcile re-syncs it
+            } catch (const std::exception& exc) {
+                // Save proceeds with the last persisted tree; the next
+                // successful reconcile re-syncs it. Report the degraded
+                // state instead of staying silent (N8).
+                statusBar()->showMessage(
+                    tr("图层分组同步失败（%1），已按上次持久化结果保存")
+                        .arg(QString::fromStdString(exc.what())),
+                    10000);
             }
         }
     }
