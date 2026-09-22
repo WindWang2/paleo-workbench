@@ -48,7 +48,7 @@ void dl_close(void* handle) {
 #ifdef _WIN32
     ::FreeLibrary(static_cast<HMODULE>(handle));
 #else
-    ::dl_close(handle);
+    ::dlclose(handle);
 #endif
 }
 

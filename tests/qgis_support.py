@@ -27,6 +27,9 @@ def qgis_bridge_available() -> bool:
     try:
         # Windows V7: the vendored-QGIS runtime DLL dirs must join the loader
         # path before the first bridge import (no-op elsewhere).
+        import sys as _sys  # archived-reference shim (legacy/python_reference)
+        from pathlib import Path as _Path
+        _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / 'legacy' / 'python_reference' / 'product'))
         from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
 
         ensure_qgis_bridge_dll_dirs()
