@@ -43,9 +43,10 @@ QtSelectionContext::QtSelectionContext(QObject* parent)
 ViewCoordinationController::ViewCoordinationController(
     QtSelectionContext* selection, CoordinateHubApi* hub, QObject* parent)
     : QObject(parent),
-      core_(selection != nullptr ? selection->bus()
-                                 : *new SelectionBus(wall_clock_ms),
-            hub) {
+      owned_bus_(selection != nullptr
+                     ? nullptr
+                     : std::make_unique<SelectionBus>(wall_clock_ms)),
+      core_(selection != nullptr ? selection->bus() : *owned_bus_, hub) {
     selection_ = selection;
     if (selection_ != nullptr) core_.attach_to_bus();
 }

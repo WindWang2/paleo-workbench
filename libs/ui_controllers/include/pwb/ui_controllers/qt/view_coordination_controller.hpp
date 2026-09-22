@@ -20,6 +20,7 @@
 
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -164,6 +165,9 @@ public slots:
     void on_dock_depth_cursor(const QString& well_name, double md);
 
 private:
+    // Bus for the unbound (selection == nullptr) case; owned so it is
+    // released with the controller instead of leaked (F-08: was *new).
+    std::unique_ptr<SelectionBus> owned_bus_;
     ViewCoordinationCore core_;
     QtSelectionContext* selection_ = nullptr;
 };
