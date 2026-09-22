@@ -68,3 +68,9 @@ libs/*
 | Validation / review | `libs/ui_review`, `libs/closure_review` |
 
 Design authority for the shell: `docs/ui-redesign/qt-ribbon-workspaces-2026-09-21/`.
+
+## Deeper inventory (pass-2)
+
+- Per-library table (63 libs, Qt vs Qt-free, CMake one-liner): [`module-map-deep.md`](module-map-deep.md)
+- Ribbon command catalog (58 ids + effective install): [`ribbon-command-catalog.md`](ribbon-command-catalog.md)
+- App install seams (`*_install` composition root): [`app-install-seams.md`](app-install-seams.md)
