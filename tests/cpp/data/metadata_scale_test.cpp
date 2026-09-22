@@ -95,13 +95,13 @@ PWB_TEST(sql_read_path_is_bounded_at_scale) {
                 asset.bind(3, name);  // already-lowercase name_search
                 asset.bind(4, i % 3 == 0 ? "well_log" : "tabular");
                 asset.bind(5, version_id);
-                asset.step_done();
+                PWB_CHECK(asset.step_done().ok());
                 asset.reset();
                 version.bind(1, version_id);
                 version.bind(2, asset_id);
                 version.bind(3, static_cast<std::int64_t>(i));
                 version.bind(4, "sha_s" + std::to_string(i));
-                version.step_done();
+                PWB_CHECK(version.step_done().ok());
                 version.reset();
             }
         }

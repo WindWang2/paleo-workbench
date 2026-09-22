@@ -71,6 +71,7 @@ namespace pwb::ui_pages_data::qt {
 class DataWorkspace;
 class HomePage;
 class HubPage;
+class PreparationPage;
 }
 namespace pwb::ui_wellseis::qt {
 class GeologicalModeling3DPage;
@@ -238,6 +239,12 @@ public:
     pwb::ui_pages_data::qt::DataWorkspace* data_workspace() const {
         return data_workspace_;
     }
+    // The adopted preparation page (ws2 数据制备) — non-owning, null until
+    // adopt_preparation_page installs the real page. Shutdown wiring and
+    // host-side installers reach the page through here.
+    pwb::ui_pages_data::qt::PreparationPage* preparation_page() const {
+        return preparation_page_;
+    }
     pwb::ui_wellseis::qt::WellLogPredictionPage* well_log_page() const {
         return well_log_page_;
     }
@@ -398,6 +405,10 @@ private:
     pwb::ui_map::MappingPage* mapping_page_ = nullptr;
     pwb::ui_review::qt::ReviewExportPage* review_page_ = nullptr;
     pwb::ui_seqviz::qt::VisualizationPage* visualization_page_ = nullptr;
+    // #1455: the adopted preparation page must be reachable at shutdown —
+    // its WorkerHost (factor prepare / contour draft) joins through
+    // shutdown_workers() like every other page-owned worker.
+    pwb::ui_pages_data::qt::PreparationPage* preparation_page_ = nullptr;
 };
 
 }  // namespace pwb::app

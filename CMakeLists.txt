@@ -1168,6 +1168,38 @@ elseif(PWB_BUILD_PLATFORM)
 endif()
 # END UI-14
 
+# BEGIN cpp-close-01-test — the data.catalog_closure acceptance test.
+# tests/cpp/data/CMakeLists.txt probes for Pwb::UiControllers at the
+# data-suite mount, which sits ABOVE this line: the probe always evaluated
+# before libs/ui_controllers existed and the test silently never joined
+# any configuration (the same ordering trap the apps slice hit and fixed
+# by relocating post-hoc — see the cpp-close-01 block below). Register it
+# here instead, once its targets are guaranteed to exist.
+if(BUILD_TESTING AND PWB_BUILD_CATALOG_CLOSURE
+        AND TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore
+        AND TARGET Pwb::Catalog AND TARGET Pwb::Project
+        AND NOT TARGET data_catalog_closure)
+    add_executable(data_catalog_closure
+        tests/cpp/data/catalog_closure_test.cpp
+        tests/cpp/data/test_main.cpp
+        apps/paleo_workbench_platform/closure_catalog_service.cpp
+        apps/paleo_workbench_platform/closure_catalog_install.cpp)
+    target_compile_features(data_catalog_closure PRIVATE cxx_std_20)
+    target_include_directories(data_catalog_closure PRIVATE
+        tests/cpp/data
+        apps/paleo_workbench_platform
+        libs/ui_review/include)
+    target_link_libraries(data_catalog_closure PRIVATE
+        Pwb::Data Pwb::Catalog Pwb::Project Pwb::Workspace Pwb::Domain
+        Pwb::UiControllers Pwb::UiDataCore)
+    if(MSVC)
+        target_compile_options(data_catalog_closure PRIVATE /utf-8 /W4 /permissive-)
+    endif()
+    add_test(NAME data.catalog_closure COMMAND data_catalog_closure)
+    set_tests_properties(data.catalog_closure PROPERTIES TIMEOUT 300)
+endif()
+# END cpp-close-01-test
+
 # BEGIN UI-13/14 seam — linked_workspace panel, post-hoc. The gate inside
 # libs/ui_composite (processed at the UI-13 mount, far above) can never see
 # Pwb::UiControllersQt because that target is only created by the UI-14

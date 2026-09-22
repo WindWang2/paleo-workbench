@@ -1099,12 +1099,33 @@ void VizBCrossWellDock::restore_from_project() {
         emit status_message(tr("新工程无连井工作区，已重置"));
         return;
     }
-    if (!file.open(QIODevice::ReadOnly)) return;
+    // #1466: an unreadable or corrupt sidecar must reset the workspace
+    // FIRST — keeping the previous project's wells/picks in memory let
+    // the next persist_now() write project A's content into project B's
+    // sidecar. Same isolation as Geo3DDock's corrupt path.
+    if (!file.open(QIODevice::ReadOnly)) {
+        reset_workspace();
+        emit status_message(tr("连井工作区无法读取，已重置：%1").arg(path));
+        return;
+    }
     try {
-        restore_state(Json::parse(file.readAll().toStdString()));
+        const Json state = Json::parse(file.readAll().toStdString());
+        if (!state.is_object()) {
+            // Valid JSON but not a workspace object — corrupt for our
+            // purposes (restore_state would silently keep whatever the
+            // previous project left in memory).
+            throw std::runtime_error("workspace is not a JSON object");
+        }
+        // The sidecar fully defines the workspace (#1466): reset FIRST so
+        // a valid-but-partial payload (missing keys) can never leave the
+        // previous project's wells/picks behind to be re-persisted into
+        // this project's sidecar.
+        reset_workspace();
+        restore_state(state);
         emit status_message(tr("已恢复连井工作区"));
     } catch (const std::exception&) {
-        emit status_message(tr("连井工作区损坏，忽略"));
+        reset_workspace();
+        emit status_message(tr("连井工作区损坏，已重置"));
     }
 }
 

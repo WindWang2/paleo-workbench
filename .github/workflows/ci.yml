@@ -213,6 +213,9 @@ jobs:
             native/layer_model_core/src/layer_model.cpp \
             native/layer_model_core/src/standalone_test.cpp \
             -o /tmp/layer_model_selftest && /tmp/layer_model_selftest
+          g++ -std=c++17 -O2 -Wall -Wextra \
+            native/seismic_3d_core/src/standalone_test.cpp \
+            -o /tmp/seismic_resample_selftest && /tmp/seismic_resample_selftest
 
       - name: Run tests (Linux)
         if: runner.os == 'Linux'

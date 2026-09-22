@@ -322,6 +322,14 @@ PackageVerifyReport verify_zip_container_impl(const std::filesystem::path& zip_p
         report.issues.push_back(
             {"error", "bad-zip", std::string("zip 容器损坏: ") + exc.what()});
         return report;
+    } catch (const std::exception& exc) {
+        // Defense in depth (#1469): a hostile container must land in the
+        // failure report whatever the parser threw — never escape the
+        // verifier as an unhandled exception.
+        report.issues.push_back(
+            {"error", "bad-zip",
+             std::string("zip 容器无法解析: ") + exc.what()});
+        return report;
     }
 
     std::vector<std::string> names;
@@ -434,8 +442,15 @@ PackageVerifyReport verify_zip_container_impl(const std::filesystem::path& zip_p
             continue;
         }
         if (deep) {
-            const std::string payload = bundle->read_entry_bytes(*info);
-            if (pwb::domain::Sha256::of_bytes(payload) != entry.sha256) {
+            // Stream the entry through the digest in bounded chunks
+            // (read_entry already CRC-validates): the old form
+            // materialized the whole payload in memory just to hash it —
+            // O(entry size) peak for a 4 GiB-class entry.
+            pwb::domain::Sha256 digest;
+            bundle->read_entry(*info, [&digest](std::string_view chunk) {
+                digest.update(chunk);
+            });
+            if (digest.hex_digest() != entry.sha256) {
                 report.issues.push_back(
                     {"error", "checksum-mismatch", entry.path + ": sha256 不匹配"});
             }

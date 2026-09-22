@@ -27,11 +27,13 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
+#include <pwb/seismic_io/checked_arith.hpp>
 #include <pwb/seismic_io/segy_layout.hpp>
 #include <pwb/seismic_io/volume_descriptor.hpp>
 
@@ -42,18 +44,24 @@ struct WindowSpec {
     std::array<std::int64_t, 3> extent{0, 0, 0};
 
     [[nodiscard]] std::int64_t elements() const noexcept {
-        // D5: checked multiplication — extreme extents from a hostile
+        // D5/#1456: checked multiplication — extreme extents from a hostile
         // window must refuse with 0 (an invalid elements count), never
-        // signed-overflow-UB before the bounds check can run.
-        std::int64_t n = extent[0];
-        for (int k = 1; k < 3; ++k) {
-            if (n == 0) return 0;
-            if (extent[k] != 0 &&
-                std::abs(extent[k]) > (std::numeric_limits<std::int64_t>::max() /
-                                       std::abs(n))) {
+        // signed-overflow-UB before the bounds check can run. Any negative
+        // extent is an invalid window (window_in_bounds refuses those too)
+        // and also reports 0; std::abs(INT64_MIN) would itself be UB, so
+        // negatives are short-circuited instead of absolutized.
+        std::int64_t n = 1;
+        for (int k = 0; k < 3; ++k) {
+            if (extent[k] <= 0) return 0;
+            const auto product = checked::mul(
+                static_cast<std::uint64_t>(n),
+                static_cast<std::uint64_t>(extent[k]));
+            if (!product.has_value()
+                || *product > static_cast<std::uint64_t>(
+                                  std::numeric_limits<std::int64_t>::max())) {
                 return 0;
             }
-            n *= extent[k];
+            n = static_cast<std::int64_t>(*product);
         }
         return n;
     }

@@ -220,6 +220,14 @@ std::optional<Vec3> well_plane_crossing(const Plane& plane,
                         stations[k][2] + t * (stations[k + 1][2] - stations[k][2])};
         }
     }
+    // #1462: the loop above only examines stations[0..n-2] as segment
+    // starts, so a well whose LAST station lies exactly on the plane
+    // never hit the sign(dist[k]) == 0 branch — the crossing silently
+    // became "no intersection". The final station needs its own on-plane
+    // check; contract (first crossing along station order) is unchanged.
+    if (sign(dist[stations.size() - 1]) == 0) {
+        return stations[stations.size() - 1];
+    }
     return std::nullopt;
 }
 

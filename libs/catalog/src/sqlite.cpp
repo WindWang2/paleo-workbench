@@ -122,10 +122,10 @@ DataError Database::execute(std::string_view sql) {
 Result<std::int64_t> Database::scalar_i64(std::string_view sql) {
     Statement statement = prepare(sql);
     if (!statement.is_valid()) {
-        return DataError(ErrorCode::CorruptDatabase, "cannot prepare: " +
-                                                         std::string(sql));
+        return statement.error();
     }
     if (!statement.step()) {
+        if (!statement.ok()) return statement.error();
         return DataError(ErrorCode::NotFound, "no row for scalar query");
     }
     return statement.int64(0);
@@ -147,7 +147,8 @@ Statement Database::prepare(std::string_view sql) {
                                       nullptr);
     if (rc != SQLITE_OK) {
         last_error_ = rc;
-        return Statement(db_, nullptr);
+        return Statement(db_, nullptr,
+                         make_error("cannot prepare statement", db_, rc));
     }
     return Statement(db_, stmt);
 }
@@ -323,17 +324,19 @@ DataError Database::ensure_schema() {
     return DataError(ErrorCode::Ok, "");
 }
 
-Statement::Statement(sqlite3* db, sqlite3_stmt* stmt)
-    : db_(db), stmt_(stmt) {}
+Statement::Statement(sqlite3* db, sqlite3_stmt* stmt,
+                     domain::DataError prepare_error)
+    : db_(db), stmt_(stmt), error_(std::move(prepare_error)) {}
 
 Statement::~Statement() {
     if (stmt_ != nullptr) sqlite3_finalize(stmt_);
 }
 
 Statement::Statement(Statement&& other) noexcept
-    : db_(other.db_), stmt_(other.stmt_) {
+    : db_(other.db_), stmt_(other.stmt_), error_(std::move(other.error_)) {
     other.stmt_ = nullptr;
     other.db_ = nullptr;
+    other.error_ = DataError(ErrorCode::Ok, "");
 }
 
 Statement& Statement::operator=(Statement&& other) noexcept {
@@ -341,8 +344,10 @@ Statement& Statement::operator=(Statement&& other) noexcept {
         if (stmt_ != nullptr) sqlite3_finalize(stmt_);
         db_ = other.db_;
         stmt_ = other.stmt_;
+        error_ = std::move(other.error_);
         other.stmt_ = nullptr;
         other.db_ = nullptr;
+        other.error_ = DataError(ErrorCode::Ok, "");
     }
     return *this;
 }
@@ -352,36 +357,88 @@ void Statement::reset() {
         sqlite3_reset(stmt_);
         sqlite3_clear_bindings(stmt_);
     }
+    error_ = DataError(ErrorCode::Ok, "");
+}
+
+// Bind failures (SQLITE_RANGE on a bad index, SQLITE_NOMEM, binding on an
+// empty statement) are recorded and surface at the next step/step_done —
+// the first failure wins, mirroring how the step codes are captured.
+void Statement::record_bind_error(int rc, const char* what) {
+    if (error_.ok() && rc != SQLITE_OK) {
+        error_ = make_error(what, db_, rc);
+    }
 }
 
 Statement& Statement::bind(int index, std::string_view text) {
-    sqlite3_bind_text(stmt_, index, text.data(),
-                      static_cast<int>(text.size()), SQLITE_TRANSIENT);
+    if (stmt_ == nullptr) {
+        record_bind_error(SQLITE_MISUSE, "bind on empty statement");
+        return *this;
+    }
+    record_bind_error(
+        sqlite3_bind_text(stmt_, index, text.data(),
+                          static_cast<int>(text.size()), SQLITE_TRANSIENT),
+        "bind text failed");
     return *this;
 }
 
 Statement& Statement::bind(int index, std::int64_t value) {
-    sqlite3_bind_int64(stmt_, index, value);
+    if (stmt_ == nullptr) {
+        record_bind_error(SQLITE_MISUSE, "bind on empty statement");
+        return *this;
+    }
+    record_bind_error(sqlite3_bind_int64(stmt_, index, value),
+                      "bind int failed");
     return *this;
 }
 
 Statement& Statement::bind(int index, double value) {
-    sqlite3_bind_double(stmt_, index, value);
+    if (stmt_ == nullptr) {
+        record_bind_error(SQLITE_MISUSE, "bind on empty statement");
+        return *this;
+    }
+    record_bind_error(sqlite3_bind_double(stmt_, index, value),
+                      "bind double failed");
     return *this;
 }
 
 Statement& Statement::bind_null(int index) {
-    sqlite3_bind_null(stmt_, index);
+    if (stmt_ == nullptr) {
+        record_bind_error(SQLITE_MISUSE, "bind on empty statement");
+        return *this;
+    }
+    record_bind_error(sqlite3_bind_null(stmt_, index), "bind null failed");
     return *this;
 }
 
 bool Statement::step() {
-    if (stmt_ == nullptr) return false;
-    return sqlite3_step(stmt_) == SQLITE_ROW;
+    if (stmt_ == nullptr) return false;  // prepare error already recorded
+    if (!error_.ok()) return false;      // bind failure pending
+    const int rc = sqlite3_step(stmt_);
+    if (rc == SQLITE_ROW) return true;
+    if (rc != SQLITE_DONE) {
+        error_ = make_error("statement failed", db_, rc);
+    }
+    return false;
 }
 
-void Statement::step_done() {
-    if (stmt_ != nullptr) sqlite3_step(stmt_);
+DataError Statement::step_done() {
+    if (!error_.ok()) return error_;
+    if (stmt_ == nullptr) {
+        // Unreachable through Database::prepare (it records the prepare
+        // error); guards a default-constructed or moved-from statement.
+        error_ = DataError(ErrorCode::CorruptDatabase,
+                           "step_done on empty statement");
+        return error_;
+    }
+    const int rc = sqlite3_step(stmt_);
+    if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
+        error_ = make_error("statement failed", db_, rc);
+        return error_;
+    }
+    // Re-arm for bind + step_done loops: reset keeps the prepared
+    // statement reusable without re-preparing per row.
+    sqlite3_reset(stmt_);
+    return DataError(ErrorCode::Ok, "");
 }
 
 std::string Statement::text(int column) const {

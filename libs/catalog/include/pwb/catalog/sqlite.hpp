@@ -48,6 +48,8 @@ public:
     domain::Result<std::int64_t> scalar_i64(std::string_view sql);
     bool table_exists(std::string_view name);
 
+    // Prepares a statement. On failure the returned Statement is invalid
+    // AND carries the prepare error (checked via is_valid()/error()).
     Statement prepare(std::string_view sql);
 
     // BEGIN IMMEDIATE … COMMIT/ROLLBACK guard. Each returns the sqlite
@@ -72,7 +74,6 @@ private:
 class Statement {
 public:
     Statement() = default;
-    Statement(sqlite3* db, sqlite3_stmt* stmt);
     ~Statement();
 
     Statement(Statement&&) noexcept;
@@ -86,9 +87,18 @@ public:
     Statement& bind(int index, double value);
     Statement& bind_null(int index);
 
-    // Returns true when a row is available, false when done.
+    // Advances one step. Returns true when a row is available; false when
+    // the statement is done OR failed — a failed step records the error
+    // (check ok()/error() after the loop; DONE leaves ok() true).
     bool step();
-    void step_done();
+
+    // Checked non-query step (issue #1458): Ok only when the statement
+    // prepared, every bind succeeded and sqlite3_step returned DONE or
+    // ROW. A failed prepare (empty statement), a failed bind or a failed
+    // step returns the recorded DataError instead of silently succeeding.
+    // The statement is reset on success so bind + step_done loops reuse
+    // one prepared statement.
+    [[nodiscard]] domain::DataError step_done();
 
     std::string text(int column) const;
     std::int64_t int64(int column) const;
@@ -96,9 +106,31 @@ public:
     int column_count() const;
     std::string column_name(int column) const;
 
+    // ---- error surface (issue #1458) ----------------------------------
+    // Every failure is captured AT the failing call (prepare/bind/step
+    // return codes), never re-read from the connection-level
+    // sqlite3_errcode — a later successful API call overwrites that state.
+    // A Statement that failed to prepare, failed to bind, or whose last
+    // step returned an error is !ok() until reset.
+
+    // True when no prepare/bind/step failure is recorded.
+    bool ok() const { return error_.ok(); }
+    // The first recorded failure (stable until reset or destruction).
+    const domain::DataError& error() const { return error_; }
+
 private:
+    // Database::prepare is the only factory (a failed prepare passes the
+    // error in so the empty statement fails loudly at step time).
+    friend class Database;
+    Statement(sqlite3* db, sqlite3_stmt* stmt,
+              domain::DataError prepare_error = domain::DataError(
+                  domain::ErrorCode::Ok, ""));
+
+    void record_bind_error(int rc, const char* what);
+
     sqlite3* db_ = nullptr;
     sqlite3_stmt* stmt_ = nullptr;
+    domain::DataError error_{domain::ErrorCode::Ok, ""};
 };
 
 class Transaction {

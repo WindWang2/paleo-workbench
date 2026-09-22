@@ -1179,7 +1179,78 @@ void run_meshqc(Case& cs, const Json& c) {
 
 }  // namespace
 
+// #1462 endpoint matrix: well_plane_crossing direct checks (not
+// fixture-driven — the frozen oracle only covers a middle station on the
+// plane; these pin the first/last/tangent/duplicate contract).
+void run_well_crossing_endpoint_matrix() {
+    int local_failures = 0;
+    auto expect_hit = [&](const gm::Plane& plane,
+                          const std::vector<gm::Vec3>& stations,
+                          const gm::Vec3& want, const char* what) {
+        const auto got = gm::well_plane_crossing(plane, stations);
+        if (!got.has_value()) {
+            std::fprintf(stderr, "FAIL crossing %s: no hit\n", what);
+            ++local_failures;
+            return;
+        }
+        for (int d = 0; d < 3; ++d) {
+            if (std::fabs((*got)[d] - want[d])
+                > 1e-12 * std::max(1.0, std::fabs(want[d]))) {
+                std::fprintf(stderr,
+                             "FAIL crossing %s: axis %d got %g want %g\n",
+                             what, d, (*got)[d], want[d]);
+                ++local_failures;
+            }
+        }
+    };
+    auto expect_miss = [&](const gm::Plane& plane,
+                           const std::vector<gm::Vec3>& stations,
+                           const char* what) {
+        if (gm::well_plane_crossing(plane, stations).has_value()) {
+            std::fprintf(stderr, "FAIL crossing %s: unexpected hit\n", what);
+            ++local_failures;
+        }
+    };
+    const gm::Plane z0 = gm::axis_plane("z", 0.0);
+    // First station exactly on the plane.
+    expect_hit(z0, {{0, 0, 0}, {1, 0, -1}, {2, 0, -2}}, {0, 0, 0},
+               "first station on plane");
+    // LAST station exactly on the plane — the #1462 regression (the old
+    // loop never examined the final station's sign).
+    expect_hit(z0, {{0, 0, 1}, {1, 0, 2}, {2, 0, 0}}, {2, 0, 0},
+               "last station on plane");
+    expect_hit(z0, {{0, 0, 1}, {2, 0, 0}}, {2, 0, 0},
+               "last of two stations on plane");
+    // Middle station exactly on the plane.
+    expect_hit(z0, {{0, 0, 1}, {1, 0, 0}, {2, 0, -1}}, {1, 0, 0},
+               "middle station on plane");
+    // Ordinary sign crossing (interpolated).
+    expect_hit(z0, {{0, 0, 1}, {2, 0, -1}}, {1, 0, 0},
+               "ordinary crossing");
+    // No crossing at all.
+    expect_miss(z0, {{0, 0, 1}, {1, 0, 2}, {2, 0, 3}}, "all above plane");
+    // Two consecutive stations on the plane -> the FIRST one wins.
+    expect_hit(z0, {{0, 0, 1}, {1, 0, 0}, {2, 0, 0}, {3, 0, -1}}, {1, 0, 0},
+               "two consecutive on plane, first wins");
+    // Repeated (duplicate) station landing exactly on the plane last.
+    expect_hit(z0, {{0, 0, 1}, {1, 0, 2}, {1, 0, 2}, {1, 0, 0}}, {1, 0, 0},
+               "duplicate then on-plane");
+    // Vertical plane (x) and oblique plane with an on-plane last stop.
+    const gm::Plane x5 = gm::axis_plane("x", 5.0);
+    expect_hit(x5, {{0, 0, 0}, {2, 0, 0}, {5, 3, 7}}, {5, 3, 7},
+               "vertical plane, last on plane");
+    const gm::Plane oblique =
+        gm::plane_from_normal_point({1.0, 1.0, 1.0}, {3.0, 3.0, 3.0});
+    expect_hit(oblique, {{0, 0, 0}, {1, 1, 1}, {3, 3, 3}}, {3, 3, 3},
+               "oblique plane, last on plane");
+    // Fewer than two stations: no crossing by contract.
+    expect_miss(z0, {{0, 0, 0}}, "single station");
+    g_failures += local_failures;
+    if (local_failures == 0) ++g_cases;
+}
+
 int main() {
+    run_well_crossing_endpoint_matrix();
     std::ifstream stream(PWB_GEOMODEL_FIXTURE, std::ios::binary);
     if (!stream.good()) {
         std::fprintf(stderr, "FAIL cannot open fixture\n");

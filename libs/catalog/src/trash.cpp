@@ -98,10 +98,13 @@ bool safe_entity_id(const std::string& id) {
 
 std::string relpath_for(const fs::path& project_path, const fs::path& absolute) {
     // Python relative_to(project_dir); callers pass payloads under it.
-    const std::string abs = fs::weakly_canonical(absolute).string();
-    const std::string base = project_dir(project_path).string();
+    // generic_string(): the prefix compare is slash-based — .string()
+    // yields backslashes on Windows and the match (and with it the stored
+    // rel_path) silently degraded to a bare filename there (#1472 family).
+    const std::string abs = fs::weakly_canonical(absolute).generic_string();
+    const std::string base = project_dir(project_path).generic_string();
     if (abs.rfind(base + "/", 0) == 0) return abs.substr(base.size() + 1);
-    return absolute.filename().string();
+    return absolute.filename().generic_string();
 }
 
 }  // namespace
@@ -137,8 +140,8 @@ bool is_cas_path(const fs::path& project_path, const std::string& rel_path) {
     const fs::path blobs = fs::weakly_canonical(
         pwb::project::artifact_dir_for(project_path) / "blobs", ec);
     const fs::path resolved = fs::weakly_canonical(candidate, ec);
-    const std::string blobs_text = blobs.string();
-    const std::string resolved_text = resolved.string();
+    const std::string blobs_text = blobs.generic_string();
+    const std::string resolved_text = resolved.generic_string();
     return resolved_text.rfind(blobs_text + "/", 0) == 0;
 }
 

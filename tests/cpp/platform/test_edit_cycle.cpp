@@ -175,6 +175,86 @@ int main(int argc, char** argv) {
         session.close();
     }
 
+    {
+        // -- #1467: newly digitized features enter the topology gate -------
+        // Pending adds live in editBuffer()->addedFeatures(), not
+        // changedGeometries() — the gate must validate exactly the
+        // geometry set the staged writer will emit.
+        MapSession session;
+        std::string error;
+        pwb::qgis::LayerBinding binding{"added.layer", "asset-3", "version-1",
+                                        "vector"};
+        const QString uri = QStringLiteral(
+            "Polygon?crs=EPSG:4326&field=id:integer");
+        std::unique_ptr<QgsVectorLayer> scratch(
+            new QgsVectorLayer(uri, QStringLiteral("scratch_added"),
+                               QStringLiteral("memory")));
+        PWB_CHECK(scratch->startEditing());
+        QgsFeature seed(scratch->fields());
+        seed.setAttribute(0, 1);
+        seed.setGeometry(QgsGeometry::fromWkt(
+            QStringLiteral("POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))")));
+        scratch->addFeature(seed);
+        PWB_CHECK(scratch->commitChanges(true));
+        const QString path = temp_dir.path() + QStringLiteral("/added.gpkg");
+        QgsVectorFileWriter::SaveVectorOptions options;
+        options.driverName = QStringLiteral("GPKG");
+        QString writer_error;
+        QString new_filename;
+        QString new_layer;
+        PWB_CHECK(QgsVectorFileWriter::writeAsVectorFormatV3(
+            scratch.get(), path, QgsCoordinateTransformContext(), options,
+            &writer_error, &new_filename, &new_layer)
+            == QgsVectorFileWriter::NoError);
+        scratch.reset();
+
+        QgsVectorLayer* layer = session.addVectorLayer(
+            (path + QStringLiteral("|layername=added")).toStdString(),
+            "added", binding, &error);
+        PWB_CHECK_MSG(layer != nullptr, "added layer add failed: " + error);
+        EditController edit(session);
+        PWB_CHECK(edit.start_editing("added.layer").empty());
+        // Bowtie as a NEW feature — no existing geometry is touched, so
+        // changedGeometries() stays empty and only addedFeatures() has it.
+        const std::string bowtie_feature =
+            R"({"type":"Feature","properties":{"id":2},"geometry":)"
+            R"({"type":"Polygon","coordinates":)"
+            R"([[[0,0],[10,0],[0,10],[10,10],[0,0]]]}})";
+        PWB_CHECK(edit.add_feature_geojson("added.layer", bowtie_feature)
+                      .empty());
+        const std::vector<std::string> added_errors =
+            edit.validate_topology("added.layer");
+        PWB_CHECK_MSG(!added_errors.empty(),
+                      "bowtie ADDED feature bypassed the topology gate "
+                      "(#1467: gate must cover addedFeatures())");
+        pwb::qgis::StagedAsset staged;
+        const std::string blocked =
+            edit.commit("added.layer", staged_dir, &staged, nullptr);
+        PWB_CHECK_MSG(!blocked.empty(),
+                      "commit was not blocked by an illegal ADDED feature");
+        PWB_CHECK(blocked.find("拓扑校验失败") == 0);
+        PWB_CHECK(edit.editing("added.layer"));   // session kept for repair
+        PWB_CHECK(edit.dirty("added.layer"));     // buffer intact
+
+        // Repair: undo the add — validation passes and the commit lands.
+        PWB_CHECK(edit.undo("added.layer").empty());
+        PWB_CHECK(edit.validate_topology("added.layer").empty());
+
+        // Delete-only edits carry no pending geometry to validate.
+        QgsFeatureIds select;
+        select << 1;
+        layer->selectByIds(select);
+        int deleted = 0;
+        PWB_CHECK(edit.delete_selected("added.layer", &deleted).empty());
+        PWB_CHECK(deleted == 1);
+        PWB_CHECK(edit.validate_topology("added.layer").empty());
+        const std::string repaired =
+            edit.commit("added.layer", staged_dir, &staged, nullptr);
+        PWB_CHECK_MSG(repaired.empty(),
+                      "repaired added-feature commit failed: " + repaired);
+        session.close();
+    }
+
     pwb::qgis::QgisRuntime::release();
     return ::pwb::test::report("platform.edit.cycle");
 }

@@ -134,4 +134,20 @@ private:
 void install_quit_drain(std::shared_ptr<JobScheduler> scheduler,
                         int drain_timeout_ms = 5000);
 
+// Terminal-aware reissue seam (#1471). The scheduler's frozen contract
+// runs on_done/on_cancel BEFORE the job's terminal state lands, so a
+// queued completion can execute on the GUI thread while JobOwner::
+// is_running() is still true — calling start() from that callback throws
+// std::logic_error. A consumer that wants to immediately resubmit work
+// on the SAME owner runs the resubmit through here instead: each GUI
+// turn re-checks is_running() and only runs `fn` once the owner is
+// terminal (or was never started). The hop is queued on `context` — a
+// destroyed context drops the pending reissue; `fn` runs on the GUI
+// thread exactly once. Preferred context: the owner itself (it is a
+// QObject), so whichever of owner/context dies first drops the hop —
+// otherwise ensure the context cannot outlive the owner's storage (the
+// JobCenter) without an intervening event-loop turn.
+void reissue_when_terminal(JobOwner& owner, QObject* context,
+                           std::function<void()> fn);
+
 }  // namespace pwb::job::qtbridge

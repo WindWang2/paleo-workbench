@@ -625,6 +625,126 @@ int factor_kernel_battery(QgsApplication& app) {
 }
 #endif  // PWB_WITH_FACTOR_KERNEL
 
+// #1455 regression — window close while the preparation page's worker
+// runs: the destruction must be BOUNDED (AppShell::shutdown_workers now
+// reaches the adopted PreparationPage → WorkerHost::shutdown instead of
+// the destructor's unbounded join), a shutdown timeout detaches a thread
+// that only holds shared_ptr state (no UAF on the destroyed host — the
+// marshalled deliveries are dropped by the released guard), and the
+// process survives the event loop afterwards.
+int prepare_shutdown_battery(QgsApplication& app) {
+    namespace fs = std::filesystem;
+    const fs::path tmp = fs::temp_directory_path()
+        / ("pwb_v14_prep_shutdown_" + std::to_string(test_pid()));
+    fs::create_directories(tmp);
+    const fs::path project_file = tmp / "shutdown.paleo.json";
+
+    // One kriging task sized so the numeric core plausibly outlives the
+    // bounded shutdown (LOO R^2 alone is O(N) linear solves): 260 wells.
+    Json points = Json::array();
+    for (int i = 0; i < 260; ++i) {
+        points.push_back(Json{{"well", "W" + std::to_string(i)},
+                              {"x", 100.0 + 0.02 * i},
+                              {"y", 30.0 + 0.015 * i},
+                              {"value", 12.0 + 0.37 * i}});
+    }
+    Json document = Json::object();
+    document["schema_version"] = 1;
+    document["meta"] = Json{{"name", "prep shutdown"},
+                            {"project_root", "."},
+                            {"created_at", "2026-09-22T00:00:00+00:00"},
+                            {"updated_at", "2026-09-22T00:00:00+00:00"}};
+    document["coordinate"] = Json{{"project_crs", "EPSG:32650"},
+                                  {"crs_locked", false},
+                                  {"display_crs", "EPSG:4326 / WGS84"}};
+    document["stratigraphy"] = Json{{"target_horizon", "C6"}};
+    document["constraint_layers"] = Json::array();
+    document["factor_map_tasks"] = Json::array({Json{
+        {"id", "factor_shutdown"},
+        {"name", "C6 砂地比"},
+        {"target_horizon", "C6"},
+        {"factor_type", "砂地比"},
+        {"method", "克里金"},
+        {"status", "pending"},
+        {"source_kind", "mixed"},
+        {"parameters", Json{{"sample_points", points}}}}});
+    document["paleomap_documents"] = Json::array();
+    document["contour_drafts"] = Json::array();
+    document["well_tables"] = Json::array();
+    document["resources"] = Json::array();
+    {
+        std::ofstream out(project_file, std::ios::binary | std::ios::trunc);
+        out << pwb::domain::dump_json_python_compatible(document);
+    }
+
+    // Declared outside the window scope: the destruction timing must
+    // survive the scope that owns the MainWindow.
+    auto destroy_start = std::chrono::steady_clock::now();
+    {
+        MainWindow window;
+        window.show();
+        const QString open_error =
+            window.openProject(QString::fromStdString(project_file.string()));
+        PWB_CHECK_MSG(open_error.isEmpty(), "openProject failed");
+        auto* preparation =
+            window.appShell()->preparation_page() != nullptr
+                ? window.appShell()->preparation_page()
+                : window.appShell()
+                      ->findChild<
+                          pwb::ui_pages_data::qt::PreparationPage*>();
+        PWB_CHECK(preparation != nullptr);
+        // Deterministic wiring pin (#1455): the shell must REMEMBER the
+        // adopted page — the shutdown path depends on this pointer, and
+        // findChild alone cannot tell a dropped adoption from a
+        // later-found child.
+        PWB_CHECK(window.appShell()->preparation_page() == preparation);
+        auto* panel = preparation->task_panel();
+        PWB_CHECK(panel != nullptr);
+
+        // Fire the batch and wait until the worker actually OWNS the run
+        // (the seams report busy through the real WorkerHost).
+        QMetaObject::invokeMethod(panel, "generate_requested",
+                                  Q_ARG(QString,
+                                        QStringLiteral("克里金")));
+        bool running_seen = false;
+        for (int i = 0; i < 500 && !running_seen; ++i) {
+            app.processEvents();
+            running_seen = preparation->is_prepare_running();
+        }
+        PWB_CHECK_MSG(running_seen,
+                      "prepare run never registered as running");
+
+        // Destroy the window mid-run: the scoped destructor runs
+        // ~MainWindow → AppShell::shutdown_workers → PreparationPage::
+        // shutdown_workers (bounded) — never an unbounded GUI join.
+        destroy_start = std::chrono::steady_clock::now();
+        window.hide();
+    }
+    const double destroy_ms =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - destroy_start)
+            .count();
+    // Bounded destruction: the window destructor stops the joint host
+    // (1000 ms) + JobCenter owners (1000 ms each) + every owned page
+    // worker (preparation 3000 ms worst case) + the scheduler drain
+    // (~2 s) and tears down QGIS — the bound must cover that SUM, while
+    // the pre-#1455 behavior froze here until a slow grid kernel
+    // finished between cancellation points (potentially unbounded).
+    PWB_CHECK_MSG(destroy_ms < 15000.0,
+                  "window destruction blocked the GUI thread for "
+                      + std::to_string(destroy_ms)
+                      + " ms (unbounded join?)");
+    // The abandoned worker's marshalled deliveries are dropped (the
+    // released guard): pumping events after destruction must be safe —
+    // a late delivery firing into the dead page is the UAF family.
+    for (int i = 0; i < 50; ++i) {
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    fs::remove_all(tmp);
+    return pwb::test::failure_count();
+}
+
 // M5-2: 版式轻量页 + 上下文 Ribbon 组（编图场景真实选中驱动）。
 int m5_compose_battery() {
     MainWindow window;
@@ -722,6 +842,7 @@ int main(int argc, char** argv) {
     bank_battery(app);
 #ifdef PWB_WITH_APP_SHELL
     install_battery();
+    prepare_shutdown_battery(app);
 #ifdef PWB_WITH_FACTOR_KERNEL
     factor_kernel_battery(app);
 #endif

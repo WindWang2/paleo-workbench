@@ -184,6 +184,17 @@ PWB_TEST(rapid_slice_changes_converge_without_blocking) {
     const double tmax = snapshot.time_max_ms;
     const double step = (tmax - t0) / 8.0;
     for (int i = 1; i <= 6; ++i) {
+        // Before scrubbing again, let the prep worker actually pick the
+        // request up: the #1471 window opens when a scrub CANCELS a
+        // running read and the delivered finished callback reissues on
+        // the same owner while the job is still pre-terminal — a bare
+        // start() there throws logic_error out of a queued slot and the
+        // process dies. (The deterministic guarantee is unit-tested at
+        // reissue_when_terminal; this soak hits the real pipeline.)
+        if (i > 1) {
+            JOINT_REQUIRE(wait_until([&] { return rig.host->prep_in_flight(); },
+                                     2000));
+        }
         const auto started = std::chrono::steady_clock::now();
         rig.host->add_time_slice(t0 + step * i);
         rig.host->set_active_time_slice(t0 + step * i);
