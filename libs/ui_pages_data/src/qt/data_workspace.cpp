@@ -3,7 +3,9 @@
 
 #include <QEvent>
 #include <QHBoxLayout>
+#include <QShowEvent>
 #include <QSizePolicy>
+#include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -76,34 +78,55 @@ DataWorkspace::DataWorkspace(QWidget* parent) : QWidget(parent) {
     center_stack_->addWidget(overview_panel_);   // index 1 = overview
     center_stack_->addWidget(well_detail_panel_);// index 2 = well view
 
-    right_splitter_ = new QSplitter(Qt::Orientation::Vertical, this);
-    right_splitter_->setChildrenCollapsible(false);
+    // 页内底签（原型 ws0 中央下部的「数据预览|版本历史|关联关系」槽）。
+    // 壳层把它们提为独立 dock（data_preview / data_history /
+    // data_relations）—— dock 工厂 reparent reader_panel_ 后本页签容器
+    // 为空，由壳层 hide；独立宿主页面（VizEDataPage 等）不经 dock，页内
+    // 预览保持原生可见 —— 布局/polish 照常。
     reader_panel_ = new DataReaderPanel(this);
-    inspector_panel_ = new QWidget(this);  // seam placeholder
-    right_splitter_->addWidget(reader_panel_);
-    right_splitter_->addWidget(inspector_panel_);
-    right_splitter_->setStretchFactor(0, 3);
-    right_splitter_->setStretchFactor(1, 2);
-    right_splitter_->setSizes({260, 140});
 
     main_splitter_->addWidget(navigation_tree_);
     auto* center_container = new QWidget(this);
     map_center_host_ = center_container;
     center_layout_ = new QVBoxLayout(center_container);
     center_layout_->setContentsMargins(0, 0, 0, 0);
-    center_layout_->addWidget(center_stack_, 1);
+    center_vsplit_ = new QSplitter(Qt::Orientation::Vertical,
+                                   center_container);
+    center_vsplit_->setObjectName(QStringLiteral("DataCenterSplit"));
+    center_vsplit_->setChildrenCollapsible(false);
+    center_vsplit_->addWidget(center_stack_);
+    bottom_tabs_ = new QTabWidget(center_vsplit_);
+    bottom_tabs_->setObjectName(QStringLiteral("DataBottomTabs"));
+    bottom_tabs_->addTab(reader_panel_, QStringLiteral("数据预览"));
+    center_vsplit_->addWidget(bottom_tabs_);
+    center_vsplit_->setStretchFactor(0, 11);
+    center_vsplit_->setStretchFactor(1, 9);
+    center_layout_->addWidget(center_vsplit_, 1);
     well_map_panel_ = nullptr;  // injected via set_well_map_panel
     main_splitter_->addWidget(center_container);
-    main_splitter_->addWidget(right_splitter_);
+    // 原型 ws0 右列占位（数据属性/数据血缘槽）—— 壳层里是独立 dock
+    // （data_props/data_lineage），接管后此列被壳层 hide；独立宿主页
+    // 面保持原生三栏布局（列宽影响中央图表的等比纵横比）。
+    right_column_ = new QSplitter(Qt::Orientation::Vertical, this);
+    right_column_->setObjectName(QStringLiteral("DataRightColumn"));
+    right_column_->setChildrenCollapsible(false);
+    inspector_panel_ = new QWidget(this);  // 数据属性 seam placeholder
+    lineage_panel_ = new QWidget(this);    // 数据血缘 seam placeholder
+    right_column_->addWidget(inspector_panel_);
+    right_column_->addWidget(lineage_panel_);
+    right_column_->setStretchFactor(0, 3);
+    right_column_->setStretchFactor(1, 2);
+    right_column_->setSizes({260, 140});
+    main_splitter_->addWidget(right_column_);
     for (QWidget* side :
          {static_cast<QWidget*>(navigation_tree_), center_container,
-          static_cast<QWidget*>(right_splitter_)}) {
+          static_cast<QWidget*>(right_column_)}) {
         side->setSizePolicy(QSizePolicy::Policy::Expanding,
                             QSizePolicy::Policy::Expanding);
     }
     main_splitter_->setStretchFactor(0, 0);
     main_splitter_->setStretchFactor(1, 3);
-    main_splitter_->setStretchFactor(2, 2);
+    main_splitter_->setStretchFactor(2, 1);
 
     layout->addWidget(main_splitter_);
 
@@ -114,19 +137,33 @@ DataWorkspace::DataWorkspace(QWidget* parent) : QWidget(parent) {
             &DataWorkspace::persist_docked_sizes);
     connect(main_splitter_, &QSplitter::splitterMoved, this,
             [this](int, int) { float_sizes_timer_->start(); });
-    connect(right_splitter_, &QSplitter::splitterMoved, this,
+    connect(center_vsplit_, &QSplitter::splitterMoved, this,
             [this](int, int) { float_sizes_timer_->start(); });
+    connect(right_column_, &QSplitter::splitterMoved, this,
+            [this](int, int) { float_sizes_timer_->start(); });
+}
+
+QWidget* DataWorkspace::bottom_tabs() { return bottom_tabs_; }
+
+void DataWorkspace::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    // 原型 ws0：数据列表约占中央高度 55%，表格下页签占余下 —— 首次可
+    // 见时按真实高度播种一次；用户拖动后不再干预。
+    if (vsplit_seeded_ || center_vsplit_ == nullptr) return;
+    const int total = center_vsplit_->height();
+    if (total <= 200) return;
+    vsplit_seeded_ = true;
+    const int top = total * 55 / 100;
+    center_vsplit_->setSizes({top, total - top});
 }
 
 void DataWorkspace::set_float_controller(FloatControllerApi* controller) {
     float_controller_ = controller;
     if (float_controller_ == nullptr) return;
+    // 面板化改订：reader/属性/血缘已是壳层 dock（自带悬浮/停靠
+    // chrome）——页内浮动按钮只剩导航树与井位图。
     make_floatable(QStringLiteral("data:navigation"), navigation_tree_,
                    QStringLiteral("数据导航树"));
-    make_floatable(QStringLiteral("data:reader"), reader_panel_,
-                   QStringLiteral("数据预览"));
-    make_floatable(QStringLiteral("data:inspector"), inspector_panel_,
-                   QStringLiteral("数据资产检查器"));
     if (well_map_panel_ != nullptr) {
         make_floatable(QStringLiteral("data:well_map"), well_map_panel_,
                        QStringLiteral("井位地图"));
@@ -153,25 +190,6 @@ void DataWorkspace::set_well_map_panel(WellMapPanelApi* panel) {
     well_map_panel_ = panel;
     if (well_map_panel_ != nullptr) {
         center_layout_->addWidget(well_map_panel_, 0);
-    }
-}
-
-void DataWorkspace::set_inspector_panel(QWidget* panel) {
-    if (panel == nullptr || panel == inspector_panel_) return;
-    const int index = right_splitter_->indexOf(inspector_panel_);
-    auto* old = inspector_panel_;
-    inspector_panel_ = panel;
-    // #1389: keep the floatable registry pointed at the LIVE panel — the
-    // old one is deleteLater'd and a stale entry would dangle when the
-    // docked-sizes debounce timer fires.
-    auto fit = floatable_.find(QStringLiteral("data:inspector"));
-    if (fit != floatable_.end()) {
-        fit->second = panel;
-    }
-    if (index >= 0) {
-        right_splitter_->insertWidget(index, panel);
-        old->hide();
-        old->deleteLater();
     }
 }
 
@@ -292,10 +310,6 @@ void DataWorkspace::show_well_detail(bool visible) {
 
 bool DataWorkspace::well_detail_visible() const {
     return center_stack_->currentIndex() == 2;
-}
-
-void DataWorkspace::set_right_visible(bool visible) {
-    right_splitter_->setVisible(visible);
 }
 
 }  // namespace pwb::ui_pages_data::qt

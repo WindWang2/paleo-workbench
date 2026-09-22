@@ -15,7 +15,7 @@ std::vector<DockDescriptor> make_workstation_docks() {
         return desc;
     };
     std::vector<DockDescriptor> docks;
-    docks.reserve(14);
+    docks.reserve(34);
 
     {
         auto x = d("nav", "资源管理器");
@@ -30,6 +30,9 @@ std::vector<DockDescriptor> make_workstation_docks() {
         auto x = d("mapping_stage", "编图阶段");
         x.preferred_size = std::pair{280, 0};
         x.preferred_height = 280;
+        // Prototype 左栏下部 = 每工作区 WorkflowPanel；阶段面板保留为
+        // 按需 dock（面板菜单/预设可再开）。
+        x.default_visible = false;
         x.workflow_tags = {"mapping"};
         docks.push_back(std::move(x));
     }
@@ -52,6 +55,8 @@ std::vector<DockDescriptor> make_workstation_docks() {
     {
         auto x = d("facies_palette", "相带画刷");
         x.preferred_area = kAreaRight;
+        // Prototype 右栏按需工具：默认隐藏，stage/工作区 profile 抬升。
+        x.default_visible = false;
         x.preferred_size = std::pair{240, 0};
         x.workflow_tags = {"mapping"};
         x.remark = "M2 相带调色板 + 吸色管 + 数字键装备";
@@ -68,9 +73,176 @@ std::vector<DockDescriptor> make_workstation_docks() {
     }
     {
         auto x = d("composite_input", "输入与结果");
+        // Prototype 右栏标签组的一员（单因素/输入清单）；stage2 profile
+        // 控制显隐，与 图层管理/检查器 共 tab。
+        x.preferred_area = kAreaRight;
         x.default_visible = false;
         x.preferred_size = std::pair{280, 0};
         x.workflow_tags = {"mapping", "review"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws1 右栏「对比」页 —— 真实联动解释对照工作区。
+        auto x = d("predict_compare", "对比");
+        x.preferred_area = kAreaRight;
+        x.default_visible = false;
+        x.preferred_size = std::pair{300, 0};
+        x.workflow_tags = {"prediction", "review"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws2 右栏「约束」页 —— 宿主把窗口级 ConstraintPanel 收编进
+        // 此 dock（adopt_dock）；未收编时保持隐藏（无 factory）。
+        auto x = d("constraint_panel", "约束");
+        x.preferred_area = kAreaRight;
+        x.default_visible = false;
+        x.preferred_size = std::pair{300, 0};
+        x.workflow_tags = {"mapping", "constraint"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws2 右栏「参考」页 —— 参考图层清单（LayerManagerPanel 第二
+        // 实例：勾选/不透明度同一交互面）。
+        auto x = d("reference_maps", "参考");
+        x.preferred_area = kAreaRight;
+        x.default_visible = false;
+        x.preferred_size = std::pair{300, 0};
+        x.workflow_tags = {"mapping", "constraint"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws3 右栏「图件整饰」页 —— MapChromePanel（图名/图例/指北针/
+        // 比例尺/标题栏 勾选，写回 map_chrome 文档节）。
+        auto x = d("map_decor", "图件整饰");
+        x.preferred_area = kAreaRight;
+        x.default_visible = false;
+        x.preferred_size = std::pair{300, 0};
+        x.workflow_tags = {"mapping"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws3 右栏「版式输出」页 —— LayoutComposePanel（模板/纸张/导出）。
+        auto x = d("layout_output", "版式输出");
+        x.preferred_area = kAreaRight;
+        x.default_visible = false;
+        x.preferred_size = std::pair{300, 0};
+        x.workflow_tags = {"mapping"};
+        docks.push_back(std::move(x));
+    }
+    // ------------------------------------------------------------------
+    // 底部「阶段/预览行」（dock 嵌套 row0 —— 任务|日志 工具条之上）：
+    // 每格独立 dock，可单独悬浮/停靠/tab 化；navigate_workspace 按
+    // 工作区投影成员集合，非成员整组隐藏后该行塌陷。
+    // ------------------------------------------------------------------
+    {
+        // ws0 数据管理底签：数据预览|版本历史|关联关系。
+        auto x = d("data_preview", "数据预览");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 240;
+        x.workflow_tags = {"data"};
+        docks.push_back(std::move(x));
+    }
+    {
+        auto x = d("data_history", "版本历史");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 240;
+        x.workflow_tags = {"data"};
+        docks.push_back(std::move(x));
+    }
+    {
+        auto x = d("data_relations", "关联关系");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 240;
+        x.workflow_tags = {"data"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws1 智能预测底签：井震两联|预测任务|地震预测。
+        auto x = d("pair_link", "井震两联");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 300;
+        x.workflow_tags = {"prediction", "interpretation"};
+        docks.push_back(std::move(x));
+    }
+    {
+        auto x = d("predict_task", "预测任务");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 300;
+        x.workflow_tags = {"prediction"};
+        docks.push_back(std::move(x));
+    }
+    {
+        auto x = d("seismic_predict", "地震预测");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 300;
+        x.workflow_tags = {"prediction", "seismic"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws2 约束与单因素底签：连井剖面|数据制备|地层对比|层序格架。
+        // 连井剖面 = 窗口级 VizBCrossWellDock 经 adopt_dock 收编。
+        auto x = d("crosswell", "连井剖面");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 300;
+        x.workflow_tags = {"constraint", "interpretation"};
+        docks.push_back(std::move(x));
+    }
+    {
+        auto x = d("data_prep", "数据制备");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 300;
+        x.workflow_tags = {"constraint"};
+        docks.push_back(std::move(x));
+    }
+    {
+        auto x = d("strat_compare", "地层对比");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 300;
+        x.workflow_tags = {"constraint", "interpretation"};
+        docks.push_back(std::move(x));
+    }
+    {
+        auto x = d("seq_frame", "层序格架");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 300;
+        x.workflow_tags = {"constraint"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws3 综合编图底签：单因素参考缩略图带（更矮的一条）。
+        auto x = d("factor_refs", "单因素参考");
+        x.preferred_area = kAreaBottom;
+        x.default_visible = false;
+        x.preferred_height = 170;
+        x.workflow_tags = {"mapping"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // ws0 数据管理右列：数据属性(上)/数据血缘(下) —— 竖向二分，
+        // 不并入右栏 tab 组（原型两片同显）。
+        auto x = d("data_props", "数据属性");
+        x.preferred_area = kAreaRight;
+        x.default_visible = false;
+        x.preferred_size = std::pair{300, 0};
+        x.workflow_tags = {"data"};
+        docks.push_back(std::move(x));
+    }
+    {
+        auto x = d("data_lineage", "数据血缘");
+        x.preferred_area = kAreaRight;
+        x.default_visible = false;
+        x.preferred_size = std::pair{300, 0};
+        x.workflow_tags = {"data"};
         docks.push_back(std::move(x));
     }
     {
@@ -86,8 +258,8 @@ std::vector<DockDescriptor> make_workstation_docks() {
         auto x = d("tasks", "任务中心");
         x.preferred_area = kAreaBottom;
         x.importance = DockImportance::Utility;
-        x.default_visible = false;
-        x.preferred_height = 200;
+        // Prototype 底部常驻条（任务|日志 tabs）——默认可见。
+        x.preferred_height = 140;
         x.workflow_tags = {"background"};
         docks.push_back(std::move(x));
     }
@@ -95,9 +267,29 @@ std::vector<DockDescriptor> make_workstation_docks() {
         auto x = d("logs", "日志");
         x.preferred_area = kAreaBottom;
         x.importance = DockImportance::Utility;
-        x.default_visible = false;
-        x.preferred_height = 200;
+        x.preferred_height = 140;
         x.workflow_tags = {"diagnostics"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // 底部常驻条的第三页（任务|日志|验证记录 —— prototype 底条）。
+        auto x = d("verify_records", "验证记录");
+        x.preferred_area = kAreaBottom;
+        x.importance = DockImportance::Utility;
+        x.preferred_height = 140;
+        x.workflow_tags = {"diagnostics", "review"};
+        docks.push_back(std::move(x));
+    }
+    {
+        // 单因素统计（CONV-16 FactorStatsDock）——宿主经 adopt_dock 收编
+        // 进底条 tab 组；stage2 profile 的 window.factor_stats 键照常
+        // 抬升同一对象。未收编时隐藏（占位护栏）。
+        auto x = d("factor_stats", "单因素统计");
+        x.preferred_area = kAreaBottom;
+        x.importance = DockImportance::Utility;
+        x.default_visible = false;
+        x.preferred_height = 140;
+        x.workflow_tags = {"constraint", "diagnostics"};
         docks.push_back(std::move(x));
     }
     {

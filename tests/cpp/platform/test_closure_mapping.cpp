@@ -53,6 +53,7 @@ namespace { long test_pid() {
 #include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
 #include <pwb/ui_seqviz/qt/composition_panel.hpp>
+#include <pwb/ui_workstation/workstation_frame.hpp>
 
 #include "closure_mapping_document.hpp"
 #include "closure_mapping_install.hpp"
@@ -276,18 +277,20 @@ int install_battery() {
     // 「编图工具」dock（page_stack_ 唯一页）。
     PWB_CHECK(shell->page_stack() != nullptr);
     PWB_CHECK(shell->page_stack()->count() == 1);
-    // M3 (P0-2): the real PreparationPage lives in the 约束与单因素 bottom
-    // stack's 数据制备 tab — the hub slot keeps only a legacy route.
-    auto* bottom_tabs = shell->stage_bottom_tabs();
-    PWB_CHECK_MSG(bottom_tabs != nullptr, "stage-2 bottom tabs missing");
-    PWB_CHECK(bottom_tabs->count() >= 1);
-    // M6: the page rides in a BottomTabHost (Ignored policy) so the
-    // 65:35 canvas contract holds — the page itself is inside the host.
+    // M3 (P0-2): the real PreparationPage lives in the 约束与单因素
+    // bottom stage row's 数据制备 dock — the hub slot keeps only a
+    // legacy route.
+    auto* prep_dock = shell->workstation()->dock("data_prep");
+    PWB_CHECK_MSG(prep_dock != nullptr, "stage-2 数据制备 dock missing");
+    PWB_CHECK_MSG(prep_dock->widget() != nullptr,
+                  "数据制备 dock has no content");
+    // M6: the page rides in a BottomHost (Ignored policy) inside the
+    // dock — the page itself is inside the host.
     auto* preparation =
-        bottom_tabs->widget(0)
+        prep_dock->widget()
             ->findChild<pwb::ui_pages_data::qt::PreparationPage*>();
     PWB_CHECK_MSG(preparation != nullptr,
-                  "PreparationPage not adopted into the ws2 bottom tab");
+                  "PreparationPage not adopted into the ws2 dock");
     PWB_CHECK_MSG(preparation->objectName()
                       == QStringLiteral("PreparationPage"),
                   "preparation page object name");
@@ -635,9 +638,12 @@ int m5_compose_battery() {
     auto* ribbon = shell->ribbon();
     PWB_CHECK(ribbon != nullptr);
 
-    // 版式面板骑 ws3 底部栈第 2 页：默认组版（参考带）不动。
-    PWB_CHECK(shell->stage3_home() != nullptr);
-    PWB_CHECK(shell->stage3_home()->findChild<QWidget*>(
+    // 版式面板住右栏「版式输出」dock；ws3 底部阶段行的「单因素参考」
+    // dock 带参考缩略图（默认组版不动）。
+    auto* refs_dock = shell->workstation()->dock("factor_refs");
+    PWB_CHECK(refs_dock != nullptr);
+    PWB_CHECK(refs_dock->widget() != nullptr &&
+              refs_dock->widget()->findChild<QWidget*>(
                   "FactorReferenceStrip") != nullptr);
     auto* compose = shell->findChild<pwb::app::LayoutComposePanel*>();
     PWB_CHECK_MSG(compose != nullptr, "layout compose panel missing");

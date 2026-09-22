@@ -25,6 +25,7 @@
 #include <QDockWidget>
 #include <QFrame>
 #include <QMainWindow>
+#include <QTabBar>
 #include <QToolBar>
 
 #include <pwb/ui_shell/dock_registry.hpp>
@@ -36,6 +37,7 @@
 #include <pwb/ui_workstation/inspector_panel.hpp>
 #include <pwb/ui_workstation/process_hub.hpp>
 #include <pwb/ui_workstation/task_center.hpp>
+#include <pwb/ui_workstation/workflow_panel.hpp>
 
 namespace pwb::ui_workstation {
 
@@ -62,10 +64,17 @@ public:
                            PanelFactory factory);
     // True when a real panel factory is registered for this dock — a
     // dock without one renders a "(占位页, 待实现)" placeholder and must
-    // not be force-shown by a stage profile (#1450).
+    // not be force-shown by a stage profile (#1450). Adopted docks carry
+    // their own real widget → count as factory-backed.
     bool has_panel_factory(const std::string& dock_id) const {
         const auto it = factories_.find(dock_id);
-        return it != factories_.end() && static_cast<bool>(it->second);
+        if (it != factories_.end() && static_cast<bool>(it->second)) {
+            return true;
+        }
+        if (auto* d = dock(dock_id)) {
+            return d->property("pwbAdopted").toBool();
+        }
+        return false;
     }
     void install_default_panels();
     // Build every dock from the registry (idempotent — re-call is a
@@ -75,6 +84,23 @@ public:
     QDockWidget* dock(const std::string& dock_id) const;
     void set_dock_visible(const std::string& dock_id, bool visible);
     bool dock_visible(const std::string& dock_id) const;
+    // 收编外部真实 QDockWidget（如窗口级 ConstraintPanel）进 dock 宿主
+    // —— 注销注册表占位 dock、按描述符区域停靠、并入所属分组锚。
+    // dock_id 须是注册表 id；adopted dock 标 pwbAdopted，profile/
+    // set_dock_visible/面板菜单照常驱动。
+    void adopt_dock(const std::string& dock_id, QDockWidget* adopted);
+    // 向注册表 dock 注入真实内容部件（dock 本身保持注册表 chrome）：
+    // 占位/旧内容退役，标 pwbAdopted 使占位护栏视作 factory-backed。
+    void install_panel(const std::string& dock_id, QWidget* content);
+
+    // 层位标签行（中央区上方，ws1-4 显示）：target_horizon 权威的又一
+    // 视图/编辑器——与 StatusBar/Ribbon 尾部选择器同一权威，点击只发
+    // horizon_requested；无候选时整行隐藏（诚实缺席）。
+    void set_horizon_state(const QString& horizon,
+                           const std::vector<QString>& options);
+    QString current_horizon() const;
+    // 工作区门禁：ws0 数据管理不显示层位行（prototype parity）。
+    void set_horizon_strip_enabled(bool enabled);
 
     // Workspace presets: apply a visibility matrix (does NOT resize —
     // preset switches never disturb user-arranged sizes).
@@ -99,6 +125,8 @@ public:
     WorkstationAppBar* app_bar() const { return app_bar_; }
     ActivityRail* activity_rail() const { return rail_; }
     WorkstationExplorer* explorer() const { return explorer_; }
+    // 左栏下部工作流面板（nav dock 内，explorer 之下的竖向分格）。
+    WorkflowPanel* workflow_panel() const { return workflow_panel_; }
     WorkstationInspector* inspector() const { return inspector_; }
     WorkstationTaskCenter* task_center() const { return task_center_; }
     WorkstationLogViewer* log_viewer() const { return log_viewer_; }
@@ -118,6 +146,11 @@ public:
 signals:
     // Preset/dock-visibility mirror for host persistence.
     void layout_changed();
+    // 层位标签行编辑请求（宿主接 stage_flow 权威写路径）。
+    void horizon_requested(const QString& horizon);
+    // finish_dock_layout 完成（宿主首显之后）—— 供壳层重放需要
+    // 可见 dock 的分组/投影（tabifyDockWidget 对隐藏 dock 无效）。
+    void dock_layout_ready();
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
@@ -127,7 +160,13 @@ private:
     QWidget* content_for(const std::string& dock_id, QWidget* parent);
     void sync_floating_minimum(QDockWidget* dock,
                                const ui_shell::DockDescriptor& desc);
+    // pwbBlankTitle 面板：停靠态用 0x0 空白标题栏（tab 条即页签），
+    // 悬浮态还原原生标题栏供拖动/关闭。
+    void sync_titlebar_for_float(QDockWidget* dock, bool floating);
     void apply_inspector_policy(int width);
+    // Deferred dock tab grouping — runs once after the dock host's
+    // first Show (see eventFilter).
+    void finish_dock_layout();
 
     QMainWindow* dock_host_ = nullptr;
     QToolBar* app_bar_toolbar_ = nullptr;
@@ -136,6 +175,7 @@ private:
     std::map<std::string, PanelFactory> factories_;
     std::string current_preset_;
     bool built_ = false;
+    bool tabs_built_ = false;
     bool tearing_down_ = false;
     bool explorer_expanded_ = true;
     bool inspector_hidden_by_viewport_ = false;
@@ -147,10 +187,15 @@ private:
     QWidget* top_bar_ = nullptr;
     ActivityRail* rail_ = nullptr;
     WorkstationExplorer* explorer_ = nullptr;
+    QWidget* nav_column_ = nullptr;  // explorer + workflow 竖向分格容器
+    WorkflowPanel* workflow_panel_ = nullptr;
     WorkstationInspector* inspector_ = nullptr;
     WorkstationTaskCenter* task_center_ = nullptr;
     WorkstationLogViewer* log_viewer_ = nullptr;
     AgentWorkspacePanel* agent_panel_ = nullptr;
+    QTabBar* horizon_tabs_ = nullptr;
+    bool horizon_strip_enabled_ = false;
+    bool syncing_horizon_tabs_ = false;
 };
 
 }  // namespace pwb::ui_workstation

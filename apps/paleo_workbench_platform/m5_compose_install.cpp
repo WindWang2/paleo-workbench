@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <QAction>
+#include <QPushButton>
 
 #include "app_context.hpp"
 #include "app_shell.hpp"
@@ -20,9 +21,11 @@
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/ui_data_qt/map_edit_items.hpp>
+#include <pwb/ui_map/map_chrome_panel.hpp>
 #include <pwb/ui_pages_mapedit/map_edit_scene.hpp>
 #include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_ribbon/ribbon_spec.hpp>
+#include <pwb/ui_shell/command_registry.hpp>
 
 namespace pwb::app::m5_compose {
 
@@ -119,6 +122,54 @@ void install(const Install& install) {
     shell->set_stage3_compose(panel);
     QObject::connect(bank, &closure_mapping::MapDocumentBank::active_changed,
                      panel, [panel] { panel->refresh_chrome(); });
+
+    // ---- 图件整饰 panel (ws3 右栏「图件整饰」tab) ------------------------
+    // 与 LayoutComposePanel 同一 map_chrome 文档节、同一写回路径（F:69
+    // 单一权威）：读 active_document 快照，写 doc["map_chrome"] 后广播
+    // document_saved 让另一面板同步镜像。
+    if (auto* decor = qobject_cast<pwb::ui_map::MapChromePanel*>(
+            shell->map_decor_panel())) {
+        const auto sync_decor = [bank, decor] {
+            if (auto* doc = bank->active_document(); doc != nullptr) {
+                decor->update_state(*doc);
+            }
+        };
+        QObject::connect(bank,
+                         &closure_mapping::MapDocumentBank::active_changed,
+                         decor, [sync_decor](const QString&) {
+                             sync_decor();
+                         });
+        QObject::connect(bank,
+                         &closure_mapping::MapDocumentBank::document_saved,
+                         decor, [sync_decor](const QString&) {
+                             sync_decor();
+                         });
+        QObject::connect(decor, &pwb::ui_map::MapChromePanel::chrome_changed,
+                         shell, [bank, shell](const Json& payload) {
+                             auto* doc = bank->active_document();
+                             if (doc == nullptr) {
+                                 emit shell->status_message(QStringLiteral(
+                                     "图件整饰：无活动编图文档"));
+                                 return;
+                             }
+                             (*doc)["map_chrome"] = payload;
+                             emit bank->document_saved(
+                                 QString::fromStdString(bank->active_id()));
+                         });
+        // 保存/送交验证按钮 = 既有 ribbon 命令同一回调（无第二实现）。
+        auto& registry = pwb::ui_shell::command_registry();
+        const auto bind = [&registry](QPushButton* button,
+                                    const char* command_id) {
+            if (button == nullptr) return;
+            const auto* spec = registry.get(command_id);
+            if (spec == nullptr || !spec->callback) return;
+            QObject::connect(button, &QPushButton::clicked, button,
+                             [callback = spec->callback] { callback(); });
+        };
+        bind(decor->save_button(), "map.save_plan");
+        bind(decor->review_button(), "map.submit");
+        sync_decor();
+    }
 
     // ---- 上下文 Ribbon 组 (R:33) ------------------------------------------
     auto* scene = bank->edit_scene();

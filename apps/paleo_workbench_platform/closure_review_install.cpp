@@ -4,12 +4,14 @@
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/closure_review/project_review_actions.hpp>
+#include <pwb/closure_review/review_disposition.hpp>
 #ifdef PWB_WITH_CLOSURE_WORKFLOW
 #include <pwb/closure_workflow/persistent_catalog.hpp>
 #endif  // PWB_WITH_CLOSURE_WORKFLOW
 #include <pwb/domain/errors.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/ui_review/qt/review_export_page.hpp>
+#include <pwb/ui_workstation/verify_records_panel.hpp>
 
 #include <filesystem>
 #include <memory>
@@ -153,6 +155,36 @@ public:
                     return exposed;
                 });
         }
+        // 底条「验证记录」表 = quality_reports[].review_records 的只读
+        // 投影 —— 同一复核权威；provider 每次 refresh 重拉当前文档，
+        // 无工程/无记录即空表（诚实缺席）。
+        if (auto* panel = shell_->verify_records_panel();
+            panel != nullptr) {
+            panel->set_records_provider(
+                [this]() -> std::vector<QStringList> {
+                    std::vector<QStringList> rows;
+                    if (!available()) return rows;
+                    const domain::Json reports = clr::active_quality_reports_of(
+                        context_->projectStore()->document().root());
+                    if (!reports.is_array()) return rows;
+                    for (const auto& report : reports) {
+                        if (!report.is_object()) continue;
+                        for (const auto& record :
+                             clr::review_records_of(report)) {
+                            rows.push_back(
+                                {QString::fromStdString(record.issue_key),
+                                 QString::fromStdString(record.rule),
+                                 QString::fromStdString(record.severity),
+                                 QString::fromUtf8(
+                                     clr::review_disposition_label(
+                                         record.disposition)),
+                                 QString::fromStdString(record.author),
+                                 QString::fromStdString(record.created_at)});
+                        }
+                    }
+                    return rows;
+                });
+        }
 #endif
         refresh();
     }
@@ -188,6 +220,10 @@ public:
                 }
                 validation->update_reports(report_list);
             }
+            if (auto* panel = shell_->verify_records_panel();
+                panel != nullptr) {
+                panel->refresh();
+            }
             return;
         }
 #endif
@@ -197,6 +233,10 @@ public:
         if (auto* validation = shell_->validation_page();
             validation != nullptr) {
             validation->update_reports({});
+        }
+        if (auto* panel = shell_->verify_records_panel();
+            panel != nullptr) {
+            panel->refresh();
         }
     }
 

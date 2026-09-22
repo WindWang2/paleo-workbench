@@ -283,6 +283,22 @@ void MainWindow::installStageFlow() {
     auto* composite = shell->composite();
     if (workstation == nullptr || composite == nullptr) return;
 
+#ifdef PWB_WITH_CONV_27
+    // ws2 右栏「约束」页：窗口级 ConstraintPanel 收编进工作站 dock 宿主
+    // —— 同一对象；window.constraint_panel profile 键与面板菜单照常
+    // 驱动（visibility 直写 dock，adopted 后仍命中）。
+    if (constraint_dock_ != nullptr) {
+        workstation->adopt_dock("constraint_panel", constraint_dock_);
+    }
+#endif
+#ifdef PWB_WITH_CONV_16
+    // 单因素统计 HUD 同样收编（底条 tab 组「单因素统计」）—— stage2
+    // profile 的 window.factor_stats 抬升它时不再出现窗口级旧 dock。
+    if (factor_dock_ != nullptr) {
+        workstation->adopt_dock("factor_stats", factor_dock_);
+    }
+#endif
+
 #ifdef PWB_WITH_DATA_INTEGRATION
     // V14 constraint authoring (#1446): the stage panel's eight
     // constraint buttons used to emit constraint_requested with no
@@ -431,6 +447,25 @@ void MainWindow::installStageFlow() {
     // The ①②③ segments are the ribbon tabs now (D1); the horizon combo
     // migrated to the AppShell StatusBar — ONE target_horizon authority,
     // read/apply still exclusively through the seams above.
+    // 画布层位标签行 + Ribbon 尾部层位选择器：与状态条层位下拉同一
+    // target_horizon 权威的另两处视图/编辑器 —— 回写只走
+    // request_horizon（单一写路径）。
+    if (auto* composite = shell->composite()) {
+        connect(composite,
+                &pwb::ui_composite::CompositeDocument::horizon_requested,
+                this, [this](const QString& horizon) {
+                    if (stage_flow_ != nullptr) {
+                        stage_flow_->request_horizon(
+                            horizon.toStdString());
+                    }
+                });
+    }
+    connect(shell, &AppShell::horizon_requested, this,
+            [this](const QString& horizon) {
+                if (stage_flow_ != nullptr) {
+                    stage_flow_->request_horizon(horizon.toStdString());
+                }
+            });
     if (auto* status = shell->status_bar()) {
         connect(status, &pwb::ui_shell::StatusBar::horizon_requested, this,
                 [this](const QString& horizon) {
@@ -515,16 +550,43 @@ void MainWindow::installStageFlow() {
                             }
                         }
                     }
-                    status->set_horizon_state(
+                    const QString horizon =
                         snap.horizon.has_value()
                             ? QString::fromStdString(*snap.horizon)
-                            : QString(),
-                        options);
+                            : QString();
+                    // 三处视图一次投影（状态条选择器 / Ribbon 尾部 /
+                    // 画布层位标签行）。
+                    if (auto* shell = appShell()) {
+                        shell->set_horizon_state(horizon, options);
+                    }
+                    // 图件标题浮层（prototype 画布顶部居中标题）。
+                    if (auto* composite =
+                            appShell() != nullptr ? appShell()->composite()
+                                                  : nullptr) {
+                        static const std::map<std::string, QString>
+                            title_templates = {
+                                {kStage1Value,
+                                 QStringLiteral("%1层沉积相智能预测图")},
+                                {kStage2Value,
+                                 QStringLiteral("%1层约束与单因素分析图")},
+                                {kStage3Value,
+                                 QStringLiteral("%1层沉积相平面图")},
+                            };
+                        const auto it =
+                            title_templates.find(snap.stage_value);
+                        composite->set_map_title(
+                            it != title_templates.end() && !horizon.isEmpty()
+                                ? it->second.arg(horizon)
+                                : QString());
+                    }
                 });
-        status->set_horizon_state(
-            stage_flow_->snapshot().horizon.has_value()
-                ? QString::fromStdString(*stage_flow_->snapshot().horizon)
-                : QString());
+        if (auto* shell = appShell()) {
+            shell->set_horizon_state(
+                stage_flow_->snapshot().horizon.has_value()
+                    ? QString::fromStdString(*stage_flow_->snapshot().horizon)
+                    : QString(),
+                {});
+        }
     }
 
     // -- production commands (the palette registry leaves its empty shell) ---

@@ -47,6 +47,9 @@ public:
     // fires submodule_changed (UI-driven switch parity).
     void switch_to(const std::string& key, bool emit = false);
 
+    // ws0 原型无 pill 行 —— 页内导航走资源树，pill 条隐藏。
+    void set_switcher_visible(bool on);
+
     std::string current_key() const;
     QWidget* current_page() const;
     QWidget* page(const std::string& key) const;
@@ -69,6 +72,7 @@ private:
     std::map<std::string, std::function<void()>> activate_fns_;
     QWidget* switcher_host_;
     QHBoxLayout* switcher_layout_;
+    bool switcher_hidden_ = false;
     QStackedWidget* stack_;
     std::string current_;
 };

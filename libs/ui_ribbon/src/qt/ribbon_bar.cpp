@@ -15,6 +15,7 @@
 #include <QStringList>
 #include <QStyle>
 #include <QTabBar>
+#include <QTransform>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -48,7 +49,23 @@ RibbonBar::RibbonBar(QWidget* parent) : QWidget(parent) {
     band_ = new QStackedWidget;
     band_->setObjectName("ribbonBand");
     build_band_pages();
-    layout->addWidget(band_);
+
+    // 命令带行：band 占拉伸区，右侧留宿主槽位（层位选择器等随当前
+    // 工作区常驻的关键选择 — R:49 Ribbon 只承载高频命令与关键选择）。
+    band_row_ = new QWidget(this);
+    band_row_->setObjectName("ribbonBandRow");
+    auto* band_row_layout = new QHBoxLayout(band_row_);
+    band_row_layout->setContentsMargins(0, 0, 0, 0);
+    band_row_layout->setSpacing(0);
+    band_row_layout->addWidget(band_, 1);
+    band_trailing_ = new QWidget(band_row_);
+    band_trailing_->setObjectName("ribbonBandTrailing");
+    auto* trailing_layout = new QHBoxLayout(band_trailing_);
+    trailing_layout->setContentsMargins(4, 4, 8, 4);
+    trailing_layout->setSpacing(6);
+    band_row_layout->addWidget(band_trailing_, 0,
+                               Qt::AlignmentFlag::AlignVCenter);
+    layout->addWidget(band_row_);
 
     // Esc re-collapses a temporarily expanded band (R:23). Disabled
     // unless a temporary expansion is active so it never steals Esc from
@@ -79,18 +96,32 @@ void RibbonBar::set_file_menu(QMenu* menu) {
 }
 
 void RibbonBar::set_quick_access_actions(const QuickAccessActions& actions) {
-    auto bind = [](QToolButton* button, QAction* action) {
+    auto bind = [this](QToolButton* button, QAction* action,
+                       const QIcon& fallback_icon) {
         if (action != nullptr) {
+            // 治理动作不带图标 —— 图标必须落在动作上：setDefaultAction
+            // 之后每次 QAction::changed 都会把按钮图标回同步为
+            // action->icon()，只设按钮图标会被清空并回退绘制文字。
+            if (action->icon().isNull() && !fallback_icon.isNull()) {
+                action->setIcon(fallback_icon);
+            }
             button->setDefaultAction(action);
+            button->setToolButtonStyle(
+                Qt::ToolButtonStyle::ToolButtonIconOnly);
             button->show();
         } else {
             button->setDefaultAction(nullptr);
             button->hide();
         }
     };
-    bind(qat_save_, actions.save);
-    bind(qat_undo_, actions.undo);
-    bind(qat_redo_, actions.redo);
+    const QIcon save_icon = resolve_icon("menu-save.svg", "qat.save");
+    // 撤销图标无 ccw 变体 —— rotate-cw 水平镜像。
+    const QIcon cw = resolve_icon("rotate-cw.svg", "qat.undo");
+    const QIcon undo_icon(cw.pixmap(18, 18)
+                              .transformed(QTransform().scale(-1, 1)));
+    bind(qat_save_, actions.save, save_icon);
+    bind(qat_undo_, actions.undo, undo_icon);
+    bind(qat_redo_, actions.redo, cw);
 }
 
 void RibbonBar::set_command_action(const QString& command_id, QAction* action) {
@@ -130,6 +161,29 @@ void RibbonBar::set_command_evaluator(
     pwb::ui_ribbon::CommandEvaluator evaluator) {
     evaluator_ = std::move(evaluator);
     refresh_command_availability();
+}
+
+void RibbonBar::set_task_count(int count) {
+    const int clamped = std::max(0, count);
+    task_button_->setText(clamped > 0
+                              ? QStringLiteral("任务 %1").arg(clamped)
+                              : QStringLiteral("任务"));
+}
+
+QWidget* RibbonBar::band_trailing_host() const { return band_trailing_; }
+
+void RibbonBar::set_band_trailing(QWidget* widget) {
+    if (band_trailing_ == nullptr || widget == nullptr) return;
+    // 宿主控件只有一个实例 — 每个工作区共享同一尾部槽位（层位选择器
+    // 在所有五页常驻，prototype 行为）。
+    auto* host_layout = qobject_cast<QHBoxLayout*>(band_trailing_->layout());
+    if (host_layout == nullptr) return;
+    while (auto* item = host_layout->takeAt(0)) {
+        if (item->widget() != nullptr) item->widget()->hide();
+    }
+    widget->setParent(band_trailing_);
+    host_layout->addWidget(widget);
+    widget->show();
 }
 
 void RibbonBar::refresh_command_availability() {
@@ -353,6 +407,8 @@ QWidget* RibbonBar::build_nav_row() {
     qat_redo_ = new QToolButton(nav);
     for (auto* button : {qat_save_, qat_undo_, qat_redo_}) {
         button->setAutoRaise(true);
+        // QAT 是图标位（prototype：保存/撤销/重做只见图标）。
+        button->setToolButtonStyle(Qt::ToolButtonStyle::ToolButtonIconOnly);
         button->hide();
     }
     qat_save_->setObjectName("ribbonQatSave");
@@ -386,22 +442,55 @@ QWidget* RibbonBar::build_nav_row() {
             [this] { emit searchRequested(); });
     layout->addWidget(search_button_);
 
+    // 任务中心 / Agent — prototype 顶栏右侧入口；宿主接 dock 开关。
+    task_button_ = new QToolButton(nav);
+    task_button_->setObjectName("ribbonTaskButton");
+    task_button_->setText(QStringLiteral("任务"));
+    task_button_->setToolTip(QStringLiteral("任务中心"));
+    task_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    task_button_->setAutoRaise(true);
+    task_button_->setIcon(resolve_icon("rb-run.svg", "chrome.tasks"));
+    connect(task_button_, &QToolButton::clicked, this,
+            [this] { emit taskCenterRequested(); });
+    layout->addWidget(task_button_);
+
+    agent_button_ = new QToolButton(nav);
+    agent_button_->setObjectName("ribbonAgentButton");
+    agent_button_->setText(QStringLiteral("Agent"));
+    agent_button_->setToolTip(QStringLiteral("上下文感知 Agent 工作区"));
+    agent_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    agent_button_->setAutoRaise(true);
+    agent_button_->setIcon(
+        resolve_icon("visualization.svg", "chrome.agent"));
+    connect(agent_button_, &QToolButton::clicked, this,
+            [this] { emit agentRequested(); });
+    layout->addWidget(agent_button_);
+
     compact_button_ = new QToolButton(nav);
     compact_button_->setObjectName("ribbonCompact");
-    compact_button_->setText(QStringLiteral("紧凑"));
+    compact_button_->setIcon(
+        resolve_icon("rb-density-compact.svg", "chrome.compact"));
     compact_button_->setToolTip(QStringLiteral("紧凑模式"));
     compact_button_->setCheckable(true);
     compact_button_->setAutoRaise(true);
+    compact_button_->setAccessibleName(QStringLiteral("紧凑模式"));
     connect(compact_button_, &QToolButton::toggled, this,
             [this](bool on) { set_compact(on); });
     layout->addWidget(compact_button_);
 
     collapse_button_ = new QToolButton(nav);
     collapse_button_->setObjectName("ribbonCollapse");
-    collapse_button_->setText(QStringLiteral("折叠"));
+    {
+        // 上箭头图标：chevron-down 旋转 180°（资源库无 up 变体）。
+        const QIcon down = resolve_icon("chevron-down.svg",
+                                        "chrome.collapse");
+        collapse_button_->setIcon(QIcon(
+            down.pixmap(18, 18).transformed(QTransform().rotate(180.0))));
+    }
     collapse_button_->setToolTip(QStringLiteral("折叠 Ribbon · Ctrl+F1"));
     collapse_button_->setCheckable(true);
     collapse_button_->setAutoRaise(true);
+    collapse_button_->setAccessibleName(QStringLiteral("折叠 Ribbon"));
     connect(collapse_button_, &QToolButton::toggled, this,
             [this](bool on) { set_collapsed(on); });
     layout->addWidget(collapse_button_);
@@ -511,6 +600,9 @@ void RibbonBar::configure_command_button(CommandButton& command) {
                                  pwb::ui_ribbon::CommandKind::Toggle);
     command.button->setAutoRaise(true);
     command.button->setToolTip(command.text);
+    // R:29 每区唯一主动作 — QSS 主色描边区分（样式见 build_ribbon_qss）。
+    command.button->setProperty(
+        "primary", command.kind == pwb::ui_ribbon::CommandKind::Primary);
 }
 
 QIcon RibbonBar::resolve_icon(const QString& name, const QString& gap_id) {
@@ -558,9 +650,9 @@ void RibbonBar::apply_mode() {
             command.button->setIconSize(QSize(icon_px, icon_px));
         }
     });
-    band_->setVisible(mode_state_.band_visible());
+    band_row_->setVisible(mode_state_.band_visible());
     if (mode_state_.band_visible()) {
-        band_->setFixedHeight(band_height_for(effective));
+        band_row_->setFixedHeight(band_height_for(effective));
     }
     compact_button_->setChecked(mode_state_.compact());
     collapse_button_->setChecked(mode_state_.collapsed());
@@ -785,25 +877,35 @@ QString RibbonBar::build_ribbon_qss() const {
     const QString text = token("TEXT_PRIMARY", "#25313D");
     const QString hover = token("BG_MENU_HOVER", "#EDF2F4");
     const QString selection = token("BG_SELECTION", "#D8EBEF");
-    const QString focus = token("FOCUS_RING", "#0078D4");
+    const QString accent = token("PRIMARY", "#0B5563");
     // 少量状态/间距 QSS only; sizes come from font metrics + logical px.
     return QStringLiteral(
                "RibbonBar { background: %1; }"
-               "QWidget#ribbonNav { background: %1; }"
+               "QWidget#ribbonNav { background: %1;"
+               " border-bottom: 1px solid %3; }"
+               "QWidget#ribbonBandRow { background: %2; }"
                "QStackedWidget#ribbonBand { background: %2; }"
-               "QFrame#ribbonSeparator { background: %3; }"
-               "QLabel#ribbonGroupLabel { color: %4; }"
+               "QWidget#ribbonBandTrailing { background: %2; }"
+               "QFrame#ribbonSeparator { background: %3; max-width: 1px; }"
+               "QLabel#ribbonGroupLabel { color: %4; font-size: 11px;"
+               " padding-bottom: 1px; }"
                "QToolButton { color: %5; border: 1px solid transparent;"
-               " border-radius: 2px; padding: 4px; }"
+               " border-radius: 2px; padding: 3px; }"
                "QToolButton:hover { background: %6; }"
                "QToolButton:checked { background: %7; }"
                "QToolButton:focus { border: 1px solid %8; }"
-               "QTabBar::tab { padding: 6px 12px; border: none;"
-               " border-bottom: 2px solid transparent; }"
-               "QTabBar::tab:selected { color: %8;"
+               // 每区唯一主动作（R:29）：主色描边+浅底，与次级按钮区分。
+               "QToolButton[primary=\"true\"] { background: %7;"
+               " border: 1px solid %8; font-weight: 600; }"
+               "QToolButton[primary=\"true\"]:hover { background: %6;"
+               " border: 1px solid %8; }"
+               "QTabBar::tab { padding: 5px 14px; border: none;"
+               " border-bottom: 2px solid transparent; color: %4; }"
+               "QTabBar::tab:hover { color: %5; }"
+               "QTabBar::tab:selected { color: %8; font-weight: 600;"
                " border-bottom: 2px solid %8; }")
-        .arg(shell, shell, surface, separator, text_muted, text, hover,
-             selection, focus);
+        .arg(shell, surface, separator, text_muted, text, hover,
+             selection, accent);
 }
 
 }  // namespace pwb::ui_ribbon::qt

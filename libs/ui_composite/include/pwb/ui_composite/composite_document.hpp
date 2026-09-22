@@ -81,6 +81,8 @@ public:
     pwb::ui_widgets::StratigraphicTimelineWidget* timeline = nullptr;
     pwb::ui_widgets::ConstraintFactorHud* constraint_hud = nullptr;
     pwb::ui_shell::MapStatusBar* status_bar = nullptr;
+    // 图件标题浮层（画布顶部居中，鼠标穿透）。
+    QLabel* map_title = nullptr;
 
     CompositeEditController* edit_controller = nullptr;
     CompositeEditControllerObject* controller_object = nullptr;
@@ -96,6 +98,9 @@ public:
 
     // 空态提示：无图层时中央画布给明确引导（视觉 QA 11）。
     void update_empty_hint(bool has_content);
+
+    // 图件标题浮层（"C6层沉积相智能预测图" 式；空串隐藏）。
+    void set_map_title(const QString& title);
 
     // 宿主出口：dock 挂载、阶段动作派发等由 WorkstationFrame 接线。
 signals:
@@ -132,6 +137,8 @@ private slots:
 
 private:
     void wire_panels();
+    void layout_map_title();
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
     QWidget* canvas_ = nullptr;
     bool uses_native_stack_ = false;

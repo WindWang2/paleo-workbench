@@ -15,6 +15,9 @@
 #include <pwb/ui_widgets/interactive_qc_hub.hpp>
 #include <pwb/ui_widgets/stratigraphic_timeline_slider.hpp>
 
+#include <algorithm>
+
+#include <QEvent>
 #include <QVBoxLayout>
 
 namespace pwb::ui_composite {
@@ -27,7 +30,10 @@ CompositeDocument::CompositeDocument(QWidget* parent) : QWidget(parent) {
     layout->setSpacing(0);
 
     // M1 多期次时间轴：画布之上的常驻横条（宿主绑定 EpochTimelineController）。
+    // 原型中央列此槽位是层位条 —— 时间轴默认隐藏，宿主绑定期次控制器
+    // /进入期次对比时再现（未绑定时它只是空 chrome）。
     timeline = new pwb::ui_widgets::StratigraphicTimelineWidget(this);
+    timeline->hide();
     layout->addWidget(timeline);
 
     // 中央画布占位：宿主 set_canvas 注入真实控件（QgisCanvasShim 或回退）。
@@ -102,6 +108,7 @@ void CompositeDocument::set_canvas(QWidget* canvas,
         // 时间轴(0) 之后、附属层之前 = 中央区。
         auto* box = static_cast<QVBoxLayout*>(layout());
         box->insertWidget(1, canvas_, 1);
+        canvas_->installEventFilter(this);
         // 空态提示挂画布（鼠标穿透）。
         if (empty_hint_ == nullptr) {
             empty_hint_ = new QLabel(
@@ -114,8 +121,41 @@ void CompositeDocument::set_canvas(QWidget* canvas,
             empty_hint_->setAttribute(Qt::WA_TransparentForMouseEvents);
             empty_hint_->hide();
         }
+        if (map_title == nullptr) {
+            map_title = new QLabel(canvas_);
+            map_title->setObjectName(QStringLiteral("CompositeMapTitle"));
+            map_title->setAlignment(Qt::AlignCenter);
+            map_title->setAttribute(Qt::WA_TransparentForMouseEvents);
+            map_title->setStyleSheet(QStringLiteral(
+                "QLabel#CompositeMapTitle { font-size: 13px;"
+                " font-weight: 600; padding: 2px 10px; }"));
+            map_title->hide();
+        }
         constraint_hud->setParent(canvas_);
+        layout_map_title();
     }
+}
+
+void CompositeDocument::set_map_title(const QString& title) {
+    if (map_title == nullptr) return;
+    map_title->setText(title);
+    map_title->setVisible(!title.trimmed().isEmpty());
+    layout_map_title();
+}
+
+void CompositeDocument::layout_map_title() {
+    if (map_title == nullptr || canvas_ == nullptr) return;
+    map_title->adjustSize();
+    const int x = std::max(0, (canvas_->width() - map_title->width()) / 2);
+    map_title->move(x, 4);
+    map_title->raise();
+}
+
+bool CompositeDocument::eventFilter(QObject* obj, QEvent* event) {
+    if (obj == canvas_ && event->type() == QEvent::Resize) {
+        layout_map_title();
+    }
+    return QWidget::eventFilter(obj, event);
 }
 
 void CompositeDocument::set_project_crs(const std::string& crs) {

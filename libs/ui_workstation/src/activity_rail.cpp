@@ -129,4 +129,20 @@ void ActivityRail::apply_metrics(int rail_width_px,
     if (settings_button_ != nullptr) settings_button_->setFixedSize(size);
 }
 
+void ActivityRail::set_icon_only(bool icon_only) {
+    const auto style = icon_only ? Qt::ToolButtonStyle::ToolButtonIconOnly
+                                 : Qt::ToolButtonStyle::
+                                       ToolButtonTextUnderIcon;
+    const QSize size = icon_only ? QSize(30, 30) : QSize(52, 56);
+    setFixedWidth(icon_only ? 34 : 56);
+    for (auto& [_, button] : buttons_) {
+        button->setToolButtonStyle(style);
+        button->setFixedSize(size);
+    }
+    if (settings_button_ != nullptr) {
+        settings_button_->setToolButtonStyle(style);
+        settings_button_->setFixedSize(size);
+    }
+}
+
 }  // namespace pwb::ui_workstation

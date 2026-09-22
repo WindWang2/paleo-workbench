@@ -71,12 +71,19 @@ void check_shell(MainWindow& window) {
     PWB_CHECK(shell->ribbon() != nullptr);
     PWB_CHECK(shell->workspace_host() != nullptr);
     PWB_CHECK(shell->workspace_host()->count() == 3);
-    // M3: the science host is the 65:35 splitter with the per-stage bottom
-    // stack; the validation page is the real composition page (P0-4).
-    PWB_CHECK(shell->science_splitter() != nullptr);
-    PWB_CHECK(shell->science_bottom() != nullptr);
-    PWB_CHECK(shell->science_bottom()->count() ==
-              pwb::app::kStageBottomCount);
+    // M3 面板化改订: 科学宿主 = 纯 QGIS 画布页；阶段面板是底部阶段行
+    // 的独立 dock（可悬浮/停靠/tab 化，navigate_workspace 投影成员）。
+    auto* science_page = shell->workspace_host()->findChild<QWidget*>(
+        QStringLiteral("ScienceHostPage"));
+    PWB_CHECK(science_page != nullptr);
+    for (const char* dock_id :
+         {"data_preview", "data_history", "data_relations", "pair_link",
+          "predict_task", "seismic_predict", "crosswell", "data_prep",
+          "strat_compare", "seq_frame", "factor_refs", "data_props",
+          "data_lineage"}) {
+        PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
+                      std::string("stage dock missing: ") + dock_id);
+    }
     PWB_CHECK(shell->validation_page() != nullptr);
     PWB_CHECK(shell->validation_page()->findChild<QWidget*>(
                   "ValidationRunQc") != nullptr);
@@ -113,16 +120,25 @@ void check_workspace_navigation(MainWindow& window) {
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
               pwb::app::WorkspaceHostWidget::kPageScience);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
-    // M3: entering ws1 flips the science-host bottom to the prediction
-    // two-pane composition.
-    PWB_CHECK(shell->science_bottom()->currentIndex() == 0);
+    // M3 面板化: 进 ws1 → 底部阶段行投影预测组 —— 井震两联 dock 抬起
+    // 可见；预测任务/地震预测同组 tab 成员；ws2/ws3 成员隐藏。
+    auto* host = shell->workstation()->dock_host();
+    auto* pair = shell->workstation()->dock("pair_link");
+    PWB_CHECK(pair != nullptr && pair->isVisible());
+    PWB_CHECK(host->tabifiedDockWidgets(pair).contains(
+        shell->workstation()->dock("predict_task")));
+    PWB_CHECK(host->tabifiedDockWidgets(pair).contains(
+        shell->workstation()->dock("seismic_predict")));
+    PWB_CHECK(!shell->workstation()->dock_visible("strat_compare"));
+    PWB_CHECK(!shell->workstation()->dock_visible("factor_refs"));
 
     // Workspaces 1/2/3 share the ONE science host page.
     shell->navigate_workspace(3);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
               pwb::app::WorkspaceHostWidget::kPageScience);
     PWB_CHECK(shell->ribbon()->current_workspace() == 3);
-    PWB_CHECK(shell->science_bottom()->currentIndex() == 2);
+    PWB_CHECK(shell->workstation()->dock_visible("factor_refs"));
+    PWB_CHECK(!shell->workstation()->dock_visible("pair_link"));
 
     shell->navigate_workspace(4);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
@@ -159,25 +175,21 @@ void check_workspace_navigation(MainWindow& window) {
               pwb::app::WorkspaceHostWidget::kPageValidation);
     PWB_CHECK(shell->ribbon()->current_workspace() == 4);
 
-    // M5-3 migrated homes: sequence → ws2 层序格架 tab；well_log → ws1；
-    // seismic → ws1 地震预测 tab；geomodel → ws4 3D 对照 tab；viz → ws0。
+    // M5-3 migrated homes: sequence → ws2 层序格架 dock；well_log → ws1；
+    // seismic → ws1 地震预测 dock；geomodel → ws4 3D 对照 tab；viz → ws0。
     shell->navigate_to(pwb::ui_shell::kPageIndexWell,
                        QStringLiteral("sequence"));
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
               pwb::app::WorkspaceHostWidget::kPageScience);
     PWB_CHECK(shell->ribbon()->current_workspace() == 2);
-    PWB_CHECK(shell->stage_bottom_tabs()->tabText(
-                  shell->stage_bottom_tabs()->currentIndex()) ==
-              QStringLiteral("层序格架"));
+    PWB_CHECK(shell->workstation()->dock_visible("seq_frame"));
 
     shell->navigate_to(pwb::ui_shell::kPageIndexWell);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
 
     shell->navigate_to(pwb::ui_shell::kPageIndexSeismic);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
-    PWB_CHECK(shell->stage1_bottom_tabs()->tabText(
-                  shell->stage1_bottom_tabs()->currentIndex()) ==
-              QStringLiteral("地震预测"));
+    PWB_CHECK(shell->workstation()->dock_visible("seismic_predict"));
 
     shell->navigate_to(pwb::ui_shell::kPageIndexSeismic,
                        QStringLiteral("geomodel"));

@@ -9,9 +9,10 @@
 //   WorkstationFrame.central = WorkspaceHostWidget (QStackedWidget, 3 pages)
 //     page 0 数据管理  = the hub-0 assembly (概述 pill + the adopted
 //                      composed data page) — moved OUT of the hub dock
-//     page 1 科学宿主 = 65:35 QSplitter: CompositeDocument (宿主注入画布)
-//                      over the per-stage bottom stack (M3: ws1 地震+测井
-//                      两联 / ws2 连井剖面+数据制备 / ws3 单因素参考带);
+//     page 1 科学宿主 = 纯 CompositeDocument (宿主注入画布) —— 阶段
+//                      面板住进底部阶段行 dock（ws1 井震两联|预测任务|
+//                      地震预测 / ws2 连井剖面|数据制备|地层对比|层序格架
+//                      / ws3 单因素参考带），可悬浮/停靠/tab 化；
 //                      workspaces 1/2/3 share this ONE QGIS canvas authority
 //     page 2 验证     = ValidationWorkspacePage (M3, D5): 只读对照画布 +
 //                      地震剖面 + QcIssueTable + InteractiveQCHub 定位
@@ -54,6 +55,7 @@
 
 #include <pwb/ui_shell/deferred_page_bindings.hpp>
 
+class QComboBox;
 class QShowEvent;
 class QSplitter;
 class QTabWidget;
@@ -95,6 +97,7 @@ class CommandPalette;
 class StatusBar;
 }
 namespace pwb::ui_workstation {
+class VerifyRecordsPanel;
 class WorkstationFrame;
 }
 
@@ -115,12 +118,9 @@ public:
     explicit WorkspaceHostWidget(QWidget* parent = nullptr);
 };
 
-// The per-stage bottom stack inside the science host (M3, D2): index 0 =
-// 智能预测 bottom (地震剖面 + 测井轨道两联), 1 = 约束与单因素 bottom
-// (连井剖面 + 数据制备 tabs), 2 = 综合编图 bottom (单因素参考缩略图带).
-// Only the current stage's page is shown — the flip rides the stage
-// authority (navigate_workspace + sync_workspace_for_stage).
-inline constexpr int kStageBottomCount = 3;
+// 底部阶段行（dock 嵌套 row0）：每工作区一份阶段/预览 dock 成员集
+// （navigate_workspace 投影；全隐时行塌陷）。成员 id 见注册表
+// data_preview…factor_refs —— 面板化后无页栈常量。
 
 class AppShell : public QWidget {
     Q_OBJECT
@@ -201,23 +201,12 @@ public:
     // M2 chrome: the five-workspace ribbon and the central workspace stack.
     pwb::ui_ribbon::qt::RibbonBar* ribbon() const { return ribbon_; }
     WorkspaceHostWidget* workspace_host() const { return workspace_host_; }
-    // M3 science-host composition (P0): the 65:35 splitter carries the
-    // composite document on top and the per-stage bottom stack below; the
-    // compose install fills each bottom page with the real panels (ws1
-    // 两联 / ws2 连井+制备 / ws3 参考带), honest placeholders until then.
-    QSplitter* science_splitter() const { return science_splitter_; }
-    QStackedWidget* science_bottom() const { return science_bottom_; }
-    // M3 ws2 bottom tabs (连井剖面 | 数据制备) — the compose install adds
-    // the cross-well tab; adopt_preparation_page swaps the 数据制备 tab.
-    QTabWidget* stage_bottom_tabs() const { return stage2_tabs_; }
-    // M5-3 ws1 bottom tabs: [井震两联 | 预测任务(测井预测) | 地震预测] —
-    // the compose install inserts the 两联 split at index 0.
-    QTabWidget* stage1_bottom_tabs() const { return stage1_tabs_; }
-    // M5-2 版式模式 (ws3, F:70): the stage-3 bottom hosts a stack —
-    // index 0 = the default composition (factor reference strip etc.,
-    // untouched), index 1 = the layout-compose panel, visible ONLY in
-    // compose mode. The central canvas splitter never changes.
-    QWidget* stage3_home() const { return stage3_home_; }
+    // M3 science-host — 面板化改订：中央 = 纯 QGIS 画布；阶段面板住
+    // 进底部阶段行 dock（可悬浮/停靠/tab 化），测试与宿主经
+    // workstation()->dock(id) 按注册表 id 取 dock。
+    // ws2 底部「数据制备」dock 由 adopt_preparation_page 注入真实页面。
+    // 底部阶段行 dock 按页签标题抬起（navigate_to 路由语义）。
+    void focus_stage_dock(const QString& title);
     void set_stage3_compose(QWidget* panel);
     void set_compose_mode(bool on);
     bool compose_mode() const { return compose_mode_; }
@@ -225,6 +214,16 @@ public:
     ValidationWorkspacePage* validation_page() const {
         return validation_page_;
     }
+    // 底条「验证记录」面板（verify_records dock）——宿主经此绑定
+    // quality_reports 数据源（provider seam；nullptr 直到 dock 构建）。
+    pwb::ui_workstation::VerifyRecordsPanel* verify_records_panel() const {
+        return verify_records_;
+    }
+    // ws3 右栏「图件整饰 / 版式输出」面板 —— 宿主经此接写回闭包。
+    QWidget* map_decor_panel() const { return map_decor_; }
+    // 版式输出面板由 m5_compose_install 经 set_stage3_compose 收编
+    // 进 dock —— 读回经 dock->widget()（未收编时为占位/nullptr）。
+    QWidget* layout_output_panel() const;
 
     // Page accessors for host wiring (non-owning).
     pwb::ui_pages_data::qt::HomePage* home_page() const {
@@ -266,6 +265,12 @@ public:
 
     void set_project_name(const QString& name);
 
+    // 层位状态投影（target_horizon 单一权威的三处视图：状态条选择器、
+    // Ribbon 命令带尾部选择器、画布层位标签行）——宿主经此一处投影，
+    // 三处互不复制状态；任一视图的编辑只回发 horizon_requested。
+    void set_horizon_state(const QString& horizon,
+                           const std::vector<QString>& options = {});
+
     // CLOSURE-PREVIEW (task 04, function-level lease via the wave
     // coordination registry): mount the composed data page over the bare
     // management workspace. The composite ADOPTS data_workspace_ (it is
@@ -296,6 +301,9 @@ signals:
     void theme_requested(const QString& theme_value);
     void density_requested(const QString& density_value);
     void status_message(const QString& message);
+    // Ribbon 尾部层位选择器的编辑请求（宿主接 stage_flow 权威写路径，
+    // 与 StatusBar::horizon_requested 同一信号语义）。
+    void horizon_requested(const QString& horizon);
 
 private:
     void build_pages();
@@ -305,29 +313,29 @@ private:
     void setup_shortcuts();
     void handle_workstation_command(const QString& text);
     void persist_workspace(int workspace_index);
-    // M6: seed the 65:35 canvas:bottom split at first show (construction
-    // time the splitter has no width — setSizes would clamp).
-    void showEvent(QShowEvent* event) override;
-    // M3: flip the science-host bottom stack to the stage's composition
-    // (65:35 splitter above it — sizes stay user-draggable, never reset).
+    // 状态栏「坐标 · CRS · 比例尺」段 —— 画布信号分头更新缓存后合并
+    // 重发（update_context 一次写全段；horizon 段由层位权威另路投影）。
+    void sync_status_context();
+    // M3: 阶段组合 —— 底部阶段行 dock 投影（stage→workspace 成员集）；
+    // 行内显隐走占位护栏，行高首揭时一次性播种。
     void apply_stage_composition(const std::string& stage_value);
-    // M5-2: enter/leave 版式模式 (ws3 bottom stack page 1/0, F:70).
+    void apply_stage_dock_profile(int workspace_index);
+    // M5-2: enter/leave 版式模式（抬起右栏「版式输出」dock，F:70）。
     void apply_compose_mode();
-    // M5-3: focus a stage/validation bottom (or rail) tab by title.
+    // M5-3: focus a validation rail tab by title (页内页签保留)。
     static void focus_stage_tab(QTabWidget* tabs, const QString& title);
+    // 左栏工作流面板按工作区换内容（步骤清单 / 验证设置勾选）；步骤
+    // 点击经 command_registry 走既有命令路径（workflow_command_ids_
+    // 为当前工作区的步骤→命令映射）。
+    void sync_workflow_panel(int workspace_index);
 
     pwb::ui_workstation::WorkstationFrame* workstation_ = nullptr;
     pwb::ui_composite::CompositeDocument* composite_ = nullptr;
     WorkspaceHostWidget* workspace_host_ = nullptr;
     pwb::ui_ribbon::qt::RibbonBar* ribbon_ = nullptr;
-    QSplitter* science_splitter_ = nullptr;
-    QStackedWidget* science_bottom_ = nullptr;
-    QTabWidget* stage1_tabs_ = nullptr;  // 井震两联 | 预测任务 | 地震预测
-    QTabWidget* stage2_tabs_ = nullptr;  // 连井剖面 | 数据制备 | 地层对比 | 层序格架
-    bool splitter_seeded_ = false;
-    // M5-2 版式模式 (ws3): bottom stack — 0 默认组版 / 1 版式面板。
-    QStackedWidget* stage3_stack_ = nullptr;
-    QWidget* stage3_home_ = nullptr;
+    // 底部阶段行行高已播种（首次揭行一次性 resizeDocks；之后用户
+    // 拖动即用户权威）。
+    bool stage_row_seeded_ = false;
     bool compose_mode_ = false;
     ValidationWorkspacePage* validation_page_ = nullptr;
     pwb::ui_shell::AdaptivePageStack* page_stack_ = nullptr;
@@ -341,6 +349,21 @@ private:
     std::function<std::optional<std::string>(const std::string&)>
         ribbon_load_;
     std::function<void(const std::string&, const std::string&)> ribbon_save_;
+
+    // Ribbon 命令带尾部常驻槽：层位选择器（三视图之一，见
+    // set_horizon_state）。
+    QComboBox* ribbon_horizon_combo_ = nullptr;
+    bool syncing_ribbon_horizon_ = false;
+    QString status_coords_;
+    QString status_crs_;
+    QString status_scale_;
+    QStringList workflow_command_ids_;
+    // Per-workspace right-dock panel instances (created lazily by the
+    // dock factories; non-owning — docks own them).
+    QWidget* predict_compare_ = nullptr;
+    QWidget* reference_layers_ = nullptr;
+    QWidget* map_decor_ = nullptr;
+    pwb::ui_workstation::VerifyRecordsPanel* verify_records_ = nullptr;
 
     // Joint-host seam (06): the window injects the real host (owned by
     // the Geo3D dock); without one the fallback stub reports

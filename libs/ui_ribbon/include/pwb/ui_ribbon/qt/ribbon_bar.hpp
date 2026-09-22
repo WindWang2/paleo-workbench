@@ -84,6 +84,15 @@ public:
     void set_command_evaluator(pwb::ui_ribbon::CommandEvaluator evaluator);
     void refresh_command_availability();
 
+    // Nav-row 任务/Agent 入口（prototype 顶栏）：按钮由宿主接线到 dock
+    // 开关；计数镜像任务中心活动数（0 = 无角标文案）。
+    void set_task_count(int count);
+
+    // 命令带右侧固定槽位（R:49 关键选择——层位选择器等跨工作区常驻）。
+    // 宿主把控件交给这里；返回 nullptr 时宿主应自行处理。
+    QWidget* band_trailing_host() const;
+    void set_band_trailing(QWidget* widget);
+
     // ---- state ------------------------------------------------------------
     int current_workspace() const { return current_workspace_; }
     void set_current_workspace(int index);
@@ -126,6 +135,8 @@ signals:
     void workspaceActivated(int index);
     void commandTriggered(const QString& command_id);
     void searchRequested();
+    void taskCenterRequested();
+    void agentRequested();
     void modeChanged(pwb::ui_ribbon::RibbonMode mode);
 
 protected:
@@ -207,12 +218,17 @@ private:
     QToolButton* qat_redo_ = nullptr;
     QTabBar* tabs_ = nullptr;
     QToolButton* search_button_ = nullptr;
+    QToolButton* task_button_ = nullptr;
+    QToolButton* agent_button_ = nullptr;
     QToolButton* compact_button_ = nullptr;
     QToolButton* collapse_button_ = nullptr;
     QShortcut* esc_shortcut_ = nullptr;
 
-    // command bands
+    // command bands — band_row_ 包住 band_（堆栈）+ band_trailing_
+    // （右侧固定槽位容器），折叠/展开时整行一起显隐。
+    QWidget* band_row_ = nullptr;
     QStackedWidget* band_ = nullptr;
+    QWidget* band_trailing_ = nullptr;
     std::array<std::vector<GroupWidgets>, pwb::ui_ribbon::kWorkspaceCount>
         workspace_groups_;
     // Band row per workspace (the trailing stretch lives at its end) —

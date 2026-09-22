@@ -34,6 +34,10 @@ public:
     // are injected — the C++ token table lives outside this slice).
     void apply_metrics(int rail_width_px, int button_size_px);
 
+    // 细图标轨（qt_ribbon_native prototype parity）: icon-only 34px
+    // buttons, text moves to the tooltip. Default stays text-under-icon.
+    void set_icon_only(bool icon_only);
+
 signals:
     void mode_requested(const QString& mode);
     void settings_requested();

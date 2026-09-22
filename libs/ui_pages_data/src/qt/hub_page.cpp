@@ -41,8 +41,9 @@ void HubPage::add_submodule(const std::string& key, const QString& title,
             [this, k] { switch_to(k, /*emit=*/true); });
     buttons_.push_back(btn);
     switcher_layout_->addWidget(btn);
-    // A single-sub-module hub has no visible switcher (可视化)。
-    switcher_host_->setVisible(keys_.size() > 1);
+    // A single-sub-module hub has no visible switcher (可视化)；宿主
+    // 也可经 set_switcher_visible 钉死隐藏（ws0 原型无 pill 行）。
+    switcher_host_->setVisible(!switcher_hidden_ && keys_.size() > 1);
 }
 
 QWidget* HubPage::replace_submodule(const std::string& key, QWidget* page) {
@@ -63,6 +64,11 @@ QWidget* HubPage::replace_submodule(const std::string& key, QWidget* page) {
 }
 
 void HubPage::finish() { switcher_layout_->addStretch(1); }
+
+void HubPage::set_switcher_visible(bool on) {
+    switcher_hidden_ = !on;
+    switcher_host_->setVisible(on);
+}
 
 void HubPage::switch_to(const std::string& key, bool emit_signal) {
     QWidget* page_widget = nullptr;

@@ -1,8 +1,8 @@
 #pragma once
 
-// M5-3 — 数据管理工作区收尾安装：版本历史/来源关系面板挂进
-// DataWorkspace 的 inspector 槽，选择状态订阅 AssetSelectionBus（单
-// 一权威）。仅 PWB_WITH_V14_DATA_LINEAGE 构建（血缘读侧符号所在）。
+// M5-3 — 数据管理工作区收尾安装：数据属性表单 + 血缘页签挂进
+// DataWorkspace 的右列/底部槽，选择状态订阅 AssetSelectionBus（单
+// 一权威）。血缘面板对读侧切片缺席自降级，故装配无条件。
 
 class QMainWindow;
 

@@ -125,6 +125,10 @@ struct ExplorerFacts {
     std::vector<ExplorerInterpretationFact> interpretations;
     std::vector<ExplorerExportFact> export_artifacts;
     std::vector<ExplorerMembershipFact> memberships;
+    // 约束与单因素图（原型工区树分组）—— factor_map_tasks 与
+    // constraint_layers 的合并投影；type 区分来源（factor_map|
+    // constraint_group）。
+    std::vector<ExplorerResourceFact> factor_maps;
 };
 
 // One spec build: roots + the footer text the panel shows (the Python
