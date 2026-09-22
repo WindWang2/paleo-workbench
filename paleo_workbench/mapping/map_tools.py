@@ -1005,8 +1005,10 @@ class VertexTool(MapTool):
         一个手势 = 一个宏 = 一个 undo 单元。最少顶点守卫在 session，
         失败即拒绝（False）。
         """
+        # begin OUTSIDE the try (R2-28 Python twin): a nested begin raises
+        # and the except used to destroy the OUTER command's edits.
+        self.session.begin_edit_command()
         try:
-            self.session.begin_edit_command()
             with self.session.edit_source("vertex(native)"):
                 self.session.insert_vertex(
                     str(feature_id), tuple(int(i) for i in path), point)
@@ -1019,8 +1021,9 @@ class VertexTool(MapTool):
 
     def commit_vertex_delete(self, feature_id: str, path: tuple[int, ...]) -> bool:
         """V10 原生 Delete 键删点落会话（native-only）。守卫同 insert。"""
+        # begin OUTSIDE the try (R2-28 Python twin).
+        self.session.begin_edit_command()
         try:
-            self.session.begin_edit_command()
             with self.session.edit_source("vertex(native)"):
                 self.session.delete_vertex(str(feature_id), tuple(int(i) for i in path))
         except Exception as exc:
