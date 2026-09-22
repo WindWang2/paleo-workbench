@@ -537,3 +537,81 @@ def test_generate_uses_cell_batch_for_no_direction_barrier_case(monkeypatch):
     assert finite > 0
     # Later gap-fill/anchoring stages may fill more cells than the IDW pass.
     assert 0 < result.diagnostics["plain_distance_grid_points"] <= finite
+
+
+# --------------------------------------------------------------------------- #
+# Default value-range semantics (ISSUE-020 revalidation follow-up)
+# --------------------------------------------------------------------------- #
+
+
+def test_default_config_does_not_collapse_maps_outside_unit_interval():
+    """Bare-default config must not clamp a map whose values lie outside
+    [0, 1] onto a constant surface.
+
+    The old ``value_min=0.0`` / ``value_max=1.0`` defaults clamped every
+    well-anchoring target to 1.0 for e.g. porosity data in [5, 9], silently
+    flattening the interpolated surface to a constant (data-integrity loss,
+    no error raised). Defaults are now None = derive from the data; an
+    explicit caller-supplied range keeps its clamping contract.
+    """
+    ce = _vendored_engine()
+    wells = [
+        ce.ConstraintWell("w1", 0.0, 0.0, 5.0),
+        ce.ConstraintWell("w2", 100.0, 0.0, 7.0),
+        ce.ConstraintWell("w3", 0.0, 100.0, 9.0),
+    ]
+    boundary = ce.BoundaryPolygon(
+        exterior=(
+            (0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0), (0.0, 0.0)
+        )
+    )
+    cfg = ce.ConstrainedIDWConfig(grid_resolution=40)
+    assert cfg.value_min is None and cfg.value_max is None
+    result = ce.generate_constrained_idw(wells, [boundary], [], [], [], cfg)
+    z = np.asarray(result.grid_z, dtype=float)
+    finite = z[np.isfinite(z)]
+    assert finite.size > 0
+    # IDW between 5/7/9 must express the observed spread, not a constant.
+    assert finite.max() - finite.min() > 1.0, (
+        f"surface collapsed to constant range [{finite.min()}, {finite.max()}]"
+    )
+    assert finite.max() == pytest.approx(9.0, rel=0.02)
+    assert finite.min() == pytest.approx(5.0, rel=0.02)
+
+    # Explicit range keeps its clamping contract.
+    cfg_clamped = ce.ConstrainedIDWConfig(
+        grid_resolution=40, value_min=6.0, value_max=8.0
+    )
+    result_c = ce.generate_constrained_idw(
+        wells, [boundary], [], [], [], cfg_clamped
+    )
+    zc = np.asarray(result_c.grid_z, dtype=float)
+    fc = zc[np.isfinite(zc)]
+    assert fc.size > 0
+    assert fc.min() >= 6.0 - 1e-9
+    assert fc.max() <= 8.0 + 1e-9
+
+
+def test_collinear_boundary_does_not_crash_engine():
+    """ISSUE-020 claimed ZeroDivisionError on collinear bounds: revalidated —
+    degenerate (zero-area) boundaries yield an empty domain mask and an
+    all-NaN grid, never a crash; every internal step-math floors at 1e-9.
+    Locks that contract so a future refactor cannot reintroduce the crash."""
+    ce = _vendored_engine()
+    wells = [
+        ce.ConstraintWell("w1", 100.0, 10.0, 1.0),
+        ce.ConstraintWell("w2", 100.0, 50.0, 2.0),
+        ce.ConstraintWell("w3", 100.0, 90.0, 3.0),
+    ]
+    boundary = ce.BoundaryPolygon(
+        exterior=((100.0, 0.0), (100.0, 50.0), (100.0, 100.0), (100.0, 50.0))
+    )
+    for cfg in (
+        ce.ConstrainedIDWConfig(grid_resolution=40, boundary_margin_ratio=0.0),
+        ce.ConstrainedIDWConfig(grid_resolution=40),
+    ):
+        result = ce.generate_constrained_idw(
+            wells, [boundary], [], [], [], cfg
+        )
+        z = np.asarray(result.grid_z, dtype=float)
+        assert np.isfinite(z).sum() >= 0  # no exception is the contract

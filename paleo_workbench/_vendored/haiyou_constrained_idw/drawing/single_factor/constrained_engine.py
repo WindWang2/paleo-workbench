@@ -160,8 +160,12 @@ class ConstrainedIDWConfig:
     decluster_strength: float = 2.0
     min_points: int = 3
     max_points: int = 12
-    value_min: Optional[float] = 0.0
-    value_max: Optional[float] = 1.0
+    # Clamping range for well-anchoring targets and residual caps. None means
+    # "derive from the data" (anchoring value_span falls back to the observed
+    # well range); a hard-coded default interval would silently collapse any
+    # map whose values fall outside it onto a constant surface.
+    value_min: Optional[float] = None
+    value_max: Optional[float] = None
     endpoint_tolerance: float = 1e-7
     boundary_margin_ratio: float = 0.02
     data_hull_buffer_meters: float = 0.0
