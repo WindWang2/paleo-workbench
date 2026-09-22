@@ -3,17 +3,26 @@
 ## Commands run
 
 ```bash
-git rev-parse HEAD   # expect 18c674ef before refresh commits
+git rev-parse HEAD   # code baseline before refresh: 18c674ef
 test -d libs/ui_ribbon
 test -f apps/paleo_workbench_platform/CMakeLists.txt
-python3 - <<'PY'  # 63 libs grouped with empty ungrouped set
-...
-PY
-git diff --name-only origin/main...HEAD
+# 63 libs under libs/ (module-map.md)
+git diff --name-only origin/main...HEAD   # docs paths only on this PR branch
 ```
+
+## Branch tip (remote)
+
+- Branch: `docs/project-documentation-refresh-2026`
+- Code baseline: `18c674ef`
+- Docs commits pushed via GitHub MCP (`push_files` / Contents API)
 
 ## PR
 
-- URL: _filled after `gh` / MCP create_
-- Branch: `docs/project-documentation-refresh-2026`
+- URL: _filled after create_pull_request_
 - Base: `main`
+- Head: `docs/project-documentation-refresh-2026`
+- Merge: **not** performed (documentation refresh only)
+
+## DoD
+
+See `02-dod.md` (D1–D11).

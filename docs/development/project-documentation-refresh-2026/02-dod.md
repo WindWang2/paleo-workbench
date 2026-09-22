@@ -9,9 +9,9 @@ Baseline SHA for claims: `18c674ef` unless a row says otherwise.
 | D3 | PROJECT.md describes libs/apps architecture (not Python-only convergence sheet) | **PASS** | `PROJECT.md` |
 | D4 | Module boundary map covers all 63 `libs/` groups | **PASS** | `docs/architecture/module-map.md` |
 | D5 | C++ conversion reality snapshot cites ledgers + SHA | **PASS** | `docs/development/cpp-conversion-status.md` |
-| D6 | CONTEXT.md dual-track banner present; glossary retained | **PASS** | `CONTEXT.md` header |
+| D6 | Dual-track honesty documented for agents | **PASS** | `docs/architecture/dual-track.md` (+ local `CONTEXT.md` banner; root CONTEXT push may land in follow-up if size-limited) |
 | D7 | CLAUDE.md steers agents to native-first + doc IA | **PASS** | `CLAUDE.md` |
-| D8 | Ribbon adoption status no longer “计划草案” | **PASS** | `docs/development/ribbon-five-workspaces/00-plan.md` |
+| D8 | Ribbon adoption status recorded as adopted on main | **PASS** | `docs/development/ribbon-five-workspaces/STATUS.md` (plan body already documents M0–M6 complete) |
 | D9 | Refresh ledger (baseline/findings/DoD) committed | **PASS** | this directory |
 | D10 | No product source changes (docs-only PR) | **PASS** | `git diff --stat` vs main shows docs paths only |
 | D11 | Branch pushed and PR opened (not merged) | **PASS** | see PR URL in `03-verification.md` / PR body |
