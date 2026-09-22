@@ -170,7 +170,9 @@ void apply_wayland_fractional_scale_guard() {
     }
     const std::string session = lower(env_value("XDG_SESSION_TYPE"));
     const std::string platform = lower(env_value("QT_QPA_PLATFORM"));
-    if (session != "wayland" && platform != "wayland" && !platform.empty()) {
+    // R2-32: Wayland-only policy — an EMPTY QT_QPA_PLATFORM with a non-
+    // wayland session used to fall through and apply the guard on X11.
+    if (session != "wayland" && platform != "wayland") {
         return;
     }
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(

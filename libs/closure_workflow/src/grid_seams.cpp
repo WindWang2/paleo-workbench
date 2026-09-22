@@ -82,6 +82,11 @@ std::optional<FactorGrid> decode_grid_artifact(const std::string& payload) {
     if (width <= 0 || height <= 0) return std::nullopt;
     grid.width = static_cast<int>(width);
     grid.height = static_cast<int>(height);
+    // R2-33: a corrupt catalog artifact with huge dims and a tiny grid_z
+    // threw bad_alloc out of a function documented to return nullopt —
+    // bound the reserve at a sane cell count (100M cells = 400 MB float).
+    constexpr long long kMaxCells = 100'000'000;
+    if (width * height > kMaxCells) return std::nullopt;
     const std::size_t cells =
         static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
 

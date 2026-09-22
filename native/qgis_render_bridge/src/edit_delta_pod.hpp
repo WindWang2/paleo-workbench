@@ -23,6 +23,8 @@
 
 #include <QtGlobal>  // qint64 / quint64 与桥内约定一致
 
+#include <stdexcept>
+
 namespace pwb::qgis_render {
 
 // 事件种类（与 edit_tools 发射点一一对应）。
@@ -67,6 +69,11 @@ class EditEventRing {
  public:
   explicit EditEventRing(std::size_t capacity_pow2 = 4096)
       : mask_(capacity_pow2 - 1), slots_(capacity_pow2) {
+    // R2-31: capacity 0 wrapped the mask to SIZE_MAX with empty slots —
+    // tryPush wrote out of bounds. Fail fast instead.
+    if (capacity_pow2 == 0) {
+      throw std::invalid_argument("EditEventRing capacity must be > 0");
+    }
     // capacity 必须为 2 的幂（取模走掩码）。
     while ((mask_ + 1) & mask_) {
       ++mask_;

@@ -9,6 +9,7 @@
 #include <qgslinestring.h>
 #include <qgsrectangle.h>
 #include <qgsvertexid.h>
+#include <QRegularExpression>
 
 namespace pwb::qgis_render {
 namespace {
@@ -167,7 +168,12 @@ std::string geometry_validate(const std::string& geometry) {
         } else {
             where = QStringLiteral("null");
         }
+        // R2-30: control characters in GEOS messages produced malformed
+        // JSON that the Python-side json.loads rejected even though the
+        // validation itself succeeded — strip them.
         QString message = error.what();
+        message.remove(QRegularExpression(
+            QStringLiteral("[\\x00-\\x1f\\x7f]")));
         message.replace(QLatin1String("\\"), QLatin1String("\\\\"))
             .replace(QLatin1String("\""), QLatin1String("\\\""));
         json += QStringLiteral("{\"where\":%1,\"message\":\"%2\"}").arg(where, message);

@@ -128,6 +128,10 @@ void DirectoryEnvelopePublisher::publish_success(
         atomic_write(dir / "envelope.json",
                      pwb::domain::dump_json_python_compatible(env));
     }
+    // R2-36: a failed-then-retried request must not leave both outcome
+    // files — dir-scanning consumers could read the stale failure.
+    std::error_code remove_ec;
+    std::filesystem::remove(dir / "failure.json", remove_ec);
     // Full result dump (provenance + diagnostics + record index).
     Json dump = Json::object();
     dump["request_id"] = result.request_id;
@@ -183,6 +187,10 @@ void DirectoryEnvelopePublisher::publish_failure(
         throw std::runtime_error("publish_failure: cannot create "
                                  + dir.string() + ": " + ec.message());
     }
+    // R2-36: mirror of the success path — clear the opposite outcome.
+    std::error_code remove_ec;
+    std::filesystem::remove(dir / "result.json", remove_ec);
+    std::filesystem::remove(dir / "envelope.json", remove_ec);
     Json dump = Json::object();
     dump["request_id"] = failure.request_id;
     dump["code"] = failure.code;
