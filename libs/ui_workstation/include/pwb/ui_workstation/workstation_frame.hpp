@@ -25,6 +25,7 @@
 #include <QDockWidget>
 #include <QFrame>
 #include <QMainWindow>
+#include <QTabBar>
 #include <QToolBar>
 
 #include <pwb/ui_shell/dock_registry.hpp>
@@ -63,10 +64,17 @@ public:
                            PanelFactory factory);
     // True when a real panel factory is registered for this dock — a
     // dock without one renders a "(占位页, 待实现)" placeholder and must
-    // not be force-shown by a stage profile (#1450).
+    // not be force-shown by a stage profile (#1450). Adopted docks carry
+    // their own real widget → count as factory-backed.
     bool has_panel_factory(const std::string& dock_id) const {
         const auto it = factories_.find(dock_id);
-        return it != factories_.end() && static_cast<bool>(it->second);
+        if (it != factories_.end() && static_cast<bool>(it->second)) {
+            return true;
+        }
+        if (auto* d = dock(dock_id)) {
+            return d->property("pwbAdopted").toBool();
+        }
+        return false;
     }
     void install_default_panels();
     // Build every dock from the registry (idempotent — re-call is a
@@ -76,6 +84,20 @@ public:
     QDockWidget* dock(const std::string& dock_id) const;
     void set_dock_visible(const std::string& dock_id, bool visible);
     bool dock_visible(const std::string& dock_id) const;
+    // 收编外部真实 QDockWidget（如窗口级 ConstraintPanel）进 dock 宿主
+    // —— 注销注册表占位 dock、按描述符区域停靠、并入同区 tab 组。
+    // dock_id 须是注册表 id；adopted dock 标 pwbAdopted，profile/
+    // set_dock_visible/面板菜单照常驱动。
+    void adopt_dock(const std::string& dock_id, QDockWidget* adopted);
+
+    // 层位标签行（中央区上方，ws1-4 显示）：target_horizon 权威的又一
+    // 视图/编辑器——与 StatusBar/Ribbon 尾部选择器同一权威，点击只发
+    // horizon_requested；无候选时整行隐藏（诚实缺席）。
+    void set_horizon_state(const QString& horizon,
+                           const std::vector<QString>& options);
+    QString current_horizon() const;
+    // 工作区门禁：ws0 数据管理不显示层位行（prototype parity）。
+    void set_horizon_strip_enabled(bool enabled);
 
     // Workspace presets: apply a visibility matrix (does NOT resize —
     // preset switches never disturb user-arranged sizes).
@@ -121,6 +143,8 @@ public:
 signals:
     // Preset/dock-visibility mirror for host persistence.
     void layout_changed();
+    // 层位标签行编辑请求（宿主接 stage_flow 权威写路径）。
+    void horizon_requested(const QString& horizon);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
@@ -160,6 +184,9 @@ private:
     WorkstationTaskCenter* task_center_ = nullptr;
     WorkstationLogViewer* log_viewer_ = nullptr;
     AgentWorkspacePanel* agent_panel_ = nullptr;
+    QTabBar* horizon_tabs_ = nullptr;
+    bool horizon_strip_enabled_ = false;
+    bool syncing_horizon_tabs_ = false;
 };
 
 }  // namespace pwb::ui_workstation

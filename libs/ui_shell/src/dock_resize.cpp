@@ -25,7 +25,8 @@ bool ensure_dock_usable(QMainWindow* host, QDockWidget* dock, int minimum,
 
 void apply_first_run_sizes(
     QMainWindow* host,
-    const std::map<std::string, QDockWidget*>& docks_by_id) {
+    const std::map<std::string, QDockWidget*>& docks_by_id,
+    bool include_heights) {
     if (host == nullptr) {
         return;
     }
@@ -81,15 +82,27 @@ void apply_first_run_sizes(
     };
 
     widths({{"nav", preferred_w("nav", 280)}});
-    widths({{"mapping_stage", preferred_w("mapping_stage", 280)},
-            {"composite_input", preferred_w("composite_input", 280)}});
-    heights({{"nav", preferred_h("nav", 420)},
-             {"mapping_stage", preferred_h("mapping_stage", 280)}});
-    widths({{"inspector", preferred_w("inspector", 300)},
-            {"composite_layer", preferred_w("composite_layer", 300)}});
-    heights({{"agent", preferred_h("agent", 200)},
-             {"tasks", preferred_h("tasks", 200)},
-             {"composite_linked", preferred_h("composite_linked", 200)}});
+    widths({{"mapping_stage", preferred_w("mapping_stage", 280)}});
+    if (include_heights) {
+        heights({{"nav", preferred_h("nav", 420)},
+                 {"mapping_stage", preferred_h("mapping_stage", 280)}});
+    }
+    // 右栏 tab 组共享同一 dock 槽位 —— 任一成员（含工作区专属面板）
+    // 都是该槽位的尺寸来源，统一给原型右栏宽度。
+    widths({{"inspector", preferred_w("inspector", 320)},
+            {"composite_layer", preferred_w("composite_layer", 320)},
+            {"predict_compare", preferred_w("predict_compare", 320)},
+            {"constraint_panel", preferred_w("constraint_panel", 320)},
+            {"composite_input", preferred_w("composite_input", 320)},
+            {"reference_maps", preferred_w("reference_maps", 320)},
+            {"facies_palette", preferred_w("facies_palette", 320)},
+            {"map_decor", preferred_w("map_decor", 320)},
+            {"layout_output", preferred_w("layout_output", 320)}});
+    if (include_heights) {
+        heights({{"agent", preferred_h("agent", 200)},
+                 {"tasks", preferred_h("tasks", 200)},
+                 {"composite_linked", preferred_h("composite_linked", 200)}});
+    }
 }
 
 }  // namespace pwb::ui_shell

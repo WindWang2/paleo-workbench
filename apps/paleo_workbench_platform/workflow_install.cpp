@@ -73,7 +73,10 @@
 #include <pwb/ui_wellseis/slices.hpp>
 #include <pwb/ui_workers/correlation_load.hpp>
 #include <pwb/ui_workers/worker_common.hpp>
+#include <pwb/ui_workstation/explorer_panel.hpp>
+#include <pwb/ui_workstation/explorer_spec.hpp>
 #include <pwb/ui_workstation/stage_actions.hpp>
+#include <pwb/ui_workstation/workstation_frame.hpp>
 #include <pwb/workflow_runtime/map_qa_rules.hpp>
 #include <pwb/workflow_runtime/qc.hpp>
 #include <pwb/workflow_runtime/service.hpp>
@@ -1184,6 +1187,145 @@ private:
         core.on_seismic_prediction_updated();
         core.on_contour_drafts_updated();
         push_visualization_();
+        push_explorer_facts_();
+    }
+
+    // 资源管理器事实投影（原型左栏对象树）：工程文档 → ExplorerFacts →
+    // explorer.set_facts —— 与 push_project_to_pages_ 同一刷新周期，
+    // 工程打开/切换/写回后树随文档同步；无工程时给出诚实空态。
+    void push_explorer_facts_() {
+        auto* frame = shell_ != nullptr ? shell_->workstation() : nullptr;
+        auto* explorer =
+            frame != nullptr ? frame->explorer() : nullptr;
+        if (explorer == nullptr) return;
+        ui_workstation::ExplorerFacts facts;
+        const auto s = store();
+        facts.project_open = s != nullptr;
+        if (s == nullptr) {
+            explorer->set_facts(facts);
+            return;
+        }
+        const Json& root = s->document().root();
+        const auto array_len = [](const Json& obj, const char* key) -> int {
+            const Json* v = jfield(obj, key);
+            return (v != nullptr && v->is_array())
+                       ? static_cast<int>(v->size())
+                       : 0;
+        };
+        if (const Json* meta = jfield(root, "meta");
+            meta != nullptr && meta->is_object()) {
+            facts.project_name = jstr(*meta, "name");
+        }
+        if (const Json* area = jfield(root, "workarea");
+            area != nullptr && area->is_object()) {
+            facts.workarea_name = jstr(*area, "name");
+        }
+        if (const Json* stratigraphy = jfield(root, "stratigraphy");
+            stratigraphy != nullptr && stratigraphy->is_object()) {
+            facts.target_horizon =
+                jstr(*stratigraphy, "target_horizon");
+        }
+        if (const Json* wells = jfield(root, "wells");
+            wells != nullptr && wells->is_array()) {
+            for (const auto& well : *wells) {
+                if (!well.is_object()) continue;
+                ui_workstation::ExplorerWellFact fact;
+                fact.id = jstr(well, "id");
+                fact.name = jstr(well, "name");
+                facts.wells.push_back(std::move(fact));
+            }
+        }
+        if (const Json* resources = jfield(root, "resources");
+            resources != nullptr && resources->is_array()) {
+            for (const auto& row : *resources) {
+                if (!row.is_object()) continue;
+                ui_workstation::ExplorerResourceFact fact;
+                fact.id = jstr(row, "id");
+                fact.name = jstr(row, "name");
+                fact.type = jstr(row, "type");
+                fact.path = jstr(row, "path");
+                fact.format = jstr(row, "format");
+                fact.status = jstr(row, "status");
+                facts.resources.push_back(std::move(fact));
+            }
+        }
+        if (const Json* entities = jfield(root, "geological_entities");
+            entities != nullptr && entities->is_array()) {
+            for (const auto& entity : *entities) {
+                if (!entity.is_object()) continue;
+                ui_workstation::ExplorerEntityFact fact;
+                fact.name = jstr(entity, "name");
+                facts.geological_entities.push_back(std::move(fact));
+            }
+        }
+        if (const Json* layers = jfield(root, "user_vector_layers");
+            layers != nullptr && layers->is_array()) {
+            for (const auto& layer : *layers) {
+                if (!layer.is_object()) continue;
+                ui_workstation::ExplorerUserLayerFact fact;
+                fact.id = jstr(layer, "id");
+                fact.name = jstr(layer, "name", "编修图层");
+                fact.geometry_kind = jstr(layer, "geometry_kind", "line");
+                fact.feature_count = array_len(layer, "features");
+                facts.user_layers.push_back(std::move(fact));
+            }
+        }
+        if (const Json* docs = jfield(root, "paleomap_documents");
+            docs != nullptr && docs->is_array()) {
+            for (const auto& doc : *docs) {
+                if (!doc.is_object()) continue;
+                ui_workstation::ExplorerMapDocumentFact fact;
+                fact.id = jstr(doc, "id");
+                fact.name = jstr(doc, "name");
+                fact.line_features = array_len(doc, "line_features");
+                fact.facies_polygons = array_len(doc, "facies_polygons");
+                fact.label_features = array_len(doc, "label_features");
+                fact.reference_layers = array_len(doc, "reference_layers");
+                facts.map_documents.push_back(std::move(fact));
+            }
+        }
+        // 解释成果 = 层位解释 + 连井/地层对比解释（原型「解释要素」）。
+        for (const char* key :
+             {"horizon_interpretations", "correlation_interpretations"}) {
+            const Json* rows = jfield(root, key);
+            if (rows == nullptr || !rows->is_array()) continue;
+            for (const auto& row : *rows) {
+                if (!row.is_object()) continue;
+                ui_workstation::ExplorerInterpretationFact fact;
+                fact.id = jstr(row, "id");
+                fact.name = jstr(row, "name");
+                fact.current_version_id =
+                    jstr(row, "current_version_id");
+                facts.interpretations.push_back(std::move(fact));
+            }
+        }
+        // 约束与单因素图 = 单因素图任务 + 约束图层组（原型分组）。
+        for (const auto& [key, type] :
+             {std::pair{"factor_map_tasks", "factor_map"},
+              std::pair{"constraint_layers", "constraint_group"}}) {
+            const Json* rows = jfield(root, key);
+            if (rows == nullptr || !rows->is_array()) continue;
+            for (const auto& row : *rows) {
+                if (!row.is_object()) continue;
+                ui_workstation::ExplorerResourceFact fact;
+                fact.id = jstr(row, "id");
+                fact.name = jstr(row, "name");
+                fact.type = type;
+                facts.factor_maps.push_back(std::move(fact));
+            }
+        }
+        if (const Json* artifacts = jfield(root, "export_artifacts");
+            artifacts != nullptr && artifacts->is_array()) {
+            for (const auto& row : *artifacts) {
+                if (!row.is_object()) continue;
+                ui_workstation::ExplorerExportFact fact;
+                fact.id = jstr(row, "id");
+                fact.name = jstr(row, "name");
+                fact.output_path = jstr(row, "output_path");
+                facts.export_artifacts.push_back(std::move(fact));
+            }
+        }
+        explorer->set_facts(facts);
     }
 
     void push_visualization_() {

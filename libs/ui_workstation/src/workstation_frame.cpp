@@ -67,9 +67,134 @@ WorkstationFrame::WorkstationFrame(QWidget* parent) : QFrame(parent) {
 }
 
 void WorkstationFrame::set_central_widget(QWidget* page_stack) {
+    // 中央区 = [层位标签行][页栈]：层位条是 target_horizon 权威的一处
+    // 视图（qt_ribbon_native 画布上方层位标签），ws0 隐藏、ws1-4 显示；
+    // 点击只发 horizon_requested，不持有状态。
+    auto* column = new QWidget(dock_host_);
+    column->setObjectName("WorkstationCenterColumn");
+    auto* column_layout = new QVBoxLayout(column);
+    column_layout->setContentsMargins(0, 0, 0, 0);
+    column_layout->setSpacing(0);
+    horizon_tabs_ = new QTabBar(column);
+    horizon_tabs_->setObjectName(QStringLiteral("WorkstationHorizonTabs"));
+    horizon_tabs_->setExpanding(false);
+    horizon_tabs_->setDrawBase(false);
+    horizon_tabs_->setUsesScrollButtons(true);
+    horizon_tabs_->hide();  // 无候选时整行隐藏（诚实缺席）；ws0 永不显示。
+    connect(horizon_tabs_, &QTabBar::currentChanged, this,
+            [this](int index) {
+                if (syncing_horizon_tabs_ || index < 0) return;
+                emit horizon_requested(horizon_tabs_->tabText(index));
+            });
+    // 原型层位条贴左（◁ 滚动钮 + 页签自左排布）。
+    auto* horizon_row = new QHBoxLayout();
+    horizon_row->setContentsMargins(0, 0, 0, 0);
+    horizon_row->addWidget(horizon_tabs_);
+    horizon_row->addStretch(1);
+    column_layout->addLayout(horizon_row);
     central_ = page_stack;
     if (central_ != nullptr) {
-        dock_host_->setCentralWidget(central_);
+        column_layout->addWidget(central_, 1);
+    }
+    dock_host_->setCentralWidget(column);
+}
+
+void WorkstationFrame::set_horizon_state(
+    const QString& horizon, const std::vector<QString>& options) {
+    if (horizon_tabs_ == nullptr) return;
+    syncing_horizon_tabs_ = true;
+    QStringList choices;
+    for (const QString& option : options) {
+        if (!option.isEmpty() && !choices.contains(option)) {
+            choices.push_back(option);
+        }
+    }
+    const QString target = horizon.trimmed();
+    if (!target.isEmpty() && !choices.contains(target)) {
+        // 权威值必须存活——未知层位插入而非丢弃（StatusBar 同语义）。
+        choices.push_front(target);
+    }
+    QStringList existing;
+    for (int i = 0; i < horizon_tabs_->count(); ++i) {
+        existing << horizon_tabs_->tabText(i);
+    }
+    if (existing != choices) {
+        while (horizon_tabs_->count() > 0) horizon_tabs_->removeTab(0);
+        for (const QString& choice : choices) horizon_tabs_->addTab(choice);
+    }
+    const int index = target.isEmpty() ? -1 : choices.indexOf(target);
+    if (index >= 0) horizon_tabs_->setCurrentIndex(index);
+    horizon_tabs_->setVisible(horizon_strip_enabled_ && !choices.isEmpty());
+    syncing_horizon_tabs_ = false;
+}
+
+QString WorkstationFrame::current_horizon() const {
+    if (horizon_tabs_ == nullptr || horizon_tabs_->currentIndex() < 0) {
+        return {};
+    }
+    return horizon_tabs_->tabText(horizon_tabs_->currentIndex()).trimmed();
+}
+
+void WorkstationFrame::set_horizon_strip_enabled(bool enabled) {
+    horizon_strip_enabled_ = enabled;
+    if (horizon_tabs_ != nullptr) {
+        horizon_tabs_->setVisible(enabled && horizon_tabs_->count() > 0);
+    }
+}
+
+void WorkstationFrame::adopt_dock(const std::string& dock_id,
+                                  QDockWidget* adopted) {
+    if (adopted == nullptr) return;
+    if (auto* old = dock(dock_id)) {
+        // 注册表占位 dock 退役 —— 真实 dock 接管同一 dock_id。
+        dock_host_->removeDockWidget(old);
+        docks_.erase(dock_id);
+        old->deleteLater();
+    }
+    if (auto* parent_window =
+            qobject_cast<QMainWindow*>(adopted->parent())) {
+        parent_window->removeDockWidget(adopted);
+    }
+    adopted->setParent(dock_host_);
+    adopted->setObjectName(QStringLiteral("WorkstationDock_%1")
+                             .arg(QString::fromStdString(dock_id)));
+    // 收编 dock 自带真实内容 —— has_panel_factory 语义上等价于已注入
+    // factory（#1450 占位护栏不应把它判成占位页）。
+    adopted->setProperty("pwbDockId", QString::fromStdString(dock_id));
+    adopted->setProperty("pwbAdopted", true);
+    // 与固定面板同一 chrome 处理：标题栏并入 tab 组（原型右栏只见
+    // tab 条，无 dock 标题栏）。
+    auto* blank = new QWidget(adopted);
+    blank->setFixedSize(0, 0);
+    adopted->setTitleBarWidget(blank);
+    const auto* desc =
+        ui_shell::workstation_dock_registry().get(dock_id);
+    dock_host_->addDockWidget(
+        area_for(desc != nullptr ? desc->preferred_area : "right"),
+        adopted);
+    adopted->hide();
+    docks_[dock_id] = adopted;
+    connect(adopted, &QDockWidget::visibilityChanged, this,
+            [this](bool) {
+                if (!tearing_down_) {
+                    note_user_layout_change();
+                }
+            });
+    if (tabs_built_ && desc != nullptr) {
+        // 组已建成 → 并进同区 tab 组的锚 dock（隐藏的注册成员在显示
+        // 时以 tab 现身，同延迟成组语义）。
+        for (const auto& other_desc :
+             ui_shell::workstation_dock_registry().descriptors()) {
+            if (other_desc.dock_id == dock_id) continue;
+            if (area_for(other_desc.preferred_area) !=
+                area_for(desc->preferred_area)) {
+                continue;
+            }
+            if (auto* anchor = dock(other_desc.dock_id)) {
+                dock_host_->tabifyDockWidget(anchor, adopted);
+                break;
+            }
+        }
     }
 }
 
@@ -214,7 +339,9 @@ void WorkstationFrame::build_docks() {
     // 保留标题栏（浮动/关闭 UX）。
     for (const char* id :
          {"nav", "inspector", "composite_layer", "facies_palette",
-          "composite_input", "tasks", "logs"}) {
+          "composite_input", "predict_compare", "reference_maps",
+          "map_decor", "layout_output", "tasks", "logs",
+          "verify_records"}) {
         if (auto* d = dock(id)) {
             auto* blank = new QWidget(d);
             blank->setFixedSize(0, 0);
@@ -246,10 +373,26 @@ void WorkstationFrame::finish_dock_layout() {
             }
         }
     };
-    tabify({"inspector", "composite_layer", "facies_palette",
-            "composite_input", "hub"});
-    tabify({"tasks", "logs", "console", "agent", "composite_linked",
-            "well", "seismic"});
+    // 右栏组序 = 跨工作区原型页签的全序（每工作区只显示子集 ——
+    // navigate_workspace 按目标页序重放显隐，顺序即 tab 顺序）：
+    //   ws1 图层|预测参数|对比(相带画刷)；ws2 约束|单因素|参考；
+    //   ws3 编图图层|图件整饰|版式输出。
+    tabify({"composite_layer", "inspector", "constraint_panel",
+            "composite_input", "predict_compare", "reference_maps",
+            "facies_palette", "map_decor", "layout_output", "hub"});
+    tabify({"tasks", "logs", "verify_records", "factor_stats",
+            "console", "agent", "composite_linked", "well", "seismic"});
+    // 底条默认当前页 = 任务（prototype parity）；右栏当前页由
+    // navigate_workspace 按工作区首个成员抬起。
+    if (auto* tasks = dock("tasks")) {
+        tasks->raise();
+    }
+    // ctor 里跑过一次时宿主还是 0x0，resizeDocks 不落地 —— 首个布局
+    // 之后重放宽度（tabs_built_ 保证本函数只进一次）。高度不重放：
+    // 此刻底条已是 tab 组，强行 setSize 会挤压中央 science 分格的
+    // 65:35 种子比例（ribbon_visual 的 canvas:bottom 结构断言）。
+    ui_shell::apply_first_run_sizes(dock_host_, docks_,
+                                    /*include_heights=*/false);
 }
 
 QDockWidget* WorkstationFrame::dock(const std::string& dock_id) const {

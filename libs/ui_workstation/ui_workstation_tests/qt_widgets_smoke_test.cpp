@@ -208,6 +208,36 @@ int main(int argc, char** argv) {
     frame.show();
     frame.set_dock_visible("agent", true);
     check(frame.dock_visible("agent"), "dock visibility toggles");
+
+    // adopted dock: an external QDockWidget mounts as a real
+    // panel-backed surface (has_panel_factory true via pwbAdopted) —
+    // the constraint/factor-stats adoption path depends on it.
+    check(!frame.has_panel_factory("constraint_panel"),
+          "unadopted constraint_panel fails the placeholder guard");
+    auto* adopted = new QDockWidget(QStringLiteral("约束"), &frame);
+    auto* adopted_body = new QWidget(adopted);
+    adopted->setWidget(adopted_body);
+    frame.adopt_dock("constraint_panel", adopted);
+    check(frame.dock("constraint_panel") == adopted,
+          "adopted dock registered under its id");
+    check(frame.has_panel_factory("constraint_panel"),
+          "adopted dock passes the placeholder guard");
+
+    // Frame-level horizon strip: hidden with no candidates, shows on
+    // ws1-4 once state lands, forwards requests without owning state.
+    check(frame.current_horizon().isEmpty(),
+          "horizon strip empty before state");
+    frame.set_horizon_strip_enabled(true);
+    frame.set_horizon_state("C6", {"C3", "C6", "D53"});
+    check(frame.current_horizon() == "C6", "horizon strip tracks target");
+    frame.set_horizon_state("", {});
+    check(frame.current_horizon().isEmpty(),
+          "horizon strip clears on empty state");
+
+    // Bottom strip carries the verification-records dock.
+    check(frame.dock("verify_records") != nullptr,
+          "verify_records dock built");
+
     frame.apply_layout_preset(
         pwb::ui_shell::workstation_layout_presets().front().id);
     frame.apply_first_run_sizes();

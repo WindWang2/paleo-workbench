@@ -1,7 +1,7 @@
 {
   "meta": {
     "generator": "tools/oracle/generate_ui_shell_fixtures.py",
-    "python": "3.14.6",
+    "python": "3.14.7",
     "note": "PySide6 stubbed (QObject/Signal/QSettings in-memory); tool_availability.stage_whitelist_reason is a sentinel — the real reason text is libs/tool_policy's contract."
   },
   "dock_framework": {
@@ -35,7 +35,7 @@
         "title": "编图阶段",
         "preferred_area": "left",
         "importance": "secondary",
-        "default_visible": true,
+        "default_visible": false,
         "can_float": true,
         "can_tabify": true,
         "min_floating_size": [
@@ -107,7 +107,7 @@
         "title": "相带画刷",
         "preferred_area": "right",
         "importance": "secondary",
-        "default_visible": true,
+        "default_visible": false,
         "can_float": true,
         "can_tabify": true,
         "min_floating_size": [
@@ -150,7 +150,7 @@
       {
         "dock_id": "composite_input",
         "title": "输入与结果",
-        "preferred_area": "left",
+        "preferred_area": "right",
         "importance": "secondary",
         "default_visible": false,
         "can_float": true,
@@ -170,6 +170,129 @@
         ],
         "context_tags": [],
         "object_name": "WorkstationDock_输入与结果",
+        "remark": ""
+      },
+      {
+        "dock_id": "predict_compare",
+        "title": "对比",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "prediction",
+          "review"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_对比",
+        "remark": ""
+      },
+      {
+        "dock_id": "constraint_panel",
+        "title": "约束",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "mapping",
+          "constraint"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_约束",
+        "remark": ""
+      },
+      {
+        "dock_id": "reference_maps",
+        "title": "参考",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "mapping",
+          "constraint"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_参考",
+        "remark": ""
+      },
+      {
+        "dock_id": "map_decor",
+        "title": "图件整饰",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "mapping"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_图件整饰",
+        "remark": ""
+      },
+      {
+        "dock_id": "layout_output",
+        "title": "版式输出",
+        "preferred_area": "right",
+        "importance": "secondary",
+        "default_visible": false,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": [
+          300,
+          0
+        ],
+        "preferred_height": null,
+        "workflow_tags": [
+          "mapping"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_版式输出",
         "remark": ""
       },
       {
@@ -198,7 +321,7 @@
         "title": "任务中心",
         "preferred_area": "bottom",
         "importance": "utility",
-        "default_visible": false,
+        "default_visible": true,
         "can_float": true,
         "can_tabify": true,
         "min_floating_size": [
@@ -206,7 +329,7 @@
           160
         ],
         "preferred_size": null,
-        "preferred_height": 200,
+        "preferred_height": 140,
         "workflow_tags": [
           "background"
         ],
@@ -219,6 +342,49 @@
         "title": "日志",
         "preferred_area": "bottom",
         "importance": "utility",
+        "default_visible": true,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 140,
+        "workflow_tags": [
+          "diagnostics"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_日志",
+        "remark": ""
+      },
+      {
+        "dock_id": "verify_records",
+        "title": "验证记录",
+        "preferred_area": "bottom",
+        "importance": "utility",
+        "default_visible": true,
+        "can_float": true,
+        "can_tabify": true,
+        "min_floating_size": [
+          220,
+          160
+        ],
+        "preferred_size": null,
+        "preferred_height": 140,
+        "workflow_tags": [
+          "diagnostics",
+          "review"
+        ],
+        "context_tags": [],
+        "object_name": "WorkstationDock_验证记录",
+        "remark": ""
+      },
+      {
+        "dock_id": "factor_stats",
+        "title": "单因素统计",
+        "preferred_area": "bottom",
+        "importance": "utility",
         "default_visible": false,
         "can_float": true,
         "can_tabify": true,
@@ -227,12 +393,13 @@
           160
         ],
         "preferred_size": null,
-        "preferred_height": 200,
+        "preferred_height": 140,
         "workflow_tags": [
+          "constraint",
           "diagnostics"
         ],
         "context_tags": [],
-        "object_name": "WorkstationDock_日志",
+        "object_name": "WorkstationDock_单因素统计",
         "remark": ""
       },
       {
@@ -331,9 +498,16 @@
       "facies_palette",
       "hub",
       "composite_input",
+      "predict_compare",
+      "constraint_panel",
+      "reference_maps",
+      "map_decor",
+      "layout_output",
       "agent",
       "tasks",
       "logs",
+      "verify_records",
+      "factor_stats",
       "console",
       "composite_linked",
       "well",
@@ -350,8 +524,15 @@
       "background": [
         "tasks"
       ],
+      "constraint": [
+        "constraint_panel",
+        "reference_maps",
+        "factor_stats"
+      ],
       "diagnostics": [
         "logs",
+        "verify_records",
+        "factor_stats",
         "console"
       ],
       "interpretation": [
@@ -364,13 +545,22 @@
         "composite_layer",
         "facies_palette",
         "composite_input",
+        "constraint_panel",
+        "reference_maps",
+        "map_decor",
+        "layout_output",
         "composite_linked"
       ],
       "navigation": [
         "hub"
       ],
+      "prediction": [
+        "predict_compare"
+      ],
       "review": [
-        "composite_input"
+        "composite_input",
+        "predict_compare",
+        "verify_records"
       ],
       "seismic": [
         "seismic"

@@ -76,12 +76,14 @@ DataWorkspace::DataWorkspace(QWidget* parent) : QWidget(parent) {
     center_stack_->addWidget(overview_panel_);   // index 1 = overview
     center_stack_->addWidget(well_detail_panel_);// index 2 = well view
 
+    // 原型 ws0 右列 = 数据属性（上）+ 数据血缘/处理流程（下）；两个都是
+    // seam 槽位 —— V14 装配注入 DataDetailPanel / DataLineagePanel。
     right_splitter_ = new QSplitter(Qt::Orientation::Vertical, this);
     right_splitter_->setChildrenCollapsible(false);
-    reader_panel_ = new DataReaderPanel(this);
-    inspector_panel_ = new QWidget(this);  // seam placeholder
-    right_splitter_->addWidget(reader_panel_);
+    inspector_panel_ = new QWidget(this);  // 数据属性 seam placeholder
+    lineage_panel_ = new QWidget(this);    // 数据血缘 seam placeholder
     right_splitter_->addWidget(inspector_panel_);
+    right_splitter_->addWidget(lineage_panel_);
     right_splitter_->setStretchFactor(0, 3);
     right_splitter_->setStretchFactor(1, 2);
     right_splitter_->setSizes({260, 140});
@@ -91,7 +93,21 @@ DataWorkspace::DataWorkspace(QWidget* parent) : QWidget(parent) {
     map_center_host_ = center_container;
     center_layout_ = new QVBoxLayout(center_container);
     center_layout_->setContentsMargins(0, 0, 0, 0);
-    center_layout_->addWidget(center_stack_, 1);
+    // 原型 ws0 中央 = 数据列表 + 表格下页签（数据预览|版本历史|关联关系）。
+    // 预览是真实 DataReaderPanel；版本/血缘页由 V14 装配提入。
+    center_vsplit_ = new QSplitter(Qt::Orientation::Vertical,
+                                   center_container);
+    center_vsplit_->setObjectName(QStringLiteral("DataCenterSplit"));
+    center_vsplit_->setChildrenCollapsible(false);
+    center_vsplit_->addWidget(center_stack_);
+    bottom_tabs_ = new QTabWidget(center_vsplit_);
+    bottom_tabs_->setObjectName(QStringLiteral("DataBottomTabs"));
+    reader_panel_ = new DataReaderPanel(bottom_tabs_);
+    bottom_tabs_->addTab(reader_panel_, QStringLiteral("数据预览"));
+    center_vsplit_->addWidget(bottom_tabs_);
+    center_vsplit_->setStretchFactor(0, 11);
+    center_vsplit_->setStretchFactor(1, 9);
+    center_layout_->addWidget(center_vsplit_, 1);
     well_map_panel_ = nullptr;  // injected via set_well_map_panel
     main_splitter_->addWidget(center_container);
     main_splitter_->addWidget(right_splitter_);
@@ -103,7 +119,7 @@ DataWorkspace::DataWorkspace(QWidget* parent) : QWidget(parent) {
     }
     main_splitter_->setStretchFactor(0, 0);
     main_splitter_->setStretchFactor(1, 3);
-    main_splitter_->setStretchFactor(2, 2);
+    main_splitter_->setStretchFactor(2, 1);
 
     layout->addWidget(main_splitter_);
 
@@ -116,6 +132,19 @@ DataWorkspace::DataWorkspace(QWidget* parent) : QWidget(parent) {
             [this](int, int) { float_sizes_timer_->start(); });
     connect(right_splitter_, &QSplitter::splitterMoved, this,
             [this](int, int) { float_sizes_timer_->start(); });
+}
+
+void DataWorkspace::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    // 原型 ws0：数据列表约占中央高度 55%，表格下页签（数据预览|
+    // 版本历史|关联关系）占余下 —— 首次可见时按真实高度播种一次；
+    // 用户拖动后 persist_docked_sizes 接管，种子不再干预。
+    if (vsplit_seeded_ || center_vsplit_ == nullptr) return;
+    const int total = center_vsplit_->height();
+    if (total <= 200) return;
+    vsplit_seeded_ = true;
+    const int top = total * 55 / 100;
+    center_vsplit_->setSizes({top, total - top});
 }
 
 void DataWorkspace::set_float_controller(FloatControllerApi* controller) {
@@ -168,6 +197,18 @@ void DataWorkspace::set_inspector_panel(QWidget* panel) {
     if (fit != floatable_.end()) {
         fit->second = panel;
     }
+    if (index >= 0) {
+        right_splitter_->insertWidget(index, panel);
+        old->hide();
+        old->deleteLater();
+    }
+}
+
+void DataWorkspace::set_lineage_panel(QWidget* panel) {
+    if (panel == nullptr || panel == lineage_panel_) return;
+    const int index = right_splitter_->indexOf(lineage_panel_);
+    auto* old = lineage_panel_;
+    lineage_panel_ = panel;
     if (index >= 0) {
         right_splitter_->insertWidget(index, panel);
         old->hide();

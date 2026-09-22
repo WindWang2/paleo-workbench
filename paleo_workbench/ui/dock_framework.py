@@ -84,7 +84,9 @@ WORKSTATION_DOCKS: tuple[DockDescriptor, ...] = (
         title="编图阶段",
         preferred_area=AREA_LEFT,
         importance=DockImportance.SECONDARY,
-        default_visible=True,
+        # Prototype 左栏下部 = 每工作区 WorkflowPanel；阶段面板保留为
+        # 按需 dock（面板菜单/预设可再开）。
+        default_visible=False,
         preferred_size=(280, 0),
         preferred_height=280,
         workflow_tags=("mapping",),
@@ -112,7 +114,8 @@ WORKSTATION_DOCKS: tuple[DockDescriptor, ...] = (
         title="相带画刷",
         preferred_area=AREA_RIGHT,
         importance=DockImportance.SECONDARY,
-        default_visible=True,
+        # Prototype 右栏按需工具：默认隐藏，stage/工作区 profile 抬升。
+        default_visible=False,
         preferred_size=(240, 0),
         workflow_tags=("mapping",),
         remark="M2 相带调色板 + 吸色管 + 数字键装备",
@@ -130,11 +133,66 @@ WORKSTATION_DOCKS: tuple[DockDescriptor, ...] = (
     DockDescriptor(
         dock_id="composite_input",
         title="输入与结果",
-        preferred_area=AREA_LEFT,
+        # Prototype 右栏标签组的一员（单因素/输入清单）；stage2 profile
+        # 控制显隐，与 图层管理/检查器 共 tab。
+        preferred_area=AREA_RIGHT,
         importance=DockImportance.SECONDARY,
         default_visible=False,
         preferred_size=(280, 0),
         workflow_tags=("mapping", "review"),
+    ),
+    DockDescriptor(
+        # ws1 右栏「对比」页 —— 真实联动解释对照工作区。
+        dock_id="predict_compare",
+        title="对比",
+        preferred_area=AREA_RIGHT,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_size=(300, 0),
+        workflow_tags=("prediction", "review"),
+    ),
+    DockDescriptor(
+        # ws2 右栏「约束」页 —— 宿主把窗口级 ConstraintPanel 收编进
+        # 此 dock（adopt_dock）；未收编时保持隐藏（无 factory）。
+        dock_id="constraint_panel",
+        title="约束",
+        preferred_area=AREA_RIGHT,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_size=(300, 0),
+        workflow_tags=("mapping", "constraint"),
+    ),
+    DockDescriptor(
+        # ws2 右栏「参考」页 —— 参考图层清单（LayerManagerPanel 第二
+        # 实例：勾选/不透明度同一交互面）。
+        dock_id="reference_maps",
+        title="参考",
+        preferred_area=AREA_RIGHT,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_size=(300, 0),
+        workflow_tags=("mapping", "constraint"),
+    ),
+    DockDescriptor(
+        # ws3 右栏「图件整饰」页 —— MapChromePanel（图名/图例/指北针/
+        # 比例尺/标题栏 勾选，写回 map_chrome 文档节）。
+        dock_id="map_decor",
+        title="图件整饰",
+        preferred_area=AREA_RIGHT,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_size=(300, 0),
+        workflow_tags=("mapping",),
+    ),
+    DockDescriptor(
+        # ws3 右栏「版式输出」页 —— LayoutComposePanel（模板/纸张/导出）。
+        dock_id="layout_output",
+        title="版式输出",
+        preferred_area=AREA_RIGHT,
+        importance=DockImportance.SECONDARY,
+        default_visible=False,
+        preferred_size=(300, 0),
+        workflow_tags=("mapping",),
     ),
     DockDescriptor(
         dock_id="agent",
@@ -150,8 +208,8 @@ WORKSTATION_DOCKS: tuple[DockDescriptor, ...] = (
         title="任务中心",
         preferred_area=AREA_BOTTOM,
         importance=DockImportance.UTILITY,
-        default_visible=False,
-        preferred_height=200,
+        # Prototype 底部常驻条（任务|日志 tabs）——默认可见。
+        preferred_height=140,
         workflow_tags=("background",),
     ),
     DockDescriptor(
@@ -159,9 +217,29 @@ WORKSTATION_DOCKS: tuple[DockDescriptor, ...] = (
         title="日志",
         preferred_area=AREA_BOTTOM,
         importance=DockImportance.UTILITY,
-        default_visible=False,
-        preferred_height=200,
+        preferred_height=140,
         workflow_tags=("diagnostics",),
+    ),
+    DockDescriptor(
+        # 底部常驻条的第三页（任务|日志|验证记录 —— prototype 底条）。
+        dock_id="verify_records",
+        title="验证记录",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.UTILITY,
+        preferred_height=140,
+        workflow_tags=("diagnostics", "review"),
+    ),
+    DockDescriptor(
+        # 单因素统计（CONV-16 FactorStatsDock）——宿主经 adopt_dock 收编
+        # 进底条 tab 组；stage2 profile 的 window.factor_stats 键照常
+        # 抬升同一对象。未收编时隐藏（占位护栏）。
+        dock_id="factor_stats",
+        title="单因素统计",
+        preferred_area=AREA_BOTTOM,
+        importance=DockImportance.UTILITY,
+        default_visible=False,
+        preferred_height=140,
+        workflow_tags=("constraint", "diagnostics"),
     ),
     DockDescriptor(
         dock_id="console",

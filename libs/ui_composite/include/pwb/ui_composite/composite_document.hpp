@@ -22,7 +22,6 @@
 #include <pwb/ui_composite/map_snapshot.hpp>
 
 #include <QLabel>
-#include <QTabBar>
 #include <QTimer>
 #include <QWidget>
 
@@ -82,9 +81,6 @@ public:
     pwb::ui_widgets::StratigraphicTimelineWidget* timeline = nullptr;
     pwb::ui_widgets::ConstraintFactorHud* constraint_hud = nullptr;
     pwb::ui_shell::MapStatusBar* status_bar = nullptr;
-    // 层位标签行（画布上方）：target_horizon 的又一视图，与状态条层位
-    // 下拉共享同一权威——本部件只发 horizon_requested，不持有状态。
-    QTabBar* horizon_tabs = nullptr;
     // 图件标题浮层（画布顶部居中，鼠标穿透）。
     QLabel* map_title = nullptr;
 
@@ -103,11 +99,6 @@ public:
     // 空态提示：无图层时中央画布给明确引导（视觉 QA 11）。
     void update_empty_hint(bool has_content);
 
-    // 层位状态投影（宿主经 StageFlow 快照驱动）：当前层位 + 候选清单。
-    // 与 StatusBar::set_horizon_state 同一权威数据，互不复制状态。
-    void set_horizon_state(const QString& horizon,
-                           const std::vector<QString>& options);
-    QString current_horizon() const;
     // 图件标题浮层（"C6层沉积相智能预测图" 式；空串隐藏）。
     void set_map_title(const QString& title);
 
@@ -152,7 +143,6 @@ private:
     QWidget* canvas_ = nullptr;
     bool uses_native_stack_ = false;
     QLabel* empty_hint_ = nullptr;
-    bool syncing_horizon_tabs_ = false;
     QTimer* composition_timer_ = nullptr;
     std::string project_crs_;
 };

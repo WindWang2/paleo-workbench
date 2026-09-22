@@ -151,9 +151,7 @@
 #if defined(PWB_WITH_CLOSURE_MAPPING)
 #include "m5_compose_install.hpp"
 #endif
-#if defined(PWB_WITH_V14_DATA_LINEAGE)
 #include "m5_data_install.hpp"
-#endif
 
 #if __has_include(<pwb/closure_science/qt/page_binding.hpp>)
 #include <pwb/closure_science/qt/page_binding.hpp>
@@ -828,13 +826,10 @@ void MainWindow::buildUi() {
     }
 #endif
 // END UI-18 M5-2
-// BEGIN UI-18 M5-3 — 数据管理版本/来源页签 + hub 轴解散（页面住进工作区，
-// 血缘面板挂数据页 inspector 槽）。
-#if defined(PWB_WITH_V14_DATA_LINEAGE)
+// BEGIN UI-18 M5-3 — 数据管理属性/血缘装配 + hub 轴解散（页面住进工作区）。
     if (app_shell_ != nullptr) {
         m5_data::install({this, app_shell_, &context_});
     }
-#endif
 // END UI-18 M5-3
 #ifdef PWB_WITH_APP_SHELL
     if (app_shell_ != nullptr) {

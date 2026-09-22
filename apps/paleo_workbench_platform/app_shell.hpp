@@ -96,6 +96,7 @@ class CommandPalette;
 class StatusBar;
 }
 namespace pwb::ui_workstation {
+class VerifyRecordsPanel;
 class WorkstationFrame;
 }
 
@@ -226,6 +227,16 @@ public:
     ValidationWorkspacePage* validation_page() const {
         return validation_page_;
     }
+    // 底条「验证记录」面板（verify_records dock）——宿主经此绑定
+    // quality_reports 数据源（provider seam；nullptr 直到 dock 构建）。
+    pwb::ui_workstation::VerifyRecordsPanel* verify_records_panel() const {
+        return verify_records_;
+    }
+    // ws3 右栏「图件整饰 / 版式输出」面板 —— 宿主经此接写回闭包。
+    QWidget* map_decor_panel() const { return map_decor_; }
+    // 版式输出面板由 m5_compose_install 经 set_stage3_compose 收编
+    // 进 dock —— 读回经 dock->widget()（未收编时为占位/nullptr）。
+    QWidget* layout_output_panel() const;
 
     // Page accessors for host wiring (non-owning).
     pwb::ui_pages_data::qt::HomePage* home_page() const {
@@ -315,9 +326,13 @@ private:
     void setup_shortcuts();
     void handle_workstation_command(const QString& text);
     void persist_workspace(int workspace_index);
+    // 状态栏「坐标 · CRS · 比例尺」段 —— 画布信号分头更新缓存后合并
+    // 重发（update_context 一次写全段；horizon 段由层位权威另路投影）。
+    void sync_status_context();
     // M6: seed the 65:35 canvas:bottom split at first show (construction
     // time the splitter has no width — setSizes would clamp).
     void showEvent(QShowEvent* event) override;
+    void seed_science_splitter();
     // M3: flip the science-host bottom stack to the stage's composition
     // (65:35 splitter above it — sizes stay user-draggable, never reset).
     void apply_stage_composition(const std::string& stage_value);
@@ -360,7 +375,16 @@ private:
     // set_horizon_state）。
     QComboBox* ribbon_horizon_combo_ = nullptr;
     bool syncing_ribbon_horizon_ = false;
+    QString status_coords_;
+    QString status_crs_;
+    QString status_scale_;
     QStringList workflow_command_ids_;
+    // Per-workspace right-dock panel instances (created lazily by the
+    // dock factories; non-owning — docks own them).
+    QWidget* predict_compare_ = nullptr;
+    QWidget* reference_layers_ = nullptr;
+    QWidget* map_decor_ = nullptr;
+    pwb::ui_workstation::VerifyRecordsPanel* verify_records_ = nullptr;
 
     // Joint-host seam (06): the window injects the real host (owned by
     // the Geo3D dock); without one the fallback stub reports

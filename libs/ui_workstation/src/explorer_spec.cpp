@@ -226,20 +226,65 @@ struct Builder {
     }
 
     ExplorerNode interpretation_group() const {
-        // Target horizon comes only from stratigraphy.target_horizon —
-        // empty means the empty state, no "D63" fallback.
-        ExplorerNode child;
-        if (!facts.target_horizon.empty()) {
-            child.key = "interpretation/" + facts.target_horizon;
-            child.label = facts.target_horizon;
-            child.payload = {{"kind", "interpretation"},
-                             {"name", facts.target_horizon}};
-        } else {
-            child.key = "interpretation/empty";
-            child.label = "未设置目标层位";
-            child.payload = {{"kind", "empty"}};
+        // 原型工区树「解释要素」—— 列出真实解释成果；无解释时退回
+        // 目标层位节点（target_horizon 权威），再退诚实空态。
+        std::vector<ExplorerNode> children;
+        for (std::size_t i = 0; i < facts.interpretations.size(); ++i) {
+            const auto& interp = facts.interpretations[i];
+            ExplorerNode node;
+            node.key = "interpretation/" +
+                       (interp.id.empty() ? std::to_string(i) : interp.id);
+            node.label = interp.name.empty() ? "解释成果" : interp.name;
+            if (!interp.current_version_id.empty()) {
+                node.label += " " + interp.current_version_id;
+            }
+            node.payload = {{"kind", "interpretation"},
+                            {"id", interp.id}};
+            node.object = interp.object;
+            children.push_back(std::move(node));
         }
-        return group_node("group/interpretation", "解释", {child});
+        if (children.empty()) {
+            ExplorerNode child;
+            if (!facts.target_horizon.empty()) {
+                child.key = "interpretation/" + facts.target_horizon;
+                child.label = facts.target_horizon;
+                child.payload = {{"kind", "interpretation"},
+                                 {"name", facts.target_horizon}};
+            } else {
+                child.key = "interpretation/empty";
+                child.label = "未设置目标层位";
+                child.payload = {{"kind", "empty"}};
+            }
+            children.push_back(std::move(child));
+        }
+        return group_node(
+            "group/interpretation",
+            "解释要素 (" + std::to_string(children.size()) + ")",
+            std::move(children));
+    }
+
+    // 原型工区树「约束与单因素图」—— factor_map_tasks + constraint
+    // 组的合并投影（facts.factor_maps）；空则整组不出现。
+    std::optional<ExplorerNode> factor_map_group() const {
+        if (facts.factor_maps.empty()) return std::nullopt;
+        std::vector<ExplorerNode> children;
+        for (std::size_t i = 0; i < facts.factor_maps.size(); ++i) {
+            const auto& entry = facts.factor_maps[i];
+            ExplorerNode node;
+            node.key = "factormap/" +
+                       (entry.id.empty() ? std::to_string(i) : entry.id);
+            node.label = entry.name.empty() ? "未命名图" : entry.name;
+            node.payload = {{"kind", "factor_map"},
+                            {"id", entry.id},
+                            {"source_type", entry.type}};
+            node.object = entry.object;
+            children.push_back(std::move(node));
+        }
+        return group_node(
+            "group/factor-maps",
+            "约束与单因素图 (" +
+                std::to_string(facts.factor_maps.size()) + ")",
+            std::move(children));
     }
 
     // Null when there are no user vector layers (Python
@@ -284,6 +329,27 @@ struct Builder {
         area.children.push_back(seismic_group());
         area.children.push_back(horizon_group());
         area.children.push_back(interpretation_group());
+        if (auto group = factor_map_group()) {
+            area.children.push_back(std::move(*group));
+        }
+        if (!facts.map_documents.empty()) {
+            // 原型工区树尾部「综合编图」分组 —— 文档计数进组名。
+            std::vector<ExplorerNode> docs;
+            for (const auto& doc : facts.map_documents) {
+                ExplorerNode node;
+                node.key = "mapdoc/" + doc.id;
+                node.label =
+                    doc.name.empty() ? "未命名图件" : doc.name;
+                node.payload = {{"kind", "map_document"}, {"id", doc.id}};
+                node.object = doc.object;
+                docs.push_back(std::move(node));
+            }
+            area.children.push_back(group_node(
+                "group/map-docs",
+                "综合编图 (" +
+                    std::to_string(facts.map_documents.size()) + ")",
+                std::move(docs)));
+        }
         area.children.push_back(group_node(
             "group/results", "成果",
             [] {
@@ -352,6 +418,102 @@ struct Builder {
         }
         spec.footer = std::to_string(count) +
                       " 个项目数据对象；存储缓存默认隐藏";
+        spec.roots.push_back(std::move(root));
+        return spec;
+    }
+
+    // ws4 验证：勾选式「项目资源管理器」—— 成果（图件/解释版本）与
+    // 参考数据（井/地震/编修图层）全部可勾选，默认勾选；勾选状态经
+    // check_toggled 回到验证页（参与对比的对象集）。
+    ExplorerSpec spec_review() const {
+        ExplorerSpec spec;
+        ExplorerNode root = project_root();
+        if (!facts.project_open) {
+            spec.footer = "未打开工程";
+            spec.roots.push_back(std::move(root));
+            return spec;
+        }
+        const auto checkable = [](ExplorerNode& node) {
+            node.check_state = 2;  // Qt::Checked
+            return node;
+        };
+        std::vector<ExplorerNode> results;
+        for (const auto& doc : facts.map_documents) {
+            ExplorerNode node;
+            node.key = "review/map/" + doc.id;
+            node.label = doc.name.empty() ? "未命名图件" : doc.name;
+            node.payload = {{"kind", "map_document"}, {"id", doc.id}};
+            node.object = doc.object;
+            results.push_back(checkable(node));
+        }
+        for (const auto& interp : facts.interpretations) {
+            ExplorerNode node;
+            node.key = "review/interp/" + interp.id;
+            node.label = interp.name.empty() ? "解释成果" : interp.name;
+            node.payload = {{"kind", "interpretation_result"},
+                            {"id", interp.id}};
+            node.object = interp.object;
+            results.push_back(checkable(node));
+        }
+        if (results.empty()) {
+            ExplorerNode empty;
+            empty.key = "review/results-empty";
+            empty.label = "暂无成果 — 先在综合编图产出";
+            empty.payload = {{"kind", "empty"}};
+            results.push_back(std::move(empty));
+        }
+        const std::string horizon = facts.target_horizon.empty()
+                                        ? std::string("当前层位")
+                                        : facts.target_horizon;
+        root.children.push_back(group_node("group/review-results",
+                                           horizon + " 成果",
+                                           std::move(results)));
+
+        std::vector<ExplorerNode> refs;
+        for (const auto& interp : facts.interpretations) {
+            ExplorerNode node;
+            node.key = "review/ref-interp/" + interp.id;
+            node.label = "井解释 " + (interp.name.empty()
+                                          ? std::string("未命名")
+                                          : interp.name);
+            node.payload = {{"kind", "interpretation_reference"},
+                            {"id", interp.id}};
+            node.object = interp.object;
+            refs.push_back(checkable(node));
+        }
+        for (const auto& well : facts.wells) {
+            ExplorerNode node;
+            node.key = "review/well/" + well.id;
+            node.label = well.name.empty() ? "未命名井" : well.name;
+            node.payload = {{"kind", "well"}, {"well_name", well.name}};
+            refs.push_back(checkable(node));
+        }
+        for (const auto* r : visible_resources()) {
+            if (r->type != "seismic") continue;
+            ExplorerNode node = resource_node(*r);
+            refs.push_back(checkable(node));
+        }
+        for (const auto& layer : facts.user_layers) {
+            ExplorerNode node;
+            node.key = "review/uvlayer/" + layer.id;
+            node.label = "单因素 " + (layer.name.empty()
+                                          ? std::string("编修图层")
+                                          : layer.name);
+            node.payload = {{"kind", "user_vector_layer"},
+                            {"layer_id", layer.id}};
+            node.object = layer.object;
+            refs.push_back(checkable(node));
+        }
+        if (refs.empty()) {
+            ExplorerNode empty;
+            empty.key = "review/refs-empty";
+            empty.label = "暂无参考数据";
+            empty.payload = {{"kind", "empty"}};
+            refs.push_back(std::move(empty));
+        }
+        root.children.push_back(group_node("group/review-refs", "参考数据",
+                                           std::move(refs)));
+        spec.footer = "勾选参与验证对比的对象";
         spec.roots.push_back(std::move(root));
         return spec;
     }
@@ -564,6 +726,7 @@ const std::map<std::string, std::string>& explorer_mode_titles() {
         {"project", "资源管理器"}, {"data", "数据目录"},
         {"layers", "图层管理器"},  {"search", "全局搜索"},
         {"history", "历史与成果"}, {"workspaces", "工作区"},
+        {"review", "项目资源管理器"},
     };
     return titles;
 }
@@ -580,6 +743,7 @@ ExplorerSpec build_explorer_spec(const std::string& mode,
         return builder.spec_data();
     }
     if (normalized == "layers") return builder.spec_layers();
+    if (normalized == "review") return builder.spec_review();
     if (normalized == "history") return builder.spec_history();
     if (normalized == "workspaces") return builder.spec_workspaces();
     return builder.spec_project();

@@ -1,34 +1,66 @@
 #include "m5_data_install.hpp"
 
-#if defined(PWB_WITH_V14_DATA_LINEAGE)
-
 #include "app_context.hpp"
 #include "app_shell.hpp"
 #include "data_lineage_panel.hpp"
 
+#include <pwb/ui_pages_data/asset_view.hpp>
 #include <pwb/ui_pages_data/qt/asset_selection_bus.hpp>
+#include <pwb/ui_pages_data/qt/data_detail_panel.hpp>
 #include <pwb/ui_pages_data/qt/data_workspace.hpp>
+
+#include <QTabWidget>
 
 namespace pwb::app::m5_data {
 
 void install(const Install& install) {
     auto* shell = install.shell;
-    if (shell == nullptr || shell->data_workspace() == nullptr) {
-        return;
+    auto* workspace =
+        shell != nullptr ? shell->data_workspace() : nullptr;
+    if (workspace == nullptr) return;
+    auto* bus = workspace->selection_bus();
+
+    // 原型 ws0 右列 = 数据属性（上）+ 数据血缘/处理流程（下）。
+    // 数据属性：真实元数据表单（类型/格式/状态/路径/校验），选择走
+    // 单一 AssetSelectionBus 权威 —— 与数据表/血缘同一选择。
+    auto* detail =
+        new pwb::ui_pages_data::qt::DataDetailPanel(workspace);
+    if (bus != nullptr) {
+        QObject::connect(
+            bus, &pwb::ui_pages_data::qt::AssetSelectionBus::
+                     current_asset_changed,
+            detail,
+            [detail](const std::optional<
+                     pwb::ui_pages_data::AssetRow>& asset) {
+                detail->update_asset(asset);
+            });
     }
-    auto* panel = new DataLineagePanel(shell);
-    panel->set_context(install.context);
-    // 选择状态单一权威：直接订阅数据页已绑定的 AssetSelectionBus。
-    if (auto* bus = shell->data_workspace()->selection_bus();
-        bus != nullptr) {
-        panel->bind_selection_bus(bus);
-    }
-    QObject::connect(panel, &DataLineagePanel::status_message, shell,
+    workspace->set_inspector_panel(detail);
+
+    // 数据血缘：真实版本历史 + 来源关系（DataLineagePanel）。面板自身
+    // 对血缘读侧切片缺席降级诚实（PWB_WITH_V14_DATA_LINEAGE 门查询）。
+    auto* lineage = new DataLineagePanel(workspace);
+    lineage->set_context(install.context);
+    if (bus != nullptr) lineage->bind_selection_bus(bus);
+    QObject::connect(lineage, &DataLineagePanel::status_message, shell,
                      &AppShell::status_message);
-    // inspector 槽 = ws0 右侧属性/版本/来源区域（浮动体系原生支持）。
-    shell->data_workspace()->set_inspector_panel(panel);
+    workspace->set_lineage_panel(lineage);
+
+    // 原型 ws0 表格下页签的「版本历史 | 关联关系」—— 与右列血缘同一
+    // 权威的另一视图：第二实例只做数据控制器（自身隐藏），其两个真实
+    // 页提入底部页签条；两个实例订阅同一 bus，选择一致。
+    auto* bottom_lineage = new DataLineagePanel(workspace);
+    bottom_lineage->set_context(install.context);
+    if (bus != nullptr) bottom_lineage->bind_selection_bus(bus);
+    QObject::connect(bottom_lineage, &DataLineagePanel::status_message,
+                     shell, &AppShell::status_message);
+    if (auto* tabs = workspace->bottom_tabs(); tabs != nullptr) {
+        QWidget* history = bottom_lineage->tabs()->widget(0);
+        QWidget* relations = bottom_lineage->tabs()->widget(1);
+        tabs->addTab(history, QStringLiteral("版本历史"));
+        tabs->addTab(relations, QStringLiteral("关联关系"));
+    }
+    bottom_lineage->hide();  // 控制器壳隐藏，页面已提入底签
 }
 
 }  // namespace pwb::app::m5_data
-
-#endif  // PWB_WITH_V14_DATA_LINEAGE

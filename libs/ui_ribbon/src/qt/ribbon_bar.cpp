@@ -99,12 +99,15 @@ void RibbonBar::set_quick_access_actions(const QuickAccessActions& actions) {
     auto bind = [this](QToolButton* button, QAction* action,
                        const QIcon& fallback_icon) {
         if (action != nullptr) {
-            button->setDefaultAction(action);
-            // 治理动作不带图标 —— QAT 是图标位，补上资产图标（动作一旦
-            // 拥有图标，setDefaultAction 的同步会以动作为准）。
+            // 治理动作不带图标 —— 图标必须落在动作上：setDefaultAction
+            // 之后每次 QAction::changed 都会把按钮图标回同步为
+            // action->icon()，只设按钮图标会被清空并回退绘制文字。
             if (action->icon().isNull() && !fallback_icon.isNull()) {
-                button->setIcon(fallback_icon);
+                action->setIcon(fallback_icon);
             }
+            button->setDefaultAction(action);
+            button->setToolButtonStyle(
+                Qt::ToolButtonStyle::ToolButtonIconOnly);
             button->show();
         } else {
             button->setDefaultAction(nullptr);
@@ -393,6 +396,8 @@ QWidget* RibbonBar::build_nav_row() {
     qat_redo_ = new QToolButton(nav);
     for (auto* button : {qat_save_, qat_undo_, qat_redo_}) {
         button->setAutoRaise(true);
+        // QAT 是图标位（prototype：保存/撤销/重做只见图标）。
+        button->setToolButtonStyle(Qt::ToolButtonStyle::ToolButtonIconOnly);
         button->hide();
     }
     qat_save_->setObjectName("ribbonQatSave");

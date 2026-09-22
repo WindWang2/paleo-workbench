@@ -1,11 +1,14 @@
 #include "app_shell.hpp"
 
 #include <cstddef>
+#include <iterator>
 
 #include <QComboBox>
 #include <QDebug>
+#include <QDockWidget>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLocale>
 #include <QMenu>
 #include <QScrollArea>
 #include <QShowEvent>
@@ -17,15 +20,19 @@
 
 #include <qgsmapcanvas.h>
 #include <qgspointxy.h>
+#include <qgscoordinatereferencesystem.h>
 
 #include <pwb/ui_composite/composite_document.hpp>
 #include <pwb/ui_composite/layer_manager_panel.hpp>
+#include <pwb/ui_composite/linked_workspace.hpp>
 #include <pwb/ui_composite/mapping_stage_panel.hpp>
 #include <pwb/ui_data_core/preview_provider.hpp>
+#include <pwb/ui_map/map_chrome_panel.hpp>
 #include <pwb/ui_map/mapping_page.hpp>
 #include <pwb/ui_pages_data/qt/data_workspace.hpp>
 #include <pwb/ui_pages_data/qt/home_page.hpp>
 #include <pwb/ui_pages_data/qt/hub_page.hpp>
+#include <pwb/ui_pages_data/qt/navigation_tree_widget.hpp>
 #include <pwb/ui_review/qt/review_export_page.hpp>
 #include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_seqviz/geoviz_provider.hpp>
@@ -35,6 +42,7 @@
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/command_registry.hpp>
+#include <pwb/ui_shell/map_status_bar.hpp>
 #include <pwb/ui_shell/navigation.hpp>
 #include <pwb/ui_shell/page_placeholder.hpp>
 #include <pwb/ui_shell/shortcut_registry.hpp>
@@ -53,6 +61,7 @@
 #include <pwb/ui_workstation/activity_rail.hpp>
 #include <pwb/ui_workstation/app_bar.hpp>
 #include <pwb/ui_workstation/explorer_panel.hpp>
+#include <pwb/ui_workstation/verify_records_panel.hpp>
 #include <pwb/ui_workstation/workflow_panel.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
@@ -154,12 +163,29 @@ AppShell::AppShell(QWidget* parent,
     // --- workstation frame: the WORKSPACE HOST is the central content
     // (D2); the legacy page stack stays in the 功能页 (hub) dock.
     composite_ = new ui_composite::CompositeDocument(this);
+    // 原型只有窗口底部一条状态栏 —— 复合文档内嵌 MapStatusBar（旧版
+    // 画布下条带）隐藏，坐标/比例尺/CRS 经 update_context 前送到壳层
+    // 状态栏（install_canvas 接线），编辑态读数（捕捉/拓扑）随宿主
+    // 未绑定而保持诚实空态。
+    composite_->status_bar->hide();
     build_workspace_host();
     workstation_ = new ui_workstation::WorkstationFrame(this);
     workstation_->set_central_widget(workspace_host_);
     wire_workstation();
     workstation_->build_docks();
     workstation_->apply_first_run_sizes();
+
+    // 帧级层位条（build_docks 后才存在）—— 与状态条/Ribbon 尾部选择
+    // 器同一 target_horizon 权威，只回发请求不持状态。
+    connect(workstation_,
+            &ui_workstation::WorkstationFrame::horizon_requested,
+            this, &AppShell::horizon_requested);
+
+    // 底条「验证记录」双击行 → 验证工作区（问题详情在页内右列）。
+    if (auto* records = verify_records_panel()) {
+        connect(records, &ui_workstation::VerifyRecordsPanel::record_activated,
+                this, [this](int) { navigate_workspace(4); });
+    }
 
     // 左栏工作流面板（nav dock 内部件，build_docks 后才存在）：步骤
     // 点击经 command_registry 走既有命令路径（与 Ribbon 按钮同一回
@@ -230,9 +256,14 @@ void AppShell::build_pages() {
     hub_data_->add_submodule("overview", "项目概述", home_page_);
     hub_data_->add_submodule("management", "数据管理", data_workspace_);
     hub_data_->finish();
-    // Prototype ws0 lands on the data list, not the overview — the pill
-    // row still offers 项目概述 as a user choice.
+    // Prototype ws0 lands on the data list, not the overview — and shows
+    // NO pill row（子模块导航走左侧资源树的 概览/数据管理 节点）。
+    hub_data_->set_switcher_visible(false);
     hub_data_->switch_to("management");
+    // Prototype ws0 的左列归壳层 explorer（对象树）；页内 facet
+    // 导航树（生命阶段/标签/完整性筛选）与它是重复面 —— 隐藏后
+    // 页 = [数据列表 | 数据属性] 两列，过滤走表格自身工具条。
+    data_workspace_->navigation_tree()->hide();
     page_stack_->addWidget(hub_data_);
 
     // ws1 智能预测：测井预测（输入与证据页）+ 地震预测（输入侧）。
@@ -636,6 +667,42 @@ void AppShell::wire_workstation() {
         [this](const std::string&, QWidget*) -> QWidget* {
             return composite_->stage_panel;
         });
+    // 原型右栏每工作区页签（navigate_workspace 决定子集与标题）：
+    //   ws1 图层|预测参数|对比   ws2 约束|单因素|参考
+    //   ws3 编图图层|图件整饰|版式输出
+    workstation_->set_panel_factory(
+        "predict_compare",
+        [this](const std::string&, QWidget* parent) -> QWidget* {
+            predict_compare_ =
+                new ui_composite::LinkedInterpretationWorkspace(parent);
+            return predict_compare_;
+        });
+    workstation_->set_panel_factory(
+        "reference_maps",
+        [this](const std::string&, QWidget* parent) -> QWidget* {
+            // 参考图层清单 —— 与图层管理同一交互面的第二实例。
+            reference_layers_ = new ui_composite::LayerManagerPanel(parent);
+            return reference_layers_;
+        });
+    workstation_->set_panel_factory(
+        "map_decor",
+        [this](const std::string&, QWidget* parent) -> QWidget* {
+            // 图件整饰 —— 图名/图例/指北针/比例尺勾选；写回接线在
+            // m5_compose_install（MapDocumentBank 单一权威）。
+            map_decor_ = new pwb::ui_map::MapChromePanel(parent);
+            return map_decor_;
+        });
+    // layout_output 无 factory —— m5_compose_install 装配好
+    // LayoutComposePanel（含 map_chrome 读写闭包）后经
+    // set_stage3_compose 收编进该 dock；无 closure-mapping 的构建里
+    // dock 保持隐藏（占位护栏语义）。
+    workstation_->set_panel_factory(
+        "verify_records",
+        [this](const std::string&, QWidget* parent) -> QWidget* {
+            verify_records_ =
+                new ui_workstation::VerifyRecordsPanel(parent);
+            return verify_records_;
+        });
 
     // Navigation: explorer -> navigate_to (the M2 legacy routing seam —
     // Python activate_legacy parity).
@@ -709,10 +776,37 @@ void AppShell::install_canvas(QWidget* canvas, bool uses_native_stack) {
         connect(qgs_canvas, &QgsMapCanvas::xyCoordinates, this,
                 [this](const QgsPointXY& p) {
                     composite_->on_map_position(p.x(), p.y());
+                    // 原型状态栏 X/Y 读数（壳层单条；内嵌条已退役）。
+                    status_coords_ =
+                        QStringLiteral("X: %1  Y: %2")
+                            .arg(p.x(), 0, 'f', 2)
+                            .arg(p.y(), 0, 'f', 2);
+                    sync_status_context();
                 });
-        connect(qgs_canvas, &QgsMapCanvas::extentsChanged, composite_,
-                &ui_composite::CompositeDocument::on_extent_changed);
+        connect(qgs_canvas, &QgsMapCanvas::extentsChanged, this,
+                [this, qgs_canvas] {
+                    composite_->on_extent_changed();
+                    const double scale = qgs_canvas->scale();
+                    status_scale_ =
+                        scale > 0.0
+                            ? QLocale().toString(
+                                  static_cast<qint64>(scale))
+                            : QString();
+                    status_crs_ =
+                        qgs_canvas->mapSettings()
+                            .destinationCrs()
+                            .authid();
+                    sync_status_context();
+                });
     }
+}
+
+void AppShell::sync_status_context() {
+    // update_context 是整段一次写入 —— 三路来源（坐标/比例尺/CRS）各自
+    // 缓存最新值后合并重发，互不覆盖。
+    if (status_bar_ == nullptr) return;
+    status_bar_->update_context(status_coords_, {}, status_crs_,
+                                status_scale_);
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +839,11 @@ void AppShell::navigate_workspace(int workspace_index) {
             ? WorkspaceHostWidget::kPageValidation
             : WorkspaceHostWidget::kPageScience;
     workspace_host_->setCurrentIndex(page);
+    if (page == WorkspaceHostWidget::kPageScience && !splitter_seeded_) {
+        // 首次进科学页才有真实高度 —— 布局在同事件回合内完成，
+        // 延后一拍播种 65:35。
+        QTimer::singleShot(0, this, [this] { seed_science_splitter(); });
+    }
 
     // Ribbon tab mirror — blocked so the programmatic sync can never
     // re-enter navigate_workspace (no activation loop).
@@ -761,6 +860,61 @@ void AppShell::navigate_workspace(int workspace_index) {
     }
     palette_->dismiss();
 
+    // ws4 验证：资源管理器切到勾选式「项目资源管理器」（成果/参考数据
+    // 勾选 = 参与对比集）。离开验证时恢复 project；用户在其它工作区
+    // 自选的 rail 模式不被打扰（只在 review→非 review 边界复位）。
+    if (auto* explorer = workstation_->explorer()) {
+        const std::string mode = explorer->mode();
+        if (workspace_index == 4) {
+            if (mode != "review") explorer->set_mode("review");
+        } else if (mode == "review") {
+            explorer->set_mode("project");
+        }
+    }
+
+    // 原型右栏 tab 组：每个工作区一份「成员 + 标题 + 顺序」声明。先对
+    // 全候选集统一隐身，再按序 set_visible —— show 顺序即 tab 顺序
+    // （隐藏成员的 tabifyDockWidget 注册是惰性的，首个可见成员为锚）。
+    // 标题只改 dock windowTitle，面板实例不变。
+    struct RightTab {
+        const char* id;
+        const char* title;
+    };
+    static const RightTab kAllRight[] = {
+        {"inspector", "检查器"},       {"composite_layer", "图层管理"},
+        {"composite_input", "输入与结果"}, {"facies_palette", "相带画刷"},
+        {"predict_compare", "对比"},   {"constraint_panel", "约束"},
+        {"reference_maps", "参考"},    {"map_decor", "图件整饰"},
+        {"layout_output", "版式输出"},
+    };
+    static const RightTab kWs1[] = {
+        {"composite_layer", "图层"},
+        {"inspector", "预测参数"},
+        {"predict_compare", "对比"},
+    };
+    static const RightTab kWs2[] = {
+        {"constraint_panel", "约束"},
+        {"composite_input", "单因素"},
+        {"reference_maps", "参考"},
+    };
+    static const RightTab kWs3[] = {
+        {"composite_layer", "编图图层"},
+        {"map_decor", "图件整饰"},
+        {"layout_output", "版式输出"},
+    };
+    const RightTab* ws_tabs = nullptr;
+    size_t ws_tab_count = 0;
+    if (workspace_index == 1) {
+        ws_tabs = kWs1;
+        ws_tab_count = std::size(kWs1);
+    } else if (workspace_index == 2) {
+        ws_tabs = kWs2;
+        ws_tab_count = std::size(kWs2);
+    } else if (workspace_index == 3) {
+        ws_tabs = kWs3;
+        ws_tab_count = std::size(kWs3);
+    }
+
     if (scientific) {
         // D1: the middle three workspaces ARE the stages — entering one
         // writes the stage authority through the ONE host-injected seam
@@ -772,27 +926,40 @@ void AppShell::navigate_workspace(int workspace_index) {
         if (stage_apply_ != nullptr) {
             stage_apply_(pwb::tool_policy::stage_value(stage));
         }
-        // Prototype 右栏标签组：科学工作区 = 检查器|图层管理|相带画刷|
-        // 输入与结果 tab 组（ws0/ws4 将其关掉）。恢复显隐 + 图层管理
-        // 为默认当前页（profile 可能把 相带画刷/输入与结果 提到前——
-        // 图层是稳定默认面，用户切页不被打扰）。
-        workstation_->set_dock_visible("inspector", true);
-        workstation_->set_dock_visible("composite_layer", true);
-        if (auto* layer_dock = workstation_->dock("composite_layer")) {
-            layer_dock->raise();
+    } else if (presentation_apply_ != nullptr) {
+        // 数据管理/验证 reshape the docks through the extended
+        // presentation profiles — WITHOUT touching the stage authority.
+        presentation_apply_(ui_ribbon::workspace_id(workspace));
+    }
+
+    // 右栏成员/顺序是工作区权威（profile 先跑，这里收敛最终结果）；
+    // 隐藏同时复位默认标题 —— 经面板菜单单开的 dock 不残留 ws 标题。
+    for (const auto& tab : kAllRight) {
+        if (auto* dock = workstation_->dock(tab.id)) {
+            dock->setWindowTitle(QString::fromUtf8(tab.title));
         }
-    } else {
-        // ws0 数据管理 / ws4 验证：属性·血缘 / 验证结果住在页内右列 ——
-        // 独立的 检查器/图层管理 dock 退下（原型右侧即页内列）。
-        workstation_->set_dock_visible("inspector", false);
-        workstation_->set_dock_visible("composite_layer", false);
-        if (presentation_apply_ != nullptr) {
-            // 数据管理/验证 reshape the docks through the extended
-            // presentation profiles — WITHOUT touching the stage
-            // authority.
-            presentation_apply_(ui_ribbon::workspace_id(workspace));
+        workstation_->set_dock_visible(tab.id, false);
+    }
+    QDockWidget* first_shown = nullptr;
+    for (size_t i = 0; i < ws_tab_count; ++i) {
+        // 占位护栏（#1450）：无真实面板/factory 的 dock 永不显示。
+        if (!workstation_->has_panel_factory(ws_tabs[i].id)) continue;
+        if (auto* dock = workstation_->dock(ws_tabs[i].id)) {
+            dock->setWindowTitle(QString::fromUtf8(ws_tabs[i].title));
+        }
+        workstation_->set_dock_visible(ws_tabs[i].id, true);
+        if (first_shown == nullptr) {
+            first_shown = workstation_->dock(ws_tabs[i].id);
         }
     }
+    // 默认当前页 = 首个 tab（图层/约束类主面）。
+    if (first_shown != nullptr) {
+        first_shown->raise();
+    }
+
+    // 层位条：科学工作区 + 验证都显示（原型 ws1–4 顶部均有层位页签）；
+    // ws0 数据管理隐藏。
+    workstation_->set_horizon_strip_enabled(workspace_index != 0);
 
     sync_workflow_panel(workspace_index);
 }
@@ -802,6 +969,9 @@ void AppShell::sync_workflow_panel(int workspace_index) {
                                           : nullptr;
     if (panel == nullptr) return;
     workflow_command_ids_.clear();
+
+    // ws0 原型左列只有 rail + 全高资源树 —— 无流程面板。
+    panel->setVisible(workspace_index != 0);
 
     // (标题, 步骤|分隔, 对应 ribbon 命令 id|分隔) — 步骤文案取自
     // qt_ribbon_native prototype；命令 id 走 ribbon spec / registry。
@@ -880,15 +1050,22 @@ void AppShell::apply_stage_composition(const std::string& stage_value) {
     apply_compose_mode();
 }
 
+QWidget* AppShell::layout_output_panel() const {
+    auto* dock = workstation_ != nullptr
+                     ? workstation_->dock("layout_output")
+                     : nullptr;
+    return dock != nullptr ? dock->widget() : nullptr;
+}
+
 void AppShell::set_stage3_compose(QWidget* panel) {
-    if (panel == nullptr || stage3_stack_ == nullptr) return;
-    if (stage3_stack_->count() > 1) {
-        if (auto* old = stage3_stack_->widget(1)) {
-            stage3_stack_->removeWidget(old);
-            old->deleteLater();
-        }
+    if (panel == nullptr || workstation_ == nullptr) return;
+    // 版式输出面板住进右栏 dock（prototype ws3 右页签「版式输出」）——
+    // 原 stage3 底部栈第 2 页退役；收编标记让 has_panel_factory 视作
+    // 真实面板（#1450 占位护栏语义不变）。
+    if (auto* dock = workstation_->dock("layout_output")) {
+        dock->setWidget(panel);
+        dock->setProperty("pwbAdopted", true);
     }
-    stage3_stack_->addWidget(panel);
     apply_compose_mode();
 }
 
@@ -898,8 +1075,15 @@ void AppShell::set_compose_mode(bool on) {
 }
 
 void AppShell::apply_compose_mode() {
-    if (stage3_stack_ == nullptr || stage3_stack_->count() < 2) return;
-    stage3_stack_->setCurrentIndex(compose_mode_ ? 1 : 0);
+    // 版式模式 = 抬起右栏「版式输出」dock（底部栈保持单因素参考带，
+    // prototype ws3 底部组成不变）；未收编（无 closure-mapping）时
+    // 占位护栏保持隐藏。
+    if (!compose_mode_ || workstation_ == nullptr) return;
+    if (!workstation_->has_panel_factory("layout_output")) return;
+    if (auto* dock = workstation_->dock("layout_output")) {
+        workstation_->set_dock_visible("layout_output", true);
+        dock->raise();
+    }
 }
 
 void AppShell::persist_workspace(int workspace_index) {
@@ -1129,12 +1313,13 @@ void AppShell::set_project_name(const QString& name) {
 void AppShell::set_horizon_state(const QString& horizon,
                                  const std::vector<QString>& options) {
     // 单一 target_horizon 权威的三处视图同步投影（状态条选择器 /
-    // Ribbon 尾部选择器 / 画布层位标签行）。
+    // Ribbon 尾部选择器 / 帧级层位条——后者悬于中央页宿主之上，
+    // ws1–4 可见）。
     if (status_bar_ != nullptr) {
         status_bar_->set_horizon_state(horizon, options);
     }
-    if (composite_ != nullptr) {
-        composite_->set_horizon_state(horizon, options);
+    if (workstation_ != nullptr) {
+        workstation_->set_horizon_state(horizon, options);
     }
     if (ribbon_horizon_combo_ != nullptr) {
         syncing_ribbon_horizon_ = true;
@@ -1164,13 +1349,19 @@ void AppShell::set_horizon_state(const QString& horizon,
 
 void AppShell::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
+    seed_science_splitter();
+}
+
+// 主图:底部 65:35 一次性种子 —— 仅当科学宿主已真实布局（高度可量）
+// 时播种；首个工作区是 ws0 时壳层 showEvent 里高度为 0，种子留给
+// navigate_workspace 进科学页的首次切换。
+void AppShell::seed_science_splitter() {
     if (splitter_seeded_ || science_splitter_ == nullptr) return;
-    splitter_seeded_ = true;
     const int total = science_splitter_->height();
-    if (total > 100) {
-        const int top = total * 65 / 100;
-        science_splitter_->setSizes({top, total - top});
-    }
+    if (total <= 100) return;
+    splitter_seeded_ = true;
+    const int top = total * 65 / 100;
+    science_splitter_->setSizes({top, total - top});
 }
 
 QWidget* AppShell::adopt_data_page(QWidget* composite) {
@@ -1198,6 +1389,13 @@ void AppShell::shutdown_workers() {
     if (home_page_ != nullptr) home_page_->shutdown_workers();
     if (visualization_page_ != nullptr) {
         visualization_page_->shutdown_workers();
+    }
+    // ws1 右栏「对比」页是真实联动工作区 —— 其 worker 随页级关停。
+    if (auto* compare =
+            qobject_cast<ui_composite::LinkedInterpretationWorkspace*>(
+                predict_compare_);
+        compare != nullptr) {
+        compare->shutdown_workers();
     }
     if (workstation_ != nullptr) workstation_->shutdown();
 }

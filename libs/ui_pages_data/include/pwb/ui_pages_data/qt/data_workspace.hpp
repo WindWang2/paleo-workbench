@@ -9,6 +9,7 @@
 #include <QPointer>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QTabWidget>
 #include <QToolButton>
 #include <QWidget>
 
@@ -84,6 +85,9 @@ public:
         std::function<void(const QString& key, const QList<int>& sizes)> fn);
     void set_well_map_panel(WellMapPanelApi* panel);
     void set_inspector_panel(QWidget* panel);
+    // 原型 ws0 右列下槽「数据血缘/处理流程」—— V14 lineage 面板落位；
+    // 未注入时保持诚实空占位。
+    void set_lineage_panel(QWidget* panel);
     void set_well_detail_panel(QWidget* panel);
     // CLOSURE-PREVIEW (task 04): bind the single asset-selection state.
     // Table selection publishes into the bus; bus state (rows, external
@@ -98,9 +102,13 @@ public:
     ProjectOverviewPanel* overview_panel() { return overview_panel_; }
     DataReaderPanel* reader_panel() { return reader_panel_; }
     QWidget* inspector_panel() { return inspector_panel_; }
+    QWidget* lineage_panel() { return lineage_panel_; }
     WellMapPanelApi* well_map_panel() { return well_map_panel_; }
     QSplitter* main_splitter() { return main_splitter_; }
     QSplitter* right_splitter() { return right_splitter_; }
+    // 原型 ws0 表格下方页签（数据预览 | 版本历史 | 关联关系）—— 宿主
+    // 经此增挂真实面板页。
+    QTabWidget* bottom_tabs() { return bottom_tabs_; }
 
     void show_overview(bool visible);
     bool overview_visible() const;
@@ -111,6 +119,7 @@ public:
     static constexpr int kDockedSizesDelayMs = 400;
 
 private:
+    void showEvent(QShowEvent* event) override;
     void make_floatable(const QString& key, QWidget* panel,
                         const QString& title);
     void on_map_float_changed(const QString& key, bool floating);
@@ -118,7 +127,9 @@ private:
 
     QSplitter* main_splitter_;
     QSplitter* right_splitter_;
+    QSplitter* center_vsplit_;
     QStackedWidget* center_stack_;
+    QTabWidget* bottom_tabs_;
     QWidget* map_center_host_;
     QVBoxLayout* center_layout_;
     NavigationTree* navigation_tree_;
@@ -127,6 +138,7 @@ private:
     QWidget* well_detail_panel_;
     DataReaderPanel* reader_panel_;
     QWidget* inspector_panel_;
+    QWidget* lineage_panel_;
     WellMapPanelApi* well_map_panel_;
 
     FloatControllerApi* float_controller_ = nullptr;
@@ -138,6 +150,7 @@ private:
     // inspector replaced by set_inspector_panel's deleteLater) — a raw
     // pointer here would dangle into persist_docked_sizes' deferred timer.
     std::map<QString, QPointer<QWidget>> floatable_;
+    bool vsplit_seeded_ = false;
     bool map_collapsed_before_overview_ = true;
     bool map_collapsed_before_float_ = true;
     QTimer* float_sizes_timer_;

@@ -26,6 +26,7 @@
 #include <QSplitter>
 #include <QTabBar>
 #include <QTemporaryDir>
+#include <QTreeView>
 #include <QToolButton>
 #include <qgsapplication.h>
 
@@ -330,6 +331,42 @@ int main(int argc, char** argv) {
                   QStringLiteral("restore: current workspace ws3"));
             window.appShell()->shutdown_workers();
         }
+    }
+
+    // Project-loaded pass: the sample project fills the resource explorer,
+    // the horizon strip, and every per-workspace surface with REAL data —
+    // the empty-project captures alone cannot prove the prototype layout.
+    {
+        QTemporaryDir sample_dir;
+        qputenv("PALEO_SAMPLE_PROJECT_DIR", sample_dir.path().toLocal8Bit());
+        MainWindow window;
+        window.resize(1672, 941);
+        window.show();
+        pump();
+        window.openSampleProjectRequested();
+        pump();
+        auto* tree = window.appShell()->workstation()->explorer()
+                         ->findChild<QTreeView*>();
+        check(tree != nullptr && tree->model() != nullptr,
+              QStringLiteral("project: explorer tree present"));
+#if defined(PWB_WITH_WORKFLOW_WIRING)
+        // 本目标带全量 workflow 装配时才校验资源树投影（products-only
+        // 路径 WorkflowBinding::push_project_to_pages_ 未编入时树保持
+        // 空工程诚实态，不构成失败）。
+        if (tree != nullptr && tree->model() != nullptr) {
+            check(tree->model()->rowCount() > 0,
+                  QStringLiteral("project: explorer populated from facts"));
+        }
+#endif
+        const char* kWsNames[] = {"ws0-data", "ws1-predict", "ws2-factor",
+                                  "ws3-map", "ws4-validation"};
+        for (int ws = 0; ws < 5; ++ws) {
+            window.appShell()->navigate_workspace(ws);
+            pump();
+            capture(window.appShell(),
+                    QStringLiteral("%1-proj-%2").arg(tag, kWsNames[ws]));
+        }
+        window.appShell()->shutdown_workers();
     }
 
     // Horizon selector: single-source view contract (status bar combo
