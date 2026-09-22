@@ -63,6 +63,8 @@ std::vector<std::vector<Vec3>> mesh_plane_intersection(
     const std::vector<std::array<std::int64_t, 3>>& faces);
 
 // First crossing point of a well polyline with the plane, or nullopt.
+// "Crossing" includes a station lying exactly ON the plane — first,
+// intermediate or last (#1462: the last station used to be missed).
 std::optional<Vec3> well_plane_crossing(const Plane& plane,
                                         const std::vector<Vec3>& stations);
 
