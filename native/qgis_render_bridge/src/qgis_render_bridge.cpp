@@ -73,6 +73,17 @@ std::mutex g_qgis_lifecycle_mutex;
 // process-level initQgis guard (was anonymous-namespace internal).
 bool g_qgis_initialized = false;
 
+// R2-5: two process-global initQgis guards exist (libs/qgis
+// QgisRuntime::g_initialized for the product app, this one for the
+// pybind bridge). They are deliberately NOT merged: the bridge is only
+// exercised by the optional extension under PySide (never linked into
+// the product app), and QGIS 4.2 is not safely re-initializable after
+// exitQgis() inside a running host — the bridge releases its own objects
+// on shutdown and intentionally never calls exitQgis(). A mixed host
+// (bridge + QgisRuntime in one process) must acquire exactly one guard
+// first; that is a host contract, documented here so a future contributor
+// does not "fix" the asymmetry into a double-init crash.
+
 namespace {
 
 std::size_t g_qgis_bridge_count = 0;
