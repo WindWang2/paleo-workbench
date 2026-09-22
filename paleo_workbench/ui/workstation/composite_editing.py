@@ -1055,6 +1055,13 @@ class CompositeEditController(QObject):
             return
         if layer.edit_session is not None:
             layer.edit_session.rollback_changes()
+        # 原生编辑会话随层清理（R2-15 Python twin）：残留条目会让
+        # session_layer_ids() 永非空——工程切换被拒、每次保存都被
+        # commit_mirror_layer 的 "layer not in an edit session" 卡死，
+        # 且 UI 不再暴露该层的回滚入口。删除即丢弃易失缓冲（与
+        # Python 会话 rollback_changes 同语义）。
+        if self.native_editing.is_open(layer_id):
+            self.native_editing.rollback(layer_id)
         # V9 W2：错误计数缓存随层清理（防跨工程泄漏）。
         self._topology.forget_error_count([layer_id])
         self._kinds.pop(layer_id, None)

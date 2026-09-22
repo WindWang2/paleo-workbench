@@ -23,6 +23,8 @@ worker thread (all state lives in this object, no globals).
 
 from __future__ import annotations
 
+import logging
+
 import json
 import os
 import threading
@@ -81,6 +83,9 @@ from paleo_workbench.catalog.service_v11 import DataFabricV11Mixin
 from paleo_workbench.catalog.store import CatalogStore, catalog_file_for
 from paleo_workbench.project.models import _now_iso
 from paleo_workbench.project.paths import artifact_dir_for
+
+
+_svc_logger = logging.getLogger(__name__)
 
 
 class _CatalogMaps:
@@ -2397,7 +2402,12 @@ class DataCatalogService(DataFabricV11Mixin):
         """Enumerate unfinished working copies (any state, newest last)."""
         try:
             rows = self._index.list_working_copies()
-        except Exception:
+        except Exception as exc:
+            # Round-9 D2: a corrupt/locked index silently disabled the
+            # whole working-copy recovery ladder — make it visible.
+            _svc_logger.warning(
+                "working-copy recovery listing failed (recovery disabled "
+                "this open): %s", exc)
             return []
         return [self._working_copy_status(row) for row in rows]
 
@@ -2562,8 +2572,12 @@ class DataCatalogService(DataFabricV11Mixin):
         if _wc_working_id is not None:
             try:
                 self._index.update_working_copy_state(_wc_working_id, "committing")
-            except Exception:
-                pass
+            except Exception as exc:
+                # Round-9 D2 (CP7 twin): the phase write failing degrades
+                # crash-recovery semantics — visible, not silent.
+                _svc_logger.warning(
+                    "working-copy %s: dirty→committing registry write "
+                    "failed: %s", _wc_working_id, exc)
         try:
             committed = self._commit_working_copy_inner(
                 working_path,
@@ -2581,16 +2595,20 @@ class DataCatalogService(DataFabricV11Mixin):
                     # file is back at (or never left) the working path — the
                     # copy is still live user work.
                     self._index.update_working_copy_state(_wc_working_id, "dirty")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _svc_logger.warning(
+                        "working-copy %s: failure revert to dirty failed: %s",
+                        _wc_working_id, exc)
             raise
         # Success: the payload moved into managed storage and the copy no
         # longer exists — drop the registry row.
         if _wc_working_id is not None:
             try:
                 self._index.remove_working_copy(_wc_working_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                _svc_logger.warning(
+                    "working-copy %s: success row removal failed: %s",
+                    _wc_working_id, exc)
         return committed
 
     def _commit_working_copy_inner(
