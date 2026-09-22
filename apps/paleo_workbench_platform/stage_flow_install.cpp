@@ -656,6 +656,12 @@ void MainWindow::installStageFlow() {
                 -> const pwb::ui_shell::OperationRecord* {
                 return pwb::ui_shell::operation_registry().record(op_id);
             });
+        // F-06: the registry's cancel hook was only wired in the QA harness
+        // — the product task center silently ignored cancels on registry
+        // rows (the job-cancel hook above covers scheduler jobs only).
+        center->set_cancel_operation([](const std::string& op_id) {
+            return pwb::ui_shell::operation_registry().request_cancel(op_id);
+        });
     }
 #endif
 
