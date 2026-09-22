@@ -321,3 +321,21 @@ class TestKernelRobustness:
     def test_expression_with_no_variables_refused(self):
         with pytest.raises(ValueError, match="at least one curve"):
             evaluate_curve_expression("1.5", {})
+
+
+def test_chained_comparison_and_where_mask_semantics():
+    """R2-1: chained comparisons must AND pairwise (Python semantics).
+
+    The old evaluator folded the boolean result of the first comparison
+    into the next comparator: ``0 < GR < 150`` became ``(0 < GR) < 150``
+    (bool→0/1 < any upper bound → all-True), silently writing wrong
+    derived curves into the catalog. Regression lock.
+    """
+    gr = np.array([50.0, 200.0])
+    out = evaluate_curve_expression("0 < GR < 150", {"GR": gr})
+    np.testing.assert_array_equal(out.astype(bool), [True, False])
+    out = evaluate_curve_expression("50 < GR < 250", {"GR": gr})
+    np.testing.assert_array_equal(out.astype(bool), [False, True])
+    # Single comparisons unchanged.
+    out = evaluate_curve_expression("GR > 100", {"GR": gr})
+    np.testing.assert_array_equal(out.astype(bool), [False, True])
