@@ -53,6 +53,11 @@ DeliveryPump& delivery_pump() {
 // after release (OwnedWorkerJob guarded-slot parity).
 void queue_delivery(std::shared_ptr<std::atomic<bool>> guard,
                     std::function<void()> body) {
+    // Post-app-exit guard: ~QCoreApplication destroys the pump while a
+    // detached-keeper job may still be running — instance() nulls early,
+    // so drop rather than touch a destroyed receiver (and delivery_pump()
+    // itself dereferences instance() on first init).
+    if (QCoreApplication::instance() == nullptr) return;
     DeliveryPump& pump = delivery_pump();
     QMetaObject::invokeMethod(
         &pump,
@@ -268,6 +273,27 @@ void install_quit_drain(std::shared_ptr<JobScheduler> scheduler,
             scheduler->shutdown(true, drain_timeout_ms / 1000.0);
         },
         Qt::DirectConnection);
+}
+
+// ------------------------------------------------------- terminal reissue --
+
+void reissue_when_terminal(JobOwner& owner, QObject* context,
+                           std::function<void()> fn) {
+    if (context == nullptr || fn == nullptr) return;
+    QMetaObject::invokeMethod(
+        context,
+        [&owner, context, fn = std::move(fn)]() mutable {
+            if (owner.is_running()) {
+                // Still inside the callback-before-terminal window (or the
+                // owner genuinely runs the next job): try again on the
+                // next GUI turn. The job always reaches a terminal state,
+                // so this defer chain cannot outlive the owner's work.
+                reissue_when_terminal(owner, context, std::move(fn));
+                return;
+            }
+            fn();
+        },
+        Qt::QueuedConnection);
 }
 
 }  // namespace pwb::job::qtbridge

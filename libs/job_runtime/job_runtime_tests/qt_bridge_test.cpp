@@ -234,6 +234,97 @@ TEST(app_quit_drains_running_jobs) {
     PWB_CHECK(handle.snapshot().state == JobState::cancelled);
 }
 
+TEST(reissue_when_terminal_defers_until_owner_terminal) {
+    // #1471: the scheduler's frozen contract delivers the finished
+    // callback BEFORE the job's terminal state lands, so a consumer that
+    // resubmits work on the same owner from inside that callback can see
+    // is_running() still true — a bare start() throws logic_error out of
+    // a queued slot. The terminal-aware reissue seam must run the
+    // resubmit exactly once, on the GUI thread, and only once the owner
+    // is terminal (so the resubmit's start() cannot throw).
+    auto scheduler = std::make_shared<JobScheduler>(
+        JobScheduler::Options{.max_workers = 1});
+    JobOwner owner;
+    QObject context;
+    std::atomic<int> reissues{0};
+    std::atomic<bool> ran_on_gui{false};
+    std::atomic<bool> saw_terminal{true};
+    std::atomic<bool> second_finished{false};
+
+    JobSpec spec;
+    spec.run = [](JobContext& ctx) -> std::any {
+        ctx.sleep_interruptible(0.15);
+        return "first";
+    };
+    std::atomic<bool> first_finished{false};
+    (void)owner.start(*scheduler, std::move(spec),
+                      [&](const JobOutcome&) { first_finished = true; });
+
+    // Consumer pattern: reissue requested WHILE the owner genuinely runs
+    // (a superset of the callback-before-terminal window).
+    pwb::job::qtbridge::reissue_when_terminal(owner, &context, [&] {
+        ++reissues;
+        ran_on_gui = QThread::currentThread() ==
+                     QCoreApplication::instance()->thread();
+        saw_terminal = !owner.is_running();
+        // The consumer immediately resubmits on the same owner — this
+        // start() must be legal from inside the reissue (the seam only
+        // fires once terminal; a violation aborts the test process).
+        JobSpec next;
+        next.run = [](JobContext&) -> std::any { return "second"; };
+        (void)owner.start(*scheduler, std::move(next),
+                          [&](const JobOutcome&) { second_finished = true; });
+    });
+    pump_events([&] { return second_finished.load(); });
+    PWB_CHECK(first_finished.load());
+    PWB_CHECK(reissues.load() == 1);   // exactly once, never re-queued after
+    PWB_CHECK(ran_on_gui.load());
+    PWB_CHECK(saw_terminal.load());    // start() inside the reissue is legal
+    PWB_CHECK(second_finished.load());
+}
+
+TEST(reissue_when_terminal_fires_for_idle_owner_and_drops_with_context) {
+    // An owner that never started (or is already terminal) fires the
+    // reissue on the next GUI turn; a context destroyed before delivery
+    // drops the pending reissue entirely.
+    auto scheduler = std::make_shared<JobScheduler>(
+        JobScheduler::Options{.max_workers = 1});
+    {
+        JobOwner idle_owner;
+        QObject context;
+        std::atomic<int> fired{0};
+        pwb::job::qtbridge::reissue_when_terminal(idle_owner, &context,
+                                                  [&] { ++fired; });
+        pump_events([&] { return fired.load() > 0; });
+        PWB_CHECK(fired.load() == 1);
+    }
+    {
+        JobOwner owner;
+        std::atomic<bool> started{false};
+        std::atomic<int> fired{0};
+        JobSpec spec;
+        spec.run = [&started](JobContext& ctx) -> std::any {
+            started = true;
+            ctx.sleep_interruptible(0.3);
+            return {};
+        };
+        (void)owner.start(*scheduler, std::move(spec), nullptr);
+        while (!started.load()) QThread::msleep(2);
+        PWB_CHECK(owner.is_running());  // the reissue below must defer
+        {
+            QObject context;  // destroyed while the reissue is deferred
+            pwb::job::qtbridge::reissue_when_terminal(owner, &context,
+                                                      [&] { ++fired; });
+            // Deliberately NO event processing inside this scope: the
+            // queued hop is still pending when the context dies —
+            // ~QObject must drop it (a destroyed context never runs fn).
+        }
+        pump_events([] { return false; });  // a wrongly-kept hop fires here
+        PWB_CHECK(fired.load() == 0);
+        PWB_CHECK(owner.shutdown(2000));
+    }
+}
+
 int main() {
     int argc = 1;
     char name[] = "job_qt.bridge";

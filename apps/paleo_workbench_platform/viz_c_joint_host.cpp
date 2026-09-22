@@ -844,6 +844,27 @@ void VizCJointHost::request_prep() {
     if (prep_owner_ == nullptr) {
         prep_owner_ = &job_center_.make_owner(this);
     }
+    // #1471: the scheduler's frozen contract delivers the finished
+    // callback BEFORE the job's terminal state lands, so this reissue
+    // (running inside that callback) can see is_running() still true —
+    // start() would throw logic_error out of a queued slot. Defer to a
+    // later GUI turn through the terminal-aware seam instead; the flag
+    // keeps repeated reissues collapsed into one defer chain. The OWNER
+    // is the hop context: it dies with the host (QObject child) or with
+    // the JobCenter (unique_ptr), whichever happens first — either death
+    // drops the pending hop, so no teardown order can leave the chain
+    // firing against a dead owner.
+    if (prep_owner_->is_running()) {
+        if (!prep_reissue_pending_) {
+            prep_reissue_pending_ = true;
+            pwb::job::qtbridge::reissue_when_terminal(
+                *prep_owner_, prep_owner_, [this] {
+                    prep_reissue_pending_ = false;
+                    request_prep();
+                });
+        }
+        return;
+    }
     const std::uint64_t generation = current.generation;
     auto request = std::make_shared<JointPrepRequest>(std::move(current));
     prep_in_flight_ = *request;

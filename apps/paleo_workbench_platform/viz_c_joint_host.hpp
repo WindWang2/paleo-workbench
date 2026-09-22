@@ -219,6 +219,9 @@ private:
     pwb::job::qtbridge::JobOwner* prep_owner_ = nullptr;
     bool prep_running_ = false;
     bool shutdown_done_ = false;  // request_prep() is a no-op after it
+    // One deferred-reissue chain at a time (#1471): collapsing repeated
+    // pre-terminal reissues keeps the GUI-turn defer loop single.
+    bool prep_reissue_pending_ = false;
     std::optional<JointPrepRequest> prep_in_flight_;
     // The request the applied payload was produced for (diff target).
     std::optional<JointPrepRequest> prep_applied_;
