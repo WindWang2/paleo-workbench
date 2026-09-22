@@ -13,6 +13,11 @@ add_library(pwb_mapping_kernel STATIC
     # BEGIN CONV-03
     src/layer_products.cpp
     # END CONV-03
+    # geoviz_plots.interpolation ports — 样条(Clough-Tocher cubic /
+    # linear/nearest/rbf via scipy_grid) + 方向趋势(directional_trend)
+    # kernels; Qt-free leaves consumed by the factor-prepare dispatcher.
+    src/directional_trend.cpp
+    src/scipy_grid.cpp
 )
 add_library(Pwb::MappingKernel ALIAS pwb_mapping_kernel)
 target_include_directories(pwb_mapping_kernel PUBLIC

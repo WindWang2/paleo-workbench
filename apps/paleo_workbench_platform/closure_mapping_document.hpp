@@ -89,6 +89,10 @@ public:
         return last_warnings_;
     }
 
+    // M5-2 context groups: the editing scene (selection → ribbon context
+    // group injection). Non-owning — owned by the mapping page.
+    ui_pages_mapedit::MapEditScene* edit_scene() const { return scene_; }
+
 signals:
     void active_changed(const QString& id);
     void document_saved(const QString& id);

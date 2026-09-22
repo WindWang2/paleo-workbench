@@ -308,6 +308,14 @@ public:
     std::string verify_integrity(const std::string& version_id) override;
 
     void warm_document() override;
+    // Composition-root escape hatch: the inference run layer
+    // (closure_science start_inference/execute_run) mutates through the
+    // core's own SaveHook channel over the same single-writer store —
+    // nullptr after close(). Callers must hold no adapter lock; the GUI
+    // thread owns both this accessor and the stage-action path.
+    catalog::CatalogServiceCore* mutable_core() {
+        return core_store_.has_value() ? &*core_store_ : nullptr;
+    }
     void recover_working_copies() override;
     void migrate_legacy_resources(const domain::Json& resources_snapshot) override;
     void sweep_temp_on_open() override;

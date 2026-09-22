@@ -112,6 +112,13 @@
 // END VIZ-D
 #endif
 
+#if defined(PWB_WITH_SEISMIC_VIEWER)
+// M3 (P0-1/P0-4): the workspace bottom + validation comparison panes are
+// SeismicSliceWidget views routed from the ONE catalog open path (a second
+// VIEW of the same volume authority, never a second loader).
+#include <pwb/seismic_viewer/seismic_slice_widget.hpp>
+#endif
+
 #include <qgsfeatureiterator.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
@@ -137,6 +144,15 @@
 #include "diagnostics.hpp"
 #ifdef PWB_WITH_APP_SHELL
 #include "app_shell.hpp"
+#include "workspace_compose.hpp"
+#include "ribbon_command_install.hpp"
+#include "m5_validation_install.hpp"
+#if defined(PWB_WITH_CLOSURE_MAPPING)
+#include "m5_compose_install.hpp"
+#endif
+#if defined(PWB_WITH_V14_DATA_LINEAGE)
+#include "m5_data_install.hpp"
+#endif
 
 #if __has_include(<pwb/closure_science/qt/page_binding.hpp>)
 #include <pwb/closure_science/qt/page_binding.hpp>
@@ -144,6 +160,10 @@
 #include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/status_bar.hpp>
+// M2 (UI-18) — the ribbon chrome: QAT binds the governed ToolActionSet
+// save/undo/redo actions (the SAME QAction objects the menus/shortcuts
+// reuse — D4, no parallel actions).
+#include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 // cpp-close-12 — palette tool-details come from the canonical explain()
 // formatter (UI-12 domain); no second state table in this shell.
 #include <pwb/ui_workstation/action_help.hpp>
@@ -202,6 +222,9 @@
 // BEGIN CLOSURE-MAPPING
 #ifdef PWB_WITH_CLOSURE_MAPPING
 #include "closure_mapping_install.hpp"
+#ifdef PWB_WITH_WORKFLOW_WIRING
+#include "workflow_install.hpp"
+#endif
 #endif
 // END CLOSURE-MAPPING
 
@@ -417,6 +440,13 @@ void MainWindow::init_shell(QSettings* services_settings) {
     theme_service_->load_persisted(*services_settings_);
     buildPlatformMenus();
     pwb::platform_services::restore_window_layout(*services_settings_, *this);
+#ifdef PWB_WITH_APP_SHELL
+    // M2 (D7): the ribbon mode + workspace persist on the same unified
+    // (PaleoWorkbench, Workstation) store. The shell was constructed
+    // BEFORE the settings store was bound (buildUi order), so its restore
+    // runs here — after the bind, before show().
+    if (app_shell_ != nullptr) app_shell_->restore_ribbon_state();
+#endif
     // Apply the restored sheet once the widget tree is complete (and sync
     // the checkable theme/density actions to the restored state).
     theme_service_->apply(*this);
@@ -434,6 +464,14 @@ MainWindow::~MainWindow() {
         pwb::ui_shell::command_registry().unregister(id);
     }
     stage_flow_command_ids_.clear();
+#endif
+#ifdef PWB_WITH_APP_SHELL
+    // M4 (UI-18): the ribbon command set is per-window too — same dangling-
+    // closure contract as the stage-flow seeds above.
+    for (const std::string& id : ribbon_command_ids_) {
+        pwb::ui_shell::command_registry().unregister(id);
+    }
+    ribbon_command_ids_.clear();
 #endif
 #ifdef PWB_WITH_CONV_30
     // CONV-30 — stop job bodies at their next safe point and drain with a
@@ -460,6 +498,10 @@ MainWindow::~MainWindow() {
 
 void MainWindow::buildUi() {
     canvas_ = context_.session().map().createCanvas(this);
+    // M6: named identity — the shell hosts MULTIPLE QgsMapCanvas instances
+    // (session canvas, validation compare canvas, mapping-page previews);
+    // lookups by type+order are fragile, the session canvas is named.
+    canvas_->setObjectName(QStringLiteral("session-map-canvas"));
 #ifdef PWB_WITH_GEO3D_VIZ
     // 06 closure: the Geo3D dock (and its joint host) must exist BEFORE
     // the AppShell builds its pages — the joint page receives the real
@@ -706,6 +748,63 @@ void MainWindow::buildUi() {
     installStageFlow();
 #endif
 // END PWB-V14-THREE-STAGE
+// BEGIN UI-14 WORKFLOW-WIRING — the composition root: WorkflowController
+// with every seam bound to the real services/pages + the per-project
+// catalog closure + stage-action/shelf routing. Last: it consumes the
+// preparation page, document bank and factor grid store the mapping
+// closure installed.
+#ifdef PWB_WITH_WORKFLOW_WIRING
+    if (app_shell_ != nullptr && job_center_ != nullptr) {
+        pwb::app::workflow_wiring::install(
+            this, app_shell_, &context_, job_center_.get());
+    }
+#endif
+// END UI-14 WORKFLOW-WIRING
+// BEGIN UI-18 M3 — five-workspace composition (P0): fills the science-host
+// per-stage bottom stack (ws1 两联 / ws2 连井+制备 / ws3 参考带) and the
+// validation page pane. After every closure install so every adopted
+// surface exists; per-slice guards keep reduced builds honest.
+#ifdef PWB_WITH_APP_SHELL
+    if (app_shell_ != nullptr) {
+        workspace_compose::compose({this, app_shell_, &context_,
+                                    job_center_.get()});
+    }
+#endif
+// END UI-18 M3
+// BEGIN UI-18 M4 — the ribbon command band: 58 placeholder ids become real
+// CommandRegistry commands (or honest disabled entries), then the ribbon
+// binds governed QActions + the session-aware evaluator.
+#ifdef PWB_WITH_APP_SHELL
+    if (app_shell_ != nullptr) {
+        ribbon_commands::install({this, app_shell_, &context_,
+                                  job_center_.get(), &ribbon_command_ids_});
+        wire_ribbon_commands();
+    }
+#endif
+// END UI-18 M4
+// BEGIN UI-18 M5 — the validation workspace gaps: 解释 vs 预测对比视图 +
+// 问题级人工复核状态机 (compiled where ClosureReview is linked).
+#if defined(PWB_WITH_M5_VALIDATION)
+    if (app_shell_ != nullptr) {
+        m5_validation::install({this, app_shell_, &context_});
+    }
+#endif
+// END UI-18 M5
+// BEGIN UI-18 M5-2 — 版式轻量页 + 上下文 Ribbon 组（编图切片构建）。
+#if defined(PWB_WITH_CLOSURE_MAPPING)
+    if (app_shell_ != nullptr) {
+        m5_compose::install({this, app_shell_, &context_});
+    }
+#endif
+// END UI-18 M5-2
+// BEGIN UI-18 M5-3 — 数据管理版本/来源页签 + hub 轴解散（页面住进工作区，
+// 血缘面板挂数据页 inspector 槽）。
+#if defined(PWB_WITH_V14_DATA_LINEAGE)
+    if (app_shell_ != nullptr) {
+        m5_data::install({this, app_shell_, &context_});
+    }
+#endif
+// END UI-18 M5-3
 }
 
 #ifdef PWB_WITH_APP_SHELL
@@ -713,6 +812,36 @@ void MainWindow::wire_app_shell() {
     // 主状态条入宿主原生槽位（Python dock_host=QMainWindow parity:
     // AppShell parks its StatusBar on the window's statusBar, stretch 1).
     statusBar()->addWidget(app_shell_->status_bar(), 1);
+
+    // M2 (UI-18) — ribbon host wiring:
+    //  * QAT save/undo/redo bind the governed ToolActionSet actions (the
+    //    same objects the edit menu/toolbar consume — D4 single source).
+    //  * Persistence resolves the services store LAZILY per call: buildUi
+    //    runs before the constructor binds services_settings_, and tests
+    //    inject their own store — both stay honest.
+    if (app_shell_->ribbon() != nullptr) {
+        pwb::ui_ribbon::qt::RibbonBar::QuickAccessActions qat;
+        qat.save = governedAction(QStringLiteral("save_edits"));
+        qat.undo = governedAction(QStringLiteral("undo"));
+        qat.redo = governedAction(QStringLiteral("redo"));
+        app_shell_->ribbon()->set_quick_access_actions(qat);
+    }
+    app_shell_->set_ribbon_persistence(
+        [this](const std::string& key) -> std::optional<std::string> {
+            if (services_settings_ == nullptr) return std::nullopt;
+            const QVariant value = services_settings_->value(
+                QString::fromStdString("ribbon/" + key));
+            if (!value.isValid()) return std::nullopt;
+            return value.toString().toStdString();
+        },
+        [this](const std::string& key, const std::string& value) {
+            if (services_settings_ == nullptr) return;
+            services_settings_->setValue(
+                QString::fromStdString("ribbon/" + key),
+                QString::fromStdString(value));
+        });
+    connect(app_shell_, &AppShell::exit_requested, this,
+            [this] { close(); });
 
 // BEGIN CLOSURE-SCIENCE (line 03) — production science/prediction page
 // binding: the well-log + seismic prediction pages receive the
@@ -807,6 +936,63 @@ void MainWindow::wire_app_shell() {
 }
 #endif
 
+#ifdef PWB_WITH_APP_SHELL
+void MainWindow::wire_ribbon_commands() {
+    if (app_shell_ == nullptr || app_shell_->ribbon() == nullptr) return;
+    auto* ribbon = app_shell_->ribbon();
+
+    // -- governed QAction bindings (D4: the SAME QAction objects the
+    // menus/shortcuts reuse — bound buttons follow policy enablement).
+    ribbon->set_command_action(QStringLiteral("map.select"),
+                               governedAction(QStringLiteral("select")));
+    ribbon->set_command_action(QStringLiteral("map.edit_facies"),
+                               governedAction(
+                                   QStringLiteral("toggle_editing")));
+    ribbon->set_command_action(QStringLiteral("map.export"),
+                               governedAction(QStringLiteral("map_export")));
+
+    // -- D8 disabled-reason channel: the registry verdict under the LIVE
+    // session snapshot (no project / no write / stage gates / busy all
+    // surface as concrete Chinese reasons through the ribbon tooltips).
+    ribbon->set_command_evaluator(
+        [this](const std::string& command_id) -> pwb::ui_ribbon::CommandState {
+            auto& registry = pwb::ui_shell::command_registry();
+            if (registry.get(command_id) == nullptr) return {true, ""};
+            const pwb::tool_policy::ToolContextSnapshot snapshot =
+                context_.session().snapshot();
+            palette_context_ = pwb::ui_shell::CommandContext();
+            palette_context_.write_granted = snapshot.write_granted;
+            palette_context_.mapping_stage = snapshot.mapping_stage;
+            const auto verdict = registry.evaluate(command_id, &palette_context_);
+            return {verdict.enabled, verdict.reason};
+        });
+
+    // -- the full file menu (R:20): same handlers as the native 文件 menu,
+    // MRU rides the same settings store (refreshRecentProjects fills both).
+    // No shortcuts here on purpose: the native menu bar carries the
+    // canonical key bindings (Ctrl+N/O/Q…) — a second binding would make
+    // them ambiguous; the ribbon file button is a mouse surface.
+    auto* file = new QMenu(app_shell_);
+#ifdef PWB_WITH_DATA_INTEGRATION
+    file->addAction(tr("新建工程…"), this, [this] { newProjectDialog(); });
+    file->addAction(tr("打开工程…"), this, [this] { openProjectDialog(); });
+    file->addAction(tr("保存工程"), this, [this] { saveProjectRequested(); });
+    file->addAction(tr("打开样例工程"), this,
+                    [this] { openSampleProjectRequested(); });
+    file->addSeparator();
+    file->addAction(tr("工程属性…"), this,
+                    [this] { showProjectProperties(); });
+    file->addSeparator();
+#endif
+    ribbon_recent_menu_ = new QMenu(tr("最近工程(&R)"), file);
+    file->addMenu(ribbon_recent_menu_);
+    file->addSeparator();
+    file->addAction(tr("退出"), this, [this] { close(); });
+    ribbon->set_file_menu(file);
+    refreshRecentProjects();
+}
+#endif
+
 void MainWindow::buildMenusAndToolbar() {
     // Actions materialize from the policy vocabulary; labels/shortcuts are
     // presentation, enablement/visibility/checked stay policy-derived.
@@ -894,6 +1080,18 @@ void MainWindow::buildMenusAndToolbar() {
     edit_menu->addAction(actions_.action("toggle_editing"));
     edit_menu->addSeparator();
     edit_menu->addAction(actions_.action("vertex"));
+#ifdef PWB_WITH_CONV_27
+    // M4 (R:20): the retired 地图工具 toolbar's edit tools live here now —
+    // the same governed QActions (also bound into the ws3 ribbon band), no
+    // command lost, no parallel actions.
+    edit_menu->addSeparator();
+    edit_menu->addAction(actions_.action("select"));
+    edit_menu->addAction(actions_.action("add_point"));
+    edit_menu->addAction(actions_.action("add_line"));
+    edit_menu->addAction(actions_.action("add_polygon"));
+    edit_menu->addAction(actions_.action("delete_selected"));
+#endif
+    edit_menu->addSeparator();
     edit_menu->addAction(actions_.action("undo"));
     edit_menu->addAction(actions_.action("redo"));
     edit_menu->addSeparator();
@@ -963,32 +1161,10 @@ void MainWindow::buildMenusAndToolbar() {
     geology_menu->addAction(actions_.action("factor_workbench"));
 #endif
 
-    auto* toolbar = addToolBar(tr("地图工具"));
-    toolbar->setObjectName(QStringLiteral("map-toolbar"));
-    toolbar->addAction(actions_.action("reference_import"));
-    toolbar->addAction(actions_.action("layer_new"));
-    toolbar->addSeparator();
-    toolbar->addAction(actions_.action("pan"));
-    toolbar->addAction(actions_.action("zoom_in"));
-    toolbar->addAction(actions_.action("zoom_out"));
-    toolbar->addAction(actions_.action("full_extent"));
-    toolbar->addSeparator();
-    toolbar->addAction(actions_.action("toggle_editing"));
-    toolbar->addAction(actions_.action("vertex"));
-#ifdef PWB_WITH_CONV_27
-    toolbar->addAction(actions_.action("select"));
-    toolbar->addAction(actions_.action("add_point"));
-    toolbar->addAction(actions_.action("add_line"));
-    toolbar->addAction(actions_.action("add_polygon"));
-    toolbar->addAction(actions_.action("delete_selected"));
-    toolbar->addSeparator();
-#endif
-    toolbar->addAction(actions_.action("undo"));
-    toolbar->addAction(actions_.action("redo"));
-    toolbar->addAction(actions_.action("save_edits"));
-    toolbar->addAction(actions_.action("rollback"));
-    toolbar->addSeparator();
-    toolbar->addAction(actions_.action("map_export"));
+    // M4 (R:20): the 地图工具 toolbar RETIRES — every action it carried
+    // stays reachable through the menus (view/edit/file above) and the
+    // ws3 ribbon band (the same governed QActions via set_command_action).
+    // Nothing removed, nothing re-implemented.
 }
 
 void MainWindow::connectActions() {
@@ -1366,6 +1542,13 @@ QString MainWindow::openProject(const QString& project_file) {
     pwb::app::closure_mapping::notify_project_changed(this);
 #endif
 // END CLOSURE-MAPPING
+// BEGIN UI-14 WORKFLOW-WIRING — reopen the catalog rails + rebind the
+// controller against the freshly opened project (after the mapping
+// closure so the shared catalog instance already exists).
+#ifdef PWB_WITH_WORKFLOW_WIRING
+    pwb::app::workflow_wiring::notify_project_changed(this);
+#endif
+// END UI-14 WORKFLOW-WIRING
 
     // Materialize every bound GeoJSON layer as an explicit working copy —
     // the catalog payload file itself is read-only for the shell.
@@ -1375,6 +1558,9 @@ QString MainWindow::openProject(const QString& project_file) {
         context_.setProjectStore(nullptr);
 #ifdef PWB_WITH_CLOSURE_MAPPING
         pwb::app::closure_mapping::notify_project_changed(this);
+#endif
+#ifdef PWB_WITH_WORKFLOW_WIRING
+        pwb::app::workflow_wiring::notify_project_changed(this);
 #endif
         return QString::fromStdString(snapshot.error().message);
     }
@@ -2319,27 +2505,40 @@ void MainWindow::syncThemeMenuChecks() {
 }
 
 void MainWindow::refreshRecentProjects() {
-    if (recent_projects_menu_ == nullptr) return;
-    recent_projects_menu_->clear();
-    if (services_settings_ == nullptr) return;
+    // M4 (R:20): both the native 文件 menu and the ribbon file button carry
+    // the same MRU — one data source (the settings store), two views.
     const QStringList projects =
-        pwb::platform_services::load_recent_projects(*services_settings_);
-    if (projects.isEmpty()) {
-        QAction* empty = recent_projects_menu_->addAction(tr("(暂无最近工程)"));
-        empty->setEnabled(false);
-        return;
-    }
-    for (const QString& project : projects) {
-        QAction* action = recent_projects_menu_->addAction(project);
-        connect(action, &QAction::triggered, this,
-                [this, project]() { openRecentProject(project); });
-    }
-    recent_projects_menu_->addSeparator();
-    recent_projects_menu_->addAction(
-        tr("清除最近工程"), this, [this]() {
-            pwb::platform_services::clear_recent_projects(*services_settings_);
+        services_settings_ == nullptr
+            ? QStringList()
+            : pwb::platform_services::load_recent_projects(*services_settings_);
+    auto fill = [this, &projects](QMenu* menu) {
+        if (menu == nullptr) return;
+        menu->clear();
+        if (projects.isEmpty()) {
+            QAction* empty = menu->addAction(tr("(暂无最近工程)"));
+            empty->setEnabled(false);
+            return;
+        }
+        for (const QString& project : projects) {
+            QAction* action = menu->addAction(project);
+            connect(action, &QAction::triggered, this,
+                    [this, project]() { openRecentProject(project); });
+        }
+        menu->addSeparator();
+        menu->addAction(tr("清除最近工程"), this, [this]() {
+            if (services_settings_ != nullptr) {
+                pwb::platform_services::clear_recent_projects(
+                    *services_settings_);
+            }
             refreshRecentProjects();
         });
+    };
+    fill(recent_projects_menu_);
+#ifdef PWB_WITH_APP_SHELL
+    // M4: the ribbon file button carries the same MRU (one data source,
+    // two views). Absent in reduced builds (no ribbon, no member).
+    fill(ribbon_recent_menu_);
+#endif
 }
 
 void MainWindow::openRecentProject(const QString& project_file) {
@@ -2459,6 +2658,28 @@ QString MainWindow::loadLasIntoDock(const QString& las_path) {
     if (!host->load_las(las_path, &error)) {
         return error.isEmpty() ? QStringLiteral("load failed") : error;
     }
+    // M3 (P0-1): the same LAS loads into the ws1 bottom 测井轨道 pane —
+    // one file authority, a second VIEW of it (a pane failure is reported
+    // on the status bar, never silently swallowed). The host is
+    // moc-free — resolve through its QWidget identity + object name.
+#ifdef PWB_WITH_APP_SHELL
+    if (app_shell_ != nullptr) {
+        QWidget* found = app_shell_->findChild<QWidget*>(
+            QStringLiteral("WorkspaceWellPane"));
+        auto* pane = static_cast<pwb::viz::WellLogHostWidget*>(
+            found != nullptr && found != host ? found : nullptr);
+        if (pane != nullptr) {
+            QString pane_error;
+            if (!pane->load_las(las_path, &pane_error)) {
+                statusBar()->showMessage(
+                    tr("底部测井窗格载入失败：%1")
+                        .arg(pane_error.isEmpty() ? QStringLiteral("未知错误")
+                                                  : pane_error),
+                    8000);
+            }
+        }
+    }
+#endif  // PWB_WITH_APP_SHELL
     return QString();
 }
 #endif
@@ -2483,6 +2704,33 @@ std::vector<std::string> MainWindow::volumeVersionIds() const {
         }
     }
     return ids;
+}
+
+void MainWindow::routeVolumeToWorkspacePanes(
+    const std::shared_ptr<pwb::viz::ISeismicVolume>& volume,
+    const std::string& version_id) {
+#ifdef PWB_WITH_APP_SHELL
+    if (app_shell_ == nullptr || volume == nullptr) return;
+    for (const char* name :
+         {"WorkspaceSeismicPane", "ValidationSeismicPane"}) {
+        // The slice widget is moc-free (Q_OBJECT assert) — resolve the
+        // pane through its QWidget identity + object name, then cast.
+        QWidget* found =
+            app_shell_->findChild<QWidget*>(QString::fromLatin1(name));
+        auto* pane =
+            found != nullptr
+                ? static_cast<pwb::seismic_viewer::SeismicSliceWidget*>(found)
+                : nullptr;
+        if (pane != nullptr && pane != slice_widget_) {
+            pane->set_volume(volume,
+                             pwb::seismic_viewer::VolumeIdentity{version_id, 0},
+                             ++slice_revision_);
+        }
+    }
+#else
+    (void)volume;
+    (void)version_id;
+#endif  // PWB_WITH_APP_SHELL
 }
 
 QString MainWindow::openVolumeVersion(const std::string& version_id) {
@@ -2512,6 +2760,7 @@ QString MainWindow::openVolumeVersion(const std::string& version_id) {
             slice_widget_->set_volume(
                 opened.volume, pwb::seismic_viewer::VolumeIdentity{version_id, 0},
                 ++slice_revision_);
+            routeVolumeToWorkspacePanes(opened.volume, version_id);
             seismic_dock_->show();
             seismic_dock_->raise();
             statusBar()->showMessage(
@@ -2565,6 +2814,7 @@ QString MainWindow::openVolumeVersion(const std::string& version_id) {
         slice_widget_->set_volume(
             volume, pwb::seismic_viewer::VolumeIdentity{version_id, 0},
             ++slice_revision_);
+        routeVolumeToWorkspacePanes(volume, version_id);
         seismic_dock_->show();
         seismic_dock_->raise();
         statusBar()->showMessage(
@@ -3564,7 +3814,13 @@ void MainWindow::resetLayoutState() {
 // runtime tree authority through QgsLayerTreeStack.
 void MainWindow::applyLayerControlForOpen() {
     pwb::application::PwbDataStore* store = context_.projectStore().get();
-    if (store == nullptr) return;
+    if (store == nullptr) {
+        // Closed/no project: the workspace pointers from the previous
+        // open are dangling — never leave them on the window.
+        setProperty("pwb.layer_workspace", QVariant());
+        setProperty("pwb.layer_groups", QVariant());
+        return;
+    }
     pwb::domain::DiagnosticList diagnostics;
     // Const read (the non-const mapping_workspace() would materialize an
     // empty section into the document on every open).
@@ -3583,6 +3839,16 @@ void MainWindow::applyLayerControlForOpen() {
     layer_stage_ =
         std::make_unique<pwb::ui_composite::LayerStageController>(
             *layer_workspace_, *layer_groups_);
+    // Composition-root access (stage-action orchestration mutates the
+    // SAME live state the save path persists — a second authority would
+    // be clobbered by syncLayerControlOnSave). Same property pattern as
+    // closure_factor_catalog: raw pointer rebound per project open.
+    setProperty("pwb.layer_workspace",
+                QVariant::fromValue(
+                    static_cast<void*>(layer_workspace_.get())));
+    setProperty("pwb.layer_groups",
+                QVariant::fromValue(
+                    static_cast<void*>(layer_groups_.get())));
     // Target model probes read the runtime map back (the canvas current
     // layer stays the fact; drift is reported, never papered over).
     layer_targets_ = std::make_unique<pwb::ui_composite::LayerTargets>();

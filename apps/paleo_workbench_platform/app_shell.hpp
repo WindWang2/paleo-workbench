@@ -1,21 +1,42 @@
 #pragma once
 
 // AppShell — the page-navigation composition root (W5/UI-17), port of
-// paleo_workbench/ui/app_shell.py's assembly contract:
+// paleo_workbench/ui/app_shell.py's assembly contract, M2-restructured per
+// docs/development/ribbon-five-workspaces/00-plan.md (D1/D2):
 //
-//   outer layout: WorkstationFrame (internal QMainWindow dock host)
-//   WorkstationFrame.central = CompositeDocument (编图文档: 宿主注入画布)
-//   "hub" dock            = scroll-wrapped AdaptivePageStack (5 hubs, real
-//                         pages; 功能页 dock — Python HubScrollArea parity)
+//   outer layout: RibbonBar (five-workspace tabs + command bands) over
+//                 WorkstationFrame (internal QMainWindow dock host)
+//   WorkstationFrame.central = WorkspaceHostWidget (QStackedWidget, 3 pages)
+//     page 0 数据管理  = the hub-0 assembly (概述 pill + the adopted
+//                      composed data page) — moved OUT of the hub dock
+//     page 1 科学宿主 = 65:35 QSplitter: CompositeDocument (宿主注入画布)
+//                      over the per-stage bottom stack (M3: ws1 地震+测井
+//                      两联 / ws2 连井剖面+数据制备 / ws3 单因素参考带);
+//                      workspaces 1/2/3 share this ONE QGIS canvas authority
+//     page 2 验证     = ValidationWorkspacePage (M3, D5): 只读对照画布 +
+//                      地震剖面 + QcIssueTable + InteractiveQCHub 定位
+//   "hub" dock            = scroll-wrapped AdaptivePageStack (legacy
+//                          vocabulary intact: slot 0 carries a migrated
+//                          notice; well/seismic/viz/preparation stay
+//                          reachable until M3)
 //   composite_* docks     = CompositeDocument's own sub-panels
 //   mapping_stage dock    = CompositeDocument's stage panel
 //   nav/inspector/tasks/logs/console/agent = UI-12 default panels
 //
-// Navigation: explorer.navigation_requested -> navigate_to (flush deferred
-// bindings, hub switch, hub dock show+raise — Python activate_legacy /
-// show_hub_page parity). Ctrl+K opens the CommandPalette over the global
-// CommandRegistry; 1..5 / Alt+1..3 hub/submodule shortcuts come from the
-// central ShortcutRegistry like Python.
+// Navigation (M2): the FIVE WORKSPACES are the top-level axis. User intent
+// (ribbon tab, digit shortcuts 1..5, nav.workspace.* commands) enters
+// navigate_workspace(int); stage-backed workspaces (1/2/3) ALSO write the
+// stage authority through the host-injected stage_apply seam (single write
+// path: MainWindow::applyStageValue). Legacy callers (explorer cards,
+// workflow pages.navigate_to) keep navigate_to(hub, subkey) — internally a
+// ROUTING table onto workspaces or the legacy hub dock, never a second
+// navigation implementation (F:27). Stage changes from other writers sync
+// the ribbon tab back only while the science host page is current (D1:
+// 数据管理/验证 never rewrite the stage).
+//
+// Ctrl+K opens the CommandPalette over the global CommandRegistry; the
+// ribbon command search button and the ribbon's unbound placeholder
+// buttons evaluate availability through the same registry.
 //
 // Service seams stay host-injected (DataPageServices / PrepareBackend /
 // JointHost / preview providers …). Where a real adapter exists the window
@@ -24,12 +45,18 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <QString>
+#include <QStackedWidget>
 #include <QWidget>
 
 #include <pwb/ui_shell/deferred_page_bindings.hpp>
+
+class QShowEvent;
+class QSplitter;
+class QTabWidget;
 
 namespace pwb::ui_composite {
 class CompositeDocument;
@@ -59,6 +86,9 @@ class MappingPage;
 namespace pwb::ui_review::qt {
 class ReviewExportPage;
 }
+namespace pwb::ui_ribbon::qt {
+class RibbonBar;
+}
 namespace pwb::ui_shell {
 class AdaptivePageStack;
 class CommandPalette;
@@ -69,6 +99,28 @@ class WorkstationFrame;
 }
 
 namespace pwb::app {
+
+class ValidationWorkspacePage;
+
+// Central workspace stack (D2). Three pages, fixed order: 数据管理 /
+// 科学宿主 (workspaces 1/2/3 share it) / 验证. A plain QStackedWidget
+// subclass so tests and the host can address it by type.
+class WorkspaceHostWidget : public QStackedWidget {
+    Q_OBJECT
+public:
+    static constexpr int kPageData = 0;
+    static constexpr int kPageScience = 1;
+    static constexpr int kPageValidation = 2;
+
+    explicit WorkspaceHostWidget(QWidget* parent = nullptr);
+};
+
+// The per-stage bottom stack inside the science host (M3, D2): index 0 =
+// 智能预测 bottom (地震剖面 + 测井轨道两联), 1 = 约束与单因素 bottom
+// (连井剖面 + 数据制备 tabs), 2 = 综合编图 bottom (单因素参考缩略图带).
+// Only the current stage's page is shown — the flip rides the stage
+// authority (navigate_workspace + sync_workspace_for_stage).
+inline constexpr int kStageBottomCount = 3;
 
 class AppShell : public QWidget {
     Q_OBJECT
@@ -88,9 +140,45 @@ public:
     // bound). uses_native_stack mirrors CompositeDocument::set_canvas.
     void install_canvas(QWidget* canvas, bool uses_native_stack = false);
 
-    // Python navigate_to parity: flush deferred bindings for the hub,
-    // switch the stack + in-hub submodule, dismiss the palette, then
-    // show/raise the 功能页 dock titled after the submodule.
+    // ---- M2: five-workspace navigation authority ----------------------------
+    // User-intent entry (ribbon tab click, digit shortcuts, commands).
+    // Workspace 0 → data page; 1/2/3 → the science host page AND the stage
+    // authority write (through the injected stage_apply seam — absent seam
+    // keeps the page switch honest in reduced builds); 4 → validation page.
+    // 数据管理/验证 NEVER rewrite the stage (D1).
+    void navigate_workspace(int workspace_index);
+
+    // Reverse sync (D1): called by the host when the stage authority changed
+    // through another writer (stage.goto command, StageDock, restore). Only
+    // syncs the ribbon tab while the science host page is current; the
+    // signal is blocked so no workspaceActivated loop can form.
+    void sync_workspace_for_stage(const std::string& stage_value);
+
+    // Host-injected seams (bound by the platform install; absent = honest
+    // no-op, never a fabricated authority):
+    //  - stage write for workspaces 1/2/3 (routes to
+    //    MainWindow::applyStageValue in the product).
+    //  - presentation projection for workspaces 0/4 (StageFlowController::
+    //    apply_presentation — the extended StageLayoutProfile machinery).
+    void set_stage_apply(std::function<void(const std::string&)> seam);
+    void set_presentation_apply(std::function<void(const std::string&)> seam);
+
+    // Ribbon persistence (D7): (PaleoWorkbench, Workstation) QSettings
+    // "ribbon/" keys through the host's services store. Null sinks = the
+    // shell runs unpersisted (reduced hosts/tests stay inert).
+    void set_ribbon_persistence(
+        std::function<std::optional<std::string>(const std::string& key)> load,
+        std::function<void(const std::string& key, const std::string& value)>
+            save);
+    // Called by the host AFTER the settings store is bound (the shell is
+    // constructed before the window's services store exists): restores the
+    // ribbon mode + current workspace, then navigates (default 数据管理).
+    void restore_ribbon_state();
+
+    // Legacy hub-axis seam (Python navigate_to parity, M2 routing table):
+    // hub 0 → workspace 0; 编图 canvas → workspace 3, review → workspace 4;
+    // everything else (well/seismic/viz/preparation) stays on the 功能页
+    // hub dock with a status notice until M3 migrates it.
     void navigate_to(int hub_index, const QString& submodule_key = {});
     // 功能页 dock show+raise (activate_legacy/show_hub_page parity).
     void show_hub_page(const QString& title);
@@ -109,6 +197,33 @@ public:
     }
     pwb::ui_shell::CommandPalette* command_palette() const {
         return palette_;
+    }
+    // M2 chrome: the five-workspace ribbon and the central workspace stack.
+    pwb::ui_ribbon::qt::RibbonBar* ribbon() const { return ribbon_; }
+    WorkspaceHostWidget* workspace_host() const { return workspace_host_; }
+    // M3 science-host composition (P0): the 65:35 splitter carries the
+    // composite document on top and the per-stage bottom stack below; the
+    // compose install fills each bottom page with the real panels (ws1
+    // 两联 / ws2 连井+制备 / ws3 参考带), honest placeholders until then.
+    QSplitter* science_splitter() const { return science_splitter_; }
+    QStackedWidget* science_bottom() const { return science_bottom_; }
+    // M3 ws2 bottom tabs (连井剖面 | 数据制备) — the compose install adds
+    // the cross-well tab; adopt_preparation_page swaps the 数据制备 tab.
+    QTabWidget* stage_bottom_tabs() const { return stage2_tabs_; }
+    // M5-3 ws1 bottom tabs: [井震两联 | 预测任务(测井预测) | 地震预测] —
+    // the compose install inserts the 两联 split at index 0.
+    QTabWidget* stage1_bottom_tabs() const { return stage1_tabs_; }
+    // M5-2 版式模式 (ws3, F:70): the stage-3 bottom hosts a stack —
+    // index 0 = the default composition (factor reference strip etc.,
+    // untouched), index 1 = the layout-compose panel, visible ONLY in
+    // compose mode. The central canvas splitter never changes.
+    QWidget* stage3_home() const { return stage3_home_; }
+    void set_stage3_compose(QWidget* panel);
+    void set_compose_mode(bool on);
+    bool compose_mode() const { return compose_mode_; }
+    // M3 验证 workspace page (ws4) — the real composition page (P0-4).
+    ValidationWorkspacePage* validation_page() const {
+        return validation_page_;
     }
 
     // Page accessors for host wiring (non-owning).
@@ -175,6 +290,8 @@ signals:
     void properties_requested();
     void preview_settings_requested();
     void about_requested();
+    // Ribbon file-menu exit (the host window owns the close decision).
+    void exit_requested();
     // View-menu requests — the host owns the theme authority.
     void theme_requested(const QString& theme_value);
     void density_requested(const QString& density_value);
@@ -182,17 +299,48 @@ signals:
 
 private:
     void build_pages();
+    void build_workspace_host();
+    void wire_ribbon();
     void wire_workstation();
     void setup_shortcuts();
-    void on_hub_page_activated(int hub_index, const QString& key);
     void handle_workstation_command(const QString& text);
+    void persist_workspace(int workspace_index);
+    // M6: seed the 65:35 canvas:bottom split at first show (construction
+    // time the splitter has no width — setSizes would clamp).
+    void showEvent(QShowEvent* event) override;
+    // M3: flip the science-host bottom stack to the stage's composition
+    // (65:35 splitter above it — sizes stay user-draggable, never reset).
+    void apply_stage_composition(const std::string& stage_value);
+    // M5-2: enter/leave 版式模式 (ws3 bottom stack page 1/0, F:70).
+    void apply_compose_mode();
+    // M5-3: focus a stage/validation bottom (or rail) tab by title.
+    static void focus_stage_tab(QTabWidget* tabs, const QString& title);
 
     pwb::ui_workstation::WorkstationFrame* workstation_ = nullptr;
     pwb::ui_composite::CompositeDocument* composite_ = nullptr;
+    WorkspaceHostWidget* workspace_host_ = nullptr;
+    pwb::ui_ribbon::qt::RibbonBar* ribbon_ = nullptr;
+    QSplitter* science_splitter_ = nullptr;
+    QStackedWidget* science_bottom_ = nullptr;
+    QTabWidget* stage1_tabs_ = nullptr;  // 井震两联 | 预测任务 | 地震预测
+    QTabWidget* stage2_tabs_ = nullptr;  // 连井剖面 | 数据制备 | 地层对比 | 层序格架
+    bool splitter_seeded_ = false;
+    // M5-2 版式模式 (ws3): bottom stack — 0 默认组版 / 1 版式面板。
+    QStackedWidget* stage3_stack_ = nullptr;
+    QWidget* stage3_home_ = nullptr;
+    bool compose_mode_ = false;
+    ValidationWorkspacePage* validation_page_ = nullptr;
     pwb::ui_shell::AdaptivePageStack* page_stack_ = nullptr;
     pwb::ui_shell::StatusBar* status_bar_ = nullptr;
     pwb::ui_shell::CommandPalette* palette_ = nullptr;
     pwb::ui_shell::DeferredPageBindings deferred_;
+
+    // M2 host-injected seams (see the setters above; absent = no-op).
+    std::function<void(const std::string&)> stage_apply_;
+    std::function<void(const std::string&)> presentation_apply_;
+    std::function<std::optional<std::string>(const std::string&)>
+        ribbon_load_;
+    std::function<void(const std::string&, const std::string&)> ribbon_save_;
 
     // Joint-host seam (06): the window injects the real host (owned by
     // the Geo3D dock); without one the fallback stub reports
@@ -205,9 +353,9 @@ private:
         fallback_joint_host_;
 
     pwb::ui_pages_data::qt::HubPage* hub_data_ = nullptr;
-    pwb::ui_pages_data::qt::HubPage* hub_well_ = nullptr;
-    pwb::ui_pages_data::qt::HubPage* hub_seismic_ = nullptr;
-    pwb::ui_pages_data::qt::HubPage* hub_mapping_ = nullptr;
+    // M5-3: hub 轴解散 —— well/seismic/mapping 的 HubPage 外壳已拆除，
+    // 页面直接住在工作区（见 build_workspace_host）；page_stack_ 只
+    // 剩「编图工具」dock 的单页内容（mapping_page_）。
 
     pwb::ui_pages_data::qt::HomePage* home_page_ = nullptr;
     pwb::ui_pages_data::qt::DataWorkspace* data_workspace_ = nullptr;

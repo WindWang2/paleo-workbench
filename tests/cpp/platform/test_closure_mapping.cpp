@@ -13,8 +13,11 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QAction>
+#include <QGraphicsItem>
 #include <QLabel>
 #include <QPointF>
+#include <QPushButton>
 #include <QStackedWidget>
 #include <QVariant>
 #include <qgsapplication.h>
@@ -31,13 +34,18 @@
 #include <unistd.h>
 
 #include <pwb/domain/json.hpp>
+#include <pwb/ui_data_qt/map_edit_items.hpp>
 #include <pwb/ui_pages_data/qt/hub_page.hpp>
 #include <pwb/ui_pages_data/qt/preparation_page.hpp>
 #include <pwb/ui_pages_mapedit/map_edit_scene.hpp>
 #include <pwb/ui_pages_mapedit/map_edit_view.hpp>
+#include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
+#include <pwb/ui_shell/adaptive_page_stack.hpp>
 #include <pwb/ui_seqviz/qt/composition_panel.hpp>
 
 #include "closure_mapping_document.hpp"
+#include "closure_mapping_install.hpp"
+#include "layout_compose_panel.hpp"
 #include "test_framework.hpp"
 
 #ifdef PWB_WITH_APP_SHELL
@@ -251,22 +259,23 @@ int install_battery() {
             != nullptr,
         "closure context not installed");
 
-    // -- preparation: the placeholder is gone, the real page is in --------
-    pwb::ui_pages_data::qt::HubPage* hub_mapping = nullptr;
-    for (auto* hub : shell->findChildren<pwb::ui_pages_data::qt::HubPage*>()) {
-        if (hub->hub_index() == pwb::ui_shell::kPageIndexMapping) {
-            hub_mapping = hub;
-        }
-    }
-    PWB_CHECK(hub_mapping != nullptr);
-    PWB_CHECK(hub_mapping->page("preparation") != nullptr);
-    PWB_CHECK(qobject_cast<pwb::ui_pages_data::qt::PreparationPage*>(
-                  hub_mapping->page("preparation"))
-              != nullptr);
+    // -- preparation: M3 moved it into the ws2 bottom (数据制备 tab) ---------
+    // M5-3: hub 外壳已拆 —— mapping hub 不再存在；mapping_page 住在
+    // 「编图工具」dock（page_stack_ 唯一页）。
+    PWB_CHECK(shell->page_stack() != nullptr);
+    PWB_CHECK(shell->page_stack()->count() == 1);
+    // M3 (P0-2): the real PreparationPage lives in the 约束与单因素 bottom
+    // stack's 数据制备 tab — the hub slot keeps only a legacy route.
+    auto* bottom_tabs = shell->stage_bottom_tabs();
+    PWB_CHECK_MSG(bottom_tabs != nullptr, "stage-2 bottom tabs missing");
+    PWB_CHECK(bottom_tabs->count() >= 1);
+    // M6: the page rides in a BottomTabHost (Ignored policy) so the
+    // 65:35 canvas contract holds — the page itself is inside the host.
     auto* preparation =
-        shell->findChild<pwb::ui_pages_data::qt::PreparationPage*>();
+        bottom_tabs->widget(0)
+            ->findChild<pwb::ui_pages_data::qt::PreparationPage*>();
     PWB_CHECK_MSG(preparation != nullptr,
-                  "PreparationPage not installed into the shell");
+                  "PreparationPage not adopted into the ws2 bottom tab");
     PWB_CHECK_MSG(preparation->objectName()
                       == QStringLiteral("PreparationPage"),
                   "preparation page object name");
@@ -600,6 +609,91 @@ int factor_kernel_battery(QgsApplication& app) {
     return pwb::test::failure_count();
 }
 #endif  // PWB_WITH_FACTOR_KERNEL
+
+// M5-2: 版式轻量页 + 上下文 Ribbon 组（编图场景真实选中驱动）。
+int m5_compose_battery() {
+    MainWindow window;
+    window.show();
+    AppShell* shell = window.appShell();
+    PWB_CHECK_MSG(shell != nullptr, "AppShell missing");
+    auto* bank = pwb::app::closure_mapping::document_bank(&window);
+    PWB_CHECK(bank != nullptr);
+    auto* scene = bank->edit_scene();
+    PWB_CHECK(scene != nullptr);
+    auto* ribbon = shell->ribbon();
+    PWB_CHECK(ribbon != nullptr);
+
+    // 版式面板骑 ws3 底部栈第 2 页：默认组版（参考带）不动。
+    PWB_CHECK(shell->stage3_home() != nullptr);
+    PWB_CHECK(shell->stage3_home()->findChild<QWidget*>(
+                  "FactorReferenceStrip") != nullptr);
+    auto* compose = shell->findChild<pwb::app::LayoutComposePanel*>();
+    PWB_CHECK_MSG(compose != nullptr, "layout compose panel missing");
+    PWB_CHECK(!shell->compose_mode());
+    shell->set_compose_mode(true);
+    PWB_CHECK(shell->compose_mode());
+    shell->set_compose_mode(false);
+    PWB_CHECK(!shell->compose_mode());
+    // 真实模板清单（内置 9 模板）+ 图件整饰四项（图例/指北针/比例尺/标题栏）。
+    PWB_CHECK(compose->template_selector()->count() >= 9);
+    PWB_CHECK(compose->chrome_checks().size() == 4);
+    PWB_CHECK(compose->paper_selector()->count() == 5);
+    // 导出入口复用 governed map_export（同一 QAction，D4）。
+    PWB_CHECK(compose->findChild<QPushButton*>(
+                  QStringLiteral("ComposeExport")) != nullptr);
+
+    // 上下文组：选中 line（约束线）→ ws2/ws3 出现「约束线编辑」。
+    pwb::domain::Json doc = pwb::domain::Json::object();
+    scene->load_document(&doc);
+    const auto line_id = scene->create_feature(pwb::domain::Json{
+        {"id", "ln-1"},
+        {"kind", "line"},
+        {"name", "物源线1"},
+        {"coordinates",
+         pwb::domain::Json::array({pwb::domain::Json::array({0.0, 0.0}),
+                                   pwb::domain::Json::array({5.0, 5.0})})}});
+    PWB_CHECK(line_id.has_value());
+    static_cast<pwb::ui_data_qt::LineItem*>(scene->item_by_id(*line_id))
+        ->setSelected(true);
+    QCoreApplication::processEvents();
+    PWB_CHECK(ribbon->context_group_keys(2).contains(
+        QStringLiteral("constraint")));
+    PWB_CHECK(ribbon->context_group_keys(3).contains(
+        QStringLiteral("constraint")));
+
+    // 改选 label（标注）→ 标注组取代约束线组。
+    for (QGraphicsItem* item : scene->items()) item->setSelected(false);
+    const auto label_id = scene->create_feature(pwb::domain::Json{
+        {"id", "lb-1"},
+        {"kind", "label"},
+        {"name", "注记1"},
+        {"coordinates", pwb::domain::Json::array({1.0, 1.0})}});
+    PWB_CHECK(label_id.has_value());
+    static_cast<pwb::ui_data_qt::LabelItem*>(scene->item_by_id(*label_id))
+        ->setSelected(true);
+    QCoreApplication::processEvents();
+    PWB_CHECK(ribbon->context_group_keys(3).contains(
+        QStringLiteral("annotation")));
+    PWB_CHECK(!ribbon->context_group_keys(2).contains(
+        QStringLiteral("constraint")));
+
+    // 清空选择 → 组消失（R:33 不残留）。
+    for (QGraphicsItem* item : scene->items()) item->setSelected(false);
+    QCoreApplication::processEvents();
+    PWB_CHECK(ribbon->context_group_keys(2).isEmpty());
+    PWB_CHECK(ribbon->context_group_keys(3).isEmpty());
+
+    // 捕捉 QAction 与场景 snap_manager 同一状态（禁止第二份）。
+    auto* snap =
+        shell->findChild<QAction*>(QStringLiteral("FactorSnapToggle"));
+    PWB_CHECK(snap != nullptr);
+    const bool snap_before = scene->snap_enabled();
+    snap->trigger();
+    PWB_CHECK(scene->snap_enabled() == !snap_before);
+    snap->trigger();  // 还原
+    PWB_CHECK(scene->snap_enabled() == snap_before);
+    return pwb::test::failure_count();
+}
 #endif  // PWB_WITH_APP_SHELL
 
 }  // namespace
@@ -613,6 +707,7 @@ int main(int argc, char** argv) {
 #ifdef PWB_WITH_FACTOR_KERNEL
     factor_kernel_battery(app);
 #endif
+    m5_compose_battery();
 #else
     std::fprintf(stdout,
                  "SKIP install battery — PWB_WITH_APP_SHELL not defined\n");

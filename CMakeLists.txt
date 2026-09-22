@@ -601,12 +601,6 @@ if(PWB_BUILD_CONV_27B AND NOT TARGET pwb_mapping_document)
     add_subdirectory(libs/mapping_document)
 endif()
 # END CONV-27B
-# BEGIN CONV-27C (subdirectory) — added after the data and CONV-02 blocks so
-# Pwb::Domain and Pwb::MappingDocument exist when the library configures.
-if(PWB_BUILD_CONV_27C)
-    add_subdirectory(libs/cartography)
-endif()
-# END CONV-27C (subdirectory)
 # CONV-PROVIDERS subdirectory — placed after the mapping kernel/document
 # blocks so Pwb::MappingKernel and Pwb::MappingDocument exist (ALIAS targets
 # must be defined when referenced).
@@ -667,6 +661,15 @@ endif()
 if(PWB_BUILD_CONV_26B)
     add_subdirectory(libs/workflow_runtime)
 endif()
+# BEGIN CONV-27C (subdirectory) — added after the data, CONV-02 and
+# CONV-26B blocks so Pwb::Domain + Pwb::MappingDocument +
+# Pwb::WorkflowRuntime + Pwb::MappingKernel exist when the library
+# configures (the §14 cartographic QA rule set consumes the workflow_runtime
+# delegate inputs/make_issue/catalog seams).
+if(PWB_BUILD_CONV_27C)
+    add_subdirectory(libs/cartography)
+endif()
+# END CONV-27C (subdirectory)
 # BEGIN CONV-32
 # Workflow interpretation domain spine (Qt-free, M7 interpretation core):
 # constraint capabilities + algorithm registry, factor products +
@@ -906,6 +909,15 @@ if(PWB_BUILD_PLATFORM)
     # profiles/preference codec + unified surface state model) with a Qt
     # controller shell; authority stays in ProjectSession/tool_policy.
     add_subdirectory(libs/ui_stageflow)
+    # BEGIN UI-18 — Ribbon 五工作区 chrome (libs/ui_ribbon): Qt-free core
+    # (five-workspace registry, data-driven command group table, three-mode
+    # state machine, host-injected disabled-reason channel) + RibbonBar Qt
+    # shell. M1 only — not wired into the app shell; the composition root
+    # (ribbon_install.cpp) lands with the later milestones. No new option:
+    # the core joins every configuration that resolved Pwb::ToolPolicy, the
+    # _qt target the ones with Qt6::Widgets + the shell slices it binds.
+    add_subdirectory(libs/ui_ribbon)
+    # END UI-18
     # UI-13 — workstation-composite slice: Qt-free composite-editor
     # cores (vector layers/edit sessions, topology, merge, CRS gate,
     # snapping, map tools, controller) + Qt/QGIS shells as they land.
@@ -1039,7 +1051,10 @@ if(TARGET Pwb::ClosureReview AND TARGET pwb-platform)
         apps/paleo_workbench_platform/closure_review_install.cpp
         apps/paleo_workbench_platform/closure_review_install.hpp)
     target_link_libraries(pwb-platform PRIVATE Pwb::ClosureReview)
-    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_REVIEW=1)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_REVIEW=1
+        # M5: the validation gaps install + the closure_review-backed
+        # review-record persistence (both ride this link closure).
+        PWB_WITH_M5_VALIDATION=1 PWB_WITH_M5_CLOSURE_REVIEW=1)
 endif()
 # END CLOSURE-REVIEW
 
@@ -1198,13 +1213,26 @@ if(TARGET pwb-platform
    AND TARGET Pwb::UiWorkstationQt AND TARGET Pwb::UiCompositeQt
    AND TARGET Pwb::UiShellQt AND TARGET Pwb::UiPagesDataQt
    AND TARGET Pwb::UiMapQgis AND TARGET Pwb::UiReviewQt
-   AND TARGET Pwb::UiSeqvizQt AND TARGET Pwb::UiWellseisQt)
+   AND TARGET Pwb::UiSeqvizQt AND TARGET Pwb::UiWellseisQt
+   AND TARGET Pwb::UiRibbonQt)
     target_sources(pwb-platform PRIVATE
-        apps/paleo_workbench_platform/app_shell.cpp)
+        apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/validation_workspace_page.cpp
+        apps/paleo_workbench_platform/factor_reference_strip.cpp
+        apps/paleo_workbench_platform/workspace_compose.cpp
+        apps/paleo_workbench_platform/ribbon_command_install.cpp
+        apps/paleo_workbench_platform/comparison_view.cpp
+        apps/paleo_workbench_platform/review_disposition_panel.cpp
+        apps/paleo_workbench_platform/m5_validation_install.cpp
+        apps/paleo_workbench_platform/layout_compose_panel.cpp
+        apps/paleo_workbench_platform/layout_compose_panel.hpp
+        apps/paleo_workbench_platform/m5_compose_install.cpp
+        apps/paleo_workbench_platform/data_lineage_panel.cpp
+        apps/paleo_workbench_platform/m5_data_install.cpp)
     target_link_libraries(pwb-platform PRIVATE
         Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
         Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt Pwb::UiSeqvizQt
-        Pwb::UiWellseisQt)
+        Pwb::UiWellseisQt Pwb::UiRibbonQt Pwb::UiWidgets)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_APP_SHELL=1)
     if(BUILD_TESTING)
         # App-shell wiring battery: the full shell path compiles the real
@@ -1216,7 +1244,16 @@ if(TARGET pwb-platform
             apps/paleo_workbench_platform/main_window.cpp
             apps/paleo_workbench_platform/app_context.cpp
             apps/paleo_workbench_platform/diagnostics.cpp
-            apps/paleo_workbench_platform/app_shell.cpp)
+            apps/paleo_workbench_platform/app_shell.cpp
+            apps/paleo_workbench_platform/validation_workspace_page.cpp
+            apps/paleo_workbench_platform/factor_reference_strip.cpp
+            apps/paleo_workbench_platform/workspace_compose.cpp
+            apps/paleo_workbench_platform/ribbon_command_install.cpp
+            apps/paleo_workbench_platform/comparison_view.cpp
+            apps/paleo_workbench_platform/review_disposition_panel.cpp
+            apps/paleo_workbench_platform/m5_validation_install.cpp
+            apps/paleo_workbench_platform/data_lineage_panel.cpp
+            apps/paleo_workbench_platform/m5_data_install.cpp)
         if(COMMAND pwb_link_job_runtime)
             pwb_link_job_runtime(platform_app_shell)
         endif()
@@ -1231,7 +1268,8 @@ if(TARGET pwb-platform
             Pwb::PlatformServices
             Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
             Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
-            Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+            Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
+            Pwb::UiWidgets)
         target_compile_definitions(platform_app_shell PRIVATE
             PWB_WITH_APP_SHELL=1
             PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
@@ -1276,7 +1314,16 @@ if(TARGET pwb-platform
                 apps/paleo_workbench_platform/app_context.cpp
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
-                apps/paleo_workbench_platform/stage_flow_install.cpp)
+                apps/paleo_workbench_platform/stage_flow_install.cpp
+                apps/paleo_workbench_platform/validation_workspace_page.cpp
+                apps/paleo_workbench_platform/factor_reference_strip.cpp
+                apps/paleo_workbench_platform/workspace_compose.cpp
+                apps/paleo_workbench_platform/ribbon_command_install.cpp
+                apps/paleo_workbench_platform/comparison_view.cpp
+                apps/paleo_workbench_platform/review_disposition_panel.cpp
+                apps/paleo_workbench_platform/m5_validation_install.cpp
+                apps/paleo_workbench_platform/data_lineage_panel.cpp
+                apps/paleo_workbench_platform/m5_data_install.cpp)
             if(COMMAND pwb_link_job_runtime)
                 pwb_link_job_runtime(platform_three_stage_flow)
             endif()
@@ -1293,7 +1340,8 @@ if(TARGET pwb-platform
                 Pwb::PlatformServices Pwb::UiStageflowQt
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
                 Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
-                Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
+                Pwb::UiWidgets)
             target_compile_definitions(platform_three_stage_flow PRIVATE
                 PWB_WITH_APP_SHELL=1
                 PWB_WITH_STAGE_FLOW=1
@@ -1346,7 +1394,16 @@ if(TARGET pwb-platform
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
                 apps/paleo_workbench_platform/shell_project_actions.cpp
-                apps/paleo_workbench_platform/closure_review_install.cpp)
+                apps/paleo_workbench_platform/closure_review_install.cpp
+                apps/paleo_workbench_platform/validation_workspace_page.cpp
+                apps/paleo_workbench_platform/factor_reference_strip.cpp
+                apps/paleo_workbench_platform/workspace_compose.cpp
+                apps/paleo_workbench_platform/ribbon_command_install.cpp
+                apps/paleo_workbench_platform/comparison_view.cpp
+                apps/paleo_workbench_platform/review_disposition_panel.cpp
+                apps/paleo_workbench_platform/m5_validation_install.cpp
+                apps/paleo_workbench_platform/data_lineage_panel.cpp
+                apps/paleo_workbench_platform/m5_data_install.cpp)
             # END V14-COMPILATION-PUBLISH
             if(COMMAND pwb_link_job_runtime)
                 pwb_link_job_runtime(platform_closure_review_install)
@@ -1364,10 +1421,13 @@ if(TARGET pwb-platform
                 Pwb::PlatformServices Pwb::Data Pwb::ClosureReview
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
                 Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
-                Pwb::UiSeqvizQt Pwb::UiWellseisQt)
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
+                Pwb::UiWidgets)
             target_compile_definitions(platform_closure_review_install PRIVATE
                 PWB_WITH_APP_SHELL=1
                 PWB_WITH_CLOSURE_REVIEW=1
+                PWB_WITH_M5_VALIDATION=1
+                PWB_WITH_M5_CLOSURE_REVIEW=1
                 PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
             add_test(NAME platform.closure_review_install
                      COMMAND platform_closure_review_install)
@@ -1383,7 +1443,8 @@ elseif(PWB_BUILD_PLATFORM AND TARGET pwb-platform)
         "UI-17: app_shell skipped — needs Pwb::UiWorkstationQt + "
         "Pwb::UiCompositeQt + Pwb::UiShellQt + Pwb::UiPagesDataQt + "
         "Pwb::UiMapQgis + Pwb::UiReviewQt + Pwb::UiSeqvizQt + "
-        "Pwb::UiWellseisQt; the direct-canvas shell remains")
+        "Pwb::UiWellseisQt + Pwb::UiRibbonQt; the direct-canvas shell "
+        "remains")
 endif()
 
 # END UI-17
@@ -1698,6 +1759,53 @@ if(TARGET pwb-platform
     endif()
     # END V14-FACTOR
 
+    # BEGIN UI-14 WORKFLOW-WIRING — the composition root that instantiates
+    # qt::WorkflowController, binds every seam bag to the real services
+    # (workflow_runtime + closure_workflow compilers + the SHARED factor
+    # grid store/catalog rail the mapping closure owns) and routes the
+    # composite stage actions + factor-shelf signals. Compiles only with
+    # the full closure above; a reduced configure keeps the pages working
+    # through their own install paths (honest seam-absent degrade).
+    # cpp-close-01 catalog/project closure — relocated verbatim from
+    # apps/paleo_workbench_platform/CMakeLists.txt: the TARGET probe there
+    # evaluated before libs/ui_controllers (root line ~1084) existed, so
+    # the slice silently never joined the build. Post-hoc target_sources
+    # like the CLOSURE-REVIEW block above.
+    if(PWB_BUILD_CATALOG_CLOSURE
+            AND TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore
+            AND TARGET Pwb::Catalog AND TARGET Pwb::Project)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/closure_catalog_service.cpp
+            apps/paleo_workbench_platform/closure_catalog_install.cpp)
+        target_link_libraries(pwb-platform PRIVATE
+            Pwb::UiControllers Pwb::UiDataCore Pwb::Catalog Pwb::Project)
+        # ICatalogApi is a Qt-free header; the seam is consumed via the
+        # include path only (no link dep on the Qt-side ui_review library).
+        target_include_directories(pwb-platform PRIVATE
+            ${CMAKE_SOURCE_DIR}/libs/ui_review/include)
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_CATALOG_CLOSURE=1)
+    endif()
+    # END cpp-close-01 (relocated)
+    if(TARGET Pwb::UiControllersQt AND TARGET Pwb::UiWorkstationQt
+       AND TARGET Pwb::UiReviewQt AND TARGET Pwb::WorkflowRuntime)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/workflow_install.cpp
+            apps/paleo_workbench_platform/workflow_install.hpp)
+        target_link_libraries(pwb-platform PRIVATE
+            Pwb::UiControllers Pwb::UiControllersQt
+            Pwb::UiWorkstationQt Pwb::UiReviewQt Pwb::WorkflowRuntime)
+        # The compile/product services join when the closure_workflow
+        # slice is in this configure (PWB_BUILD_CPP_CLOSE_02); without it
+        # the seams stay unset and the core degrades honestly.
+        if(TARGET Pwb::ClosureWorkflow)
+            target_link_libraries(pwb-platform PRIVATE Pwb::ClosureWorkflow)
+        endif()
+        target_compile_definitions(pwb-platform PRIVATE
+            PWB_WITH_WORKFLOW_WIRING=1)
+    endif()
+    # END UI-14 WORKFLOW-WIRING
+
     # BEGIN V14-COMPILATION-PUBLISH — baseline link fix: main_window.cpp
     # references shell_project_actions (12-line #1421 surface) but this
     # test target's source list never carried the TU, so the target could
@@ -1711,7 +1819,19 @@ if(TARGET pwb-platform
         apps/paleo_workbench_platform/diagnostics.cpp
         apps/paleo_workbench_platform/shell_project_actions.cpp
         apps/paleo_workbench_platform/closure_mapping_document.cpp
-        apps/paleo_workbench_platform/closure_mapping_install.cpp)
+        apps/paleo_workbench_platform/closure_mapping_install.cpp
+        apps/paleo_workbench_platform/validation_workspace_page.cpp
+        apps/paleo_workbench_platform/factor_reference_strip.cpp
+        apps/paleo_workbench_platform/workspace_compose.cpp
+        apps/paleo_workbench_platform/ribbon_command_install.cpp
+        apps/paleo_workbench_platform/comparison_view.cpp
+        apps/paleo_workbench_platform/review_disposition_panel.cpp
+        apps/paleo_workbench_platform/m5_validation_install.cpp
+        apps/paleo_workbench_platform/data_lineage_panel.cpp
+        apps/paleo_workbench_platform/m5_data_install.cpp
+        apps/paleo_workbench_platform/layout_compose_panel.cpp
+        apps/paleo_workbench_platform/layout_compose_panel.hpp
+        apps/paleo_workbench_platform/m5_compose_install.cpp)
     # END V14-COMPILATION-PUBLISH
     pwb_link_job_runtime(platform_closure_mapping)
     set_target_properties(platform_closure_mapping PROPERTIES AUTOMOC ON)
@@ -1725,7 +1845,7 @@ if(TARGET pwb-platform
         Pwb::PlatformServices Pwb::JobQt
         Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
         Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
-        Pwb::UiSeqvizQt Pwb::UiWellseisQt
+        Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt Pwb::UiWidgets
         Pwb::UiPagesMapedit Pwb::UiSeqviz Pwb::UiWellseis
         Pwb::UiWorkers Pwb::MappingDocument Pwb::Project
         Pwb::VizCharts)
@@ -1749,6 +1869,74 @@ if(TARGET pwb-platform
     set_tests_properties(platform.closure_mapping PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+
+    # M6 — ribbon visual/QA harness (plan 00-plan.md §4-M6): offscreen
+    # captures the acceptance matrix into the build-tree evidence dir and
+    # hard-gates the §5 structural contract. Same closure as this block;
+    # runs twice (100% / QT_SCALE_FACTOR=1.5 DPI sweep).
+    add_executable(platform_ribbon_visual
+        tests/cpp/platform/test_ribbon_visual.cpp
+        apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/main_window.cpp
+        apps/paleo_workbench_platform/app_context.cpp
+        apps/paleo_workbench_platform/diagnostics.cpp
+        apps/paleo_workbench_platform/shell_project_actions.cpp
+        apps/paleo_workbench_platform/closure_mapping_document.cpp
+        apps/paleo_workbench_platform/closure_mapping_install.cpp
+        apps/paleo_workbench_platform/validation_workspace_page.cpp
+        apps/paleo_workbench_platform/factor_reference_strip.cpp
+        apps/paleo_workbench_platform/workspace_compose.cpp
+        apps/paleo_workbench_platform/ribbon_command_install.cpp
+        apps/paleo_workbench_platform/comparison_view.cpp
+        apps/paleo_workbench_platform/review_disposition_panel.cpp
+        apps/paleo_workbench_platform/m5_validation_install.cpp
+        apps/paleo_workbench_platform/data_lineage_panel.cpp
+        apps/paleo_workbench_platform/m5_data_install.cpp
+        apps/paleo_workbench_platform/layout_compose_panel.cpp
+        apps/paleo_workbench_platform/layout_compose_panel.hpp
+        apps/paleo_workbench_platform/m5_compose_install.cpp)
+    pwb_link_job_runtime(platform_ribbon_visual)
+    set_target_properties(platform_ribbon_visual PROPERTIES AUTOMOC ON)
+    target_compile_features(platform_ribbon_visual PRIVATE cxx_std_20)
+    target_include_directories(platform_ribbon_visual PRIVATE
+        tests/cpp/platform
+        apps/paleo_workbench_platform
+        ${CMAKE_BINARY_DIR}/generated)
+    target_link_libraries(platform_ribbon_visual PRIVATE
+        Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+        Pwb::PlatformServices Pwb::JobQt
+        Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+        Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt Pwb::UiWidgets
+        Pwb::UiPagesMapedit Pwb::UiSeqviz Pwb::UiWellseis
+        Pwb::UiWorkers Pwb::MappingDocument Pwb::Project
+        Pwb::VizCharts)
+    target_compile_definitions(platform_ribbon_visual PRIVATE
+        PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform"
+        PWB_WITH_APP_SHELL=1 PWB_WITH_CLOSURE_MAPPING=1)
+    if(PWB_BUILD_CONV_05 AND PWB_BUILD_CONV_18
+       AND TARGET Pwb::FactorHost AND TARGET Pwb::WorkflowRuntime)
+        target_sources(platform_ribbon_visual PRIVATE
+            apps/paleo_workbench_platform/factor_prepare_production.cpp)
+        target_link_libraries(platform_ribbon_visual PRIVATE
+            Pwb::FactorHost Pwb::WorkflowRuntime Pwb::MappingKernel)
+        target_compile_definitions(platform_ribbon_visual PRIVATE
+            PWB_WITH_FACTOR_KERNEL=1)
+    endif()
+    set(PWB_RIBBON_VISUAL_EVIDENCE
+        "${CMAKE_BINARY_DIR}/visual-evidence/ribbon")
+    add_test(NAME platform.ribbon_visual
+             COMMAND platform_ribbon_visual ${PWB_RIBBON_VISUAL_EVIDENCE})
+    set_tests_properties(platform.ribbon_visual PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+    add_test(NAME platform.ribbon_visual_dpi15
+             COMMAND platform_ribbon_visual ${PWB_RIBBON_VISUAL_EVIDENCE}-dpi15)
+    set_tests_properties(platform.ribbon_visual_dpi15 PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1.5;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
         TIMEOUT 300)
 endif()
 # END CLOSURE-MAPPING (late)
@@ -1813,7 +2001,16 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
                 apps/paleo_workbench_platform/viz_e_hosts.cpp
                 apps/paleo_workbench_platform/viz_e_install.cpp
                 apps/paleo_workbench_platform/closure_preview_adapters.cpp
-                apps/paleo_workbench_platform/closure_preview_install.cpp)
+                apps/paleo_workbench_platform/closure_preview_install.cpp
+                apps/paleo_workbench_platform/validation_workspace_page.cpp
+                apps/paleo_workbench_platform/factor_reference_strip.cpp
+                apps/paleo_workbench_platform/workspace_compose.cpp
+                apps/paleo_workbench_platform/ribbon_command_install.cpp
+                apps/paleo_workbench_platform/comparison_view.cpp
+                apps/paleo_workbench_platform/review_disposition_panel.cpp
+                apps/paleo_workbench_platform/m5_validation_install.cpp
+                apps/paleo_workbench_platform/data_lineage_panel.cpp
+                apps/paleo_workbench_platform/m5_data_install.cpp)
             if(COMMAND pwb_link_job_runtime)
                 pwb_link_job_runtime(platform_closure_preview)
             endif()
@@ -1830,7 +2027,8 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
                 Pwb::PlatformServices
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
                 Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
-                Pwb::UiSeqvizQt Pwb::UiWellseisQt
+                Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
+                Pwb::UiWidgets
                 Pwb::UiCanvas Pwb::UiDataCore Pwb::Ingest Pwb::SeismicIo
                 Pwb::Visualization Pwb::SeismicViewer
                 Pwb::UiPagesPreview Pwb::UiPagesPreviewQt

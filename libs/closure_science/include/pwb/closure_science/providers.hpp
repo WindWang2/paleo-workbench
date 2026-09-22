@@ -23,6 +23,33 @@ namespace pwb::closure_science {
 // flags, evidence weights, review areas below the 0.7 confidence bound).
 [[nodiscard]] ProviderRun make_demo_facies_provider();
 
+// ---- mock facies providers (mock_facies.py parity) -------------------------
+// Stage-1 stage-action providers (run_well_facies_mock /
+// run_seismic_facies_mock). Both are demo-only deterministic generators
+// carrying the full honesty flags (is_mock / is_replaceable / demo /
+// final_scientific_prediction=false); map-product assembly fail-closes on
+// source_kind=mock exactly like the Python product.
+inline constexpr const char* kProviderMockWellFacies = "mock_well_facies";
+inline constexpr const char* kProviderMockSeismicFacies =
+    "mock_seismic_facies";
+inline constexpr const char* kModelIdMockWellFacies = "mock-well-facies-v1";
+inline constexpr const char* kModelIdMockSeismicFacies =
+    "mock-seismic-facies-v1";
+inline constexpr const char* kMockFaciesGeneratorVersion = "mock-facies-1.0";
+
+// Per-well interval draw (MockWellFaciesProvider.run parity): reads
+// parameters["_wells"|"wells"], "target_horizon", "seed"; emits
+// result_summary.predicted_regions + well_detail for the INTERMEDIATE
+// registration. Empty wells → explicit error (InferenceInputError parity).
+[[nodiscard]] ProviderRun make_mock_well_facies_provider();
+
+// Areal nearest-neighbour facies patches (MockSeismicFaciesProvider.run
+// parity): 12 seeded anchors over parameters["_extent"|"extent"], optional
+// "_clip_ring"|"clip_ring" mask, polygonized via the mapping kernel; emits
+// spatial VECTOR_POLYGONS features + mock_grid for the INTERMEDIATE
+// registration.
+[[nodiscard]] ProviderRun make_mock_seismic_facies_provider();
+
 struct TiledOnnxProviderConfig {
     // Root for the inference work/output directories (the artifacts tree —
     // write outputs live under <root>/intermediate/inference/<run id>).

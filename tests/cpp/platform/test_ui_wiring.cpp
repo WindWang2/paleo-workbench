@@ -53,23 +53,37 @@ int main(int argc, char** argv) {
     window.show();
     pwb::application::ProjectSession* session = window.session();
 
-    // -- actions really live in toolbar AND menus (same objects) ------------
-    QToolBar* toolbar = window.findChild<QToolBar*>("map-toolbar");
-    PWB_CHECK_MSG(toolbar != nullptr, "map toolbar missing");
+    // -- M4: the 地图工具 toolbar is RETIRED (R:20). It must be gone, and
+    // every governed action it carried must stay reachable from the menu
+    // bar as the SAME QAction objects (the full-shell build additionally
+    // binds them into the ws3 ribbon band — one object per command, no
+    // parallel actions).
+    PWB_CHECK_MSG(window.findChild<QToolBar*>("map-toolbar") == nullptr,
+                  "map-toolbar must be retired in M4");
     const char* wired[] = {
         "reference_import", "layer_new", "pan", "zoom_in", "zoom_out",
         "full_extent", "toggle_editing", "vertex", "undo", "redo",
         "save_edits", "rollback", "map_export",
     };
-    for (const char* id : wired) {
-        QList<QAction*> tb = toolbar->actions();
-        bool in_toolbar = false;
-        for (QAction* a : tb) {
-            if (a->objectName() == QLatin1String(id)) { in_toolbar = true; break; }
+    auto in_menus = [&window](const char* id) {
+        QAction* governed = window.governedAction(QLatin1String(id));
+        if (governed == nullptr) return false;
+        const auto menus = window.menuBar()->actions();
+        for (QAction* menu_action : menus) {
+            if (QMenu* menu = menu_action->menu()) {
+                for (QAction* entry : menu->actions()) {
+                    if (entry == governed) return true;
+                }
+            }
         }
-        PWB_CHECK_MSG(in_toolbar, std::string(id) + " not added to the toolbar");
+        return false;
+    };
+    for (const char* id : wired) {
         PWB_CHECK_MSG(window.actionWired(QLatin1String(id)),
                       std::string(id) + " has no connected operation");
+        PWB_CHECK_MSG(in_menus(id),
+                      std::string(id) +
+                          " lost its menu entry with the toolbar retirement");
     }
     // Menus consume the SAME QAction objects (single policy consumer).
     int menu_action_hits = 0;

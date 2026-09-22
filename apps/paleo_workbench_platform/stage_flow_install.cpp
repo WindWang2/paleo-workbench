@@ -3,15 +3,19 @@
 // main_window.hpp).
 //
 // What this slice wires (one composition point, no second authorities):
-//  1. Mounts the (previously orphan) CompositeDocument::stage_bar on the
-//     WorkstationFrame app-bar row — the top-of-window stage switch.
-//  2. StageFlowController: seams to ProjectSession (stage) + the project
+//  1. StageFlowController: seams to ProjectSession (stage) + the project
 //     document stratigraphy (horizon); per-stage layout profiles applied
 //     through WorkstationFrame docks / MappingPage panels / MainWindow
 //     docks; per-stage user preferences persisted in QSettings
 //     (stage_presentation/ group, version-fenced).
+//  2. M2 (ribbon five-workspaces, D1/D2): the AppShell navigation seams —
+//     stage_apply (the ONE stage write path) + presentation_apply (the
+//     extended 数据管理/验证 profiles); stage→ribbon reverse sync; the
+//     horizon selector on the AppShell StatusBar (the MappingStageBar
+//     ①②③ segments retired — the ribbon tabs are the stage switch now).
 //  3. Production command registrations into ui_shell::command_registry()
-//     — the palette registry was an empty shell in the product build.
+//     — the palette registry was an empty shell in the product build;
+//     nav.hub.* re-aimed at nav.workspace.* (the five ribbon tabs).
 //  4. TaskCenter providers: JobCenter scheduler snapshots + the global
 //     operation registry; cancel routes through the scheduler.
 //  5. Selection/focus bus: one QtSelectionContext + ViewCoordination-
@@ -40,11 +44,12 @@
 #include <pwb/job_runtime/job_contract.hpp>
 #include <pwb/ui/stage_readiness.hpp>
 #include <pwb/ui_composite/composite_document.hpp>
-#include <pwb/ui_composite/mapping_stage_bar.hpp>
 #include <pwb/ui_map/map_dock_manager.hpp>
 #include <pwb/ui_map/mapping_page.hpp>
+#include <pwb/ui_ribbon/ribbon_spec.hpp>
 #include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/operation_registry.hpp>
+#include <pwb/ui_shell/status_bar.hpp>
 #include <pwb/ui_stageflow/qt/stage_flow_controller.hpp>
 #include <pwb/ui_workstation/task_center.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
@@ -119,16 +124,21 @@ const std::vector<CommandSeed>& command_seeds() {
         {"stage.goto.compilation", "切换到 ③ 综合编图",
          "进入综合编图阶段", "阶段 stage 综合 compilation 编图 三",
          "阶段", "3", {}, false},
-        {"nav.hub.data", "打开 数据 页", "切到数据工作区",
-         "导航 页面 data 数据", "导航", "", {}, false},
-        {"nav.hub.wells", "打开 井 页", "切到井/测井工作区",
-         "导航 页面 well 井 测井", "导航", "", {}, false},
-        {"nav.hub.seismic", "打开 地震 页", "切到地震工作区",
-         "导航 页面 seismic 地震", "导航", "", {}, false},
-        {"nav.hub.mapping", "打开 编图 页", "切到编图工作区",
-         "导航 页面 mapping 编图", "导航", "", {}, false},
-        {"nav.hub.viz", "打开 可视化 页", "切到可视化工作区",
-         "导航 页面 viz 可视化", "导航", "", {}, false},
+        // M2 (D1): the five workspaces are the navigation axis — the
+        // retired nav.hub.* seeds become nav.workspace.* (labels per the
+        // ui_ribbon workspace registry).
+        {"nav.workspace.data", "打开 数据管理 工作区", "切到数据管理工作区",
+         "导航 工作区 workspace data 数据", "导航", "", {}, false},
+        {"nav.workspace.predict", "打开 智能预测 工作区",
+         "切到智能预测工作区", "导航 工作区 workspace predict 预测",
+         "导航", "", {}, false},
+        {"nav.workspace.factor", "打开 约束与单因素 工作区",
+         "切到约束与单因素工作区",
+         "导航 工作区 workspace factor 约束 因素", "导航", "", {}, false},
+        {"nav.workspace.map", "打开 综合编图 工作区", "切到综合编图工作区",
+         "导航 工作区 workspace map 编图", "导航", "", {}, false},
+        {"nav.workspace.verify", "打开 验证 工作区", "切到验证工作区",
+         "导航 工作区 workspace verify 验证", "导航", "", {}, false},
         {"panel.toggle.tasks", "任务中心 开/关", "显示或隐藏任务中心",
          "面板 任务 task center 后台", "面板", "", {}, false},
         {"panel.toggle.agent", "Agent 面板 开/关", "显示或隐藏 Agent 面板",
@@ -156,19 +166,15 @@ const std::vector<CommandSeed>& command_seeds() {
     return seeds;
 }
 
-// Which hub index a nav command addresses (submodule keys mirror
-// ui_shell/navigation.cpp registration order).
-struct NavTarget {
-    int hub;
-    const char* subkey;
-};
-const std::map<std::string, NavTarget>& nav_targets() {
-    static const std::map<std::string, NavTarget> targets = {
-        {"nav.hub.data", {0, "overview"}},
-        {"nav.hub.wells", {1, "well_log"}},
-        {"nav.hub.seismic", {2, "seismic"}},
-        {"nav.hub.mapping", {3, "canvas"}},
-        {"nav.hub.viz", {4, ""}},
+// Which workspace index a nav command addresses (pwb::ui_ribbon
+// kWorkspaceOrder — the ribbon tab order is load-bearing).
+const std::map<std::string, int>& nav_targets() {
+    static const std::map<std::string, int> targets = {
+        {"nav.workspace.data", 0},
+        {"nav.workspace.predict", 1},
+        {"nav.workspace.factor", 2},
+        {"nav.workspace.map", 3},
+        {"nav.workspace.verify", 4},
     };
     return targets;
 }
@@ -379,37 +385,54 @@ void MainWindow::installStageFlow() {
     };
     stage_flow_->set_seams(std::move(seams));
 
-    // -- stage bar mount (the orphan becomes the top stage switch) -----------
-    if (composite->stage_bar != nullptr &&
-        workstation->mount_top_bar(composite->stage_bar)) {
-        auto* bar = composite->stage_bar;
-        connect(bar, &pwb::ui_composite::MappingStageBar::stage_requested, this,
-                [this](const QString& value) {
-                    if (stage_flow_ != nullptr) {
-                        stage_flow_->request_stage(value.toStdString());
-                    }
-                });
-        connect(bar, &pwb::ui_composite::MappingStageBar::horizon_requested, this,
+    // -- M2 workspace navigation seams (D1/D2) -------------------------------
+    // The ribbon/shell ask for a stage write through the ONE authority path
+    // (applyStageValue with CONV-27; the direct canonicalized session write
+    // in a reduced configure) — AppShell never writes ProjectSession itself.
+    shell->set_stage_apply([this](const std::string& value) {
+        apply_stage_authority(*this, value);
+    });
+    // 数据管理/验证 dock projection: the extended presentation profiles
+    // ride the same StageLayoutProfile machinery (stage_presentation/
+    // user overrides included) without touching the stage snapshot.
+    shell->set_presentation_apply([this](const std::string& key) {
+        if (stage_flow_ != nullptr) stage_flow_->apply_presentation(key);
+    });
+    // Stage → ribbon reverse sync (D1): any other writer of the stage
+    // authority (stage.goto command, StageDock, project restore) mirrors
+    // the ribbon tab while the science host page is current. The shell
+    // blocks the ribbon signal, so no workspaceActivated loop can form.
+    connect(stage_flow_, &StageFlowController::stage_applied, shell,
+            [shell](const QString& value) {
+                shell->sync_workspace_for_stage(value.toStdString());
+            });
+
+    // -- stage presentation surfaces (M2: the MappingStageBar retires) -------
+    // The ①②③ segments are the ribbon tabs now (D1); the horizon combo
+    // migrated to the AppShell StatusBar — ONE target_horizon authority,
+    // read/apply still exclusively through the seams above.
+    if (auto* status = shell->status_bar()) {
+        connect(status, &pwb::ui_shell::StatusBar::horizon_requested, this,
                 [this](const QString& horizon) {
                     if (stage_flow_ != nullptr) {
                         stage_flow_->request_horizon(horizon.toStdString());
                     }
                 });
-        connect(stage_flow_, &StageFlowController::stage_applied, bar,
-                [bar](const QString& value) {
-                    bar->set_current_stage(value.toStdString());
-                });
-        connect(stage_flow_, &StageFlowController::snapshot_changed, bar,
-                [this, bar]() {
+        connect(stage_flow_, &StageFlowController::snapshot_changed, this,
+                [this, status]() {
                     const auto& snap = stage_flow_->snapshot();
                     // Empty horizon (project without stratigraphy) clears
                     // the combo — a stale horizon must not survive a
                     // project switch.
-                    bar->set_horizon_state(
+                    status->set_horizon_state(
                         snap.horizon.has_value()
                             ? QString::fromStdString(*snap.horizon)
                             : QString());
                 });
+        status->set_horizon_state(
+            stage_flow_->snapshot().horizon.has_value()
+                ? QString::fromStdString(*stage_flow_->snapshot().horizon)
+                : QString());
     }
 
     // -- production commands (the palette registry leaves its empty shell) ---
@@ -440,16 +463,28 @@ void MainWindow::installStageFlow() {
                 id == "stage.goto.prediction" ? kStage1Value
                 : id == "stage.goto.constraints" ? kStage2Value
                                                  : kStage3Value;
-            spec.callback = [this, target]() {
+            // D1: the stage workspaces ARE the ribbon tabs — a stage
+            // command also lands the user on the matching workspace.
+            const int workspace =
+                id == "stage.goto.prediction"
+                    ? static_cast<int>(pwb::ui_ribbon::Workspace::
+                                           IntelligentPrediction)
+                : id == "stage.goto.constraints"
+                    ? static_cast<int>(
+                          pwb::ui_ribbon::Workspace::ConstraintFactor)
+                    : static_cast<int>(pwb::ui_ribbon::Workspace::
+                                           IntegratedCompilation);
+            spec.callback = [this, target, workspace]() {
                 if (stage_flow_ != nullptr) stage_flow_->request_stage(target);
-            };
-        } else if (id.rfind("nav.hub.", 0) == 0) {
-            const auto& target = nav_targets().at(id);
-            const int hub = target.hub;
-            const QString subkey = QString::fromUtf8(target.subkey);
-            spec.callback = [this, hub, subkey]() {
                 if (appShell() != nullptr) {
-                    appShell()->navigate_to(hub, subkey);
+                    appShell()->navigate_workspace(workspace);
+                }
+            };
+        } else if (id.rfind("nav.workspace.", 0) == 0) {
+            const int workspace = nav_targets().at(id);
+            spec.callback = [this, workspace]() {
+                if (appShell() != nullptr) {
+                    appShell()->navigate_workspace(workspace);
                 }
             };
         } else if (id.rfind("panel.toggle.", 0) == 0) {

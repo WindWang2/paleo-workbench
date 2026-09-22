@@ -16,6 +16,13 @@ target_link_libraries(closure_science_core_test
 target_compile_features(closure_science_core_test PRIVATE cxx_std_20)
 target_compile_definitions(closure_science_core_test PRIVATE
     PWB_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_executable(closure_science_mock_facies_test mock_facies_test.cpp)
+target_link_libraries(closure_science_mock_facies_test
+    PRIVATE Pwb::ClosureScience Pwb::Workflow Pwb::Project Pwb::Domain)
+target_compile_features(closure_science_mock_facies_test PRIVATE cxx_std_20)
+add_test(NAME closure_science.mock_facies COMMAND closure_science_mock_facies_test)
+set_tests_properties(closure_science.mock_facies PROPERTIES TIMEOUT 120)
+
 add_test(NAME closure_science.core COMMAND closure_science_core_test)
 set_tests_properties(closure_science.core PROPERTIES TIMEOUT 600)
 if(PWB_ONNXRUNTIME_LIBRARY AND EXISTS "${PWB_ONNXRUNTIME_LIBRARY}")

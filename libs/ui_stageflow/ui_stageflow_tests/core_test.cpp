@@ -19,8 +19,10 @@ PWB_TEST(stage_layout_profile_matrix) {
     const auto s1 = stage_layout_profile(kStage1Value);
     CHECK(s1.stage_value == kStage1Value);
     CHECK(s1.lower_pane_mode == kLowerPaneSeismicWell);
-    CHECK(s1.visibility.at("workstation.seismic") == true);
-    CHECK(s1.visibility.at("workstation.well") == true);
+    // M3: the seismic/well surfaces live in the science-host bottom
+    // two-pane — the legacy placeholder docks stay managed-but-hidden.
+    CHECK(s1.visibility.at("workstation.seismic") == false);
+    CHECK(s1.visibility.at("workstation.well") == false);
     CHECK(s1.visibility.at("workstation.composite_input") == false);
     CHECK(s1.visibility.at("workstation.composite_linked") == false);
     CHECK(s1.visibility.at("workstation.facies_palette") == true);

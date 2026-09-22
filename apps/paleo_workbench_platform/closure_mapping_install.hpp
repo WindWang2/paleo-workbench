@@ -39,6 +39,18 @@ namespace pwb::application {
 class PwbDataStore;
 }  // namespace pwb::application
 
+// Composition-root accessor types (forward declarations — the heavy
+// headers stay in the .cpp).
+namespace pwb::ui_pages_data::qt {
+class PreparationPage;
+}
+namespace pwb::factor_production {
+class LiveFactorGridStore;
+}
+namespace pwb::workflow_runtime {
+class CatalogRepository;
+}
+
 namespace pwb::app::closure_mapping {
 
 struct Install {
@@ -85,5 +97,53 @@ bool save_documents(QMainWindow* window, std::string* error);
 // Read-only access for presentation wiring (bank signals → page state).
 class MapDocumentBank;
 MapDocumentBank* document_bank(QMainWindow* window);
+
+// Composition-root accessors (the workflow binding shares these — one
+// live grid store, one provenance rail, one preparation page per window):
+pwb::ui_pages_data::qt::PreparationPage* preparation_page(
+    QMainWindow* window);
+#if defined(PWB_WITH_FACTOR_KERNEL)
+std::shared_ptr<pwb::factor_production::LiveFactorGridStore>
+factor_grid_store(QMainWindow* window);
+std::shared_ptr<pwb::workflow_runtime::CatalogRepository> factor_catalog(
+    QMainWindow* window);
+#endif
+
+// BEGIN V14-COMPILATION-PUBLISH — composition export control surface.
+//
+// The panel's export seam stays synchronous (Python composition_panel
+// `_export` parity: export_composition_reported runs inline and returns a
+// report). Cooperative cancellation + coarse progress ride a per-window
+// token the running export polls at stage boundaries — the same
+// map_export_worker discipline (CancellationToken checkpoints; a
+// cancelled export removes the partial file and reports ok=false, never
+// a success claim).
+//
+// cancel_composition_export: idempotent, no-op when idle; also invoked
+// by notify_project_changed so a project switch cannot let an in-flight
+// export write against the old project.
+void cancel_composition_export(QMainWindow* window);
+
+// Installs a coarse progress sink (0..100 at stage boundaries) for the
+// window's composition exports; an empty function clears it. The sink is
+// invoked on whichever thread the export runs — GUI-thread for the
+// panel's synchronous seam, the worker lane for export_composition_async.
+void set_composition_export_progress(QMainWindow* window,
+                                     std::function<void(int)> progress);
+
+// Worker-capable entry (one export at a time per window — the honest
+// refusal is false when a run is in flight). `composition_json` is the
+// dumped Composition document (transport-stable across the thread hop);
+// GUI-affine canvas seams marshal onto the GUI thread internally.
+// `progress` and `finished` fire on the GUI thread via queued delivery;
+// `finished` receives a report object {ok, engine, path, message,
+// warnings, cancelled} — ok=false with `failure`/`message` on refusals,
+// never a fabricated success.
+bool export_composition_async(
+    QMainWindow* window, const std::string& composition_json,
+    const std::string& path, const std::string& format, double dpi,
+    std::function<void(int)> progress,
+    std::function<void(pwb::domain::Json report)> finished);
+// END V14-COMPILATION-PUBLISH
 
 }  // namespace pwb::app::closure_mapping

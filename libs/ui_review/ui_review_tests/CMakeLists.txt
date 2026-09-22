@@ -14,6 +14,17 @@ target_include_directories(ui_review.core_smoke PRIVATE
 add_test(NAME ui_review.core_smoke COMMAND ui_review.core_smoke)
 set_tests_properties(ui_review.core_smoke PROPERTIES TIMEOUT 120)
 
+# M5 — 解释 vs 预测对比 core: bands from the real payloads, (well, unit)
+# pairing, presence-mismatch visibility, taxonomy separation.
+add_executable(ui_review.compare_core compare_core_test.cpp)
+target_compile_features(ui_review.compare_core PRIVATE cxx_std_20)
+target_link_libraries(ui_review.compare_core PRIVATE
+    Pwb::UiReview Pwb::Domain)
+target_include_directories(ui_review.compare_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ui_review.compare_core COMMAND ui_review.compare_core)
+set_tests_properties(ui_review.compare_core PROPERTIES TIMEOUT 60)
+
 # --- Qt widget smoke (offscreen, no QGIS) ---------------------------------
 if(TARGET pwb_ui_review_qt)
     # QSignalSpy/QTRY live in Qt6::Test — not part of the platform

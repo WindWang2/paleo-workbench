@@ -12,6 +12,9 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
+
+class QComboBox;
 
 namespace pwb::ui_shell {
 
@@ -51,6 +54,20 @@ public:
                         const QString& crs = QString(),
                         const QString& scale = QString());
 
+    // ---- 层位选择器 (M2 ribbon-five-workspaces, D1/G2) -----------------------
+    // The horizon selector migrated here from the retired MappingStageBar.
+    // It is a VIEW/EDITOR of the single project.stratigraphy.target_horizon
+    // authority — the host (StageFlowController seams) drives
+    // set_horizon_state and consumes horizon_requested; no second state.
+    // Empty horizon clears the combo; unknown horizon values are inserted
+    // so the selector never drops the authority's value.
+    void set_horizon_state(const QString& horizon,
+                           const std::vector<QString>& options = {});
+    QString current_horizon() const;
+
+signals:
+    void horizon_requested(const QString& horizon);
+
 private:
     QString engine_badge_sheet() const;
 
@@ -60,6 +77,9 @@ private:
     QLabel* workbench_label_ = nullptr;
     QLabel* coord_label_ = nullptr;
     QLabel* engine_label_ = nullptr;
+    QLabel* horizon_label_ = nullptr;
+    QComboBox* horizon_combo_ = nullptr;
+    bool syncing_horizon_ = false;  // set_horizon_state reentry guard
 };
 
 }  // namespace pwb::ui_shell

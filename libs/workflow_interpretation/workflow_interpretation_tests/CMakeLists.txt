@@ -2,6 +2,13 @@
 # frozen oracle fixture path as argv[1] (workflow_graph tests pattern).
 set(WORKFLOW_INTERPRETATION_FIXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 
+add_executable(workflow_interpretation_fault_lifecycle_test fault_lifecycle_test.cpp)
+target_link_libraries(workflow_interpretation_fault_lifecycle_test
+    PRIVATE Pwb::WorkflowInterpretation)
+target_compile_features(workflow_interpretation_fault_lifecycle_test PRIVATE cxx_std_20)
+add_test(NAME workflow_interpretation.fault_lifecycle
+         COMMAND workflow_interpretation_fault_lifecycle_test)
+
 add_executable(workflow_interpretation_registry_test registry_test.cpp)
 target_link_libraries(workflow_interpretation_registry_test
     PRIVATE Pwb::WorkflowInterpretation)

@@ -1,5 +1,7 @@
 #include "pwb/closure_review/review_qc_core.hpp"
 
+#include "pwb/closure_review/review_disposition.hpp"
+
 #include <pwb/mapping/polygonization.hpp>
 #include <pwb/ui_data_core/map_edit_geometry.hpp>
 
@@ -1260,8 +1262,17 @@ domain::Result<domain::Json> run_map_qc_on_document(
     }
     report["rule_status"] = rule_status;
     report["coverage"] = Json{{"evaluated", evaluated}, {"skipped", skipped}};
-
+    // M5 (F:76): stamp the input fingerprint so a later input change marks
+    // the report 已过期 (review_disposition::report_is_stale). Re-runs
+    // replace the report — human review records are carried over, never
+    // silently dropped (复核记录可重开和追溯).
+    report["input_fingerprint"] =
+        qc_input_fingerprint(root, *document, inputs);
     if (existing != nullptr) {
+        const auto carried = existing->find("review_records");
+        if (carried != existing->end() && carried->is_object()) {
+            report["review_records"] = *carried;
+        }
         *existing = report;
     } else {
         reports->push_back(report);

@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QImage>
 #include <QTemporaryDir>
+#include <QStatusBar>
 #include <QThread>
 
 #include <algorithm>
@@ -26,6 +27,8 @@
 #include <qgsvectorlayer.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsproviderregistry.h>
+
+#include <pwb/ui_composite/composite_document.hpp>
 
 #include <pwb/qgis/layout_service.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
@@ -268,7 +271,11 @@ Result checkWorkflowDag() {
 #endif
 
 // Offscreen UI shell: the real MainWindow (menus, toolbar, canvas, docks)
-// constructs and destroys cleanly over a real AppContext.
+// constructs and destroys cleanly over a real AppContext. With the
+// workflow wiring installed, every stage-action dispatch key answers with
+// an honest verdict (an error message through the status surface — never
+// "未接入", never a crash) — the no-project smoke for the C++ stage-action
+// parity contract (Python stage_actions.py L208-231).
 Result checkUiShell() {
     Result r{QStringLiteral("ui_shell"), false, {}};
     {
@@ -282,9 +289,59 @@ Result checkUiShell() {
             r.detail = QStringLiteral("pan action not wired");
             return r;
         }
+#if defined(PWB_WITH_WORKFLOW_WIRING)
+        auto* composite =
+            window.findChild<pwb::ui_composite::CompositeDocument*>();
+        if (composite != nullptr) {
+            static const char* const kActions[] = {
+                "load_initial_facies", "add_well_prediction_overlay",
+                "add_seismic_prediction_overlay",
+                "well_prediction_point_to_surface", "run_well_facies_mock",
+                "run_seismic_facies_mock", "toggle_prediction_confidence",
+                "create_facies_draft", "open_factor_workbench",
+                "run_factor", "overlay_factor_results",
+                "commit_constraints", "select_evidence", "freeze_input_set",
+                "create_integrated_draft", "create_integrated_boundary",
+                "run_fusion", "run_qa", "commit_interpretation",
+                "assemble_map_product", "stage_save", "stage_qc"};
+            int dispatched = 0;
+            for (const char* action : kActions) {
+                // No project open: every handler must land on the honest
+                // error path (horizon gate / 请先打开工程 / service
+                // unavailable) — visible on the status bar, never the
+                // "未接入" placeholder, never a crash.
+                emit composite->stage_action_requested(
+                    QStringLiteral("facies_calibration"),
+                    QString::fromLatin1(action));
+                QCoreApplication::sendPostedEvents();
+                QCoreApplication::processEvents();
+                const QString message =
+                    window.statusBar()->currentMessage();
+                if (message.contains(QStringLiteral("未接入"))
+                    || message.contains(QStringLiteral("未知阶段动作"))) {
+                    r.detail = QStringLiteral(
+                        "stage action %1 reported unwired: %2")
+                                   .arg(QString::fromLatin1(action),
+                                        message);
+                    return r;
+                }
+                ++dispatched;
+            }
+            r.detail = QStringLiteral(
+                "MainWindow + %1 stage actions honest-dispatched; ")
+                           .arg(dispatched);
+        } else {
+            r.detail = QStringLiteral(
+                "MainWindow constructed (composite absent — stage-action "
+                "smoke skipped); ");
+        }
+#else
+        r.detail = QStringLiteral(
+            "MainWindow + AppContext constructed/destroyed; ");
+#endif
     }
     r.passed = true;
-    r.detail = QStringLiteral("MainWindow + AppContext constructed/destroyed");
+    r.detail += QStringLiteral("MainWindow + AppContext constructed/destroyed");
     return r;
 }
 
@@ -363,7 +420,14 @@ QVector<SelfCheck::Result> SelfCheck::run(const QString& source_dir) {
         // engine the canvas uses (widget->grab() is not deterministic for
         // an unshown window under the offscreen platform).
         Result r{QStringLiteral("render_frame"), false, {}};
-        QgsMapCanvas* canvas = window.findChild<QgsMapCanvas*>();
+        // M6: the named session canvas — type-only findChild is fragile
+        // now that the shell hosts several QgsMapCanvas instances
+        // (validation compare canvas, mapping-page previews…).
+        QgsMapCanvas* canvas =
+            window.findChild<QgsMapCanvas*>(QStringLiteral("session-map-canvas"));
+        if (canvas == nullptr) {
+            canvas = window.findChild<QgsMapCanvas*>();
+        }
         QgsVectorLayer* layer =
             context.session().map().vectorLayerById("fixture.facies_boundary");
         if (canvas == nullptr || layer == nullptr) {

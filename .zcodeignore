@@ -1,0 +1,139 @@
+# Python
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment / IDE
+.env
+.env.*
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local agent/tooling caches (not project source)
+.agents/
+.codex/
+.cache/
+.planning/
+
+# Project-local prepared preview disk cache
+**/.preview_cache/
+
+# Sample data is large and stays local; scanner tests use tmp_path fixtures
+data/
+# Golden-value fixtures are small, deterministic, and part of the test contract
+!tests/data/
+!tests/data/**
+!tests/cpp/data/
+!tests/cpp/data/**
+# C++ public headers live under pwb/<module>/ — never sample data
+!libs/**/include/pwb/data/
+!libs/**/include/pwb/data/**
+
+# Nested engine repo is tracked as a submodule (see .gitmodules)
+# geo-viz-engine/
+.worktrees/
+
+# Native build artifacts
+native/**/*.so
+native/**/*.pyd
+native/**/build/
+native/**/*.egg-info/
+# Standalone g++/cl selftest executables (built from *_test.cpp, verified in CI)
+native/**/*_selftest
+native/**/*_selftest.exe
+native/bin/
+*.obj
+*.exp
+*.lib
+
+# AI agent workspace directories
+.gemini/
+.cursor/
+.claude/
+.gstack/
+
+# Local build / diagnostic artifacts (never tracked)
+build/
+CMakeFiles/
+.zcode/
+# Never track built native modules — a committed repo-root .so shadows a fresh
+# build on sys.path[0] and makes CI "freshly built" asserts vacuous (packaging
+# #435). Native modules are built in-place under native/<pkg> and installed
+# editable, or from the geo-viz-engine submodule.
+*.cpython-3*-x86_64-linux-gnu.so
+
+
+# Stale in-tree build residue from before map_edit_core moved to the
+# geo-viz-engine submodule (48d774e1); never let it reappear untracked.
+native/map_edit_core/
+native/gdal-vendored/
+run_env.sh
+
+# Desktop-app runtime state (SQLite): QGIS symbology session style database
+# and user history. Never source; keep them out of git status.
+symbology-style.db
+user-history.db
+
+# Agent session working directories (transient tooling artifacts).
+.agent-work/
+baseline_tests*.log
+scratch_full_tests.log
+main_full_tests.log
+run_suite_detached.bat
+run_batched.bat
+main_batched*
+scratch_wt_batched*
+.baseline-*.log
+.baseline-*.txt
+.v7-baseline-gen.log
+.final-sweep.log
+
+# Local agent/worktree scratch: build logs, diagnostics and generated reports
+# that are not part of the tree. `build/` above is the actual CMake output.
+.workbuddy/
+
+a.out
+
+# Line-14 benchmark working dir: fixtures + reports are regenerated
+# by tools/pwb-bench; reports are archived under docs/development/.
+bench-out/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+site-packages/
+venv/
+coverage/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

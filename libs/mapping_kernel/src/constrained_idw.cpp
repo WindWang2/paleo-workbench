@@ -3163,6 +3163,771 @@ std::pair<int, int> summarize_point_density(const std::vector<Well>& wells,
     return {isolated, dense};
 }
 
+// --------------------------------------------------------------------------- //
+// Contour-extraction tail helpers — the post-surface section of
+// constrained_engine.py, ported in its own code order. Grid rasters are flat
+// row-major (rows = |y|, cols = |x|); masks are uint8.
+// --------------------------------------------------------------------------- //
+
+// Extracted isolines keyed by level (Result::contours).
+using ContourMap = std::map<double, std::vector<Polyline>>;
+// (level, polyline) workspace shared by the crossing solvers.
+using TopoWork = std::vector<std::pair<double, Polyline>>;
+
+// scipy.ndimage.label — 4-connectivity (default structure), labels assigned
+// in first-seen row-major order.
+std::pair<std::vector<std::int32_t>, int>
+label_components(const std::vector<std::uint8_t>& mask, std::size_t rows,
+                 std::size_t cols) {
+    std::vector<std::int32_t> labels(rows * cols, 0);
+    std::int32_t next = 0;
+    std::vector<std::size_t> stack;
+    for (std::size_t seed = 0; seed < mask.size(); ++seed) {
+        if (!mask[seed] || labels[seed] != 0) continue;
+        ++next;
+        labels[seed] = next;
+        stack.push_back(seed);
+        while (!stack.empty()) {
+            const std::size_t cur = stack.back();
+            stack.pop_back();
+            const std::size_t r = cur / cols;
+            const std::size_t c = cur % cols;
+            const std::size_t nb[4] = {
+                r > 0 ? cur - cols : cur,
+                r + 1 < rows ? cur + cols : cur,
+                c > 0 ? cur - 1 : cur,
+                c + 1 < cols ? cur + 1 : cur,
+            };
+            const bool valid[4] = {r > 0, r + 1 < rows, c > 0, c + 1 < cols};
+            for (int k = 0; k < 4; ++k) {
+                if (!valid[k]) continue;
+                const std::size_t ni = nb[k];
+                if (mask[ni] && labels[ni] == 0) {
+                    labels[ni] = next;
+                    stack.push_back(ni);
+                }
+            }
+        }
+    }
+    return {labels, static_cast<int>(next)};
+}
+
+// scipy.ndimage.binary_erosion — cross structure (4-conn), border_value=0.
+std::vector<std::uint8_t> binary_erosion(const std::vector<std::uint8_t>& mask,
+                                         std::size_t rows, std::size_t cols,
+                                         int iterations) {
+    std::vector<std::uint8_t> cur = mask;
+    for (int it = 0; it < iterations; ++it) {
+        std::vector<std::uint8_t> next(rows * cols, 0);
+        for (std::size_t r = 1; r + 1 < rows; ++r) {
+            for (std::size_t c = 1; c + 1 < cols; ++c) {
+                const std::size_t i = r * cols + c;
+                if (cur[i] && cur[i - cols] && cur[i + cols] && cur[i - 1] &&
+                    cur[i + 1]) {
+                    next[i] = 1;
+                }
+            }
+        }
+        cur = std::move(next);
+    }
+    return cur;
+}
+
+// scipy.ndimage.maximum_filter — square window, mode='reflect' (half-sample
+// symmetric: index -1 -> 0, n -> n-1). Separable because max is associative.
+std::vector<double> maximum_filter(const std::vector<double>& grid,
+                                   std::size_t rows, std::size_t cols,
+                                   int size) {
+    if (size <= 1 || grid.empty()) return grid;
+    const std::ptrdiff_t h = size / 2;
+    const std::ptrdiff_t nr = static_cast<std::ptrdiff_t>(rows);
+    const std::ptrdiff_t nc = static_cast<std::ptrdiff_t>(cols);
+    auto reflect = [](std::ptrdiff_t p, std::ptrdiff_t n) {
+        while (p < 0 || p >= n) {
+            p = p < 0 ? -p - 1 : 2 * n - 1 - p;
+        }
+        return p;
+    };
+    std::vector<double> tmp(rows * cols, -kInf), out(rows * cols, -kInf);
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t c = 0; c < cols; ++c) {
+            double best = -kInf;
+            for (std::ptrdiff_t k = -h; k <= h; ++k) {
+                const std::size_t cc = static_cast<std::size_t>(
+                    reflect(static_cast<std::ptrdiff_t>(c) + k, nc));
+                best = std::max(best, grid[r * cols + cc]);
+            }
+            tmp[r * cols + c] = best;
+        }
+    }
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t c = 0; c < cols; ++c) {
+            double best = -kInf;
+            for (std::ptrdiff_t k = -h; k <= h; ++k) {
+                const std::size_t rr = static_cast<std::size_t>(
+                    reflect(static_cast<std::ptrdiff_t>(r) + k, nr));
+                best = std::max(best, tmp[rr * cols + c]);
+            }
+            out[r * cols + c] = best;
+        }
+    }
+    return out;
+}
+
+// fast_grid.upsample_mask_nearest — np.rint (half-even) index mapping.
+std::vector<std::uint8_t> upsample_mask_nearest(
+    const std::vector<std::uint8_t>& mask, std::size_t rows, std::size_t cols,
+    int factor, std::size_t& out_rows, std::size_t& out_cols) {
+    if (factor <= 1 || rows * cols == 0) {
+        out_rows = rows;
+        out_cols = cols;
+        return mask;
+    }
+    out_rows = (rows - 1) * static_cast<std::size_t>(factor) + 1;
+    out_cols = (cols - 1) * static_cast<std::size_t>(factor) + 1;
+    std::vector<std::uint8_t> out(out_rows * out_cols, 0);
+    for (std::size_t r = 0; r < out_rows; ++r) {
+        const std::size_t sr = std::min(
+            rows - 1,
+            static_cast<std::size_t>(std::max(
+                0.0, std::nearbyint(static_cast<double>(r) / factor))));
+        for (std::size_t c = 0; c < out_cols; ++c) {
+            const std::size_t sc = std::min(
+                cols - 1,
+                static_cast<std::size_t>(std::max(
+                    0.0, std::nearbyint(static_cast<double>(c) / factor))));
+            out[r * out_cols + c] = mask[sr * cols + sc];
+        }
+    }
+    return out;
+}
+
+// fast_grid.upsample_bilinear_grid — bilinear densify gated by the
+// all-finite/all-same-label corner rule.
+struct UpsampledSurface {
+    std::vector<double> grid, x, y;
+    std::size_t rows = 0, cols = 0;
+    std::vector<std::int32_t> labels;
+    bool has_labels = false;
+};
+
+UpsampledSurface upsample_bilinear_grid(
+    const std::vector<double>& grid, std::size_t rows, std::size_t cols,
+    const std::vector<double>& x_coords, const std::vector<double>& y_coords,
+    const std::vector<std::int32_t>* region_labels, int factor) {
+    UpsampledSurface out;
+    factor = std::max(1, std::min(4, factor));
+    if (factor <= 1 || grid.empty() || x_coords.size() < 2 ||
+        y_coords.size() < 2) {
+        out.grid = grid;
+        out.x = x_coords;
+        out.y = y_coords;
+        out.rows = rows;
+        out.cols = cols;
+        out.has_labels = region_labels != nullptr;
+        if (region_labels != nullptr) out.labels = *region_labels;
+        return out;
+    }
+    const std::size_t new_rows = (rows - 1) * static_cast<std::size_t>(factor) + 1;
+    const std::size_t new_cols = (cols - 1) * static_cast<std::size_t>(factor) + 1;
+    out.rows = new_rows;
+    out.cols = new_cols;
+    out.grid.assign(new_rows * new_cols, kNaN);
+    out.has_labels = region_labels != nullptr;
+    if (out.has_labels) out.labels.assign(new_rows * new_cols, -1);
+    out.x = linspace(x_coords.front(), x_coords.back(), new_cols);
+    out.y = linspace(y_coords.front(), y_coords.back(), new_rows);
+    const std::ptrdiff_t rmax = static_cast<std::ptrdiff_t>(rows) - 2;
+    const std::ptrdiff_t cmax = static_cast<std::ptrdiff_t>(cols) - 2;
+    for (std::size_t r = 0; r < new_rows; ++r) {
+        const double src_r = static_cast<double>(r) / factor;
+        std::ptrdiff_t r0 = static_cast<std::ptrdiff_t>(std::floor(src_r));
+        r0 = std::min(r0, rmax);
+        if (r == new_rows - 1) r0 = rmax;
+        double fy = src_r - static_cast<double>(r0);
+        if (r == new_rows - 1) fy = 1.0;
+        for (std::size_t c = 0; c < new_cols; ++c) {
+            const double src_c = static_cast<double>(c) / factor;
+            std::ptrdiff_t c0 = static_cast<std::ptrdiff_t>(std::floor(src_c));
+            c0 = std::min(c0, cmax);
+            if (c == new_cols - 1) c0 = cmax;
+            double fx = src_c - static_cast<double>(c0);
+            if (c == new_cols - 1) fx = 1.0;
+            const std::size_t i00 =
+                static_cast<std::size_t>(r0) * cols +
+                static_cast<std::size_t>(c0);
+            const double v00 = grid[i00];
+            const double v10 = grid[i00 + 1];
+            const double v01 = grid[i00 + cols];
+            const double v11 = grid[i00 + cols + 1];
+            bool finite = std::isfinite(v00) && std::isfinite(v10) &&
+                          std::isfinite(v01) && std::isfinite(v11);
+            std::int32_t label_val = -1;
+            if (region_labels != nullptr) {
+                const std::int32_t l00 = (*region_labels)[i00];
+                const std::int32_t l10 = (*region_labels)[i00 + 1];
+                const std::int32_t l01 = (*region_labels)[i00 + cols];
+                const std::int32_t l11 = (*region_labels)[i00 + cols + 1];
+                const bool same =
+                    l00 >= 0 && l00 == l10 && l00 == l01 && l00 == l11;
+                finite = finite && same;
+                label_val = finite ? l00 : -1;
+            }
+            if (finite) {
+                const double top = v00 * (1.0 - fx) + v10 * fx;
+                const double bottom = v01 * (1.0 - fx) + v11 * fx;
+                out.grid[r * new_cols + c] = top * (1.0 - fy) + bottom * fy;
+                if (out.has_labels) {
+                    out.labels[r * new_cols + c] = label_val;
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// masks.resolve_contour_component_dilation_cells
+double resolve_contour_component_dilation_cells(std::size_t grid_resolution,
+                                                bool limit_to_well_coverage) {
+    if (limit_to_well_coverage) {
+        return std::min(24.0, std::max(12.0,
+                                     static_cast<double>(grid_resolution) *
+                                         0.09));
+    }
+    return std::min(30.0, std::max(14.0,
+                                   static_cast<double>(grid_resolution) *
+                                       0.1));
+}
+
+// masks.build_contour_component_mask — dilate each IDW-connected component
+// separately (no cross-void bridging).
+void build_contour_component_mask(const std::vector<std::uint8_t>& seed_mask,
+                                  const std::vector<std::uint8_t>& domain_mask,
+                                  std::size_t rows, std::size_t cols,
+                                  double dilation_cells,
+                                  std::vector<std::uint8_t>& out) {
+    const std::size_t n = rows * cols;
+    std::vector<std::uint8_t> seeds(n, 0);
+    bool any_seed = false;
+    for (std::size_t i = 0; i < n; ++i) {
+        seeds[i] = (seed_mask[i] && domain_mask[i]) ? 1 : 0;
+        any_seed = any_seed || seeds[i] != 0;
+    }
+    if (dilation_cells <= 0.0 || !any_seed) {
+        out = seeds;
+        return;
+    }
+    const auto [labels, count] = label_components(seeds, rows, cols);
+    if (count <= 0) {
+        out = seeds;
+        return;
+    }
+    out.assign(n, 0);
+    std::vector<std::uint8_t> component(n, 0), reach;
+    for (int comp_id = 1; comp_id <= count; ++comp_id) {
+        std::fill(component.begin(), component.end(), 0);
+        for (std::size_t i = 0; i < n; ++i) {
+            if (labels[i] == comp_id) component[i] = 1;
+        }
+        build_bfs_reach_mask(component, domain_mask, rows, cols,
+                             dilation_cells, reach);
+        for (std::size_t i = 0; i < n; ++i) {
+            if (reach[i]) out[i] = 1;
+        }
+    }
+}
+
+// masks.resolve_contour_hole_fill_max_cells
+int resolve_contour_hole_fill_max_cells(std::size_t grid_resolution,
+                                        double dilation_cells) {
+    const double span = std::max(6.0, dilation_cells * 2.5);
+    const double cap = std::max(
+        128.0, static_cast<double>(grid_resolution) *
+                   static_cast<double>(grid_resolution) * 0.03);
+    return static_cast<int>(std::min(span * span, cap));
+}
+
+// masks.build_contour_hole_fill_mask — only *small* NaN holes inside the
+// component mask (large void pockets stay unfilled).
+void build_contour_hole_fill_mask(const std::vector<std::uint8_t>& comp_mask,
+                                  const std::vector<double>& grid,
+                                  std::size_t rows, std::size_t cols,
+                                  int max_hole_cells,
+                                  std::vector<std::uint8_t>& out) {
+    const std::size_t n = rows * cols;
+    out.assign(n, 0);
+    std::vector<std::uint8_t> holes(n, 0);
+    bool any_hole = false;
+    for (std::size_t i = 0; i < n; ++i) {
+        holes[i] = (comp_mask[i] && !std::isfinite(grid[i])) ? 1 : 0;
+        any_hole = any_hole || holes[i] != 0;
+    }
+    if (!any_hole || max_hole_cells <= 0) return;
+    const auto [labels, count] = label_components(holes, rows, cols);
+    if (count <= 0) return;
+    std::vector<int> comp_size(count + 1, 0);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (labels[i] > 0) ++comp_size[labels[i]];
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (labels[i] > 0 && comp_size[labels[i]] <= max_hole_cells) {
+            out[i] = 1;
+        }
+    }
+}
+
+// constrained_engine.sample_bilinear_grid — NaN outside finite cells.
+std::optional<double> sample_bilinear_grid(const std::vector<double>& grid,
+                                           std::size_t rows, std::size_t cols,
+                                           const std::vector<double>& x_coords,
+                                           const std::vector<double>& y_coords,
+                                           double x, double y) {
+    if (grid.empty() || x_coords.size() < 2 || y_coords.size() < 2) {
+        return std::nullopt;
+    }
+    const double x0_axis = x_coords.front(), x1_axis = x_coords.back();
+    const double y0_axis = y_coords.front(), y1_axis = y_coords.back();
+    if (x < std::min(x0_axis, x1_axis) || x > std::max(x0_axis, x1_axis)) {
+        return std::nullopt;
+    }
+    if (y < std::min(y0_axis, y1_axis) || y > std::max(y0_axis, y1_axis)) {
+        return std::nullopt;
+    }
+    const double dx = x_coords[1] - x_coords[0];
+    const double dy = y_coords[1] - y_coords[0];
+    if (std::abs(dx) <= 1e-24 || std::abs(dy) <= 1e-24) return std::nullopt;
+    const double col_f = (x - x_coords[0]) / dx;
+    const double row_f = (y - y_coords[0]) / dy;
+    const int col0 = static_cast<int>(std::floor(col_f));
+    const int row0 = static_cast<int>(std::floor(row_f));
+    if (col0 < 0 || row0 < 0 || col0 >= static_cast<int>(x_coords.size()) - 1 ||
+        row0 >= static_cast<int>(y_coords.size()) - 1) {
+        return std::nullopt;
+    }
+    const double fx = col_f - col0;
+    const double fy = row_f - row0;
+    const std::size_t i00 =
+        static_cast<std::size_t>(row0) * cols + static_cast<std::size_t>(col0);
+    const double v00 = grid[i00];
+    const double v10 = grid[i00 + 1];
+    const double v01 = grid[i00 + cols];
+    const double v11 = grid[i00 + cols + 1];
+    if (!std::isfinite(v00) || !std::isfinite(v10) || !std::isfinite(v01) ||
+        !std::isfinite(v11)) {
+        return std::nullopt;
+    }
+    const double top = v00 * (1.0 - fx) + v10 * fx;
+    const double bottom = v01 * (1.0 - fx) + v11 * fx;
+    return top * (1.0 - fy) + bottom * fy;
+}
+
+// constrained_engine._project_point_to_segment (len2 <= 1e-24 -> (0, a)).
+std::optional<std::pair<double, Point>> project_point_to_segment(
+    const Point& pt, const Point& a, const Point& b) {
+    const double dx = b[0] - a[0], dy = b[1] - a[1];
+    const double length_sq = dx * dx + dy * dy;
+    if (length_sq <= 1e-24) {
+        return std::make_pair(0.0, a);
+    }
+    double t = ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / length_sq;
+    t = std::max(0.0, std::min(1.0, t));
+    return std::make_pair(t, Point{a[0] + t * dx, a[1] + t * dy});
+}
+
+// constrained_engine._point_to_segment_distance (via _project_point_to_segment;
+// never returns None).
+double point_seg_distance(const Point& pt, const Point& a, const Point& b) {
+    const auto proj = project_point_to_segment(pt, a, b);
+    const Point& c = proj->second;
+    return std::hypot(pt[0] - c[0], pt[1] - c[1]);
+}
+
+// constrained_engine._segment_intersection_point — proper transverse
+// intersection only (collinear overlap -> nullopt).
+std::optional<Point> segment_intersection_point(const Point& a, const Point& b,
+                                              const Point& c, const Point& d,
+                                              double tol = 1e-7) {
+    const double rx = b[0] - a[0], ry = b[1] - a[1];
+    const double sx = d[0] - c[0], sy = d[1] - c[1];
+    const double denom = cross2(rx, ry, sx, sy);
+    if (std::abs(denom) <= 1e-12) return std::nullopt;
+    const double qpx = c[0] - a[0], qpy = c[1] - a[1];
+    const double t = cross2(qpx, qpy, sx, sy) / denom;
+    const double u = cross2(qpx, qpy, rx, ry) / denom;
+    if (!(tol < t && t < 1.0 - tol && tol < u && u < 1.0 - tol)) {
+        return std::nullopt;
+    }
+    return Point{a[0] + t * rx, a[1] + t * ry};
+}
+
+// constrained_engine._point_on_segment_interior — t in (end_tol, 1-end_tol)
+// when pt lies within line_tol of ab's interior.
+std::optional<double> point_on_segment_interior(const Point& pt, const Point& a,
+                                                const Point& b,
+                                                double end_tol,
+                                                double line_tol) {
+    const double vx = b[0] - a[0], vy = b[1] - a[1];
+    const double ll = vx * vx + vy * vy;
+    if (ll <= 1e-24) return std::nullopt;
+    const double t =
+        ((pt[0] - a[0]) * vx + (pt[1] - a[1]) * vy) / ll;
+    if (t <= end_tol || t >= 1.0 - end_tol) return std::nullopt;
+    const double qx = a[0] + t * vx, qy = a[1] + t * vy;
+    if (std::hypot(pt[0] - qx, pt[1] - qy) > line_tol) return std::nullopt;
+    return t;
+}
+
+// is_blocked_by_barrier over BarrierLine polylines (per-segment strict test).
+bool line_blocked_by_barriers(const Point& a, const Point& b,
+                              const std::vector<BarrierLine>& barriers,
+                              double tol) {
+    for (const auto& barrier : barriers) {
+        const auto& pts = barrier.points;
+        for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
+            if (strict_segments_intersect(a[0], a[1], b[0], b[1], pts[i][0],
+                                          pts[i][1], pts[i + 1][0],
+                                          pts[i + 1][1], tol)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// --------------------------------------------------------------------------- //
+// Polyline primitives (constrained_engine.py bottom block)
+// --------------------------------------------------------------------------- //
+
+double point_distance(const Point& a, const Point& b) {
+    return std::hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+// _polyline_length — alias of the existing helper.
+double contour_polyline_length(const Polyline& pts) {
+    return polyline_length_pts(pts);
+}
+
+// _dedupe_consecutive_points
+Polyline dedupe_consecutive_points(const Polyline& points, double tolerance) {
+    Polyline out;
+    for (const Point& pt : points) {
+        if (out.empty() || point_distance(out.back(), pt) > tolerance) {
+            out.push_back(pt);
+        }
+    }
+    return out;
+}
+
+// _contour_close_tolerance
+double contour_close_tolerance(double grid_step) {
+    return std::max(grid_step * 0.35, 1e-6);
+}
+
+// _is_closed_polyline
+bool is_closed_polyline(const Polyline& points, double grid_step) {
+    return points.size() > 2 &&
+           point_distance(points.front(), points.back()) <=
+               contour_close_tolerance(grid_step);
+}
+
+// _rdp_simplify — recursive Ramer-Douglas-Peucker (same split order).
+Polyline rdp_simplify(const Polyline& points, double tolerance) {
+    if (points.size() <= 2) return points;
+    const Point start = points.front();
+    const Point end = points.back();
+    double max_distance = -1.0;
+    std::size_t split_index = 0;
+    for (std::size_t i = 1; i + 1 < points.size(); ++i) {
+        const double d = point_seg_distance(points[i], start, end);
+        if (d > max_distance) {
+            max_distance = d;
+            split_index = i;
+        }
+    }
+    if (max_distance > tolerance) {
+        Polyline left =
+            rdp_simplify(Polyline(points.begin(),
+                                  points.begin() +
+                                      static_cast<std::ptrdiff_t>(split_index) +
+                                      1),
+                         tolerance);
+        Polyline right =
+            rdp_simplify(Polyline(points.begin() +
+                                      static_cast<std::ptrdiff_t>(split_index),
+                                  points.end()),
+                         tolerance);
+        left.pop_back();
+        left.insert(left.end(), right.begin(), right.end());
+        return left;
+    }
+    return {start, end};
+}
+
+// _densify_polyline_segments — insert vertices so no segment exceeds max_seg.
+Polyline densify_polyline_segments(const Polyline& points, double max_seg) {
+    if (points.size() < 2) return points;
+    const double max_s = std::max(max_seg, 1e-9);
+    Polyline out{points.front()};
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        const double x0 = out.back()[0], y0 = out.back()[1];
+        const double x1 = points[i][0], y1 = points[i][1];
+        const double dist = std::hypot(x1 - x0, y1 - y0);
+        if (dist > max_s * 1.05) {
+            const int n = std::max(1, static_cast<int>(std::ceil(dist / max_s)));
+            for (int k = 1; k < n; ++k) {
+                const double t = static_cast<double>(k) / n;
+                out.push_back({x0 + (x1 - x0) * t, y0 + (y1 - y0) * t});
+            }
+        }
+        out.push_back({x1, y1});
+    }
+    return out;
+}
+
+// _remove_polyline_spikes — drop sharp interior vertices (MS stair artifacts).
+Polyline remove_polyline_spikes(const Polyline& points, double grid_step,
+                                double min_turn_cos = -0.25) {
+    if (points.size() < 4) return points;
+    const double step = std::max(grid_step, 1e-9);
+    const bool closed = is_closed_polyline(points, step);
+    Polyline core(points.begin(),
+                  closed ? points.end() - 1 : points.end());
+    if (core.size() < 3) return points;
+    auto keep_vertex = [&](const Point& prev, const Point& cur,
+                           const Point& nxt) {
+        const double v1x = cur[0] - prev[0], v1y = cur[1] - prev[1];
+        const double v2x = nxt[0] - cur[0], v2y = nxt[1] - cur[1];
+        const double n1 = std::hypot(v1x, v1y);
+        const double n2 = std::hypot(v2x, v2y);
+        if (n1 < step * 0.15 || n2 < step * 0.15) return false;
+        const double cos_a = (v1x * v2x + v1y * v2y) / (n1 * n2);
+        if (cos_a < min_turn_cos && n1 < step * 4.0 && n2 < step * 4.0) {
+            return false;
+        }
+        return true;
+    };
+    bool changed = true;
+    int guard = 0;
+    while (changed && guard < 4) {
+        ++guard;
+        changed = false;
+        Polyline new_core;
+        const std::size_t m = core.size();
+        for (std::size_t i = 0; i < m; ++i) {
+            if (!closed && (i == 0 || i == m - 1)) {
+                new_core.push_back(core[i]);
+                continue;
+            }
+            const Point& prev = core[(i + m - 1) % m];
+            const Point& cur = core[i];
+            const Point& nxt = core[(i + 1) % m];
+            if (keep_vertex(prev, cur, nxt)) {
+                new_core.push_back(cur);
+            } else {
+                changed = true;
+            }
+        }
+        if (new_core.size() < (closed ? 3 : 2)) break;
+        core = new_core;
+    }
+    if (closed) {
+        if (!core.empty() && core.front() != core.back()) {
+            core.push_back(core.front());
+        }
+        return core;
+    }
+    return core;
+}
+
+// _chaikin_smooth_polyline — corner cutting; endpoints pinned when open.
+Polyline chaikin_smooth_polyline(const Polyline& points, int iterations,
+                                 double grid_step) {
+    if (points.size() <= 2 || iterations <= 0) return points;
+    const bool closed = is_closed_polyline(points, grid_step);
+    Polyline current(points.begin(),
+                     closed ? points.end() - 1 : points.end());
+    if (closed && current.size() < 3) return points;
+    for (int it = 0; it < iterations; ++it) {
+        if (closed) {
+            Polyline smoothed;
+            for (std::size_t i = 0; i < current.size(); ++i) {
+                const Point& p0 = current[i];
+                const Point& p1 = current[(i + 1) % current.size()];
+                smoothed.push_back({0.75 * p0[0] + 0.25 * p1[0],
+                                    0.75 * p0[1] + 0.25 * p1[1]});
+                smoothed.push_back({0.25 * p0[0] + 0.75 * p1[0],
+                                    0.25 * p0[1] + 0.75 * p1[1]});
+            }
+            current = std::move(smoothed);
+        } else {
+            Polyline smoothed{current.front()};
+            for (std::size_t i = 0; i + 1 < current.size(); ++i) {
+                const Point& p0 = current[i];
+                const Point& p1 = current[i + 1];
+                smoothed.push_back({0.75 * p0[0] + 0.25 * p1[0],
+                                    0.75 * p0[1] + 0.25 * p1[1]});
+                smoothed.push_back({0.25 * p0[0] + 0.75 * p1[0],
+                                    0.25 * p0[1] + 0.75 * p1[1]});
+            }
+            smoothed.push_back(current.back());
+            current = std::move(smoothed);
+        }
+    }
+    if (closed) current.push_back(current.front());
+    return current;
+}
+
+// _collapse_grid_stairs — fold short ~90-degree stair kinks.
+Polyline collapse_grid_stairs(const Polyline& points, double grid_step) {
+    if (points.size() < 4) return points;
+    const double step = std::max(grid_step, 1e-9);
+    const bool closed = is_closed_polyline(points, step);
+    const Polyline core(points.begin(),
+                        closed ? points.end() - 1 : points.end());
+    if (core.size() < 3) return points;
+    Polyline out{core.front()};
+    std::size_t i = 1;
+    const std::size_t n = core.size();
+    while (i + 1 < n) {
+        const Point& p0 = out.back();
+        const Point& p1 = core[i];
+        const Point& p2 = core[i + 1];
+        const double d01 = point_distance(p0, p1);
+        const double d12 = point_distance(p1, p2);
+        if (d01 <= step * 2.8 && d12 <= step * 2.8) {
+            const double v1x = p1[0] - p0[0], v1y = p1[1] - p0[1];
+            const double v2x = p2[0] - p1[0], v2y = p2[1] - p1[1];
+            const double n1 = std::hypot(v1x, v1y);
+            const double n2 = std::hypot(v2x, v2y);
+            if (n1 > 1e-12 && n2 > 1e-12) {
+                const double cos_a = (v1x * v2x + v1y * v2y) / (n1 * n2);
+                if (std::abs(cos_a) < 0.35) {
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+        out.push_back(p1);
+        i += 1;
+    }
+    out.push_back(core.back());
+    if (closed && !out.empty() && out.front() != out.back()) {
+        out.push_back(out.front());
+    }
+    return out.size() >= 2 ? out : points;
+}
+
+// _moving_average_polyline — 3-point (1,2,1)/4 average, endpoints fixed.
+Polyline moving_average_polyline(const Polyline& points, double grid_step,
+                                 int passes = 2) {
+    if (points.size() < 4 || passes <= 0) return points;
+    const double step = std::max(grid_step, 1e-9);
+    const bool closed = is_closed_polyline(points, step);
+    Polyline cur(points.begin(), closed ? points.end() - 1 : points.end());
+    if (cur.size() < 3) return points;
+    for (int p = 0; p < std::max(1, passes); ++p) {
+        Polyline nxt;
+        const std::size_t m = cur.size();
+        for (std::size_t i = 0; i < m; ++i) {
+            if (!closed && (i == 0 || i == m - 1)) {
+                nxt.push_back(cur[i]);
+                continue;
+            }
+            const Point& p0 = cur[(i + m - 1) % m];
+            const Point& p1 = cur[i];
+            const Point& p2 = cur[(i + 1) % m];
+            nxt.push_back({(p0[0] + 2.0 * p1[0] + p2[0]) * 0.25,
+                           (p0[1] + 2.0 * p1[1] + p2[1]) * 0.25});
+        }
+        cur = std::move(nxt);
+    }
+    if (closed && !cur.empty()) cur.push_back(cur.front());
+    return cur;
+}
+
+// _polyline_self_intersects — non-adjacent strict intersections (closed
+// first/last adjacency excepted).
+bool polyline_self_intersects(const Polyline& pts, double grid_step) {
+    const std::size_t n = pts.size();
+    if (n < 4) return false;
+    const bool closed = is_closed_polyline(pts, grid_step);
+    for (std::size_t i = 0; i + 1 < n; ++i) {
+        for (std::size_t j = i + 2; j + 1 < n; ++j) {
+            if (closed && i == 0 && j == n - 2) continue;
+            if (segment_intersection_point(pts[i], pts[i + 1], pts[j],
+                                           pts[j + 1])
+                    .has_value()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// _polylines_properly_cross — any proper segment intersection.
+bool polylines_properly_cross(const Polyline& a, const Polyline& b) {
+    for (std::size_t i = 0; i + 1 < a.size(); ++i) {
+        for (std::size_t j = 0; j + 1 < b.size(); ++j) {
+            if (segment_intersection_point(a[i], a[i + 1], b[j], b[j + 1])
+                    .has_value()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// _cartographic_smooth_polyline — collapse stairs -> moving average ->
+// de-spike -> light RDP -> densify -> Chaikin (backing off on self-crossing).
+Polyline cartographic_smooth_polyline(const Polyline& points, double grid_step,
+                                      int iterations = 4) {
+    const double step = std::max(grid_step, 1e-9);
+    Polyline base = collapse_grid_stairs(points, step);
+    base = moving_average_polyline(base, step, 3);
+    base = remove_polyline_spikes(base, step, -0.05);
+    if (base.size() > 4) {
+        const bool was_closed = is_closed_polyline(base, step);
+        Polyline core(base.begin(),
+                      was_closed ? base.end() - 1 : base.end());
+        core = rdp_simplify(core, step * 0.04);
+        if (was_closed && core.size() >= 3) {
+            core.push_back(core.front());
+            base = core;
+        } else {
+            base = core;
+        }
+    }
+    base = densify_polyline_segments(base, step * 1.35);
+    base = dedupe_consecutive_points(base, std::max(step * 1e-6, 1e-9));
+    if (base.size() < 2) return base;
+    const int it = std::max(0, std::min(8, iterations));
+    if (it <= 0) return base;
+    if (base.size() < 3) return base;
+    for (int try_it = it; try_it > 0; --try_it) {
+        Polyline cand = chaikin_smooth_polyline(base, try_it, step);
+        cand = moving_average_polyline(cand, step, 2);
+        if (cand.size() > 6) {
+            const bool was_closed = is_closed_polyline(cand, step);
+            Polyline core(cand.begin(),
+                          was_closed ? cand.end() - 1 : cand.end());
+            core = rdp_simplify(core, step * 0.025);
+            if (was_closed && core.size() >= 3) {
+                core.push_back(core.front());
+                cand = core;
+            } else {
+                cand = core;
+            }
+            cand = densify_polyline_segments(cand, step * 1.25);
+            cand = moving_average_polyline(cand, step, 1);
+        }
+        cand = dedupe_consecutive_points(cand, std::max(step * 1e-6, 1e-9));
+        if (cand.size() >= 2 && !polyline_self_intersects(cand, step)) {
+            return cand;
+        }
+    }
+    return base;
+}
+
 }  // namespace
 
 // --------------------------------------------------------------------------- //
@@ -3173,7 +3938,8 @@ Result generate_constrained_idw(const std::vector<Well>& wells,
                                 const std::vector<BoundaryPolygon>& boundaries,
                                 const std::vector<BarrierLine>& barriers,
                                 const std::vector<DirectionLine>& directions,
-                                const Config& config) {
+                                const Config& config,
+                                std::optional<std::vector<double>> levels) {
     if (wells.size() < 3) {
         throw std::invalid_argument(
             "有效井点不足，至少需要 3 个，当前 " +

@@ -103,20 +103,9 @@ endif()
 # touches the shared feature gate; 12 can hoist it verbatim later.
 option(PWB_BUILD_CATALOG_CLOSURE
     "Line-01 catalog/project closure adapter inside pwb-platform" ON)
-if(PWB_BUILD_CATALOG_CLOSURE
-        AND TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore
-        AND TARGET Pwb::Catalog AND TARGET Pwb::Project)
-    target_sources(pwb-platform PRIVATE
-        closure_catalog_service.cpp
-        closure_catalog_install.cpp)
-    target_link_libraries(pwb-platform PRIVATE
-        Pwb::UiControllers Pwb::UiDataCore Pwb::Catalog Pwb::Project)
-    # ICatalogApi is a Qt-free header; the seam is consumed via the include
-    # path only (no link dep on the Qt-side ui_review library).
-    target_include_directories(pwb-platform PRIVATE
-        ${CMAKE_SOURCE_DIR}/libs/ui_review/include)
-    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CATALOG_CLOSURE=1)
-endif()
+# NOTE: the target_sources/link/define for this slice moved to the root
+# CMakeLists late block — Pwb::UiControllers is created AFTER this
+# directory is processed, so a TARGET probe here can never fire.
 # END cpp-close-01
 # BEGIN PWB-V14-DATA-LINEAGE (P4 product wiring)
 # closure_data_workspace — nav-tree population from the live project

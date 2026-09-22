@@ -506,7 +506,7 @@ void VizBCrossWellDock::refresh_factor_context() {
                       .value<pwb::factor_production::LiveFactorGridStore*>();
     auto* catalog =
         owner->property("closure_factor_catalog")
-            .value<pwb::factor_production::PersistentRuntimeCatalog*>();
+            .value<pwb::workflow_runtime::CatalogRepository*>();
     std::vector<std::pair<std::string, std::array<double, 2>>> wells;
     for (const auto& w : well_coords_cache_) {
         wells.emplace_back(w.value("name", std::string()),

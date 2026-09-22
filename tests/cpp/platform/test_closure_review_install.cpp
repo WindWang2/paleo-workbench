@@ -10,16 +10,24 @@
 #include <string>
 
 #include <QTemporaryDir>
+#include <QAction>
+#include <QLabel>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <qgsapplication.h>
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+#include <pwb/ui_review/compare_core.hpp>
 #include <pwb/ui_review/qt/qc_issue_table.hpp>
 #include <pwb/ui_review/qt/review_export_page.hpp>
 
 #include "app_shell.hpp"
 #include "closure_review_install.hpp"
+#include "comparison_view.hpp"
 #include "main_window.hpp"
+#include "review_disposition_panel.hpp"
+#include "validation_workspace_page.hpp"
 
 #include "test_framework.hpp"
 
@@ -114,6 +122,62 @@ int main(int argc, char** argv) {
         PWB_CHECK(report_it != root.end() && report_it->is_array() &&
                   !report_it->empty());
         PWB_CHECK(report_it->at(0).at("status") == "pass");
+    }
+
+    // ---- M5: the validation gaps are installed ----------------------------
+    {
+        auto* validation = shell->validation_page();
+        PWB_CHECK_MSG(validation != nullptr, "validation page missing");
+        // The placeholders became the real widgets.
+        PWB_CHECK(validation->compare_view() != nullptr);
+        PWB_CHECK(validation->review_panel() != nullptr);
+        PWB_CHECK(validation->compare_view()->objectName() ==
+                  QStringLiteral("ComparisonView"));
+        PWB_CHECK(validation->review_panel()->objectName() ==
+                  QStringLiteral("ReviewDispositionPanel"));
+        // Mode action group exists and switches the view mode (the
+        // verify.side_by_side/overlay/difference commands trigger these).
+        auto* overlay = validation->findChild<QAction*>(
+            QStringLiteral("VerifyModeOverlay"));
+        auto* side_by_side = validation->findChild<QAction*>(
+            QStringLiteral("VerifyModeSideBySide"));
+        PWB_CHECK(overlay != nullptr && side_by_side != nullptr);
+        overlay->trigger();
+        auto* compare = qobject_cast<pwb::app::ComparisonView*>(
+            validation->compare_view());
+        PWB_CHECK(compare != nullptr);
+        PWB_CHECK(compare->mode() == pwb::ui_review::CompareMode::Overlay);
+        side_by_side->trigger();
+        PWB_CHECK(compare->mode() ==
+                  pwb::ui_review::CompareMode::SideBySide);
+        // Exclusive group: only one mode checked at a time.
+        PWB_CHECK(!overlay->isChecked() && side_by_side->isChecked());
+        // F:75: no time-depth calibration in the document → the link
+        // toggle is disabled with its honest reason.
+        auto* link = validation->findChild<QAction*>(
+            QStringLiteral("VerifyLinkToggle"));
+        PWB_CHECK(link != nullptr && !link->isEnabled());
+        // Ribbon checkable bindings reference the same actions.
+        PWB_CHECK(shell->ribbon() != nullptr);
+
+        // Review panel: note is mandatory — empty note refuses the save.
+        auto* panel = qobject_cast<pwb::app::ReviewDispositionPanel*>(
+            validation->review_panel());
+        PWB_CHECK(panel != nullptr);
+        QVariantMap issue;
+        issue.insert(QStringLiteral("rule"), QStringLiteral("rule.a"));
+        issue.insert(QStringLiteral("severity"),
+                     QStringLiteral("error"));
+        issue.insert(QStringLiteral("message"),
+                     QStringLiteral("测试问题"));
+        issue.insert(QStringLiteral("key"), QStringLiteral("rule.a|f1"));
+        panel->set_selected_issue(issue);
+        PWB_CHECK(!panel->save_button()->isEnabled());  // note empty
+        panel->note_editor()->setPlainText(QStringLiteral("专家确认"));
+        PWB_CHECK(panel->save_button()->isEnabled());
+        // The original verdict text stays visible beside the draft.
+        PWB_CHECK(panel->findChild<QLabel*>(
+                      QStringLiteral("ReviewOriginalVerdict")) != nullptr);
     }
 
     return pwb::test::report("platform.closure_review_install");

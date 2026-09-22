@@ -82,6 +82,25 @@ struct StageLayoutProfile {
 // profile (lenient fallback, workspace codec parity).
 StageLayoutProfile stage_layout_profile(const std::string& stage_value);
 
+// Generalized presentation profile (M2 of docs/development/
+// ribbon-five-workspaces/00-plan.md, D2 extension): the same projection
+// mechanism keyed by an arbitrary presentation key. The three stage values
+// resolve to the stage profiles above; the two non-scientific workspaces
+// add their own profiles ("data_management" / "validation" — entering
+// 数据管理/验证 must reshape the docks without rewriting the stage):
+//   data_management: every science/mapping surface hidden (the data page
+//     owns the central area); nav/inspector/tasks stay user-policy.
+//   validation: the review/QC surfaces on (mapping chrome/reference/bottom),
+//     composer + factor/constraint surfaces off.
+// Unknown keys keep the stage-1 lenient fallback.
+StageLayoutProfile presentation_profile(const std::string& presentation_key);
+
+// The two non-scientific workspace presentation keys (pwb::ui_ribbon
+// workspace ids; duplicated as literals here to keep this core Qt-free and
+// ui_ribbon-independent).
+inline constexpr const char* kPresentationDataManagement = "data_management";
+inline constexpr const char* kPresentationValidation = "validation";
+
 // All keys any profile manages (stable order) — assertion/test surface.
 std::vector<std::string> profile_managed_keys();
 

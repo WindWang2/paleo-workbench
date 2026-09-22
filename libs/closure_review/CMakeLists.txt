@@ -23,6 +23,7 @@ add_library(pwb_closure_review STATIC
     src/project_review_actions.cpp
     src/report_export.cpp
     src/review_qc_core.cpp
+    src/review_disposition.cpp
     src/review_versioning.cpp
 )
 add_library(Pwb::ClosureReview ALIAS pwb_closure_review)

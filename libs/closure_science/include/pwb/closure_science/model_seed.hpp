@@ -25,6 +25,7 @@
 #include <pwb/domain/errors.hpp>
 
 #include <string>
+#include <utility>
 
 namespace pwb::closure_science {
 
@@ -42,6 +43,15 @@ inline constexpr const char* kProviderGeovizOnline = "geoviz_online";
 // promotes). Returns Ok when both models + versions exist afterwards.
 domain::DataError ensure_default_models(catalog::CatalogDocument& document,
                                         const catalog::SaveHook& save);
+
+// ensure_mock_facies_models parity (mock_facies.py): idempotent seed of
+// the two stage-action mock models (mock_well_facies /
+// mock_seismic_facies providers, both status="demo" + demo_only so
+// find_production_model never returns them). Returns the (well, seismic)
+// version ids.
+domain::Result<std::pair<std::string, std::string>>
+ensure_mock_facies_models(catalog::CatalogDocument& document,
+                          const catalog::SaveHook& save);
 
 // Register-or-refresh one validated model package as catalog rows.
 // `manifest_path` points at a model package manifest.json (or the package

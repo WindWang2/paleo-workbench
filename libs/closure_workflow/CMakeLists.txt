@@ -16,6 +16,15 @@ add_library(pwb_closure_workflow STATIC
     src/cache_run_rail.cpp
     src/host_bindings.cpp
 )
+
+# Deep-catalog write adapter (managed dedup / legacy bridge / external
+# link / register_* over the workflow_runtime catalog seam). Joins only
+# when the deep catalog core is in the build — the file-backed provenance
+# rail stays the reduced-configure answer.
+if(TARGET Pwb::Catalog)
+    target_sources(pwb_closure_workflow PRIVATE src/catalog_closure_adapter.cpp)
+    target_link_libraries(pwb_closure_workflow PRIVATE Pwb::Catalog)
+endif()
 add_library(Pwb::ClosureWorkflow ALIAS pwb_closure_workflow)
 
 target_include_directories(pwb_closure_workflow
