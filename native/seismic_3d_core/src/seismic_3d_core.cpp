@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <limits>
 
+#include "resample_bounds.hpp"
+
 namespace py = pybind11;
 
 // OpenMP parallel regions are only worthwhile above a work-size threshold:
@@ -323,38 +325,25 @@ py::array_t<float> fast_resample_volume_3d(py::array_t<float, py::array::c_style
     // Peak-preserving stride-block decimation (issue #419): the old nearest
     // grid-point sampling dropped any thin reflection between stride samples,
     // so LOD previews lost events that the native traces still contain. Each
-    // target cell now aggregates its source stride block [lo, hi] per axis
-    // (hi of the last target forced to the source edge, since float32
-    // rounding of t*step can land below s) and keeps the sample with the
-    // largest |value|, sign preserved. A block containing any NaN is
+    // target cell aggregates its source stride block [lo, hi] per axis
+    // (hi of the last target forced to the source edge) and keeps the sample
+    // with the largest |value|, sign preserved. A block containing any NaN is
     // conservatively NaN, matching the Python fallback and the NaN semantics
     // of the other kernels in this module. Blocks are contiguous and cover
     // the whole source; upsampling (step < 1) yields single-sample blocks
     // (the old nearest sample), so identity resampling is unchanged.
-    float step0 = static_cast<float>(s0) / static_cast<float>(std::max<size_t>(1, t0));
-    float step1 = static_cast<float>(s1) / static_cast<float>(std::max<size_t>(1, t1));
-    float step2 = static_cast<float>(s2) / static_cast<float>(std::max<size_t>(1, t2));
-
-    auto block_bounds = [](size_t s, size_t t, float step, std::vector<size_t>& lo, std::vector<size_t>& hi) {
-        lo.resize(t);
-        hi.resize(t);
-        for (size_t i = 0; i < t; ++i) {
-            lo[i] = static_cast<size_t>(i * step);
-            if (i + 1 == t) {
-                hi[i] = s - 1;
-            } else {
-                // Guarded decrement: trunc((i+1)*step) can be 0 when
-                // upsampling (step < 1); size_t underflow would read OOB.
-                size_t next = static_cast<size_t>((i + 1) * step);
-                hi[i] = (next > 0) ? next - 1 : 0;
-            }
-            if (hi[i] < lo[i]) hi[i] = lo[i];  // upsampling: single sample
-        }
-    };
+    //
+    // Block boundaries come from the exact integer recurrence in
+    // resample_bounds.hpp (#1463): the previous float32 form
+    // (trunc(i * step)) rounded indices past s - 1 once an axis exceeded
+    // 2^24 — float32 cannot represent integers that large — and the last
+    // block then read past the source buffer.
     std::vector<size_t> lo0, hi0, lo1, hi1, lo2, hi2;
-    block_bounds(s0, t0, step0, lo0, hi0);
-    block_bounds(s1, t1, step1, lo1, hi1);
-    block_bounds(s2, t2, step2, lo2, hi2);
+    if (!pwb::seismic_core::resample_block_bounds(s0, t0, lo0, hi0)
+        || !pwb::seismic_core::resample_block_bounds(s1, t1, lo1, hi1)
+        || !pwb::seismic_core::resample_block_bounds(s2, t2, lo2, hi2)) {
+        throw std::invalid_argument("cannot resample an empty source axis");
+    }
 
     const float nan = std::numeric_limits<float>::quiet_NaN();
 
