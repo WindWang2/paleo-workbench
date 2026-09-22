@@ -31,7 +31,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[4]
-ADAPTER_PATH = REPO_ROOT / "paleo_workbench" / "viz" / "welllog_engine_adapter.py"
+# Python-retirement: the adapter lives in the retirement archive now.
+ARCHIVE_PRODUCT = REPO_ROOT / "legacy" / "python_reference" / "product"
+ADAPTER_PATH = ARCHIVE_PRODUCT / "paleo_workbench" / "viz" / "welllog_engine_adapter.py"
 
 NAN = float("nan")
 INF = float("inf")
@@ -64,7 +66,7 @@ def load_adapter():
 
     science_spec = importlib.util.spec_from_file_location(
         "paleo_workbench.workflow.well_science",
-        REPO_ROOT / "paleo_workbench" / "workflow" / "well_science.py")
+        ARCHIVE_PRODUCT / "paleo_workbench" / "workflow" / "well_science.py")
     science = importlib.util.module_from_spec(science_spec)
     sys.modules[science_spec.name] = science
     science_spec.loader.exec_module(science)

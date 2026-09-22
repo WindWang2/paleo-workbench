@@ -91,9 +91,10 @@ ADJUDICATIONS = {
 def load_python_reference():
     sys.path.insert(0, str(GEOVIZ_ROOT))
     pkg = types.ModuleType("paleo_workbench")
-    pkg.__path__ = [str(REPO_ROOT / "paleo_workbench")]
+    _archive = REPO_ROOT / "legacy" / "python_reference" / "product"  # Python-retirement
+    pkg.__path__ = [str(_archive / "paleo_workbench")]
     resources = types.ModuleType("paleo_workbench.resources")
-    resources.__path__ = [str(REPO_ROOT / "paleo_workbench" / "resources")]
+    resources.__path__ = [str(_archive / "paleo_workbench" / "resources")]
     parsers = types.ModuleType("paleo_workbench.resources.preview_parsers")
     parsers.__path__ = [
         str(REPO_ROOT / "paleo_workbench" / "resources" / "preview_parsers")
