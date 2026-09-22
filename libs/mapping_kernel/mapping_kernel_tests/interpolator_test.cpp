@@ -127,10 +127,317 @@ void test_idw_keep_policy_preserves_duplicate_contract() {
           "exact-site cell finite under 'keep'");
 }
 
+// #1460: one sample with a NaN x (first in the vector — the position that
+// used to poison dataset_extent's min/max seed). Every neighbourhood mode
+// must produce EXACTLY the grid of the dataset without that sample.
+void test_nonfinite_coord_policy_is_consistent_across_paths() {
+    constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    std::vector<pwb::mapping::SamplePoint> clean = {
+        {0.0, 0.0, 1.0}, {2.0, 0.0, 2.0}, {0.0, 2.0, 3.0},
+        {2.0, 2.0, 4.0}, {1.0, 1.0, 2.5},
+    };
+    std::vector<pwb::mapping::SamplePoint> poisoned = clean;
+    poisoned.insert(poisoned.begin(), {nan, 1.0, 100.0});
+    poisoned.push_back({inf, 0.5, -100.0});
+
+    auto options_for = [](const char* method) {
+        InterpolateOptions opt;
+        opt.method = method;
+        opt.grid_n = 12;
+        return opt;
+    };
+    struct Mode {
+        const char* name;
+        InterpolateOptions opt;
+    };
+    std::vector<Mode> modes;
+    {
+        InterpolateOptions o = options_for("idw");
+        modes.push_back({"idw all-neighbours", o});
+    }
+    {
+        InterpolateOptions o = options_for("idw");
+        o.max_neighbors = 3;
+        modes.push_back({"idw kNN", o});
+    }
+    {
+        InterpolateOptions o = options_for("idw");
+        o.search_radius = 1.5;
+        modes.push_back({"idw radius", o});
+    }
+    {
+        InterpolateOptions o = options_for("kriging");
+        modes.push_back({"kriging global", o});
+    }
+    {
+        InterpolateOptions o = options_for("kriging");
+        o.max_neighbors = 4;
+        modes.push_back({"kriging neighbourhood", o});
+    }
+    for (const Mode& mode : modes) {
+        const FactorGrid base = pwb::mapping::interpolate_factor(clean,
+                                                                 mode.opt);
+        const FactorGrid got = pwb::mapping::interpolate_factor(poisoned,
+                                                                mode.opt);
+        check(base.grid_z.size() == got.grid_z.size(),
+              std::string(mode.name) + ": grid size matches clean run");
+        bool identical = base.grid_z.size() == got.grid_z.size();
+        for (std::size_t i = 0; identical && i < got.grid_z.size(); ++i) {
+            if (std::isnan(base.grid_z[i]) != std::isnan(got.grid_z[i])
+                || (!std::isnan(base.grid_z[i])
+                    && base.grid_z[i] != got.grid_z[i])) {
+                identical = false;
+            }
+        }
+        check(identical,
+              std::string(mode.name)
+                  + ": non-finite-coordinate samples change nothing");
+        check(got.statistics.valid_count == static_cast<int>(
+              got.grid_z.size()),
+              std::string(mode.name) + ": no NaN-poisoned cells remain");
+    }
+
+    // Non-finite value AND non-finite coordinate: both drop.
+    std::vector<pwb::mapping::SamplePoint> value_nan = clean;
+    value_nan.push_back({3.0, 3.0, nan});
+    const FactorGrid value_nan_grid = pwb::mapping::interpolate_factor(
+        value_nan, options_for("idw"));
+    const FactorGrid clean_grid = pwb::mapping::interpolate_factor(
+        clean, options_for("idw"));
+    check(value_nan_grid.statistics.valid_count
+              == clean_grid.statistics.valid_count,
+          "non-finite value sample drops like a non-finite coordinate");
+}
+
+// #1460 unit surface: valid_points / dataset_extent on non-finite coords.
+void test_valid_points_and_extent_skip_nonfinite_coordinates() {
+    constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<pwb::mapping::SamplePoint> points = {
+        {nan, 0.0, 5.0},   // NaN x — dropped
+        {0.0, nan, 5.0},   // NaN y — dropped
+        {1.0, 1.0, 7.0},
+        {3.0, 1.0, 8.0},
+        {2.0, 4.0, 9.0},
+    };
+    const auto valid = pwb::mapping::valid_points(points);
+    check(valid.size() == 3, "valid_points drops non-finite x/y");
+    // Extent ignores non-finite coordinates but keeps invalid-VALUE
+    // samples with finite coordinates (the ALL-points contract).
+    std::vector<pwb::mapping::SamplePoint> extent_probe = {
+        {nan, nan, 1.0}, {0.0, 0.0, nan}, {4.0, 0.0, 2.0}, {0.0, 4.0, 3.0}};
+    const auto extent = pwb::mapping::dataset_extent(extent_probe);
+    check(std::fabs(extent[0] - (-0.4)) < 1e-12
+              && std::fabs(extent[1] - (-0.4)) < 1e-12
+              && std::fabs(extent[2] - 4.4) < 1e-12
+              && std::fabs(extent[3] - 4.4) < 1e-12,
+          "dataset_extent skips non-finite coords, keeps invalid values");
+    const auto all_nonfinite = pwb::mapping::dataset_extent(
+        {{nan, 0.0, 1.0}, {0.0, nan, 1.0}});
+    check(all_nonfinite[0] == 0.0 && all_nonfinite[2] == 1.0,
+          "dataset_extent of only-nonfinite coords falls back to unit box");
+}
+
+// #1465: with a fitted nugget > 0 the OK system must use one covariance
+// contract — C(0) = nugget + psill on the diagonal, C(h>0) = total_sill -
+// gamma(h), variance measured against the same total sill. The in-test
+// oracle re-solves the (n+1) system with the kernel's OWN fitted
+// parameters and the documented contract; the old code (diagonal without
+// the nugget) fails this comparison.
+void test_kriging_nugget_covariance_contract() {
+    // Deterministic three-cluster field (values 40/0/40 plus fixed noise):
+    // within-cluster lags see only the noise variance, cluster-to-cluster
+    // lags (inside max_lag = dmax/2) see the value contrast — the classic
+    // identifiable-nugget geometry. Verified: this dataset fits a nugget
+    // around ~112 (stable, deterministic).
+    std::vector<pwb::mapping::SamplePoint> points;
+    {
+        const double noise[12] = {14, -14, 10, -10, 14, -14,
+                                  10, -10, 14, -14, 10, -10};
+        const double base[3] = {40.0, 0.0, 40.0};
+        const double cx[3] = {0.0, 5.0, 10.0};
+        const double off[4][2] = {{0, 0}, {0.3, 0.1}, {0.1, 0.3},
+                                  {0.2, 0.2}};
+        int k = 0;
+        for (int c = 0; c < 3; ++c) {
+            for (int p = 0; p < 4; ++p, ++k) {
+                points.push_back({cx[c] + off[p][0], off[p][1],
+                                  base[c] + noise[k]});
+            }
+        }
+    }
+    InterpolateOptions options;
+    options.method = "kriging";
+    options.grid_n = 10;
+    const FactorGrid got = pwb::mapping::interpolate_factor(points, options);
+    check(got.nugget > 0.0,
+          "noisy dataset fits a positive nugget (fixture premise)");
+    if (!(got.nugget > 0.0)) return;
+
+    // Mirror the kernel: dedup, then distances.
+    std::vector<double> xs, ys, zs;
+    for (const auto& p : pwb::mapping::valid_points(points)) {
+        xs.push_back(p.x);
+        ys.push_back(p.y);
+        zs.push_back(p.value);
+    }
+    const auto merged = pwb::mapping::deduplicate_samples(xs, ys, zs);
+    const int n = static_cast<int>(merged.z.size());
+    const double nugget = got.nugget;
+    const double sill = got.sill;  // partial sill
+    const double total_sill = sill + nugget;
+    const std::string model = got.model;
+    const double range = got.range;
+    auto gamma = [&](double h) {
+        return pwb::mapping::model_semivariance({h}, nugget, sill, range,
+                                                model)[0];
+    };
+    auto cov = [&](double h) {
+        return h <= 0.0 ? total_sill : total_sill - gamma(h);
+    };
+
+    // Augmented OK matrix with the documented contract.
+    const int sys = n + 1;
+    std::vector<double> K(static_cast<std::size_t>(sys * sys), 0.0);
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            const double dx = merged.x[static_cast<std::size_t>(i)]
+                              - merged.x[static_cast<std::size_t>(j)];
+            const double dy = merged.y[static_cast<std::size_t>(i)]
+                              - merged.y[static_cast<std::size_t>(j)];
+            K[static_cast<std::size_t>(i * sys + j)] =
+                cov(std::sqrt(dx * dx + dy * dy));
+        }
+        K[static_cast<std::size_t>(i * sys + n)] = 1.0;
+        K[static_cast<std::size_t>(n * sys + i)] = 1.0;
+    }
+
+    // Tiny Gaussian elimination with partial pivoting (test-side oracle).
+    auto solve = [&](std::vector<double> a, std::vector<double> b) {
+        std::vector<double> x(static_cast<std::size_t>(sys), 0.0);
+        for (int col = 0; col < sys; ++col) {
+            int best = col;
+            for (int row = col + 1; row < sys; ++row) {
+                if (std::fabs(a[static_cast<std::size_t>(row * sys + col)])
+                    > std::fabs(
+                        a[static_cast<std::size_t>(best * sys + col)])) {
+                    best = row;
+                }
+            }
+            for (int j = 0; j < sys; ++j) {
+                std::swap(a[static_cast<std::size_t>(col * sys + j)],
+                          a[static_cast<std::size_t>(best * sys + j)]);
+            }
+            std::swap(b[static_cast<std::size_t>(col)],
+                      b[static_cast<std::size_t>(best)]);
+            const double diag =
+                a[static_cast<std::size_t>(col * sys + col)];
+            if (!(std::fabs(diag) > 0.0)) return x;
+            for (int row = col + 1; row < sys; ++row) {
+                const double f =
+                    a[static_cast<std::size_t>(row * sys + col)] / diag;
+                for (int j = col; j < sys; ++j) {
+                    a[static_cast<std::size_t>(row * sys + j)] -=
+                        f * a[static_cast<std::size_t>(col * sys + j)];
+                }
+                b[static_cast<std::size_t>(row)] -=
+                    f * b[static_cast<std::size_t>(col)];
+            }
+        }
+        for (int i = sys - 1; i >= 0; --i) {
+            double s = b[static_cast<std::size_t>(i)];
+            for (int j = i + 1; j < sys; ++j) {
+                s -= a[static_cast<std::size_t>(i * sys + j)]
+                     * x[static_cast<std::size_t>(j)];
+            }
+            x[static_cast<std::size_t>(i)] =
+                s / a[static_cast<std::size_t>(i * sys + i)];
+        }
+        return x;
+    };
+
+    // Re-solve at every grid node and compare with the kernel's output.
+    double worst_z = 0.0;
+    double worst_var = 0.0;
+    for (int row = 0; row < got.grid_n; ++row) {
+        for (int col = 0; col < got.grid_n; ++col) {
+            const double tx = got.grid_x[static_cast<std::size_t>(col)];
+            const double ty = got.grid_y[static_cast<std::size_t>(row)];
+            std::vector<double> rhs(static_cast<std::size_t>(sys), 0.0);
+            for (int s = 0; s < n; ++s) {
+                const double dx =
+                    tx - merged.x[static_cast<std::size_t>(s)];
+                const double dy =
+                    ty - merged.y[static_cast<std::size_t>(s)];
+                rhs[static_cast<std::size_t>(s)] =
+                    cov(std::sqrt(dx * dx + dy * dy));
+            }
+            rhs[static_cast<std::size_t>(n)] = 1.0;
+            const auto w = solve(K, rhs);
+            double zhat = 0.0;
+            double wcov = 0.0;
+            for (int s = 0; s < n; ++s) {
+                zhat += w[static_cast<std::size_t>(s)]
+                        * merged.z[static_cast<std::size_t>(s)];
+                wcov += w[static_cast<std::size_t>(s)]
+                        * rhs[static_cast<std::size_t>(s)];
+            }
+            const double variance =
+                std::max(0.0,
+                         total_sill - (wcov + w[static_cast<std::size_t>(n)]));
+            const std::size_t at = static_cast<std::size_t>(
+                row * got.grid_n + col);
+            worst_z = std::max(worst_z,
+                               std::fabs(zhat
+                                         - static_cast<double>(
+                                             got.grid_z[at])));
+            worst_var = std::max(
+                worst_var,
+                std::fabs(variance
+                          - static_cast<double>(got.variance_grid[at])));
+            check(got.variance_grid[at] >= 0.0f,
+                  "kriging variance non-negative");
+            // NOTE: an OK variance may legitimately exceed C(0) — negative
+            // weights (screen effect) push total_sill - (wcov + mu) above
+            // the total sill — so only non-negativity and the oracle match
+            // above are asserted.
+        }
+    }
+    check(worst_z < 1e-4,
+          "nugget>0 estimate matches the C(0)=total-sill oracle ("
+              + std::to_string(worst_z) + ")");
+    check(worst_var < 1e-4,
+          "nugget>0 variance matches the C(0)=total-sill oracle ("
+              + std::to_string(worst_var) + ")");
+}
+
+// grid_n ceiling (#1460 hardening family): a hostile grid_n must be
+// refused with a clean invalid_argument, not overflow int cell math or
+// thrash the allocator.
+void test_grid_n_ceiling_rejects_hostile_requests() {
+    std::vector<pwb::mapping::SamplePoint> points = {
+        {0.0, 0.0, 1.0}, {1.0, 0.0, 2.0}, {0.0, 1.0, 3.0},
+    };
+    InterpolateOptions options;
+    options.method = "idw";
+    options.grid_n = 2000000000;
+    bool threw = false;
+    try {
+        static_cast<void>(pwb::mapping::interpolate_factor(points, options));
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    check(threw, "hostile grid_n refused with invalid_argument");
+}
+
 
 
 int main() {
     test_idw_keep_policy_preserves_duplicate_contract();
+    test_nonfinite_coord_policy_is_consistent_across_paths();
+    test_valid_points_and_extent_skip_nonfinite_coordinates();
+    test_kriging_nugget_covariance_contract();
+    test_grid_n_ceiling_rejects_hostile_requests();
     const std::string fixture_path = PWB_INTERP_FIXTURE;
     std::ifstream stream(fixture_path, std::ios::binary);
     if (!stream.good()) {

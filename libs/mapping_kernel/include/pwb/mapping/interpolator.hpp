@@ -97,10 +97,14 @@ GridStatistics grid_statistics(const std::vector<float>& grid_z);
 std::vector<double> linspace(double start, double stop, int num);
 
 // GeologicalFactorDataset.extent — (xmin, ymin, xmax, ymax) of ALL points
-// (invalid QC included). Empty → (0, 0, 1, 1).
+// with finite coordinates (invalid QC included). Samples with non-finite
+// x/y cannot bound a grid (#1460) and are skipped; empty → (0, 0, 1, 1).
 std::array<double, 4> dataset_extent(const std::vector<SamplePoint>& points);
 
-// Points kept by GeologicalFactorDataset.valid_points.
+// Points kept by GeologicalFactorDataset.valid_points: finite x, y AND
+// value plus ok/valid QC flags (#1460 — a sample without a finite location
+// cannot enter any interpolation neighbourhood; all-neighbours, kNN,
+// radius and kriging paths therefore share one skip policy).
 std::vector<SamplePoint> valid_points(const std::vector<SamplePoint>& points);
 
 // GeologicalFactorDataset.validate() on the valid subset.

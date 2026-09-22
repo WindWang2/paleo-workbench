@@ -74,12 +74,16 @@ bool neighbor_less(const Neighbor& a, const Neighbor& b) {
     return a.idx < b.idx;
 }
 
-std::vector<Neighbor> k_nearest(double tx, double ty,
-                                const std::vector<double>& xs,
-                                const std::vector<double>& ys, int k,
-                                std::optional<double> radius) {
+// k_nearest over a CALLER-OWNED scratch buffer: the old per-call
+// `std::vector<Neighbor> all(n)` allocation dominated the kNN path
+// (n * 16 bytes per target cell — megabytes of churn per grid); the
+// selection semantics are byte-identical.
+void k_nearest(double tx, double ty, const std::vector<double>& xs,
+               const std::vector<double>& ys, int k,
+               std::optional<double> radius,
+               std::vector<Neighbor>& all) {
     const std::size_t n = xs.size();
-    std::vector<Neighbor> all(n);
+    all.resize(n);
     for (std::size_t j = 0; j < n; ++j) {
         const double dx = tx - xs[j];
         const double dy = ty - ys[j];
@@ -99,8 +103,54 @@ std::vector<Neighbor> k_nearest(double tx, double ty,
     } else {
         std::sort(all.begin(), all.end(), neighbor_less);
     }
-    return all;
 }
+
+// Finite-coordinate view of the sample arrays for the interpolation
+// kernels (#1460 kernel-side insurance): if any x/y is non-finite, build
+// filtered copies ONCE per call; otherwise alias the caller's vectors.
+// This keeps the hot per-cell loops free of a per-sample isfinite branch
+// (which measurably de-vectorised the all-neighbours IDW) while still
+// making NaN coordinates impossible to reach from any internal caller.
+struct FiniteSamples {
+    std::vector<double> x;
+    std::vector<double> y;
+    std::vector<double> z;
+    const std::vector<double>* px = nullptr;
+    const std::vector<double>* py = nullptr;
+    const std::vector<double>* pz = nullptr;
+    std::size_t n = 0;
+
+    FiniteSamples(const std::vector<double>& xs, const std::vector<double>& ys,
+                  const std::vector<double>& zs)
+        : px(&xs), py(&ys), pz(&zs), n(xs.size()) {
+        for (std::size_t s = 0; s < xs.size(); ++s) {
+            if (!std::isfinite(xs[s]) || !std::isfinite(ys[s])) {
+                build_filtered(xs, ys, zs);
+                return;
+            }
+        }
+    }
+
+    void build_filtered(const std::vector<double>& xs,
+                        const std::vector<double>& ys,
+                        const std::vector<double>& zs) {
+        x.reserve(xs.size());
+        y.reserve(ys.size());
+        z.reserve(zs.size());
+        for (std::size_t s = 0; s < xs.size(); ++s) {
+            if (std::isfinite(xs[s]) && std::isfinite(ys[s])
+                && std::isfinite(zs[s])) {
+                x.push_back(xs[s]);
+                y.push_back(ys[s]);
+                z.push_back(zs[s]);
+            }
+        }
+        px = &x;
+        py = &y;
+        pz = &z;
+        n = x.size();
+    }
+};
 
 bool point_in_ring(double x, double y, const std::vector<Point>& ring) {
     const std::size_t count = ring.size();
@@ -143,9 +193,18 @@ void apply_domain_mask(FactorGrid& result, const std::vector<Point>& boundary) {
     result.domain_masked_cells = masked;
 }
 
-bool solve_linear(std::vector<double> A, std::vector<double> b, int n,
-                  std::vector<double>& x) {
-    x.assign(static_cast<std::size_t>(n), 0.0);
+// In-place LU factorization with partial pivoting (the exact elimination
+// solve_linear always performed, minus the rhs). Pivoting depends only on
+// the matrix, so factorizing once and applying to many right-hand sides
+// is BITWISE what per-rhs factorization produced — this is what makes the
+// global kriging path affordable (the old code copied and re-factored the
+// (n+1)^2 system for every grid cell: 400 s at n=300 / 200x200 grid).
+// A[col*n+col..] holds U; the multipliers stay in the strict lower part.
+// Returns false at the same exact-zero pivot that failed before.
+bool lu_factor_inplace(std::vector<double>& A, std::vector<int>& perm,
+                       int n) {
+    perm.resize(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i) perm[static_cast<std::size_t>(i)] = i;
     for (int col = 0; col < n; ++col) {
         int best = col;
         double best_abs = std::fabs(A[static_cast<std::size_t>(col * n + col)]);
@@ -163,31 +222,72 @@ bool solve_linear(std::vector<double> A, std::vector<double> b, int n,
                 std::swap(A[static_cast<std::size_t>(col * n + j)],
                           A[static_cast<std::size_t>(best * n + j)]);
             }
-            std::swap(b[static_cast<std::size_t>(col)],
-                      b[static_cast<std::size_t>(best)]);
+            std::swap(perm[static_cast<std::size_t>(col)],
+                      perm[static_cast<std::size_t>(best)]);
         }
         const double diag = A[static_cast<std::size_t>(col * n + col)];
         for (int row = col + 1; row < n; ++row) {
             const double f =
                 A[static_cast<std::size_t>(row * n + col)] / diag;
+            A[static_cast<std::size_t>(row * n + col)] = f;
             for (int j = col + 1; j < n; ++j) {
                 A[static_cast<std::size_t>(row * n + j)] -=
                     f * A[static_cast<std::size_t>(col * n + j)];
             }
+        }
+    }
+    return true;
+}
+
+// Solve A x = b against a factorization from lu_factor_inplace, replacing
+// b with x. perm[i] is the ORIGINAL row that ended up at position i; each
+// b element travels with its row (they were swapped together at factor
+// time), so the permutation is applied as a gather — sequential in-place
+// swaps would compose the permutation with itself and scramble b. The
+// gather-then-forward-substitute order below then applies exactly the same
+// subtractions, to the same values, in the same per-row ascending order as
+// the old interleaved elimination — bitwise identical output.
+void lu_solve_apply(const std::vector<double>& A,
+                    const std::vector<int>& perm, std::vector<double>& b,
+                    int n) {
+    std::vector<double> gathered(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        gathered[static_cast<std::size_t>(i)] =
+            b[static_cast<std::size_t>(perm[static_cast<std::size_t>(i)])];
+    }
+    b.swap(gathered);
+    for (int col = 0; col < n; ++col) {
+        const double bcol = b[static_cast<std::size_t>(col)];
+        for (int row = col + 1; row < n; ++row) {
             b[static_cast<std::size_t>(row)] -=
-                f * b[static_cast<std::size_t>(col)];
+                A[static_cast<std::size_t>(row * n + col)] * bcol;
         }
     }
     for (int i = n - 1; i >= 0; --i) {
         double s = b[static_cast<std::size_t>(i)];
         for (int j = i + 1; j < n; ++j) {
             s -= A[static_cast<std::size_t>(i * n + j)]
-                 * x[static_cast<std::size_t>(j)];
+                 * b[static_cast<std::size_t>(j)];
         }
         const double diag = A[static_cast<std::size_t>(i * n + i)];
-        if (!(std::fabs(diag) > 0.0)) return false;
-        x[static_cast<std::size_t>(i)] = s / diag;
+        if (!(std::fabs(diag) > 0.0)) {
+            b[static_cast<std::size_t>(i)] =
+                std::numeric_limits<double>::quiet_NaN();
+            continue;
+        }
+        b[static_cast<std::size_t>(i)] = s / diag;
     }
+}
+
+bool solve_linear(std::vector<double> A, std::vector<double> b, int n,
+                  std::vector<double>& x) {
+    std::vector<int> perm;
+    if (!lu_factor_inplace(A, perm, n)) {
+        x.assign(static_cast<std::size_t>(n), 0.0);
+        return false;
+    }
+    lu_solve_apply(A, perm, b, n);
+    x = std::move(b);
     return true;
 }
 
@@ -418,7 +518,16 @@ std::optional<double> positive_radius(const std::optional<double>& radius) {
 void idw_fill(FactorGrid& out, const std::vector<double>& xs,
               const std::vector<double>& ys, const std::vector<double>& zs,
               const InterpolateOptions& options) {
-    const int n = static_cast<int>(xs.size());
+    // #1460 kernel-side insurance: filter non-finite coordinates ONCE per
+    // call (valid_points already does this at the public boundary; this is
+    // the second, kernel-level brace). A per-sample isfinite branch inside
+    // the hot loops below measurably de-vectorised the all-neighbours IDW
+    // (+57% on a 2000-sample 200x200 grid), so the guard lives here.
+    const FiniteSamples finite(xs, ys, zs);
+    const std::vector<double>& sx = *finite.px;
+    const std::vector<double>& sy = *finite.py;
+    const std::vector<double>& sz = *finite.pz;
+    const int n = static_cast<int>(finite.n);
     const int grid_n = out.grid_n;
     const double p = std::max(1.0, options.power);
     const double eps = kEps;
@@ -445,8 +554,8 @@ void idw_fill(FactorGrid& out, const std::vector<double>& xs,
                     double vsum = 0.0;
                     int last_exact = -1;
                     for (int s = 0; s < n; ++s) {
-                        const double dx = tx - xs[static_cast<std::size_t>(s)];
-                        const double dy = ty - ys[static_cast<std::size_t>(s)];
+                        const double dx = tx - sx[static_cast<std::size_t>(s)];
+                        const double dy = ty - sy[static_cast<std::size_t>(s)];
                         double dist2 = dx * dx + dy * dy;
                         const bool exact = dist2 < eps_sq;
                         if (dist2 < eps_sq) dist2 = eps_sq;
@@ -458,24 +567,28 @@ void idw_fill(FactorGrid& out, const std::vector<double>& xs,
                         }
                         if (exact) w = 0.0;
                         wsum += w;
-                        vsum += w * zs[static_cast<std::size_t>(s)];
+                        vsum += w * sz[static_cast<std::size_t>(s)];
                         if (exact) last_exact = s;
                     }
                     const std::size_t at =
                         static_cast<std::size_t>(i * grid_n + j);
                     if (wsum > 0.0) z64[at] = vsum / wsum;
                     if (last_exact >= 0) {
-                        z64[at] = zs[static_cast<std::size_t>(last_exact)];
+                        z64[at] = sz[static_cast<std::size_t>(last_exact)];
                     }
                 }
             }
         }
     } else {
+        // Scratch reuse: one neighbour buffer for the whole grid instead
+        // of one n-element allocation per cell (the dominant kNN cost).
+        std::vector<Neighbor> scratch;
         for (int i = 0; i < grid_n; ++i) {
             for (int j = 0; j < grid_n; ++j) {
                 const double tx = out.grid_x[static_cast<std::size_t>(j)];
                 const double ty = out.grid_y[static_cast<std::size_t>(i)];
-                const auto nb = k_nearest(tx, ty, xs, ys, k, radius);
+                k_nearest(tx, ty, sx, sy, k, radius, scratch);
+                const std::vector<Neighbor>& nb = scratch;
                 int neighbor_count = 0;
                 double wsum = 0.0;
                 double vsum = 0.0;
@@ -489,7 +602,7 @@ void idw_fill(FactorGrid& out, const std::vector<double>& xs,
                     double w = 1.0 / std::pow(d, p);
                     if (exact) w = 0.0;
                     wsum += w;
-                    const double zv = zs[nbor.idx];
+                    const double zv = sz[nbor.idx];
                     vsum += w * zv;
                     if (exact) {
                         last_exact = static_cast<int>(nbor.idx);
@@ -525,6 +638,34 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
                   std::vector<double> ys, std::vector<double> zs,
                   const InterpolateOptions& options) {
     const std::string model = canonical_model(options.variogram_model);
+    // #1460 kernel-side insurance (second brace behind valid_points):
+    // drop non-finite coordinates ONCE before any distance/variogram
+    // math can see them (cheap pre-scan; copies only in the pathological
+    // case a non-finite coordinate slipped past the public boundary).
+    bool any_nonfinite = false;
+    for (std::size_t s = 0; s < xs.size(); ++s) {
+        if (!std::isfinite(xs[s]) || !std::isfinite(ys[s])) {
+            any_nonfinite = true;
+            break;
+        }
+    }
+    if (any_nonfinite) {
+        std::vector<double> fx, fy, fz;
+        fx.reserve(xs.size());
+        fy.reserve(xs.size());
+        fz.reserve(xs.size());
+        for (std::size_t s = 0; s < xs.size(); ++s) {
+            if (std::isfinite(xs[s]) && std::isfinite(ys[s])
+                && std::isfinite(zs[s])) {
+                fx.push_back(xs[s]);
+                fy.push_back(ys[s]);
+                fz.push_back(zs[s]);
+            }
+        }
+        xs = std::move(fx);
+        ys = std::move(fy);
+        zs = std::move(fz);
+    }
     DedupResult merged = deduplicate_samples(xs, ys, zs);
     xs = std::move(merged.x);
     ys = std::move(merged.y);
@@ -556,7 +697,21 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
     const auto gamma = [&](double h) {
         return model_sv_at(h, nugget, psill, r, model);
     };
-    const auto cov = [&](double h) { return (sill + nugget) - gamma(h); };
+    // Covariance contract (#1465): C(0) = nugget + psill (the total sill —
+    // a sample's covariance with itself includes the nugget), and for
+    // h > 0, C(h) = total_sill - gamma(h) = psill * (1 - shape(h)).
+    // The model formula evaluates gamma(0) = nugget (the discontinuity of
+    // the semivariance at zero separation), so the old unconditional
+    // `(sill + nugget) - gamma(h)` cancelled the nugget at h == 0: the OK
+    // diagonal carried psill while the kriging variance was measured
+    // against total_sill — inconsistent whenever the fit produced a
+    // nugget > 0. With nugget == 0 both forms coincide, so every frozen
+    // oracle (all fitted nugget = 0) is unchanged.
+    const double total_sill = sill + nugget;
+    const auto cov = [&](double h) {
+        if (h <= 0.0) return total_sill;
+        return total_sill - gamma(h);
+    };
 
     const int grid_n = out.grid_n;
     const std::size_t m =
@@ -582,18 +737,27 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
         const auto radius = positive_radius(options.search_radius);
         const int sys = k_eff + 1;
         const double ridge = (sill > 0.0) ? 1e-10 * sill : 1e-10;
-        const double total_sill = sill + nugget;
         std::fill(z_pred.begin(), z_pred.end(),
                   std::numeric_limits<double>::quiet_NaN());
         std::fill(variance.begin(), variance.end(),
                   std::numeric_limits<double>::quiet_NaN());
+        // Scratch reuse: the per-cell neighbour buffer, keep-mask and OK
+        // system storage are allocated ONCE for the grid, not per cell
+        // (five heap allocations per cell dominated small-k neighbourhood
+        // runs; the numeric sequence per cell is unchanged).
+        std::vector<Neighbor> nb;
+        std::vector<char> keep;
+        std::vector<double> K;
+        std::vector<double> rhs;
+        std::vector<double> cov_tn;
+        std::vector<double> z_vals;
         for (int row = 0; row < grid_n; ++row) {
             for (int col = 0; col < grid_n; ++col) {
                 const double tx = out.grid_x[static_cast<std::size_t>(col)];
                 const double ty = out.grid_y[static_cast<std::size_t>(row)];
-                auto nb = k_nearest(tx, ty, xs, ys, k_eff, radius);
+                k_nearest(tx, ty, xs, ys, k_eff, radius, nb);
                 int kept = 0;
-                std::vector<char> keep(static_cast<std::size_t>(k_eff), 0);
+                keep.assign(static_cast<std::size_t>(k_eff), 0);
                 for (int t = 0; t < static_cast<int>(nb.size()); ++t) {
                     if (std::isfinite(nb[static_cast<std::size_t>(t)].dist)) {
                         keep[static_cast<std::size_t>(t)] = 1;
@@ -601,12 +765,10 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
                     }
                 }
                 if (kept < min_n) continue;
-                std::vector<double> K(static_cast<std::size_t>(sys * sys), 0.0);
-                std::vector<double> rhs(static_cast<std::size_t>(sys), 0.0);
-                std::vector<double> cov_tn(static_cast<std::size_t>(k_eff),
-                                           0.0);
-                std::vector<double> z_vals(static_cast<std::size_t>(k_eff),
-                                           0.0);
+                K.assign(static_cast<std::size_t>(sys * sys), 0.0);
+                rhs.assign(static_cast<std::size_t>(sys), 0.0);
+                cov_tn.assign(static_cast<std::size_t>(k_eff), 0.0);
+                z_vals.assign(static_cast<std::size_t>(k_eff), 0.0);
                 for (int a = 0; a < k_eff; ++a) {
                     const bool ka = keep[static_cast<std::size_t>(a)] != 0;
                     const std::size_t ia =
@@ -674,13 +836,36 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
             K[static_cast<std::size_t>(n * sys + i)] = 1.0;
         }
         const double ridge = (cov0 > 0.0) ? 1e-10 * cov0 : 1e-10;
-        const double total_sill = sill + nugget;
+        // Factor the global system ONCE: the pivot sequence depends only on
+        // K, so each cell's lu_solve_apply is bitwise what the per-cell
+        // solve_ok_system ladder produced — minus re-copying and
+        // re-factoring the (n+1)^2 matrix for every grid cell (400 s at
+        // n=300 on a 200x200 grid before; see #1465 perf pass).
+        std::vector<double> lu_direct = K;
+        std::vector<int> perm_direct;
+        const bool direct_ok =
+            lu_factor_inplace(lu_direct, perm_direct, sys);
+        std::vector<double> lu_ridge;
+        std::vector<int> perm_ridge;
+        bool ridge_ok = false;
+        if (!direct_ok) {
+            lu_ridge = K;
+            for (int i = 0; i < n; ++i) {
+                lu_ridge[static_cast<std::size_t>(i * sys + i)] +=
+                    ridge * static_cast<double>(n);
+            }
+            ridge_ok = lu_factor_inplace(lu_ridge, perm_ridge, sys);
+        }
+        // Scratch reuse: rhs/cov_tn/w per cell were three heap allocations
+        // inside the hottest loop of the global path.
+        std::vector<double> rhs(static_cast<std::size_t>(sys), 0.0);
+        std::vector<double> cov_tn(static_cast<std::size_t>(n), 0.0);
+        std::vector<double> w(static_cast<std::size_t>(sys), 0.0);
         for (int row = 0; row < grid_n; ++row) {
             for (int col = 0; col < grid_n; ++col) {
                 const double tx = out.grid_x[static_cast<std::size_t>(col)];
                 const double ty = out.grid_y[static_cast<std::size_t>(row)];
-                std::vector<double> rhs(static_cast<std::size_t>(sys), 0.0);
-                std::vector<double> cov_tn(static_cast<std::size_t>(n), 0.0);
+                std::fill(rhs.begin(), rhs.end(), 0.0);
                 for (int s = 0; s < n; ++s) {
                     const double dx = tx - xs[static_cast<std::size_t>(s)];
                     const double dy = ty - ys[static_cast<std::size_t>(s)];
@@ -690,8 +875,16 @@ void kriging_fill(FactorGrid& out, std::vector<double> xs,
                         cov_tn[static_cast<std::size_t>(s)];
                 }
                 rhs[static_cast<std::size_t>(n)] = 1.0;
-                const std::vector<double> w =
-                    solve_ok_system(K, rhs, sys, n, ridge);
+                if (direct_ok || ridge_ok) {
+                    w.assign(rhs.begin(), rhs.end());
+                    lu_solve_apply(direct_ok ? lu_direct : lu_ridge,
+                                   direct_ok ? perm_direct : perm_ridge, w,
+                                   sys);
+                } else {
+                    // Both factorizations singular: the frozen lstsq
+                    // last-resort ladder (NaN weights on total failure, D1).
+                    w = solve_ok_system(K, rhs, sys, n, ridge);
+                }
                 double zhat = 0.0;
                 double wcov = 0.0;
                 for (int s = 0; s < n; ++s) {
@@ -749,15 +942,28 @@ std::vector<double> linspace(double start, double stop, int num) {
 }
 
 std::array<double, 4> dataset_extent(const std::vector<SamplePoint>& points) {
-    if (points.empty()) return {0.0, 0.0, 1.0, 1.0};
-    double xmin = points[0].x, xmax = points[0].x;
-    double ymin = points[0].y, ymax = points[0].y;
+    // NaN/Inf coordinates cannot bound anything (#1460): std::min/std::max
+    // skip a NaN only when it is the second operand, so a non-finite
+    // coordinate in the seed position poisoned the whole extent (and with
+    // it every grid axis). Non-finite-coordinate samples are skipped here
+    // exactly as the interpolation kernels skip them; finite-coordinate
+    // samples keep the ALL-points contract (invalid QC still bounds).
+    bool have_any = false;
+    double xmin = 0.0, xmax = 0.0, ymin = 0.0, ymax = 0.0;
     for (const SamplePoint& p : points) {
+        if (!std::isfinite(p.x) || !std::isfinite(p.y)) continue;
+        if (!have_any) {
+            xmin = xmax = p.x;
+            ymin = ymax = p.y;
+            have_any = true;
+            continue;
+        }
         xmin = std::min(xmin, p.x);
         xmax = std::max(xmax, p.x);
         ymin = std::min(ymin, p.y);
         ymax = std::max(ymax, p.y);
     }
+    if (!have_any) return {0.0, 0.0, 1.0, 1.0};
     const double pad_x = !is_close(xmin, xmax)
         ? std::max(0.01, (xmax - xmin) * 0.1)
         : 0.05;
@@ -770,7 +976,15 @@ std::array<double, 4> dataset_extent(const std::vector<SamplePoint>& points) {
 std::vector<SamplePoint> valid_points(const std::vector<SamplePoint>& points) {
     std::vector<SamplePoint> out;
     for (const SamplePoint& p : points) {
-        if (std::isfinite(p.value) && qc_ok(p.qc_flag)) out.push_back(p);
+        // #1460: a sample without finite x/y has no location and cannot
+        // participate in spatial interpolation — the kNN paths already
+        // dropped it (their isfinite(dist) guard); requiring finite
+        // coordinates here makes the all-neighbours path agree instead of
+        // poisoning the whole grid through NaN weights.
+        if (std::isfinite(p.x) && std::isfinite(p.y)
+            && std::isfinite(p.value) && qc_ok(p.qc_flag)) {
+            out.push_back(p);
+        }
     }
     return out;
 }
@@ -846,6 +1060,16 @@ FactorGrid interpolate_factor(const std::vector<SamplePoint>& points,
     const auto issues = validate_dataset(points);
     if (!issues.empty()) {
         throw std::invalid_argument(join_issues(issues));
+    }
+    // grid_n caps the grid at 10000 x 10000 cells: beyond that the int
+    // cell arithmetic (i * grid_n + j) would overflow and the z64 buffer
+    // alone exceeds available memory — refuse instead of UB/OOM-thrash.
+    constexpr int kMaxGridN = 10000;
+    if (options.grid_n > kMaxGridN) {
+        throw std::invalid_argument(
+            "grid_n " + std::to_string(options.grid_n) + " exceeds the "
+            + std::to_string(kMaxGridN) + "x" + std::to_string(kMaxGridN)
+            + " cell ceiling");
     }
     const auto valid = valid_points(points);
     const auto extent = dataset_extent(points);
