@@ -64,9 +64,16 @@ void MapLayerTree::set_documents(const std::vector<Json>& documents) {
 }
 
 void MapLayerTree::set_active_document(const Json* document) {
-    active_document_ = document;
-    rebuild_tree();
+    // Snapshot by value: callers pass pointers into re-allocating vectors
+    // (documents_ / MappingPage::documents_); keeping the raw pointer
+    // dangled into freed storage (review R2-7).
     if (document == nullptr) {
+        active_document_.reset();
+    } else {
+        active_document_ = *document;
+    }
+    rebuild_tree();
+    if (!active_document_.has_value()) {
         return;
     }
     // Select + expand the matching document row (key-stable lookup —
@@ -189,14 +196,14 @@ void MapLayerTree::rebuild_tree() {
     QTreeWidgetItem* populated_item = nullptr;
     const Json* populated_doc = nullptr;
     for (std::size_t i = 0; i < documents_.size(); ++i) {
-        if (active_document_ != nullptr &&
+        if (active_document_.has_value() &&
             documents_[i] == *active_document_) {
             reconcile_document_children(doc_items_[i], documents_[i]);
             populated_item = doc_items_[i];
             populated_doc = &documents_[i];
         }
     }
-    if (active_document_ == nullptr && !doc_items_.empty()) {
+    if (!active_document_.has_value() && !doc_items_.empty()) {
         reconcile_document_children(doc_items_.back(), documents_.back());
         populated_item = doc_items_.back();
         populated_doc = &documents_.back();
@@ -353,8 +360,8 @@ void MapLayerTree::on_current_item_changed(QTreeWidgetItem* current) {
     if (doc == nullptr) {
         return;
     }
-    if (active_document_ == nullptr || *doc != *active_document_) {
-        active_document_ = doc;
+    if (!active_document_.has_value() || *doc != *active_document_) {
+        active_document_ = *doc;
         rebuild_tree();
         for (QTreeWidgetItem* item : doc_items_) {
             if (item->data(0, kKeyRole).toString().toStdString() == key) {

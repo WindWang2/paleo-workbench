@@ -172,12 +172,20 @@ void ProjectControllerCore::schedule_catalog_maintenance_(
     // The snapshot is taken HERE on the GUI thread so the worker never
     // iterates a section the GUI may mutate.
     domain::Json resources_snapshot = domain::Json::array();
+    // R2-8: deep-copy the document root HERE on the GUI thread; the worker
+    // must never read host_.document() — the GUI mutates that Json tree
+    // during editing and a concurrent read tears it (the prior code called
+    // host_.document() from the std::async worker, contradicting the
+    // ATOMICS-ONLY contract comment 100 lines below).
+    domain::Json document_root_snapshot;
     if (loaded != nullptr) {
-        const auto it = loaded->root().find("resources");
-        if (it != loaded->root().end() && it->is_array())
+        document_root_snapshot = loaded->root();
+        const auto it = document_root_snapshot.find("resources");
+        if (it != document_root_snapshot.end() && it->is_array())
             resources_snapshot = *it;
     }
-    auto kickoff = [this, generation, target, loaded, resources_snapshot]() {
+    auto kickoff = [this, generation, target, loaded, resources_snapshot,
+                    document_root_snapshot]() {
         auto* live_doc = host_.document ? host_.document() : nullptr;
         const auto live_path =
             host_.project_path ? host_.project_path() : std::nullopt;
@@ -190,9 +198,12 @@ void ProjectControllerCore::schedule_catalog_maintenance_(
         maintenance_cancel_ = cancel;
         maintenance_future_ = std::async(
             std::launch::async,
-            [this, generation, target, loaded, resources_snapshot, cancel]() {
+            [this, generation, target, loaded, resources_snapshot,
+             document_root_snapshot, cancel]() {
                 run_catalog_maintenance_(generation, target, loaded,
-                                         resources_snapshot, cancel);
+                                         resources_snapshot,
+                                         std::move(document_root_snapshot),
+                                         cancel);
             });
     };
     if (host_.post_next_turn) {
@@ -204,7 +215,7 @@ void ProjectControllerCore::schedule_catalog_maintenance_(
 
 void ProjectControllerCore::run_catalog_maintenance_(
     int generation, fs::path target, project::ProjectDocument* loaded,
-    domain::Json resources_snapshot,
+    domain::Json resources_snapshot, domain::Json document_root_snapshot,
     std::shared_ptr<std::atomic<bool>> cancel) {
     // Worker-side staleness reads ATOMICS ONLY (#1449): the host's
     // document()/project_path() std::function members are mutated on the
@@ -277,10 +288,13 @@ void ProjectControllerCore::run_catalog_maintenance_(
                 project::resolve_project_path(relative, target);
             return resolved.is_ok() ? fs::path(resolved.value()) : raw;
         };
-        auto* live_doc = host_.document ? host_.document() : nullptr;
-        if (live_doc == nullptr) return;
+        if (document_root_snapshot.is_null() || document_root_snapshot.is_discarded())
+            return;  // no live document at schedule time
+        // The snapshot was taken on the GUI thread at schedule time —
+        // never read host_.document() here (concurrent mutation tears the
+        // Json tree; the #1449 ATOMICS-ONLY contract).
         std::any staged = catalog_.stage_resources(
-            live_doc->root(), resources_snapshot, resolver,
+            document_root_snapshot, resources_snapshot, resolver,
             [cancel]() { return cancel && cancel->load(); });
         if (stale()) return;
         if (staged.has_value() || !mapping.empty()) {

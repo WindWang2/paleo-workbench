@@ -69,7 +69,11 @@ private:
     const void* identity_of(const Json& document) const;
 
     std::vector<Json> documents_;
-    const Json* active_document_ = nullptr;
+    // Store the active document BY VALUE (review R2-7): a raw pointer
+    // dangled into freed documents_ storage after set_documents
+    // reallocated the vector, and into MappingPage::documents_ before
+    // set_documents ran — a deep compare over freed heap.
+    std::optional<Json> active_document_ = nullptr;
     // The document currently carrying the layer subtree (fallback path may
     // differ from the active document — Python _populated_document parity).
     const Json* populated_document_ = nullptr;

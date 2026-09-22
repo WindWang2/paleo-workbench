@@ -113,9 +113,18 @@ void TaskTableModel::refresh(std::vector<TaskRow> rows, double now) {
     // 3) In-place updates: only changed columns emit dataChanged;
     //    elapsed-second changes touch only the elapsed column.
     for (int row = 0; row < static_cast<int>(rows_.size()); ++row) {
-        // Refresh the stored row content from the snapshot (the row
-        // order is the spec order; rows_ may hold stale copies for
-        // updated-but-not-reinserted entries — overwrite by id).
+        // Refresh the stored row content from the SNAPSHOT (review R2-6:
+        // the comment promised overwrite-by-id but bound rows_[row] — the
+        // stale stored copy — so after first insert no state/progress/
+        // message ever updated; terminal rows stayed "运行中" with a live
+        // cancel button). Look the row up by id in the incoming rows and
+        // overwrite the stored copy.
+        const std::string& row_id = rows_[row].task_id;
+        auto fresh_it = std::find_if(
+            rows.begin(), rows.end(),
+            [&](const TaskRow& r) { return r.task_id == row_id; });
+        if (fresh_it == rows.end()) continue;  // defensively removed above
+        rows_[row] = *fresh_it;
         const TaskRow& fresh = rows_[row];
         auto core = std::make_tuple(
             std::string(job::to_string(fresh.state)),
