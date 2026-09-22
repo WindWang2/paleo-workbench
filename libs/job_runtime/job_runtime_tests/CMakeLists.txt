@@ -15,6 +15,7 @@ pwb_add_job_test(lifecycle lifecycle_test.cpp)
 pwb_add_job_test(cancel cancel_test.cpp)
 pwb_add_job_test(dedupe dedupe_exception_test.cpp)
 pwb_add_job_test(shutdown shutdown_admission_test.cpp)
+pwb_add_job_test(thread_join_guard thread_join_guard_test.cpp)
 
 add_executable(job_runtime.policy_oracle policy_oracle_test.cpp)
 target_compile_features(job_runtime.policy_oracle PRIVATE cxx_std_20)

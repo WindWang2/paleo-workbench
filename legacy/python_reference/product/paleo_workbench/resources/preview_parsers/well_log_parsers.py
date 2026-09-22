@@ -5,6 +5,9 @@ import re
 from typing import TYPE_CHECKING
 
 from paleo_workbench.project.models import ResourceItem
+from paleo_workbench.resources.text_codec import (
+    decode_text_with_fallback,
+)
 from paleo_workbench.resources.preview_parsers.models import PreviewResult
 from paleo_workbench.resources.preview_parsers.table_parsers import parse_error_preview, safe_stat
 from paleo_workbench.viz.well_log_api import fast_las_parse_data
@@ -96,7 +99,7 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
 
         if getattr(header, "wrapped", False):
             raise _UseLasio  # wrapped LAS: fast channel cannot handle it
-        content = path.read_text(encoding="utf-8", errors="replace")
+        content = decode_text_with_fallback(path.read_bytes())
         _headers, arr = fast_las_parse_data(content, header.null_value)
         if arr.ndim == 2 and arr.shape[0] > 0:
             if arr.shape[1] != len(curves):

@@ -285,6 +285,7 @@ private:
                               const CommitReceiptV1& receipt,
                               JournalPhase phase) const;
     domain::DataError write_journal(const domain::Json& journal);
+    void log_journal_failure(const domain::DataError& error) const;
     domain::Result<CommitReceiptV1> finish_journal_phase4(
         const CommitRequestV1& request, const catalog::DataVersion& version,
         CommitReceiptV1 receipt, project::ProjectDocument& document);

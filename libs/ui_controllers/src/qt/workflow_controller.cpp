@@ -1,10 +1,12 @@
 #include <pwb/ui_controllers/qt/workflow_controller.hpp>
 
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <QTimer>
 #include <QWidget>
 
 #include <pwb/ui_controllers/qt/job_owner_runner.hpp>
+#include <pwb/ui_controllers/qt/project_controller.hpp>
 
 namespace pwb::ui_controllers::qt {
 
@@ -17,7 +19,15 @@ WorkflowController::WorkflowController(job::JobScheduler& scheduler,
     // object's thread (QueuedConnection parity — a QTimer(0) post is the
     // same contract and needs no receiver object).
     pages_.post_to_gui = [](std::function<void()> fn) {
-        QTimer::singleShot(0, [fn = std::move(fn)]() mutable { fn(); });
+        // R2-18/R6-1: receiver-carrying post keyed on the application
+        // object — main-thread affinity by construction (a lazily-created
+        // sentinel would bind to this WORKER thread on first call and
+        // silently drop every subsequent post). Staleness is guarded by
+        // generation checks in the posted bodies.
+        auto* app = QCoreApplication::instance();
+        if (app == nullptr) return;
+        QTimer::singleShot(0, app,
+                           [fn = std::move(fn)]() mutable { fn(); });
     };
 }
 

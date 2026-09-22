@@ -408,8 +408,12 @@ TEST(pick_model_persistence_and_tamper_selfcheck) {
     horizon::clear_picks(set);
     PWB_CHECK(set.picks.empty());
 
-    // Negative self-checks: tampered schema, corrupted JSON, bad axis —
-    // each must fail closed, never silently accept.
+    // Negative self-checks at the PARSE layer: corrupted JSON, wrong
+    // schema, bad axis — each must fail closed, never silently accept.
+    // Identity forging is intentionally NOT caught here: the parser's job
+    // is faithful round-trip (verify with the caller's identity compare,
+    // exercised by callers); claiming parse-level integrity for forged ids
+    // was an overstatement (review G2).
     std::string tampered = json_text;
     const std::size_t pos = tampered.find("\"volume_id\": \"vol-42\"");
     PWB_CHECK(pos != std::string::npos);

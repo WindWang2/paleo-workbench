@@ -704,6 +704,10 @@ void JobScheduler::run_job(const std::shared_ptr<JobCell>& cell) {
 
     if (cancelled) {
         invoke_on_cancel(spec);
+        // Scratch cleanup BEFORE the terminal state lands: once wait()
+        // unblocks, the work dir is already gone — release can never race
+        // an observer (#1451 B-06).
+        release_work_dir(cell->snapshot.job_id);
         std::lock_guard<std::mutex> guard(mutex_);
         std::lock_guard<std::mutex> cell_guard(cell->mutex);
         if (!raised_cancelled) cell->result = std::move(result);
@@ -724,6 +728,7 @@ void JobScheduler::run_job(const std::shared_ptr<JobCell>& cell) {
             } catch (...) {
             }
         }
+        release_work_dir(cell->snapshot.job_id);
         std::lock_guard<std::mutex> guard(mutex_);
         std::lock_guard<std::mutex> cell_guard(cell->mutex);
         cell->snapshot.error = error;
@@ -746,6 +751,7 @@ void JobScheduler::run_job(const std::shared_ptr<JobCell>& cell) {
                 degraded = true;  // predicate failure is itself a caveat
             }
         }
+        release_work_dir(cell->snapshot.job_id);
         std::lock_guard<std::mutex> guard(mutex_);
         std::lock_guard<std::mutex> cell_guard(cell->mutex);
         cell->result = std::move(result);

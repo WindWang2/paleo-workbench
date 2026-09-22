@@ -771,8 +771,12 @@ bool VertexTool::commit_vertex_insert(const std::string& feature_id,
                                       const std::vector<int>& path,
                                       const MapPoint& point) {
     if (!session) return false;
+    // R2-28: begin OUTSIDE the try — begin_edit_command throws when a
+    // command is already open, and the catch used to destroy that OUTER
+    // command (silently reverting its edits and corrupting the caller's
+    // end_edit_command pairing).
+    session->begin_edit_command();
     try {
-        session->begin_edit_command();
         auto guard = session->edit_source("vertex(native)");
         session->insert_vertex(feature_id, path, point_json(point));
     } catch (const std::exception&) {
@@ -786,8 +790,9 @@ bool VertexTool::commit_vertex_insert(const std::string& feature_id,
 bool VertexTool::commit_vertex_delete(const std::string& feature_id,
                                       const std::vector<int>& path) {
     if (!session) return false;
+    // R2-28: same begin-outside-try discipline as commit_vertex_insert.
+    session->begin_edit_command();
     try {
-        session->begin_edit_command();
         auto guard = session->edit_source("vertex(native)");
         session->delete_vertex(feature_id, path);
     } catch (const std::exception&) {

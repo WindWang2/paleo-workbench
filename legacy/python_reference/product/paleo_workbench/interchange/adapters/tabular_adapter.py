@@ -10,6 +10,7 @@ output is verified before it reaches the catalog.
 from __future__ import annotations
 
 import csv
+import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -379,8 +380,16 @@ class CsvLikeAdapter(FormatAdapter):
         # target's convention.
         source_delimiter = sniff_delimiter(self._read_text_prefix(source))
         target_delimiter = "\t" if target.suffix.lower() == ".tsv" else ","
+        # R11-4 (ISSUE-010 class): the import side detects GB18030 with a
+        # warning, but the export copy read utf-8+replace and silently
+        # turned a GBK source into U+FFFD mojibake in the exported rows.
+        from paleo_workbench.resources.text_codec import decode_text_with_fallback
+
         with atomic_output(target) as tmp:
-            with open(source, "r", encoding="utf-8", errors="replace", newline="") as src:
+            with open(source, "rb") as raw_src:
+                src = io.StringIO(
+                    decode_text_with_fallback(raw_src.read()), newline=""
+                )
                 reader = csv.reader(src, delimiter=source_delimiter)
                 with open(tmp, "w", encoding="utf-8", newline="") as dst:
                     writer = csv.writer(dst, delimiter=target_delimiter)

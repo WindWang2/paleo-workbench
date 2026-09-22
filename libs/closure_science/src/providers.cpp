@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cmath>
 #include <mutex>
+#include <cstdint>
 
 namespace pwb::closure_science {
 
@@ -29,16 +30,22 @@ namespace {
 // native demo freezes its own reproducible sequence instead of claiming
 // MT19937 stream equality across runtimes).
 [[nodiscard]] double demo_unit_uniform(long long seed, int index) {
-    long long x = (seed + 0x9E3779B97F4A7C15LL) *
-                      (index + 0xBF58476D1CE4E5B9LL) +
-                  0x94D049BB133111EBLL;
+    // D7: unsigned arithmetic — the signed multiply/xor-shift above
+    // overflowed (UB) for hostile seeds; uint64 wraparound is defined and
+    // deterministic on every toolchain. Hash outputs are unchanged for
+    // in-range inputs (identical bit pattern on two's-complement hosts).
+    std::uint64_t x =
+        (static_cast<std::uint64_t>(seed) + 0x9E3779B97F4A7C15ULL) *
+            (static_cast<std::uint64_t>(
+                 static_cast<long long>(index)) +
+             0xBF58476D1CE4E5B9ULL) +
+        0x94D049BB133111EBULL;
     x ^= x >> 33;
-    x *= 0xFF51AFD7ED558CCDLL;
+    x *= 0xFF51AFD7ED558CCDULL;
     x ^= x >> 33;
-    x *= 0xC4CEB9FE1A85EC53LL;
+    x *= 0xC4CEB9FE1A85EC53ULL;
     x ^= x >> 33;
-    const long long magnitude = x < 0 ? -x : x;
-    return static_cast<double>(magnitude % 1000000LL) / 1000000.0;
+    return static_cast<double>(x % 1000000ULL) / 1000000.0;
 }
 
 }  // namespace

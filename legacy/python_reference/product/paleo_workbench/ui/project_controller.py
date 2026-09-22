@@ -52,7 +52,8 @@ class _DomainMigrationBridge(QObject):
     project can never mutate the new document.
     """
 
-    migration_staged = Signal(str, int, object, object)  # path, generation, mapping, staged
+    # path, generation, mapping, staged, role_backfill_pending
+    migration_staged = Signal(str, int, object, object, bool)
 
 
 class ProjectController:
@@ -382,6 +383,11 @@ class ProjectController:
             or self.window.project_path != target
         ):
             return
+        # R10-1/R11-1: bind on EVERY path — an unwrapped maintenance call
+        # raising (or a missing catalog) previously left this unbound and
+        # the emit raised NameError inside the swallow-all, silently
+        # dropping the migration staging for that open.
+        role_backfill_pending = False
         service = None
         try:
             from paleo_workbench.catalog import get_catalog_service
@@ -417,16 +423,14 @@ class ProjectController:
                 # promote the unique live candidate for required_single
                 # roles that lost their primary; ambiguous groups wait for
                 # a human. Deterministic + idempotent; guarded like every
-                # open-time maintenance step.
-                try:
-                    if loaded is not None:
-                        from paleo_workbench.catalog.roles_backfill import (
-                            backfill_role_primaries,
-                        )
-
-                        backfill_role_primaries(loaded)
-                except Exception:
-                    pass
+                # open-time maintenance step. R2-8 Python twin (round-9 D1):
+                # backfill WRITES is_primary through the live document — a
+                # GUI-thread mutation from this worker thread, the exact
+                # hazard this method's own invariant (#12) forbids. Deferred
+                # to the GUI slot: the bridge carries a flag and the slot
+                # runs the backfill against the live document on the GUI
+                # thread (see _on_domain_migration_staged).
+                role_backfill_pending = True
                 # V11 typed-lineage backfill (docs 06 §5): deterministic
                 # output-port roles for pre-V11 runs; idempotent no-op when
                 # ports are already present.
@@ -477,16 +481,18 @@ class ProjectController:
             )
             if (cancel_event is not None and cancel_event.is_set()) or generation != self._session_generation:
                 return
-            if staged or mapping:
+            if staged or mapping or role_backfill_pending:
                 self._migration_bridge.migration_staged.emit(
-                    str(target), generation, mapping, staged
+                    str(target), generation, mapping, staged,
+                    role_backfill_pending,
                 )
         except Exception:
             # A migration failure must never break the open project.
             return
 
     def _on_domain_migration_staged(
-        self, project_path: str, generation: int, mapping: dict, staged: object
+        self, project_path: str, generation: int, mapping: dict, staged: object,
+        role_backfill_pending: bool = False,
     ) -> None:
         """GUI-thread binding pass after background extraction."""
         window = self.window
@@ -497,6 +503,17 @@ class ProjectController:
             or str(window.project_path) != project_path
         ):
             return
+        if role_backfill_pending:
+            # Round-9 D1: the promotion runs HERE (GUI thread) — the worker
+            # never mutates the live document.
+            try:
+                from paleo_workbench.catalog.roles_backfill import (
+                    backfill_role_primaries,
+                )
+
+                backfill_role_primaries(window.project)
+            except Exception:
+                pass
         try:
             from paleo_workbench.project.domain_migration import (
                 migrate_project_to_workarea,

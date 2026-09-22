@@ -16,6 +16,7 @@
 #include <deque>
 #include <string>
 #include <vector>
+#include <mutex>
 
 namespace pwb::ui_workstation {
 
@@ -36,7 +37,12 @@ public:
     explicit LogBuffer(int capacity = kLogLineCap)
         : capacity_(capacity < 1 ? 1 : capacity) {}
 
+    // R2-23: the class contract says "any thread may post" while the
+    // producer races the GUI poll timer's take — an unsynchronized deque
+    // is UB no try/catch can intercept. Mutex-guarded (the operations are
+    // tiny; contention is irrelevant at log cadence).
     void push(const std::string& line) {
+        const std::lock_guard<std::mutex> lock(mutex_);
         pending_.push_back(line);
         while (static_cast<int>(pending_.size()) > capacity_) {
             pending_.pop_front();
@@ -44,15 +50,20 @@ public:
     }
 
     std::vector<std::string> take_pending() {
+        const std::lock_guard<std::mutex> lock(mutex_);
         std::vector<std::string> out(pending_.begin(), pending_.end());
         pending_.clear();
         return out;
     }
 
-    int pending_count() const { return static_cast<int>(pending_.size()); }
+    int pending_count() const {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        return static_cast<int>(pending_.size());
+    }
     int capacity() const { return capacity_; }
 
 private:
+    mutable std::mutex mutex_;
     std::deque<std::string> pending_;
     int capacity_;
 };

@@ -1315,20 +1315,15 @@ DataError CatalogRepository::export_manifest(
     const std::filesystem::path bak =
         manifest_path.parent_path()
         / (manifest_path.filename().generic_string() + ".bak");
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out.good()) {
-            return DataError(ErrorCode::IoError,
-                             "manifest temp file unwritable");
-        }
-        out.write(text.data(), static_cast<std::streamsize>(text.size()));
-        out.flush();
-        if (!out.good()) {
-            std::filesystem::remove(tmp, ec);
-            return DataError(ErrorCode::IoError, "manifest temp write failed");
-        }
+    // CP1: parity with save_manifest — fsync the payload before rename and
+    // restore the .bak when the final rename fails (the old form left
+    // catalog.json absent with the tmp orphaned).
+    if (!write_file_fsynced(tmp, text)) {
+        std::filesystem::remove(tmp, ec);
+        return DataError(ErrorCode::IoError, "manifest temp write failed");
     }
-    if (std::filesystem::exists(manifest_path, ec)) {
+    const bool had_previous = std::filesystem::exists(manifest_path, ec);
+    if (had_previous) {
         std::filesystem::rename(manifest_path, bak, ec);
         if (ec) {
             std::filesystem::remove(tmp, ec);
@@ -1338,6 +1333,12 @@ DataError CatalogRepository::export_manifest(
     }
     std::filesystem::rename(tmp, manifest_path, ec);
     if (ec) {
+        if (had_previous) {
+            // Restore: the previous revision is still complete in the .bak.
+            std::error_code restore_ec;
+            std::filesystem::rename(bak, manifest_path, restore_ec);
+        }
+        std::filesystem::remove(tmp, ec);
         return DataError(ErrorCode::IoError,
                          "manifest rename failed: " + ec.message());
     }
@@ -1384,14 +1385,23 @@ Result<CatalogDocument> CatalogRepository::open_read_write() {
             "INSERT INTO sync_state (key, value) VALUES"
             " ('catalog_revision', '1') ON CONFLICT(key) DO NOTHING");
         seed.step_done();
+        if (auto failure = sqlite_step_error(db_, "open_read_write")) {
+            return *failure;
+        }
         Statement stamp = db_.prepare(
             "INSERT INTO sync_state (key, value) VALUES"
             " ('schema_version', '1') ON CONFLICT(key) DO NOTHING");
         stamp.step_done();
+        if (auto failure = sqlite_step_error(db_, "open_read_write")) {
+            return *failure;
+        }
         Statement index_stamp = db_.prepare(
             "INSERT INTO sync_state (key, value) VALUES"
             " ('index_schema_version', '5') ON CONFLICT(key) DO NOTHING");
         index_stamp.step_done();
+        if (auto failure = sqlite_step_error(db_, "open_read_write")) {
+            return *failure;
+        }
     }
     return load_document_from(db_);
 }
@@ -1449,6 +1459,9 @@ DataError CatalogRepository::upsert_asset_in_transaction(
         statement.bind_null(12);
     }
     statement.step_done();
+    if (auto failure = sqlite_step_error(db_, "upsert_asset_in_transaction")) {
+        return *failure;
+    }
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1507,6 +1520,9 @@ DataError CatalogRepository::upsert_version_rows(const DataVersion& version) {
     }
     statement.bind(16, parents.dump());
     statement.step_done();
+    if (auto failure = sqlite_step_error(db_, "upsert_version_rows")) {
+        return *failure;
+    }
 
     // Derived tables owned by the version row (db.py derived-collection
     // writers): lineage from parent_ids, members.
@@ -1515,6 +1531,9 @@ DataError CatalogRepository::upsert_version_rows(const DataVersion& version) {
             "DELETE FROM lineage WHERE child_version_id = ?");
         clear.bind(1, version.id.str());
         clear.step_done();
+        if (auto failure = sqlite_step_error(db_, "upsert_version_rows")) {
+            return *failure;
+        }
         for (const auto& parent : version.parent_version_ids) {
             Statement row = db_.prepare(
                 "INSERT OR IGNORE INTO lineage (parent_version_id, "
@@ -1522,13 +1541,23 @@ DataError CatalogRepository::upsert_version_rows(const DataVersion& version) {
             row.bind(1, parent.str());
             row.bind(2, version.id.str());
             row.step_done();
+            if (auto failure = sqlite_step_error(db_, "upsert_version_rows")) {
+                return *failure;
+            }
         }
     }
-    if (!version.members.empty()) {
+    {
+        // Unconditional clear (review C2): a version re-saved with members
+        // emptied must drop its old rows — the gated DELETE resurrected
+        // removed members on the next load (apply_changes.cpp already
+        // clears unconditionally).
         Statement clear = db_.prepare(
             "DELETE FROM version_members WHERE version_id = ?");
         clear.bind(1, version.id.str());
         clear.step_done();
+        if (auto failure = sqlite_step_error(db_, "upsert_version_rows")) {
+            return *failure;
+        }
         for (const auto& member : version.members) {
             Statement row = db_.prepare(
                 "INSERT INTO version_members (version_id, name, rel_path,"
@@ -1551,6 +1580,9 @@ DataError CatalogRepository::upsert_version_rows(const DataVersion& version) {
                 row.bind_null(8);
             }
             row.step_done();
+            if (auto failure = sqlite_step_error(db_, "upsert_version_rows")) {
+                return *failure;
+            }
         }
     }
     return DataError(ErrorCode::Ok, "");
@@ -1576,11 +1608,17 @@ DataError CatalogRepository::upsert_run_rows(const DataRun& run) {
     }
     statement.bind(7, run.created_at);
     statement.step_done();
+    if (auto failure = sqlite_step_error(db_, "upsert_run_rows")) {
+        return *failure;
+    }
 
     Statement clear_inputs =
         db_.prepare("DELETE FROM run_inputs WHERE run_id = ?");
     clear_inputs.bind(1, run.id.str());
     clear_inputs.step_done();
+    if (auto failure = sqlite_step_error(db_, "upsert_run_rows")) {
+        return *failure;
+    }
     for (const auto& input : run.input_version_ids) {
         Statement row = db_.prepare(
             "INSERT OR IGNORE INTO run_inputs (run_id, version_id) "
@@ -1588,11 +1626,17 @@ DataError CatalogRepository::upsert_run_rows(const DataRun& run) {
         row.bind(1, run.id.str());
         row.bind(2, input.str());
         row.step_done();
+        if (auto failure = sqlite_step_error(db_, "upsert_run_rows")) {
+            return *failure;
+        }
     }
     Statement clear_outputs =
         db_.prepare("DELETE FROM run_outputs WHERE run_id = ?");
     clear_outputs.bind(1, run.id.str());
     clear_outputs.step_done();
+    if (auto failure = sqlite_step_error(db_, "upsert_run_rows")) {
+        return *failure;
+    }
     for (const auto& output : run.output_version_ids) {
         Statement row = db_.prepare(
             "INSERT OR IGNORE INTO run_outputs (run_id, version_id) "
@@ -1600,12 +1644,18 @@ DataError CatalogRepository::upsert_run_rows(const DataRun& run) {
         row.bind(1, run.id.str());
         row.bind(2, output.str());
         row.step_done();
+        if (auto failure = sqlite_step_error(db_, "upsert_run_rows")) {
+            return *failure;
+        }
     }
     if (db_.table_exists("run_ports")) {
         Statement clear_ports =
             db_.prepare("DELETE FROM run_ports WHERE run_id = ?");
         clear_ports.bind(1, run.id.str());
         clear_ports.step_done();
+        if (auto failure = sqlite_step_error(db_, "upsert_run_rows")) {
+            return *failure;
+        }
         auto write_ports = [&](const std::vector<RunPort>& ports,
                                const char* direction) {
             for (const auto& port : ports) {
@@ -1623,6 +1673,16 @@ DataError CatalogRepository::upsert_run_rows(const DataRun& run) {
                 row.bind(8, port.entity_id);
                 row.bind(9, port.note);
                 row.step_done();
+                if (auto failure = sqlite_step_error(db_, "upsert_run_rows")) {
+                    // Void lambda context: early return only — a value
+                    // return would change the deduced lambda type and make
+                    // the normal loop fall-through UB (found by
+                    // data.consumer_loop segfault).
+                    std::fprintf(stderr,
+                                 "pwb-catalog: run port write failed: %s\n",
+                                 failure->message.c_str());
+                    return;
+                }
             }
         };
         write_ports(run.input_ports, "input");
@@ -1637,14 +1697,23 @@ DataError CatalogRepository::bump_revision() {
         " ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS "
         "INTEGER) + 1 AS TEXT)");
     statement.step_done();
+    if (auto failure = sqlite_step_error(db_, "bump_revision")) {
+        return *failure;
+    }
     Statement stamp = db_.prepare(
         "INSERT INTO sync_state (key, value) VALUES ('schema_version', '1')"
         " ON CONFLICT(key) DO NOTHING");
     stamp.step_done();
+    if (auto failure = sqlite_step_error(db_, "bump_revision")) {
+        return *failure;
+    }
     Statement index_stamp = db_.prepare(
         "INSERT INTO sync_state (key, value) VALUES ('index_schema_version',"
         " '5') ON CONFLICT(key) DO NOTHING");
     index_stamp.step_done();
+    if (auto failure = sqlite_step_error(db_, "bump_revision")) {
+        return *failure;
+    }
     return DataError(ErrorCode::Ok, "");
 }
 
@@ -1693,6 +1762,9 @@ DataError CatalogRepository::set_current_version(
     statement.bind(2, updated_at);
     statement.bind(3, asset_id.str());
     statement.step_done();
+    if (auto failure = sqlite_step_error(db_, "set_current_version")) {
+        return *failure;
+    }
     bump_revision();
     if (auto commit_error = transaction.commit();
         commit_error.code != ErrorCode::Ok) return commit_error;
@@ -1759,6 +1831,9 @@ DataError CatalogRepository::remove_working_copy(
         "DELETE FROM working_copies WHERE working_id = ?");
     statement.bind(1, working_id);
     statement.step_done();
+    if (auto failure = sqlite_step_error(db_, "remove_working_copy")) {
+        return *failure;
+    }
     if (auto commit_error = transaction.commit();
         commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
@@ -1777,6 +1852,9 @@ DataError CatalogRepository::set_working_copy_state(
     statement.bind(2, local_now_iso_seconds());
     statement.bind(3, working_id);
     statement.step_done();
+    if (auto failure = sqlite_step_error(db_, "set_working_copy_state")) {
+        return *failure;
+    }
     if (auto commit_error = transaction.commit();
         commit_error.code != ErrorCode::Ok) return commit_error;
     return DataError(ErrorCode::Ok, "");
@@ -1796,6 +1874,9 @@ DataError CatalogRepository::commit_version_transaction(
     pointer.bind(2, version.created_at);
     pointer.bind(3, asset_id.str());
     pointer.step_done();
+    if (auto failure = sqlite_step_error(db_, "commit_version_transaction")) {
+        return *failure;
+    }
     if (run_id.has_value()) {
         Statement row = db_.prepare(
             "INSERT OR IGNORE INTO run_outputs (run_id, version_id) "
@@ -1803,6 +1884,9 @@ DataError CatalogRepository::commit_version_transaction(
         row.bind(1, run_id->str());
         row.bind(2, version.id.str());
         row.step_done();
+        if (auto failure = sqlite_step_error(db_, "commit_version_transaction")) {
+            return *failure;
+        }
     }
     bump_revision();
     if (auto commit_error = transaction.commit();
@@ -1828,11 +1912,17 @@ DataError CatalogRepository::publish_result_transaction(
     pointer.bind(2, version.created_at);
     pointer.bind(3, version.asset_id.str());
     pointer.step_done();
+    if (auto failure = sqlite_step_error(db_, "publish_result_transaction")) {
+        return *failure;
+    }
     Statement row = db_.prepare(
         "INSERT OR IGNORE INTO run_outputs (run_id, version_id) VALUES (?,?)");
     row.bind(1, run_id.str());
     row.bind(2, version.id.str());
     row.step_done();
+    if (auto failure = sqlite_step_error(db_, "publish_result_transaction")) {
+        return *failure;
+    }
     bump_revision();
     if (auto commit_error = transaction.commit();
         commit_error.code != ErrorCode::Ok) return commit_error;
@@ -1854,6 +1944,9 @@ DataError CatalogRepository::import_raw_transaction(const DataAsset& asset,
     pointer.bind(2, version.created_at);
     pointer.bind(3, version.asset_id.str());
     pointer.step_done();
+    if (auto failure = sqlite_step_error(db_, "import_raw_transaction")) {
+        return *failure;
+    }
     bump_revision();
     if (auto commit_error = transaction.commit();
         commit_error.code != ErrorCode::Ok) return commit_error;
@@ -1907,6 +2000,11 @@ int CatalogRepository::rebase_artifact_paths() {
             update.bind(1, rewritten);
             update.bind(2, version.id.str());
             update.step_done();
+            if (auto failure = sqlite_step_error(db_, "rebase_artifact_paths")) {
+                // int sentinel: -1 tells the caller the rebase is unreliable
+                // (save_as refuses to publish on a failed rebase).
+                return -1;
+            }
             ++changed;
         }
         auto trash = version.metadata.find("trash");
@@ -1923,6 +2021,9 @@ int CatalogRepository::rebase_artifact_paths() {
                     update.bind(1, json_column(merged, "{}"));
                     update.bind(2, version.id.str());
                     update.step_done();
+                    if (auto failure = sqlite_step_error(db_, "rebase_artifact_paths")) {
+                        return -1;
+                    }
                     ++changed;
                 }
             }
@@ -1948,6 +2049,11 @@ int CatalogRepository::rebase_artifact_paths() {
             update.bind(1, uri);
             update.bind(2, id);
             update.step_done();
+            if (auto failure = sqlite_step_error(db_, "rebase_artifact_paths")) {
+                // int sentinel: -1 tells the caller the rebase is unreliable
+                // (save_as refuses to publish on a failed rebase).
+                return -1;
+            }
             ++changed;
         }
     }
@@ -1986,6 +2092,9 @@ DataError CatalogRepository::finish_run_transaction(
     update.bind(2, json_column(merged, "{}"));
     update.bind(3, run_id.str());
     update.step_done();
+    if (auto failure = sqlite_step_error(db_, "finish_run_transaction")) {
+        return *failure;
+    }
     bump_revision();
     if (auto commit_error = transaction.commit();
         commit_error.code != ErrorCode::Ok) return commit_error;
@@ -2066,6 +2175,14 @@ void CatalogRepository::record_manifest_mtime_ns(
     statement.bind(1, "manifest_mtime_ns");
     statement.bind(2, std::to_string(*mtime));
     statement.step_done();
+    if (auto failure = sqlite_step_error(*db, "record_manifest_mtime_ns")) {
+        // Void bookkeeping helper: detect + report, then abandon the write
+        // (the transaction rolls back on scope exit — never a silent
+        // partial commit; review C1).
+        std::fprintf(stderr, "pwb-catalog: %s failed: %s\n", "record_manifest_mtime_ns",
+                     failure->message.c_str());
+        return;
+    }
     (void)transaction.commit();  // swallow parity (bookkeeping writes)
 }
 
@@ -2263,6 +2380,14 @@ void CatalogRepository::release_staging_lease(const std::string& lease_id) {
     if (!statement.is_valid()) return;
     statement.bind(1, lease_id);
     statement.step_done();
+    if (auto failure = sqlite_step_error(*db, "release_staging_lease")) {
+        // Void bookkeeping helper: detect + report, then abandon the write
+        // (the transaction rolls back on scope exit — never a silent
+        // partial commit; review C1).
+        std::fprintf(stderr, "pwb-catalog: %s failed: %s\n", "release_staging_lease",
+                     failure->message.c_str());
+        return;
+    }
     (void)transaction.commit();  // swallow parity (bookkeeping writes)
 }
 
@@ -2279,6 +2404,14 @@ void CatalogRepository::heartbeat_staging_lease(
     statement.bind(1, local_now_iso_seconds());
     statement.bind(2, lease_id);
     statement.step_done();
+    if (auto failure = sqlite_step_error(*db, "heartbeat_staging_lease")) {
+        // Void bookkeeping helper: detect + report, then abandon the write
+        // (the transaction rolls back on scope exit — never a silent
+        // partial commit; review C1).
+        std::fprintf(stderr, "pwb-catalog: %s failed: %s\n", "heartbeat_staging_lease",
+                     failure->message.c_str());
+        return;
+    }
     (void)transaction.commit();  // swallow parity (bookkeeping writes)
 }
 
@@ -2299,6 +2432,9 @@ int CatalogRepository::prune_stale_staging_leases(
     if (!statement.is_valid()) return 0;
     statement.bind(1, local_iso_seconds(cutoff));
     statement.step_done();
+    if (auto failure = sqlite_step_error(*db, "prune_stale_staging_leases")) {
+        return -1;  // int sentinel (same contract as the commit failure below)
+    }
     const int removed = sqlite3_changes(db->handle());
     if (auto commit_error = transaction.commit();
         commit_error.code != ErrorCode::Ok) return -1;
@@ -2360,6 +2496,9 @@ DataError CatalogRepository::commit_promote_transaction(
     pointer.bind(2, version.created_at);
     pointer.bind(3, version.asset_id.str());
     pointer.step_done();
+    if (auto failure = sqlite_step_error(db_, "commit_promote_transaction")) {
+        return *failure;
+    }
     bump_revision();
     if (auto commit_error = transaction.commit();
         commit_error.code != ErrorCode::Ok) return commit_error;
@@ -2385,6 +2524,9 @@ DataError CatalogRepository::commit_working_copy_transaction(
     pointer.bind(2, version.created_at);
     pointer.bind(3, version.asset_id.str());
     pointer.step_done();
+    if (auto failure = sqlite_step_error(db_, "commit_working_copy_transaction")) {
+        return *failure;
+    }
     if (run_id.has_value()) {
         Statement row = db_.prepare(
             "INSERT OR IGNORE INTO run_outputs (run_id, version_id) "
@@ -2392,6 +2534,9 @@ DataError CatalogRepository::commit_working_copy_transaction(
         row.bind(1, run_id->str());
         row.bind(2, version.id.str());
         row.step_done();
+        if (auto failure = sqlite_step_error(db_, "commit_working_copy_transaction")) {
+            return *failure;
+        }
     }
     bump_revision();
     if (auto commit_error = transaction.commit();

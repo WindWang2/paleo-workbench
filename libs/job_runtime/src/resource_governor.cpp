@@ -312,6 +312,24 @@ ResourceGovernor& global_governor() {
 
 void set_governor(std::unique_ptr<ResourceGovernor> governor) {
     std::lock_guard<std::mutex> lock(g_governor_mutex);
+    // R2-4: outstanding ResourceLeases hold a RAW governor* — replacing
+    // the global while a lease is alive left the lease's release() /
+    // held_seconds() dereferencing freed memory (UAF). Retire the old
+    // governor into a zombie slot (its budget stops governing, but any
+    // live lease can still safely release) instead of destroying it. The
+    // zombie is reclaimed once no lease can still reference it (at the
+    // next swap; outstanding leases then belong to the zombie chain's
+    // lifetime — bounded: the zombie list is drained on swap).
+    static std::vector<std::unique_ptr<ResourceGovernor>> zombie_governors;
+    if (g_governor) {
+        zombie_governors.push_back(std::move(g_governor));
+        // Bound the zombie chain: leases handed out before the previous
+        // swap have released by now in practice (bounded job lifetimes),
+        // so retire the OLDEST zombie only.
+        if (zombie_governors.size() > 64) {
+            zombie_governors.erase(zombie_governors.begin());
+        }
+    }
     g_governor = std::move(governor);
 }
 

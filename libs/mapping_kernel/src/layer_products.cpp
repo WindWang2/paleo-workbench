@@ -333,7 +333,20 @@ ContourLayerProduct generate_contour_layer_product(
     if (options.levels.has_value()) {
         out.levels = *options.levels;
     } else if (use_interval) {
-        const double interval = *options.interval;
+        double interval = *options.interval;
+        // D4: a caller-supplied interval tiny relative to |vmin| makes
+        // curr + interval == curr → an unbounded loop and unbounded level
+        // growth (hang/OOM). Floor the interval at the addition-noise scale
+        // (and refuse non-positive/NaN outright).
+        const double span = std::max(std::fabs(vmax - vmin), 1e-9);
+        const double min_interval =
+            std::max(std::numeric_limits<double>::epsilon() *
+                         std::max(std::fabs(vmin), std::fabs(vmax)) * 4.0,
+                     span / 1000000.0);
+        if (!std::isfinite(interval) || interval <= 0.0) {
+            interval = span / 8.0;  // sane default instead of a hang
+        }
+        interval = std::max(interval, min_interval);
         // Python math.ceil returns an int, so 0 * interval is +0.0; C++
         // std::ceil keeps -0.0 for ratios in (-1, 0). Normalize so labels
         // print "0", not "-0".

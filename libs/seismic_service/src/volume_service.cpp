@@ -10,6 +10,11 @@ std::size_t tile_cache_budget_from_env(std::size_t default_bytes) {
     if (raw == nullptr || *raw == '\0') {
         return default_bytes;
     }
+    // R2-22: digits only — stoull accepted "-1" (wrapped to ~2^64,
+    // effectively unbounded cache) and trailing garbage ("64MB" → 64).
+    for (const char* c = raw; *c != '\0'; ++c) {
+        if (*c < '0' || *c > '9') return default_bytes;
+    }
     try {
         const unsigned long long parsed = std::stoull(raw);
         if (parsed == 0) {

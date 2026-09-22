@@ -975,8 +975,19 @@ IntegratedRunOutput run_integrated_fusion(
 
     if (sensitivity.is_null()) {
         // V8 M5 degraded path: no registration cached it — compute now.
-        sensitivity =
-            pwb::factor_fusion::sensitivity_report(result.model, result);
+        // Best-effort like the registration path above (#1451 B-08): a
+        // throwing sensitivity must degrade the summary, not abort the
+        // whole fusion run.
+        try {
+            sensitivity =
+                pwb::factor_fusion::sensitivity_report(result.model, result);
+        } catch (const std::exception& exc) {
+            sensitivity = Json::object();
+            sensitivity["error"] = std::string("sensitivity degraded: ") + exc.what();
+        } catch (...) {
+            sensitivity = Json::object();
+            sensitivity["error"] = "sensitivity degraded: unknown exception";
+        }
     }
     Json qc = result.qc;
     qc["registration"] = registration;

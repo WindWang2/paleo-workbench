@@ -201,7 +201,10 @@ class OwnedWorkerJob(QObject):
         self._worker = None
         self._cancel = None
         self._target = None
-        self._result_connections = []
+        # Disconnect result signals for real instead of dropping the list:
+        # the guarded closures otherwise stay connected to the worker for as
+        # long as it lives (ISSUE-018 signal-closure leak).
+        self._disconnect_results()
         if self._destroyed_conn is not None:
             try:
                 # PySide's bound-signal ``disconnect`` expects a callable,

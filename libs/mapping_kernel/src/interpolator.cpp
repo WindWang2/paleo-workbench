@@ -224,7 +224,12 @@ std::vector<double> solve_ok_system(const std::vector<double>& K,
     }
     if (solve_linear(regularized, rhs, n, w)) return w;
     if (!solve_lstsq(regularized, rhs, n, w)) {
-        w.assign(static_cast<std::size_t>(n), 0.0);
+        // D1: total solver failure must NOT return a zero-weight vector —
+        // the caller would blend z_pred = 0 with full-sill variance into a
+        // fabricated flat-zero surface with no diagnostic. NaN weights make
+        // the estimate NaN (an honest "no estimate") instead.
+        w.assign(static_cast<std::size_t>(n),
+                 std::numeric_limits<double>::quiet_NaN());
     }
     return w;
 }
@@ -861,6 +866,14 @@ FactorGrid interpolate_factor(const std::vector<SamplePoint>& points,
     if (is_kriging_method(options.method)) {
         kriging_fill(out, std::move(xs), std::move(ys), std::move(zs), options);
     } else {
+        // IDW keeps coincident samples: the host's sample-normalization
+        // stage is the single dedup authority and its
+        // duplicate_policy='keep' contract depends on the kernel NOT
+        // forcing a merge (the science_service duplicates_keep oracle
+        // would change otherwise). The kernel-level epsilon clamp is
+        // retained — 'keep' is only safe when the host already vetted the
+        // duplicates (duplicates_mean / duplicates_error routes merge or
+        // refuse before reaching this call).
         idw_fill(out, xs, ys, zs, options);
     }
     apply_domain_mask(out, options.boundary);

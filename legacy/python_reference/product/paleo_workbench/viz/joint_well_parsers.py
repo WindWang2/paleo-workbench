@@ -32,9 +32,9 @@ def parse_well_heads(
     """Parse SMI well heads and explicitly return the reconciled registry."""
     source_path = Path(path)
     records: list[tuple[str, float, float, float, float, float, float]] = []
-    for line in source_path.read_text(
-        encoding="utf-8", errors="replace"
-    ).splitlines():
+    from paleo_workbench.resources.text_codec import read_text_with_fallback
+
+    for line in read_text_with_fallback(source_path).splitlines():
         s = line.strip()
         if not s or s.startswith("#"):
             continue
@@ -85,7 +85,9 @@ def parse_td_table(path: Path | str, well_name: str | None = None) -> TimeDepthT
     times: list[float] = []
     mds: list[float] = []
     name = well_name or Path(path).stem
-    for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+    from paleo_workbench.resources.text_codec import read_text_with_fallback
+
+    for line in read_text_with_fallback(path).splitlines():
         s = line.strip()
         if not s or s.startswith("#"):
             if "Well :" in s or "Well:" in s:

@@ -51,6 +51,23 @@ QShortcut* ShortcutRegistry::register_shortcut(
                      });
     shortcuts_[spec.id] = shortcut;
     registry_[spec.id] = spec;
+    // Owner-widget teardown must release the key: without this hook the
+    // stale spec kept the shortcut "taken" forever, so a rebuilt window's
+    // RibbonBar skipped registration (review R4 — Ctrl+F1 dead after a
+    // teardown/reopen). No context object (the registry is not a QObject
+    // and outlives every shortcut it created — central-registry contract);
+    // the connection dies with the sender, and the sender check keeps the
+    // deleteLater re-register path above from erasing the NEW entry when
+    // the OLD object dies.
+    QObject::connect(shortcut, &QObject::destroyed,
+                     [this, id = spec.id](QObject* gone) {
+                         const auto it = shortcuts_.find(id);
+                         if (it != shortcuts_.end() &&
+                             static_cast<QObject*>(it->second) == gone) {
+                             shortcuts_.erase(it);
+                             registry_.erase(id);
+                         }
+                     });
     warn_conflicts(spec);
     return shortcut;
 }

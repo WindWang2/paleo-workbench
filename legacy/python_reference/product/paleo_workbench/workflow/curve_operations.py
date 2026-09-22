@@ -430,22 +430,33 @@ def evaluate_curve_expression(expr: str, variables: dict[str, np.ndarray]) -> np
         if isinstance(node, ast.Compare) and all(
             isinstance(op, _ALLOWED_CMPOPS) for op in node.ops
         ):
+            # Chained comparisons are ANDed pairwise (R2-1): Python
+            # ``0 < GR < 150`` is ``(0 < GR) and (GR < 150)``, NOT
+            # ``(0 < GR) < 150`` — folding the boolean result of the first
+            # comparison into the next comparator silently produced
+            # all-True masks (bool→0/1 < any upper bound), corrupting every
+            # derived curve a user wrote with a range predicate.
             left = visit(node.left)
+            result = None
             for op, comparator in zip(node.ops, node.comparators):
                 right = visit(comparator)
                 if isinstance(op, ast.Gt):
-                    left = left > right
+                    part = left > right
                 elif isinstance(op, ast.Lt):
-                    left = left < right
+                    part = left < right
                 elif isinstance(op, ast.GtE):
-                    left = left >= right
+                    part = left >= right
                 elif isinstance(op, ast.LtE):
-                    left = left <= right
+                    part = left <= right
                 elif isinstance(op, ast.Eq):
-                    left = left == right
+                    part = left == right
                 else:
-                    left = left != right
-            return left
+                    part = left != right
+                result = part if result is None else (
+                    np.asarray(result, dtype=bool) & np.asarray(part, dtype=bool)
+                )
+                left = right  # the comparator's left for the NEXT pair
+            return result
         if isinstance(node, ast.BoolOp) and isinstance(node.op, _ALLOWED_BOOLOPS):
             operands = [np.asarray(visit(v), dtype=bool) for v in node.values]
             result = operands[0]

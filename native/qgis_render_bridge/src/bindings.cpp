@@ -637,82 +637,75 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
         }
         return py::module_::import("json").attr("dumps")(value).cast<std::string>();
     };
-    auto geometry_list_arg = [geometry_arg](const py::iterable& values) {
-        std::vector<std::string> items;
-        for (const py::handle item : values) {
-            items.push_back(geometry_arg(item));
-        }
-        return items;
-    };
-    geometry.def("union", [&geometry_arg](const py::iterable& parts) {
+    geometry.def("union", [geometry_arg](const py::iterable& parts) {
                       std::vector<std::string> items;
                       for (const py::handle item : parts) {
                           items.push_back(geometry_arg(item));
                       }
                       return pwb::qgis_render::geometry_union(items);
                   }, py::arg("geometries"));
-    geometry.def("split_by_line", [&geometry_arg](const py::object& target,
+    geometry.def("split_by_line", [geometry_arg](const py::object& target,
                                                    const py::object& cutter) {
                       return pwb::qgis_render::geometry_split_by_line(
                           geometry_arg(target), geometry_arg(cutter));
                   }, py::arg("geometry"), py::arg("cutter"));
-    geometry.def("intersection", [&geometry_arg](const py::object& a, const py::object& b) {
+    geometry.def("intersection", [geometry_arg](const py::object& a, const py::object& b) {
                       return pwb::qgis_render::geometry_intersection(
                           geometry_arg(a), geometry_arg(b));
                   });
-    geometry.def("difference", [&geometry_arg](const py::object& a, const py::object& b) {
+    geometry.def("difference", [geometry_arg](const py::object& a, const py::object& b) {
                       return pwb::qgis_render::geometry_difference(
                           geometry_arg(a), geometry_arg(b));
                   });
-    geometry.def("symdifference", [&geometry_arg](const py::object& a, const py::object& b) {
+    geometry.def("symdifference", [geometry_arg](const py::object& a, const py::object& b) {
                       return pwb::qgis_render::geometry_symdifference(
                           geometry_arg(a), geometry_arg(b));
                   });
-    geometry.def("buffer", [&geometry_arg](const py::object& source, const double distance,
+    geometry.def("buffer", [geometry_arg](const py::object& source, const double distance,
                               const int segments) {
                       return pwb::qgis_render::geometry_buffer(
                           geometry_arg(source), distance, segments);
                   }, py::arg("geometry"), py::arg("distance"), py::arg("segments") = 8);
-    geometry.def("offset_curve", [&geometry_arg](const py::object& source, const double distance) {
+    geometry.def("offset_curve", [geometry_arg](const py::object& source, const double distance) {
                       return pwb::qgis_render::geometry_offset_curve(
                           geometry_arg(source), distance);
                   });
-    geometry.def("simplify", [&geometry_arg](const py::object& source, const double tolerance) {
+    geometry.def("simplify", [geometry_arg](const py::object& source, const double tolerance) {
                       return pwb::qgis_render::geometry_simplify(
                           geometry_arg(source), tolerance);
                   });
-    geometry.def("smooth", [&geometry_arg](const py::object& source, const unsigned int iterations,
+    geometry.def("smooth", [geometry_arg](const py::object& source, const unsigned int iterations,
                               const double offset) {
                       return pwb::qgis_render::geometry_smooth(
                           geometry_arg(source), iterations, offset);
                   }, py::arg("geometry"), py::arg("iterations") = 1, py::arg("offset") = 0.25);
-    geometry.def("densify", [&geometry_arg](const py::object& source, const double interval) {
+    geometry.def("densify", [geometry_arg](const py::object& source, const double interval) {
                       return pwb::qgis_render::geometry_densify(
                           geometry_arg(source), interval);
                   });
-    geometry.def("make_valid", [&geometry_arg](const py::object& source) {
+    geometry.def("make_valid", [geometry_arg](const py::object& source) {
                       return pwb::qgis_render::geometry_make_valid(geometry_arg(source));
                   });
-    geometry.def("is_valid", [&geometry_arg](const py::object& source) {
+    geometry.def("is_valid", [geometry_arg](const py::object& source) {
                       return pwb::qgis_render::geometry_is_valid(geometry_arg(source));
                   });
-    geometry.def("validate", [&geometry_arg](const py::object& source) {
+    geometry.def("validate", [geometry_arg](const py::object& source) {
                       // V7 详细校验：[{"where": [x,y]|null, "message": str}, ...]
                       return py::module_::import("json")
                           .attr("loads")(
                               pwb::qgis_render::geometry_validate(geometry_arg(source)))
                           .cast<py::list>();
                   }, py::arg("geometry"));
-    geometry.def("reshape", [&geometry_arg](const py::object& source,
+    geometry.def("reshape", [geometry_arg](const py::object& source,
                                             const py::object& line) {
                       return pwb::qgis_render::geometry_reshape(
                           geometry_arg(source), geometry_arg(line));
                   }, py::arg("geometry"), py::arg("reshape_line"));
-    geometry.def("multipart_to_singlepart", [&geometry_arg](const py::object& source) {
+    geometry.def("multipart_to_singlepart", [geometry_arg](const py::object& source) {
                       return pwb::qgis_render::geometry_multipart_to_singlepart(
                           geometry_arg(source));
                   });
-    geometry.def("singlepart_to_multipart", [&geometry_arg](const py::iterable& parts) {
+    geometry.def("singlepart_to_multipart", [geometry_arg](const py::iterable& parts) {
                       std::vector<std::string> items;
                       for (const py::handle item : parts) {
                           items.push_back(geometry_arg(item));
@@ -720,19 +713,19 @@ PYBIND11_MODULE(qgis_render_bridge, module) {
                       return pwb::qgis_render::geometry_singlepart_to_multipart(items);
                   });
     // V10 部件操作：QgsGeometry::addPart / deletePart（新整体几何 GeoJSON）。
-    geometry.def("add_part", [&geometry_arg](const py::object& source,
+    geometry.def("add_part", [geometry_arg](const py::object& source,
                                              const py::object& part) {
                       const std::string source_json = geometry_arg(source);
                       const std::string part_json = geometry_arg(part);
                       return pwb::qgis_render::geometry_add_part(source_json, part_json);
                   },
                  py::arg("geometry"), py::arg("part"));
-    geometry.def("delete_part", [&geometry_arg](const py::object& source, int part_index) {
+    geometry.def("delete_part", [geometry_arg](const py::object& source, int part_index) {
                       const std::string source_json = geometry_arg(source);
                       return pwb::qgis_render::geometry_delete_part(source_json, part_index);
                   },
                  py::arg("geometry"), py::arg("part_index"));
-    geometry.def("clip", [&geometry_arg](const py::object& source, const py::sequence& extent) {
+    geometry.def("clip", [geometry_arg](const py::object& source, const py::sequence& extent) {
                       return pwb::qgis_render::geometry_clip(
                           geometry_arg(source), parse_extent(extent));
                   });

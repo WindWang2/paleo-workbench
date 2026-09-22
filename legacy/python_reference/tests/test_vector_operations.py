@@ -30,3 +30,13 @@ def test_merge_and_split_are_reversible_session_operations() -> None:
     assert len(split_ids) == 2
     assert session.undo()
     assert session.feature("left").feature_id == "left"
+
+
+def test_merge_accepts_one_shot_iterable() -> None:
+    """R2-10: a generator input must not be exhausted by validation and
+    then re-raise 'select at least two polygons' — forward the deduped ids."""
+    layer, session = _polygon_layer()
+    merged_id = merge_selected_polygons(
+        session, (k for k in ["left", "right"])  # one-shot generator
+    )
+    assert merged_id

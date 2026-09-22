@@ -9,9 +9,15 @@ def package_version() -> str:
     try:
         return importlib.metadata.version("paleo-workbench")
     except importlib.metadata.PackageNotFoundError:
-        from paleo_workbench import __version__
+        try:
+            from paleo_workbench import __version__
 
-        return __version__
+            return __version__
+        except Exception:
+            # Not installed AND the package itself is not importable (e.g.
+            # src/ diagnostics run from a source tree without deps): a
+            # static sentinel keeps Config importable instead of raising.
+            return "0.0.0+unknown"
 
 
 class Config:

@@ -223,6 +223,7 @@ def main() -> None:
     text = json.dumps(payload, indent=2)
     print(text)
     if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(text)
             fh.write("\n")

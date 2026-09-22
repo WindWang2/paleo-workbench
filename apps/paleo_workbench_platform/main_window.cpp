@@ -24,6 +24,7 @@
 #include <utility>
 #include "job_center.hpp"
 #include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/job_runtime/thread_join_guard.hpp>
 #endif
 // END CONV-30
 
@@ -1614,6 +1615,16 @@ QString MainWindow::openProject(const QString& project_file) {
     pwb::app::workflow_wiring::notify_project_changed(this);
 #endif
 // END UI-14 WORKFLOW-WIRING
+#ifdef PWB_WITH_APP_SHELL
+    // Unbound project-gated commands (data.import / predict.run /
+    // factor.compute / verify.run …) evaluate availability only when the
+    // ribbon is asked to — after a project opens they stayed disabled with
+    // the "需要先打开工程" tooltip until an unrelated context-group
+    // injection happened to refresh them (review R2).
+    if (app_shell_ != nullptr && app_shell_->ribbon() != nullptr) {
+        app_shell_->ribbon()->refresh_command_availability();
+    }
+#endif
 
     // Materialize every bound GeoJSON layer as an explicit working copy —
     // the catalog payload file itself is read-only for the shell.
@@ -1907,6 +1918,13 @@ QString MainWindow::closeProject() {
     context_.session().set_store(nullptr);
     context_.setProjectStore(nullptr);
     facts_.clear();
+#ifdef PWB_WITH_APP_SHELL
+    // Mirror of the open path (review R2): project-gated availability must
+    // drop again once the project is closed, not stay stale-enabled.
+    if (app_shell_ != nullptr && app_shell_->ribbon() != nullptr) {
+        app_shell_->ribbon()->refresh_command_availability();
+    }
+#endif
 // BEGIN CLOSURE-MAPPING
 #ifdef PWB_WITH_CLOSURE_MAPPING
     pwb::app::closure_mapping::notify_project_changed(this);
@@ -2600,6 +2618,23 @@ void MainWindow::closeEvent(QCloseEvent* event) {
                     statusBar()->showMessage(
                         tr("保存失败（%1），关闭已取消")
                             .arg(QString::fromStdString(error)),
+                        10000);
+                    event->ignore();
+                    return;
+                }
+            }
+            // The staged commits only cover layer payloads — the project
+            // document (constraint registrations, workspace state,
+            // stratigraphy) needs its own save or quitting silently
+            // discards everything not yet flushed (same family as the
+            // #1453 closeProject fix, which closeEvent never got).
+            {
+                QString saved_to;
+                const QString save_error =
+                    shell_project_actions::save_open_project(*this, &saved_to);
+                if (!save_error.isEmpty()) {
+                    statusBar()->showMessage(
+                        tr("文档保存失败（%1），关闭已取消").arg(save_error),
                         10000);
                     event->ignore();
                     return;
@@ -3469,6 +3504,10 @@ std::string MainWindow::importSegyProgressed(
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     });
+    // read_segy (or the path ctor) throwing must still join the bridge: a
+    // joinable std::thread destroyed during unwinding terminates the process
+    // (#1451 B-10 family).
+    pwb::job::ThreadJoinGuard bridge_guard{read_done, bridge};
     auto volume = pwb::seismic_io::read_segy(
         std::filesystem::path(path.toStdWString()), error, flag);
     read_done.store(true, std::memory_order_relaxed);
@@ -3524,8 +3563,15 @@ void MainWindow::importSegyDialog() {
     std::string read_error;
     std::atomic<bool> done{false};
     std::thread worker([&]() {
-        volume = pwb::seismic_io::read_segy(
-            std::filesystem::path(path.toStdWString()), &read_error, cancel);
+        try {
+            volume = pwb::seismic_io::read_segy(
+                std::filesystem::path(path.toStdWString()), &read_error,
+                cancel);
+        } catch (const std::exception& ex) {
+            read_error = ex.what();
+        } catch (...) {
+            read_error = "cancelled";
+        }
         done.store(true);
     });
     while (!done.load()) {
@@ -3654,6 +3700,8 @@ void MainWindow::submitSegyJob(const QString& path) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
         });
+        // Same exception-safety contract as the sync import path above.
+        pwb::job::ThreadJoinGuard bridge_guard{read_done, bridge};
         auto volume = pwb::seismic_io::read_segy(source_path, &result.error,
                                                  flag);
         read_done.store(true, std::memory_order_relaxed);
@@ -4185,9 +4233,13 @@ void MainWindow::applyLayerControlForOpen() {
         // Host guard (02-architecture §5): an applier throw must not
         // escape openProject — the plane degrades, the open proceeds.
         layer_groups_->reconcile(snapshots);
-    } catch (const std::exception&) {
-        // status surface notes the degraded reconcile; retry on the next
-        // composition change (V5 §78).
+    } catch (const std::exception& exc) {
+        // Degrade, but TELL the user (N8: the comment promised a status
+        // surface note that was never emitted — silent degradation).
+        statusBar()->showMessage(
+            tr("图层分组同步失败（%1），将继续重试")
+                .arg(QString::fromStdString(exc.what())),
+            10000);
     }
     // Drop targets referencing layers the runtime does not have (report
     // only — a fresh open cannot have dirty sessions yet).
@@ -4238,9 +4290,14 @@ void MainWindow::syncLayerControlOnSave() {
                 // No force: the diff runs against the pre-drag baseline
                 // and emits exactly the user's minimal move set.
                 layer_groups_->reconcile(layer_snapshots_);
-            } catch (const std::exception&) {
-                // save proceeds with the last persisted tree; the next
-                // successful reconcile re-syncs it
+            } catch (const std::exception& exc) {
+                // Save proceeds with the last persisted tree; the next
+                // successful reconcile re-syncs it. Report the degraded
+                // state instead of staying silent (N8).
+                statusBar()->showMessage(
+                    tr("图层分组同步失败（%1），已按上次持久化结果保存")
+                        .arg(QString::fromStdString(exc.what())),
+                    10000);
             }
         }
     }

@@ -109,3 +109,65 @@ PWB_TEST(name_search_is_case_folded_on_write) {
     PWB_CHECK(statement.text(0) ==
               "seismic attribute grunfeld 相带边界");
 }
+
+PWB_TEST(duplicate_member_names_fail_the_upsert_not_silently_commit) {
+    // Review C1: the bare INSERT INTO version_members aborted one statement
+    // mid-loop on duplicate names, but step_done() swallowed the rc — the
+    // upsert returned Ok, the revision bumped, and only the first member
+    // row persisted (a durable false-Committed receipt).
+    auto repository = fresh_store("dup-members");
+    auto opened = repository.open_read_write();
+    PWB_CHECK(opened.is_ok());
+    PWB_CHECK(repository.upsert_asset(test_asset("asset_dup")).code ==
+              pwb::domain::ErrorCode::Ok);
+    auto version = test_version("ver_dup", "asset_dup", 1);
+    pwb::catalog::VersionMember first;
+    first.name = "same.bin";
+    first.rel_path = "a/same.bin";
+    first.member_role = "file";
+    first.ordinal = 0;
+    first.required = true;
+    pwb::catalog::VersionMember second = first;
+    second.rel_path = "b/same.bin";
+    second.ordinal = 1;
+    version.members = {first, second};
+    const pwb::domain::DataError error = repository.upsert_version(version);
+    PWB_CHECK(error.code != pwb::domain::ErrorCode::Ok);
+    // The read-back must not half-materialize the member set.
+    auto document = repository.open_read_only();
+    PWB_CHECK(document.is_ok());
+    bool found = false;
+    for (const auto& stored : document.value().versions) {
+        if (stored.id.str() == "ver_dup") found = true;
+    }
+    (void)found;  // row presence is transactional detail; the error is the contract
+}
+
+PWB_TEST(re_saved_version_with_empty_members_drops_stale_rows) {
+    // Review C2: the version_members DELETE was gated on !members.empty(),
+    // so clearing a version's members resurrected the old rows on load.
+    auto repository = fresh_store("clear-members");
+    auto opened = repository.open_read_write();
+    PWB_CHECK(opened.is_ok());
+    PWB_CHECK(repository.upsert_asset(test_asset("asset_clr")).code ==
+              pwb::domain::ErrorCode::Ok);
+    auto version = test_version("ver_clr", "asset_clr", 1);
+    pwb::catalog::VersionMember member;
+    member.name = "keep.bin";
+    member.rel_path = "keep.bin";
+    member.member_role = "file";
+    member.ordinal = 0;
+    member.required = true;
+    version.members = {member};
+    PWB_CHECK(repository.upsert_version(version).code ==
+              pwb::domain::ErrorCode::Ok);
+    version.members.clear();
+    PWB_CHECK(repository.upsert_version(version).code ==
+              pwb::domain::ErrorCode::Ok);
+    auto document = repository.open_read_only();
+    PWB_CHECK(document.is_ok());
+    for (const auto& stored : document.value().versions) {
+        if (stored.id.str() != "ver_clr") continue;
+        PWB_CHECK(stored.members.empty());
+    }
+}

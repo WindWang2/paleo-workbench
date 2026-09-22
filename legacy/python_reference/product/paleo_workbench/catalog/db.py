@@ -13,6 +13,8 @@ manifest checkpoint plus :meth:`rebuild` recreate the store, and
 
 from __future__ import annotations
 
+import logging
+
 import json
 import sqlite3
 import sys
@@ -918,6 +920,9 @@ def native_thread_alive(native_id: int) -> bool | None:
     return None
 
 
+_wc_logger = logging.getLogger(__name__)
+
+
 class CatalogIndex:
     """Project-local SQLite query index over a :class:`CatalogDocument`.
 
@@ -1410,8 +1415,11 @@ class CatalogIndex:
                     " WHERE working_id = ?",
                     (state, datetime.now().isoformat(timespec="seconds"), working_id),
                 )
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as exc:
+            # Round-9 D2 (CP7 twin): a failed phase write degrades crash
+            # recovery silently — visible, never swallowed bare.
+            _wc_logger.warning("working-copy state update failed for %s: %s",
+                               working_id, exc)
 
     def remove_working_copy(self, working_id: str) -> None:
         conn = self._connect()
@@ -1421,8 +1429,9 @@ class CatalogIndex:
                     "DELETE FROM working_copies WHERE working_id = ?",
                     (working_id,),
                 )
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as exc:
+            _wc_logger.warning("working-copy removal failed for %s: %s",
+                               working_id, exc)
 
     def is_fresh(self, document: CatalogDocument) -> bool:
         """True when the index matches *document*'s revision and schema."""

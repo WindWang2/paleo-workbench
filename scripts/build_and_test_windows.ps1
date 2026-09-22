@@ -12,7 +12,15 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 
 # Ensure Scripts folder is on PATH for cmake/ninja/pytest
-$UserScripts = Join-Path $env:APPDATA "Python\Python313\Scripts"
+# Derive the user Scripts dir from the active interpreter instead of
+# hardcoding Python313 (pyproject pins <3.13; a hardcoded minor silently
+# misses the pinned install's Scripts dir).
+$PyUserScripts = python -c "import sysconfig; print(sysconfig.get_path('scripts', scheme='nt_user'))" 2>$null
+if (-not $PyUserScripts -or -not (Test-Path $PyUserScripts)) {
+    $PyVer = python -c "import sys; print(f'Python{sys.version_info.major}{sys.version_info.minor}')" 2>$null
+    if ($PyVer) { $PyUserScripts = Join-Path $env:APPDATA "$PyVer\Scripts" }
+}
+$UserScripts = $PyUserScripts
 if (Test-Path $UserScripts) {
     $env:PATH = "$UserScripts;$env:PATH"
 }

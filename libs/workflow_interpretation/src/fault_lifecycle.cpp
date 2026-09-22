@@ -9,7 +9,11 @@
 #include <pwb/factor_host/fingerprint.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 #include <set>
 #include <fstream>
 #include <map>
@@ -52,12 +56,33 @@ void atomic_write_json(const std::filesystem::path& path,
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        out.flush();
         if (!out.good()) {
+            std::error_code cleanup_ec;
+            std::filesystem::remove(tmp, cleanup_ec);
             throw std::runtime_error("fault artifact write failed: "
                                      + tmp.string());
         }
     }
-    std::filesystem::rename(tmp, path);
+#if !defined(_WIN32)
+    // WI10: fsync before rename — "atomic" naming without the sync can
+    // publish an empty artifact after a crash. Windows rename-replace
+    // semantics are documented as unsupported for this helper (POSIX
+    // paths only, same as the catalog persistence layer).
+    if (FILE* handle = std::fopen(tmp.string().c_str(), "r")) {
+        const int fd = fileno(handle);
+        if (fd >= 0) (void)::fsync(fd);
+        std::fclose(handle);
+    }
+#endif
+    std::error_code rename_ec;
+    std::filesystem::rename(tmp, path, rename_ec);
+    if (rename_ec) {
+        std::error_code cleanup_ec;
+        std::filesystem::remove(tmp, cleanup_ec);
+        throw std::runtime_error("fault artifact rename failed: "
+                                 + rename_ec.message());
+    }
 }
 
 std::optional<std::string> sha256_file_or_none(
@@ -195,6 +220,21 @@ FaultInterpretationDraft new_fault_draft(
     const std::vector<std::string>& source_version_ids, const std::string& crs,
     const std::optional<std::string>& interpretation_id,
     const std::optional<std::string>& parent_version_id) {
+    // WI1: non-finite coordinates cannot round-trip — the fingerprint
+    // encodes NaN but the artifact serializes it as null and the restore
+    // silently drops the vertex, so a save/reload minted a new "version"
+    // with altered geometry. Fail closed at the public entry instead of
+    // destroying data downstream.
+    for (const FaultTrace& trace : traces) {
+        for (const auto& [x, y] : trace.polyline) {
+            if (!std::isfinite(x) || !std::isfinite(y)) {
+                throw std::invalid_argument(
+                    "fault trace '" + trace.id +
+                    "' has non-finite coordinates (x=" +
+                    std::to_string(x) + ", y=" + std::to_string(y) + ")");
+            }
+        }
+    }
     FaultInterpretationDraft draft;
     draft.interpretation_id = interpretation_id.has_value()
                                   ? *interpretation_id
@@ -393,6 +433,7 @@ save_fault_draft(FaultInterpretationDraft& draft, Json& project_root,
     // register_fault_interpretation_run parity over the runtime seam.
     std::string version_id = version_token;
     std::string managed_path = artifact.generic_string();
+    bool managed_resolved = false;
     if (catalog != nullptr) {
         std::vector<std::string> inputs = draft.payload.source_version_ids;
         if (parent.has_value()
@@ -452,26 +493,48 @@ save_fault_draft(FaultInterpretationDraft& draft, Json& project_root,
                     std::ifstream in(artifact, std::ios::binary);
                     std::ostringstream buffer;
                     buffer << in.rdbuf();
+                    // WI6: a failed re-read would register an EMPTY payload
+                    // against the real checksum — a permanent integrity
+                    // mismatch. The stream must be healthy and non-empty
+                    // (the artifact was just written with bytes).
+                    if (in.bad() || buffer.str().empty()) {
+                        throw std::runtime_error(
+                            "fault artifact re-read failed before "
+                            "registration");
+                    }
                     return buffer.str();
                 }(),
                 "derived", run_id, version_metadata);
             version_id = registered.version_id;
+            // WI4: resolve INSIDE the guarded block — a throw after the
+            // run/asset registration left a "completed" run plus a
+            // registered asset while save re-threw, and a retry
+            // double-registered both.
+            if (const auto version = catalog->resolve_version(version_id);
+                version.has_value() && !version->path.empty()) {
+                managed_path = version->path;
+                managed_resolved = true;
+            }
             catalog->update_run_status(run_id, "completed");
         } catch (const std::exception&) {
             // No orphan RUNNING run + no ghost artifact (H7 compensation).
-            try {
-                catalog->update_run_status(run_id, "failed");
-            } catch (const std::exception&) {
+            // WI5: only runs that were actually created can be failed —
+            // update_run_status("") itself throws on unknown ids.
+            if (!run_id.empty()) {
+                try {
+                    catalog->update_run_status(run_id, "failed");
+                } catch (const std::exception&) {
+                }
             }
             std::error_code ignored;
             std::filesystem::remove(artifact, ignored);
             throw;
         }
-        if (const auto version = catalog->resolve_version(version_id);
-            version.has_value() && !version->path.empty()) {
-            managed_path = version->path;
+        if (managed_resolved) {
             // Success-path hygiene: the managed copy is the record — drop
             // the local working duplicate so saves don't accumulate ghosts.
+            // Only when resolution confirmed the managed path: the local
+            // file is the only copy otherwise.
             std::error_code ignored;
             std::filesystem::remove(artifact, ignored);
         }

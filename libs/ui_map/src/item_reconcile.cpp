@@ -67,6 +67,12 @@ std::map<std::string, QTreeWidgetItem*> reconcile_tree_items(
         const std::string key = tree_key(item);
         if (key.empty() || !wanted.count(key)) {
             container->removeChild(item);
+            // R2-27: removeChild unparents but does NOT delete — removed
+            // items leaked with their whole subtrees on every
+            // active-document switch (the list variant deletes via
+            // takeItem). QObject-style: heap QTreeWidgetItems need an
+            // explicit delete once detached.
+            delete item;
             by_key.erase(key);
         }
     }

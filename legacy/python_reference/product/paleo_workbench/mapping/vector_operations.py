@@ -36,8 +36,12 @@ def merge_selected_polygons(session: VectorEditSession, feature_ids: Iterable[st
             merge_selected_polygons as qgis_merge,
         )
 
-        return qgis_merge(session, feature_ids)
-    return _shapely_merge(session, feature_ids)
+        # R2-10: forward the deduped ids, not the (possibly one-shot)
+        # original iterable — a generator input was exhausted by the
+        # validation above and the inner call re-raised "select at least
+        # two polygons".
+        return qgis_merge(session, ids)
+    return _shapely_merge(session, ids)
 
 
 def _shapely_merge(session: VectorEditSession, feature_ids: Iterable[str]) -> str:

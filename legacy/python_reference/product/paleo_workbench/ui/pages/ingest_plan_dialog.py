@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from pathlib import Path
 from typing import Any, Callable
 
@@ -67,6 +69,9 @@ def _status_display(item: PlannedItem) -> str:
     return "✓"
 
 
+logger = logging.getLogger(__name__)
+
+
 class _PlanWorker(QObject):
     """计划构建/执行 worker（一次一事；经 QThread moveToThread）。"""
 
@@ -104,9 +109,12 @@ class _PlanWorker(QObject):
             self.failed.emit("内部错误：计划未构建")
             return
         try:
+            # R11-3: run the IMPORT phase only — binding mutates the live
+            # document's entities/links and belongs on the GUI thread (the
+            # #12 invariant); the done-handler binds from the report.
             report = execute_ingest_plan(
                 self._plan, self._service, self._project,
-                bind=True,
+                bind=False,
                 progress=lambda done, total: self.progress.emit(done, total),
                 cancel=lambda: self._cancelled,
             )
@@ -357,6 +365,18 @@ class IngestPlanDialog(QDialog):
         self.detail.set_item(None, project=self._project)
 
     def _on_execute_done(self, report: IngestExecuteReport) -> None:
+        # R11-3: GUI-thread binding of the worker's staged imports.
+        staged = getattr(report, "staged_bindings", None)
+        if staged:
+            try:
+                from paleo_workbench.resources.ingest_plan import (
+                    _bind_plan_items,
+                )
+
+                _bind_plan_items(self._project, staged, report)
+                report.staged_bindings = []
+            except Exception:
+                logger.exception("post-execute binding failed")
         self._report = report
         self._teardown_worker()
         self._set_running(False)

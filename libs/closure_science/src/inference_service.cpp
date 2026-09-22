@@ -4,6 +4,8 @@
 
 #include <pwb/closure_science/inference_service.hpp>
 
+#include "inference_hash.hpp"
+
 #include <pwb/closure_science/model_seed.hpp>
 #include <pwb/catalog/checksum.hpp>
 #include <pwb/catalog/model_registry.hpp>
@@ -19,6 +21,8 @@
 #include <stdexcept>
 
 namespace pwb::closure_science {
+
+using detail::dump_canonical;
 
 using catalog::DataAsset;
 using catalog::DataRun;
@@ -53,36 +57,6 @@ constexpr const char* kPayloadReservedKeys[] = {
         if (key == reserved) return true;
     }
     return false;
-}
-
-[[nodiscard]] std::string dump_canonical(const Json& value) {
-    // Python _snapshot_hash: json.dumps(payload, sort_keys=True,
-    // ensure_ascii=False). Recursive key-sorted compact dump.
-    if (value.is_object()) {
-        std::map<std::string, std::string> encoded;
-        for (auto it = value.begin(); it != value.end(); ++it) {
-            encoded[it.key()] = dump_canonical(it.value());
-        }
-        std::string out = "{";
-        bool first = true;
-        for (const auto& [key, encoded_value] : encoded) {
-            if (!first) out += ",";
-            first = false;
-            out += "\"" + key + "\":" + encoded_value;
-        }
-        return out + "}";
-    }
-    if (value.is_array()) {
-        std::string out = "[";
-        bool first = true;
-        for (const auto& item : value) {
-            if (!first) out += ",";
-            first = false;
-            out += dump_canonical(item);
-        }
-        return out + "]";
-    }
-    return value.dump();
 }
 
 [[nodiscard]] std::string snapshot_hash(const Json& snapshot) {

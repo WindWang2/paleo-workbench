@@ -29,10 +29,13 @@ void StageFlowController::refresh() {
     const bool horizon_changed = next.horizon != snapshot_.horizon;
     const bool real_change = next != snapshot_;
     snapshot_ = next;
-    if (stage_changed) {
+    if (stage_changed || layout_disturbed_) {
         // Layout follows the authority — visibility matrices only, never
-        // sizes (preset-switch contract).
+        // sizes (preset-switch contract). layout_disturbed_ covers the
+        // return-to-same-stage trip after a presentation profile (数据管理/
+        // 验证) rewrote dock visibility without changing the stage value.
         apply_stage_layout(snapshot_.stage_value);
+        layout_disturbed_ = false;
     }
     if (!real_change) return;
     emit snapshot_changed();
@@ -94,6 +97,11 @@ void StageFlowController::apply_presentation(
     const auto prefs = preferences_.load(presentation_key);
     seams_.apply_visibility(effective_visibility(profile, prefs));
     ++applied_visibility_count_;
+    // The presentation profile rewrote dock visibility; the next refresh()
+    // must re-apply the stage layout even for an unchanged stage value,
+    // so returning to the same science workspace restores its docks
+    // (review R1).
+    layout_disturbed_ = true;
 }
 
 StagePreferenceSink make_qsettings_preference_sink(QSettings& settings) {

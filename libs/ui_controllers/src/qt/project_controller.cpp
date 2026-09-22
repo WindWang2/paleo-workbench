@@ -2,6 +2,7 @@
 
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <QTimer>
 #include <QWidget>
 
@@ -13,12 +14,24 @@ namespace {
 
 constexpr const char* kProjectFilter = "Paleo 工程 (*.paleo.json)";
 
-// QTimer(0) parity — marshal onto the GUI thread's next event turn.
-void post_next_turn(std::function<void()> fn) {
-    QTimer::singleShot(0, [fn = std::move(fn)]() mutable { fn(); });
-}
-
 }  // namespace
+
+// QTimer(0) parity — marshal onto the GUI thread's next event turn.
+// R2-18/R6-1: the receiver matters twice over. A contextless singleShot
+// is NEVER dropped when its target dies (UAF), and a lazily-created
+// sentinel QObject binds to whichever thread FIRST calls this — the
+// workflow progress hop calls from a scheduler worker, which would give
+// the sentinel worker-thread affinity and silently kill every post
+// (timers need an event loop). QCoreApplication::instance() is created
+// on the main thread before any worker can post and lives until after
+// every controller is gone — the correct owner for app-lifetime posts.
+void post_next_turn(std::function<void()> fn) {
+    auto* app = QCoreApplication::instance();
+    if (app == nullptr) {
+        return;  // no application: nowhere to marshal to; drop the post
+    }
+    QTimer::singleShot(0, app, [fn = std::move(fn)]() mutable { fn(); });
+}
 
 ProjectController::ProjectController(job::JobScheduler& scheduler,
                                      QObject* parent)

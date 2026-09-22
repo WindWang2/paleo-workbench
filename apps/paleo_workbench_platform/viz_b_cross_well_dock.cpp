@@ -11,6 +11,7 @@
 
 #include <QComboBox>
 #include <QFile>
+#include <QSaveFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -1069,7 +1070,10 @@ void VizBCrossWellDock::persist_now() {
     }
     const QString path =
         project_directory_ + QStringLiteral("/cross_well_workspace.json");
-    QFile file(path);
+    // N7: atomic sidecar like the geo3d/joint siblings — a crash mid-write
+    // used to leave a truncated workspace JSON (restore then dropped the
+    // whole cross-well workspace).
+    QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         emit status_message(tr("连井工作区保存失败：%1").arg(path));
         return;  // dirty stays set — retried on the next coalesced tick
@@ -1077,7 +1081,10 @@ void VizBCrossWellDock::persist_now() {
     const QByteArray text =
         QByteArray::fromStdString(save_state().dump(2));
     file.write(text);
-    file.flush();
+    if (!file.commit()) {
+        emit status_message(tr("连井工作区保存失败：%1").arg(path));
+        return;
+    }
     persist_dirty_ = false;
 }
 

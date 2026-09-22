@@ -965,6 +965,14 @@ SessionOutput OnnxRuntimeSession::run(const SessionBatch& batch) {
 
     SessionOutput out;
     out.ndim = static_cast<int>(rank);
+    // R2-35: only the first 5 dims populate n/c/d/h/w while data holds ALL
+    // elements — a rank>5 output silently mis-sized every consumer that
+    // computed from (n,c,d,h,w). Reject up front.
+    if (rank > 5) {
+        throw TiledInferenceError(
+            "onnxruntime: model output rank > 5 is unsupported "
+            "(n/c/d/h/w consumers would mis-size)");
+    }
     for (std::size_t axis = 0; axis < rank && axis < 5; ++axis) {
         const std::int64_t dim = dims[axis];
         if (dim < 0

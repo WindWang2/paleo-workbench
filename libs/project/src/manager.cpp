@@ -7,6 +7,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 #include <fstream>
 #include <sstream>
 #include <utility>
@@ -298,6 +301,19 @@ Result<SaveStats> ProjectManager::write_payload(const std::string& payload) {
             return DataError(ErrorCode::IoError, "temp file write failed");
         }
     }
+#if !defined(_WIN32)
+    // CP2: fsync the payload before rename — a crash after rename but
+    // before page flush could publish a zero-length main file (the .bak
+    // ladder recovers, but the catalog side fsyncs for exactly this
+    // reason; the project document deserves the same guarantee).
+    if (FILE* handle = std::fopen(tmp.string().c_str(), "r")) {
+        const int fd = fileno(handle);
+        if (fd >= 0) {
+            (void)::fsync(fd);
+        }
+        std::fclose(handle);
+    }
+#endif
 
     // main → .bak, then tmp → main (manager.py _write_payload order).
     bool old_moved = false;

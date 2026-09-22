@@ -465,13 +465,28 @@ void LayerGroupController::apply_tree(const LayerTreeSnapshot& desired,
     // success and later diffs would stay blind to the skipped moves
     // (silent drift, only recoverable via force).
     if (!tree_diff.group_moves.empty() || !tree_diff.layer_moves.empty()) {
+        // D-09: ops whose id is absent from the desired tree target layers
+        // deleted outside this controller (the bridge already removed them).
+        // Applying them is a guaranteed skip, which would abort reconcile
+        // without advancing last_applied_ — wedging every later reconcile
+        // on the same diff forever. Dead-id ops are no-ops by construction:
+        // drop them, and let skips of LIVE ids still abort (R2-P0).
+        std::set<std::string> desired_ids;
+        for (const TreeNode* group : desired.iter_groups()) {
+            desired_ids.insert("group:" + group->group_id);
+        }
+        for (const std::string& layer_id : desired.iter_layers()) {
+            desired_ids.insert(layer_id);
+        }
         std::vector<PlacementOp> placements;
         for (const auto& op : tree_diff.group_moves) {
+            if (desired_ids.count("group:" + op.group_id) == 0) continue;
             placements.push_back(
                 PlacementOp{"group:" + op.group_id, op.new_parent,
                             op.new_index});
         }
         for (const auto& op : tree_diff.layer_moves) {
+            if (desired_ids.count(op.layer_id) == 0) continue;
             placements.push_back(
                 PlacementOp{op.layer_id, op.new_parent, op.new_index});
         }

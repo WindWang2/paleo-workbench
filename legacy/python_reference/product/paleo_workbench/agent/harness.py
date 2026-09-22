@@ -62,6 +62,18 @@ class PaleoAIHarness:
         self.algorithm_registry = algorithm_registry
         self.template_registry = template_registry
 
+    @staticmethod
+    def _skip_downstream(plan: TaskGraph, node: TaskNode, logs: list[str]) -> None:
+        """Cascade SKIPPED to dependents of a failed node (ISSUE-021)."""
+        skipped = plan.cascade_skip(
+            node.id, f"skipped: upstream task '{node.id}' failed: {node.error}"
+        )
+        if skipped:
+            logs.append(
+                f"Skipped {len(skipped)} downstream task(s) after failure of "
+                f"'{node.id}': {', '.join(skipped)}"
+            )
+
     def execute_query(
         self,
         user_query: str,
@@ -108,6 +120,7 @@ class PaleoAIHarness:
                     node.status = TaskStatus.FAILED
                     node.error = f"Agent '{node.agent_name}' not found."
                     _log(f"ERROR: {node.error}")
+                    self._skip_downstream(plan, node, logs)
                     continue
 
                 try:
@@ -120,6 +133,7 @@ class PaleoAIHarness:
                     node.status = TaskStatus.FAILED
                     node.error = str(exc)
                     _log(f"Task '{node.id}' failed with exception: {exc}")
+                    self._skip_downstream(plan, node, logs)
 
         elapsed = time.perf_counter() - start_time
         success = not plan.has_failures() and plan.is_finished()

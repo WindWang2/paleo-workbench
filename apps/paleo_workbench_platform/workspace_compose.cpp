@@ -277,8 +277,12 @@ void compose_compilation_bottom(MainWindow* window, AppShell* shell,
 #if defined(PWB_WITH_CLOSURE_MAPPING) && defined(PWB_WITH_FACTOR_KERNEL)
     // shared_ptr BY VALUE — the renderer lambda keeps the store alive.
     auto store = closure_mapping::factor_grid_store(window);
-    // Cache lives on the install frame — bounded, task+fingerprint keyed.
+    // Cache lives with the strip — bounded, task+fingerprint keyed.
+    // (Review N5: the raw new leaked the hash + up to 64 pixmaps per
+    // window; QObject-delete bound to the strip's destruction instead.)
     auto* cache = new QHash<QString, QPixmap>();
+    QObject::connect(strip, &QObject::destroyed, strip,
+                     [cache] { delete cache; });
     strip->set_thumbnail_renderer(
         [store, cache](const pwb::domain::Json& task,
                        const QSize& size) -> QPixmap {

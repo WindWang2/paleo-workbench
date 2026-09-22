@@ -1180,6 +1180,10 @@ struct QgisMapStack::Impl {
     // 不再使 carried 项 id 漂移：串缓存安全，Python 侧跨 run 持 id 变稳）。
     QHash<const QgsGeometryCheckError*, QString> error_ids;
     int next_error_id = 0;
+    // Epoch tag (review R2-2): ids minted in run N are "e<N>:<k>"; a full
+    // re-run bumps the epoch, so a stale host-held id from an older run can
+    // never resolve against the new session (cross-feature corruption).
+    int error_id_epoch = 0;
     // 评审 P1：退休检查引用计数——carried 错误持 check 裸指针，引用归零
     // 即释放（有界，不随增量 run 数无限累积）。
     QHash<QgsGeometryCheck*, int> retired_refs;
@@ -1197,6 +1201,7 @@ struct QgisMapStack::Impl {
       retired_refs.clear();
       error_ids.clear();
       next_error_id = 0;
+      ++error_id_epoch;  // R2-2: full re-run — mint under a new epoch
       error_item_json.clear();
       error_item_compact.clear();
       error_geometry_json.clear();
@@ -2610,7 +2615,18 @@ std::string QgisMapStack::upsertMirrorLayer(const std::string& doc_id,
       if (!features.isEmpty()) {
         if (existing->dataProvider() == nullptr
             || !existing->dataProvider()->addFeatures(features)) {
-          throw std::runtime_error("mirror addFeatures failed for doc_id: " + doc_id);
+          // D-10: truncate already wiped the layer — an empty mirror on the
+          // canvas is a data-loss state that never self-heals (the revision
+          // bookkeeping looks current, and later full ships hit the same
+          // failed provider). Recover in the #1153 geometry-drift family:
+          // drop the corrupted mirror and rebuild it fresh from this
+          // payload once. Recursion is bounded at one level — the fresh
+          // path creates a new layer and throws on its own failures.
+          impl_->eraseMirrorByDocId(doc_id);
+          return upsertMirrorLayer(doc_id, name, geometry_type, crs_auth_id,
+                                   geojson_feature_collection, renderer_xml,
+                                   labeling_xml, legacy_style_json,
+                                   fields_json, min_scale, max_scale);
         }
       }
       recordMirrorFeatureFids(impl_->mirror_feature_fids[doc_id], features, geoBytes);
@@ -7195,7 +7211,9 @@ std::string QgisMapStack::runGeometryChecks(std::uintptr_t canvas_addr,
     auto id_it = impl_->checker.error_ids.find(error);
     if (id_it == impl_->checker.error_ids.end()) {
       id_it = impl_->checker.error_ids.insert(
-          error, QString::number(impl_->checker.next_error_id++));
+          error,
+          QStringLiteral("e%1:%2").arg(impl_->checker.error_id_epoch).arg(
+              impl_->checker.next_error_id++));
     }
     impl_->checker.native_by_id.insert(id_it.value(), i);
   }
@@ -7402,8 +7420,13 @@ std::string QgisMapStack::runIncrementalGeometryChecks(
       impl_->checker.error_geometry_json.remove(error);
       delete error;
     } else {
+      // Same epoch-tagged vocabulary as the full-run mint (R2-2 residual:
+      // a bare numeric id here could collide with a stale host-held id
+      // after a full re-run reset the counter).
       impl_->checker.error_ids.insert(
-          error, QString::number(impl_->checker.next_error_id++));
+          error,
+          QStringLiteral("e%1:%2").arg(impl_->checker.error_id_epoch).arg(
+              impl_->checker.next_error_id++));
       impl_->checker.native_errors.append(error);
     }
   }
@@ -7453,13 +7476,32 @@ std::string QgisMapStack::fixGeometryError(std::uintptr_t canvas_addr,
           project()->mapLayer(check_error->layerId()));
     }
   }
+  // R2-3: the macro must balance on EVERY exit from applyCheckerFix — a
+  // GEOS throw mid-fix used to leave an open edit command on a live
+  // editable layer (corrupted undo stack / permanently open macro).
+  struct EditCommandGuard {
+    QgsVectorLayer* layer;
+    bool& done;
+    ~EditCommandGuard() {
+      if (layer != nullptr && layer->isEditable() && !done) {
+        layer->destroyEditCommand();
+      }
+    }
+  };
+  bool edit_done = false;
   if (command_layer != nullptr && command_layer->isEditable()) {
     command_layer->beginEditCommand(QStringLiteral("Fix geometry error"));
   }
+  EditCommandGuard guard{command_layer, edit_done};
   const bool ok = applyCheckerFix(error_id, method, &touched, &failure);
   if (command_layer != nullptr && command_layer->isEditable()) {
-    if (ok) command_layer->endEditCommand();
-    else command_layer->destroyEditCommand();
+    if (ok) {
+      command_layer->endEditCommand();
+      edit_done = true;
+    } else {
+      command_layer->destroyEditCommand();
+      edit_done = true;
+    }
   }
   if (!ok) {
     QJsonObject payload;
@@ -7523,6 +7565,23 @@ std::string QgisMapStack::fixGeometryErrors(std::uintptr_t canvas_addr,
   for (QgsVectorLayer* layer : command_layers) {
     layer->beginEditCommand(QStringLiteral("Fix geometry errors"));
   }
+  // R2-3: same macro-balance guarantee for the plural path (a throw inside
+  // a round used to leave N open commands).
+  struct EditCommandsGuard {
+    const QSet<QgsVectorLayer*>& layers;
+    bool& done;
+    ~EditCommandsGuard() {
+      if (!done) {
+        for (QgsVectorLayer* layer : layers) {
+          if (layer != nullptr && layer->isEditable()) {
+            layer->destroyEditCommand();
+          }
+        }
+      }
+    }
+  };
+  bool edits_done = false;
+  EditCommandsGuard multi_guard{command_layers, edits_done};
   std::vector<std::string> touched;
   QStringList pending = ids;
   for (int round = 0; round < 8 && !pending.isEmpty(); ++round) {
@@ -7550,6 +7609,7 @@ std::string QgisMapStack::fixGeometryErrors(std::uintptr_t canvas_addr,
   for (QgsVectorLayer* layer : command_layers) {
     layer->endEditCommand();
   }
+  edits_done = true;
   if (!touched.empty()) {
     fireCheckerGesture(touched, "Fix geometry errors");
   }

@@ -159,13 +159,20 @@ int Bootstrap::run(int argc, char** argv) {
                                      "(versions/providers/probes/log tail)")});
     parser.process(app);
 
-    // The unified settings identity predates the native shell: migrate the
-    // legacy (WorkstationV3 / paleo-workbench) stores on every startup —
-    // idempotent, cheap (ui/layout_persistence.py contract). Theme, window
-    // layout and recent lists are owned by MainWindow on the same store.
-    pwb::platform_services::migrate_legacy_settings();
-
     const RunMode mode = parse_mode(parser);
+
+    // The unified settings identity predates the native shell: migrate the
+    // legacy (WorkstationV3 / paleo-workbench) stores on interactive
+    // startups — idempotent, cheap (ui/layout_persistence.py contract).
+    // R2-26: read-only probe modes (--diagnostics / --capabilities) must
+    // not touch the user's store; two concurrently started probes used to
+    // interleave whole-file QSettings syncs and race the migration.
+    const bool probe_mode = mode == RunMode::Diagnostics
+                            || mode == RunMode::Capabilities
+                            || mode == RunMode::SelfCheck;
+    if (!probe_mode) {
+        pwb::platform_services::migrate_legacy_settings();
+    }
 
     // Single QGIS init for the process; failures are a startup fatal with
     // a structured report (never a silent half-initialized runtime).

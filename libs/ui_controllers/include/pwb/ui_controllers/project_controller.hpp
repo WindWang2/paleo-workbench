@@ -160,6 +160,7 @@ private:
     void run_catalog_maintenance_(int generation, fs::path target,
                                   project::ProjectDocument* loaded,
                                   domain::Json resources_snapshot,
+                                  domain::Json document_root_snapshot,
                                   std::shared_ptr<std::atomic<bool>> cancel);
     void register_persisted_factor_grids_(const fs::path& project_path);
     void rebase_factor_grid_artifact_paths_(const fs::path& old_path,

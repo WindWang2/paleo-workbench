@@ -48,3 +48,10 @@ target_compile_features(workflow_interpretation_integrated_test PRIVATE cxx_std_
 add_test(NAME workflow_interpretation.integrated
          COMMAND workflow_interpretation_integrated_test
                  ${WORKFLOW_INTERPRETATION_FIXTURE_DIR}/workflow_interpretation_integrated_oracle.json)
+
+add_executable(workflow_interpretation_dependencies_test dependencies_test.cpp)
+target_link_libraries(workflow_interpretation_dependencies_test
+    PRIVATE Pwb::WorkflowInterpretation Pwb::WorkflowRuntime)
+target_compile_features(workflow_interpretation_dependencies_test PRIVATE cxx_std_20)
+add_test(NAME workflow_interpretation.dependencies
+         COMMAND workflow_interpretation_dependencies_test)

@@ -191,7 +191,11 @@ def _tangent_extend(coords: list, tolerance: float):
         return dx / norm, dy / norm
 
     extended = {"head": 0.0, "tail": 0.0}
-    for _ in range(int(MAX_EXTENSION_FACTOR * 2) + 1):
+    # R2-11: the per-end budget (tolerance × MAX_EXTENSION_FACTOR) was
+    # unreachable — int(factor*2)+1 iterations split the budget across both
+    # ends. Double the iteration budget so the documented per-end reach is
+    # actually attainable.
+    for _ in range(int(MAX_EXTENSION_FACTOR * 2) * 2 + 1):
         head, tail = points[0], points[-1]
         if math.dist(head, tail) <= float(tolerance):
             mid = ((head[0] + tail[0]) / 2.0, (head[1] + tail[1]) / 2.0)

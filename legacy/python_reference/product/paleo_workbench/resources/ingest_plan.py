@@ -482,6 +482,9 @@ class IngestExecuteReport:
     skipped: list[str] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
     cancelled: bool = False
+    # R11-3: when execute runs with bind=False, the staged bindings wait
+    # here for the caller's GUI-thread application.
+    staged_bindings: list = field(default_factory=list)
 
 
 def execute_ingest_plan(
@@ -600,6 +603,11 @@ def execute_ingest_plan(
 
     if bind and staged_bindings:
         _bind_plan_items(project, staged_bindings, report)
+    else:
+        # R11-3: bind=False leaves the staged bindings on the report for
+        # the caller to apply on the GUI thread (worker threads must not
+        # mutate the live document's entities/links).
+        report.staged_bindings = list(staged_bindings)
     return report
 
 

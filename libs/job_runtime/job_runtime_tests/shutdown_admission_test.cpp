@@ -302,3 +302,25 @@ TEST(aging_promotes_long_waiting_jobs_with_injected_clock) {
 }
 
 int main() { return pwb_test_main(); }
+
+TEST(work_dir_is_released_automatically_at_job_completion) {
+    // #1451 B-06: work_dir() used to have no production release — the
+    // epilogue below must drop the scratch dir by the time wait() returns,
+    // without any explicit release_work_dir call.
+    JobScheduler scheduler({.max_workers = 1});
+    scheduler.set_work_root(std::filesystem::temp_directory_path() /
+                            "pwb-job-runtime-tests");
+    std::atomic<bool> created{false};
+    JobSpec spec;
+    spec.run = [&](JobContext& ctx) -> std::any {
+        const auto dir = scheduler.work_dir(ctx.job_id());
+        created = std::filesystem::exists(dir);
+        return {};
+    };
+    JobHandle handle = scheduler.submit(std::move(spec));
+    handle.wait();
+    PWB_CHECK(created.load());
+    PWB_CHECK(!std::filesystem::exists(
+        std::filesystem::temp_directory_path() / "pwb-job-runtime-tests" /
+        handle.job_id()));
+}
