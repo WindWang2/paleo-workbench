@@ -86,7 +86,10 @@ void product_message_handler(QtMsgType type, const QMessageLogContext& context,
 #ifdef __linux__
 // Product invariant: the native entry never maps a Python runtime. Scan
 // the process image for python shared objects (covers PySide/libpython —
-// anything that slipped in through a plugin).
+// anything that slipped in through a plugin). The patterns match library
+// and site-packages path shapes (libpython*, */python*/, pyside, shiboken)
+// rather than a bare "python" substring: a checkout directory merely named
+// like "...-python-archive" must not fail the check.
 QString scan_python_runtime() {
     std::ifstream maps("/proc/self/maps");
     if (!maps.is_open()) return QStringLiteral("not-probed");
@@ -96,7 +99,8 @@ QString scan_python_runtime() {
         const auto pos = line.find('/');
         if (pos == std::string::npos) continue;
         const std::string path = line.substr(pos);
-        if (path.find("python") != std::string::npos
+        if (path.find("libpython") != std::string::npos
+            || path.find("/python") != std::string::npos
             || path.find("pyside") != std::string::npos
             || path.find("shiboken") != std::string::npos) {
             hits.insert(path);
