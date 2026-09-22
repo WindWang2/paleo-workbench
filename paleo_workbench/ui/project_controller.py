@@ -255,9 +255,6 @@ class ProjectController:
             from paleo_workbench.catalog import get_catalog_service
 
             service = get_catalog_service()
-            # R10-1: bind on every path — an unwrapped maintenance call raising (or a missing catalog) skipped the assignment and the
-            # later emit condition raised NameError, silently dropping the migration staging for that open.
-            role_backfill_pending = False
             if service is not None:
                 # #1079: cancel still-running background transcodes before
                 # their catalog handle disappears (partial stores stay
@@ -386,6 +383,11 @@ class ProjectController:
             or self.window.project_path != target
         ):
             return
+        # R10-1/R11-1: bind on EVERY path — an unwrapped maintenance call
+        # raising (or a missing catalog) previously left this unbound and
+        # the emit raised NameError inside the swallow-all, silently
+        # dropping the migration staging for that open.
+        role_backfill_pending = False
         service = None
         try:
             from paleo_workbench.catalog import get_catalog_service

@@ -222,6 +222,7 @@ class GeologicalMappingService:
         factor_name: str,
         *,
         target_horizon: str = "",
+        mutate_project: bool = True,
         method: str = "kriging",
         grid_n: int = 50,
         color_ramp: str | None = None,
@@ -301,7 +302,8 @@ class GeologicalMappingService:
                     **(task.quality_metrics or {}),
                     "constraints_ignored": constraint_record["unsupported_constraints"],
                 }
-        project.factor_map_tasks.append(task)
+        if mutate_project:
+            project.factor_map_tasks.append(task)
 
         # V9 (P0-1): this service path must carry the SAME staleness anchors
         # as the factor_interpolation path — constraint pins (content hashes
@@ -342,7 +344,12 @@ class GeologicalMappingService:
                 elif lyr.layer_type in ("polygon", "facies"):
                     paleo_map.facies_polygons.extend([dict(f) for f in lyr.features])
 
-        project.paleomap_documents.append(paleo_map)
+        if mutate_project:
+            project.paleomap_documents.append(paleo_map)
+        else:
+            # Round-11 R11-2: carry the companion record for the GUI-thread
+            # slot to append (workers must not mutate the live document).
+            map_doc._pending_paleo_map = paleo_map
 
         logger.info("Created geological factor map %r with %d layers", doc_title, len(map_doc.layers))
         return map_doc, task

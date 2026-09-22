@@ -58,6 +58,10 @@ class _FactorMapWorker(QObject):
         try:
             if QThread.currentThread().isInterruptionRequested():
                 return
+            # R11-2: run READ-ONLY against the live document — the service
+            # used to append the task + paleomap records from THIS worker
+            # thread while the GUI kept reading those lists (the #12
+            # cross-thread-mutation invariant). The finished slot appends.
             map_doc, task = self.service.create_factor_map(
                 self.project,
                 factor_name=self.params["factor_name"],
@@ -69,6 +73,7 @@ class _FactorMapWorker(QObject):
                 include_contours=self.params.get("include_contours", True),
                 include_wells=self.params.get("include_wells", True),
                 include_polygons=self.params.get("include_polygons", False),
+                mutate_project=False,
             )
             if QThread.currentThread().isInterruptionRequested():
                 return
@@ -226,6 +231,13 @@ class CreateFactorMapDialog(QDialog):
 
     def _on_worker_finished(self, map_doc: MapDocument, task) -> None:
         self.progress_bar.setVisible(False)
+        # R11-2: GUI-thread application of the worker's records (the
+        # service ran with mutate_project=False; both appends belong here).
+        self.project.factor_map_tasks.append(task)
+        pending_map = getattr(map_doc, "_pending_paleo_map", None)
+        if pending_map is not None:
+            self.project.paleomap_documents.append(pending_map)
+            del map_doc._pending_paleo_map
         self.created_map_doc = map_doc
         self.map_created.emit(map_doc)
         QMessageBox.information(
