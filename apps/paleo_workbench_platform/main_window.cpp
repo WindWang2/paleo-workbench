@@ -478,6 +478,17 @@ MainWindow::~MainWindow() {
     ribbon_command_ids_.clear();
 #endif
 #ifdef PWB_WITH_CONV_30
+    // Joint host FIRST (review R2): its prep owner can have a pending
+    // terminal-aware reissue (#1471) — after the JobCenter sweep resets
+    // the owners, such a chain could still submit a fresh prep job
+    // mid-teardown. VizCJointHost::shutdown sets shutdown_done_ (no
+    // post-shutdown resurrection) and drains its own owners, bounded.
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+    if (geo3d_dock_ != nullptr &&
+        geo3d_dock_->existing_joint_host() != nullptr) {
+        geo3d_dock_->existing_joint_host()->shutdown(1000);
+    }
+#endif
     // CONV-30 — stop job bodies at their next safe point and drain with a
     // bounded wait so no job can touch members during teardown (the
     // declared-last JobCenter member would otherwise die first anyway;
@@ -1836,7 +1847,13 @@ QString MainWindow::openProject(const QString& project_file) {
 // window close, which previously only flushed on volume load/switch).
 #if defined(PWB_WITH_GEO3D_VIZ)
     if (geo3d_dock_ != nullptr) {
-        geo3d_dock_->persist_project_workspace();
+        const QString geo3d_persist_error =
+            geo3d_dock_->persist_project_workspace();
+        if (!geo3d_persist_error.isEmpty()) {
+            // #1457: a sidecar save failure on the switch path must be
+            // visible — the old project's workspace state was NOT saved.
+            statusBar()->showMessage(geo3d_persist_error, 10000);
+        }
 #ifdef PWB_WITH_UI_WELLSEIS
         if (geo3d_dock_->joint_host() != nullptr) {
             geo3d_dock_->joint_host()->save_state();
@@ -2738,7 +2755,13 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 // BEGIN JOINT-ANALYSIS close flush (same cancel-gate discipline).
 #if defined(PWB_WITH_GEO3D_VIZ)
     if (geo3d_dock_ != nullptr) {
-        geo3d_dock_->persist_project_workspace();
+        const QString geo3d_persist_error =
+            geo3d_dock_->persist_project_workspace();
+        if (!geo3d_persist_error.isEmpty()) {
+            // #1457: the window is about to die — the last visible
+            // surface carries the failure (the state was not saved).
+            statusBar()->showMessage(geo3d_persist_error, 10000);
+        }
 #ifdef PWB_WITH_UI_WELLSEIS
         if (geo3d_dock_->joint_host() != nullptr) {
             geo3d_dock_->joint_host()->save_state();
@@ -2757,6 +2780,14 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     // every owned job (AppShell.shutdown_workers parity); a job that
     // refuses to cancel detaches to the process-lifetime keeper and keeps
     // running without the window (its GUI deliveries are dropped).
+    // Joint host first (review R2): a pending #1471 reissue chain must
+    // not resurrect a prep job after the owners were swept.
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+    if (geo3d_dock_ != nullptr &&
+        geo3d_dock_->existing_joint_host() != nullptr) {
+        geo3d_dock_->existing_joint_host()->shutdown(1000);
+    }
+#endif
     if (job_center_ != nullptr) job_center_->shutdown_workers(400);
 #endif
     // Contract teardown order: session (edit -> canvas detach -> layers ->

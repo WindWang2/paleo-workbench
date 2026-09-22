@@ -104,74 +104,153 @@ QString qstr(const std::string& s) {
 
 }  // namespace
 
+namespace {
+
+// App-lifetime delivery pump for WorkerHost::Client::marshal (the
+// job_bridge DeliveryPump pattern): a plain QObject on the GUI thread,
+// parented to the app, so a worker-side invokeMethod can never target a
+// dead receiver. Per-run suppression is the released flag re-checked
+// inside the queued body at delivery time.
+class WorkerDeliveryPump : public QObject {
+public:
+    using QObject::QObject;
+};
+
+WorkerDeliveryPump* worker_delivery_pump() {
+    QCoreApplication* app = QCoreApplication::instance();
+    if (app == nullptr) return nullptr;  // no application: nowhere to marshal
+    // Heap-allocated with NO parent at construction (the first call may
+    // happen on a worker thread — parenting across threads is silently
+    // dropped), then adopted by the app from the GUI thread via a queued
+    // call: the app owns it, so there is no static-destruction ordering
+    // hazard at exit.
+    static WorkerDeliveryPump* pump = [app] {
+        auto* created = new WorkerDeliveryPump();
+        created->moveToThread(app->thread());
+        QMetaObject::invokeMethod(
+            created,
+            [created, app] { created->setParent(app); },
+            Qt::QueuedConnection);
+        return created;
+    }();
+    return pump;
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // Off-thread worker host — runs the injected worker body on one joinable
 // std::thread and marshals terminal callbacks back to the GUI thread. The
 // page's guards prevent overlapping runs; the host joins before a
 // replacement run and on destruction (worker lifecycle ownership).
+//
+// #1455 hardening: the worker body NEVER touches this QObject. It runs
+// against a per-run heap Control block shared with the host, plus a
+// copyable Client handle whose marshal() hops through an app-lifetime
+// delivery pump guarded by the run's released flag. A shutdown that times
+// out detaches the thread — the abandoned body keeps only shared_ptr
+// state, so it cannot use-after-free the host after the window dies, and
+// its queued deliveries are dropped at delivery time.
 // ---------------------------------------------------------------------------
 class WorkerHost : public QObject {
     Q_OBJECT
 public:
-    using Body = std::function<void()>;
+    // Everything the worker body may touch lives here — shared ownership
+    // between the GUI thread and the (possibly abandoned) worker thread.
+    // One Control per run: a stale finish can never clobber the next
+    // run's latch (the #1449 generation guard, made structural).
+    struct Control {
+        std::atomic<bool> cancelled{false};
+        std::atomic<bool> busy{false};
+        std::atomic<bool> finished{false};  // set when the body returns
+    };
+
+    // Copyable worker-side handle (capture BY VALUE inside bodies and
+    // bridges — it never dangles). marshal() targets the app-lifetime
+    // pump; a delivery queued before the run was released is dropped at
+    // delivery time, never committed.
+    class Client {
+    public:
+        bool cancelled() const { return control_->cancelled.load(); }
+        void marshal(std::function<void()> fn) const {
+            auto* pump = worker_delivery_pump();
+            // Post-app-exit guard: ~QCoreApplication destroys the pump
+            // while a shutdown-timeout-detached body may still run —
+            // instance() nulls early, so drop rather than touch it.
+            if (pump == nullptr || QCoreApplication::instance() == nullptr) {
+                return;
+            }
+            auto guard = released_;
+            QMetaObject::invokeMethod(
+                pump,
+                [guard, fn = std::move(fn)]() {
+                    if (guard->load()) return;  // run released: drop
+                    fn();
+                },
+                Qt::QueuedConnection);
+        }
+
+    private:
+        friend class WorkerHost;
+        Client(std::shared_ptr<Control> control,
+               std::shared_ptr<std::atomic<bool>> released)
+            : control_(std::move(control)), released_(std::move(released)) {}
+        std::shared_ptr<Control> control_;
+        std::shared_ptr<std::atomic<bool>> released_;
+    };
+
+    using Body = std::function<void(Client&)>;
 
     explicit WorkerHost(QObject* parent) : QObject(parent) {}
+    ~WorkerHost() override;
 
     // target mirrors Python OwnedWorkerJob.target: the page's guards
     // compare it against the bound project so stale completions drop.
     void run(void* target, Body body) {
         join();
         target_ = target;
-        busy_.store(true);
-        cancelled_.store(false);
-        // Reset the finished latch BEFORE spawning (#1449): a stale
-        // finished_==true from a PREVIOUS run made wait_join's first
-        // check pass instantly and fall into an unbounded join() of the
-        // CURRENT thread — the bounded shutdown contract (wait_ms) only
-        // held until the second run.
-        finished_.store(false, std::memory_order_relaxed);
-        // Generation guard (#1449): a shutdown-timeout DETACHED body used
-        // to clear busy_ on exit, clobbering the flag of the run that
-        // replaced it (guard defeat → double submit). Only the current
-        // generation may release the latch/busy state.
-        const std::uint64_t generation = ++generation_;
-        thread_ = std::thread([this, body = std::move(body),
-                               generation]() {
-            body();
-            if (generation_.load(std::memory_order_acquire) == generation) {
-                finished_.store(true, std::memory_order_release);
-                busy_.store(false);
-            }
+        // Fresh control + guard per run (JobOwner::start discipline): a
+        // delivery already queued for the PREVIOUS run keeps its own
+        // guard and stays suppressed after its shutdown.
+        control_ = std::make_shared<Control>();
+        released_ = std::make_shared<std::atomic<bool>>(false);
+        control_->busy.store(true);
+        thread_ = std::thread([control = control_, released = released_,
+                               body = std::move(body)]() mutable {
+            Client client(control, released);
+            body(client);
+            control->finished.store(true, std::memory_order_release);
+            control->busy.store(false, std::memory_order_release);
         });
     }
 
-    void cancel() { cancelled_.store(true); }
-    bool cancelled() const { return cancelled_.load(); }
+    void cancel() { control_->cancelled.store(true); }
+    bool cancelled() const { return control_->cancelled.load(); }
 
-    bool busy() const { return busy_.load(); }
+    bool busy() const { return control_->busy.load(); }
     void* target() const { return target_; }
 
     // OwnedWorkerJob.shutdown parity: request cancellation, then join —
     // BOUNDED by wait_ms (page teardown / window close must not freeze the
-    // GUI for the full kernel duration). On timeout the worker is
-    // abandoned as detached: its marshalled terminal callback is dropped
-    // by the page's generation+target guards, so a stale result can never
-    // land on the next run (the same discipline Python's daemon join uses).
+    // GUI for the full kernel duration). The run is released BEFORE the
+    // wait (JobOwner::shutdown parity): pump deliveries outlive the host,
+    // so an already-queued callback must never fire into the page that is
+    // being torn down. On timeout the worker is abandoned as detached: it
+    // keeps only its shared_ptr control block and client handle, so the
+    // host (and the window below it) can die safely while it runs to its
+    // next cancellation point.
     bool shutdown(int wait_ms) {
         if (!thread_.joinable()) return true;
-        cancelled_.store(true);
+        release_run();
+        cancel();
         if (wait_ms > 0) {
             if (wait_join(wait_ms)) {
-                busy_.store(false);
+                control_->busy.store(false);
                 target_ = nullptr;
                 return true;
             }
             thread_.detach();  // abandoned; guards discard its result
-            // Bump the generation: the abandoned body's trailing
-            // finished_/busy_ writes are now ignored (#1449).
-            generation_.fetch_add(1, std::memory_order_acq_rel);
-            finished_.store(false, std::memory_order_relaxed);
-            busy_.store(false);
+            control_->busy.store(false);
             target_ = nullptr;
             return false;
         }
@@ -179,53 +258,61 @@ public:
         return !thread_.joinable();
     }
 
-    // Marshal a terminal callback onto the GUI thread. The callback owns
-    // its captures (heap/shared payloads, never references into the thread
-    // body's stack).
-    void marshal(std::function<void()> fn) {
-        QMetaObject::invokeMethod(
-            this, [fn = std::move(fn)] { fn(); }, Qt::QueuedConnection);
-    }
-
     void join() {
         if (thread_.joinable()) {
-            cancelled_.store(true);  // cooperative stop request
+            cancel();  // cooperative stop request
             thread_.join();
-            busy_.store(false);
+            control_->busy.store(false);
             target_ = nullptr;
         }
     }
 
     // Timed join: std::thread has no timed join, so the body sets
-    // finished_ when it returns and we poll joinability at 5 ms.
+    // finished when it returns and we poll joinability at 5 ms.
     bool wait_join(int ms) {
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
         while (true) {
-            if (finished_.load(std::memory_order_acquire)) {
+            if (control_->finished.load(std::memory_order_acquire)) {
                 if (thread_.joinable()) thread_.join();
-                finished_.store(false, std::memory_order_relaxed);
+                control_->finished.store(false, std::memory_order_relaxed);
                 return true;
             }
             if (std::chrono::steady_clock::now() >= deadline) {
-                return !thread_.joinable() && !finished_.load();
+                return !thread_.joinable() && !control_->finished.load();
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     }
 
-    ~WorkerHost() override { join(); }
-
 private:
-    // Monotonic run generation; only the current generation's body may
-    // clear the finished latch / busy flag (#1449).
-    std::atomic<std::uint64_t> generation_{0};
+    // Drop the current run's queued deliveries (shutdown/detach/dtor).
+    void release_run() {
+        if (released_) released_->store(true);
+    }
+
     std::thread thread_;
-    std::atomic<bool> cancelled_{false};
-    std::atomic<bool> busy_{false};
-    std::atomic<bool> finished_{false};  // set when the body returns
+    std::shared_ptr<Control> control_ = std::make_shared<Control>();
+    std::shared_ptr<std::atomic<bool>> released_ =
+        std::make_shared<std::atomic<bool>>(false);
     void* target_ = nullptr;
 };
+
+WorkerHost::~WorkerHost() {
+    // Last-resort stop (#1455): BOUNDED — release the run (drop queued
+    // deliveries), cancel, wait, and on timeout detach the (now safely
+    // abandoned) thread instead of an unbounded GUI-thread join. The
+    // normal path never gets here: the page's shutdown_workers ran first
+    // through AppShell::shutdown_workers.
+    if (thread_.joinable()) {
+        release_run();
+        cancel();
+        if (!wait_join(3000)) {
+            thread_.detach();
+        }
+    }
+    release_run();
+}
 
 namespace {
 
@@ -1727,15 +1814,19 @@ bool install(const Install& install) {
                     /*factor_types=*/std::nullopt, seams);
             }
             host->run(project,
-                      [host, snapshot = std::move(snapshot), seams, grids,
+                      [snapshot = std::move(snapshot), seams, grids,
                        progress, completed, failed, cancelled, gen,
-                       method]() {
+                       method](WorkerHost::Client& client) {
                 try {
                     job::CancellationToken token;
                     std::atomic<bool> body_done{false};
-                    std::thread cancel_bridge([&host, &token, &body_done] {
+                    // The cancel bridge polls the Client handle (a
+                    // by-value copy — shared_ptr state only, never the
+                    // host QObject, so it stays legal even on the
+                    // abandoned/detached path #1455 guards).
+                    std::thread cancel_bridge([client, &token, &body_done] {
                         while (!body_done.load(std::memory_order_relaxed)) {
-                            if (host->cancelled()) {
+                            if (client.cancelled()) {
                                 token.cancel();
                                 return;
                             }
@@ -1769,7 +1860,7 @@ bool install(const Install& install) {
                         view.completed = update.completed;
                         view.phase = update.phase;
                         view.message = update.message;
-                        host->marshal(
+                        client.marshal(
                             [progress, view] { progress(view); });
                     };
                     auto result = pwb::ui_workers::
@@ -1781,7 +1872,7 @@ bool install(const Install& install) {
                     done.clean_count = result.clean_count;
                     done.executed_count = result.executed_count;
                     if (result.cancelled) {
-                        host->marshal([cancelled] { cancelled(); });
+                        client.marshal([cancelled] { cancelled(); });
                     } else {
                         // The full DTO travels through the shared grid
                         // store keyed by task id; the view carries the
@@ -1791,17 +1882,17 @@ bool install(const Install& install) {
                             std::make_shared<pwb::ui_workers::
                                                  FactorPrepareBatchResult>(
                                 std::move(result));
-                        host->marshal(
+                        client.marshal(
                             [completed, done, payload, grids] {
                                 grids->stash_last_result(payload);
                                 completed(done);
                             });
                     }
                 } catch (const job::JobCancelled&) {
-                    host->marshal([cancelled] { cancelled(); });
+                    client.marshal([cancelled] { cancelled(); });
                 } catch (const std::exception& exc) {
                     const QString message = QString::fromUtf8(exc.what());
-                    host->marshal(
+                    client.marshal(
                         [failed, message] { failed(message); });
                 }
             });
@@ -1846,20 +1937,20 @@ bool install(const Install& install) {
                std::function<void(const QString&)>,
                std::function<void()> cancelled) {
         (void)project;
-        host->run(project, [host, method, gen, progress, completed,
-                            cancelled]() {
+        host->run(project, [method, gen, progress, completed,
+                            cancelled](WorkerHost::Client& client) {
             pwb::ui_pages_data::qt::PrepareProgressView start;
             start.generation = gen;
             start.phase = "classify";
             start.message = "网格计算内核未接入";
-            host->marshal([progress, start] { progress(start); });
+            client.marshal([progress, start] { progress(start); });
 
             pwb::ui_workers::FactorPrepareBatchResult result;
             result.generation = gen;
             result.method = method;
             for (int i = 0; i < 1; ++i) {
-                if (host->cancelled()) {
-                    host->marshal([cancelled] { cancelled(); });
+                if (client.cancelled()) {
+                    client.marshal([cancelled] { cancelled(); });
                     return;
                 }
                 pwb::ui_workers::FactorPrepareTaskResult item;
@@ -1872,7 +1963,7 @@ bool install(const Install& install) {
             done.generation = gen;
             done.clean_count = result.clean_count;
             done.executed_count = result.executed_count;
-            host->marshal([completed, done] { completed(done); });
+            client.marshal([completed, done] { completed(done); });
         });
         });
     preparation->set_commit_prepare_fn(
@@ -1993,10 +2084,11 @@ bool install(const Install& install) {
                 tasks_json = *it;
             }
         }
-        host->run(project, [host, completed = std::move(completed),
+        host->run(project, [completed = std::move(completed),
                             failed = std::move(failed), store,
                             tasks_json = std::move(tasks_json),
-                            resolved_grids = std::move(resolved_grids)]() {
+                            resolved_grids = std::move(resolved_grids)](
+                           WorkerHost::Client& client) {
             try {
                 // Shared result payload: the ledger JSON the GUI-thread
                 // commit writes back, plus the created-draft count.
@@ -2042,6 +2134,32 @@ bool install(const Install& install) {
                     // created-count contract; compile upserts into a fresh
                     // snapshot ledger and the commit replaces the section.)
                     job::CancellationToken token;
+                    // Cancel bridge (prepare-worker parity): the marching-
+                    // squares kernel observes the token, so a shutdown's
+                    // cancel actually interrupts the compile instead of
+                    // waiting out the whole pass (#1455). The bridge polls
+                    // the Client copy — never the host QObject.
+                    std::atomic<bool> body_done{false};
+                    std::thread cancel_bridge([client, &token, &body_done] {
+                        while (!body_done.load(std::memory_order_relaxed)) {
+                            if (client.cancelled()) {
+                                token.cancel();
+                                return;
+                            }
+                            std::this_thread::sleep_for(
+                                std::chrono::milliseconds(50));
+                        }
+                    });
+                    const auto join_bridge = [&cancel_bridge, &body_done]() {
+                        body_done.store(true, std::memory_order_relaxed);
+                        if (cancel_bridge.joinable()) {
+                            cancel_bridge.join();
+                        }
+                    };
+                    struct JoinGuard {
+                        std::function<void()> fn;
+                        ~JoinGuard() { fn(); }
+                    } join_guard{join_bridge};
                     // The real extraction kernel: viz_charts marching
                     // squares (contourpy serial port) behind the
                     // ui_workers ExtractLinesFn seam.
@@ -2091,12 +2209,12 @@ bool install(const Install& install) {
                         payload->push_back(draft_to_json(draft));
                     }
                 }
-                host->marshal([completed, payload] {
+                client.marshal([completed, payload] {
                     completed(payload.get());
                 });
             } catch (const std::exception& exc) {
                 const QString message = QString::fromUtf8(exc.what());
-                host->marshal([failed, message] { failed(message); });
+                client.marshal([failed, message] { failed(message); });
             }
         });
         });

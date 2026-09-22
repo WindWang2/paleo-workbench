@@ -246,16 +246,29 @@ std::vector<std::string> EditController::validate_topology(
     std::vector<std::string> errors;
     QgsVectorLayer* layer = session_.vectorLayerById(layer_id);
     if (layer == nullptr || layer->editBuffer() == nullptr) return errors;
-    const QgsGeometryMap changed = layer->editBuffer()->changedGeometries();
-    int index = 0;
-    for (auto it = changed.constBegin(); it != changed.constEnd(); ++it, ++index) {
+    // The gate must see exactly the pending-geometry set the staged writer
+    // emits: changed host geometries AND newly digitized features. A freshly
+    // added feature lives in addedFeatures() until it is committed — gating
+    // only changedGeometries() let a new self-intersecting polygon through
+    // (#1467). Deleted features have no pending geometry to validate.
+    const auto validate_one = [&errors](long long fid,
+                                        const QgsGeometry& geometry) {
+        if (geometry.isNull() || geometry.isEmpty()) return;
         QVector<QgsGeometry::Error> geometry_errors;
-        it.value().validateGeometry(geometry_errors,
-                                    Qgis::GeometryValidationEngine::Geos);
+        geometry.validateGeometry(geometry_errors,
+                                  Qgis::GeometryValidationEngine::Geos);
         for (const QgsGeometry::Error& err : geometry_errors) {
-            errors.push_back("feature " + std::to_string(static_cast<long long>(it.key()))
+            errors.push_back("feature " + std::to_string(fid)
                 + ": " + err.what().toStdString());
         }
+    };
+    const QgsGeometryMap changed = layer->editBuffer()->changedGeometries();
+    for (auto it = changed.constBegin(); it != changed.constEnd(); ++it) {
+        validate_one(static_cast<long long>(it.key()), it.value());
+    }
+    const QgsFeatureMap added = layer->editBuffer()->addedFeatures();
+    for (auto it = added.constBegin(); it != added.constEnd(); ++it) {
+        validate_one(static_cast<long long>(it.key()), it.value().geometry());
     }
     return errors;
 }

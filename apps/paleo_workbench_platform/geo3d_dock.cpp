@@ -305,9 +305,9 @@ void Geo3DDock::restore_project_workspace() {
     }
 }
 
-void Geo3DDock::persist_project_workspace() {
+QString Geo3DDock::persist_project_workspace() {
     if (controller_ == nullptr || project_directory_.isEmpty()) {
-        return;
+        return QString();  // nothing bound: not a failed save
     }
     const QString path =
         project_directory_ + QStringLiteral("/geo3d_workspace.json");
@@ -315,9 +315,15 @@ void Geo3DDock::persist_project_workspace() {
     // truncated sidecar behind.
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
-        return;
+        return tr("三维工作区无法写入（%1）").arg(path);
     }
-    file.write(QByteArray::fromStdString(
-        controller_->save_state().dump(2)));
-    file.commit();
+    const QByteArray text = QByteArray::fromStdString(
+        controller_->save_state().dump(2));
+    // A short write or a refused commit is a FAILED save (#1457): report
+    // it — the caller shows the loss instead of proceeding as if the
+    // user's viewpoint/layer state had reached disk.
+    if (file.write(text) != text.size() || !file.commit()) {
+        return tr("三维工作区保存失败（%1）").arg(path);
+    }
+    return QString();
 }

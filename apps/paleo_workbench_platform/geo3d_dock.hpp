@@ -56,6 +56,11 @@ public:
     // host (MainWindow declares the JobCenter member last → reverse
     // member order destroys it first — see main_window.hpp).
     pwb::app::viz_c::VizCJointHost* joint_host();
+    // Non-creating probe for teardown sweeps (joint_host() would lazily
+    // CREATE a host — never call that during window destruction).
+    pwb::app::viz_c::VizCJointHost* existing_joint_host() const {
+        return joint_host_.get();
+    }
 #endif
 
     // ---- project persistence (the cross_well_workspace.json pattern) ------
@@ -66,7 +71,13 @@ public:
     // persist_project_workspace() on project close / window close.
     void set_project_directory(const QString& directory);
     void restore_project_workspace();
-    void persist_project_workspace();
+    // Writes the geo3d_workspace.json sidecar. Returns an empty string on
+    // success; on failure (open/short write/commit refused — e.g. disk
+    // full) a user-readable reason so the save/close path can surface it
+    // instead of silently losing the workspace state (#1457: QSaveFile's
+    // failed commit leaves the PREVIOUS file intact, so the loss is
+    // "state not saved", never a truncated sidecar).
+    QString persist_project_workspace();
 
 signals:
     // 2D map synchronization seam (selected well name).
