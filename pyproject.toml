@@ -70,12 +70,15 @@ build-backend = "setuptools.build_meta"
 # native C++ `pwb-platform` executable; no Python console entry points ship
 # from this tree anymore.
 
-# [tool.setuptools] packages/package-data — removed with the Python
-# product retirement: this project no longer packages any application code.
-# The distribution exists so `pip install -e ".[dev]"` provisions the
-# development environment (pytest, oracle/migration tooling and their
-# dependencies). The retired implementation lives only under
-# legacy/python_reference and is never packaged.
+# [tool.setuptools] — removed packages/package-data with the Python product
+# retirement: this project no longer packages any application code. The
+# distribution exists so `pip install -e ".[dev]"` provisions the development
+# environment (pytest, oracle/migration tooling and their dependencies). The
+# retired implementation lives only under legacy/python_reference and is
+# never packaged. py-modules is pinned empty so flat-layout auto-discovery
+# can never start shipping code if a root __init__.py appears later.
+[tool.setuptools]
+py-modules = []
 
 [tool.pytest.ini_options]
 testpaths = [

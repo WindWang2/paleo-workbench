@@ -72,7 +72,10 @@ QString resource_file(const QString& relative_path) {
 }
 
 QString icon_file(const QString& icon_name) {
-    return resource_file(QStringLiteral("icons/") + icon_name);
+    // Canonical staged layout: the icon set lives under ui/assets/icons/
+    // inside the resources root (resources/ui/assets/icons/**, installed to
+    // share/paleo-workbench/resources/ui/assets/icons/**).
+    return resource_file(QStringLiteral("ui/assets/icons/") + icon_name);
 }
 
 QStringList resource_roots_probed() {

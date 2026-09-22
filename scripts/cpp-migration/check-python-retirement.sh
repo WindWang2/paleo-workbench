@@ -8,13 +8,15 @@
 #   2. tree shape — the retired package must not reappear at the repo root,
 #      and pyproject must not re-register it as an installable product;
 #   3. sanctioned bridge — every ACTIVE tracked .py that imports
-#      paleo_workbench must carry the archived-reference shim (dev tooling
-#      reaches the archive only through tools/oracle/_legacy_reference.py);
+#      paleo_workbench must reach the archive through the sanctioned shim
+#      (tools/oracle/_legacy_reference.py or an explicit archive-path
+#      insert adjacent to the import, in effective code);
 #   4. runtime python-independence — delegates to
 #      audit-python-runtime-deps.sh (source scan of the product link set +
 #      optional ldd closure);
-#   5. install-tree purity — an install/deploy root passed via --install-dir
-#      must contain zero .py/.pyc files and zero legacy/ paths.
+#   5. install-tree purity — an install/deploy root passed via
+#      PALEO_RETIRE_INSTALL_DIR must contain zero .py/.pyc files and zero
+#      legacy/ paths (final-closure-gate.sh exports it for the package leg).
 #
 # Exit 0 = clean; exit 1 = violation (with file:line evidence).
 # Development tooling only — never part of the product.
@@ -26,30 +28,39 @@ InstallDir="${PALEO_RETIRE_INSTALL_DIR:-}"
 
 fail() { echo "VIOLATION: $*"; Status=1; }
 
+# Normalized archive marker: matches literal legacy/python_reference AND
+# segment-joined constructions like Path("legacy") / "python_reference".
+ARCHIVE_RE='legacy.{0,12}python_reference'
+
+# Strip comment-only lines (# for shell/py, // and * for cmake/cpp) so the
+# scans below judge EFFECTIVE code only.
+strip_comments() { grep -vE '^[[:space:]]*(#|//|\*|/\*)' "$1" 2>/dev/null || true; }
+
 # ---------------------------------------------------------------- 1. archive
-# isolation. Effective-code scan: strip comment lines first (same exemption
-# class as audit-python-runtime-deps.sh).
+# isolation.
 echo "== retirement gate: archive isolation"
-hits=$(grep -rnE 'legacy/python_reference' \
-        "$RepoRoot/CMakeLists.txt" \
-        "$RepoRoot/cmake" \
-        "$RepoRoot/apps" \
-        "$RepoRoot/libs" \
-        "$RepoRoot/native" \
-        --include='*.cmake' --include='CMakeLists.txt' --include='*.cpp' --include='*.hpp' 2>/dev/null \
-      | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*|#)' || true)
-if [ -n "$hits" ]; then
-    fail "legacy/python_reference referenced by effective product/build code:"
-    echo "$hits"
-else
-    echo "  clean: no effective archive references in CMake/product sources"
-fi
+for scope in CMakeLists.txt cmake apps libs native tests CMakePresets.json; do
+    path="$RepoRoot/$scope"
+    [ -e "$path" ] || continue
+    if [ -d "$path" ]; then
+        hits=$(grep -rnE "$ARCHIVE_RE" --include='*.cmake' --include='CMakeLists.txt' \
+               --include='*.cpp' --include='*.hpp' "$path" 2>/dev/null \
+               | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*|#)' || true)
+    else
+        hits=$(strip_comments "$path" | grep -nE "$ARCHIVE_RE" \
+               | sed "s|^|$path:|" || true)
+    fi
+    if [ -n "$hits" ]; then
+        fail "legacy/python_reference referenced by effective product/build code ($scope):"
+        echo "$hits"
+    fi
+done
+echo "  clean: no effective archive references in CMake/product sources"
 
 # launchers/deploy scripts must not launch or copy the archive
-launcher_hits=$(grep -rnE 'legacy/python_reference' \
-        "$RepoRoot/scripts/cpp-migration" 2>/dev/null \
-      | grep -vE ':[0-9]+:[[:space:]]*#' \
-      | grep -v 'check-python-retirement.sh' || true)
+launcher_hits=$(grep -rnE "$ARCHIVE_RE" "$RepoRoot/scripts" 2>/dev/null \
+                | grep -vE ':[0-9]+:[[:space:]]*#' \
+                | grep -v 'check-python-retirement.sh' || true)
 if [ -n "$launcher_hits" ]; then
     fail "archive referenced by product launcher/deploy scripts:"
     echo "$launcher_hits"
@@ -79,9 +90,13 @@ unshimmed=$(git -C "$RepoRoot" ls-files '*.py' | while IFS= read -r f; do
     case "$f" in
         legacy/*) continue ;;
     esac
-    if grep -qE '(^|[^A-Za-z_])(from|import)[[:space:]]+paleo_workbench' "$RepoRoot/$f" 2>/dev/null \
-       && ! grep -q '_legacy_reference\|legacy/python_reference' "$RepoRoot/$f"; then
-        printf '%s\n' "$f"
+    if grep -qE '(^|[^A-Za-z_])(from|import)[[:space:]]+paleo_workbench' "$RepoRoot/$f" 2>/dev/null; then
+        # effective-code shim markers: the sanctioned module or an explicit
+        # archive-path insert (comments stripped before the test)
+        if ! strip_comments "$RepoRoot/$f" | grep -qE \
+            'import[[:space:]]+_legacy_reference|ensure_legacy_reference\(\)|'"$ARCHIVE_RE"; then
+            printf '%s\n' "$f"
+        fi
     fi
 done)
 if [ -n "$unshimmed" ]; then

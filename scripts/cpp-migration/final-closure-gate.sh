@@ -103,6 +103,12 @@ run_package() {
         echo "native install tree contains archived (legacy/) paths" >&2
         exit 1
     fi
+    if find "$DeployDir" -path '*legacy*' -print -quit | grep -q .; then
+        echo "deployed native tree contains archived (legacy/) paths" >&2
+        exit 1
+    fi
+    PALEO_RETIRE_INSTALL_DIR="$InstallDir" \
+        "$RepoRoot/scripts/cpp-migration/check-python-retirement.sh"
     "$Gate" Exec -j "$Jobs" -- \
         "$RepoRoot/scripts/cpp-migration/deploy-native-product.sh" \
         "$BuildDir" "$DeployDir"

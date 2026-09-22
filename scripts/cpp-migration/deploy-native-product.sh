@@ -27,6 +27,7 @@ if [ $# -ne 2 ]; then
 fi
 BuildDir="$(cd "$1" && pwd)"
 DistDir="$2"
+DeployRepoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # CMake single-config generators drop the exe next to its object dir.
 for candidate in \
     "$BuildDir/bin/pwb-platform" \
@@ -99,6 +100,16 @@ for gdal_plugins in "${PWB_LOCAL_SDK:+$PWB_LOCAL_SDK/lib/gdalplugins}" \
     fi
 done
 
+# ---- 3b) product resources (facies JSONs + ui/assets/icons) ----------------
+# The native-owned resources/ tree is the product's runtime asset set
+# (resource_locator probes <dist>/share/paleo-workbench/resources).
+mkdir -p "$DistDir/share/paleo-workbench"
+if [ -d "$DeployRepoRoot/resources" ]; then
+    cp -R "$DeployRepoRoot/resources" "$DistDir/share/paleo-workbench/resources"
+else
+    echo "WARNING: $DeployRepoRoot/resources absent — deployed tree runs without product assets" >&2
+fi
+
 # ---- 4) launcher -----------------------------------------------------------
 cat > "$DistDir/bin/pwb-platform" <<LAUNCHER
 #!/usr/bin/env bash
@@ -120,7 +131,6 @@ chmod +x "$DistDir/bin/pwb-platform"
 # consumed from their SDK roots — their roots are collected here too when
 # present). audit-licenses.sh verifies the result.
 echo "== collecting third-party license materials"
-DeployRepoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 mkdir -p "$DistDir/licenses"
 # The vendor install tree has no COPYING at its root — fall back to the
 # QGIS source tree (same variable the SDK admission consumes).

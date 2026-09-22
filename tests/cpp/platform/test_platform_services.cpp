@@ -548,8 +548,8 @@ void check_session_policy() {
 void check_resource_locator() {
     QTemporaryDir dir;
     const QString root = dir.path() + "/resources";
-    QDir().mkpath(root + "/icons");
-    { QFile f(root + "/icons/layers.svg"); f.open(QIODevice::WriteOnly); }
+    QDir().mkpath(root + "/ui/assets/icons");
+    { QFile f(root + "/ui/assets/icons/layers.svg"); f.open(QIODevice::WriteOnly); }
 
     qputenv("PALEO_RESOURCES_DIR", root.toUtf8());
     PWB_CHECK(resources_root() == QDir(root).canonicalPath());

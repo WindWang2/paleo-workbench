@@ -10,10 +10,10 @@
 #   bin/*.dll                              runtime closure: QGIS + Qt + MSVC CRT (Windows)
 #   bin/platforms|imageformats|styles/     Qt plugins (Windows)
 #   lib/                                   shared libraries (Linux: libpwb*.so; empty on Windows)
-#   share/paleo-workbench/resources/       application resources
-#   share/paleo-workbench/templates/       document templates
-#   share/paleo-workbench/icons/           application icons
-#   share/paleo-workbench/schema/          JSON schemas
+#   share/paleo-workbench/resources/       native-owned resources (facies
+#                                          data JSONs + ui/assets/icons/**;
+#                                          the retired Python tree is never
+#                                          an install source)
 #   share/paleo-workbench/pwb-package-layout.txt   this manifest
 #   bin/pwb-diagnose[.exe]                 optional install/diagnostic helper
 #
@@ -74,9 +74,8 @@ This manifest documents the install tree produced when PWB_ENABLE_PACKAGING=ON.
   bin/styles/                           Qt style plugins
   lib/                                  shared libraries (Linux: libpwb*.so; empty on Windows)
   share/paleo-workbench/resources/      application resources
-  share/paleo-workbench/templates/      document templates
-  share/paleo-workbench/icons/          application icons
-  share/paleo-workbench/schema/         JSON schemas
+  share/paleo-workbench/resources/      native-owned resources (facies
+                                       data JSONs + ui/assets/icons/**)
   share/paleo-workbench/pwb-package-layout.txt   this manifest
   bin/pwb-diagnose[.exe]                optional install/diagnostic helper
 

@@ -1,18 +1,19 @@
 name: Slow tests (nightly)
 
-# Packaging #442: the fast CI gate intentionally runs `-m "not slow"`, but the
-# 14 slow tests are the ONLY end-to-end real-data coverage (real LAS/DAT/SEGY
-# vendor formats, tests/test_geoviz_real_data_smoke.py) and the interpolation
-# performance gates (tests/perf/test_interpolation_perf.py). Nothing else ever
-# ran them, and they self-skip when the gitignored data/ tree is absent — so
-# the whole family could silently never run anywhere.
+# Packaging #442 lineage, retirement-aware (2026-09-22): the fast CI gate
+# runs `-m "not slow"`; the product slow family (real-data e2e, interpolation
+# perf, SEGY contracts) retired with the Python product suite
+# (docs/development/python-retirement/). The remaining slow family is the
+# geoviz realdata smoke + perf benches — still the only end-to-end
+# real-format coverage, still self-skipping without the gitignored data/
+# tree.
 #
-# This leg executes the full slow family on a schedule (and on manual
+# This leg executes the remaining slow family on a schedule (and on manual
 # dispatch). It is FAIL-CLOSED in two ways:
-#   1. If the slow family shrinks below its 14-test baseline, the leg fails.
+#   1. If the slow family shrinks below its presence baseline, the leg fails.
 #   2. If the representative data tree is absent, the real-data tests skip and
 #      the leg fails with an explicit message — never a silent green.
-# Providing the data makes the leg green; the perf gates then run too.
+# Providing the data makes the leg green; the perf benches then run too.
 
 on:
   schedule:

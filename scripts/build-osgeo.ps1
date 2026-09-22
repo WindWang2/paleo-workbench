@@ -118,8 +118,10 @@ Log "OSGEO INSTALL OK"
 Log ">>> verify import (after the project loader claims its DLL dirs)"
 & "$root\.venv\Scripts\python.exe" -c @"
 import sys  # Python-retirement: the vendored DLL registration lives in the
-from pathlib import Path  # archived package (legacy/python_reference/product).
-sys.path.insert(0, str(Path(r"$root") / "legacy" / "python_reference" / "product"))
+from pathlib import Path  # archived package — reached via the sanctioned shim.
+sys.path.insert(0, str(Path(r"$root") / "tools" / "oracle"))
+import _legacy_reference
+_legacy_reference.ensure_legacy_reference()
 import paleo_workbench  # noqa: F401  (registers the vendored DLL search path)
 from osgeo import gdal, osr, ogr
 print('GDAL     :', gdal.VersionInfo())
