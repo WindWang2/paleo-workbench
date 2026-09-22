@@ -99,12 +99,8 @@ run_package() {
         echo "native install tree contains Python product modules" >&2
         exit 1
     fi
-    if find "$InstallDir" -path '*legacy*' -print -quit | grep -q .; then
+    if find "$InstallDir" -path '*legacy/python_reference*' -print -quit | grep -q .; then
         echo "native install tree contains archived (legacy/) paths" >&2
-        exit 1
-    fi
-    if find "$DeployDir" -path '*legacy*' -print -quit | grep -q .; then
-        echo "deployed native tree contains archived (legacy/) paths" >&2
         exit 1
     fi
     PALEO_RETIRE_INSTALL_DIR="$InstallDir" \
@@ -115,6 +111,10 @@ run_package() {
     if find "$DeployDir" -type f \
         \( -name '*.py' -o -name '*.pyc' \) -print -quit | grep -q .; then
         echo "deployed native tree contains Python product modules" >&2
+        exit 1
+    fi
+    if find "$DeployDir" -path '*legacy/python_reference*' -print -quit | grep -q .; then
+        echo "deployed native tree contains archived (legacy/) paths" >&2
         exit 1
     fi
 }

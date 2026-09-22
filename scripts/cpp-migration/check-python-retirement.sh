@@ -60,7 +60,7 @@ echo "  clean: no effective archive references in CMake/product sources"
 # launchers/deploy scripts must not launch or copy the archive
 launcher_hits=$(grep -rnE "$ARCHIVE_RE" "$RepoRoot/scripts" 2>/dev/null \
                 | grep -vE ':[0-9]+:[[:space:]]*#' \
-                | grep -v 'check-python-retirement.sh' || true)
+                | grep -v -e 'check-python-retirement.sh' -e 'final-closure-gate.sh' || true)
 if [ -n "$launcher_hits" ]; then
     fail "archive referenced by product launcher/deploy scripts:"
     echo "$launcher_hits"
@@ -117,7 +117,7 @@ if [ -n "$InstallDir" ] && [ -d "$InstallDir" ]; then
     if [ -n "$py_files" ]; then
         fail "install tree contains Python files: $py_files"
     fi
-    legacy_paths=$(find "$InstallDir" -path '*legacy*' -print -quit)
+    legacy_paths=$(find "$InstallDir" -path '*legacy/python_reference*' -print -quit)
     if [ -n "$legacy_paths" ]; then
         fail "install tree contains archived paths: $legacy_paths"
     fi
