@@ -367,13 +367,21 @@ workflow_spec::WorkflowRun RunEngine::run(const std::string& run_id, const RunCo
     struct ReservationGuard {
         RunEngine* engine;
         const std::string* run_id;
+        std::shared_ptr<CancelToken> token;  // identity of OUR reservation
         ~ReservationGuard() {
-            if (engine != nullptr) {
-                std::lock_guard<std::mutex> lock(engine->active_mutex_);
-                engine->active_.erase(*run_id);
+            if (engine == nullptr) return;
+            std::lock_guard<std::mutex> lock(engine->active_mutex_);
+            // Erase only OUR slot: after the explicit erase + checkpoint
+            // window, a concurrent retry may have legitimately re-reserved
+            // this run_id — a key-only erase would delete ITS reservation
+            // and reopen the double-execution race (round-4 finding).
+            const auto slot = engine->active_.find(*run_id);
+            if (slot != engine->active_.end() &&
+                slot->second.token == token) {
+                engine->active_.erase(slot);
             }
         }
-    } reservation{this, &run_id};
+    } reservation{this, &run_id, token};
     workflow_spec::WorkflowRun run = store_.load(run_id);
     if (run.state == workflow_spec::RunState::completed) return run;
     if (run.state == workflow_spec::RunState::cancelled) return run;
