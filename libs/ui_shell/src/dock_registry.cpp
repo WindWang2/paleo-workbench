@@ -30,6 +30,9 @@ std::vector<DockDescriptor> make_workstation_docks() {
         auto x = d("mapping_stage", "编图阶段");
         x.preferred_size = std::pair{280, 0};
         x.preferred_height = 280;
+        // Prototype 左栏下部 = 每工作区 WorkflowPanel；阶段面板保留为
+        // 按需 dock（面板菜单/预设可再开）。
+        x.default_visible = false;
         x.workflow_tags = {"mapping"};
         docks.push_back(std::move(x));
     }
@@ -68,6 +71,9 @@ std::vector<DockDescriptor> make_workstation_docks() {
     }
     {
         auto x = d("composite_input", "输入与结果");
+        // Prototype 右栏标签组的一员（单因素/输入清单）；stage2 profile
+        // 控制显隐，与 图层管理/检查器 共 tab。
+        x.preferred_area = kAreaRight;
         x.default_visible = false;
         x.preferred_size = std::pair{280, 0};
         x.workflow_tags = {"mapping", "review"};
@@ -86,8 +92,8 @@ std::vector<DockDescriptor> make_workstation_docks() {
         auto x = d("tasks", "任务中心");
         x.preferred_area = kAreaBottom;
         x.importance = DockImportance::Utility;
-        x.default_visible = false;
-        x.preferred_height = 200;
+        // Prototype 底部常驻条（任务|日志 tabs）——默认可见。
+        x.preferred_height = 140;
         x.workflow_tags = {"background"};
         docks.push_back(std::move(x));
     }
@@ -95,8 +101,7 @@ std::vector<DockDescriptor> make_workstation_docks() {
         auto x = d("logs", "日志");
         x.preferred_area = kAreaBottom;
         x.importance = DockImportance::Utility;
-        x.default_visible = false;
-        x.preferred_height = 200;
+        x.preferred_height = 140;
         x.workflow_tags = {"diagnostics"};
         docks.push_back(std::move(x));
     }

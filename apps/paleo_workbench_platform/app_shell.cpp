@@ -2,6 +2,7 @@
 
 #include <cstddef>
 
+#include <QComboBox>
 #include <QDebug>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -52,6 +53,7 @@
 #include <pwb/ui_workstation/activity_rail.hpp>
 #include <pwb/ui_workstation/app_bar.hpp>
 #include <pwb/ui_workstation/explorer_panel.hpp>
+#include <pwb/ui_workstation/workflow_panel.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
 #include "validation_workspace_page.hpp"
@@ -159,6 +161,40 @@ AppShell::AppShell(QWidget* parent,
     workstation_->build_docks();
     workstation_->apply_first_run_sizes();
 
+    // 左栏工作流面板（nav dock 内部件，build_docks 后才存在）：步骤
+    // 点击经 command_registry 走既有命令路径（与 Ribbon 按钮同一回
+    // 调——无第二实现）；勾选行只做状态镜像。
+    if (auto* workflow = workstation_->workflow_panel()) {
+        connect(workflow, &ui_workstation::WorkflowPanel::step_activated,
+                this, [this](int index) {
+                    const QString command_id =
+                        workflow_command_ids_.value(index);
+                    if (command_id.isEmpty()) return;
+                    auto& registry = ui_shell::command_registry();
+                    const auto* spec =
+                        registry.get(command_id.toStdString());
+                    if (spec == nullptr || !spec->callback) {
+                        emit status_message(
+                            QStringLiteral("命令未绑定：%1")
+                                .arg(command_id));
+                        return;
+                    }
+                    registry.record_recent(command_id.toStdString());
+                    spec->callback();
+                });
+        connect(workflow, &ui_workstation::WorkflowPanel::check_toggled,
+                this, [this](int index, bool on) {
+                    static const char* names[] = {
+                        "空间对齐", "井点符合", "层位一致", "输入版本"};
+                    if (index < 0 || index >= 4) return;
+                    emit status_message(
+                        QStringLiteral("验证项「%1」已%2")
+                            .arg(QString::fromUtf8(names[index]),
+                                 on ? QStringLiteral("启用")
+                                    : QStringLiteral("停用")));
+                });
+    }
+
     outer->addWidget(workstation_, 1);
 
     // 主状态条：无顶层 dock 宿主时退化为内容底部条（Python parity — the
@@ -194,6 +230,9 @@ void AppShell::build_pages() {
     hub_data_->add_submodule("overview", "项目概述", home_page_);
     hub_data_->add_submodule("management", "数据管理", data_workspace_);
     hub_data_->finish();
+    // Prototype ws0 lands on the data list, not the overview — the pill
+    // row still offers 项目概述 as a user choice.
+    hub_data_->switch_to("management");
     page_stack_->addWidget(hub_data_);
 
     // ws1 智能预测：测井预测（输入与证据页）+ 地震预测（输入侧）。
@@ -496,6 +535,52 @@ void AppShell::wire_ribbon() {
     connect(ribbon_, &ui_ribbon::qt::RibbonBar::workspaceActivated, this,
             &AppShell::navigate_workspace);
 
+    // Ribbon 命令带尾部常驻槽（R:49 关键选择）：层位选择器——与状态条
+    // 层位下拉同一 target_horizon 权威的又一视图/编辑器，只回发
+    // horizon_requested，不持有状态。
+    if (auto* host = ribbon_->band_trailing_host()) {
+        auto* trailing = new QWidget(host);
+        trailing->setObjectName(QStringLiteral("RibbonHorizonField"));
+        auto* row = new QHBoxLayout(trailing);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(6);
+        auto* label = new QLabel(QStringLiteral("层位"), trailing);
+        row->addWidget(label);
+        ribbon_horizon_combo_ = new QComboBox(trailing);
+        ribbon_horizon_combo_->setObjectName(
+            QStringLiteral("RibbonHorizonCombo"));
+        ribbon_horizon_combo_->setEditable(false);
+        ribbon_horizon_combo_->setMinimumWidth(96);
+        ribbon_horizon_combo_->setPlaceholderText(
+            QStringLiteral("选择层位"));
+        ribbon_horizon_combo_->setAccessibleName(
+            QStringLiteral("层位"));
+        ribbon_horizon_combo_->setToolTip(
+            QStringLiteral("目标层位（写入工程 stratigraphy）"));
+        connect(ribbon_horizon_combo_, &QComboBox::currentIndexChanged,
+                this, [this](int index) {
+                    if (syncing_ribbon_horizon_ || index < 0) return;
+                    emit horizon_requested(
+                        ribbon_horizon_combo_->itemText(index));
+                });
+        row->addWidget(ribbon_horizon_combo_);
+        ribbon_->set_band_trailing(trailing);
+    }
+
+    // Nav-row 任务/Agent 入口 — the same dock toggles the app bar used.
+    connect(ribbon_, &ui_ribbon::qt::RibbonBar::taskCenterRequested, this,
+            [this] {
+                const auto* d = workstation_->dock("tasks");
+                workstation_->set_dock_visible(
+                    "tasks", d == nullptr || !d->isVisible());
+            });
+    connect(ribbon_, &ui_ribbon::qt::RibbonBar::agentRequested, this,
+            [this] {
+                const auto* d = workstation_->dock("agent");
+                workstation_->set_dock_visible(
+                    "agent", d == nullptr || !d->isVisible());
+            });
+
     // Mode persistence (D7): the host store binds later; the seam resolves
     // lazily so pre-bind toggles are simply not persisted.
     connect(ribbon_, &ui_ribbon::qt::RibbonBar::modeChanged, this,
@@ -559,6 +644,9 @@ void AppShell::wire_workstation() {
             this, [this](int hub_index, const QString& key) {
                 navigate_to(hub_index, key);
             });
+
+    // （工作流面板的接线在 build_docks 之后 —— nav 工厂在 dock 构建时
+    // 才创建面板，见 ctor 末尾。）
 
     // M5-3: hub 外壳已拆 —— 仅剩 hub_data_（ws0 页内导航）；无 dock 标题
     // 镜像需求。
@@ -684,11 +772,78 @@ void AppShell::navigate_workspace(int workspace_index) {
         if (stage_apply_ != nullptr) {
             stage_apply_(pwb::tool_policy::stage_value(stage));
         }
-    } else if (presentation_apply_ != nullptr) {
-        // 数据管理/验证 reshape the docks through the extended
-        // presentation profiles — WITHOUT touching the stage authority.
-        presentation_apply_(ui_ribbon::workspace_id(workspace));
+        // Prototype 右栏标签组：科学工作区 = 检查器|图层管理|相带画刷|
+        // 输入与结果 tab 组（ws0/ws4 将其关掉）。恢复显隐 + 图层管理
+        // 为默认当前页（profile 可能把 相带画刷/输入与结果 提到前——
+        // 图层是稳定默认面，用户切页不被打扰）。
+        workstation_->set_dock_visible("inspector", true);
+        workstation_->set_dock_visible("composite_layer", true);
+        if (auto* layer_dock = workstation_->dock("composite_layer")) {
+            layer_dock->raise();
+        }
+    } else {
+        // ws0 数据管理 / ws4 验证：属性·血缘 / 验证结果住在页内右列 ——
+        // 独立的 检查器/图层管理 dock 退下（原型右侧即页内列）。
+        workstation_->set_dock_visible("inspector", false);
+        workstation_->set_dock_visible("composite_layer", false);
+        if (presentation_apply_ != nullptr) {
+            // 数据管理/验证 reshape the docks through the extended
+            // presentation profiles — WITHOUT touching the stage
+            // authority.
+            presentation_apply_(ui_ribbon::workspace_id(workspace));
+        }
     }
+
+    sync_workflow_panel(workspace_index);
+}
+
+void AppShell::sync_workflow_panel(int workspace_index) {
+    auto* panel = workstation_ != nullptr ? workstation_->workflow_panel()
+                                          : nullptr;
+    if (panel == nullptr) return;
+    workflow_command_ids_.clear();
+
+    // (标题, 步骤|分隔, 对应 ribbon 命令 id|分隔) — 步骤文案取自
+    // qt_ribbon_native prototype；命令 id 走 ribbon spec / registry。
+    struct Row {
+        const char* title;
+        const char* steps;
+        const char* commands;
+    };
+    static const Row rows[] = {
+        {"数据管理流程", "数据导入|质检与整理|关联与版本|成果输出",
+         "data.import|data.check|data.lineage|data.export_table"},
+        {"智能预测工作流",
+         "相团几何检查|草稿编辑|叠加地震相预测|叠加测井相预测|"
+         "结果评估与导出",
+         "predict.params|predict.overlay_well|predict.overlay_seismic|"
+         "predict.overlay_well|predict.save"},
+        {"约束与单因素流程",
+         "约束要素编辑|单因素插值|连井剖面分析|等值线生成|成果输出",
+         "factor.edit_sourcing|factor.compute|factor.crosswell_path|"
+         "factor.contour|factor.save"},
+        {"编图工作流",
+         "单因素图检查|综合编图|图件整饰|版式输出|成果导出",
+         "map.show_reference|map.edit_facies|map.legend|map.template|"
+         "map.export"},
+    };
+
+    if (workspace_index == 4) {
+        // 验证工作区（prototype 左下 = 验证设置勾选清单）。
+        panel->set_checks(QStringLiteral("验证设置"),
+                          {QStringLiteral("空间对齐"),
+                           QStringLiteral("井点符合"),
+                           QStringLiteral("层位一致"),
+                           QStringLiteral("输入版本")});
+        return;
+    }
+    if (workspace_index < 0 || workspace_index >= 4) return;
+    const Row& row = rows[workspace_index];
+    panel->set_steps(QString::fromUtf8(row.title),
+                     QString::fromUtf8(row.steps)
+                         .split(QLatin1Char('|')));
+    workflow_command_ids_ = QString::fromUtf8(row.commands)
+                                .split(QLatin1Char('|'));
 }
 
 void AppShell::sync_workspace_for_stage(const std::string& stage_value) {
@@ -761,6 +916,17 @@ void AppShell::set_stage_apply(std::function<void(const std::string&)> seam) {
 void AppShell::set_presentation_apply(
     std::function<void(const std::string&)> seam) {
     presentation_apply_ = std::move(seam);
+    // The seam lands AFTER ctor navigation (navigate_workspace(0) ran
+    // with presentation_apply_==nullptr) — re-apply the current
+    // non-scientific workspace's dock projection so ws0/ws4 profiles
+    // aren't missed on first landing.
+    const int ws = ribbon_ != nullptr ? ribbon_->current_workspace() : 0;
+    const auto workspace =
+        ui_ribbon::kWorkspaceOrder[static_cast<size_t>(ws)];
+    if (presentation_apply_ != nullptr &&
+        !ui_ribbon::workspace_stage(workspace).has_value()) {
+        presentation_apply_(ui_ribbon::workspace_id(workspace));
+    }
 }
 
 void AppShell::set_ribbon_persistence(
@@ -958,6 +1124,42 @@ void AppShell::setup_shortcuts() {
 
 void AppShell::set_project_name(const QString& name) {
     status_bar_->set_project_name(name);
+}
+
+void AppShell::set_horizon_state(const QString& horizon,
+                                 const std::vector<QString>& options) {
+    // 单一 target_horizon 权威的三处视图同步投影（状态条选择器 /
+    // Ribbon 尾部选择器 / 画布层位标签行）。
+    if (status_bar_ != nullptr) {
+        status_bar_->set_horizon_state(horizon, options);
+    }
+    if (composite_ != nullptr) {
+        composite_->set_horizon_state(horizon, options);
+    }
+    if (ribbon_horizon_combo_ != nullptr) {
+        syncing_ribbon_horizon_ = true;
+        QStringList choices;
+        for (const QString& option : options) {
+            if (!option.isEmpty() && !choices.contains(option)) {
+                choices << option;
+            }
+        }
+        const QString target = horizon.trimmed();
+        if (!target.isEmpty() && !choices.contains(target)) {
+            choices.push_front(target);
+        }
+        QStringList existing;
+        for (int i = 0; i < ribbon_horizon_combo_->count(); ++i) {
+            existing << ribbon_horizon_combo_->itemText(i);
+        }
+        if (existing != choices) {
+            ribbon_horizon_combo_->clear();
+            ribbon_horizon_combo_->addItems(choices);
+        }
+        ribbon_horizon_combo_->setCurrentIndex(
+            target.isEmpty() ? -1 : choices.indexOf(target));
+        syncing_ribbon_horizon_ = false;
+    }
 }
 
 void AppShell::showEvent(QShowEvent* event) {

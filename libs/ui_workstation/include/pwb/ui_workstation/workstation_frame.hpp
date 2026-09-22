@@ -36,6 +36,7 @@
 #include <pwb/ui_workstation/inspector_panel.hpp>
 #include <pwb/ui_workstation/process_hub.hpp>
 #include <pwb/ui_workstation/task_center.hpp>
+#include <pwb/ui_workstation/workflow_panel.hpp>
 
 namespace pwb::ui_workstation {
 
@@ -99,6 +100,8 @@ public:
     WorkstationAppBar* app_bar() const { return app_bar_; }
     ActivityRail* activity_rail() const { return rail_; }
     WorkstationExplorer* explorer() const { return explorer_; }
+    // 左栏下部工作流面板（nav dock 内，explorer 之下的竖向分格）。
+    WorkflowPanel* workflow_panel() const { return workflow_panel_; }
     WorkstationInspector* inspector() const { return inspector_; }
     WorkstationTaskCenter* task_center() const { return task_center_; }
     WorkstationLogViewer* log_viewer() const { return log_viewer_; }
@@ -128,6 +131,9 @@ private:
     void sync_floating_minimum(QDockWidget* dock,
                                const ui_shell::DockDescriptor& desc);
     void apply_inspector_policy(int width);
+    // Deferred dock tab grouping — runs once after the dock host's
+    // first Show (see eventFilter).
+    void finish_dock_layout();
 
     QMainWindow* dock_host_ = nullptr;
     QToolBar* app_bar_toolbar_ = nullptr;
@@ -136,6 +142,7 @@ private:
     std::map<std::string, PanelFactory> factories_;
     std::string current_preset_;
     bool built_ = false;
+    bool tabs_built_ = false;
     bool tearing_down_ = false;
     bool explorer_expanded_ = true;
     bool inspector_hidden_by_viewport_ = false;
@@ -147,6 +154,8 @@ private:
     QWidget* top_bar_ = nullptr;
     ActivityRail* rail_ = nullptr;
     WorkstationExplorer* explorer_ = nullptr;
+    QWidget* nav_column_ = nullptr;  // explorer + workflow 竖向分格容器
+    WorkflowPanel* workflow_panel_ = nullptr;
     WorkstationInspector* inspector_ = nullptr;
     WorkstationTaskCenter* task_center_ = nullptr;
     WorkstationLogViewer* log_viewer_ = nullptr;

@@ -15,6 +15,9 @@
 #include <pwb/ui_widgets/interactive_qc_hub.hpp>
 #include <pwb/ui_widgets/stratigraphic_timeline_slider.hpp>
 
+#include <algorithm>
+
+#include <QEvent>
 #include <QVBoxLayout>
 
 namespace pwb::ui_composite {
@@ -29,6 +32,22 @@ CompositeDocument::CompositeDocument(QWidget* parent) : QWidget(parent) {
     // M1 多期次时间轴：画布之上的常驻横条（宿主绑定 EpochTimelineController）。
     timeline = new pwb::ui_widgets::StratigraphicTimelineWidget(this);
     layout->addWidget(timeline);
+
+    // 层位标签行（prototype 图面层位标签 — R:17 层次）：时间轴之下、
+    // 画布之上；候选与选中态全部来自宿主 set_horizon_state（状态条
+    // 层位下拉的同一权威），点击只发 horizon_requested。
+    horizon_tabs = new QTabBar(this);
+    horizon_tabs->setObjectName(QStringLiteral("CompositeHorizonTabs"));
+    horizon_tabs->setExpanding(false);
+    horizon_tabs->setDrawBase(false);
+    horizon_tabs->setUsesScrollButtons(true);
+    horizon_tabs->hide();  // 无工程/无层位候选时整行隐藏（诚实缺席）。
+    connect(horizon_tabs, &QTabBar::currentChanged, this,
+            [this](int index) {
+                if (syncing_horizon_tabs_ || index < 0) return;
+                emit horizon_requested(horizon_tabs->tabText(index));
+            });
+    layout->addWidget(horizon_tabs);
 
     // 中央画布占位：宿主 set_canvas 注入真实控件（QgisCanvasShim 或回退）。
     // 空态提示挂画布层（WA_TransparentForMouseEvents）。
@@ -99,9 +118,10 @@ void CompositeDocument::set_canvas(QWidget* canvas,
     canvas_ = canvas;
     uses_native_stack_ = uses_native_stack;
     if (canvas_ != nullptr) {
-        // 时间轴(0) 之后、附属层之前 = 中央区。
+        // 时间轴(0) + 层位标签(1) 之后、附属层之前 = 中央区。
         auto* box = static_cast<QVBoxLayout*>(layout());
-        box->insertWidget(1, canvas_, 1);
+        box->insertWidget(2, canvas_, 1);
+        canvas_->installEventFilter(this);
         // 空态提示挂画布（鼠标穿透）。
         if (empty_hint_ == nullptr) {
             empty_hint_ = new QLabel(
@@ -114,8 +134,78 @@ void CompositeDocument::set_canvas(QWidget* canvas,
             empty_hint_->setAttribute(Qt::WA_TransparentForMouseEvents);
             empty_hint_->hide();
         }
+        if (map_title == nullptr) {
+            map_title = new QLabel(canvas_);
+            map_title->setObjectName(QStringLiteral("CompositeMapTitle"));
+            map_title->setAlignment(Qt::AlignCenter);
+            map_title->setAttribute(Qt::WA_TransparentForMouseEvents);
+            map_title->setStyleSheet(QStringLiteral(
+                "QLabel#CompositeMapTitle { font-size: 13px;"
+                " font-weight: 600; padding: 2px 10px; }"));
+            map_title->hide();
+        }
         constraint_hud->setParent(canvas_);
+        layout_map_title();
     }
+}
+
+void CompositeDocument::set_horizon_state(
+    const QString& horizon, const std::vector<QString>& options) {
+    if (horizon_tabs == nullptr) return;
+    syncing_horizon_tabs_ = true;
+    QStringList choices;
+    for (const QString& option : options) {
+        if (!option.isEmpty() && !choices.contains(option)) {
+            choices.push_back(option);
+        }
+    }
+    const QString target = horizon.trimmed();
+    if (!target.isEmpty() && !choices.contains(target)) {
+        // 权威值必须存活——未知层位插入而非丢弃（StatusBar 同语义）。
+        choices.push_front(target);
+    }
+    // 与现有清单相同则不重建（标签行不闪动）。
+    QStringList existing;
+    for (int i = 0; i < horizon_tabs->count(); ++i) {
+        existing << horizon_tabs->tabText(i);
+    }
+    if (existing != choices) {
+        while (horizon_tabs->count() > 0) horizon_tabs->removeTab(0);
+        for (const QString& choice : choices) horizon_tabs->addTab(choice);
+    }
+    const int index = target.isEmpty() ? -1 : choices.indexOf(target);
+    if (index >= 0) horizon_tabs->setCurrentIndex(index);
+    horizon_tabs->setVisible(!choices.isEmpty());
+    syncing_horizon_tabs_ = false;
+}
+
+QString CompositeDocument::current_horizon() const {
+    if (horizon_tabs == nullptr || horizon_tabs->currentIndex() < 0) {
+        return {};
+    }
+    return horizon_tabs->tabText(horizon_tabs->currentIndex()).trimmed();
+}
+
+void CompositeDocument::set_map_title(const QString& title) {
+    if (map_title == nullptr) return;
+    map_title->setText(title);
+    map_title->setVisible(!title.trimmed().isEmpty());
+    layout_map_title();
+}
+
+void CompositeDocument::layout_map_title() {
+    if (map_title == nullptr || canvas_ == nullptr) return;
+    map_title->adjustSize();
+    const int x = std::max(0, (canvas_->width() - map_title->width()) / 2);
+    map_title->move(x, 4);
+    map_title->raise();
+}
+
+bool CompositeDocument::eventFilter(QObject* obj, QEvent* event) {
+    if (obj == canvas_ && event->type() == QEvent::Resize) {
+        layout_map_title();
+    }
+    return QWidget::eventFilter(obj, event);
 }
 
 void CompositeDocument::set_project_crs(const std::string& crs) {

@@ -57,6 +57,7 @@ if(TARGET Qt6::Widgets)
         src/process_hub.cpp
         src/agent_panel.cpp
         src/keybinding_manager.cpp
+        src/workflow_panel.cpp
         src/workstation_frame.cpp
         include/pwb/ui_workstation/ui_context_qt.hpp
         include/pwb/ui_workstation/mode_state_qt.hpp
@@ -68,6 +69,7 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_workstation/process_hub.hpp
         include/pwb/ui_workstation/agent_panel.hpp
         include/pwb/ui_workstation/keybinding_manager.hpp
+        include/pwb/ui_workstation/workflow_panel.hpp
         include/pwb/ui_workstation/workstation_frame.hpp
     )
     add_library(Pwb::UiWorkstationQt ALIAS pwb_ui_workstation_qt)

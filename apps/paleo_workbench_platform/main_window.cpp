@@ -160,6 +160,8 @@
 #endif
 #include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
+#include <pwb/ui_shell/dock_registry.hpp>
+#include <pwb/ui_shell/layout_presets.hpp>
 #include <pwb/ui_shell/status_bar.hpp>
 // M2 (UI-18) — the ribbon chrome: QAT binds the governed ToolActionSet
 // save/undo/redo actions (the SAME QAction objects the menus/shortcuts
@@ -168,6 +170,8 @@
 // cpp-close-12 — palette tool-details come from the canonical explain()
 // formatter (UI-12 domain); no second state table in this shell.
 #include <pwb/ui_workstation/action_help.hpp>
+// Ribbon file-menu 面板/布局 submenus drive the dock host directly.
+#include <pwb/ui_workstation/workstation_frame.hpp>
 #endif
 #include "shell_project_actions.hpp"
 #include <QStandardPaths>
@@ -832,6 +836,21 @@ void MainWindow::buildUi() {
     }
 #endif
 // END UI-18 M5-3
+#ifdef PWB_WITH_APP_SHELL
+    if (app_shell_ != nullptr) {
+        // qt_ribbon_native parity: the AppShell's own dock surfaces
+        // (nav/inspector/tasks…) replace the legacy window-level dock
+        // chrome — every MainWindow-direct dock starts hidden; stage
+        // profiles (window.* keys) and menu actions raise the ones a
+        // surface needs. A persisted saveState still wins over this
+        // default (restore runs later in the ctor).
+        const auto legacy_docks = findChildren<QDockWidget*>(
+            QString(), Qt::FindDirectChildrenOnly);
+        for (auto* legacy : legacy_docks) {
+            legacy->hide();
+        }
+    }
+#endif
 }
 
 #ifdef PWB_WITH_APP_SHELL
@@ -1014,8 +1033,39 @@ void MainWindow::wire_ribbon_commands() {
     ribbon_recent_menu_ = new QMenu(tr("最近工程(&R)"), file);
     file->addMenu(ribbon_recent_menu_);
     file->addSeparator();
+    // 面板开关 + 布局预设 — 低频命令收敛进文件菜单（R:20）。dock 勾选态
+    // 随 dock visibilityChanged 双向同步。
+    if (auto* ws = app_shell_->workstation()) {
+        auto* panels = file->addMenu(tr("面板(&P)"));
+        for (const auto& desc :
+             pwb::ui_shell::workstation_dock_registry().descriptors()) {
+            auto* dock = ws->dock(desc.dock_id);
+            if (dock == nullptr) continue;
+            auto* toggle = panels->addAction(
+                QString::fromStdString(desc.title));
+            toggle->setCheckable(true);
+            toggle->setChecked(dock->isVisible());
+            const std::string dock_id = desc.dock_id;
+            connect(toggle, &QAction::triggered, this,
+                    [ws, dock_id](bool on) {
+                        ws->set_dock_visible(dock_id, on);
+                    });
+            connect(dock, &QDockWidget::visibilityChanged, toggle,
+                    &QAction::setChecked);
+        }
+        auto* layouts = file->addMenu(tr("布局(&L)"));
+        for (const auto& [preset_id, label] :
+             pwb::ui_shell::preset_labels()) {
+            layouts->addAction(QString::fromStdString(label), this,
+                               [ws, preset_id] {
+                                   ws->apply_layout_preset(preset_id);
+                               });
+        }
+        file->addSeparator();
+    }
     file->addAction(tr("退出"), this, [this] { close(); });
     ribbon->set_file_menu(file);
+    ribbon_file_menu_ = file;
     refreshRecentProjects();
 }
 #endif
@@ -1068,6 +1118,18 @@ void MainWindow::buildMenusAndToolbar() {
     };
 
     refreshActionStates();  // materializes one QAction per tool id
+#ifdef PWB_WITH_APP_SHELL
+    // QAT 再绑定：wire_app_shell 的绑定跑在 actions_ 物化之前
+    // （buildUi 先于本函数），当时拿到 nullptr → QAT 按钮被隐藏。
+    // 动作存在后重绑 —— 同一 QAction 对象（D4 单一来源）。
+    if (app_shell_ != nullptr && app_shell_->ribbon() != nullptr) {
+        pwb::ui_ribbon::qt::RibbonBar::QuickAccessActions qat;
+        qat.save = governedAction(QStringLiteral("save_edits"));
+        qat.undo = governedAction(QStringLiteral("undo"));
+        qat.redo = governedAction(QStringLiteral("redo"));
+        app_shell_->ribbon()->set_quick_access_actions(qat);
+    }
+#endif
     for (const Wire& wire : wired) {
         QAction* action = actions_.action(wire.id);
         if (action == nullptr) continue;   // vocabulary drift: keep honest
@@ -2689,7 +2751,38 @@ void MainWindow::buildPlatformMenus() {
     help_menu->addAction(tr("关于…"), this, &MainWindow::showAboutDialog);
     help_menu->addAction(tr("诊断信息…"), this,
                          &MainWindow::showDiagnosticsDialog);
+
+#ifdef PWB_WITH_APP_SHELL
+    converge_menus_into_ribbon();
+#endif
 }
+
+#ifdef PWB_WITH_APP_SHELL
+void MainWindow::converge_menus_into_ribbon() {
+    if (ribbon_file_menu_ == nullptr || menuBar() == nullptr) return;
+    auto* file = ribbon_file_menu_;
+    QAction* exit_action =
+        file->actions().isEmpty() ? nullptr : file->actions().last();
+    // 退休菜单栏的顶层菜单（文件 除外——其项已在 Ribbon 文件菜单，
+    // 且无快捷键的版本走同一槽函数）作为子菜单并入，低频命令不丢。
+    for (QAction* top : menuBar()->actions()) {
+        QMenu* menu = top->menu();
+        if (menu == nullptr || menu->title() == tr("文件(&F)")) continue;
+        file->insertMenu(exit_action, menu);
+    }
+    file->insertSeparator(exit_action);
+    // 快捷键保全：带快捷键的动作挂到窗口本身 —— 菜单栏隐藏后 Qt 仍会
+    // 派发 WindowContext 快捷键（挂在隐藏菜单/菜单栏上的动作不计）。
+    for (QMenu* menu : findChildren<QMenu*>()) {
+        for (QAction* action : menu->actions()) {
+            if (action->menu() == nullptr && !action->shortcut().isEmpty()) {
+                addAction(action);
+            }
+        }
+    }
+    menuBar()->hide();
+}
+#endif
 
 void MainWindow::syncThemeMenuChecks() {
     if (theme_service_ == nullptr) return;

@@ -441,6 +441,10 @@ private:
     // M4 (UI-18) — the full ribbon file menu (MRU included) and the
     // governed-QAction bindings for the 综合编图 band.
     void wire_ribbon_commands();
+    // R:20 菜单收敛 — 原生菜单栏退休：顶层菜单并入 Ribbon 文件菜单为
+    // 子菜单，面板开关/布局预设入「面板」「布局」；带快捷键的动作挂回
+    // 窗口本身（菜单栏隐藏后快捷键不丢）。buildPlatformMenus 末尾调用。
+    void converge_menus_into_ribbon();
 #endif
 
     // CONV-PS platform services: settings/theme/recent/diagnostics wiring
@@ -542,6 +546,9 @@ private:
     // M4 — the ribbon file button's 最近工程 submenu (same MRU data source
     // as the native file menu; filled by refreshRecentProjects).
     QMenu* ribbon_recent_menu_ = nullptr;
+    // R:20 — the ribbon 文件 menu itself (converge_menus_into_ribbon
+    // appends the retired menubar's submenus here).
+    QMenu* ribbon_file_menu_ = nullptr;
 #endif
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;

@@ -3,6 +3,7 @@
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QScrollArea>
+#include <QSplitter>
 #include <QVBoxLayout>
 
 #include <pwb/ui_shell/dock_resize.hpp>
@@ -49,6 +50,9 @@ WorkstationFrame::WorkstationFrame(QWidget* parent) : QFrame(parent) {
     outer->addWidget(dock_host_, 1);
 
     // App bar on the host's top toolbar row — full width, immovable.
+    // qt_ribbon_native parity: the ribbon nav row already carries 文件 +
+    // 命令搜索 + 任务/Agent, so the legacy app-bar row starts hidden; a
+    // host mount_top_bar() bar (or the panels menu) can re-show it.
     app_bar_toolbar_ = new QToolBar("工作站全局栏", dock_host_);
     app_bar_toolbar_->setObjectName("WorkstationAppBarToolbar");
     app_bar_toolbar_->setMovable(false);
@@ -57,6 +61,7 @@ WorkstationFrame::WorkstationFrame(QWidget* parent) : QFrame(parent) {
     app_bar_toolbar_->addWidget(app_bar_);
     dock_host_->addToolBar(Qt::ToolBarArea::TopToolBarArea,
                            app_bar_toolbar_);
+    app_bar_toolbar_->hide();
 
     install_default_panels();
 }
@@ -88,7 +93,8 @@ QWidget* WorkstationFrame::content_for(const std::string& dock_id,
 }
 
 void WorkstationFrame::install_default_panels() {
-    // nav dock = activity rail + explorer (Python navigation_region).
+    // nav dock = 细图标轨 + [explorer / 工作流面板] 竖向分格
+    // (qt_ribbon_native prototype: rail | 资源管理器 over 当前工作流).
     set_panel_factory("nav", [this](const std::string&,
                                     QWidget* parent) -> QWidget* {
         auto* region = new QFrame(parent);
@@ -97,9 +103,19 @@ void WorkstationFrame::install_default_panels() {
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(0);
         rail_ = new ActivityRail(region);
+        rail_->set_icon_only(true);
         explorer_ = new WorkstationExplorer(region);
+        workflow_panel_ = new WorkflowPanel(region);
+        auto* column = new QSplitter(Qt::Orientation::Vertical, region);
+        column->setObjectName("WorkstationNavColumn");
+        column->setChildrenCollapsible(false);
+        column->addWidget(explorer_);
+        column->addWidget(workflow_panel_);
+        column->setStretchFactor(0, 3);
+        column->setStretchFactor(1, 2);
+        nav_column_ = column;
         layout->addWidget(rail_);
-        layout->addWidget(explorer_, 1);
+        layout->addWidget(nav_column_, 1);
         connect(rail_, &ActivityRail::mode_requested, this,
                 [this](const QString& mode) {
                     explorer_->set_mode(mode.toStdString());
@@ -180,7 +196,9 @@ void WorkstationFrame::build_docks() {
     for (const auto& desc : registry.descriptors()) {
         QDockWidget* dock = make_dock(desc);
         dock_host_->addDockWidget(area_for(desc.preferred_area), dock);
-        if (!desc.default_visible) dock->hide();
+        if (!desc.default_visible) {
+            dock->hide();
+        }
         docks_[desc.dock_id] = dock;
         connect(dock, &QDockWidget::visibilityChanged, this,
                 [this](bool) {
@@ -189,6 +207,49 @@ void WorkstationFrame::build_docks() {
                     }
                 });
     }
+
+    // Prototype 面板自带标题（资源管理器/图层管理 headers）——固定布局
+    // 面的原生 dock 标题栏是重复 chrome；显隐由 面板菜单/profile 管，
+    // tab 组仍有 tab bar。可选查看器（agent/console/well/seismic 等）
+    // 保留标题栏（浮动/关闭 UX）。
+    for (const char* id :
+         {"nav", "inspector", "composite_layer", "facies_palette",
+          "composite_input", "tasks", "logs"}) {
+        if (auto* d = dock(id)) {
+            auto* blank = new QWidget(d);
+            blank->setFixedSize(0, 0);
+            d->setTitleBarWidget(blank);
+        }
+    }
+}
+
+void WorkstationFrame::finish_dock_layout() {
+    if (tabs_built_) return;
+    tabs_built_ = true;
+
+    // Prototype right column = ONE tabbed surface (检查器 | 图层管理 |
+    // 相带画刷 | 输入与结果); hidden members join the group and raise as
+    // tabs when a profile/user shows them. Bottom utilities form the
+    // 任务|日志|… strip the same way. can_tabify=false docks stay split.
+    auto tabify = [this](std::initializer_list<const char*> ids) {
+        QDockWidget* anchor = nullptr;
+        for (const char* id : ids) {
+            auto* other = dock(id);
+            if (other == nullptr) continue;
+            const auto* desc =
+                ui_shell::workstation_dock_registry().get(id);
+            if (desc != nullptr && !desc->can_tabify) continue;
+            if (anchor == nullptr) {
+                anchor = other;
+            } else {
+                dock_host_->tabifyDockWidget(anchor, other);
+            }
+        }
+    };
+    tabify({"inspector", "composite_layer", "facies_palette",
+            "composite_input", "hub"});
+    tabify({"tasks", "logs", "console", "agent", "composite_linked",
+            "well", "seismic"});
 }
 
 QDockWidget* WorkstationFrame::dock(const std::string& dock_id) const {
@@ -254,12 +315,15 @@ bool WorkstationFrame::mount_top_bar(QWidget* bar) {
     top_bar_ = bar;
     bar->setParent(app_bar_toolbar_);
     app_bar_toolbar_->addWidget(bar);
+    app_bar_toolbar_->setVisible(true);  // 宿主挂载条 → 顶行重新出现
     return true;
 }
 
 void WorkstationFrame::set_explorer_expanded(bool expanded) {
     explorer_expanded_ = expanded;
-    if (explorer_ != nullptr) explorer_->setVisible(expanded);
+    // 折叠整列（explorer + 工作流面板），细轨保留 — prototype parity。
+    QWidget* column = nav_column_ != nullptr ? nav_column_ : explorer_;
+    if (column != nullptr) column->setVisible(expanded);
     if (rail_ != nullptr) rail_->set_explorer_expanded(expanded);
 }
 
@@ -289,6 +353,14 @@ void WorkstationFrame::apply_inspector_policy(int width) {
 }
 
 bool WorkstationFrame::eventFilter(QObject* obj, QEvent* event) {
+    if (obj == dock_host_ && event->type() == QEvent::Type::Show &&
+        !tabs_built_) {
+        // tabifyDockWidget 在首个布局前建第二个 tab 组会留下孤儿
+        // QTabBar（Qt dock 布局怪癖）——首次显示后再排队成组。
+        QMetaObject::invokeMethod(
+            this, [this] { finish_dock_layout(); },
+            Qt::ConnectionType::QueuedConnection);
+    }
     if (obj == dock_host_ && event->type() == QEvent::Type::Resize) {
         const int width = dock_host_->width();
         apply_viewport_class(ui_shell::classify_viewport(width));

@@ -54,6 +54,7 @@
 
 #include <pwb/ui_shell/deferred_page_bindings.hpp>
 
+class QComboBox;
 class QShowEvent;
 class QSplitter;
 class QTabWidget;
@@ -266,6 +267,12 @@ public:
 
     void set_project_name(const QString& name);
 
+    // 层位状态投影（target_horizon 单一权威的三处视图：状态条选择器、
+    // Ribbon 命令带尾部选择器、画布层位标签行）——宿主经此一处投影，
+    // 三处互不复制状态；任一视图的编辑只回发 horizon_requested。
+    void set_horizon_state(const QString& horizon,
+                           const std::vector<QString>& options = {});
+
     // CLOSURE-PREVIEW (task 04, function-level lease via the wave
     // coordination registry): mount the composed data page over the bare
     // management workspace. The composite ADOPTS data_workspace_ (it is
@@ -296,6 +303,9 @@ signals:
     void theme_requested(const QString& theme_value);
     void density_requested(const QString& density_value);
     void status_message(const QString& message);
+    // Ribbon 尾部层位选择器的编辑请求（宿主接 stage_flow 权威写路径，
+    // 与 StatusBar::horizon_requested 同一信号语义）。
+    void horizon_requested(const QString& horizon);
 
 private:
     void build_pages();
@@ -315,6 +325,10 @@ private:
     void apply_compose_mode();
     // M5-3: focus a stage/validation bottom (or rail) tab by title.
     static void focus_stage_tab(QTabWidget* tabs, const QString& title);
+    // 左栏工作流面板按工作区换内容（步骤清单 / 验证设置勾选）；步骤
+    // 点击经 command_registry 走既有命令路径（workflow_command_ids_
+    // 为当前工作区的步骤→命令映射）。
+    void sync_workflow_panel(int workspace_index);
 
     pwb::ui_workstation::WorkstationFrame* workstation_ = nullptr;
     pwb::ui_composite::CompositeDocument* composite_ = nullptr;
@@ -341,6 +355,12 @@ private:
     std::function<std::optional<std::string>(const std::string&)>
         ribbon_load_;
     std::function<void(const std::string&, const std::string&)> ribbon_save_;
+
+    // Ribbon 命令带尾部常驻槽：层位选择器（三视图之一，见
+    // set_horizon_state）。
+    QComboBox* ribbon_horizon_combo_ = nullptr;
+    bool syncing_ribbon_horizon_ = false;
+    QStringList workflow_command_ids_;
 
     // Joint-host seam (06): the window injects the real host (owned by
     // the Geo3D dock); without one the fallback stub reports
