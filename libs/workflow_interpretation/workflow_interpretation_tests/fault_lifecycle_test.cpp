@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <filesystem>
 #include <string>
+#include <limits>
 
 namespace {
 
@@ -113,8 +114,25 @@ Json constraint_layers() {
 
 }  // namespace
 
+// WI1: non-finite coordinates are rejected at the public entry — they
+// cannot round-trip (fingerprint encodes NaN, artifact serializes null,
+// restore drops the vertex → silent geometry change + phantom versions).
+static void test_nan_trace_rejected() {
+    FaultTrace bad;
+    bad.id = "ftrace_bad";
+    bad.polyline = {{0.0, 0.0}, {std::numeric_limits<double>::quiet_NaN(), 1.0}};
+    bool threw = false;
+    try {
+        (void)new_fault_draft("坏轨迹", {bad});
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    check(threw, "non-finite trace coordinates fail closed at entry");
+}
+
 int main() {
-    const fs::path dir = fs::temp_directory_path()
+    test_nan_trace_rejected();
+const fs::path dir = fs::temp_directory_path()
         / ("fault_lifecycle_test_" + std::to_string(::getpid()));
     fs::remove_all(dir);
     const fs::path fault_dir = dir / "faults";
@@ -176,9 +194,16 @@ int main() {
               && ref3->parent_version_id.has_value()
               && *ref3->parent_version_id == ref->current_version_id,
           "edited draft saves a new version with the old parent");
-    check(find_fault_ref(project, restored->interpretation_id)
-              ->current_version_id == ref3->current_version_id,
-          "project ref advances to the new version");
+    {
+        const auto advanced = find_fault_ref(
+            project, restored.has_value()
+                         ? restored->interpretation_id
+                         : std::string());
+        check(advanced.has_value(), "project ref still present after edit");
+        check(advanced.has_value() &&
+                  advanced->current_version_id == ref3->current_version_id,
+              "project ref advances to the new version");
+    }
 
     // H7 compensation: a failing catalog leaves no ghost artifact.
     FailingCatalog failing;

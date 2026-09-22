@@ -107,6 +107,14 @@ std::vector<std::string> run_input_versions(
 std::tuple<std::string, std::vector<std::string>, std::string>
 check_pinned_versions(CatalogRepository* catalog,
                       const std::vector<std::string>& pinned) {
+    // WI2: no catalog attached means the check is UNVERIFIABLE — the
+    // header contract says null catalog degrades verifiable checks to
+    // UNKNOWN; fabricating "missing" (version cleaned) misleads the
+    // stale-input UI when the truth is only "no catalog wired".
+    if (catalog == nullptr) {
+        return {freshness_status::kUnknown, {},
+                "无法验证（未接入目录服务）"};
+    }
     std::vector<std::string> missing;
     std::vector<std::string> stale;
     for (const std::string& version_id : pinned) {
