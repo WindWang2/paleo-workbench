@@ -12,7 +12,9 @@ add_library(pwb_ui_composite STATIC
     src/attribute_schema.cpp
     src/capture_spec.cpp
     src/composite_controller.cpp
+    src/constraints_sync.cpp
     src/crs_gate.cpp
+    src/factor_group_layers.cpp
     src/geological_layer_spec.cpp
     src/geometry.cpp
     src/layer_decorations.cpp
@@ -48,6 +50,11 @@ target_compile_features(pwb_ui_composite PUBLIC cxx_std_20)
 target_link_libraries(pwb_ui_composite PUBLIC
     Pwb::Domain Pwb::ToolPolicy Pwb::UiDataCore Pwb::UiWorkstation
     Pwb::Workspace)
+# factor_group_layers.cpp consumes the contouring/polygonization layer
+# products + the FactorGrid carrier (kernel is a leaf lib — no cycle).
+if(TARGET Pwb::MappingKernel)
+    target_link_libraries(pwb_ui_composite PUBLIC Pwb::MappingKernel)
+endif()
 
 # Qt Widgets shells (UI-13). Every Q_OBJECT header is listed as a source
 # so AUTOMOC discovers the classes in this split include/ layout. The

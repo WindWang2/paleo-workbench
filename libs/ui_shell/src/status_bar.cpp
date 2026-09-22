@@ -1,5 +1,6 @@
 #include "pwb/ui_shell/status_bar.hpp"
 
+#include <QComboBox>
 #include <QHBoxLayout>
 
 #include <pwb/platform_services/theme_tokens.hpp>
@@ -65,6 +66,29 @@ StatusBar::StatusBar(QWidget* parent) : QFrame(parent) {
     workbench_label_->setObjectName(QStringLiteral("StatusWorkbenchLabel"));
     workbench_label_->hide();
     layout->addWidget(workbench_label_);
+
+    // 层位选择器 (M2): migrated from the retired MappingStageBar — a view
+    // of the single target_horizon authority, driven by the host through
+    // set_horizon_state; edits emit horizon_requested.
+    horizon_label_ = new QLabel(QStringLiteral("层位"), this);
+    horizon_label_->setObjectName(QStringLiteral("StatusHorizonLabel"));
+    layout->addWidget(horizon_label_);
+    horizon_combo_ = new QComboBox(this);
+    horizon_combo_->setObjectName(QStringLiteral("StatusHorizonCombo"));
+    horizon_combo_->setEditable(false);
+    horizon_combo_->setInsertPolicy(QComboBox::NoInsert);
+    horizon_combo_->setMinimumWidth(130);
+    horizon_combo_->setMaximumWidth(130);
+    horizon_combo_->setPlaceholderText(QStringLiteral("选择层位"));
+    horizon_combo_->setAccessibleName(QStringLiteral("层位"));
+    horizon_combo_->setToolTip(QStringLiteral("目标层位（写入工程 stratigraphy）"));
+    connect(horizon_combo_, &QComboBox::currentIndexChanged, this,
+            [this](int index) {
+                if (syncing_horizon_ || index < 0) return;
+                emit horizon_requested(horizon_combo_->itemText(index));
+            });
+    layout->addWidget(horizon_combo_);
+
     layout->addStretch();
 
     coord_label_ = new QLabel(QString(), this);
@@ -138,6 +162,31 @@ void StatusBar::update_context(const QString& coords, const QString& horizon,
     }
     coord_label_->setText(parts.join(QStringLiteral("  ·  ")));
     coord_label_->show();
+}
+
+void StatusBar::set_horizon_state(const QString& horizon,
+                                  const std::vector<QString>& options) {
+    syncing_horizon_ = true;
+    QStringList choices;
+    for (const QString& option : options) {
+        if (!choices.contains(option)) choices.push_back(option);
+    }
+    const QString target = horizon.trimmed();
+    if (!target.isEmpty() && !choices.contains(target)) {
+        // The authority's value always survives — an unknown horizon is
+        // inserted, never dropped (MappingStageBar parity).
+        choices.push_front(target);
+    }
+    horizon_combo_->clear();
+    for (const QString& choice : choices) horizon_combo_->addItem(choice);
+    const int index = target.isEmpty() ? -1 : horizon_combo_->findText(target);
+    horizon_combo_->setCurrentIndex(index);
+    syncing_horizon_ = false;
+}
+
+QString StatusBar::current_horizon() const {
+    return horizon_combo_ != nullptr ? horizon_combo_->currentText().trimmed()
+                                     : QString();
 }
 
 }  // namespace pwb::ui_shell

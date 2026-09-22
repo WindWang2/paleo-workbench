@@ -10,7 +10,9 @@ add_library(pwb_workflow_interpretation STATIC
     src/compilation.cpp
     src/constraint_capabilities.cpp
     src/constraint_product.cpp
+    src/dependencies.cpp
     src/factor_product.cpp
+    src/fault_lifecycle.cpp
     src/integrated_interpretation.cpp
     src/revision.cpp
     src/summaries.cpp

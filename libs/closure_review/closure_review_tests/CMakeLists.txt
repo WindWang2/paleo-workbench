@@ -24,3 +24,17 @@ target_include_directories(closure_review.provenance_sink PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME closure_review.provenance_sink COMMAND closure_review.provenance_sink)
 set_tests_properties(closure_review.provenance_sink PROPERTIES TIMEOUT 60)
+
+# M5 — 问题级人工复核状态机: vocabulary, mandatory-note validation,
+# original-verdict preservation, record carry-over across the QC upsert,
+# and input-fingerprint staleness.
+add_executable(closure_review.review_disposition review_disposition_test.cpp)
+target_compile_features(closure_review.review_disposition PRIVATE cxx_std_20)
+target_link_libraries(closure_review.review_disposition PRIVATE
+    Pwb::ClosureReview Pwb::UiReview Pwb::Project Pwb::Domain
+    Pwb::UiDataCore Pwb::MappingKernel)
+target_include_directories(closure_review.review_disposition PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME closure_review.review_disposition
+         COMMAND closure_review.review_disposition)
+set_tests_properties(closure_review.review_disposition PROPERTIES TIMEOUT 120)

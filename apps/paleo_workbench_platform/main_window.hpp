@@ -106,6 +106,9 @@ class JobCenter;
 namespace pwb::seismic_viewer {
 class SeismicSliceWidget;
 }
+namespace pwb::viz {
+class ISeismicVolume;
+}
 namespace pwb::ui_stageflow::qt {
 class StageFlowController;
 }
@@ -131,7 +134,6 @@ class FactorStatsDock;
 class VizBCrossWellDock;
 #endif
 // END VIZ-B
-
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -278,6 +280,15 @@ public:
     // Displays one PWBVOL1 catalog version in the seismic dock. Returns ""
     // on success.
     QString openVolumeVersion(const std::string& version_id);
+    // M4: ribbon "选择地震" entry — the same 打开体版本 dialog the 地震
+    // menu carries (no parallel dialog).
+    void openVolumeDialogForCommands() { openVolumeDialog(); }
+    // M3 (P0-1/P0-4): mirrors one opened volume into the workspace
+    // comparison panes (ws1 bottom two-pane + validation page) — a second
+    // VIEW of the same shared volume, never a second loader.
+    void routeVolumeToWorkspacePanes(
+        const std::shared_ptr<pwb::viz::ISeismicVolume>& volume,
+        const std::string& version_id);
 #endif
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     // Submits one attribute run over a PWBVOL1 version into the real B
@@ -324,6 +335,11 @@ public:
     pwb::ui::ConstraintPanel* constraintPanel() const {
         return constraint_dock_;
     }
+#ifdef PWB_WITH_VIZ_B
+    // M3 (P0-2): the cross-well section content embeds into the ws2 bottom
+    // (the dock chrome stays as a hidden fallback host).
+    VizBCrossWellDock* vizBCrossWellDock() const { return viz_b_dock_; }
+#endif
     // Layout persistence (menu actions call the same methods).
     void saveLayoutState();
     void resetLayoutState();
@@ -394,6 +410,9 @@ private:
     // W5/UI-17 — AppShell signal wiring (project actions, theme/density
     // requests, status messages) onto the window-level handlers.
     void wire_app_shell();
+    // M4 (UI-18) — the full ribbon file menu (MRU included) and the
+    // governed-QAction bindings for the 综合编图 band.
+    void wire_ribbon_commands();
 #endif
 
     // CONV-PS platform services: settings/theme/recent/diagnostics wiring
@@ -487,6 +506,14 @@ private:
     // returned pointer must stay valid for the duration of the call only;
     // GUI-thread only).
     pwb::ui_shell::CommandContext palette_context_;
+    // M4 (UI-18) — the ribbon command ids this window registered into the
+    // process-global registry (unregistered in the destructor, the
+    // stage_flow_command_ids_ precedent — a closed window must not leave
+    // dangling closures for the next window's palette/ribbon).
+    std::vector<std::string> ribbon_command_ids_;
+    // M4 — the ribbon file button's 最近工程 submenu (same MRU data source
+    // as the native file menu; filled by refreshRecentProjects).
+    QMenu* ribbon_recent_menu_ = nullptr;
 #endif
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;

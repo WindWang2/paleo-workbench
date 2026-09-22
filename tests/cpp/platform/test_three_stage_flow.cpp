@@ -1,10 +1,14 @@
-// platform.three_stage_flow — V14-THREE-STAGE-UX wiring battery: the stage
-// bar mounts on the app-bar row, the production command set populates the
-// (previously empty) palette registry, stage switches drive the per-stage
-// layout profiles without rebuilding the map canvas, user preferences
-// round-trip, and the mapping stage restores from the project document.
-// A second window lifecycle exercises idempotent re-registration.
+// platform.three_stage_flow — V14-THREE-STAGE-UX wiring battery, M2-updated
+// (ribbon five-workspaces): the ribbon chrome replaces the retired
+// MappingStageBar (①②③ segments → ribbon tabs), the production command set
+// populates the (previously empty) palette registry (nav.workspace.* now),
+// stage switches drive the per-stage layout profiles without rebuilding
+// the map canvas, stage.goto switches stage AND workspace (D1), entering
+// 数据管理/验证 never rewrites the stage, user preferences round-trip, and
+// the mapping stage restores from the project document. A second window
+// lifecycle exercises idempotent re-registration.
 
+#include <QComboBox>
 #include <QDockWidget>
 #include <QListWidget>
 #include <QString>
@@ -20,9 +24,12 @@
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/command_registry.hpp>
 #include <pwb/ui_shell/navigation.hpp>
+#include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
+#include <pwb/ui_shell/status_bar.hpp>
 #include <pwb/ui_stageflow/qt/stage_flow_controller.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
+#include "validation_workspace_page.hpp"
 #include "app_context.hpp"
 #include "app_shell.hpp"
 #include "main_window.hpp"
@@ -48,24 +55,36 @@ void check_stage_flow_installed(MainWindow& window) {
     AppShell* shell = window.appShell();
     PWB_CHECK(shell != nullptr);
     PWB_CHECK(shell->workstation() != nullptr);
-    // The orphan stage bar is mounted on the app-bar toolbar row.
-    PWB_CHECK(shell->workstation()->top_bar_mounted());
+    // M2 (D1): the ribbon chrome is the stage switch — the MappingStageBar
+    // retires (no top-bar mount; the bar widget stays an unmounted orphan
+    // owned by the composite document).
+    PWB_CHECK(shell->ribbon() != nullptr);
+    PWB_CHECK(!shell->workstation()->top_bar_mounted());
     PWB_CHECK(shell->composite()->stage_bar != nullptr);
-    PWB_CHECK(shell->composite()->stage_bar->parentWidget() != nullptr);
-    // Not mountable twice (identity surface, one-shot).
-    PWB_CHECK(!shell->workstation()->mount_top_bar(
-        shell->composite()->stage_bar));
+    PWB_CHECK(shell->composite()->stage_bar->parentWidget() == nullptr);
+    // The horizon selector migrated to the AppShell StatusBar.
+    PWB_CHECK(shell->status_bar()->findChild<QComboBox*>(
+                  "StatusHorizonCombo") != nullptr);
+    // M3 (P0-4): the validation workspace page is the real composition
+    // (read-only compare canvas + issue table + review hub), not a
+    // placeholder.
+    PWB_CHECK(shell->validation_page() != nullptr);
+    PWB_CHECK(shell->validation_page()->map_canvas() != nullptr);
+    PWB_CHECK(shell->validation_page()->issue_table() != nullptr);
+    PWB_CHECK(shell->validation_page()->qc_hub() != nullptr);
 }
 
 void check_command_registry(MainWindow& window) {
     auto& registry = pwb::ui_shell::command_registry();
     for (const char* id :
          {"stage.goto.prediction", "stage.goto.constraints",
-          "stage.goto.compilation", "nav.hub.mapping", "panel.toggle.tasks",
+          "stage.goto.compilation", "nav.workspace.map", "panel.toggle.tasks",
           "stage.reset_layout"}) {
         PWB_CHECK_MSG(registry.get(id) != nullptr,
                       std::string("command missing: ") + id);
     }
+    // M2: the retired nav.hub.* ids are gone (workspace axis replaces them).
+    PWB_CHECK(registry.get("nav.hub.mapping") == nullptr);
     // Palette find() surfaces the stage commands (subsequence match).
     const auto hits = registry.find("阶段", 50, nullptr);
     bool found_prediction = false;
@@ -73,6 +92,39 @@ void check_command_registry(MainWindow& window) {
         if (spec->id == "stage.goto.prediction") found_prediction = true;
     }
     PWB_CHECK_MSG(found_prediction, "palette find(阶段) misses stage command");
+
+    // M4: the ribbon band commands registered — the five per-workspace
+    // primary actions exist (uniqueness of primaries is the ui_ribbon
+    // core's table-integrity contract).
+    for (const char* id : {"data.import", "predict.run", "factor.compute",
+                           "map.export", "verify.run"}) {
+        PWB_CHECK_MSG(registry.get(id) != nullptr,
+                      std::string("ribbon primary missing: ") + id);
+    }
+    // D8 honest gating: without a project the project-gated primaries are
+    // disabled WITH a concrete reason (never a silent grey-out).
+    pwb::ui_shell::CommandContext no_project;
+    no_project.mapping_stage = "facies_calibration";
+    const auto data_gate =
+        registry.evaluate("data.import", &no_project);
+    PWB_CHECK(!data_gate.enabled);
+    PWB_CHECK(!data_gate.reason.empty());
+    const auto run_gate =
+        registry.evaluate("predict.run", &no_project);
+    PWB_CHECK(!run_gate.enabled);
+    PWB_CHECK(!run_gate.reason.empty());
+    // M5-2 lit the layout commands: without a project they disable with
+    // the project gate reason (the compose panel is the real backend).
+    PWB_CHECK(registry.get("map.template") != nullptr);
+    const auto layout_gate =
+        registry.evaluate("map.template", &no_project);
+    PWB_CHECK(!layout_gate.enabled);
+    PWB_CHECK(!layout_gate.reason.empty());
+    // The run-guard: nothing running → the cancel entry explains itself.
+    const auto cancel_gate =
+        registry.evaluate("predict.cancel", &no_project);
+    PWB_CHECK(!cancel_gate.enabled);
+    PWB_CHECK(!cancel_gate.reason.empty());
 
     // Stage gating: evaluate under an explicit context (fail-closed
     // vocabulary — an unknown stage value hides stage-scoped commands).
@@ -90,10 +142,23 @@ void check_command_registry(MainWindow& window) {
 void check_stage_switch_and_layout(MainWindow& window) {
     AppShell* shell = window.appShell();
     auto* flow = window.stageFlow();
-    QgsMapCanvas* canvas_before = window.findChild<QgsMapCanvas*>();
+    // Deterministic starting point: the stage→bottom flip rides
+    // sync_workspace_for_stage, which only acts while the science host
+    // page is current — navigate explicitly instead of relying on the
+    // persisted workspace from QSettings.
+    shell->navigate_workspace(2);
+    QgsMapCanvas* canvas_before =
+        window.findChild<QgsMapCanvas*>(QStringLiteral("session-map-canvas"));
     PWB_CHECK(canvas_before != nullptr);
 
-    // Stage 2: factor surfaces appear.
+    // M3 science-host composition: the per-stage bottom stack follows the
+    // stage authority (65:35 splitter, user-draggable sizes).
+    PWB_CHECK(shell->science_splitter() != nullptr);
+    PWB_CHECK(shell->science_bottom() != nullptr);
+    PWB_CHECK(shell->science_bottom()->count() ==
+              pwb::app::kStageBottomCount);
+
+    // Stage 2: factor surfaces appear; bottom flips to the constraint tabs.
     flow->request_stage("constraint_factor");
     PWB_CHECK(flow->snapshot().stage_value == "constraint_factor");
     PWB_CHECK(flow->snapshot().stage_label.find("约束") != std::string::npos);
@@ -101,15 +166,25 @@ void check_stage_switch_and_layout(MainWindow& window) {
     PWB_CHECK(input_dock != nullptr);
     PWB_CHECK_MSG(input_dock->isVisible(),
                   "stage2 profile did not show 输入与结果 dock");
+    PWB_CHECK_MSG(shell->science_bottom()->currentIndex() == 1,
+                  "stage2 did not flip the bottom to the constraint tabs");
+    PWB_CHECK(shell->stage_bottom_tabs() != nullptr);
+    // The legacy well/seismic placeholder docks stay managed-but-hidden
+    // (the real two-pane lives in the science-host bottom).
     auto* seismic_dock = shell->workstation()->dock("seismic");
     if (seismic_dock != nullptr) {
         PWB_CHECK(!seismic_dock->isVisible());
     }
 
-    // Stage 3: composer visible, factor surfaces hidden.
+    // Stage 3: composer visible, factor surfaces hidden; the factor
+    // reference strip hosts in the bottom.
     flow->request_stage("integrated_compilation");
     PWB_CHECK(flow->snapshot().stage_value == "integrated_compilation");
     PWB_CHECK(!input_dock->isVisible());
+    PWB_CHECK_MSG(shell->science_bottom()->currentIndex() == 2,
+                  "stage3 did not flip the bottom to the reference strip");
+    PWB_CHECK(shell->science_bottom()->widget(2)->findChild<QWidget*>(
+                  "FactorReferenceStrip") != nullptr);
     if (auto* page = shell->mapping_page()) {
         if (page->dock_manager() != nullptr) {
             PWB_CHECK(page->dock_manager()->is_panel_visible("composer"));
@@ -118,22 +193,75 @@ void check_stage_switch_and_layout(MainWindow& window) {
         }
     }
 
-    // Stage 1: prediction context — seismic/well surfaces back.
+    // Stage 1: prediction context — the bottom two-pane is back. M5-3: it
+    // lives as the 井震两联 tab of the ws1 bottom tab widget.
     flow->request_stage("facies_calibration");
-    if (seismic_dock != nullptr) {
-        PWB_CHECK(seismic_dock->isVisible());
-    }
+    PWB_CHECK_MSG(shell->science_bottom()->currentIndex() == 0,
+                  "stage1 did not flip the bottom to the prediction pane");
+    PWB_CHECK(shell->stage1_bottom_tabs() != nullptr);
+    PWB_CHECK(shell->stage1_bottom_tabs()
+                  ->findChild<QWidget*>("PredictionBottomSplit") != nullptr);
     PWB_CHECK(!input_dock->isVisible());
 
     // Structural performance assertion: 3 stage switches did not rebuild
     // the QGIS canvas (visibility-only application; the stages.py
     // contract).
-    QgsMapCanvas* canvas_after = window.findChild<QgsMapCanvas*>();
+    QgsMapCanvas* canvas_after =
+        window.findChild<QgsMapCanvas*>(QStringLiteral("session-map-canvas"));
     PWB_CHECK(canvas_after == canvas_before);
 
     // Session authority: the stage switch reached ProjectSession.
     PWB_CHECK(window.session()->mapping_stage().has_value());
     PWB_CHECK(*window.session()->mapping_stage() == "facies_calibration");
+}
+
+void check_workspace_stage_coupling(MainWindow& window) {
+    // M2 (D1): workspaces 1/2/3 ARE the stages; 数据管理/验证 never rewrite
+    // the stage authority; stage.goto lands on the matching workspace.
+    AppShell* shell = window.appShell();
+    auto& registry = pwb::ui_shell::command_registry();
+    window.stageFlow()->request_stage("integrated_compilation");
+
+    // 数据管理 / 验证: page switches, stage untouched.
+    shell->navigate_workspace(0);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageData);
+    PWB_CHECK(window.session()->mapping_stage().has_value());
+    PWB_CHECK(*window.session()->mapping_stage() == "integrated_compilation");
+    shell->navigate_workspace(4);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageValidation);
+    PWB_CHECK(*window.session()->mapping_stage() == "integrated_compilation");
+
+    // Workspace 1 writes the stage authority (ws → stage direction).
+    shell->navigate_workspace(1);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageScience);
+    PWB_CHECK(*window.session()->mapping_stage() == "facies_calibration");
+    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+
+    // Reverse sync (stage → ribbon): a stage write from another surface
+    // mirrors the ribbon tab while the science host page is current —
+    // and the blocked signal means no workspaceActivated loop fires.
+    window.stageFlow()->request_stage("constraint_factor");
+    PWB_CHECK(shell->ribbon()->current_workspace() == 2);
+
+    // stage.goto command: stage AND workspace both move (D1).
+    const auto* goto_cmd = registry.get("stage.goto.compilation");
+    PWB_CHECK(goto_cmd != nullptr && goto_cmd->callback != nullptr);
+    goto_cmd->callback();
+    PWB_CHECK(window.stageFlow()->snapshot().stage_value ==
+              "integrated_compilation");
+    PWB_CHECK(shell->ribbon()->current_workspace() == 3);
+    PWB_CHECK(*window.session()->mapping_stage() == "integrated_compilation");
+
+    // nav.workspace.* command: workspace moves without a stage write for
+    // the non-scientific targets.
+    const auto* nav_cmd = registry.get("nav.workspace.data");
+    PWB_CHECK(nav_cmd != nullptr && nav_cmd->callback != nullptr);
+    nav_cmd->callback();
+    PWB_CHECK(shell->ribbon()->current_workspace() == 0);
+    PWB_CHECK(*window.session()->mapping_stage() == "integrated_compilation");
 }
 
 void check_user_preference_override(MainWindow& window) {
@@ -194,6 +322,7 @@ int main(int argc, char** argv) {
         check_stage_flow_installed(window);
         check_command_registry(window);
         check_stage_switch_and_layout(window);
+        check_workspace_stage_coupling(window);
         check_user_preference_override(window);
         check_task_center_provider(window);
         check_palette_popup(window);

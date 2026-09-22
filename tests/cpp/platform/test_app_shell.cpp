@@ -1,18 +1,26 @@
-// platform.app_shell — W5/UI-17 wiring battery: MainWindow's central
-// widget is the AppShell composition root, the hub page stack carries
-// all five hubs, navigate_to switches hub + submodule and raises the
-// 功能页 dock, the palette pops/dismisses, and a second window lifecycle
-// exercises the global shortcut-registry re-registration path.
+// platform.app_shell — W5/UI-17 wiring battery, M2-updated (ribbon
+// five-workspaces): MainWindow's central widget is the AppShell composition
+// root, the ribbon chrome sits above the workstation frame, the central
+// workspace stack carries the three host pages (数据管理 / 科学宿主 / 验证),
+// navigate_workspace is the navigation authority, navigate_to survives as
+// the legacy routing seam (hub 0 → workspace 0, 编图 canvas → workspace 3,
+// review → workspace 4, well/seismic/viz stay on the 功能页 dock), the
+// palette pops/dismisses, and a second window lifecycle exercises the
+// global shortcut-registry re-registration path.
 
 #include <QDockWidget>
+#include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QString>
+#include <QToolButton>
 #include <qgsapplication.h>
 #include <qgsmapcanvas.h>
 
 #include <pwb/application/project_session.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 #include <pwb/ui_pages_data/qt/hub_page.hpp>
+#include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/command_registry.hpp>
@@ -20,6 +28,7 @@
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
 #include "app_shell.hpp"
+#include "validation_workspace_page.hpp"
 #include "main_window.hpp"
 
 #include "test_framework.hpp"
@@ -39,9 +48,28 @@ void check_shell(MainWindow& window) {
     PWB_CHECK(shell->composite() != nullptr);
     PWB_CHECK(shell->status_bar() != nullptr);
     PWB_CHECK(shell->page_stack() != nullptr);
-    PWB_CHECK(shell->page_stack()->count() == pwb::ui_shell::kHubCount);
+    // M2: the ribbon chrome + the three-page workspace host.
+    PWB_CHECK(shell->ribbon() != nullptr);
+    PWB_CHECK(shell->workspace_host() != nullptr);
+    PWB_CHECK(shell->workspace_host()->count() == 3);
+    // M3: the science host is the 65:35 splitter with the per-stage bottom
+    // stack; the validation page is the real composition page (P0-4).
+    PWB_CHECK(shell->science_splitter() != nullptr);
+    PWB_CHECK(shell->science_bottom() != nullptr);
+    PWB_CHECK(shell->science_bottom()->count() ==
+              pwb::app::kStageBottomCount);
+    PWB_CHECK(shell->validation_page() != nullptr);
+    PWB_CHECK(shell->validation_page()->findChild<QWidget*>(
+                  "ValidationRunQc") != nullptr);
+    // M5-3: hub 轴已拆 —— page_stack_ 只剩「编图工具」dock 的单页内容
+    // （mapping_page_）；kPageIndex*/hub_names 保留为路由词汇与
+    // deferred-binding flush 键（ui_shell oracle 冻结数据不动）。
+    PWB_CHECK(shell->page_stack() != nullptr);
+    PWB_CHECK(shell->page_stack()->count() == 1);
 
-    // The session canvas is injected into the composite document.
+    // The session canvas is injected into the composite document (the
+    // science host page — the canvas-injection contract survives the
+    // central-widget swap).
     PWB_CHECK(window.findChild<QgsMapCanvas*>() != nullptr);
 
     // Composite sub-panels dock through the workstation frame.
@@ -51,6 +79,97 @@ void check_shell(MainWindow& window) {
         PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
                       std::string("dock missing: ") + dock_id);
     }
+}
+
+void check_workspace_navigation(MainWindow& window) {
+    AppShell* shell = window.appShell();
+
+    // -- workspace axis: ribbon tab mirror + page switch -------------------
+    shell->navigate_workspace(0);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageData);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 0);
+
+    shell->navigate_workspace(1);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageScience);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+    // M3: entering ws1 flips the science-host bottom to the prediction
+    // two-pane composition.
+    PWB_CHECK(shell->science_bottom()->currentIndex() == 0);
+
+    // Workspaces 1/2/3 share the ONE science host page.
+    shell->navigate_workspace(3);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageScience);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 3);
+    PWB_CHECK(shell->science_bottom()->currentIndex() == 2);
+
+    shell->navigate_workspace(4);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageValidation);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 4);
+
+    // Out-of-range navigation is ignored (Python guard parity).
+    shell->navigate_workspace(99);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageValidation);
+
+    // -- legacy routing seam (M5-3: hub 轴已解散，纯工作区路由) -------------
+    QDockWidget* hub_dock = shell->workstation()->dock("hub");
+    PWB_CHECK(hub_dock != nullptr);  // 现仅为「编图工具」dock
+
+    // hub 0 → workspace 0 (+ in-page submodule switch).
+    shell->navigate_to(pwb::ui_shell::kPageIndexData,
+                       QStringLiteral("management"));
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageData);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 0);
+
+    // 编图 canvas → workspace 3 (science host page) + 编图工具 dock raise。
+    shell->navigate_to(pwb::ui_shell::kPageIndexMapping,
+                       QStringLiteral("canvas"));
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageScience);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 3);
+
+    // 编图 review → workspace 4 (验证).
+    shell->navigate_to(pwb::ui_shell::kPageIndexMapping,
+                       QStringLiteral("review"));
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageValidation);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 4);
+
+    // M5-3 migrated homes: sequence → ws2 层序格架 tab；well_log → ws1；
+    // seismic → ws1 地震预测 tab；geomodel → ws4 3D 对照 tab；viz → ws0。
+    shell->navigate_to(pwb::ui_shell::kPageIndexWell,
+                       QStringLiteral("sequence"));
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageScience);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 2);
+    PWB_CHECK(shell->stage_bottom_tabs()->tabText(
+                  shell->stage_bottom_tabs()->currentIndex()) ==
+              QStringLiteral("层序格架"));
+
+    shell->navigate_to(pwb::ui_shell::kPageIndexWell);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+
+    shell->navigate_to(pwb::ui_shell::kPageIndexSeismic);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+    PWB_CHECK(shell->stage1_bottom_tabs()->tabText(
+                  shell->stage1_bottom_tabs()->currentIndex()) ==
+              QStringLiteral("地震预测"));
+
+    shell->navigate_to(pwb::ui_shell::kPageIndexSeismic,
+                       QStringLiteral("geomodel"));
+    PWB_CHECK(shell->ribbon()->current_workspace() == 4);
+
+    shell->navigate_to(pwb::ui_shell::kPageIndexVisualization);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 0);
+
+    // Out-of-range legacy navigation is ignored.
+    shell->navigate_to(99);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 0);
 }
 
 }  // namespace
@@ -65,32 +184,59 @@ int main(int argc, char** argv) {
         check_shell(window);
         AppShell* shell = window.appShell();
 
-        // -- navigation: hub switch + submodule + dock title ---------------
-        QDockWidget* hub_dock = shell->workstation()->dock("hub");
-        PWB_CHECK(hub_dock != nullptr);
+        check_workspace_navigation(window);
 
-        shell->navigate_to(pwb::ui_shell::kPageIndexData);
-        PWB_CHECK(shell->page_stack()->currentIndex()
-                  == pwb::ui_shell::kPageIndexData);
-        PWB_CHECK(hub_dock->isVisible());
-        PWB_CHECK(!hub_dock->windowTitle().isEmpty());
+        // -- M4: ribbon file menu + governed bindings -----------------------
+        {
+            auto* ribbon = shell->ribbon();
+            PWB_CHECK(ribbon != nullptr);
+            // The file button carries the FULL menu (M4 convergence):
+            // entries + a 最近工程 submenu (MRU rides the settings store).
+            auto* file_button =
+                ribbon->findChild<QToolButton*>("ribbonFileButton");
+            PWB_CHECK(file_button != nullptr);
+            QMenu* file_menu = file_button->menu();
+            PWB_CHECK(file_menu != nullptr);
+            int entries = 0;
+            bool has_mru = false;
+            for (QAction* action : file_menu->actions()) {
+                if (action->isSeparator()) continue;
+                ++entries;
+                if (action->menu() != nullptr) has_mru = true;
+            }
+            PWB_CHECK_MSG(entries >= 5,
+                          "ribbon file menu not filled (M4)");
+            PWB_CHECK_MSG(has_mru, "ribbon file menu misses the MRU");
+            // The ws3 band binds the SAME governed QAction objects the
+            // menus consume (D4) — bound buttons carry them.
+            PWB_CHECK(window.governedAction(QStringLiteral("map_export")) !=
+                      nullptr);
+        }
 
-        shell->navigate_to(pwb::ui_shell::kPageIndexWell,
-                           QStringLiteral("sequence"));
-        PWB_CHECK(shell->page_stack()->currentIndex()
-                  == pwb::ui_shell::kPageIndexWell);
-        auto* well_hub = qobject_cast<pwb::ui_pages_data::qt::HubPage*>(
-            shell->page_stack()->currentWidget());
-        PWB_CHECK(well_hub != nullptr);
-        PWB_CHECK(well_hub->current_key() == "sequence");
-        PWB_CHECK(hub_dock->windowTitle() == QString::fromStdString(
-            pwb::ui_shell::submodule_title(pwb::ui_shell::kPageIndexWell,
-                                           "sequence")));
-
-        // Out-of-range navigation is ignored (Python guard parity).
-        shell->navigate_to(99);
-        PWB_CHECK(shell->page_stack()->currentIndex()
-                  == pwb::ui_shell::kPageIndexWell);
+        // -- M5: the validation commands are real (M4's "M5 接入" -------
+        // placeholders lit up); without a project/data they disable with
+        // honest reasons.
+        {
+            auto& registry = pwb::ui_shell::command_registry();
+            for (const char* id :
+                 {"verify.select_object", "verify.select_baseline",
+                  "verify.link", "verify.side_by_side", "verify.overlay",
+                  "verify.difference", "verify.record",
+                  "verify.save_record"}) {
+                PWB_CHECK_MSG(registry.get(id) != nullptr,
+                              std::string("M5 command missing: ") + id);
+            }
+            pwb::ui_shell::CommandContext ctx;
+            ctx.mapping_stage = "integrated_compilation";
+            const auto data_gate =
+                registry.evaluate("verify.side_by_side", &ctx);
+            PWB_CHECK(!data_gate.enabled);
+            PWB_CHECK(!data_gate.reason.empty());
+            // F:75: the link gate names the m/ms coupling rule.
+            const auto link_gate = registry.evaluate("verify.link", &ctx);
+            PWB_CHECK(!link_gate.enabled);
+            PWB_CHECK(link_gate.reason.find("时深") != std::string::npos);
+        }
 
         // -- palette popup/dismiss (offscreen-safe) ------------------------
         shell->command_palette()->popup();

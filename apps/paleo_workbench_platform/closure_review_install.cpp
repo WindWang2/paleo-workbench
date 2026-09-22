@@ -15,9 +15,11 @@
 #include <memory>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 #include "app_context.hpp"
 #include "app_shell.hpp"
+#include "validation_workspace_page.hpp"
 
 // The backend lives in pwb::closure_review; inside pwb::app::closure_review
 // the unqualified name would resolve to this (empty) namespace.
@@ -141,6 +143,16 @@ public:
         ui_review::IReviewActions* exposed = actions_.get();
         widget->set_actions_provider(
             [exposed]() -> ui_review::IReviewActions* { return exposed; });
+        // M3 (P0-4): the 验证 workspace page consumes the SAME provider —
+        // one review authority for both surfaces (run/locate/export stay
+        // in ProjectReviewActions).
+        if (auto* validation = shell_->validation_page();
+            validation != nullptr) {
+            validation->set_actions_provider(
+                [exposed]() -> ui_review::IReviewActions* {
+                    return exposed;
+                });
+        }
 #endif
         refresh();
     }
@@ -160,15 +172,32 @@ public:
             widget->set_project_bound(true);
             const domain::Json& root =
                 context_->projectStore()->document().root();
-            widget->update_state(clr::active_quality_reports_of(root),
-                                 clr::paleomap_documents_of(root),
+            const domain::Json reports =
+                clr::active_quality_reports_of(root);
+            widget->update_state(reports, clr::paleomap_documents_of(root),
                                  export_artifacts_section(root));
+            // M3: the 验证 workspace page renders the same reports in its
+            // issue table + review hub (one report payload, two views).
+            if (auto* validation = shell_->validation_page();
+                validation != nullptr) {
+                std::vector<domain::Json> report_list;
+                if (reports.is_array()) {
+                    for (const auto& entry : reports) {
+                        if (entry.is_object()) report_list.push_back(entry);
+                    }
+                }
+                validation->update_reports(report_list);
+            }
             return;
         }
 #endif
         widget->set_project_bound(false);
         widget->update_state(domain::Json::array(), domain::Json::array(),
                              domain::Json::array());
+        if (auto* validation = shell_->validation_page();
+            validation != nullptr) {
+            validation->update_reports({});
+        }
     }
 
 private:

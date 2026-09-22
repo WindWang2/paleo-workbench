@@ -9,9 +9,13 @@
 #include <QMainWindow>
 
 #include <QBuffer>
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QIODevice>
+#include <QPointer>
+#include <QSemaphore>
 #include <QSize>
+#include <QThread>
 
 #include "app_shell.hpp"
 
@@ -28,6 +32,7 @@
 #include <any>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <limits>
 #include <map>
@@ -37,6 +42,15 @@
 #include <utility>
 
 #include "closure_mapping_document.hpp"
+
+// cpp-close-03: the canonical SQLite-backed workflow catalog rail —
+// preferred over the JSON-rail PersistentRuntimeCatalog whenever the
+// closure_workflow slice is linked (PWB_WITH_CLOSURE_WORKFLOW).
+#if defined(PWB_WITH_CLOSURE_WORKFLOW) && \
+    __has_include(<pwb/closure_workflow/catalog_closure_adapter.hpp>)
+#include <pwb/closure_workflow/catalog_closure_adapter.hpp>
+#define PWB_MAPPING_SQLITE_CATALOG 1
+#endif
 
 #if PWB_WITH_FACTOR_KERNEL
 #include "factor_prepare_production.hpp"
@@ -55,6 +69,10 @@
 #include <pwb/mapping_document/document_io.hpp>
 #include <pwb/project/manager.hpp>
 #include <pwb/ui_map/display_map_canvas.hpp>
+#ifdef PWB_WITH_CONV_29
+#include <pwb/qgis/composition_layout_service.hpp>
+#include <pwb/qgis/map_session.hpp>
+#endif
 #include <pwb/ui_pages_data/qt/preparation_page.hpp>
 #include <pwb/ui_pages_mapedit/boundary_panel.hpp>
 #include <pwb/ui_pages_mapedit/factor_preview_grid.hpp>
@@ -546,6 +564,21 @@ bool grid_from_task_parameters(const Json& task, std::vector<double>& grid_x,
 
 }  // namespace
 
+// BEGIN V14-COMPILATION-PUBLISH — lifecycle-safe frame cache entry.
+// A single grabbed canvas frame, keyed by a QPointer: the guard auto-nulls
+// when the widget is destroyed, so a recycled address can never produce a
+// stale hit (the limitation the function-local static map carried — raw
+// pointer keys, no cleanup). One entry per ClosureContext is enough: the
+// composition seams only ever read the mapping page's canvas, and a
+// different canvas simply re-keys the slot.
+struct FrameCacheEntry {
+    QPointer<const QWidget> canvas;
+    std::chrono::steady_clock::time_point at{};
+    QSize size;
+    std::string png_b64;
+};
+// END V14-COMPILATION-PUBLISH
+
 // Per-window install state — lives as a QObject child of the window so
 // notify_project_changed / save_documents can recover it by property.
 class ClosureContext : public QObject {
@@ -558,10 +591,14 @@ public:
 #if PWB_WITH_FACTOR_KERNEL
     // V14-FACTOR: process-live grid cache + the persisted factor_map
     // provenance rail (one workflow seam contract, GUI-thread-confined like
-    // every other catalog surface in this install).
+    // every other catalog surface in this install). The catalog is the
+    // SHARED rail: the workflow binding may install the canonical SQLite
+    // adapter (closure_workflow::CatalogClosureAdapter) here so factor
+    // prep, map compile and product assembly write one provenance store;
+    // the JSON-backed PersistentRuntimeCatalog remains the fallback when
+    // the deep store refuses to open (cpp-close-03 contract).
     std::shared_ptr<pwb::factor_production::LiveFactorGridStore> factor_grids;
-    std::unique_ptr<pwb::factor_production::PersistentRuntimeCatalog>
-        factor_catalog;
+    std::shared_ptr<pwb::workflow_runtime::CatalogRepository> factor_catalog;
     // Project the live grid store currently serves (same-project reopen
     // keeps its entries; a switch clears them — #848).
     std::filesystem::path factor_grids_project_;
@@ -571,6 +608,17 @@ public:
     // Element ids the user explicitly bound to the live map document
     // (set_main_map); the preview seam honours them.
     std::set<std::string> bound_map_elements;
+    // The frame cache is per-window and dies with the context; project
+    // switches clear it explicitly (notify_project_changed).
+    FrameCacheEntry frame_cache;
+    // Composition export control: a fresh CancellationToken is installed
+    // per run (copies share the stop state — cancel_composition_export
+    // drives whatever run is in flight, from any thread). export_progress
+    // is the host-installed coarse sink; export_host owns the async lane
+    // (created lazily by export_composition_async).
+    pwb::job::CancellationToken export_token;
+    std::function<void(int)> export_progress;
+    WorkerHost* export_host = nullptr;
     // END V14-COMPILATION-PUBLISH
 };
 
@@ -591,41 +639,380 @@ namespace {
 
 // A short-lived frame cache: composition interactions (element drags,
 // property edits) refresh the preview far more often than the canvas
-// content changes, so the grabbed frame is reused for 300ms. The cache is
-// keyed by the canvas widget and invalidated on size change; a canvas
-// repaint (pan/zoom) picks up within the TTL.
+// content changes, so the grabbed frame is reused for 300ms. The entry
+// lives on the per-window ClosureContext (not a function-local static) —
+// the QPointer key auto-nulls on widget destruction so a recycled address
+// can never hit a stale frame, and notify_project_changed clears it.
 constexpr auto kFrameCacheTtl = std::chrono::milliseconds(300);
 
-struct FrameCacheEntry {
-    std::chrono::steady_clock::time_point at{};
-    QSize size;
-    std::string png_b64;
-};
+// Marshals fn onto the GUI thread when the caller is off it (the async
+// export path's canvas seams) — queued delivery + a bounded wait so a
+// wedged/dying event loop degrades to "unbound" instead of deadlocking
+// the worker against a joining GUI thread. On the GUI thread this is a
+// direct call.
+template <typename Fn>
+auto on_gui_thread(Fn&& fn) -> decltype(fn()) {
+    using Ret = decltype(fn());
+    QCoreApplication* app = QCoreApplication::instance();
+    if (app == nullptr) return Ret{};
+    if (QThread::currentThread() == app->thread()) {
+        return fn();
+    }
+    struct Shared {
+        QSemaphore ready;
+        Ret out{};
+    };
+    auto shared = std::make_shared<Shared>();
+    const bool posted = QMetaObject::invokeMethod(
+        app, [shared, fn]() { shared->out = fn(); shared->ready.release(); },
+        Qt::QueuedConnection);
+    if (!posted || !shared->ready.tryAcquire(1, 2000)) return Ret{};
+    return shared->out;
+}
 
-std::string grab_canvas_frame_b64(const QWidget* canvas) {
-    if (canvas == nullptr) return "";
-    auto* mutable_canvas = const_cast<QWidget*>(canvas);
-    static std::map<const QWidget*, FrameCacheEntry> cache;
-    const QSize current = mutable_canvas->size();
-    FrameCacheEntry& entry = cache[mutable_canvas];
+// The canvas grab for map frames. Content source is the DisplayMapCanvas
+// child (the painted map surface — not the whole page with its rails);
+// the frame reports the extent actually on screen for parity assertions.
+// Must run on the GUI thread (QWidget::grab + snapshot reads); callers
+// route through on_gui_thread.
+std::string grab_canvas_frame_b64(const pwb::ui_map::DisplayMapCanvas* display,
+                                  FrameCacheEntry& entry) {
+    if (display == nullptr) return "";
+    auto* mutable_display = const_cast<pwb::ui_map::DisplayMapCanvas*>(display);
+    const QSize current = mutable_display->size();
     const auto now = std::chrono::steady_clock::now();
-    if (!entry.png_b64.empty() && entry.size == current &&
-        now - entry.at < kFrameCacheTtl) {
+    if (entry.canvas == display && !entry.png_b64.empty() &&
+        entry.size == current && now - entry.at < kFrameCacheTtl) {
         return entry.png_b64;
     }
-    const QPixmap pixmap = mutable_canvas->grab();
+    const QPixmap pixmap = mutable_display->grab();
     if (pixmap.isNull()) return "";
     QBuffer buffer;
     buffer.open(QIODevice::WriteOnly);
     if (!pixmap.toImage().save(&buffer, "PNG")) return "";
+    entry.canvas = display;
     entry.at = now;
     entry.size = current;
     entry.png_b64 = buffer.data().toBase64().toStdString();
     return entry.png_b64;
 }
 
-// Canvas layer snapshot → legend entries (the snapshot order IS the canvas
-// draw order — the host's canonical layer order, Prompt3's authority).
+// ---------------------------------------------------------------------------
+// Renderer-derived legend entries (renderers.py legend_items port).
+//
+// The Python composer's live-map branch resolves each visible layer through
+// DEFAULT_RENDERER_REGISTRY and asks the renderer for its items — so a
+// categorized layer yields one entry per class and a grid layer yields a
+// color-ramp gradient, not one flat entry per layer. The snapshot's dict
+// layers carry the same fields the registry reads (layer_type + the
+// VectorStyle dict keys), so this replays resolve()+legend_items() over
+// JSON. ComposerLegendEntry is the documented LegendItem subset (no
+// marker_symbol) — entries a seam cannot express keep their defaults.
+// ---------------------------------------------------------------------------
+
+const Json* field_or_null(const Json& obj, const char* key) {
+    if (!obj.is_object()) return nullptr;
+    const auto it = obj.find(key);
+    return it != obj.end() ? &*it : nullptr;
+}
+
+// Python truthiness: null/false/0/""/empty containers are all falsy.
+bool json_truthy(const Json& value) {
+    if (value.is_null()) return false;
+    if (value.is_boolean()) return value.get<bool>();
+    if (value.is_number()) return value.get<double>() != 0.0;
+    if (value.is_string()) return !value.get<std::string>().empty();
+    if (value.is_array() || value.is_object()) return !value.empty();
+    return false;
+}
+
+std::string json_str_value(const Json& value, const std::string& fallback) {
+    if (!json_truthy(value)) return fallback;
+    if (value.is_string()) return value.get<std::string>();
+    if (value.is_number_integer()) return std::to_string(value.get<long long>());
+    if (value.is_number()) return std::to_string(value.get<double>());
+    if (value.is_boolean()) return value.get<bool>() ? "True" : "False";
+    return fallback;
+}
+
+std::string json_str_field(const Json& obj, const char* key,
+                           const std::string& fallback) {
+    const Json* value = field_or_null(obj, key);
+    return value != nullptr ? json_str_value(*value, fallback) : fallback;
+}
+
+double json_double_field(const Json& obj, const char* key, double fallback) {
+    const Json* value = field_or_null(obj, key);
+    if (value == nullptr || !value->is_number()) return fallback;
+    const double parsed = value->get<double>();
+    return std::isfinite(parsed) ? parsed : fallback;
+}
+
+std::string lower_ascii(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+
+// "%.1f" — Python f"{v:.1f}" formatting for graduated/grid labels.
+std::string fmt_one_decimal(double value) {
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "%.1f", value);
+    return buffer;
+}
+
+// RendererRegistry.resolve parity: the dict-layer subset. Returns the
+// canonical renderer name (single|categorized|graduated|grid|contour|
+// well|annotation) — registry aliases are folded here (scalar_grid→grid,
+// well_point→well, label→annotation, polygon/vector→single,
+// facies→categorized).
+std::string resolve_renderer_name(const std::string& layer_type,
+                                  const Json& style) {
+    static const std::set<std::string> kSpecialized = {
+        "grid", "scalar_grid", "contour", "well_point", "well",
+        "annotation"};
+    static const std::map<std::string, std::string> kAliases = {
+        {"scalar_grid", "grid"}, {"well_point", "well"},
+        {"label", "annotation"}, {"polygon", "single"},
+        {"vector", "single"},   {"facies", "categorized"}};
+    const auto canonical = [&kAliases](const std::string& name) {
+        const auto it = kAliases.find(name);
+        return it != kAliases.end() ? it->second : name;
+    };
+    if (kSpecialized.count(layer_type) != 0) return canonical(layer_type);
+    const std::string style_renderer =
+        lower_ascii(json_str_field(style, "renderer", ""));
+    static const std::set<std::string> kStyleRenderers = {
+        "categorized", "graduated", "annotation", "label", "grid",
+        "scalar_grid", "contour", "well", "well_point", "polygon",
+        "facies", "vector"};
+    if (!style_renderer.empty() && style_renderer != "single" &&
+        kStyleRenderers.count(style_renderer) != 0) {
+        return canonical(style_renderer);
+    }
+    const Json* ranges = field_or_null(style, "ranges");
+    if (ranges != nullptr && json_truthy(*ranges)) return "graduated";
+    if (kStyleRenderers.count(layer_type) != 0 || layer_type == "single") {
+        return canonical(layer_type);
+    }
+    return "single";
+}
+
+// VectorStyle.from_dict defaults + the keys the legend items read.
+std::string style_fill(const Json& style) {
+    return json_str_field(style, "fill", "#6c8ebf");
+}
+std::string style_stroke(const Json& style) {
+    return json_str_field(style, "stroke", "#26364d");
+}
+double style_stroke_width(const Json& style) {
+    return json_double_field(style, "stroke_width", 1.0);
+}
+
+// (value, fill, label) — accepts both wire forms VectorStyle.from_dict
+// parses: a list of [value, fill, label] triples, or a {"value": color}
+// object (label "").
+void legend_categories(const Json& style,
+                       std::vector<std::array<std::string, 3>>& out) {
+    const Json* raw = field_or_null(style, "categories");
+    if (raw == nullptr) return;
+    if (raw->is_object()) {
+        for (auto it = raw->begin(); it != raw->end(); ++it) {
+            out.push_back({it.key(), json_str_value(*it, ""), ""});
+        }
+        return;
+    }
+    if (!raw->is_array()) return;
+    for (const Json& entry : *raw) {
+        if (!entry.is_array() || entry.size() < 2) continue;
+        out.push_back({json_str_value(entry[0], ""),
+                       json_str_value(entry[1], ""),
+                       entry.size() > 2 ? json_str_value(entry[2], "")
+                                        : ""});
+    }
+}
+
+// (lo, hi, fill, label) — list of quadruples or {min|lo, max|hi,
+// fill|color, label} objects (VectorStyle.from_dict parity).
+void legend_ranges(const Json& style,
+                   std::vector<std::tuple<double, double, std::string,
+                                          std::string>>& out) {
+    const Json* raw = field_or_null(style, "ranges");
+    if (raw == nullptr || !raw->is_array()) return;
+    for (const Json& entry : *raw) {
+        if (entry.is_array() && entry.size() >= 3) {
+            if (!entry[0].is_number() || !entry[1].is_number()) continue;
+            out.emplace_back(entry[0].get<double>(), entry[1].get<double>(),
+                             json_str_value(entry[2], ""),
+                             entry.size() > 3 ? json_str_value(entry[3], "")
+                                              : "");
+        } else if (entry.is_object()) {
+            const Json* lo = field_or_null(entry, "min");
+            if (lo == nullptr) lo = field_or_null(entry, "lo");
+            const Json* hi = field_or_null(entry, "max");
+            if (hi == nullptr) hi = field_or_null(entry, "hi");
+            const Json* fill = field_or_null(entry, "fill");
+            if (fill == nullptr) fill = field_or_null(entry, "color");
+            if (lo == nullptr || hi == nullptr || !lo->is_number() ||
+                !hi->is_number()) {
+                continue;
+            }
+            out.emplace_back(lo->get<double>(), hi->get<double>(),
+                             fill != nullptr ? json_str_value(*fill, "#6c8ebf")
+                                             : "#6c8ebf",
+                             json_str_field(entry, "label", ""));
+        }
+    }
+}
+
+// One dict layer → its renderer's legend items (Python legend_items).
+std::vector<pwb::mapping_document::ComposerLegendEntry>
+legend_entries_for_layer(const Json& layer) {
+    using pwb::mapping_document::ComposerLegendEntry;
+    std::vector<ComposerLegendEntry> items;
+    const std::string name = json_str_field(layer, "name", "");
+    const std::string layer_type =
+        lower_ascii(json_str_field(layer, "layer_type", ""));
+    const Json* style_ptr = field_or_null(layer, "style");
+    const Json empty_style = Json::object();
+    const Json& style =
+        style_ptr != nullptr && style_ptr->is_object() ? *style_ptr
+                                                       : empty_style;
+    const std::string fill = style_fill(style);
+    const std::string stroke = style_stroke(style);
+    const double stroke_width = style_stroke_width(style);
+    const std::string renderer = resolve_renderer_name(layer_type, style);
+
+    if (renderer == "grid") {
+        // GridRenderer: one gradient entry — ramp stops + value range + unit.
+        std::string ramp_name = json_str_field(style, "color_ramp", "");
+        if (ramp_name.empty()) {
+            ramp_name = json_str_field(layer, "color_ramp_name", "");
+        }
+        if (ramp_name.empty()) ramp_name = "viridis";
+        const pwb::cartography::ColorRamp ramp =
+            pwb::cartography::get_color_ramp(ramp_name);
+        const Json* range = field_or_null(style, "value_range");
+        if (range == nullptr || !json_truthy(*range)) {
+            range = field_or_null(layer, "value_range");
+        }
+        double vmin = 0.0;
+        double vmax = 100.0;
+        if (range != nullptr && range->is_array() && range->size() >= 2 &&
+            (*range)[0].is_number() && (*range)[1].is_number()) {
+            vmin = (*range)[0].get<double>();
+            vmax = (*range)[1].get<double>();
+        }
+        std::string unit = json_str_field(style, "unit", "");
+        if (unit.empty()) unit = json_str_field(layer, "unit", "");
+        ComposerLegendEntry entry;
+        entry.label = name + (unit.empty() ? "" : " (" + unit + ")") +
+                      ": " + fmt_one_decimal(vmin) + " ~ " +
+                      fmt_one_decimal(vmax);
+        entry.color = ramp.stops.back().color;
+        entry.symbol_type = "gradient";
+        entry.gradient_stops = Json::array();
+        for (const auto& stop : ramp.stops) {
+            entry.gradient_stops.push_back(
+                Json::array({stop.position, stop.color}));
+        }
+        items.push_back(std::move(entry));
+        return items;
+    }
+    if (renderer == "categorized") {
+        std::vector<std::array<std::string, 3>> categories;
+        legend_categories(style, categories);
+        const std::string symbol =
+            (layer_type == "polygon" || layer_type == "facies") ? "polygon"
+                                                              : "point";
+        for (const auto& [value, cat_fill, label] : categories) {
+            ComposerLegendEntry entry;
+            entry.label = label.empty() ? value : label;
+            entry.color = cat_fill;
+            entry.symbol_type = symbol;
+            entry.stroke_color = stroke;
+            entry.stroke_width = stroke_width;
+            items.push_back(std::move(entry));
+        }
+        return items;  // Python: an empty category list yields no items.
+    }
+    if (renderer == "graduated") {
+        std::vector<std::tuple<double, double, std::string, std::string>>
+            ranges;
+        legend_ranges(style, ranges);
+        const std::string symbol =
+            (layer_type == "polygon" || layer_type == "facies") ? "polygon"
+                                                              : "point";
+        for (const auto& [lo, hi, range_fill, label] : ranges) {
+            ComposerLegendEntry entry;
+            entry.label = label.empty()
+                              ? fmt_one_decimal(lo) + " ~ " + fmt_one_decimal(hi)
+                              : label;
+            entry.color = range_fill;
+            entry.symbol_type = symbol;
+            entry.stroke_color = stroke;
+            entry.stroke_width = stroke_width;
+            items.push_back(std::move(entry));
+        }
+        if (items.empty()) {
+            // Python's empty-ranges fallback: one single-symbol entry.
+            ComposerLegendEntry entry;
+            entry.label = name;
+            entry.color = fill;
+            entry.symbol_type = "polygon";
+            entry.stroke_color = stroke;
+            entry.stroke_width = stroke_width;
+            items.push_back(std::move(entry));
+        }
+        return items;
+    }
+    if (renderer == "contour") {
+        ComposerLegendEntry entry;
+        entry.label = name + " (等值线)";
+        entry.color = stroke;
+        entry.symbol_type = "line";
+        entry.stroke_color = stroke;
+        entry.stroke_width = stroke_width;
+        items.push_back(std::move(entry));
+        return items;
+    }
+    if (renderer == "well") {
+        ComposerLegendEntry entry;
+        entry.label = name;
+        entry.color = fill;
+        entry.symbol_type = "point";
+        entry.stroke_color = stroke;
+        entry.stroke_width = stroke_width;
+        items.push_back(std::move(entry));
+        return items;
+    }
+    if (renderer == "annotation") {
+        ComposerLegendEntry entry;
+        entry.label = name;
+        entry.color = fill != "transparent" ? fill : stroke;
+        entry.symbol_type = "point";
+        entry.stroke_color = stroke;
+        entry.stroke_width = stroke_width;
+        items.push_back(std::move(entry));
+        return items;
+    }
+    // single (default): one entry; a transparent fill makes it a line item
+    // (SingleSymbolRenderer.legend_items).
+    {
+        ComposerLegendEntry entry;
+        entry.label = name;
+        entry.color = fill != "transparent" ? fill : stroke;
+        entry.symbol_type = fill != "transparent" ? "polygon" : "line";
+        entry.stroke_color = stroke;
+        entry.stroke_width = stroke_width;
+        items.push_back(std::move(entry));
+    }
+    return items;
+}
+
+// Canvas layer snapshot → renderer-derived legend entries (the snapshot
+// order IS the canvas draw order — the host's canonical layer order,
+// Prompt3's authority). GUI-thread only: reads the live snapshot.
 std::vector<pwb::mapping_document::ComposerLegendEntry> canvas_legend_entries(
     const QWidget* canvas) {
     std::vector<pwb::mapping_document::ComposerLegendEntry> entries;
@@ -642,20 +1029,10 @@ std::vector<pwb::mapping_document::ComposerLegendEntry> canvas_legend_entries(
         if (!layer.is_object()) continue;
         if (layer.contains("visible") && !layer["visible"].is_boolean()) continue;
         if (layer.contains("visible") && !layer["visible"].get<bool>()) continue;
-        pwb::mapping_document::ComposerLegendEntry entry;
-        entry.label = layer.value("name", std::string());
-        const Json style = layer.value("style", Json::object());
-        const std::string fill = style.is_object() ? style.value("fill", std::string())
-                                                   : std::string();
-        const std::string stroke =
-            style.is_object() ? style.value("stroke", std::string()) : std::string();
-        entry.color = !fill.empty() ? fill : (!stroke.empty() ? stroke : "#6c8ebf");
-        const std::string layer_type = layer.value("layer_type", std::string());
-        entry.symbol_type = layer_type == "well" || layer_type == "well_point" ? "point"
-                            : layer_type == "contour"                  ? "line"
-                                                                        : "polygon";
-        entry.stroke_color = !stroke.empty() ? stroke : "#333333";
-        entries.push_back(std::move(entry));
+        auto layer_entries = legend_entries_for_layer(layer);
+        entries.insert(entries.end(),
+                       std::make_move_iterator(layer_entries.begin()),
+                       std::make_move_iterator(layer_entries.end()));
     }
     return entries;
 }
@@ -669,27 +1046,50 @@ bool canvas_has_content(const QWidget* canvas) {
            snapshot["layers"].is_array() && !snapshot["layers"].empty();
 }
 
-pwb::mapping_document::ComposerRenderSeams make_render_seams(const QWidget* canvas) {
+pwb::mapping_document::ComposerRenderSeams make_render_seams(
+    const QWidget* canvas, ClosureContext* context) {
     pwb::mapping_document::ComposerRenderSeams seams;
-    if (canvas != nullptr) {
+    if (canvas != nullptr && context != nullptr) {
+        // QPointer guard: a destroyed canvas can never produce a stale
+        // hit (resolve on the GUI thread, inside the marshal).
+        const QPointer<const QWidget> canvas_guard(canvas);
+        FrameCacheEntry* cache = &context->frame_cache;
         seams.frame_content =
-            [canvas](const pwb::mapping_document::ComposerElement& frame)
+            [canvas_guard, cache](const pwb::mapping_document::ComposerElement& frame)
             -> pwb::mapping_document::ComposerRenderSeams::FrameContent {
-            pwb::mapping_document::ComposerRenderSeams::FrameContent content;
-            // Only map frames take live content; every other element type
-            // renders from its own JSON properties.
-            const std::string& type = frame.element_type;
-            const bool is_map_frame =
-                type == "main_map" || type == "inset_map" || type == "profile";
-            if (!is_map_frame || !canvas_has_content(canvas)) return content;
-            content.bound = true;
-            content.png_b64 = grab_canvas_frame_b64(canvas);
-            return content;
+            using pwb::mapping_document::ComposerRenderSeams;
+            return on_gui_thread([&]() -> ComposerRenderSeams::FrameContent {
+                ComposerRenderSeams::FrameContent content;
+                const QWidget* canvas = canvas_guard.data();
+                // Only map frames take live content; every other element
+                // type renders from its own JSON properties.
+                const std::string& type = frame.element_type;
+                const bool is_map_frame =
+                    type == "main_map" || type == "inset_map" || type == "profile";
+                if (!is_map_frame || canvas == nullptr ||
+                    !canvas_has_content(canvas)) {
+                    return content;
+                }
+                auto* display =
+                    canvas->findChild<pwb::ui_map::DisplayMapCanvas*>();
+                content.bound = true;
+                content.png_b64 = grab_canvas_frame_b64(display, *cache);
+                if (display != nullptr) {
+                    const pwb::ui_map::Extent extent = display->view_extent();
+                    std::copy(extent.begin(), extent.end(),
+                              content.extent.begin());
+                    content.has_extent = true;
+                }
+                return content;
+            });
         };
         seams.legend_entries =
-            [canvas](const pwb::mapping_document::ComposerElement&)
+            [canvas_guard](const pwb::mapping_document::ComposerElement&)
             -> std::vector<pwb::mapping_document::ComposerLegendEntry> {
-            return canvas_legend_entries(canvas);
+            return on_gui_thread(
+                [&]() -> std::vector<pwb::mapping_document::ComposerLegendEntry> {
+                    return canvas_legend_entries(canvas_guard.data());
+                });
         };
     }
     // Colour-ramp resolution through the cartography authority (Python
@@ -710,20 +1110,45 @@ pwb::mapping_document::ComposerRenderSeams make_render_seams(const QWidget* canv
     return seams;
 }
 
-// The panel's export seam: pixel budget → native QGIS layout executor
-// (when the platform bound one) → native composer engine (SVG + Qt
-// PNG/PDF replay). The engine label in the report says which path
+// True when the document carries a visible live-bound map frame — the
+// shape whose composer-engine output is a raster grab (Python's composer
+// emits per-layer vectors there; the raster substitution is disclosed on
+// the report, never silently claimed as vector output).
+bool document_has_map_frame(const pwb::mapping_document::Composition& doc) {
+    for (const auto& element : doc.elements) {
+        if (!element.visible) continue;
+        const std::string& type = element.element_type;
+        if (type == "main_map" || type == "inset_map" || type == "profile") {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Shared export body: pixel budget → native QGIS layout executor (when
+// bound — install() wires CompositionLayoutService over the display
+// canvas's live session under CONV-29) → native composer engine (SVG +
+// Qt PNG/PDF replay). The engine label in the report says which path
 // produced the file (D-V14-03: the layout_export D-03 "no composer
 // fallback" decision is superseded by the native engine).
-std::function<pwb::ui_seqviz::qt::CompositionExportResult(
-    const pwb::mapping_document::Composition&, const std::string&,
-    const std::string&, double)>
-make_export_fn(const Install& platform_install, const QWidget* canvas) {
-    return [platform_install, canvas](
-               const pwb::mapping_document::Composition& document,
-               const std::string& path, const std::string& fmt,
-               double dpi) -> pwb::ui_seqviz::qt::CompositionExportResult {
-        pwb::ui_seqviz::qt::CompositionExportResult result;
+//
+// `token` is the cooperative cancellation token (checkpoints at stage
+// boundaries — map_export_worker's discipline); `progress` receives
+// coarse 0..100 stage percents and may be empty. Both are optional for
+// the synchronous panel seam; export_composition_async drives them.
+pwb::ui_seqviz::qt::CompositionExportResult run_composition_export(
+    const Install& platform_install, const QWidget* canvas,
+    ClosureContext* context,
+    const pwb::mapping_document::Composition& document,
+    const std::string& path, const std::string& fmt, double dpi,
+    const pwb::job::CancellationToken& token,
+    const std::function<void(int)>& progress) {
+    pwb::ui_seqviz::qt::CompositionExportResult result;
+    result.path = path;
+    auto report_progress = [&progress](int value) {
+        if (progress) progress(value);
+    };
+    try {
         result.path = path;
         std::string format = fmt;
         if (format.empty()) {
@@ -738,6 +1163,7 @@ make_export_fn(const Install& platform_install, const QWidget* canvas) {
             result.message = "unsupported composition export format '" + format + "'";
             return result;
         }
+        report_progress(5);
         // 1. Export pixel budget (layout_export.py MAX_EXPORT_PIXELS) — a
         //    budget breach is a caller error, never an engine fallback.
         try {
@@ -747,14 +1173,22 @@ make_export_fn(const Install& platform_install, const QWidget* canvas) {
             return result;
         }
         const pwb::mapping_document::ComposerRenderSeams render_seams =
-            make_render_seams(canvas);
-        // 2. Native QGIS layout executor (vector map output).
+            make_render_seams(canvas, context);
+        report_progress(15);
+        // Cancellation checkpoint (render seams are non-interruptible —
+        // map_export_worker parity: the token is observed between stages).
+        token.check_cancelled();
+        // 2. Native QGIS layout executor (vector map output). The executor
+        //    touches the session's QgsProject/QgsLayout — marshal onto the
+        //    GUI thread when the caller is the async worker.
         if (platform_install.layout_export) {
             Json report = Json::object();
             try {
-                report = platform_install.layout_export(
-                    pwb::mapping_document::dump_composition(document), path, format,
-                    dpi);
+                report = on_gui_thread([&]() -> Json {
+                    return platform_install.layout_export(
+                        pwb::mapping_document::dump_composition(document), path,
+                        format, dpi);
+                });
             } catch (const std::exception& ex) {
                 // The QGIS path refused by raising: fall through to the
                 // composer engine with the reason recorded.
@@ -773,6 +1207,7 @@ make_export_fn(const Install& platform_install, const QWidget* canvas) {
                         if (warning.is_string()) result.warnings.push_back(warning.get<std::string>());
                     }
                 }
+                report_progress(100);
                 return result;
             }
             // The QGIS path refused (hybrid elements, no session, …):
@@ -782,6 +1217,8 @@ make_export_fn(const Install& platform_install, const QWidget* canvas) {
                 report.is_object() ? report.value("failure", std::string()) : std::string();
             result.message = failure;
         }
+        report_progress(55);
+        token.check_cancelled();
         // 3. Composer engine (native SVG; PNG/PDF replayed on Qt).
         const pwb::mapping_document::ComposerReplaySeams replay =
             pwb::ui_seqviz::qt::make_composition_replay_seams();
@@ -800,7 +1237,59 @@ make_export_fn(const Install& platform_install, const QWidget* canvas) {
         if (!report.ok && result.message.empty()) {
             result.message = "composition export failed";
         }
+        report_progress(90);
+        // Honest raster disclosure: a live-bound map frame on the composer
+        // engine is a canvas grab — Python's composer emits per-layer
+        // vectors there, so the report must say what the file contains.
+        if (result.ok && document_has_map_frame(document)) {
+            const bool live_frame = on_gui_thread(
+                [&]() { return canvas_has_content(canvas); });
+            if (live_frame) {
+                result.warnings.push_back(
+                    "map frame content exported as a raster canvas grab "
+                    "(composer engine; the qgis_layout path was unavailable "
+                    "or refused the document)");
+            }
+        }
+        report_progress(100);
         return result;
+    } catch (const pwb::job::JobCancelled&) {
+        // Cooperative cancel: discard-on-failure parity — a cancelled
+        // export never leaves a partial file for callers to mistake for
+        // the product (the native executor already removes its own).
+        std::error_code remove_error;
+        std::filesystem::remove(path, remove_error);
+        result.ok = false;
+        result.engine.clear();
+        result.message = "composition export cancelled";
+        return result;
+    }
+}
+
+// The panel's export seam keeps its synchronous signature (Python
+// _export parity); the fresh per-run token lets cancel_composition_export
+// reach an in-flight export, and the installed progress sink observes the
+// stage boundaries.
+std::function<pwb::ui_seqviz::qt::CompositionExportResult(
+    const pwb::mapping_document::Composition&, const std::string&,
+    const std::string&, double)>
+make_export_fn(const Install& platform_install, const QWidget* canvas,
+               ClosureContext* context) {
+    return [platform_install, canvas, context](
+               const pwb::mapping_document::Composition& document,
+               const std::string& path, const std::string& fmt,
+               double dpi) -> pwb::ui_seqviz::qt::CompositionExportResult {
+        if (context != nullptr) {
+            context->export_token = pwb::job::CancellationToken{};
+        }
+        const pwb::job::CancellationToken token =
+            context != nullptr ? context->export_token
+                               : pwb::job::CancellationToken{};
+        return run_composition_export(
+            platform_install, canvas, context, document, path, fmt, dpi,
+            token,
+            context != nullptr ? context->export_progress
+                               : std::function<void(int)>{});
     };
 }
 
@@ -921,12 +1410,12 @@ bool install(const Install& install) {
     };
     // Preview: the native renderer with the live-canvas seams.
     seams.render_svg =
-        [render_seams = make_render_seams(mapping_page)](
+        [render_seams = make_render_seams(mapping_page, context)](
             const pwb::mapping_document::Composition& document) -> std::string {
         return pwb::mapping_document::render_composition_to_svg(document, render_seams);
     };
     // Export: budget → QGIS layout executor → composer engine.
-    seams.export_fn = make_export_fn(install, mapping_page);
+    seams.export_fn = make_export_fn(install, mapping_page, context);
     // Provenance: best-effort export-ledger write into the live project.
     seams.project_provider = [store_getter]() -> std::any {
         const auto store = store_getter ? store_getter() : nullptr;
@@ -1085,10 +1574,12 @@ bool install(const Install& install) {
         return it != root.end() ? *it : Json::array();
     });
 
-    auto generation = std::make_shared<int>(0);
+    // #834 parity — the process-global counter lives in
+    // factor_prepare_production.cpp so this page and the
+    // WorkflowController recompute path share one run identity.
     preparation->set_generation_fns(
-        [generation] { return ++*generation; },
-        [generation] { return *generation; });
+        &pwb::factor_production::next_factor_prepare_generation,
+        &pwb::factor_production::current_factor_prepare_generation);
 
     // OwnedWorkerJob seams — the page's running/target/cancel guards need
     // a live job binding (review P1-7); WorkerHost owns the thread.
@@ -1127,23 +1618,9 @@ bool install(const Install& install) {
     context->factor_grids =
         std::make_shared<pwb::factor_production::LiveFactorGridStore>();
     context->factor_grids_project_.clear();
-    context->factor_catalog =
-        std::make_unique<pwb::factor_production::PersistentRuntimeCatalog>();
-    {
-        const auto store0 = project_store_fn();
-        if (store0 != nullptr) {
-            try {
-                context->factor_catalog->open(
-                    store0->project_file().parent_path()
-                    / "workflow_provenance");
-            } catch (const std::exception&) {
-                // Fail-closed provenance: a corrupt store refuses to open;
-                // the prepare run degrades to no-version registration
-                // rather than silently resetting history.
-                context->factor_catalog.reset();
-            }
-        }
-    }
+    // The provenance rail opens in notify_project_changed (below, called
+    // unconditionally at the end of install) — SQLite catalog first, the
+    // JSON-rail PersistentRuntimeCatalog as the fail-closed fallback.
     {
         pwb::factor_production::FactorPrepareKernelConfig kernel_config;
         auto seams = pwb::factor_production::make_factor_prepare_seams(
@@ -1587,7 +2064,9 @@ bool install(const Install& install) {
         QVariant::fromValue(context->factor_grids.get()));
     install.window->setProperty(
         "closure_factor_catalog",
-        QVariant::fromValue(context->factor_catalog.get()));
+        QVariant::fromValue(
+            static_cast<pwb::workflow_runtime::CatalogRepository*>(
+                context->factor_catalog.get())));
 #endif
 
     install.shell->adopt_preparation_page(preparation);
@@ -1612,24 +2091,47 @@ void notify_project_changed(QMainWindow* window) {
         store != nullptr ? &store->document().root() : nullptr;
 #if PWB_WITH_FACTOR_KERNEL
     // V14-FACTOR: the provenance rail follows the open project — reopened
-    // on every switch so run/version history stays per-project. A corrupt
-    // store fails closed (rail detached, honest no-version degradation).
-    // The cross-well context handles track the same lifetime.
-    if (self->factor_catalog == nullptr) {
-        self->factor_catalog =
-            std::make_unique<pwb::factor_production::
-                                 PersistentRuntimeCatalog>();
-    }
+    // on every switch so run/version history stays per-project. The
+    // canonical SQLite catalog (catalog.sqlite, the same store the deep
+    // catalog closure + map-compile/product lineage write) is preferred;
+    // when it refuses (corrupt/absent and not creatable) the JSON-backed
+    // PersistentRuntimeCatalog remains so provenance degrades honestly
+    // instead of vanishing. A corrupt store fails closed either way —
+    // never a silently reset history.
     if (store != nullptr) {
-        try {
-            self->factor_catalog->open(
-                store->project_file().parent_path() / "workflow_provenance");
-        } catch (const std::exception&) {
-            self->factor_catalog.reset();
+        const std::filesystem::path project_file = store->project_file();
+        std::shared_ptr<pwb::workflow_runtime::CatalogRepository> next;
+#if defined(PWB_MAPPING_SQLITE_CATALOG)
+        if (auto opened = pwb::closure_workflow::CatalogClosureAdapter::
+                try_open(project_file)) {
+            next = std::make_shared<
+                pwb::closure_workflow::CatalogClosureAdapter>(
+                std::move(*opened));
         }
+#endif
+        if (next == nullptr) {
+            auto fallback = std::make_shared<
+                pwb::factor_production::PersistentRuntimeCatalog>();
+            try {
+                fallback->open(project_file.parent_path() /
+                               "workflow_provenance");
+            } catch (const std::exception&) {
+                fallback.reset();
+            }
+            next = fallback;
+        }
+        self->factor_catalog = std::move(next);
     } else {
         self->factor_catalog.reset();
     }
+    // The property mirrors the LIVE pointer — a project switch replaces
+    // the catalog object, so re-publish here (a stale pointer into a
+    // destroyed rail is worse than none).
+    window->setProperty(
+        "closure_factor_catalog",
+        QVariant::fromValue(
+            static_cast<pwb::workflow_runtime::CatalogRepository*>(
+                self->factor_catalog.get())));
     // Session caches must not leak ACROSS projects (Python
     // clear_session_caches parity — called on catalog close/switch):
     // reopen of the SAME project keeps the grids (the classifier then
@@ -1698,6 +2200,39 @@ MapDocumentBank* document_bank(QMainWindow* window) {
     auto* self = dynamic_cast<ClosureContext*>(context);
     return self != nullptr ? self->bank : nullptr;
 }
+
+// V14 composition-root accessors — the workflow binding shares the same
+// live grid store / provenance rail / preparation page instead of
+// constructing parallel instances (the #834 generation guard only works
+// when every producer writes through ONE cache + ONE catalog).
+pwb::ui_pages_data::qt::PreparationPage* preparation_page(
+    QMainWindow* window) {
+    if (window == nullptr) return nullptr;
+    const QVariant stored = window->property("closure_mapping_context");
+    auto* context = stored.value<QObject*>();
+    auto* self = dynamic_cast<ClosureContext*>(context);
+    return self != nullptr ? self->preparation : nullptr;
+}
+
+#if PWB_WITH_FACTOR_KERNEL
+std::shared_ptr<pwb::factor_production::LiveFactorGridStore>
+factor_grid_store(QMainWindow* window) {
+    if (window == nullptr) return nullptr;
+    const QVariant stored = window->property("closure_mapping_context");
+    auto* context = stored.value<QObject*>();
+    auto* self = dynamic_cast<ClosureContext*>(context);
+    return self != nullptr ? self->factor_grids : nullptr;
+}
+
+std::shared_ptr<pwb::workflow_runtime::CatalogRepository> factor_catalog(
+    QMainWindow* window) {
+    if (window == nullptr) return nullptr;
+    const QVariant stored = window->property("closure_mapping_context");
+    auto* context = stored.value<QObject*>();
+    auto* self = dynamic_cast<ClosureContext*>(context);
+    return self != nullptr ? self->factor_catalog : nullptr;
+}
+#endif
 
 }  // namespace pwb::app::closure_mapping
 

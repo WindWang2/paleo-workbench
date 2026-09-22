@@ -22,13 +22,17 @@
 #include <pwb/factor_host/interop.hpp>
 #include <pwb/factor_host/plan.hpp>
 #include <pwb/mapping/constrained_idw.hpp>
+#include <pwb/mapping/crs_policy.hpp>
+#include <pwb/mapping/directional_trend.hpp>
 #include <pwb/mapping/factor_grid_io.hpp>
 #include <pwb/mapping/interpolator.hpp>
 #include <pwb/mapping/sample_normalization.hpp>
+#include <pwb/mapping/scipy_grid.hpp>
 #include <pwb/ui_workers/worker_common.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <ctime>
 #include <fstream>
@@ -745,6 +749,81 @@ struct InterpSamples {
     return out;
 }
 
+// LOO R² for the scipy/directional backends — the Python estimator
+// verbatim: each fold evaluates the model AT the held-out point (a 1x1
+// grid), not a bilinear probe of a coarse grid. <3 samples or <2 finite
+// pairs -> null (the engines need >=3 anyway; the oracle folds skip
+// silently on engine failure).
+[[nodiscard]] Json loo_r_squared_direct(
+    const std::vector<double>& xs, const std::vector<double>& ys,
+    const std::vector<double>& zs, const std::vector<double>& qs,
+    const std::vector<double>& bs, const std::string& backend,
+    const AnisotropyParams& anisotropy,
+    const job::CancellationToken& token) {
+    constexpr int kMaxLooSamples = 64;
+    Json out = Json(nullptr);
+    const std::size_t n = zs.size();
+    if (n < 3) return out;
+    std::vector<std::size_t> indices;
+    if (n > static_cast<std::size_t>(kMaxLooSamples)) {
+        for (int i = 0; i < kMaxLooSamples; ++i) {
+            indices.push_back(static_cast<std::size_t>(std::min<double>(
+                std::floor(static_cast<double>(i)
+                           * static_cast<double>(n - 1)
+                           / (kMaxLooSamples - 1)),
+                static_cast<double>(n - 1))));
+        }
+    } else {
+        for (std::size_t i = 0; i < n; ++i) indices.push_back(i);
+    }
+    std::vector<double> observed;
+    std::vector<double> predicted;
+    for (const std::size_t held : indices) {
+        std::vector<double> tx, ty, tz, tq, tb;
+        tx.reserve(n - 1);
+        ty.reserve(n - 1);
+        tz.reserve(n - 1);
+        for (std::size_t i = 0; i < n; ++i) {
+            if (i == held) continue;
+            tx.push_back(xs[i]);
+            ty.push_back(ys[i]);
+            tz.push_back(zs[i]);
+            if (backend == "directional") {
+                tq.push_back(qs[i]);
+                tb.push_back(bs[i]);
+            }
+        }
+        try {
+            token.check_cancelled();
+            double value = std::numeric_limits<double>::quiet_NaN();
+            if (backend == "directional") {
+                const auto grid = pwb::mapping::directional_trend_grid(
+                    tx, ty, tz, {xs[held]}, {ys[held]},
+                    anisotropy.azimuth_deg, anisotropy.semi_major,
+                    anisotropy.semi_minor, &tq, &tb);
+                if (!grid.empty()) value = grid.front();
+            } else {
+                const auto grid = pwb::mapping::interpolate_scipy_grid(
+                    tx, ty, tz, {xs[held]}, {ys[held]}, backend, true);
+                if (!grid.grid_z.empty()) value = grid.grid_z.front();
+            }
+            if (std::isfinite(value)) {
+                observed.push_back(zs[held]);
+                predicted.push_back(value);
+            }
+        } catch (const job::JobCancelled&) {
+            throw;
+        } catch (const std::exception&) {
+            // Degenerate fold (singular solve / <3 train points) — the
+            // oracle returns None for the whole metric on any failure;
+            // here the pair is skipped, matching its None-per-fold arm.
+        }
+    }
+    if (observed.size() < 2) return out;
+    out = pwb::factor_host::signed_r_squared(observed, predicted);
+    return out;
+}
+
 [[nodiscard]] pwb::mapping::constrained_idw::Config
 derived_constrained_config(
     const std::vector<pwb::mapping::SamplePoint>& points, int grid_n,
@@ -818,7 +897,7 @@ struct AttachedResult {
 [[nodiscard]] AttachedResult apply_interpolation(
     const Json& raw_points, const Json& params, const std::string& method,
     int grid_n, double power, const ConstraintSet& constraints,
-    const std::string& crs,
+    const std::string& crs, const AnisotropyParams& anisotropy,
     const pwb::factor_host::FactorFingerprints& fingerprints,
     const job::CancellationToken& token) {
     AttachedResult out;
@@ -829,10 +908,120 @@ struct AttachedResult {
 
     const InterpSamples samples = load_samples(raw_points, params);
 
+    // geoviz_plots.factor.interpolation._run_grid parity: 样条→cubic
+    // (Clough-Tocher C1 patches) and 方向趋势→directional (anisotropic
+    // Gaussian kernel) ride the native scipy_grid / directional_trend
+    // kernels — same normalized samples, same 5%-pad grid axes, same
+    // point-eval LOO R².
     if (backend == "cubic" || backend == "directional") {
-        throw std::runtime_error(
-            "插值后端 " + backend + " 未原生接入（" + engine_method
-            + "）：请选择 IDW / 克里金 / 约束IDW");
+        token.check_cancelled();
+        std::vector<double> xs, ys, zs, qs, bs;
+        const Json& records =
+            samples.normalized_json.is_array() ? samples.normalized_json
+                                               : Json::array();
+        for (const auto& record : records) {
+            // extract_xy_values / extract_xy_z_weights parity over the
+            // normalized records: x/y (or lng/lat) + value|z|v, finite
+            // only. The directional arm additionally applies the qc_flag
+            // filter and the floored q / b_i weights (extract_xy_z_weights
+            // lines 101-117).
+            const Json* x = find_field(record, "x");
+            const Json* y = find_field(record, "y");
+            if (x == nullptr || y == nullptr) {
+                x = find_field(record, "lng");
+                y = find_field(record, "lat");
+            }
+            const Json* z = find_field(record, "value");
+            if (z == nullptr) z = find_field(record, "z");
+            if (z == nullptr) z = find_field(record, "v");
+            if (x == nullptr || y == nullptr || z == nullptr) continue;
+            if (!x->is_number() || !y->is_number() || !z->is_number())
+                continue;
+            const double xv = x->get<double>();
+            const double yv = y->get<double>();
+            const double zv = z->get<double>();
+            if (!std::isfinite(xv) || !std::isfinite(yv)
+                || !std::isfinite(zv))
+                continue;
+            if (backend == "directional") {
+                const Json* qc = find_field(record, "qc_flag");
+                const std::string flag =
+                    (qc != nullptr && qc->is_string())
+                        ? qc->get<std::string>()
+                        : std::string("ok");
+                if (flag != "ok" && !flag.empty()) continue;
+                const Json* q = find_field(record, "q");
+                const Json* b = find_field(record, "b_i");
+                qs.push_back(std::max(
+                    0.0, (q != nullptr && q->is_number())
+                             ? q->get<double>()
+                             : 1.0));
+                bs.push_back(std::max(
+                    0.0, (b != nullptr && b->is_number())
+                             ? b->get<double>()
+                             : 1.0));
+            }
+            xs.push_back(xv);
+            ys.push_back(yv);
+            zs.push_back(zv);
+        }
+        if (zs.size() < 2) {
+            throw std::invalid_argument("插值至少需要 2 个有效采样点");
+        }
+        const auto axes =
+            pwb::mapping::interpolation_grid_axes(xs, ys, grid_n);
+        std::vector<double> grid_z;
+        if (backend == "directional") {
+            grid_z = pwb::mapping::directional_trend_grid(
+                xs, ys, zs, axes.first, axes.second,
+                anisotropy.azimuth_deg, anisotropy.semi_major,
+                anisotropy.semi_minor, &qs, &bs);
+        } else {
+            const auto grid = pwb::mapping::interpolate_scipy_grid(
+                xs, ys, zs, axes.first, axes.second, backend, true);
+            grid_z = grid.grid_z;
+        }
+        token.check_cancelled();
+        bool any_finite = false;
+        for (const double v : grid_z) {
+            if (std::isfinite(v)) {
+                any_finite = true;
+                break;
+            }
+        }
+        if (!any_finite) {
+            throw std::runtime_error("插值结果全为无效值");
+        }
+        out.grid.grid_x = axes.first;
+        out.grid.grid_y = axes.second;
+        out.grid.grid_z.assign(grid_z.begin(), grid_z.end());
+        out.grid.algorithm_id = backend;
+        out.grid.method = engine_method;
+        out.grid.grid_n = grid_n;
+        out.grid.n_samples = static_cast<int>(zs.size());
+        out.grid.power = power;
+        std::optional<std::string> crs_opt;
+        if (!crs.empty()) crs_opt = crs;
+        const auto policy =
+            pwb::mapping::resolve_distance_policy(crs_opt, "planar");
+        out.grid.distance_policy = policy.policy;
+        out.grid.distance_policy_annotation = policy.annotation;
+        out.grid.statistics = pwb::mapping::grid_statistics(out.grid.grid_z);
+        out.backend = backend;
+        out.r_squared = loo_r_squared_direct(xs, ys, zs, qs, bs, backend,
+                                             anisotropy, token);
+        // Python: n_break_lines counts only when the backend consumed the
+        // faults (idw). These kernels take none — the ignored-constraint
+        // note is stamped in attach_result_to_task. Directional DOES
+        // consume the direction lines (resolved into the anisotropy axes
+        // above) — count them honestly.
+        out.n_break_lines = 0;
+        out.n_direction_lines =
+            backend == "directional"
+                ? static_cast<int>(constraints.direction_lines.size())
+                : 0;
+        (void)fingerprints;
+        return out;
     }
 
     // Honesty gates: the native plain kernels do not consume break lines
@@ -1096,12 +1285,15 @@ void attach_result_to_task(Json& task_json, const Json& raw_points,
     Json diagnostics = Json::object();
     diagnostics["n_break_lines"] = attached.n_break_lines;
     diagnostics["n_direction_lines"] = attached.n_direction_lines;
-    if (backend == "kriging") {
+    // Python ignored_constraints parity: a backend that does not consume
+    // the break lines REPORTS them (kriging / cubic / directional — idw
+    // refuses upstream instead; constrained consumes them).
+    if (backend != "idw" && backend != "constrained_idw") {
         Json ignored = Json::array();
         if (!constraints.break_lines.empty()) {
             ignored.push_back("barrier:" + std::to_string(
                                     constraints.break_lines.size())
-                              + " break line(s) not consumed by kriging");
+                              + " break line(s) not consumed by " + backend);
         }
         diagnostics["engine_ignored"] = std::move(ignored);
     }
@@ -1448,6 +1640,25 @@ LiveFactorGridStore::take_last_result() {
     return copy;
 }
 
+// -------------------------------------------------- process generation ----
+
+namespace {
+
+std::atomic<int>& prepare_generation_counter() {
+    static std::atomic<int> counter{0};
+    return counter;
+}
+
+}  // namespace
+
+int next_factor_prepare_generation() {
+    return ++prepare_generation_counter();
+}
+
+int current_factor_prepare_generation() {
+    return prepare_generation_counter().load();
+}
+
 // ---------------------------------------------------------- slice builder --
 
 ui_workers::PrepareProjectSlice build_prepare_slice(const Json& project_root) {
@@ -1653,7 +1864,8 @@ ui_workers::FactorPrepareSeams make_factor_prepare_seams(
                 try {
                     attached = apply_interpolation(
                         raw_points, params, method, grid_n, power,
-                        constraints, crs, resolved.fingerprints, token);
+                        constraints, crs, anisotropy,
+                        resolved.fingerprints, token);
                 } catch (const job::JobCancelled&) {
                     throw;
                 } catch (const std::exception& exc) {

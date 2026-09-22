@@ -42,25 +42,71 @@ std::string stage_display_label(const std::string& stage_value) {
 }
 
 StageLayoutProfile stage_layout_profile(const std::string& stage_value) {
-    const auto stage = tool_policy::stage_from_value(stage_value);
+    return presentation_profile(stage_value);
+}
+
+StageLayoutProfile presentation_profile(const std::string& presentation_key) {
+    const auto stage = tool_policy::stage_from_value(presentation_key);
     if (!stage.has_value()) {
-        // Lenient fallback: unknown/empty stage behaves as stage 1
+        if (presentation_key == kPresentationDataManagement) {
+            // 数据管理工作区: the data page owns the central area — every
+            // science/mapping surface steps aside. Docks the profile does
+            // NOT list (nav/mapping_stage/inspector/hub/agent/tasks/logs/
+            // console/composite_layer) stay under user + viewport policy.
+            return make_profile(
+                kPresentationDataManagement, kLowerPaneNone,
+                {
+                    {"workstation.facies_palette", false},
+                    {"workstation.composite_input", false},
+                    {"workstation.composite_linked", false},
+                    {"workstation.well", false},
+                    {"workstation.seismic", false},
+                    {"mapping.chrome", false},
+                    {"mapping.reference", false},
+                    {"mapping.composer", false},
+                    {"mapping.bottom", false},
+                    {"window.constraint_panel", false},
+                    {"window.factor_stats", false},
+                });
+        }
+        if (presentation_key == kPresentationValidation) {
+            // 验证工作区 (M2 placeholder page, M5 fills the content): the
+            // review/QC surfaces visible (chrome/reference/bottom), the
+            // composer and factor/constraint surfaces off.
+            return make_profile(
+                kPresentationValidation, kLowerPaneNone,
+                {
+                    {"workstation.facies_palette", false},
+                    {"workstation.composite_input", false},
+                    {"workstation.composite_linked", false},
+                    {"workstation.well", false},
+                    {"workstation.seismic", false},
+                    {"mapping.chrome", true},
+                    {"mapping.reference", true},
+                    {"mapping.composer", false},
+                    {"mapping.bottom", true},
+                    {"window.constraint_panel", false},
+                    {"window.factor_stats", false},
+                });
+        }
+        // Lenient fallback: unknown/empty key behaves as stage 1
         // (workspace codec parity — never fails, never invents stage 4).
-        return stage_layout_profile(kStage1Value);
+        return presentation_profile(kStage1Value);
     }
     switch (*stage) {
         case tool_policy::MappingStage::FaciesCalibration:
-            // Stage 1 智能预测: prediction context — well tracks + seismic
-            // section visible for map↔section linkage; factor and layout
-            // surfaces hidden (not this stage's work).
+            // Stage 1 智能预测 (M3): the seismic/well surfaces live in the
+            // science-host bottom two-pane now — the legacy workstation
+            // placeholder docks stay managed-but-hidden (the preference
+            // machinery keeps working, the empty chrome never shows).
             return make_profile(
                 kStage1Value, kLowerPaneSeismicWell,
                 {
                     {"workstation.facies_palette", true},
                     {"workstation.composite_input", false},
                     {"workstation.composite_linked", false},
-                    {"workstation.well", true},
-                    {"workstation.seismic", true},
+                    {"workstation.well", false},
+                    {"workstation.seismic", false},
                     {"mapping.chrome", false},
                     {"mapping.reference", false},
                     {"mapping.composer", false},
@@ -69,16 +115,15 @@ StageLayoutProfile stage_layout_profile(const std::string& stage_value) {
                     {"window.factor_stats", false},
                 });
         case tool_policy::MappingStage::ConstraintFactor:
-            // Stage 2 约束与单因素: constraint/factor surfaces on —
-            // 输入与结果 dock, linked views, cross-well lower pane,
-            // constraint + factor-stats docks, mapping reference/bottom.
+            // Stage 2 约束与单因素 (M3): 连井剖面 + 数据制备 host in the
+            // science-host bottom tabs; factor/constraint docks on.
             return make_profile(
                 kStage2Value, kLowerPaneCrossWell,
                 {
                     {"workstation.facies_palette", false},
                     {"workstation.composite_input", true},
                     {"workstation.composite_linked", true},
-                    {"workstation.well", true},
+                    {"workstation.well", false},
                     {"workstation.seismic", false},
                     {"mapping.chrome", true},
                     {"mapping.reference", true},
@@ -107,7 +152,7 @@ StageLayoutProfile stage_layout_profile(const std::string& stage_value) {
                     {"window.factor_stats", false},
                 });
     }
-    return stage_layout_profile(kStage1Value);  // unreachable, kept honest
+    return presentation_profile(kStage1Value);  // unreachable, kept honest
 }
 
 std::vector<std::string> profile_managed_keys() {

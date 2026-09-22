@@ -81,8 +81,17 @@ void StageFlowController::reset_stage_preferences() {
 
 void StageFlowController::apply_stage_layout(const std::string& stage_value) {
     if (!seams_.apply_visibility) return;
-    const auto profile = stage_layout_profile(stage_value);
+    const auto profile = presentation_profile(stage_value);
     const auto prefs = preferences_.load(stage_value);
+    seams_.apply_visibility(effective_visibility(profile, prefs));
+    ++applied_visibility_count_;
+}
+
+void StageFlowController::apply_presentation(
+    const std::string& presentation_key) {
+    if (!seams_.apply_visibility) return;
+    const auto profile = presentation_profile(presentation_key);
+    const auto prefs = preferences_.load(presentation_key);
     seams_.apply_visibility(effective_visibility(profile, prefs));
     ++applied_visibility_count_;
 }

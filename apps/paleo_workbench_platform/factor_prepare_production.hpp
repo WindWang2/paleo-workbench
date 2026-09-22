@@ -55,6 +55,15 @@ namespace pwb::factor_production {
 
 using pwb::domain::Json;
 
+// -------------------------------------------------- process generation ----
+
+// #834 parity (factor_prepare_scheduler's module-level counter): ONE
+// process-global run identity shared by the preparation page AND the
+// workflow controller — a later draw supersedes every earlier staged
+// result on either entry path.
+int next_factor_prepare_generation();
+int current_factor_prepare_generation();
+
 // ------------------------------------------------------------- live grids --
 
 // Sealed per-task grid payload (factor_grid_artifacts.py live-cache core:

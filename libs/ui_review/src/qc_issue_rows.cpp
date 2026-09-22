@@ -132,4 +132,13 @@ std::vector<QcIssueRow> qc_issue_rows(const domain::Json& rules,
     return rows;
 }
 
+std::string qc_issue_key(const domain::Json& issue) {
+    const std::string rule = str_member(issue, "rule");
+    const std::string feature = str_member(issue, "feature_id");
+    const std::string ref = str_member(issue, "ref");
+    const std::string message = str_member(issue, "message");
+    return rule + "|" + (feature.empty() ? (ref.empty() ? message : ref)
+                                         : feature);
+}
+
 }  // namespace pwb::ui_review

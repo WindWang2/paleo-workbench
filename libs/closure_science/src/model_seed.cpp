@@ -1,5 +1,6 @@
 #include <pwb/closure_science/model_seed.hpp>
 
+#include <pwb/closure_science/providers.hpp>
 #include <pwb/catalog/model_registry.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/prediction/model_package_runtime.hpp>
@@ -89,6 +90,56 @@ domain::DataError ensure_default_models(catalog::CatalogDocument& document,
     if (heuristic.code != domain::ErrorCode::Ok) return heuristic;
 
     return domain::DataError(domain::ErrorCode::Ok, "");
+}
+
+domain::Result<std::pair<std::string, std::string>>
+ensure_mock_facies_models(catalog::CatalogDocument& document,
+                          const catalog::SaveHook& save) {
+    // mock_facies.py ensure_mock_facies_models parity: register-or-keep
+    // the two mock models (status "demo", demo_only metadata), then
+    // ensure version "1" on each (deterministic, demo_only, status demo).
+    struct Spec {
+        const char* model_id;
+        const char* model_name;
+        const char* provider;
+    };
+    const Spec specs[2] = {
+        {kModelIdMockWellFacies, "测井层位沉积相预测（mock）",
+         kProviderMockWellFacies},
+        {kModelIdMockSeismicFacies, "地震相面状沉积相预测（mock）",
+         kProviderMockSeismicFacies},
+    };
+    std::pair<std::string, std::string> version_ids;
+    int slot = 0;
+    for (const Spec& spec : specs) {
+        auto model = catalog::register_model(
+            document, save,
+            base_model_request(spec.model_id, spec.model_name, "mock",
+                               spec.provider,
+                               domain::Json{{"source", "synthetic/demo"},
+                                            {"demo_only", true}}));
+        if (!model.is_ok()) return model.error();
+        catalog::RegisterModelVersionRequest version;
+        version.model_id = spec.model_id;
+        version.model_version = "1";
+        version.deterministic = true;
+        version.demo_only = true;
+        version.status = "demo";
+        version.metadata = domain::Json{{"source", "synthetic/demo"}};
+        auto ensured = ensure_model_version(document, save, version);
+        if (ensured.code != domain::ErrorCode::Ok) return ensured;
+        auto found = catalog::get_model_version(document, spec.model_id,
+                                                "1");
+        if (!found.is_ok() || found.value() == nullptr) {
+            return domain::DataError(domain::ErrorCode::Unknown,
+                                     "mock model version registration "
+                                     "did not land");
+        }
+        (slot == 0 ? version_ids.first : version_ids.second) =
+            found.value()->id;
+        ++slot;
+    }
+    return version_ids;
 }
 
 domain::Result<catalog::ModelVersion> register_package_model(

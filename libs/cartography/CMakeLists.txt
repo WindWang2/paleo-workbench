@@ -13,6 +13,7 @@ add_library(pwb_cartography STATIC
     src/templates.cpp
     src/qgis_adapter.cpp
     src/cartography.cpp
+    src/cartographic_qa.cpp
 )
 add_library(Pwb::Cartography ALIAS pwb_cartography)
 target_include_directories(pwb_cartography PUBLIC
@@ -29,7 +30,17 @@ if(NOT TARGET Pwb::MappingDocument)
         "(configure with -DPWB_BUILD_CONV_02=ON; the template library "
         "builds on the CONV-02 composition/document models)")
 endif()
-target_link_libraries(pwb_cartography PUBLIC Pwb::Domain Pwb::MappingDocument)
+# cartographic_qa.cpp consumes the §14 delegate inputs struct, make_issue
+# and the CatalogRepository seam from workflow_runtime, plus the CRS
+# axis-units oracle from mapping_kernel.
+if(NOT TARGET Pwb::WorkflowRuntime OR NOT TARGET Pwb::MappingKernel)
+    message(FATAL_ERROR
+        "pwb_cartography requires Pwb::WorkflowRuntime + Pwb::MappingKernel "
+        "(the cartographic QA rule set consumes their seams)")
+endif()
+target_link_libraries(pwb_cartography PUBLIC
+    Pwb::Domain Pwb::MappingDocument Pwb::WorkflowRuntime
+    Pwb::MappingKernel)
 
 if(BUILD_TESTING)
     add_subdirectory(cartography_tests)

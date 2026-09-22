@@ -68,6 +68,13 @@ public:
     void set_panel_visible(const std::string& panel_key, bool visible);
     void reset_stage_preferences();  // "恢复本阶段默认布局"
 
+    // M2 (ribbon five-workspaces): apply any presentation profile — the
+    // three stage values or a non-scientific workspace key
+    // ("data_management"/"validation"). Same projection + preference
+    // machinery as a stage switch; the snapshot is NOT touched (entering
+    // 数据管理/验证 never rewrites the stage authority).
+    void apply_presentation(const std::string& presentation_key);
+
     const StagePresentationSnapshot& snapshot() const { return snapshot_; }
     StageReadinessKind stage_readiness() const { return snapshot_.readiness; }
 

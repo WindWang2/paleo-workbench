@@ -17,12 +17,17 @@
 //
 // SCOPE (honest skips, decisions D1–D3 in
 // docs/development/cpp-conversion-swarm-20/ledgers/05-decisions.md):
-//   * Contour extraction / post-processing (masked_marching_squares, ring
-//     closure, crossing repair, barrier trimming...) is NOT ported: it runs
-//     after the returned grid is final and only writes result.contours /
-//     surface_*. The engine itself verifies extract_contours=True/False
-//     produce a bit-identical grid (asserted by the oracle pair
-//     barrier_fault_thickness / engine_surface_only).
+//   * Contour extraction / post-processing (the constrained_engine.py tail:
+//     component-dilated extraction surface, masked marching squares, closed
+//     high rings, merge/clip/loop-closure, cartographic smooth, bridge/close,
+//     crossing repair, min-spacing, barrier trim, edge join, fragment prune)
+//     IS ported; it runs after the returned grid is final and only writes
+//     result.contours — the display surface is bit-identical to the
+//     surface-only path (extract_contours=false skips it entirely, matching
+//     the oracle pair barrier_fault_thickness / engine_surface_only). The
+//     Python wall-clock budgets inside the crossing solvers are kept as
+//     chrono budgets (same seconds), so very pathological inputs degrade to
+//     "best effort within budget" the same way upstream does.
 //   * Host glue stays Python: shapely convex-hull+buffer domain synthesis
 //     (GEOS), pyproj CRS barrier-buffer heuristic, spatial-4-fold CV R^2 and
 //     anchored-fidelity metrics, well/dedup/constraint mapping. The C++
@@ -126,25 +131,53 @@ struct Config {
     double endpoint_tolerance = 1e-7;
     double boundary_margin_ratio = 0.02;
     double data_hull_buffer_meters = 0.0;
+    // ── Contour extraction tail (ConstrainedIDWConfig, engine L136–148) ──
+    // Declared but effectively unused upstream (the pipeline always runs the
+    // hybrid MS + closed-ring path regardless of the method string, and
+    // clip_contours_to_barriers is never read); kept for config parity.
+    std::string contour_extraction_method = "partitioned_marching_squares";
+    int contour_smoothing_iterations = 2;   // <0 -> 2 upstream
+    int contour_upsample_factor = 1;        // <=0 -> 3 upstream; clamped to 4
+    double contour_bridge_gap = 0.0;        // <=0 -> approx_step*1.5 upstream
+    double min_contour_length = 0.0;        // <=0 -> grid-step heuristics
+    double contour_simplify_tolerance = 0.0;  // <0 -> approx_step*0.08 upstream
+    bool clip_contours_to_barriers = false;   // declared upstream, never read
+    double min_contour_spacing = -1.0;        // <0 off, ==0 auto, >0 explicit
+    bool enforce_no_crossing = true;
+    // false: trend surface only — empty contours + contour_extraction_skipped.
+    bool extract_contours = true;
 };
 
 struct Result {
     std::vector<double> grid_x;  // len == config.grid_resolution (clamped)
     std::vector<double> grid_y;
     std::vector<double> grid_z;  // row-major |grid_y| x |grid_x|, NaN = nodata
+    // Extracted isolines keyed by level (ConstrainedGridResult.contours).
+    // Empty when extract_contours=false; keys may carry empty vectors for
+    // levels that produced no surviving polylines, matching the Python dict.
+    std::map<double, std::vector<Polyline>> contours;
     // Numeric surface-path diagnostics, keys matching the Python engine dict
     // (participating wells, region counts, barrier/LOS counters, anchor
-    // stats, ...). String-valued Python entries are not reproduced.
+    // stats, contour counters, ...). String-valued Python entries are not
+    // reproduced (e.g. contour_extraction_method="hybrid_ms_plus_closed_rings"
+    // is implied by the fixed pipeline).
     std::map<std::string, double> diagnostics;
 };
 
 // Raises std::invalid_argument with the Python engine's exact error text for
 // the mirrored failure branches (fewer than 3 wells, no boundary polygon,
 // boundary without vertices).
-Result generate_constrained_idw(const std::vector<Well>& wells,
-                                const std::vector<BoundaryPolygon>& boundaries,
-                                const std::vector<BarrierLine>& barriers,
-                                const std::vector<DirectionLine>& directions,
-                                const Config& config);
+//
+// `levels` mirrors the Python positional `levels` argument: when provided
+// (even empty) it is used verbatim; when nullopt the C++ port derives
+// "nice" levels over the finite grid range via
+// pwb::mapping::nice_contour_levels(vmin, vmax, 8).
+Result generate_constrained_idw(
+    const std::vector<Well>& wells,
+    const std::vector<BoundaryPolygon>& boundaries,
+    const std::vector<BarrierLine>& barriers,
+    const std::vector<DirectionLine>& directions,
+    const Config& config,
+    std::optional<std::vector<double>> levels = std::nullopt);
 
 }  // namespace pwb::mapping::constrained_idw

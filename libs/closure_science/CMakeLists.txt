@@ -13,6 +13,7 @@ add_library(pwb_closure_science STATIC
     src/catalog_payload_source.cpp
     src/catalog_envelope_publisher.cpp
     src/inference_service.cpp
+    src/mock_facies.cpp
     src/providers.cpp
     src/task_journal.cpp)
 add_library(Pwb::ClosureScience ALIAS pwb_closure_science)

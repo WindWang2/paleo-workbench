@@ -44,6 +44,7 @@ endforeach()
 add_library(pwb_ui_review STATIC
     src/advisor_html.cpp
     src/audit_summary.cpp
+    src/compare_core.cpp
     src/composite_layers.cpp
     src/contract_lines.cpp
     src/impact_markdown.cpp

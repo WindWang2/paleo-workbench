@@ -303,18 +303,17 @@ void test_degenerate_cases(LiveFactorGridStore& grids) {
     }
     CHECK(saw_failed && saw_complete);
 
-    // 样条 / 方向趋势 — no native kernel: honest per-task failure with
-    // the explicit reason, never a fabricated grid.
+    // 样条 / 方向趋势 — NATIVE kernels since the scipy_grid (Clough-Tocher
+    // cubic) / directional_trend ports: real grids land (the pre-kernel
+    // honest degrade was the explicit "未原生接入" failure — now stale).
     for (const std::string& method : {"样条", "方向趋势"}) {
         Json project = make_project(
             {make_task("factor_m1", "地层厚度",
                        synthetic_points(10, 9), method)});
         FactorPrepareBatchResult r;
         run_prepare(project, method, grids, &r);
-        CHECK(r.task_results[0].error.has_value());
-        const std::string error = *r.task_results[0].error;
-        CHECK(error.find("未原生接入") != std::string::npos);
-        CHECK(!grids.has("factor_m1"));
+        CHECK(!r.task_results[0].error.has_value());
+        CHECK(grids.has("factor_m1"));
     }
 
     // plain IDW + active break lines -> fails closed (the native plain

@@ -31,9 +31,17 @@ QString resources_root() {
             }
         }
     }
-    // 2. Compile-time source tree (dev runs and tests).
-    QString source_root = QStringLiteral(PWB_SOURCE_DIR)
-                          + QStringLiteral("/resources");
+    // 2. Compile-time source tree (dev runs and tests). Two dev layouts:
+    //    a) <source>/resources — the staged resource tree;
+    //    b) <source>/paleo_workbench — the Python product package whose
+    //       ui/assets/icons tree IS the canonical icon asset set (the C++
+    //       ribbon/toolbar tables reference these names verbatim; no
+    //       staged copy exists on a dev tree).
+    QStringList source_candidates;
+    source_candidates << QStringLiteral(PWB_SOURCE_DIR)
+                             + QStringLiteral("/paleo_workbench")
+                      << QStringLiteral(PWB_SOURCE_DIR)
+                             + QStringLiteral("/resources");
     // 3. Install layout: <prefix>/share/paleo-workbench/resources.
     QStringList install_candidates;
     const QString app_dir = QCoreApplication::applicationDirPath();
@@ -48,7 +56,7 @@ QString resources_root() {
                QStandardPaths::AppLocalDataLocation)
                .value(0)
         + QStringLiteral("/resources");
-    install_candidates.prepend(source_root);
+    install_candidates = source_candidates + install_candidates;
     return first_existing_dir(install_candidates);
 }
 
@@ -75,7 +83,9 @@ QStringList resource_roots_probed() {
     if (const char* override_dir = std::getenv("PALEO_RESOURCES_DIR")) {
         probed << QString::fromLocal8Bit(override_dir);
     }
-    probed << QStringLiteral(PWB_SOURCE_DIR) + QStringLiteral("/resources");
+    probed << QStringLiteral(PWB_SOURCE_DIR) +
+                  QStringLiteral("/paleo_workbench")
+           << QStringLiteral(PWB_SOURCE_DIR) + QStringLiteral("/resources");
     const QString app_dir = QCoreApplication::applicationDirPath();
     if (!app_dir.isEmpty()) {
         probed << app_dir

@@ -41,4 +41,11 @@ spatial_issues_by_rule(const domain::Json& issues);
 std::vector<QcIssueRow> qc_issue_rows(const domain::Json& rules,
                                       const domain::Json& issues);
 
+// M5 stable review identity for one issue: rule + feature identity
+// (feature_id, else ref, else message). Canonical definition — both the
+// closure_review persistence (review_disposition::review_issue_key) and
+// the validation page build the key through here so a review record can
+// never drift from the issue it addresses.
+std::string qc_issue_key(const domain::Json& issue);
+
 }  // namespace pwb::ui_review

@@ -159,3 +159,38 @@ MainWindow (QMainWindow)
 4. **原型代码不移植**：原型 main.cpp 全部合成数据与内联 QSS 均不进入生产；只参照其组结构与交互。设计图是概念稿不是实施真源（K2）。
 5. **图标资产**：设计稿要求统一线性图标；现 icon_factory 支持 SVG 重染但资产未必齐，M1 期间盘点缺口。
 6. 资源门/构建纪律：全程走 `scripts/cpp-migration/invoke-resource-gate.sh`，CTest offscreen 协议（tests/cpp/platform/CMakeLists.txt:63-79）；编译 main_window.cpp 的测试目标必须 `pwb_link_job_runtime()`。
+
+---
+
+## 7. 实施状态（M6 收尾，2026-09-22）
+
+**总评：M0–M6 全部完成。** 五工作区方案已在 C++ 端（`pwb-platform`）落地；验收基线：全量 ctest 255 项 244 绿，11 项失败全部为同一先已存在的环境问题（libodbc.so.2 缺失导致二进制加载期失败，含任务书点名的 ui_shell.qt_widgets_smoke、ui_widgets.modelview、ui_widgets.widgets_smoke 及同族 8 个 lib 测试，均不进入测试逻辑、与本改造无关）；产品自检 13/13；视觉 harness `platform.ribbon_visual(+dpi15)` 111 项结构检查全过。另：`closure_science.core` 需环境变量 `PALEO_ONNXRUNTIME_LIBRARY` 指向本机 onnxruntime（/home/kevin/pwb-sdks/ort/...），设置后通过。
+
+| 里程碑 | 状态 | 关键产物 |
+|---|---|---|
+| M0 | ✅ | 原型文档合流、基线记录 |
+| M1 | ✅ | `libs/ui_ribbon`（core + RibbonBar 三模式/QAT/溢出/禁用原因通道） |
+| M2 | ✅ | RibbonBar 挂载、`navigate_workspace` 导航权威、stage↔工作区双向同步（防回环）、层位下拉迁状态栏、hub 轴退役为路由 seam、布局持久化 `(PaleoWorkbench, Workstation) ribbon/*` |
+| M3 | ✅ | 科学宿主 65:35 + 底部三页栈（ws1 井震两联 / ws2 连井剖面+数据制备 / ws3 单因素参考带，真栅格缩略图缓存）；验证页真实组合 |
+| M4 | ✅ | 58 条命令全部注册（34 真实 + 24 当时禁用）；文件菜单做全（MRU 双挂）；地图工具工具栏退役（动作全保留）；D8 禁用原因通道接实时 session 快照 |
+| M5-1 | ✅ | 解释 vs 预测对比视图（三模式、真实 payload、时深门 F:75）；复核状态机（六态/备注必填/复核≠通过/指纹过期/记录跨重跑保留/导出带复核段） |
+| M5-2 | ✅ | 版式轻量页（模板 9 真清单/矢量预览/版式模式不替换画布）；上下文 Ribbon 组（R:33，布局稳定性测试断言） |
+| M5-3 | ✅ | ws0 版本历史/来源关系页签（catalog 真实血缘）；7 条 data.* 命令（5 点亮 + 2 准确禁用）；hub 轴解散（页面全部住进工作区，viz 退役 D6，hub dock 收窄为编图工具） |
+| M6 | ✅ | `platform.ribbon_visual` 截图 harness（evidence 入构建树，像素仅记录）；图标缺口闭合（dev 树资源根 + rb-opacity.svg）；DPI 1.5 结构断言 |
+
+### 已知遗留（M6 验收逐项记录）
+
+1. **hub dock 未整体拆除**：收窄为「编图工具」单页 dock（mapping_page/MapEditView 要素编辑宿主）。彻底拆除需把编辑场景并入 CompositeDocument——独立评估项。
+2. **解释版本写入端未绑**：`StratigraphyCorrelationPage` 的 `save_draft` seam 无 C++ 宿主绑定（页面自身诚实提示）；对比视图数据通路已就绪，接入即有真数据。
+3. **时深标定无数据源**：`verify.link` 联动门接入点为文档 `coordinate.time_depth_calibrations`，写入端未建，开关保持禁用 + 诚实原因（F:75）。
+4. **菜单栏保留未全量收敛**（M4 决策）：Ribbon=高频+文件入口；菜单栏=低频+全部快捷键权威宿主；无命令丢失、无平行 QAction。后续路线：M6 之后按菜单逐条评估。
+5. **仍禁用的命令（原因已写进注册，palette/ribbon tooltip 可见）**：
+   `data.link_well`/`data.set_role`（无关联/角色写入后端）、`predict.select_well`/`model_params`/`params`/`link`（预测参数/联动面未建）、`factor.crosswell_path`/`link`（连井路径/联动无后端）、`verify.cancel`（QC 同步执行无可取消任务）、`verify.select_object`/`select_baseline`（由对比视图选择器承担，可改点亮聚焦命令）。
+6. **多选批量视图**：血缘面板为单选（bus 单一权威），表格多选→bus 语义扩展留给后续。
+7. **viz 页面对象**仍存活（closure_preview provider 绑定引用），UI 面已退役；最终清除待该绑定改挂数据读取面板。
+
+### 验证入口
+
+- 构建：`cmake -S . -B build/native-product` → 资源门 Build。
+- 测试：`ctest -R '^platform\.|^ui_ribbon\.|^ui_stageflow\.|^closure_review\.|^ui_review\.'`；视觉 harness：`ctest -R platform.ribbon_visual`（evidence：`build/native-product/visual-evidence/ribbon/`）。
+- 产品自检：`pwb-platform --self-check` 13/13。

@@ -1,5 +1,11 @@
 # Paleo Workbench UI/UX Audit 与信息架构
 
+
+> **代际说明（2026-09-22）**：本文档属上一代（Python/PySide6 工作站）设计档案。
+> 现行方案为 **[qt-ribbon-workspaces-2026-09-21](../development/ribbon-five-workspaces/00-plan.md)**
+> 轻量 Ribbon 五工作区，已在 C++ 端（`pwb-platform`，分支 feat/ribbon-five-workspaces）
+> 完整实现（M0–M6 完成）。未冲突条款（OpenGL 惰性创建、五态语义、三主题机制、
+> 状态栏 CRS/坐标契约等）仍有效；与五工作区方案冲突的页面组织/导航条款以新方案为准。
 ## 审计范围
 
 本审计基于当前 PySide6 主程序、15 张实际运行截图、`project_area` 真实工程、

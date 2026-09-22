@@ -42,6 +42,13 @@ std::string format_g(double v) {
     return buf;
 }
 
+std::string ascii_lower(std::string s) {
+    for (char& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+}
+
 }  // namespace
 
 std::string normalize_crs(const std::optional<std::string>& crs) {
@@ -196,6 +203,31 @@ std::optional<DomainMismatch> coordinate_domain_mismatch(
     out.extent = *extent;
     out.domain = *domain;
     return out;
+}
+
+std::optional<double> barrier_buffer_distance_for_crs(
+    const std::optional<std::string>& crs) {
+    // Python: `if not crs: return None` — None and "" only.
+    if (!crs.has_value() || crs->empty()) {
+        return std::nullopt;
+    }
+    const std::optional<bool> resolved = crs_is_geographic(crs);
+    bool is_geographic;
+    if (resolved.has_value()) {
+        // The kernel CRS authority answers in place of
+        // pyproj.CRS.from_user_input(text).is_geographic.
+        is_geographic = *resolved;
+    } else {
+        // Unresolvable id — the Python `except Exception` path:
+        // lowercase, trimmed substring heuristic.
+        const std::string text = ascii_lower(trim(*crs));
+        is_geographic = text.find("4326") != std::string::npos ||
+                        text.find("wgs84") != std::string::npos;
+    }
+    if (!is_geographic) {
+        return std::nullopt;
+    }
+    return 300.0 / 111320.0;
 }
 
 CRSInference infer_crs_from_extent(const std::optional<Domain>& extent) {

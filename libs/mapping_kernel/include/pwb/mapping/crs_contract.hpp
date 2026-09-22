@@ -136,4 +136,15 @@ struct CRSInference {
 // declaration.
 CRSInference infer_crs_from_extent(const std::optional<Domain>& extent);
 
+// constrained_idw_adapter.barrier_buffer_distance_for_crs: the explicit
+// ~300 m barrier blank buffer expressed in map units for geographic
+// (degree) CRS projects (300.0 / 111320.0 ≈ 0.002694 deg); nullopt keeps
+// the engine's metre-calibrated auto-buffer. The kernel CRS authority
+// (crs_is_geographic) answers in place of pyproj; when it cannot resolve
+// the id (nullopt — the Python `except Exception` path) the oracle's
+// lowercase-text heuristic ("4326" / "wgs84" substring) applies. Missing
+// or empty CRS → nullopt.
+std::optional<double> barrier_buffer_distance_for_crs(
+    const std::optional<std::string>& crs);
+
 }  // namespace pwb::mapping
