@@ -18,6 +18,7 @@
 #include <algorithm>
 
 #include <QEvent>
+#include <QToolBar>
 #include <QVBoxLayout>
 
 namespace pwb::ui_composite {
@@ -35,6 +36,16 @@ CompositeDocument::CompositeDocument(QWidget* parent) : QWidget(parent) {
     timeline = new pwb::ui_widgets::StratigraphicTimelineWidget(this);
     timeline->hide();
     layout->addWidget(timeline);
+
+    map_toolbar_ = new QToolBar(this);
+    map_toolbar_->setObjectName(QStringLiteral("MapNavigationToolBar"));
+    map_toolbar_->setAccessibleName(QStringLiteral("地图工具"));
+    map_toolbar_->setMovable(false);
+    map_toolbar_->setFloatable(false);
+    map_toolbar_->setIconSize(QSize(18, 18));
+    map_toolbar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    map_toolbar_->hide();
+    layout->addWidget(map_toolbar_);
 
     // 中央画布占位：宿主 set_canvas 注入真实控件（QgisCanvasShim 或回退）。
     // 空态提示挂画布层（WA_TransparentForMouseEvents）。
@@ -105,9 +116,9 @@ void CompositeDocument::set_canvas(QWidget* canvas,
     canvas_ = canvas;
     uses_native_stack_ = uses_native_stack;
     if (canvas_ != nullptr) {
-        // 时间轴(0) 之后、附属层之前 = 中央区。
+        // 时间轴(0) + 地图工具条(1) 之后、附属层之前 = 中央区。
         auto* box = static_cast<QVBoxLayout*>(layout());
-        box->insertWidget(1, canvas_, 1);
+        box->insertWidget(2, canvas_, 1);
         canvas_->installEventFilter(this);
         // 空态提示挂画布（鼠标穿透）。
         if (empty_hint_ == nullptr) {
@@ -134,6 +145,19 @@ void CompositeDocument::set_canvas(QWidget* canvas,
         constraint_hud->setParent(canvas_);
         layout_map_title();
     }
+}
+
+void CompositeDocument::set_map_actions(
+    const std::vector<QAction*>& actions) {
+    map_toolbar_->clear();
+    for (QAction* action : actions) {
+        if (action == nullptr) {
+            map_toolbar_->addSeparator();
+        } else {
+            map_toolbar_->addAction(action);
+        }
+    }
+    map_toolbar_->setVisible(!map_toolbar_->actions().isEmpty());
 }
 
 void CompositeDocument::set_map_title(const QString& title) {

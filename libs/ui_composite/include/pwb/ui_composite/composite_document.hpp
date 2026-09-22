@@ -25,6 +25,9 @@
 #include <QTimer>
 #include <QWidget>
 
+class QAction;
+class QToolBar;
+
 namespace pwb::ui_shell {
 class MapStatusBar;
 }
@@ -64,6 +67,11 @@ public:
     void set_canvas(QWidget* canvas, bool uses_native_stack = false);
     QWidget* canvas() const { return canvas_; }
     bool uses_native_stack() const { return uses_native_stack_; }
+
+    // Compact QGIS-style map toolbar. Actions are the host's canonical
+    // governed QActions; nullptr entries create separators.
+    void set_map_actions(const std::vector<QAction*>& actions);
+    QToolBar* map_toolbar() const { return map_toolbar_; }
 
     // 面板实例由壳层创建、宿主注册为 dock（Python WorkstationFrame
     // parity）。
@@ -141,6 +149,7 @@ private:
     bool eventFilter(QObject* obj, QEvent* event) override;
 
     QWidget* canvas_ = nullptr;
+    QToolBar* map_toolbar_ = nullptr;
     bool uses_native_stack_ = false;
     QLabel* empty_hint_ = nullptr;
     QTimer* composition_timer_ = nullptr;

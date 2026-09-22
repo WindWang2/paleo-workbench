@@ -253,6 +253,23 @@ AppShell::AppShell(QWidget* parent,
 
 AppShell::~AppShell() = default;
 
+void AppShell::adopt_layer_tree_dock(QDockWidget* dock) {
+    if (dock == nullptr || workstation_ == nullptr || composite_ == nullptr) {
+        return;
+    }
+    if (auto* legacy_dock = workstation_->dock("composite_layer")) {
+        QWidget* manager = composite_->layer_manager;
+        if (legacy_dock->widget() == manager) {
+            legacy_dock->setWidget(new QWidget(legacy_dock));
+        }
+        if (manager != nullptr) {
+            manager->setParent(composite_);
+            manager->hide();
+        }
+    }
+    workstation_->adopt_dock("composite_layer", dock);
+}
+
 void AppShell::build_pages() {
     using ui_pages_data::qt::HubPage;
 

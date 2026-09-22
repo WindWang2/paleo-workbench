@@ -56,6 +56,7 @@
 #include <pwb/ui_shell/deferred_page_bindings.hpp>
 
 class QComboBox;
+class QDockWidget;
 class QShowEvent;
 class QSplitter;
 class QTabWidget;
@@ -139,6 +140,11 @@ public:
     // widget — the owning session keeps its pointer (attachCanvas already
     // bound). uses_native_stack mirrors CompositeDocument::set_canvas.
     void install_canvas(QWidget* canvas, bool uses_native_stack = false);
+
+    // Replaces the prototype layer-manager dock with the session-owned
+    // native QGIS layer tree. The prototype manager remains alive as a
+    // hidden compatibility surface for workflow/controller bindings.
+    void adopt_layer_tree_dock(QDockWidget* dock);
 
     // ---- M2: five-workspace navigation authority ----------------------------
     // User-intent entry (ribbon tab click, digit shortcuts, commands).

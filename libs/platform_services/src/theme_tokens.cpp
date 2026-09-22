@@ -358,6 +358,30 @@ std::string build_platform_qss(ThemeMode mode, Density density) {
            "QToolButton:checked { background: " + token("BG_NAV_ACTIVE") +
            "; color: " + token("TEXT_ON_RAIL_ACTIVE") + "; }\n"
            "QToolButton:disabled { color: " + token("TEXT_DISABLED") + "; }\n"
+           "QToolBar#MapNavigationToolBar { background: " + token("SURFACE") +
+           "; border: 1px solid " + token("BORDER_LIGHT") +
+           "; border-left: none; border-right: none; padding: 3px 8px; spacing: 2px; }\n"
+           "QToolBar#MapNavigationToolBar QToolButton { min-width: 24px; min-height: 24px;"
+           " padding: 3px; }\n"
+           "QToolBar#MapNavigationToolBar::separator { width: 1px; background: " +
+           token("BORDER_LIGHT") + "; margin: 5px 4px; }\n"
+           "QWidget#layer-tree-panel { background: " + token("SURFACE") + "; }\n"
+           "QLabel#LayerTreeTitle { color: " + token("TEXT_PRIMARY") +
+           "; font-weight: 600; }\n"
+           "QToolBar#LayerTreeToolBar { background: transparent; border: none;"
+           " padding: 0; spacing: 1px; }\n"
+           "QToolBar#LayerTreeToolBar QToolButton { min-width: 22px; min-height: 22px;"
+           " padding: 2px; }\n"
+           "QLineEdit#LayerTreeFilter { background: " + token("BG_SEARCH") + "; }\n"
+           "QTreeView#QgisLayerTreeView { background: " + token("BG_HEADER") +
+           "; border: 1px solid " + token("BORDER_LIGHT") +
+           "; border-radius: 4px; outline: none; }\n"
+           "QTreeView#QgisLayerTreeView::item { padding: 2px 4px; }\n"
+           "QTreeView#QgisLayerTreeView::item:hover { background: " +
+           token("BG_MENU_HOVER") + "; }\n"
+           "QLabel#LayerOpacityLabel { color: " + token("TEXT_SECONDARY") + "; }\n"
+           "QWidget#CompositeDocument #session-map-canvas { border: 1px solid " +
+           token("BORDER_LIGHT") + "; }\n"
            "QDockWidget { color: " + token("TEXT_PRIMARY") +
            "; titlebar-close-icon: none; }\n"
            "QDockWidget::title { background: " + token("BG_HEADER") +

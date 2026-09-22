@@ -30,6 +30,8 @@ class QgsLayerTreeViewIndicator;
 class QgsLayerTreeViewDefaultActions;
 class QgsMapLayer;
 class QMenu;
+class QSlider;
+class QToolBar;
 
 namespace pwb::ui {
 
@@ -74,12 +76,15 @@ signals:
 private:
     void build_context_menu(const QPoint& global_pos);
     void on_current_layer_changed(QgsMapLayer* layer);
+    void sync_opacity_control(QgsMapLayer* layer);
 
     pwb::qgis::MapSession& session_;
     QgsMapCanvas* canvas_ = nullptr;
     FactsProvider facts_provider_;
     QgsLayerTreeView* view_ = nullptr;
     ::QgsLayerTreeViewDefaultActions* default_actions_ = nullptr;
+    QToolBar* toolbar_ = nullptr;
+    QSlider* opacity_ = nullptr;
     // One editing indicator per domain layer id (recreated on refresh).
     std::map<std::string, QgsLayerTreeViewIndicator*> edit_indicators_;
 };

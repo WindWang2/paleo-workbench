@@ -1,7 +1,17 @@
 #include <pwb/ui/layer_tree_panel.hpp>
 
+#include <algorithm>
+
+#include <QAbstractItemView>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QPainter>
+#include <QSignalBlocker>
+#include <QSlider>
+#include <QToolBar>
+#include <QVBoxLayout>
 
 #include <qgslayertree.h>
 #include <qgslayertreemodel.h>
@@ -47,6 +57,73 @@ LayerTreePanel::LayerTreePanel(pwb::qgis::MapSession& session,
     view_ = session_.createLayerTree(this);
     default_actions_ = new QgsLayerTreeViewDefaultActions(view_);
 
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(8, 8, 8, 8);
+    layout->setSpacing(6);
+
+    auto* header = new QHBoxLayout;
+    auto* title = new QLabel(tr("图层"), this);
+    title->setObjectName(QStringLiteral("LayerTreeTitle"));
+    header->addWidget(title);
+    header->addStretch(1);
+    toolbar_ = new QToolBar(this);
+    toolbar_->setObjectName(QStringLiteral("LayerTreeToolBar"));
+    toolbar_->setMovable(false);
+    toolbar_->setFloatable(false);
+    toolbar_->setIconSize(QSize(16, 16));
+    toolbar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    toolbar_->addAction(default_actions_->actionAddGroup(toolbar_));
+    toolbar_->addAction(default_actions_->actionMoveToTop(toolbar_));
+    toolbar_->addAction(default_actions_->actionMoveToBottom(toolbar_));
+    toolbar_->addSeparator();
+    toolbar_->addAction(default_actions_->actionRemoveGroupOrLayer(toolbar_));
+    header->addWidget(toolbar_);
+    layout->addLayout(header);
+
+    auto* filter = new QLineEdit(this);
+    filter->setObjectName(QStringLiteral("LayerTreeFilter"));
+    filter->setClearButtonEnabled(true);
+    filter->setPlaceholderText(tr("按名称筛选图层"));
+    filter->setAccessibleName(tr("筛选图层"));
+    connect(filter, &QLineEdit::textChanged, this,
+            [this](const QString& text) {
+                if (view_->proxyModel() != nullptr) {
+                    view_->proxyModel()->setFilterText(text);
+                }
+            });
+    layout->addWidget(filter);
+
+    view_->setObjectName(QStringLiteral("QgisLayerTreeView"));
+    view_->setHeaderHidden(true);
+    view_->setAlternatingRowColors(true);
+    view_->setUniformRowHeights(false);
+    view_->setDragEnabled(true);
+    view_->setAcceptDrops(true);
+    view_->setDropIndicatorShown(true);
+    view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    view_->setAccessibleName(tr("QGIS 图层树"));
+    layout->addWidget(view_, 1);
+
+    auto* opacity_row = new QHBoxLayout;
+    auto* opacity_label = new QLabel(tr("不透明度"), this);
+    opacity_label->setObjectName(QStringLiteral("LayerOpacityLabel"));
+    opacity_row->addWidget(opacity_label);
+    opacity_ = new QSlider(Qt::Horizontal, this);
+    opacity_->setObjectName(QStringLiteral("LayerOpacity"));
+    opacity_->setRange(0, 100);
+    opacity_->setValue(100);
+    opacity_->setEnabled(false);
+    opacity_->setAccessibleName(tr("当前图层不透明度"));
+    connect(opacity_, &QSlider::valueChanged, this, [this](int value) {
+        QgsMapLayer* layer = view_->currentLayer();
+        if (layer == nullptr) return;
+        layer->setOpacity(static_cast<double>(value) / 100.0);
+        layer->triggerRepaint();
+        if (canvas_ != nullptr) canvas_->refresh();
+    });
+    opacity_row->addWidget(opacity_, 1);
+    layout->addLayout(opacity_row);
+
     // Tree selection -> domain active layer (join key authority; groups and
     // reorders cannot desync the mapping).
     connect(view_, &QgsLayerTreeView::currentLayerChanged, this,
@@ -62,12 +139,22 @@ LayerTreePanel::LayerTreePanel(pwb::qgis::MapSession& session,
 }
 
 void LayerTreePanel::on_current_layer_changed(QgsMapLayer* layer) {
+    sync_opacity_control(layer);
     if (layer == nullptr) {
         emit active_layer_changed(QString());
         return;
     }
     emit active_layer_changed(QString::fromStdString(
         pwb::qgis::layer_adapter::layer_id_of(layer)));
+}
+
+void LayerTreePanel::sync_opacity_control(QgsMapLayer* layer) {
+    const QSignalBlocker blocker(opacity_);
+    opacity_->setEnabled(layer != nullptr);
+    opacity_->setValue(
+        layer == nullptr ? 100
+                         : qRound(std::clamp(layer->opacity(), 0.0, 1.0) *
+                                  100.0));
 }
 
 void LayerTreePanel::set_active_layer(const std::string& layer_id) {

@@ -5,20 +5,33 @@
 
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
-#include <qgsrendererpropertiesdialog.h>
-#include <qgsstyle.h>
+#include <qgsmessagebar.h>
+#include <qgsrasterlayer.h>
+#include <qgsrasterlayerproperties.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectorlayerproperties.h>
 
 namespace pwb::ui::layer_style {
 
+bool open_layer_properties(QgsMapLayer* layer, QgsMapCanvas* canvas,
+                           QWidget* parent) {
+    if (layer == nullptr) return false;
+    if (auto* vector_layer = qobject_cast<QgsVectorLayer*>(layer)) {
+        QgsMessageBar message_bar;
+        QgsVectorLayerProperties dialog(
+            canvas, &message_bar, vector_layer, parent);
+        return dialog.exec() == QDialog::Accepted;
+    }
+    if (auto* raster_layer = qobject_cast<QgsRasterLayer*>(layer)) {
+        QgsRasterLayerProperties dialog(raster_layer, canvas, parent);
+        return dialog.exec() == QDialog::Accepted;
+    }
+    return false;
+}
+
 bool open_renderer_properties(QgsVectorLayer* layer, QgsMapCanvas* canvas,
                               QWidget* parent) {
-    if (layer == nullptr) return false;
-    QgsRendererPropertiesDialog dialog(
-        layer, QgsStyle::defaultStyle(), /*embedded*/ false, parent);
-    if (canvas != nullptr) dialog.setMapCanvas(canvas);
-    // QGIS applies the configured renderer to the layer on OK.
-    return dialog.exec() == QDialog::Accepted;
+    return open_layer_properties(layer, canvas, parent);
 }
 
 QString sidecar_path(const QString& layer_uri) {

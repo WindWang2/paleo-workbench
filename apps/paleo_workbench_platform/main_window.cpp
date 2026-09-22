@@ -12,6 +12,10 @@
 #include <QStatusBar>
 #include <QToolBar>
 
+#ifdef PWB_WITH_APP_SHELL
+#include <pwb/ui_widgets/icon_factory.hpp>
+#endif
+
 // BEGIN CONV-30 — product job runtime wiring (top-level: needed by the
 // ctor/dtor/closeEvent protocol and all migrated surfaces, independent of
 // CONV_01/SEISMIC_* guards)
@@ -124,6 +128,7 @@
 #include <qgsfeatureiterator.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaplayer.h>
 #include <qgsmapmouseevent.h>
 #include <qgsmaptoolemitpoint.h>
 #include <qgsmaptoolpan.h>
@@ -149,6 +154,8 @@
 #include "workspace_compose.hpp"
 #include "ribbon_command_install.hpp"
 #include "m5_validation_install.hpp"
+#include <pwb/ui_composite/composite_document.hpp>
+#include <pwb/ui_composite/layer_manager_panel.hpp>
 #if defined(PWB_WITH_CLOSURE_MAPPING)
 #include "m5_compose_install.hpp"
 #endif
@@ -563,6 +570,17 @@ void MainWindow::buildUi() {
     dock->setWidget(tree_);
 #endif
     addDockWidget(Qt::LeftDockWidgetArea, dock);
+#if defined(PWB_WITH_APP_SHELL) && defined(PWB_WITH_CONV_27)
+    app_shell_->adopt_layer_tree_dock(dock);
+    connect(app_shell_->composite()->layer_manager,
+            &pwb::ui_composite::LayerManagerPanel::active_layer_changed,
+            this, [this](const QVariant& layer_id) {
+                if (layer_panel_ != nullptr && layer_id.isValid()) {
+                    layer_panel_->set_active_layer(
+                        layer_id.toString().toStdString());
+                }
+            });
+#endif
 
     status_label_ = new QLabel(QStringLiteral("ready"), this);
     statusBar()->addWidget(status_label_);
@@ -1166,6 +1184,68 @@ void MainWindow::buildMenusAndToolbar() {
         action->setText(tr(wire.text));
         if (!wire.shortcut.isEmpty()) action->setShortcut(wire.shortcut);
     }
+
+#ifdef PWB_WITH_APP_SHELL
+    const struct {
+        const char* id;
+        const char* icon;
+    } map_icons[] = {
+        {"reference_import", "tree-add-layer"},
+        {"layer_new", "tree-add-layer"},
+        {"pan", "pan"},
+        {"zoom_in", "zoom_in"},
+        {"zoom_out", "zoom_out"},
+        {"full_extent", "full_extent"},
+        {"refresh", "refresh"},
+        {"toggle_editing", "toggle_editing"},
+        {"vertex", "vertex"},
+        {"undo", "undo"},
+        {"redo", "redo"},
+        {"save_edits", "save_edits"},
+        {"rollback", "rollback"},
+#ifdef PWB_WITH_CONV_27
+        {"select", "select"},
+        {"add_point", "add_point"},
+        {"add_line", "add_line"},
+        {"add_polygon", "add_polygon"},
+        {"delete_selected", "delete_selected"},
+#endif
+    };
+    for (const auto& entry : map_icons) {
+        if (QAction* action = actions_.action(entry.id)) {
+            action->setIcon(pwb::ui_widgets::tinted_map_icon(
+                QString::fromUtf8(entry.icon)));
+        }
+    }
+    if (app_shell_ != nullptr && app_shell_->composite() != nullptr) {
+        std::vector<QAction*> map_actions = {
+            actions_.action("reference_import"),
+            actions_.action("layer_new"),
+            nullptr,
+            actions_.action("pan"),
+            actions_.action("zoom_in"),
+            actions_.action("zoom_out"),
+            actions_.action("full_extent"),
+            actions_.action("refresh"),
+            nullptr,
+            actions_.action("toggle_editing"),
+#ifdef PWB_WITH_CONV_27
+            actions_.action("select"),
+            actions_.action("add_point"),
+            actions_.action("add_line"),
+            actions_.action("add_polygon"),
+            actions_.action("vertex"),
+            actions_.action("delete_selected"),
+#endif
+            nullptr,
+            actions_.action("undo"),
+            actions_.action("redo"),
+            actions_.action("save_edits"),
+            actions_.action("rollback"),
+        };
+        app_shell_->composite()->set_map_actions(map_actions);
+    }
+#endif
 
     QMenu* file_menu = menuBar()->addMenu(tr("文件(&F)"));
 #ifdef PWB_WITH_DATA_INTEGRATION
@@ -4189,15 +4269,13 @@ void MainWindow::deleteSelectedFeatures() {
 void MainWindow::openActiveLayerProperties() {
     const auto active = context_.session().active_layer();
     if (!active.has_value()) return;
-    QgsVectorLayer* layer =
-        context_.session().map().vectorLayerById(active->layer_id);
+    QgsMapLayer* layer =
+        context_.session().map().layerById(active->layer_id);
     if (layer == nullptr) return;
-    // Native QGIS renderer dialog applies on OK.
-    pwb::ui::layer_style::open_renderer_properties(layer, canvas_, this);
-    // Persist the configured style next to the layer's data file so it
-    // survives reopen (QML sidecar, the QGIS convention).
-    pwb::ui::layer_style::save_style_sidecar(
-        layer, layer->source());
+    if (pwb::ui::layer_style::open_layer_properties(
+            layer, canvas_, this)) {
+        pwb::ui::layer_style::save_style_sidecar(layer, layer->source());
+    }
     refreshActionStates();
 }
 
