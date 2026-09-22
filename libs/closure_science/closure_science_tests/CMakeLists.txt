@@ -16,6 +16,16 @@ target_link_libraries(closure_science_core_test
 target_compile_features(closure_science_core_test PRIVATE cxx_std_20)
 target_compile_definitions(closure_science_core_test PRIVATE
     PWB_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_executable(closure_science_inference_hash_test inference_hash_test.cpp)
+target_link_libraries(closure_science_inference_hash_test
+    PRIVATE Pwb::ClosureScience)
+target_compile_features(closure_science_inference_hash_test PRIVATE cxx_std_20)
+target_include_directories(closure_science_inference_hash_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+add_test(NAME closure_science.inference_hash
+    COMMAND closure_science_inference_hash_test)
+set_tests_properties(closure_science.inference_hash PROPERTIES TIMEOUT 60)
+
 add_executable(closure_science_mock_facies_test mock_facies_test.cpp)
 target_link_libraries(closure_science_mock_facies_test
     PRIVATE Pwb::ClosureScience Pwb::Workflow Pwb::Project Pwb::Domain)
