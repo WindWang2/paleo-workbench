@@ -515,8 +515,18 @@ std::vector<std::array<double, 2>> estimate_gradients(
                 s1 += (6.0 * (f1 - f2) - 2.0 * df2) * ey / L3;
             }
             const double det = Q00 * Q11 - Q01 * Q01;
+            // D3: a collinear neighbourhood makes det ~0 — dividing spreads
+            // ±inf/NaN over every triangle touching the vertex (scipy raises
+            // LinAlgError here and upstream falls back to nearest); keep the
+            // previous estimate for the degenerate vertex instead.
+            if (!std::isfinite(det) || std::fabs(det) < 1e-18) {
+                continue;
+            }
             const double r0 = (Q11 * s0 - Q01 * s1) / det;
             const double r1 = (-Q01 * s0 + Q00 * s1) / det;
+            if (!std::isfinite(r0) || !std::isfinite(r1)) {
+                continue;
+            }
             double change = std::max(std::fabs(yv[i][0] + r0),
                                      std::fabs(yv[i][1] + r1));
             yv[i][0] = -r0;

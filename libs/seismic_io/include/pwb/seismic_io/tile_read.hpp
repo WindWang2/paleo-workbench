@@ -42,7 +42,20 @@ struct WindowSpec {
     std::array<std::int64_t, 3> extent{0, 0, 0};
 
     [[nodiscard]] std::int64_t elements() const noexcept {
-        return extent[0] * extent[1] * extent[2];
+        // D5: checked multiplication — extreme extents from a hostile
+        // window must refuse with 0 (an invalid elements count), never
+        // signed-overflow-UB before the bounds check can run.
+        std::int64_t n = extent[0];
+        for (int k = 1; k < 3; ++k) {
+            if (n == 0) return 0;
+            if (extent[k] != 0 &&
+                std::abs(extent[k]) > (std::numeric_limits<std::int64_t>::max() /
+                                       std::abs(n))) {
+                return 0;
+            }
+            n *= extent[k];
+        }
+        return n;
     }
 };
 

@@ -100,7 +100,37 @@ double max_abs_diff_axis(const std::vector<double>& got, const Json& want) {
 
 }  // namespace
 
+void test_idw_keep_policy_preserves_duplicate_contract() {
+    // D2 (revised): the kernel keeps coincident samples — the host's
+    // duplicate_policy='keep' contract depends on it (the science_service
+    // duplicates_keep oracle locks the frozen output). What the kernel must
+    // NOT do is run away: the duplicated site reads a bounded value (the
+    // shared eps clamp behaves like the merged mean), never an arbitrary
+    // runaway, and never NaN.
+    std::vector<pwb::mapping::SamplePoint> points = {
+        {.x = 0.0, .y = 0.0, .value = 0.0, .qc_flag = "ok"},
+        {.x = 0.0, .y = 0.0, .value = 10.0, .qc_flag = "ok"},
+        {.x = 1e-3, .y = 1e-3, .value = 3.0, .qc_flag = "ok"},
+        {.x = 1e-3, .y = 0.0, .value = 4.0, .qc_flag = "ok"},
+        {.x = 0.0, .y = 1e-3, .value = 5.0, .qc_flag = "ok"},
+    };
+    pwb::mapping::InterpolateOptions options;
+    options.method = "idw";
+    options.power = 2.0;
+    options.grid_n = 16;
+    const auto grid = pwb::mapping::interpolate_factor(points, options);
+    const double mn = grid.statistics.min;
+    const double mx = grid.statistics.max;
+    check(mn >= 0.0 && mx <= 10.0,
+          "duplicate site stays bounded by the data range (no runaway)");
+    check(std::isfinite(grid.grid_z[0]),
+          "exact-site cell finite under 'keep'");
+}
+
+
+
 int main() {
+    test_idw_keep_policy_preserves_duplicate_contract();
     const std::string fixture_path = PWB_INTERP_FIXTURE;
     std::ifstream stream(fixture_path, std::ios::binary);
     if (!stream.good()) {
