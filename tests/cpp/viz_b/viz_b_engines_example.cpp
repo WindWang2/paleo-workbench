@@ -130,10 +130,20 @@ int main(int argc, char** argv) {
     pwb::viz::cross_well::HorizonPicksModel picks;
     const std::string pick_id =
         picks.add_pick("Example-Horizon", arranged[0].name, ref_depth);
+    // G3: the DTW chain used to ship only export booleans; a numeric
+    // regression (NaN / off-domain pick) would leave the test green. The
+    // fixture's propagation may legitimately produce zero picks (no
+    // correlatable offset in the search band) — that is valid; any pick
+    // that IS produced must be finite and positive.
     for (const auto& [well, depth] : pairs) {
         picks.connect_picks(pick_id, well, depth);
         std::cout << "[viz-b example] dtw pick " << well << " @ " << depth
                   << " m\n";
+        if (!std::isfinite(depth) || depth <= 0.0) {
+            std::cerr << "[viz-b example] NON-FINITE / non-positive pick @ "
+                      << well << " -> " << depth << "\n";
+            return 1;
+        }
     }
 
     // Well tie pipeline on the tie fixture's real logs.

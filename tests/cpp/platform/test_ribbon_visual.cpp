@@ -152,12 +152,17 @@ void structural_gate(AppShell* shell, const QString& phase) {
     // 主图:底部 ≈ 65:35 (user-draggable — tolerance window). Only
     // meaningful while the science host page is current — hidden pages
     // carry degenerate geometry.
-    const auto sizes =
+    const bool science_current =
         shell->workspace_host()->currentIndex() ==
-                pwb::app::WorkspaceHostWidget::kPageScience
-            ? shell->science_splitter()->sizes()
-            : QList<int>{};
-    if (sizes.size() == 2 && sizes[0] + sizes[1] > 100) {
+        pwb::app::WorkspaceHostWidget::kPageScience;
+    const auto sizes =
+        science_current ? shell->science_splitter()->sizes() : QList<int>{};
+    if (!science_current || !(sizes.size() == 2 && sizes[0] + sizes[1] > 100)) {
+        // G5: a silent skip used to record nothing for 4 of 5 workspaces;
+        // report the skip so the gate can't masquerade as coverage.
+        std::printf("  [skip] %s: canvas:bottom ratio (science page not current)\n",
+                    phase.toUtf8().constData());
+    } else if (sizes.size() == 2 && sizes[0] + sizes[1] > 100) {
         const double ratio =
             static_cast<double>(sizes[0]) / (sizes[0] + sizes[1]);
         check(ratio > 0.5 && ratio < 0.85,

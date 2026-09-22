@@ -223,7 +223,10 @@ int main(int argc, char** argv) {
         }
         delete w;
     }
-    check(true, "10 open/close cycles without a crash");
+    // Crash smoke: reaching this line at all is the assertion (a crash
+    // fails the binary); the old check(true, ...) inflated the check count
+    // with a tautology (review G4).
+    std::printf("geo3d.widget_test: 10 open/close cycles survived (crash smoke)\n");
 
     std::printf("geo3d.widget_test: %d checks, %d failures (%s)\n", g_checks,
                 g_failures, gl ? "GL" : "GL-less");
