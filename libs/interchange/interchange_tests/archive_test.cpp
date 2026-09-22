@@ -1155,6 +1155,170 @@ void run_seam_checks(const Json& oracle, const std::filesystem::path& work) {
     check(unknown_throws, "seam: unknown format rejected loudly");
 }
 
+// #1469: a truncated or hostile CENTRAL DIRECTORY is a ZipError (a failed
+// package report), never a std::out_of_range escaping through the
+// verifier's `catch (const ZipError&)` and aborting the process. The
+// fixtures below are hand-rolled because the writer can never emit them.
+void run_hostile_central_directory(const std::filesystem::path& work) {
+    auto u16 = [](std::string& s, unsigned v) {
+        s.push_back(static_cast<char>(v & 0xFF));
+        s.push_back(static_cast<char>((v >> 8) & 0xFF));
+    };
+    auto u32 = [](std::string& s, unsigned long v) {
+        for (int i = 0; i < 4; ++i)
+            s.push_back(static_cast<char>((v >> (8 * i)) & 0xFF));
+    };
+    // Minimal central-directory record; the fixed header is zeroed apart
+    // from the signature and the three variable-length counts (patched IN
+    // PLACE at their record offsets — u16 above only appends).
+    auto cd_record = [](unsigned short name_len, unsigned short extra_len,
+                            unsigned short comment_len,
+                            const std::string& tail) {
+        std::string s = "PK\x01\x02";
+        s.resize(46, '\0');
+        const auto put16at = [&s](std::size_t off, unsigned v) {
+            s[off] = static_cast<char>(v & 0xFF);
+            s[off + 1] = static_cast<char>((v >> 8) & 0xFF);
+        };
+        put16at(28, name_len);
+        put16at(30, extra_len);
+        put16at(32, comment_len);
+        return s + tail;
+    };
+    auto eocd = [&](unsigned short count, unsigned long cd_size,
+                    unsigned long cd_offset) {
+        std::string s = "PK\x05\x06";
+        u16(s, 0);
+        u16(s, 0);
+        u16(s, count);
+        u16(s, count);
+        u32(s, cd_size);
+        u32(s, cd_offset);
+        u16(s, 0);
+        return s;
+    };
+
+    struct Case {
+        const char* id;
+        std::string bytes;
+        const char* want_fragment;  // expected ZipError text fragment
+    };
+    const std::string cd_name(5, 'n');
+    const Case cases[] = {
+        // The #1469 reproducer: 46-byte record + non-zero name_len pushes
+        // the extra-field substr start past the buffer end.
+        {"name_len_overrun", cd_record(1, 0, 0, "") + eocd(1, 46, 0),
+         "truncated central directory"},
+        // name bytes present, but name_len over-declares them by one.
+        {"name_len_off_by_one",
+         cd_record(6, 0, 0, cd_name) + eocd(1, 46 + 5, 0),
+         "truncated central directory"},
+        // extra_len pushes the record tail past the directory end.
+        {"extra_len_overrun",
+         cd_record(5, 0xFFFF, 0, cd_name) + eocd(1, 46 + 5, 0),
+         "truncated central directory"},
+        // comment_len over-declared (the comment was never read at all
+        // before the fix — the next record start silently wrapped).
+        {"comment_len_overrun",
+         cd_record(5, 0, 0xF000, cd_name) + eocd(1, 46 + 5, 0),
+         "truncated central directory"},
+        // all three length fields at their u16 maximum.
+        {"max_lengths",
+         cd_record(0xFFFF, 0xFFFF, 0xFFFF, "") + eocd(1, 46, 0),
+         "truncated central directory"},
+        // EOCD pointing the directory outside the file entirely.
+        {"cd_offset_out_of_file",
+         cd_record(5, 0, 0, cd_name) + eocd(1, 51, 0xFFFF),
+         "central directory"},
+        // entry count beyond what the directory could physically hold.
+        {"entry_count_overflow",
+         cd_record(5, 0, 0, cd_name) + eocd(0xFFFF, 51, 0),
+         "entry count"},
+    };
+
+    for (const Case& entry : cases) {
+        const std::filesystem::path path =
+            write_zip_file(work, std::string("hostile_") + entry.id + ".zip",
+                           entry.bytes);
+        // (a) the parser itself raises ZipError (any other exception type
+        // — the old std::out_of_range — fails this check).
+        try {
+            ZipReader reader(path);
+            check(false, std::string("hostile/") + entry.id +
+                             " parsed a broken directory");
+        } catch (const ZipError& exc) {
+            check(std::string(exc.what()).find(entry.want_fragment) !=
+                      std::string::npos,
+                  std::string("hostile/") + entry.id + " message (got '" +
+                      exc.what() + "')");
+        } catch (const std::exception& exc) {
+            check(false, std::string("hostile/") + entry.id +
+                             " threw a non-ZipError: " + exc.what());
+        }
+        // (b) the package verifier turns it into a failure REPORT — the
+        // process must survive a hostile package (verify_package must not
+        // throw at all).
+        bool verify_threw = false;
+        try {
+            const PackageVerifyReport report = verify_package(path, true);
+            bool has_bad_zip = false;
+            for (const auto& issue : report.issues) {
+                if (issue.code == "bad-zip") has_bad_zip = true;
+            }
+            check(!report.ok() && has_bad_zip,
+                  std::string("hostile/") + entry.id + " verify report");
+        } catch (const std::exception& exc) {
+            verify_threw = true;
+            check(false, std::string("hostile/") + entry.id +
+                             " verify threw: " + exc.what());
+        }
+        check(!verify_threw,
+              std::string("hostile/") + entry.id + " verify never throws");
+    }
+
+    // A structurally valid directory whose local-header offset points
+    // past EOF: read_entry must refuse before any u64 offset arithmetic
+    // (the ZIP64 extra can legally declare offsets near 2^64).
+    {
+        const std::filesystem::path path = work / "hostile_local_offset.zip";
+        {
+            ZipWriter writer(path);
+            writer.add_bytes("a.txt", "hello");
+            writer.finish();
+        }
+        std::string bytes = read_file(path);
+        const std::size_t cd_pos = bytes.rfind("PK\x01\x02");
+        check(cd_pos != std::string::npos,
+              "hostile/local_offset has a central directory");
+        if (cd_pos != std::string::npos) {
+            const unsigned long huge = 0xFFFFFFF0UL;
+            for (int i = 0; i < 4; ++i) {
+                bytes[cd_pos + 42 + static_cast<std::size_t>(i)] =
+                    static_cast<char>((huge >> (8 * i)) & 0xFF);
+            }
+            write_file(path, bytes);
+            ZipReader reader(path);
+            const ZipEntryInfo* info = reader.find("a.txt");
+            check(info != nullptr, "hostile/local_offset entry present");
+            if (info != nullptr) {
+                bool refused = false;
+                try {
+                    (void)reader_find_read(reader, "a.txt");
+                } catch (const ZipError& exc) {
+                    refused = std::string(exc.what()).find(
+                                  "local header offset out of bounds") !=
+                              std::string::npos;
+                }
+                check(refused,
+                      "hostile/local_offset read_entry refuses past-EOF "
+                      "offset");
+            }
+        }
+    }
+    std::printf("hostile central directory: %zu cases\n",
+                sizeof(cases) / sizeof(cases[0]) + 1);
+}
+
 const ZipEntryInfo* reader_find_read(ZipReader& reader, const std::string& name) {
     const ZipEntryInfo* info = reader.find(name);
     if (info == nullptr) throw ZipError("missing entry");
@@ -1213,6 +1377,7 @@ int main() {
     run_model_parse(oracle, work);
     run_model_adapter(oracle, work);
     run_seam_checks(oracle, work);
+    run_hostile_central_directory(work);
 
     std::error_code ec;
     std::filesystem::remove_all(work, ec);

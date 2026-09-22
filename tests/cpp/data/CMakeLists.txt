@@ -155,7 +155,12 @@ pwb_data_test(data_catalog_service catalog_service_test.cpp data.catalog_service
 # tree (apps/ + ui_controllers/ui_review/ui_data_core targets) and only
 # configures in the integrated build; the standalone data-suite entry
 # skips it instead of failing configure (01 ledger A12 follow-up).
-if(TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore)
+# The registration lives in the ROOT CMakeLists (cpp-close-01-test block):
+# this probe evaluates at the data-suite mount, BEFORE libs/ui_controllers
+# exists, so it never fired — kept only as a no-op guard for orderings
+# where the root block already ran.
+if(TARGET Pwb::UiControllers AND TARGET Pwb::UiDataCore
+   AND NOT TARGET data_catalog_closure)
     pwb_data_test(data_catalog_closure catalog_closure_test.cpp
         data.catalog_closure)
     target_sources(data_catalog_closure PRIVATE

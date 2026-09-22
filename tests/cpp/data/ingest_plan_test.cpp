@@ -161,7 +161,7 @@ struct Scratch {
         PWB_CHECK(update.is_valid());
         update.bind(1, "__PWB_INGEST_ROOT__");
         update.bind(2, (root / "incoming").generic_string());
-        update.step_done();
+        PWB_CHECK(update.step_done().ok());
     }
 };
 

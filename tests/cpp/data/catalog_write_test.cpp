@@ -3,6 +3,8 @@
 #include "pwb_test.hpp"
 
 #include "pwb/catalog/repository.hpp"
+#include "pwb/catalog/sqlite.hpp"
+#include "pwb/catalog/trash.hpp"
 
 namespace {
 
@@ -131,16 +133,25 @@ PWB_TEST(duplicate_member_names_fail_the_upsert_not_silently_commit) {
     second.rel_path = "b/same.bin";
     second.ordinal = 1;
     version.members = {first, second};
+    // The revision BEFORE the failed upsert (read from the store, not the
+    // in-memory document): a failed write must not advance it (#1458).
+    const int revision_before_value = [&]() {
+        auto doc = repository.open_read_only();
+        return doc.is_ok() ? doc.value().catalog_revision : -1;
+    }();
     const pwb::domain::DataError error = repository.upsert_version(version);
     PWB_CHECK(error.code != pwb::domain::ErrorCode::Ok);
     // The read-back must not half-materialize the member set.
     auto document = repository.open_read_only();
     PWB_CHECK(document.is_ok());
+    // #1458: neither the version row nor the revision advance survived
+    // the failed transaction (rollback proof).
     bool found = false;
     for (const auto& stored : document.value().versions) {
         if (stored.id.str() == "ver_dup") found = true;
     }
-    (void)found;  // row presence is transactional detail; the error is the contract
+    PWB_CHECK(!found);
+    PWB_CHECK(document.value().catalog_revision == revision_before_value);
 }
 
 PWB_TEST(re_saved_version_with_empty_members_drops_stale_rows) {
@@ -170,4 +181,137 @@ PWB_TEST(re_saved_version_with_empty_members_drops_stale_rows) {
         if (stored.id.str() != "ver_clr") continue;
         PWB_CHECK(stored.members.empty());
     }
+}
+
+// ---------------------------------------------------------------------------
+// #1458: the Statement error channel is PER-STATEMENT (rc captured at the
+// failing prepare/bind/step), an empty statement never silently succeeds,
+// and a failed write inside a transaction leaves neither the row nor the
+// revision behind.
+// ---------------------------------------------------------------------------
+PWB_TEST(statement_error_channel_is_per_statement_issue_1458) {
+    const fs::path dir =
+        fs::temp_directory_path() / "pwb_catalog_write_stmt1458";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    const fs::path db_file = dir / "stmt1458.sqlite";
+    auto db_result = pwb::catalog::Database::open(
+        db_file, pwb::catalog::SqliteOpenMode::Create);
+    PWB_CHECK(db_result.is_ok());
+    auto db = std::move(db_result.value());
+    PWB_CHECK(db.execute("CREATE TABLE t (k INTEGER PRIMARY KEY, v TEXT)").ok());
+    PWB_CHECK(
+        db.execute("CREATE TABLE rev (key TEXT PRIMARY KEY, value TEXT)")
+            .ok());
+    PWB_CHECK(db.execute(
+                  "INSERT INTO rev (key, value) VALUES ('r', '7')")
+                  .ok());
+
+    // (a) a failed prepare surfaces through step_done — never Ok.
+    {
+        auto bad = db.prepare("INSERT INTO t (k, v VALUES (1, 'x')");
+        PWB_CHECK(!bad.is_valid());
+        auto error = bad.step_done();
+        PWB_CHECK(!error.ok());
+        PWB_CHECK(!bad.ok());
+    }
+    // (b) a bind failure (out-of-range parameter index) surfaces too.
+    {
+        auto stmt = db.prepare("INSERT INTO t (k, v) VALUES (?, ?)");
+        PWB_CHECK(stmt.is_valid());
+        stmt.bind(1, std::int64_t{1});
+        stmt.bind(99, "nowhere");
+        PWB_CHECK(!stmt.step_done().ok());
+    }
+    // (c) a step failure (PRIMARY KEY constraint) surfaces, the row is not
+    // half-committed, and the transaction rollback keeps the revision
+    // where it was.
+    {
+        pwb::catalog::Transaction transaction(db);
+        auto first = db.prepare("INSERT INTO t (k, v) VALUES (1, 'first')");
+        PWB_CHECK(first.step_done().ok());
+        // Same key again: constraint fires at STEP time — the exact rc
+        // the old void step_done() dropped (#1458).
+        auto dup = db.prepare("INSERT INTO t (k, v) VALUES (1, 'dup')");
+        auto error = dup.step_done();
+        PWB_CHECK(!error.ok());
+        // The failure propagates before any bump/commit decision.
+        auto count = db.scalar_i64("SELECT COUNT(*) FROM t");
+        PWB_CHECK(count.is_ok() && count.value() == 1);
+    }  // destructor rolls back
+    {
+        auto count = db.scalar_i64("SELECT COUNT(*) FROM t");
+        PWB_CHECK(count.is_ok() && count.value() == 0);
+        auto rev = db.scalar_i64(
+            "SELECT CAST(value AS INTEGER) FROM rev WHERE key = 'r'");
+        PWB_CHECK(rev.is_ok() && rev.value() == 7);
+    }
+    // (d) the statement is reusable after a successful step_done
+    // (auto-reset): bind + step_done loops share one prepared statement.
+    {
+        pwb::catalog::Transaction transaction(db);
+        auto row = db.prepare("INSERT INTO t (k, v) VALUES (?, ?)");
+        PWB_CHECK(row.is_valid());
+        for (int i = 1; i <= 3; ++i) {
+            row.bind(1, static_cast<std::int64_t>(i));
+            row.bind(2, "loop");
+            PWB_CHECK(row.step_done().ok());
+        }
+        PWB_CHECK(transaction.commit().ok());
+        auto count = db.scalar_i64("SELECT COUNT(*) FROM t");
+        PWB_CHECK(count.is_ok() && count.value() == 3);
+    }
+    // (e) a read loop distinguishes DONE from failure: after a clean
+    // exhaust the statement is ok().
+    {
+        auto rows = db.prepare("SELECT k FROM t ORDER BY k");
+        int seen = 0;
+        while (rows.step()) ++seen;
+        PWB_CHECK(seen == 3);
+        PWB_CHECK(rows.ok());
+        PWB_CHECK(rows.error().ok());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #1468: a source read failure mid-copy must fail the checkout and leave
+// NO committed target — never rename a truncated temp into place. A
+// directory is the deterministic injector: ifstream opens it fine on
+// POSIX/Windows but the first read fails (EISDIR) setting badbit, exactly
+// the mid-read error the loop used to ignore.
+// ---------------------------------------------------------------------------
+PWB_TEST(working_copy_source_read_error_never_commits_a_truncated_copy) {
+    const fs::path dir =
+        fs::temp_directory_path() / "pwb_catalog_write_wcbad";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir / "payload.d", ec);
+    const fs::path project_file = dir / "wcbad.paleo.json";
+    // A "payload" that opens but cannot be read.
+    const fs::path unreadable_payload = dir / "payload.d";
+
+    auto copy = pwb::catalog::create_working_copy(
+        project_file, unreadable_payload, "ver_wcbad");
+    PWB_CHECK(!copy.is_ok());
+    // POSIX: the directory OPENS but the first read fails (EISDIR) — the
+    // mid-read badbit path, error IoError. Windows (MSVC) refuses the
+    // open itself — NotFound. Either way the checkout fails loudly.
+#if !defined(_WIN32)
+    PWB_CHECK(copy.error().code == pwb::domain::ErrorCode::IoError);
+#else
+    PWB_CHECK(copy.error().code == pwb::domain::ErrorCode::NotFound);
+#endif
+
+    // The working directory exists (it is created before the copy), but
+    // nothing was committed into it and no temp residue survives.
+    const fs::path working_dir =
+        pwb::catalog::working_dir_for(project_file) / "ver_wcbad";
+    PWB_CHECK(fs::is_directory(working_dir, ec));
+    int entries = 0;
+    for (fs::recursive_directory_iterator it(working_dir, ec), end;
+         it != end && !ec; it.increment(ec)) {
+        ++entries;
+    }
+    PWB_CHECK(entries == 0);
 }
