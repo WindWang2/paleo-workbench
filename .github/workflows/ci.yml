@@ -261,18 +261,13 @@ jobs:
           # makes every place_managed_file fsync ~an order slower and the
           # timeout killed the suite at 3%, masking real failures; Linux:
           # runner-load timeouts on 2026-08-29). The nightly slow-tests.yml
-          # owns the whole family with a 300s ceiling.
-          # #1429: the two lifecycle/dead-shell files are pulled into their
-          # own step below — their tests PASS but the process can die to a
-          # teardown access violation (Qt/QGIS destruction order) that used
-          # to kill the whole run before its summary was even printed.
+          # owns the whole family with a 300s ceiling. (Python-retirement:
+          # the #1429 crash-prone pair retired with the product suite.)
           python -m pytest -v --tb=line `
             --timeout=45 `
             --timeout-method=thread `
             -m "not slow and not welllog_binding" `
             --ignore=tests/perf `
-            --ignore=tests/test_project_lifecycle.py `
-            --ignore=tests/test_app_close_dead_shell.py `
             --durations=25
 
       # (removed) "Run crash-prone teardown tests (Windows)": both subject

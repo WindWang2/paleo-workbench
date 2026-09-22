@@ -1,10 +1,10 @@
 {
- "schema_version": 1,
+ "schema_version": 2,
  "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
  "retired_at": "2026-09-22",
  "stacked_on_pr": 1473,
  "summary": {
-  "total_entries": 1909,
+  "total_entries": 1913,
   "by_classification": {
    "SCRATCH": 60,
    "LEGACY_PRODUCT_BENCHMARK": 26,
@@ -12,16 +12,21 @@
    "LEGACY_PRODUCT_EXAMPLE": 3,
    "LEGACY_PRODUCT_IMPLEMENTATION": 688,
    "PRODUCT_ASSET_STAGED": 150,
-   "LEGACY_PRODUCT_TEST": 828,
+   "LEGACY_PRODUCT_TEST": 829,
+   "REVIEW_AMENDMENT_RESTORED": 3,
    "REFERENCE_COPY": 150
   },
-  "renames": 1759,
+  "renames": 1760,
   "deletions": 0,
   "matrix_replacement_counts": {
-   "NATIVE_PRODUCT": 205,
-   "LEGACY_REFERENCE": 395,
-   "PARTIAL_NATIVE": 77,
+   "NATIVE_PRODUCT": 208,
+   "LEGACY_REFERENCE": 390,
+   "PARTIAL_NATIVE": 79,
    "NATIVE_LIBRARY_NOT_WIRED": 1
+  },
+  "amendments": {
+   "restored_to_active": 3,
+   "note": "Review amendments: qgis_support.py and the two tests/cpp oracle generators were restored to the active tree; five architecture-guard tests were archived later; scratch/ and examples/ archive paths were de-doubled."
   },
   "note": "Every archived source is a git mv (rename history preserved). cpp_replacement values come verbatim from docs/development/cpp-final-closure/migration-matrix.json; empty means no per-module native attribution (honest LEGACY_REFERENCE at module granularity, product-level replacement via the C++ pwb-platform application)."
  },
@@ -270,7 +275,7 @@
   },
   {
    "original_path": "examples/provider_plugins/README.md",
-   "archived_path": "legacy/python_reference/product/examples/examples/provider_plugins/README.md",
+   "archived_path": "legacy/python_reference/product/examples/provider_plugins/README.md",
    "classification": "LEGACY_PRODUCT_EXAMPLE",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -281,7 +286,7 @@
   },
   {
    "original_path": "examples/provider_plugins/export_map_thumbnail.py",
-   "archived_path": "legacy/python_reference/product/examples/examples/provider_plugins/export_map_thumbnail.py",
+   "archived_path": "legacy/python_reference/product/examples/provider_plugins/export_map_thumbnail.py",
    "classification": "LEGACY_PRODUCT_EXAMPLE",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -292,7 +297,7 @@
   },
   {
    "original_path": "examples/provider_plugins/geology_factor_stats.py",
-   "archived_path": "legacy/python_reference/product/examples/examples/provider_plugins/geology_factor_stats.py",
+   "archived_path": "legacy/python_reference/product/examples/provider_plugins/geology_factor_stats.py",
    "classification": "LEGACY_PRODUCT_EXAMPLE",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -943,10 +948,10 @@
    "original_path": "paleo_workbench/catalog/service.py",
    "archived_path": "legacy/python_reference/product/paleo_workbench/catalog/service.py",
    "classification": "LEGACY_PRODUCT_IMPLEMENTATION",
-   "cpp_replacement": "",
-   "matrix_classification": "LEGACY_REFERENCE",
+   "cpp_replacement": "Pwb::ClosureWorkflow, pwb_closure_workflow",
+   "matrix_classification": "NATIVE_PRODUCT",
    "runtime_dependency": false,
-   "reason": "migration-matrix final_classification=LEGACY_REFERENCE; native product runtime requires no Python (python_runtime_required=0)",
+   "reason": "migration-matrix final_classification=NATIVE_PRODUCT; native product runtime requires no Python (python_runtime_required=0)",
    "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
    "retired_at": "2026-09-22"
   },
@@ -1592,10 +1597,10 @@
    "original_path": "paleo_workbench/mapping/cartographic_qa.py",
    "archived_path": "legacy/python_reference/product/paleo_workbench/mapping/cartographic_qa.py",
    "classification": "LEGACY_PRODUCT_IMPLEMENTATION",
-   "cpp_replacement": "",
-   "matrix_classification": "LEGACY_REFERENCE",
+   "cpp_replacement": "Pwb::Cartography, cartography_bind_module, pwb_cartography",
+   "matrix_classification": "NATIVE_PRODUCT",
    "runtime_dependency": false,
-   "reason": "migration-matrix final_classification=LEGACY_REFERENCE; native product runtime requires no Python (python_runtime_required=0)",
+   "reason": "migration-matrix final_classification=NATIVE_PRODUCT; native product runtime requires no Python (python_runtime_required=0)",
    "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
    "retired_at": "2026-09-22"
   },
@@ -1812,10 +1817,10 @@
    "original_path": "paleo_workbench/mapping/factor_layer_products.py",
    "archived_path": "legacy/python_reference/product/paleo_workbench/mapping/factor_layer_products.py",
    "classification": "LEGACY_PRODUCT_IMPLEMENTATION",
-   "cpp_replacement": "",
-   "matrix_classification": "LEGACY_REFERENCE",
+   "cpp_replacement": "Pwb::UiComposite, Pwb::UiCompositeQgis, Pwb::UiCompositeQt, pwb_ui_composite, pwb_ui_composite_qgis, pwb_ui_composite_qt",
+   "matrix_classification": "PARTIAL_NATIVE",
    "runtime_dependency": false,
-   "reason": "migration-matrix final_classification=LEGACY_REFERENCE; native product runtime requires no Python (python_runtime_required=0)",
+   "reason": "migration-matrix final_classification=PARTIAL_NATIVE; native product runtime requires no Python (python_runtime_required=0)",
    "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
    "retired_at": "2026-09-22"
   },
@@ -2406,10 +2411,10 @@
    "original_path": "paleo_workbench/mapping_workspace/constraints_sync.py",
    "archived_path": "legacy/python_reference/product/paleo_workbench/mapping_workspace/constraints_sync.py",
    "classification": "LEGACY_PRODUCT_IMPLEMENTATION",
-   "cpp_replacement": "",
-   "matrix_classification": "LEGACY_REFERENCE",
+   "cpp_replacement": "Pwb::UiComposite, Pwb::UiCompositeQgis, Pwb::UiCompositeQt, pwb_ui_composite, pwb_ui_composite_qgis, pwb_ui_composite_qt",
+   "matrix_classification": "PARTIAL_NATIVE",
    "runtime_dependency": false,
-   "reason": "migration-matrix final_classification=LEGACY_REFERENCE; native product runtime requires no Python (python_runtime_required=0)",
+   "reason": "migration-matrix final_classification=PARTIAL_NATIVE; native product runtime requires no Python (python_runtime_required=0)",
    "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
    "retired_at": "2026-09-22"
   },
@@ -2439,10 +2444,10 @@
    "original_path": "paleo_workbench/mapping_workspace/dependencies.py",
    "archived_path": "legacy/python_reference/product/paleo_workbench/mapping_workspace/dependencies.py",
    "classification": "LEGACY_PRODUCT_IMPLEMENTATION",
-   "cpp_replacement": "",
-   "matrix_classification": "LEGACY_REFERENCE",
+   "cpp_replacement": "Pwb::WorkflowInterpretation, pwb_workflow_interpretation",
+   "matrix_classification": "NATIVE_PRODUCT",
    "runtime_dependency": false,
-   "reason": "migration-matrix final_classification=LEGACY_REFERENCE; native product runtime requires no Python (python_runtime_required=0)",
+   "reason": "migration-matrix final_classification=NATIVE_PRODUCT; native product runtime requires no Python (python_runtime_required=0)",
    "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
    "retired_at": "2026-09-22"
   },
@@ -9521,7 +9526,7 @@
   },
   {
    "original_path": "scratch/audit_bridge_deps.ps1",
-   "archived_path": "legacy/python_reference/scratch/scratch/audit_bridge_deps.ps1",
+   "archived_path": "legacy/python_reference/scratch/audit_bridge_deps.ps1",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9532,7 +9537,7 @@
   },
   {
    "original_path": "scratch/audit_pe_closure.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/audit_pe_closure.py",
+   "archived_path": "legacy/python_reference/scratch/audit_pe_closure.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9543,7 +9548,7 @@
   },
   {
    "original_path": "scratch/check_imports.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/check_imports.py",
+   "archived_path": "legacy/python_reference/scratch/check_imports.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9554,7 +9559,7 @@
   },
   {
    "original_path": "scratch/diag_close.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/diag_close.py",
+   "archived_path": "legacy/python_reference/scratch/diag_close.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9565,7 +9570,7 @@
   },
   {
    "original_path": "scratch/diag_crash.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/diag_crash.py",
+   "archived_path": "legacy/python_reference/scratch/diag_crash.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9576,7 +9581,7 @@
   },
   {
    "original_path": "scratch/diag_finalize.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/diag_finalize.py",
+   "archived_path": "legacy/python_reference/scratch/diag_finalize.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9587,7 +9592,7 @@
   },
   {
    "original_path": "scratch/diag_noqgis_canvas.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/diag_noqgis_canvas.py",
+   "archived_path": "legacy/python_reference/scratch/diag_noqgis_canvas.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9598,7 +9603,7 @@
   },
   {
    "original_path": "scratch/diag_refresh_shell.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/diag_refresh_shell.py",
+   "archived_path": "legacy/python_reference/scratch/diag_refresh_shell.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9609,7 +9614,7 @@
   },
   {
    "original_path": "scratch/diag_threads.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/diag_threads.py",
+   "archived_path": "legacy/python_reference/scratch/diag_threads.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9620,7 +9625,7 @@
   },
   {
    "original_path": "scratch/diag_vs_env.ps1",
-   "archived_path": "legacy/python_reference/scratch/scratch/diag_vs_env.ps1",
+   "archived_path": "legacy/python_reference/scratch/diag_vs_env.ps1",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9631,7 +9636,7 @@
   },
   {
    "original_path": "scratch/e2e_mock_facies_native.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/e2e_mock_facies_native.py",
+   "archived_path": "legacy/python_reference/scratch/e2e_mock_facies_native.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9642,7 +9647,7 @@
   },
   {
    "original_path": "scratch/pack_parallel_prompts.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/pack_parallel_prompts.py",
+   "archived_path": "legacy/python_reference/scratch/pack_parallel_prompts.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9653,7 +9658,7 @@
   },
   {
    "original_path": "scratch/pe_focus.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/pe_focus.py",
+   "archived_path": "legacy/python_reference/scratch/pe_focus.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9664,7 +9669,7 @@
   },
   {
    "original_path": "scratch/perf_seismic_bench.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/perf_seismic_bench.py",
+   "archived_path": "legacy/python_reference/scratch/perf_seismic_bench.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9675,7 +9680,7 @@
   },
   {
    "original_path": "scratch/probe_app_order.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_app_order.py",
+   "archived_path": "legacy/python_reference/scratch/probe_app_order.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9686,7 +9691,7 @@
   },
   {
    "original_path": "scratch/probe_bridge.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_bridge.py",
+   "archived_path": "legacy/python_reference/scratch/probe_bridge.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9697,7 +9702,7 @@
   },
   {
    "original_path": "scratch/probe_bridge_import.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_bridge_import.py",
+   "archived_path": "legacy/python_reference/scratch/probe_bridge_import.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9708,7 +9713,7 @@
   },
   {
    "original_path": "scratch/probe_bridge_load.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_bridge_load.py",
+   "archived_path": "legacy/python_reference/scratch/probe_bridge_load.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9719,7 +9724,7 @@
   },
   {
    "original_path": "scratch/probe_copy_render.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_copy_render.py",
+   "archived_path": "legacy/python_reference/scratch/probe_copy_render.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9730,7 +9735,7 @@
   },
   {
    "original_path": "scratch/probe_copy_roundtrip.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_copy_roundtrip.py",
+   "archived_path": "legacy/python_reference/scratch/probe_copy_roundtrip.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9741,7 +9746,7 @@
   },
   {
    "original_path": "scratch/probe_dup_display.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_dup_display.py",
+   "archived_path": "legacy/python_reference/scratch/probe_dup_display.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9752,7 +9757,7 @@
   },
   {
    "original_path": "scratch/probe_exit.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_exit.py",
+   "archived_path": "legacy/python_reference/scratch/probe_exit.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9763,7 +9768,7 @@
   },
   {
    "original_path": "scratch/probe_explorer_process_results.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_explorer_process_results.py",
+   "archived_path": "legacy/python_reference/scratch/probe_explorer_process_results.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9774,7 +9779,7 @@
   },
   {
    "original_path": "scratch/probe_inspector_derived.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_inspector_derived.py",
+   "archived_path": "legacy/python_reference/scratch/probe_inspector_derived.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9785,7 +9790,7 @@
   },
   {
    "original_path": "scratch/probe_labels_native.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_labels_native.py",
+   "archived_path": "legacy/python_reference/scratch/probe_labels_native.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9796,7 +9801,7 @@
   },
   {
    "original_path": "scratch/probe_layer_tree.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_layer_tree.py",
+   "archived_path": "legacy/python_reference/scratch/probe_layer_tree.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9807,7 +9812,7 @@
   },
   {
    "original_path": "scratch/probe_mock_real.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_mock_real.py",
+   "archived_path": "legacy/python_reference/scratch/probe_mock_real.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9818,7 +9823,7 @@
   },
   {
    "original_path": "scratch/probe_module_paths.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_module_paths.py",
+   "archived_path": "legacy/python_reference/scratch/probe_module_paths.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9829,7 +9834,7 @@
   },
   {
    "original_path": "scratch/probe_open_paths.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_open_paths.py",
+   "archived_path": "legacy/python_reference/scratch/probe_open_paths.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9840,7 +9845,7 @@
   },
   {
    "original_path": "scratch/probe_overlay_render.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_overlay_render.py",
+   "archived_path": "legacy/python_reference/scratch/probe_overlay_render.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9851,7 +9856,7 @@
   },
   {
    "original_path": "scratch/probe_preload_bisect.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_preload_bisect.py",
+   "archived_path": "legacy/python_reference/scratch/probe_preload_bisect.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9862,7 +9867,7 @@
   },
   {
    "original_path": "scratch/probe_project_layers.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_project_layers.py",
+   "archived_path": "legacy/python_reference/scratch/probe_project_layers.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9873,7 +9878,7 @@
   },
   {
    "original_path": "scratch/probe_qgis_active.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_qgis_active.py",
+   "archived_path": "legacy/python_reference/scratch/probe_qgis_active.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9884,7 +9889,7 @@
   },
   {
    "original_path": "scratch/probe_raw_draft_menu.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_raw_draft_menu.py",
+   "archived_path": "legacy/python_reference/scratch/probe_raw_draft_menu.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9895,7 +9900,7 @@
   },
   {
    "original_path": "scratch/probe_rss.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_rss.py",
+   "archived_path": "legacy/python_reference/scratch/probe_rss.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9906,7 +9911,7 @@
   },
   {
    "original_path": "scratch/probe_task9_base_identify.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_task9_base_identify.py",
+   "archived_path": "legacy/python_reference/scratch/probe_task9_base_identify.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9917,7 +9922,7 @@
   },
   {
    "original_path": "scratch/probe_task9_bisect.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_task9_bisect.py",
+   "archived_path": "legacy/python_reference/scratch/probe_task9_bisect.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9928,7 +9933,7 @@
   },
   {
    "original_path": "scratch/probe_task9_bisect2.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_task9_bisect2.py",
+   "archived_path": "legacy/python_reference/scratch/probe_task9_bisect2.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9939,7 +9944,7 @@
   },
   {
    "original_path": "scratch/probe_task9_bisect3.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_task9_bisect3.py",
+   "archived_path": "legacy/python_reference/scratch/probe_task9_bisect3.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9950,7 +9955,7 @@
   },
   {
    "original_path": "scratch/probe_ui_map.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_ui_map.py",
+   "archived_path": "legacy/python_reference/scratch/probe_ui_map.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9961,7 +9966,7 @@
   },
   {
    "original_path": "scratch/probe_view_extent.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/probe_view_extent.py",
+   "archived_path": "legacy/python_reference/scratch/probe_view_extent.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9972,7 +9977,7 @@
   },
   {
    "original_path": "scratch/repro389.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/repro389.py",
+   "archived_path": "legacy/python_reference/scratch/repro389.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9983,7 +9988,7 @@
   },
   {
    "original_path": "scratch/repro391.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/repro391.py",
+   "archived_path": "legacy/python_reference/scratch/repro391.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -9994,7 +9999,7 @@
   },
   {
    "original_path": "scratch/repro_apply_wipe.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/repro_apply_wipe.py",
+   "archived_path": "legacy/python_reference/scratch/repro_apply_wipe.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -10005,7 +10010,7 @@
   },
   {
    "original_path": "scratch/repro_detach_probe.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/repro_detach_probe.py",
+   "archived_path": "legacy/python_reference/scratch/repro_detach_probe.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -10016,7 +10021,7 @@
   },
   {
    "original_path": "scratch/repro_layertree_open.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/repro_layertree_open.py",
+   "archived_path": "legacy/python_reference/scratch/repro_layertree_open.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -10027,7 +10032,7 @@
   },
   {
    "original_path": "scratch/repro_mirror_noop.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/repro_mirror_noop.py",
+   "archived_path": "legacy/python_reference/scratch/repro_mirror_noop.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -10038,7 +10043,7 @@
   },
   {
    "original_path": "scratch/smoke_start.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/smoke_start.py",
+   "archived_path": "legacy/python_reference/scratch/smoke_start.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -10049,7 +10054,7 @@
   },
   {
    "original_path": "scratch/verify_exit_modes.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/verify_exit_modes.py",
+   "archived_path": "legacy/python_reference/scratch/verify_exit_modes.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -10060,7 +10065,7 @@
   },
   {
    "original_path": "scratch/verify_scheduler_fix.py",
-   "archived_path": "legacy/python_reference/scratch/scratch/verify_scheduler_fix.py",
+   "archived_path": "legacy/python_reference/scratch/verify_scheduler_fix.py",
    "classification": "SCRATCH",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -10270,39 +10275,6 @@
   {
    "original_path": "tests/__init__.py",
    "archived_path": "legacy/python_reference/tests/__init__.py",
-   "classification": "LEGACY_PRODUCT_TEST",
-   "cpp_replacement": "",
-   "matrix_classification": null,
-   "runtime_dependency": false,
-   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
-   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
-   "retired_at": "2026-09-22"
-  },
-  {
-   "original_path": "tests/conftest.py",
-   "archived_path": "legacy/python_reference/tests/conftest.py",
-   "classification": "LEGACY_PRODUCT_TEST",
-   "cpp_replacement": "",
-   "matrix_classification": null,
-   "runtime_dependency": false,
-   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
-   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
-   "retired_at": "2026-09-22"
-  },
-  {
-   "original_path": "tests/cpp/platform/make_golden.py",
-   "archived_path": "legacy/python_reference/tests/cpp/platform/make_golden.py",
-   "classification": "LEGACY_PRODUCT_TEST",
-   "cpp_replacement": "",
-   "matrix_classification": null,
-   "runtime_dependency": false,
-   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
-   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
-   "retired_at": "2026-09-22"
-  },
-  {
-   "original_path": "tests/cpp/science/oracle/generate_seismic_fixture.py",
-   "archived_path": "legacy/python_reference/tests/cpp/science/oracle/generate_seismic_fixture.py",
    "classification": "LEGACY_PRODUCT_TEST",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -10578,17 +10550,6 @@
   {
    "original_path": "tests/perf/timing.py",
    "archived_path": "legacy/python_reference/tests/perf/timing.py",
-   "classification": "LEGACY_PRODUCT_TEST",
-   "cpp_replacement": "",
-   "matrix_classification": null,
-   "runtime_dependency": false,
-   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
-   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
-   "retired_at": "2026-09-22"
-  },
-  {
-   "original_path": "tests/qgis_support.py",
-   "archived_path": "legacy/python_reference/tests/qgis_support.py",
    "classification": "LEGACY_PRODUCT_TEST",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -12721,6 +12682,17 @@
    "retired_at": "2026-09-22"
   },
   {
+   "original_path": "tests/test_factor_map_architecture_guards.py",
+   "archived_path": "legacy/python_reference/tests/test_factor_map_architecture_guards.py",
+   "classification": "LEGACY_PRODUCT_TEST",
+   "cpp_replacement": "",
+   "matrix_classification": null,
+   "runtime_dependency": false,
+   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
+   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
+   "retired_at": "2026-09-22"
+  },
+  {
    "original_path": "tests/test_factor_map_product_model.py",
    "archived_path": "legacy/python_reference/tests/test_factor_map_product_model.py",
    "classification": "LEGACY_PRODUCT_TEST",
@@ -14668,6 +14640,17 @@
    "retired_at": "2026-09-22"
   },
   {
+   "original_path": "tests/test_map_authoring_architecture_guards.py",
+   "archived_path": "legacy/python_reference/tests/test_map_authoring_architecture_guards.py",
+   "classification": "LEGACY_PRODUCT_TEST",
+   "cpp_replacement": "",
+   "matrix_classification": null,
+   "runtime_dependency": false,
+   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
+   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
+   "retired_at": "2026-09-22"
+  },
+  {
    "original_path": "tests/test_map_canvas_panel.py",
    "archived_path": "legacy/python_reference/tests/test_map_canvas_panel.py",
    "classification": "LEGACY_PRODUCT_TEST",
@@ -15770,6 +15753,17 @@
   {
    "original_path": "tests/test_pipeline_bootstrap.py",
    "archived_path": "legacy/python_reference/tests/test_pipeline_bootstrap.py",
+   "classification": "LEGACY_PRODUCT_TEST",
+   "cpp_replacement": "",
+   "matrix_classification": null,
+   "runtime_dependency": false,
+   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
+   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
+   "retired_at": "2026-09-22"
+  },
+  {
+   "original_path": "tests/test_pipeline_boundary.py",
+   "archived_path": "legacy/python_reference/tests/test_pipeline_boundary.py",
    "classification": "LEGACY_PRODUCT_TEST",
    "cpp_replacement": "",
    "matrix_classification": null,
@@ -18001,6 +17995,28 @@
    "retired_at": "2026-09-22"
   },
   {
+   "original_path": "tests/test_ui_sizing_ratchet_v9.py",
+   "archived_path": "legacy/python_reference/tests/test_ui_sizing_ratchet_v9.py",
+   "classification": "LEGACY_PRODUCT_TEST",
+   "cpp_replacement": "",
+   "matrix_classification": null,
+   "runtime_dependency": false,
+   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
+   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
+   "retired_at": "2026-09-22"
+  },
+  {
+   "original_path": "tests/test_ui_token_hygiene.py",
+   "archived_path": "legacy/python_reference/tests/test_ui_token_hygiene.py",
+   "classification": "LEGACY_PRODUCT_TEST",
+   "cpp_replacement": "",
+   "matrix_classification": null,
+   "runtime_dependency": false,
+   "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
+   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
+   "retired_at": "2026-09-22"
+  },
+  {
    "original_path": "tests/test_unified_map_canvas.py",
    "archived_path": "legacy/python_reference/tests/test_unified_map_canvas.py",
    "classification": "LEGACY_PRODUCT_TEST",
@@ -19372,6 +19388,39 @@
    "matrix_classification": null,
    "runtime_dependency": false,
    "reason": "pytest test of the retired Python product implementation (transitive importer closure)",
+   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
+   "retired_at": "2026-09-22"
+  },
+  {
+   "original_path": "tests/qgis_support.py",
+   "archived_path": null,
+   "classification": "REVIEW_AMENDMENT_RESTORED",
+   "cpp_replacement": "",
+   "matrix_classification": null,
+   "runtime_dependency": false,
+   "reason": "initially swept into the archive by the importer closure; restored to the active tree by review (active test/oracle infrastructure, sanctioned shim applies)",
+   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
+   "retired_at": "2026-09-22"
+  },
+  {
+   "original_path": "tests/cpp/platform/make_golden.py",
+   "archived_path": null,
+   "classification": "REVIEW_AMENDMENT_RESTORED",
+   "cpp_replacement": "",
+   "matrix_classification": null,
+   "runtime_dependency": false,
+   "reason": "initially swept into the archive by the importer closure; restored to the active tree by review (active test/oracle infrastructure, sanctioned shim applies)",
+   "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
+   "retired_at": "2026-09-22"
+  },
+  {
+   "original_path": "tests/cpp/science/oracle/generate_seismic_fixture.py",
+   "archived_path": null,
+   "classification": "REVIEW_AMENDMENT_RESTORED",
+   "cpp_replacement": "",
+   "matrix_classification": null,
+   "runtime_dependency": false,
+   "reason": "initially swept into the archive by the importer closure; restored to the active tree by review (active test/oracle infrastructure, sanctioned shim applies)",
    "baseline_sha": "0936779ea3322dd05cfea7c29c82eb528de557b4",
    "retired_at": "2026-09-22"
   },

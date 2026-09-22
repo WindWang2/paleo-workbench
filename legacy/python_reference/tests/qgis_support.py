@@ -1,3 +1,5 @@
+# Archived-suite copy of tests/qgis_support.py (kept so the retired suite
+# stays self-runnable; active tree owns the canonical version).
 """Shared conditionalization for the optional QGIS render bridge (packaging #437).
 
 The QGIS production renderer (``prefer_qgis=True``) builds a vendored QGIS
@@ -12,7 +14,8 @@ from __future__ import annotations
 
 import sys as _sys  # archived-reference shim: the retired package lives under
 from pathlib import Path as _Path  # legacy/python_reference (dev/test tooling only)
-_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "legacy" / "python_reference" / "product"))
+# archived-suite copy: the product root is a sibling of this tests dir.
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "product"))
 
 # Shown in every QGIS skip so a developer knows exactly how to enable the
 # path locally / in a QGIS CI leg.

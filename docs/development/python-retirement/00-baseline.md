@@ -56,7 +56,7 @@ Tracked Python files at baseline: **1897**.
 
 | class | files |
 |---|---|
-| P1 legacy product implementation (+ its tests/launchers/benchmarks) | 1530 |
+| P1 legacy product implementation (+ its tests/launchers/benchmarks) | 1529 |
 | P2 oracle / reference generators | 104 |
 | P3 active development tooling | 18 |
 | P4 compatibility bindings (pybind hosts) | 6 |
@@ -64,5 +64,6 @@ Tracked Python files at baseline: **1897**.
 | P6 scratch / one-off | 56 |
 | P7 third-party / vendored | 107 (98 `third_party/qgis` keep + 9 `paleo_workbench/_vendored` archived with the package) |
 
-Planned: **archive 1594** (1593 `git mv` + 1 conftest archive-copy),
-**keep 303**.
+Planned at baseline: **archive 1593** (`git mv`) + **1 conftest archive-copy**,
+**keep 303**. Final tree after review amendments: 1760 renames, 0 deletions
+(see 03/04 addenda and the manifest).

@@ -99,7 +99,8 @@ def _assert_bridge_origin() -> None:
         return
     if spec is None or not spec.origin:
         return
-    expected = Path(__file__).resolve().parents[1] / "native" / "qgis_render_bridge"
+    # Archived-suite note: repo root is three levels up from this conftest.
+    expected = Path(__file__).resolve().parents[3] / "native" / "qgis_render_bridge"
     origin = Path(spec.origin).resolve()
     if expected not in origin.parents:
         raise RuntimeError(

@@ -50,7 +50,7 @@ linked into `pwb-platform` (verified by the same audit script).
 |---|---|---|---|
 | C1 | 822/908 `tests/*.py` import `paleo_workbench` directly; +3 transitively via `tests.*` helpers (825 closure) + `tests/test_perf_helpers.py` via `tests.perf.fixtures` | inventory closure | Move the product suite to `legacy/python_reference/tests/` (paths preserved); default `pytest` no longer treats archived code as product |
 | C2 | Post-split marker coverage on kept tests: `slow` 3, `qgis` 34, `realdata_smoke` 1 — but `opengl` 0, `welllog_binding` 0 | marker scan | Adjust ci.yml's fail-closed presence checks for `opengl`/`welllog_binding` (families retired with the product); note in known limitations |
-| C3 | `perf-gate.yml` runs `pytest -m slow tests/perf/` (thresholds in `test_interpolation_perf.py`, which imports the product) and `benchmarks/render_engine_benchmark.py` (geoviz — stays) | `.github/workflows/perf-gate.yml:166,198-206` | Retire the retired-benchmark legs from the workflow; keep the geoviz render benchmark |
+| C3 | `perf-gate.yml` runs `pytest -m slow tests/perf/` (thresholds in `test_interpolation_perf.py`, which imports the product) and two benchmark scripts (`bench_interpolation.py`, `render_engine_benchmark.py` — both import the retired implementation) | `.github/workflows/perf-gate.yml` | Retire both benchmark legs; the gate keeps the geoviz slow perf suite (`tests/perf`) |
 | C4 | `tests/test_workflow_integrity.py` / `tests/e2e/test_integrity_guard.py` (CI guard twins) do not reference moved paths | rg audit | Keep unchanged |
 | C5 | `tests/cpp/**` fixtures (631 non-py files) are C++ CTest inputs | `git ls-files tests/cpp` | Keep unchanged |
 

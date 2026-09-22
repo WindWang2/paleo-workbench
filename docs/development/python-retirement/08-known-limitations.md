@@ -1,0 +1,17 @@
+# Python Retirement — Known Limitations
+
+Honest record of what this retirement intentionally does not resolve.
+None of these are product-runtime dependencies; they are dev-time or
+follow-up hygiene items.
+
+| # | Item | Status / risk | Suggested follow-up |
+|---|---|---|---|
+| K1 | `libs/mapping_bind` + `libs/cartography/cartography_bind` pybind compat seams remain in-tree and buildable (off by default, whitelisted in the runtime audit). Their only Python consumers are now archived (`paleo_workbench/mapping/cartography_native.py`, `mapping/geological_pipeline/native_bind.py` — matrix `NATIVE_LIBRARY_NOT_WIRED`). | dev-only; never linked into `pwb-platform` (ldd-audited) | decide seam retirement in a follow-up; keep the audit whitelist in sync |
+| K2 | `native/{grid_render_core,layer_model_core,seismic_3d_core,well_log_core,qgis_render_bridge}` keep `setup.py` Python-host packaging. The kernels themselves are dev/compat surface now; `native/qgis_render_bridge/src/*.cpp` is product-linked (libs/qgis) and must stay. | dev-only | follow-up: split the pybind host packaging from the product-linked sources if desired |
+| K3 | `svg_output/` (652 design SVGs, non-Python) fed the retired UI's icon catalog (`build_catalog.py`, archived). Left in place this round — outside Python-source retirement scope. | inert asset | follow-up cleanup PR if the design library has no other consumer |
+| K4 | Oracle/fixture generators import the archived reference through the sanctioned shim; executing them end-to-end needs the project dev env (numpy/pydantic/PySide6…). The verification runner for this PR had no such env, so generators were verified up to path resolution + compile, not full fixture regeneration. Frozen fixtures already committed keep CTest Python-independent. | dev-env dependent | run a generator pass in the dev env/CI when convenient |
+| K5 | Stacked base (#1473) carried MSVC-only build evidence; its Linux path had a compile defect (`::dl_close` typo, fixed here as a stacked fixup). Further platform-only defects in #1473 code would surface on other toolchains. | fixed instance; pattern risk remains with #1473 | #1473 should absorb the fixup before merge |
+| K6 | CI legs for the retired families (`test-3d-opengl`, `welllog_binding` presence check, crash-prone teardown pair, `bench_interpolation` perf leg) were removed/retired; the remaining Python CI (fast suite, nightly slow, perf-gate render leg, qgis-renderer leg) was adjusted but not executed online for this PR (per goal: local verification only). | CI unverified online | watch first online runs after merge |
+| K7 | The two JSON data assets and the 148-icon set exist twice: canonical under `resources/` (installed) and inert reference copies under the archive (so the retired implementation stays importable). A future edit must treat `resources/` as the single product source. | duplication is deliberate and recorded in the manifest | none (documented) |
+| K8 | `tests/qgis_support.py` retains a lazy archived-package import (Windows DLL-dir helper) behind the sanctioned shim; on hosts without the archive layout it degrades to a no-op as before. | benign by design | none |
+| K9 | Windows packaging flows (`windeployqt`, `build_and_test_windows.ps1`) were not exercised locally (Linux runner). Their references to the retired tree were audited statically (`build-osgeo.ps1` patched; the PS1 one-click script builds native extensions + WLE SDK, not the Python app). | platform gap | run the Windows flow on a Windows host |

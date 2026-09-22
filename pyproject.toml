@@ -39,15 +39,8 @@ dev = [
     "pytest>=8.0",
     "pytest-qt>=4.5.0",
     "pytest-timeout>=2.3.1",
-    # tests/test_wheel_assets.py builds the wheel in-process via the PEP 517
-    # backend hook; modern runner venvs no longer ship setuptools implicitly.
-    "setuptools>=69",
-    # The marching-cubes fallback contract tests (#830,
-    # tests/test_issues_823_828_830_833.py) drive the pure-Python fallback
-    # with the C++ extension disabled; that path implements the isovalue
-    # boundary contract via scikit-image when no native module is available.
-    # Without it CI fails with "No module named 'skimage'" (#859 follow-up).
-    "scikit-image>=0.22",
+    # (Python-retirement: setuptools/scikit-image served the retired
+    # wheel-build and fallback-contract tests and were dropped with them.)
     # tests/test_issue_940_misc.py parses .github/workflows/*.yaml as part of
     # the CI contract checks; pyyaml is not pulled in by any runtime dep.
     "pyyaml>=6.0",
@@ -96,11 +89,11 @@ qt_api = "pyside6"
 markers = [
     "slow: opt-in real-data or graphics tests; skip in fast CI with -m 'not slow'",
     "realdata_smoke: PR-gate real-format fixtures under tests/fixtures/realdata (#1230)",
-    "opengl: requires a real OpenGL context (skipped on offscreen; covered by the ci.yml test-3d-opengl Xvfb/llvmpipe leg — #940-1, #1058)",
+    "opengl: GL-context tests (the product-family leg retired with the Python suite — docs/development/python-retirement/; marker kept for the archived suite and geoviz use)",
     "qgis: requires the optional qgis_render_bridge extension (see docs/ci-merge-policy.md)",
     "welllog_binding: requires the built welllog pybind module",
     "timeout: per-test timeout (requires pytest-timeout plugin)",
-    "capacity: 10万-scale data-management budgets (#1060); runs in the fast CI selection",
+    "capacity: 10万-scale data budgets (#1060; family retired with the Python product suite — marker kept for the archived suite)",
 ]
 pythonpath = [
     ".",

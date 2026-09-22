@@ -31,9 +31,11 @@ legacy/python_reference/
 2. **Package + entries (git mv)** — `paleo_workbench/`, `run_app.py`,
    `run.bat`, `run-venv.bat`, `build_catalog.py`, `src/`, retired
    `benchmarks/*`, retired `scripts/bench_*.py`, `examples/provider_plugins/*.py`.
-3. **Product tests (git mv)** — the 826-file closure + original
-   `tests/conftest.py` → `legacy/python_reference/tests/…`; write the
-   trimmed active `tests/conftest.py`.
+3. **Product tests (git mv)** — the 828-file closure (825 transitive +
+   `test_perf_helpers.py` + `test_wheel_assets.py` + `test_build_catalog.py`)
+   plus a bootstrap-prepended copy of the original `tests/conftest.py` →
+   `legacy/python_reference/tests/…`; the active `tests/conftest.py` is
+   rewritten trimmed (no product imports).
 4. **Scratch (git mv)** — `scratch/`, `.scratch-*.py`,
    `run_main_batched.bat`, `run_main_suite_detached.bat`.
 5. **Archive metadata** — `README.md`, `MANIFEST.md`,
