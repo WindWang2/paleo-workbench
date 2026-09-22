@@ -1,6 +1,6 @@
 # Ribbon 五工作区 UI 接入开发计划
 
-日期：2026-09-22。状态：计划草案（待评审）。
+日期：2026-09-22。状态：**已落地（historical plan）** — adopted on `main` via `fa9ba744` / merge `cebc9f0a`. See [`STATUS.md`](STATUS.md). Keep this file as the implementation narrative; do not read the old “计划草案” wording as current.
 上游依据：分支 `origin/codex/qt-ribbon-prototype`（提交 `bbe9acb6`）的原型与设计文档。
 
 ## 1. 背景与结论

@@ -13,11 +13,15 @@ migration/verification gates) plus the visualization and well-log engine
 
 | Submodule | Role | Public repo |
 |-----------|------|-------------|
-| `geo-viz-engine` | Map / geologic visualization packages | [WindWang2/geo-viz-engine](https://github.com/WindWang2/geo-viz-engine) |
+| `geo-viz-engine` | Map / geologic visualization packages (Python reference; native ports live under `libs/`) | [WindWang2/geo-viz-engine](https://github.com/WindWang2/geo-viz-engine) |
 | `well-log-engine` | C++20 well-log SDK + **WellPlot Desktop** host app | [WindWang2/well-log-engine](https://github.com/WindWang2/well-log-engine) |
 
 See [`docs/development/python-retirement/`](docs/development/python-retirement/)
 for the retirement ledger (inventory, classification, manifest).
+
+**Documentation map**: start at [`docs/README.md`](docs/README.md).
+**Module boundaries**: [`docs/architecture/module-map.md`](docs/architecture/module-map.md).
+**C++ conversion snapshot**: [`docs/development/cpp-conversion-status.md`](docs/development/cpp-conversion-status.md).
 
 ## Building and running the product (C++)
 
@@ -39,10 +43,38 @@ build/native-product/bin/pwb-platform --capabilities
 build/native-product/bin/pwb-platform --diagnostics
 ```
 
+Windows: use preset `windows-msvc-native-product` from a VS 2022 developer
+environment (or `scripts/cpp-migration/Invoke-PlatformBuild.ps1` with the
+resource gate). Heavy builds should go through
+`scripts/cpp-migration/invoke-resource-gate.sh` /
+`Invoke-ResourceGate.ps1` when multiple worktrees share a machine.
+
 The reproducible gate that CI and release acceptance use is
 `scripts/cpp-migration/final-closure-gate.sh [static|configure|build|test|package|runtime|all]`
 (configure/build/test through the shared resource gate; install/deploy trees
 are verified Python-free and archive-free).
+
+### Production UI
+
+The adopted shell is the **ribbon five-workspaces** layout (UI labels from
+`libs/ui_ribbon`: **数据管理** → **1 智能预测** → **2 约束与单因素** →
+**3 综合编图** → **验证**). Design authority (behaviour rules; screenshots are
+design references — see status banners there):
+[`docs/ui-redesign/qt-ribbon-workspaces-2026-09-21/`](docs/ui-redesign/qt-ribbon-workspaces-2026-09-21/).
+Implementation: `libs/ui_ribbon` + app install seams.
+
+### Tests (native)
+
+```bash
+cd build/native-product
+QT_QPA_PLATFORM=offscreen ctest --output-on-failure
+# Focused families often used in conversion gates:
+#   ctest -R '^platform\.'
+#   ctest -R 'mapping_kernel'
+```
+
+Integrated gate helper: `scripts/cpp-migration/run-integrated-gate.sh` (when
+present on your checkout) and `scripts/cpp-migration/final-closure-gate.sh`.
 
 ### QGIS map stack (vendored)
 
@@ -118,6 +150,22 @@ harness (`libs/closure_agent`, `libs/agent` line). The historical Python
 implementations are retired (see the migration matrix at
 `docs/development/cpp-final-closure/migration-matrix.md` for the per-module
 native attribution).
+
+## Architecture (short)
+
+- **Host**: `apps/paleo_workbench_platform` (`pwb-platform`)
+- **Libraries**: `libs/*` — Qt-free domain cores + `ui_*` / `qgis`
+- **Catalog**: single write rail (ADR 0056 family) via catalog / workflow
+  closure adapters
+- **Map stack**: vendored QGIS in the native product; the archived Python
+  reference keeps `qgis_render_bridge` for oracle use
+- **Domain glossary**: [`CONTEXT.md`](CONTEXT.md)
+- **ADRs**: [`docs/adr/`](docs/adr/)
+
+## Agent notes
+
+See [`CLAUDE.md`](CLAUDE.md) and [`docs/agents/`](docs/agents/). Follow the
+Karpathy guidelines in `agent/skills/karpathy-guidelines/SKILL.md`.
 
 ## Well Log Workstation
 

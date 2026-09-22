@@ -1,3 +1,5 @@
+> **HISTORICAL / scratch** — agent scratch / historical findings. Not product documentation authority; see [`docs/README.md`](docs/README.md).
+
 # 当前发现入口 — C++ 全面转换收尾
 
 当前事实与决策：[C++ findings](docs/development/cpp-conversion-planning/findings.md)；

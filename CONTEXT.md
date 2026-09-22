@@ -1,10 +1,15 @@
 # Paleo Workbench Domain Model & Vocabulary
 
 > **Python-retirement status (2026-09-22):** the production Paleo Workbench
-> application is the native C++ product (`pwb-platform`). The Python
-> implementation described in this historical document is retired to
-> `legacy/python_reference/` (reference/oracle only). See
-> `docs/development/python-retirement/` for the retirement ledger.
+> application is the native C++ product (`pwb-platform`,
+> `apps/paleo_workbench_platform` + `libs/*`). The Python implementation
+> described in this historical document is retired to
+> `legacy/python_reference/` — treat the `paleo_workbench/…` paths below as
+> **domain definitions and oracle locations**, not as the native product home.
+> See [`docs/architecture/dual-track.md`](docs/architecture/dual-track.md),
+> [`docs/architecture/module-map.md`](docs/architecture/module-map.md),
+> `docs/development/python-retirement/` for the retirement ledger, and
+> [`docs/README.md`](docs/README.md) for the doc IA.
 
 This document records the ubiquitous domain language and module architecture for the Paleo Workbench codebase.
 

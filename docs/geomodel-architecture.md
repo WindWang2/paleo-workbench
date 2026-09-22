@@ -1,3 +1,5 @@
+> **HISTORICAL / dual-track** — Documents the Python-era `paleo_workbench.viz.geomodel` adapter (updated 2026-08-09). Native product geometry/viz lives under `libs/geomodel`, `libs/geo3d_viz`, and related UI hosts. See [architecture/module-map.md](architecture/module-map.md) and [architecture/dual-track.md](architecture/dual-track.md).
+
 # 三维地质建模模块 (`viz/geomodel`) 架构文档
 
 > **Branch:** `3D`

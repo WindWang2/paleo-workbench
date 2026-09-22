@@ -1,5 +1,9 @@
 # Paleo Workbench 全系统代码审计、Harness 升级与问题闭环总结报告
 
+> **HISTORICAL (2026-08-23)** — Python-era audit snapshot. **Not** current
+> product authority. Native product truth: [`docs/README.md`](docs/README.md),
+> [`README.md`](README.md), [`docs/architecture/module-map.md`](docs/architecture/module-map.md).
+
 **报告生成时间**: 2026-08-23  
 **执行智能体**: ZCode Autonomous Engineering Agent (Full Autonomous Execution)  
 **目标仓库**: [Paleo Workbench (GitHub)](https://github.com/WindWang2/paleo-workbench)

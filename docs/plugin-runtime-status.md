@@ -1,3 +1,5 @@
+> **Scope** — WellPlot Desktop / plugin-runtime roadmap (ADR 0055), not the paleogeography `pwb-platform` shell. Paths under `well-log-engine/` require `git submodule update --init`.
+
 # Plugin Runtime status (T17 / #305 · 轨 P)
 
 规格与分期门禁文档。完整插件 Runtime **不在** Desktop 首发（epic #288）验收范围。
