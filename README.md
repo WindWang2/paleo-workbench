@@ -66,7 +66,7 @@ Implementation: `libs/ui_ribbon` + app install seams (landed on `main` via
 cd build/native-product
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 # Focused families often used in conversion gates:
-#   ctest -R '^platform\.' 
+#   ctest -R '^platform\.'
 #   ctest -R 'mapping_kernel'
 ```
 

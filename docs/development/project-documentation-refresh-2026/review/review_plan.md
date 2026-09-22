@@ -1,10 +1,10 @@
 # review_plan.md — Documentation-to-code audit
 
-**Worktree**: `/workspace/paleo-workbench-doc-refresh`  
-**Branch**: `docs/project-documentation-refresh-2026`  
-**Open PR**: https://github.com/WindWang2/paleo-workbench/pull/1474 (base `main`)  
-**Tip at audit start**: `f4d3bc62` (8 docs commits ahead of `origin/main` @ `18c674ef`)  
-**Timezone**: Asia/Shanghai  
+**Worktree**: `/workspace/paleo-workbench-doc-refresh`
+**Branch**: `docs/project-documentation-refresh-2026`
+**Open PR**: https://github.com/WindWang2/paleo-workbench/pull/1474 (base `main`)
+**Tip at audit start**: `f4d3bc62` (8 docs commits ahead of `origin/main` @ `18c674ef`)
+**Timezone**: Asia/Shanghai
 **Mode**: REVIEW FIRST → FIX SECOND → VERIFY LAST (docs-only preferred)
 
 ## Phase 0 — Scope (recorded 2026-09-22)
