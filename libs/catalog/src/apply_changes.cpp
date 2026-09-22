@@ -25,13 +25,15 @@
 //        families (Python catches the broader sqlite3.DatabaseError);
 //        stale writes always pass through.
 //
-// Faithfulness note on statement errors: sqlite.hpp's Statement cannot
-// surface a failed sqlite3_step (DONE and an error both read "no row") and
-// Transaction::commit() discards the COMMIT return code. This channel must
-// propagate both (sync_store's reset+rebuild self-heal keys off them, and a
-// swallowed insert failure would COMMIT a partial transaction where Python
-// raises and rolls back), so this TU drives the same C API through a
-// file-local wrapper that keeps every rc visible.
+// Faithfulness note on statement errors: written when sqlite.hpp's
+// Statement could not surface a failed sqlite3_step (DONE and an error
+// both read "no row") — sqlite.hpp now captures every prepare/bind/step
+// rc on the Statement itself (#1458). This TU keeps its file-local Stmt
+// wrapper (same rc-visible semantics, churn not worth the rewrite), and
+// the channel still requires the propagation both layers now provide
+// (sync_store's reset+rebuild self-heal keys off them, and a swallowed
+// insert failure would COMMIT a partial transaction where Python raises
+// and rolls back).
 
 #include "pwb/catalog/apply_changes.hpp"
 

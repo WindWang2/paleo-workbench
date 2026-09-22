@@ -161,21 +161,28 @@ PWB_TEST(closure_transaction_error_channel) {
     // (a) clean commit persists.
     {
         pwb::catalog::Transaction transaction(db);
-        db.prepare("INSERT INTO t (v) VALUES ('committed')")
-            .step_done();
+        PWB_CHECK(
+            db.prepare("INSERT INTO t (v) VALUES ('committed')")
+                .step_done()
+                .ok());
         auto error = transaction.commit();
         PWB_CHECK(error.ok());
     }
     // (b) destructor rollback discards.
     {
         pwb::catalog::Transaction transaction(db);
-        db.prepare("INSERT INTO t (v) VALUES ('rolled-back')").step_done();
+        PWB_CHECK(
+            db.prepare("INSERT INTO t (v) VALUES ('rolled-back')")
+                .step_done()
+                .ok());
     }
     // (c) explicit rollback discards.
     {
         pwb::catalog::Transaction transaction(db);
-        db.prepare("INSERT INTO t (v) VALUES ('rolled-back-2')")
-            .step_done();
+        PWB_CHECK(
+            db.prepare("INSERT INTO t (v) VALUES ('rolled-back-2')")
+                .step_done()
+                .ok());
         PWB_CHECK(transaction.rollback().ok());
     }
     // (d) the #1398 regression: a NESTED BEGIN fails inside the outer
@@ -183,8 +190,10 @@ PWB_TEST(closure_transaction_error_channel) {
     // marked itself committed and PREMATURELY COMMITTED the outer scope.
     {
         pwb::catalog::Transaction outer(db);
-        db.prepare("INSERT INTO t (v) VALUES ('outer-pending')")
-            .step_done();
+        PWB_CHECK(
+            db.prepare("INSERT INTO t (v) VALUES ('outer-pending')")
+                .step_done()
+                .ok());
         std::string nested_error;
         {
             pwb::catalog::Transaction nested(db);  // BEGIN fails here
