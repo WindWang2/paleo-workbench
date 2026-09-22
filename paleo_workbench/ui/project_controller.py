@@ -255,6 +255,9 @@ class ProjectController:
             from paleo_workbench.catalog import get_catalog_service
 
             service = get_catalog_service()
+            # R10-1: bind on every path — an unwrapped maintenance call raising (or a missing catalog) skipped the assignment and the
+            # later emit condition raised NameError, silently dropping the migration staging for that open.
+            role_backfill_pending = False
             if service is not None:
                 # #1079: cancel still-running background transcodes before
                 # their catalog handle disappears (partial stores stay
@@ -425,7 +428,7 @@ class ProjectController:
                 # to the GUI slot: the bridge carries a flag and the slot
                 # runs the backfill against the live document on the GUI
                 # thread (see _on_domain_migration_staged).
-                role_backfill_pending = loaded is not None
+                role_backfill_pending = True
                 # V11 typed-lineage backfill (docs 06 §5): deterministic
                 # output-port roles for pre-V11 runs; idempotent no-op when
                 # ports are already present.

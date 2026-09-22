@@ -259,9 +259,11 @@ class JointAssetsWorker(QObject):
         if paths.tops is not None and paths.tops.is_file():
             tops_by_well: dict[str, list[tuple[str, float]]] = {}
             skipped_no_td = 0
-            for line in paths.tops.read_text(
-                encoding="utf-8", errors="replace"
-            ).splitlines():
+            from paleo_workbench.resources.text_codec import (
+                read_text_with_fallback,
+            )
+
+            for line in read_text_with_fallback(paths.tops).splitlines():
                 s = line.strip()
                 if not s or s.startswith("#"):
                     continue

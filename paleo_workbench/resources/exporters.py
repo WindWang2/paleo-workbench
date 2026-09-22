@@ -167,7 +167,11 @@ def image_to_png(input_path: Path, output_path: Path) -> None:
 
 def text_to_txt(input_path: Path, output_path: Path) -> None:
     try:
-        text = input_path.read_text(encoding="utf-8", errors="replace")
+        from paleo_workbench.resources.text_codec import (
+            read_text_with_fallback,
+        )
+
+        text = read_text_with_fallback(input_path)
         with atomic_output(output_path) as tmp:
             tmp.write_text(text, encoding="utf-8")
     except Exception as exc:
