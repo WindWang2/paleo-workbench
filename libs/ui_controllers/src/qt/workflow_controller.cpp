@@ -1,6 +1,7 @@
 #include <pwb/ui_controllers/qt/workflow_controller.hpp>
 
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <QTimer>
 #include <QWidget>
 
@@ -18,11 +19,14 @@ WorkflowController::WorkflowController(job::JobScheduler& scheduler,
     // object's thread (QueuedConnection parity — a QTimer(0) post is the
     // same contract and needs no receiver object).
     pages_.post_to_gui = [](std::function<void()> fn) {
-        // R2-18: receiver-carrying post — see project_controller's
-        // app_lifetime_post_target note (a contextless singleShot is never
-        // dropped on target destruction; the sentinel gives the post an
-        // owner, staleness is guarded by generation checks in the body).
-        QTimer::singleShot(0, &pwb::ui_controllers::qt::app_lifetime_post_target(),
+        // R2-18/R6-1: receiver-carrying post keyed on the application
+        // object — main-thread affinity by construction (a lazily-created
+        // sentinel would bind to this WORKER thread on first call and
+        // silently drop every subsequent post). Staleness is guarded by
+        // generation checks in the posted bodies.
+        auto* app = QCoreApplication::instance();
+        if (app == nullptr) return;
+        QTimer::singleShot(0, app,
                            [fn = std::move(fn)]() mutable { fn(); });
     };
 }

@@ -2,6 +2,7 @@
 
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <QTimer>
 #include <QWidget>
 
@@ -16,24 +17,20 @@ constexpr const char* kProjectFilter = "Paleo 工程 (*.paleo.json)";
 }  // namespace
 
 // QTimer(0) parity — marshal onto the GUI thread's next event turn.
-// R2-18: the receiver matters — a contextless singleShot is NEVER dropped
-// when its target dies, so a posted lambda capturing a destroyed
-// controller ran anyway (UAF). A process-lifetime sentinel object gives
-// the post an owner whose destruction semantics we control (it outlives
-// all controllers; per-controller staleness is guarded by generation
-// checks inside the posted bodies).
-QObject& app_lifetime_post_target() {
-    // Deliberate leak: a function-local static would be destroyed after
-    // main() returns — i.e., after the stack-allocated QApplication —
-    // closing a destruction-order question nobody needs. Parentless,
-    // connection-free, tiny; leaked on purpose.
-    static auto* sentinel = new QObject();
-    return *sentinel;
-}
-
+// R2-18/R6-1: the receiver matters twice over. A contextless singleShot
+// is NEVER dropped when its target dies (UAF), and a lazily-created
+// sentinel QObject binds to whichever thread FIRST calls this — the
+// workflow progress hop calls from a scheduler worker, which would give
+// the sentinel worker-thread affinity and silently kill every post
+// (timers need an event loop). QCoreApplication::instance() is created
+// on the main thread before any worker can post and lives until after
+// every controller is gone — the correct owner for app-lifetime posts.
 void post_next_turn(std::function<void()> fn) {
-    QTimer::singleShot(0, &app_lifetime_post_target(),
-                       [fn = std::move(fn)]() mutable { fn(); });
+    auto* app = QCoreApplication::instance();
+    if (app == nullptr) {
+        return;  // no application: nowhere to marshal to; drop the post
+    }
+    QTimer::singleShot(0, app, [fn = std::move(fn)]() mutable { fn(); });
 }
 
 ProjectController::ProjectController(job::JobScheduler& scheduler,
