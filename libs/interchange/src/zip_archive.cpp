@@ -174,6 +174,11 @@ struct ZipReader::Impl {
     // concurrent reads on one instance race by design (same as Python's
     // non-thread-safe ZipFile).
     std::ifstream file;
+    // Captured at open so read_entry can reject offsets that point past
+    // the file BEFORE any u64 offset arithmetic on them (a ZIP64 extra
+    // field can carry offsets up to 2^64-1; adding 30 + name + extra to
+    // such a value would wrap).
+    unsigned long long file_size = 0;
     explicit Impl(const std::filesystem::path& path) : file(path, std::ios::binary) {}
 };
 
@@ -183,6 +188,7 @@ ZipReader::ZipReader(const std::filesystem::path& path) : impl_(std::make_unique
     const auto end_pos = impl_->file.tellg();
     if (end_pos < 0) throw ZipError("File is not a zip file");
     const unsigned long long file_size = static_cast<unsigned long long>(end_pos);
+    impl_->file_size = file_size;
 
     const std::size_t window = static_cast<std::size_t>(
         file_size < 65557 ? file_size : 65557);
@@ -265,6 +271,18 @@ ZipReader::ZipReader(const std::filesystem::path& path) : impl_(std::make_unique
         const unsigned short comment_len = read_u16(rec + 32);
         info.external_attr = read_u32(rec + 38);
         info.local_header_offset = read_u32(rec + 42);
+        // Checked bounds BEFORE any slice: the variable-length tail
+        // (name + extra + comment) must fit inside the directory buffer
+        // the fixed 46-byte header already proved valid. `cd.size() - pos`
+        // cannot underflow (pos + 46 <= cd.size() above) and the left side
+        // cannot overflow (three u16 fields), so this single comparison
+        // replaces both substr calls' implicit truncation/throw behavior —
+        // a truncated or hostile directory is a ZipError, never a
+        // std::out_of_range escaping the package verification (#1469).
+        if (static_cast<std::size_t>(46) + name_len + extra_len + comment_len >
+            cd.size() - pos) {
+            throw ZipError("Bad file (truncated central directory)");
+        }
         std::string raw_name = cd.substr(pos + 46, name_len);
         // ZIP64 extra field 0x0001 carries the fields whose fixed slot is
         // 0xFFFFFFFF, in fixed order: size, compressed_size, offset.
@@ -314,6 +332,14 @@ const ZipEntryInfo* ZipReader::find(std::string_view name) const {
 
 void ZipReader::read_entry(const ZipEntryInfo& entry,
                            const std::function<void(std::string_view)>& sink) const {
+    // Offsets come from container data (a ZIP64 extra field can declare
+    // anything up to 2^64-1): reject past-EOF targets before the u64
+    // addition below can wrap (#1469 hardening — the stream gcount checks
+    // remain as the second line of defense).
+    if (entry.local_header_offset > impl_->file_size) {
+        throw ZipError("Bad file (local header offset out of bounds for " +
+                       python_repr(entry.name) + ")");
+    }
     std::string header(30, '\0');
     impl_->file.clear();
     impl_->file.seekg(static_cast<std::streamoff>(entry.local_header_offset));
@@ -464,6 +490,11 @@ void ZipWriter::add_bytes(const std::string& arcname, std::string_view bytes) {
     }
     if (bytes.size() > 0xFFFFFFFFULL) {
         throw ZipError("zip entry above 4 GiB unsupported (medium-scale limit)");
+    }
+    if (arcname.size() > 0xFFFF) {
+        // The name length slot is u16: a longer name would silently
+        // truncate the count and emit a structurally corrupt container.
+        throw ZipError("zip entry name above 65535 bytes");
     }
 
     Impl::Record record;
