@@ -25,6 +25,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.workflow import crs_policy as py  # noqa: E402
 from paleo_workbench.workflow.crs_policy import (  # noqa: E402
     DISTANCE_POLICIES,

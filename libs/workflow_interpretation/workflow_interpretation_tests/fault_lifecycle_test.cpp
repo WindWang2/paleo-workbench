@@ -19,7 +19,7 @@ namespace { long test_pid() {
 #ifdef _WIN32
     return static_cast<long>(_getpid());
 #else
-    return static_cast<long>(test_pid());
+    return static_cast<long>(::getpid());
 #endif
 } }
 #include <filesystem>

@@ -74,6 +74,10 @@ _stub_module("paleo_workbench.mapping.map_render_backend")
 _stub_module("geoviz")
 _stub_module("paleo_workbench.viz.selection_context")
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.mapping.geological_pipeline.contouring import (  # noqa: E402
     generate_contour_layer,
 )

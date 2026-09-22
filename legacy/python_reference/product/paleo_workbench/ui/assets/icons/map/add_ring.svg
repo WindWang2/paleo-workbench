@@ -1,0 +1,9 @@
+<svg height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
+  <title>添加内环</title>
+  <rect x="2.5" y="3" width="12.5" height="12.5" rx="1.5" fill="#8cbe8c" stroke="#555753" stroke-width="1.2"/>
+  <rect x="6.5" y="6.8" width="4.7" height="4.7" rx="0.8" fill="#f7fbf7" stroke="#555753" stroke-width="1.1"/>
+  <g stroke="#2f7a2f" stroke-width="1.7" stroke-linecap="round">
+    <path d="M19.3 15.4v5.2"/>
+    <path d="M16.7 18h5.2"/>
+  </g>
+</svg>

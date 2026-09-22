@@ -41,6 +41,8 @@ def ts() -> str:
 
 
 def build_minimal():
+    import _legacy_reference
+    _legacy_reference.ensure_legacy_reference()  # archived-reference shim
     from paleo_workbench.project.models import ProjectDocument, ProjectMeta
 
     meta = ProjectMeta(name="极小工程", region="", version="0.2.17a0")

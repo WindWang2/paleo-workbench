@@ -282,7 +282,13 @@ def scan_units(root: str) -> Dict[str, UnitFact]:
         fact.slices = scan_slices(cml_files)
         fact.python_origins = scan_python_origins(root, fact.headers + fact.sources + cml_files)
         for ref in fact.python_origins:
-            if os.path.exists(os.path.join(root, ref)):
+            if os.path.exists(os.path.join(root, ref)) or (
+                ref.startswith("paleo_workbench/")
+                and os.path.exists(os.path.join(root, "legacy", "python_reference",
+                                                "product", ref))
+            ):
+                # A retired origin still counts as present: it lives in the
+                # archive now (docs/development/python-retirement/).
                 fact.python_origins_present.append(ref)
             else:
                 fact.python_origins_absent.append(ref)
@@ -718,8 +724,22 @@ def scan_conv_defines(root: str) -> Set[str]:
     return found
 
 
-def scan_python_packages(root: str) -> List[str]:
+def python_product_dir(root: str) -> str:
+    """The retired Python package dir: active tree first, else the archive
+    (legacy/python_reference/product — the package was retired with the
+    Python retirement; see docs/development/python-retirement/)."""
     pkg = os.path.join(root, "paleo_workbench")
+    if os.path.isdir(pkg):
+        return pkg
+    archived = os.path.join(root, "legacy", "python_reference", "product",
+                            "paleo_workbench")
+    if os.path.isdir(archived):
+        return archived
+    return pkg  # absent; callers treat missing dirs as empty
+
+
+def scan_python_packages(root: str) -> List[str]:
+    pkg = python_product_dir(root)
     if not os.path.isdir(pkg):
         return []
     out = []

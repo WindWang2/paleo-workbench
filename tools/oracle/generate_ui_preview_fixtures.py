@@ -1506,6 +1506,8 @@ def _install_pwb_stubs() -> None:
     """Stub the out-of-scope paleo_workbench seams (viz/preview_provider)."""
     # paleo_workbench.ui.style — palette() backed by the REAL tokens, bind()
     # applies the render once (same observable effect as the real registry).
+    import _legacy_reference
+    _legacy_reference.ensure_legacy_reference()  # archived-reference shim
     import paleo_workbench.tokens as real_tokens
 
     style = types.ModuleType("paleo_workbench.ui.style")

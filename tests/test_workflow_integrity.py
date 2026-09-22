@@ -88,56 +88,35 @@ def test_ci_windows_filename_guard_has_no_dead_allowlist() -> None:
     assert "ui-ref" not in guard, "stale #441 offender referenced in the guard"
 
 
-def test_slow_tests_guard_covers_all_three_skip_phrases_and_baseline_15() -> None:
-    """#896: slow-tests.yml 必须同时覆盖三类 SEGY 缺失文案且基线为 15。
-
-    三个 skip 产地:
-    - tests/test_geoviz_real_data_smoke.py:     "representative data file is absent"
-    - tests/test_seismic_timeslice_axis_contract.py: "demo SEGY not available" (2 × @slow)
-    - tests/test_well_seismic_fence_probe.py:        "no demo SEGY" (1 × @slow)
-
-    守卫用 SLOW_SKIP_RE 汇总三者，遗漏任一都会让数据树缺失时静默绿。
-    基线 15 = 7 smoke + 5 perf + 2 axis + 1 fence，CI 与本地双侧一致。
+def test_slow_tests_guard_covers_skip_phrases_and_baseline() -> None:
+    """#896 lineage, updated for the Python retirement (2026-09-22): the
+    product slow family (real-data e2e smoke, SEGY axis contracts, fence
+    probe, interpolation perf) retired to legacy/python_reference/tests; the
+    remaining slow family is the geoviz realdata smoke + perf benches. The
+    fail-closed skip-phrase guard and a presence baseline (>= 1) stay.
     """
     import re
 
     slow_yml = (WORKFLOW_DIR / "slow-tests.yml").read_text(encoding="utf-8")
     ci_yml = (WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8")
 
-    # — Baseline 15 on both workflows —
+    # — Presence baseline on both workflows (retirement-aware) —
     for name, text in (("slow-tests.yml", slow_yml), ("ci.yml", ci_yml)):
-        assert "baseline 15" in text.lower() or "baseline 15" in text, f"{name} baseline not bumped to 15"
-        assert "-ge 15" in text, f"{name} -ge 15 guard missing"
+        assert "baseline 1" in text, f"{name} retirement baseline missing"
+        assert "-ge 1" in text, f"{name} -ge 1 guard missing"
 
-    # — Guard covers all three phrases (mirror of yml's SLOW_SKIP_RE) —
-    expected_phrases = [
-        "representative data file is absent",
-        "demo SEGY not available",
-        "no demo SEGY",
-    ]
-    for phrase in expected_phrases:
-        assert phrase in slow_yml, f"slow-tests.yml guard missing phrase: {phrase!r}"
-
-    # Validate that slow-tests.yml's guard regex is well-formed and matches
-    # each phrase (replicates the grep behaviour the CI python step uses).
+    # — Guard keeps covering the skip phrases the workflow greps for —
     m = re.search(r'SLOW_SKIP_RE\s*=\s*r"([^"]+)"', slow_yml)
     assert m, "slow-tests.yml SLOW_SKIP_RE not found"
-    pattern = m.group(1)
-    compiled = re.compile(pattern)
-    for phrase in expected_phrases:
+    compiled = re.compile(m.group(1))
+    for phrase in ("representative data file is absent",
+                   "demo SEGY not available",
+                   "no demo SEGY"):
         assert compiled.search(phrase), f"SLOW_SKIP_RE does not match {phrase!r}"
 
-    # Source-of-truth: the three skip sites still emit those exact phrases.
-    smoke = (REPO_ROOT / "tests/test_geoviz_real_data_smoke.py").read_text(encoding="utf-8")
-    axis = (REPO_ROOT / "tests/test_seismic_timeslice_axis_contract.py").read_text(encoding="utf-8")
-    fence = (REPO_ROOT / "tests/test_well_seismic_fence_probe.py").read_text(encoding="utf-8")
-    assert "representative data file is absent" in smoke
-    assert "demo SEGY not available" in axis
-    assert '"no demo SEGY"' in fence or "'no demo SEGY'" in fence or "no demo SEGY" in fence
 
-
-def test_slow_family_collect_count_meets_baseline_15() -> None:
-    """#896: slow 家族实采数 ≥15（本地最小可测家族完整性）。"""
+def test_slow_family_collect_count_meets_baseline() -> None:
+    """#896 lineage, retirement-aware: slow 家族实采数 ≥1（geoviz 家族仍在）。"""
     import subprocess
     import sys as _sys
 
@@ -156,43 +135,19 @@ def test_slow_family_collect_count_meets_baseline_15() -> None:
     # If collection fully failed (0 collected), surface the error loudly.
     assert match, f"could not parse collected count from:\n{combined[:4000]}"
     count = int(match.group(1))
-    assert count >= 15, f"slow family shrank to {count} (< 15); update baselines or restore tests"
+    assert count >= 1, f"slow family shrank to {count} (< 1); the geoviz slow family must stay collectible"
 
 
-def test_ci_3d_opengl_leg_contract() -> None:
-    """#1058: the dedicated 3D OpenGL leg must exist and select the opengl
-    family on a real X server (xcb), not the offscreen platform where every
-    marked test skips unconditionally."""
+def test_ci_3d_opengl_leg_retired() -> None:
+    """Python-retirement (2026-09-22): the test-3d-opengl leg was removed with
+    the retired product's opengl family (docs/development/python-retirement/).
+    The merge gate must no longer depend on it."""
     import yaml
 
     wf = yaml.safe_load((WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8"))
-    job = wf["jobs"]["test-3d-opengl"]
-    assert job["runs-on"] == "ubuntu-latest"
-    env = job["env"]
-    # Real GL context: xcb on Xvfb + software Mesa — NOT offscreen.
-    assert env["QT_QPA_PLATFORM"] == "xcb"
-    assert env["LIBGL_ALWAYS_SOFTWARE"] == "1"
-    run_steps = [
-        step.get("run", "") for step in job["steps"] if isinstance(step, dict)
-    ]
-    assert any("-m opengl" in run for run in run_steps), (
-        "the 3D leg must select the opengl marker family"
-    )
-    # REQUIRED gate since 2026-08-29 (three green legs post-#1112; the
-    # promotion bar the windows-latest row set in #1111): no
-    # continue-on-error, and the merge gate must fail closed on it.
-    assert job.get("continue-on-error") is None
+    assert "test-3d-opengl" not in wf["jobs"], "retired 3D leg must stay removed"
     gate = wf["jobs"]["merge-gate"]
-    assert "test-3d-opengl" in gate["needs"], (
-        "the merge gate must depend on the 3D leg"
-    )
-    fail_step = next(
-        step for step in gate["steps"]
-        if step.get("name", "").startswith("Fail closed")
-    )
-    assert "needs.test-3d-opengl.result" in fail_step["if"], (
-        "the fail-closed step must check the 3D leg result"
-    )
+    assert "test-3d-opengl" not in gate["needs"]
 
 
 def test_ci_main_leg_does_not_run_opengl_family() -> None:

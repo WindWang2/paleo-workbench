@@ -45,6 +45,10 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.mapping import color_ramps as cr  # noqa: E402
 from paleo_workbench.mapping import geological_style_library as gsl  # noqa: E402
 from paleo_workbench.mapping import geological_symbols as gs  # noqa: E402

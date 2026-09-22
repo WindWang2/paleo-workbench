@@ -279,18 +279,14 @@ def _attach_parents(tree: ast.AST) -> None:
             field_child._parent = child
 
 
-@pytest.mark.parametrize("root_name", ["paleo_workbench"])
-def test_workbench_production_imports_only_geoviz_facade(root_name: str):
-    """Workbench production code must import only the public facade.
-
-    Phase-2 T1 (#245): the shared allow-list is enforced for the workbench.
-    The Well Log Workstation moved out of this tree into the well-log-engine
-    submodule (apps/wellplot-desktop/well_log_workstation); its imports are
-    governed by that repo's own policy, not by this parent-repo test.
+def test_workbench_production_imports_only_geoviz_facade():
+    """Python-retirement (2026-09-22): the workbench production tree retired
+    to legacy/python_reference; the facade allow-list policy itself stays
+    enforced by the synthetic tests below (and by the geoviz packages' own
+    policy). The retired tree is no longer scanned from the active suite.
     """
-    root = Path(__file__).resolve().parents[1] / root_name
-    violations = _workbench_geoviz_import_violations(root)
-    assert not violations, violations
+    archived = Path(__file__).resolve().parents[1] / "legacy/python_reference/product"
+    assert (archived / "paleo_workbench").is_dir(), "archive layout must stay intact"
 
 
 @pytest.mark.parametrize("private_name", ("engine", "previews"))

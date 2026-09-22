@@ -43,7 +43,7 @@ void configure_layer_tree_view(QgsLayerTreeView* view) {
     const QString closed = platform_services::icon_file(
         QStringLiteral("map/tree-branch-closed.svg"));
     const QString opened = platform_services::icon_file(
-        QStringLiteral("map/tree-branch-opened.svg"));
+        QStringLiteral("map/tree-branch-open.svg"));
     const QString closed_url = QDir(closed).absolutePath();
     const QString opened_url = QDir(opened).absolutePath();
     view->setStyleSheet(

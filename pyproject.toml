@@ -1,7 +1,7 @@
 [project]
 name = "paleo-workbench"
 version = "0.2.17a0"
-description = "Paleogeographic map compilation desktop workbench"
+description = "Paleo Workbench — development tooling environment (the production application is the native C++ pwb-platform build; the retired Python implementation is archived under legacy/python_reference)"
 license = {file = "LICENSE"}
 # Project unified on CPython 3.12 only (cp312/cp313 mix previously caused .so shadowing; see #435/#851).
 requires-python = ">=3.12,<3.13"
@@ -39,15 +39,8 @@ dev = [
     "pytest>=8.0",
     "pytest-qt>=4.5.0",
     "pytest-timeout>=2.3.1",
-    # tests/test_wheel_assets.py builds the wheel in-process via the PEP 517
-    # backend hook; modern runner venvs no longer ship setuptools implicitly.
-    "setuptools>=69",
-    # The marching-cubes fallback contract tests (#830,
-    # tests/test_issues_823_828_830_833.py) drive the pure-Python fallback
-    # with the C++ extension disabled; that path implements the isovalue
-    # boundary contract via scikit-image when no native module is available.
-    # Without it CI fails with "No module named 'skimage'" (#859 follow-up).
-    "scikit-image>=0.22",
+    # (Python-retirement: setuptools/scikit-image served the retired
+    # wheel-build and fallback-contract tests and were dropped with them.)
     # tests/test_issue_940_misc.py parses .github/workflows/*.yaml as part of
     # the CI contract checks; pyyaml is not pulled in by any runtime dep.
     "pyyaml>=6.0",
@@ -72,30 +65,20 @@ qgis-renderer = [
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
-[project.scripts]
-# Installed-state entry points (packaging #440). `python -m paleo_workbench`
-# works via paleo_workbench/__main__.py; both enter paleo_workbench.main.main()
-# and exit with its status (SystemExit(2) with install guidance when geoviz is
-# unavailable). WellPlot Desktop (well-log-engine/apps/wellplot-desktop) is a
-# separate product not packaged from this tree.
-paleo-workbench = "paleo_workbench.main:main"
+# [project.scripts] — removed with the Python product retirement
+# (docs/development/python-retirement/): the production application is the
+# native C++ `pwb-platform` executable; no Python console entry points ship
+# from this tree anymore.
 
-[tool.setuptools.packages.find]
-include = ["paleo_workbench*"]
-
-# Non-.py package assets are loaded from the filesystem at runtime
-# (paleo_workbench/ui/icon_rail.py, menu_bar.py, mapping docs, vendored
-# ATTRIBUTION.md) — without this, wheels silently ship them missing and the
-# UI degrades to plain-text navigation (packaging #439). Keep in sync with
-# tests/test_wheel_assets.py.
-[tool.setuptools.package-data]
-paleo_workbench = [
-    "ui/assets/icons/*.svg",
-    "ui/assets/icons/map/*.svg",
-    "ui/pages/prototypes/*.html",
-    "mapping/*.md",
-    "_vendored/haiyou_constrained_idw/*.md",
-]
+# [tool.setuptools] — removed packages/package-data with the Python product
+# retirement: this project no longer packages any application code. The
+# distribution exists so `pip install -e ".[dev]"` provisions the development
+# environment (pytest, oracle/migration tooling and their dependencies). The
+# retired implementation lives only under legacy/python_reference and is
+# never packaged. py-modules is pinned empty so flat-layout auto-discovery
+# can never start shipping code if a root __init__.py appears later.
+[tool.setuptools]
+py-modules = []
 
 [tool.pytest.ini_options]
 testpaths = [
@@ -109,11 +92,11 @@ qt_api = "pyside6"
 markers = [
     "slow: opt-in real-data or graphics tests; skip in fast CI with -m 'not slow'",
     "realdata_smoke: PR-gate real-format fixtures under tests/fixtures/realdata (#1230)",
-    "opengl: requires a real OpenGL context (skipped on offscreen; covered by the ci.yml test-3d-opengl Xvfb/llvmpipe leg — #940-1, #1058)",
+    "opengl: GL-context tests (the product-family leg retired with the Python suite — docs/development/python-retirement/; marker kept for the archived suite and geoviz use)",
     "qgis: requires the optional qgis_render_bridge extension (see docs/ci-merge-policy.md)",
     "welllog_binding: requires the built welllog pybind module",
     "timeout: per-test timeout (requires pytest-timeout plugin)",
-    "capacity: 10万-scale data-management budgets (#1060); runs in the fast CI selection",
+    "capacity: 10万-scale data budgets (#1060; family retired with the Python product suite — marker kept for the archived suite)",
 ]
 pythonpath = [
     ".",

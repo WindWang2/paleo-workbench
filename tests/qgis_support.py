@@ -10,6 +10,10 @@ select the QGIS tests explicitly.
 
 from __future__ import annotations
 
+import sys as _sys  # archived-reference shim: the retired package lives under
+from pathlib import Path as _Path  # legacy/python_reference (dev/test tooling only)
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "legacy" / "python_reference" / "product"))
+
 # Shown in every QGIS skip so a developer knows exactly how to enable the
 # path locally / in a QGIS CI leg.
 QGIS_SKIP_REASON = (

@@ -44,25 +44,26 @@ def _load(name: str, path: Path):
     return module
 
 
-_stub_package("paleo_workbench", REPO / "paleo_workbench")
-_stub_package("paleo_workbench.agent", REPO / "paleo_workbench" / "agent")
-_stub_package("paleo_workbench.harness", REPO / "paleo_workbench" / "harness")
-_stub_package("paleo_workbench.providers", REPO / "paleo_workbench" / "providers")
+ARCHIVE_PRODUCT = REPO / "legacy" / "python_reference" / "product"  # Python-retirement
+_stub_package("paleo_workbench", ARCHIVE_PRODUCT / "paleo_workbench")
+_stub_package("paleo_workbench.agent", ARCHIVE_PRODUCT / "paleo_workbench" / "agent")
+_stub_package("paleo_workbench.harness", ARCHIVE_PRODUCT / "paleo_workbench" / "harness")
+_stub_package("paleo_workbench.providers", ARCHIVE_PRODUCT / "paleo_workbench" / "providers")
 _intent = _load(
     "paleo_workbench.agent.intent",
-    REPO / "paleo_workbench" / "agent" / "intent.py",
+    ARCHIVE_PRODUCT / "paleo_workbench" / "agent" / "intent.py",
 )
 _planner = _load(
     "paleo_workbench.agent.planner",
-    REPO / "paleo_workbench" / "agent" / "planner.py",
+    ARCHIVE_PRODUCT / "paleo_workbench" / "agent" / "planner.py",
 )
 _spec = _load(
     "paleo_workbench.harness.spec",
-    REPO / "paleo_workbench" / "harness" / "spec.py",
+    ARCHIVE_PRODUCT / "paleo_workbench" / "harness" / "spec.py",
 )
 _load(
     "paleo_workbench.providers.contracts",
-    REPO / "paleo_workbench" / "providers" / "contracts.py",
+    ARCHIVE_PRODUCT / "paleo_workbench" / "providers" / "contracts.py",
 )
 
 IntentParser = _intent.IntentParser

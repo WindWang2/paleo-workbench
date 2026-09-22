@@ -1012,7 +1012,7 @@ elseif(PWB_BUILD_PLATFORM)
     message(STATUS
         "UI-04: libs/ui_workers skipped — enable PWB_BUILD_CONV_22 "
         "(geomodel contracts) for the worker ports; the Python workers "
-        "remain the production path")
+        "remained the production path until the 2026-09 Python retirement)")
 endif()
 # END UI-04
 
@@ -1035,7 +1035,7 @@ elseif(PWB_BUILD_PLATFORM)
     message(STATUS
         "UI-09: libs/ui_wellseis skipped — needs Pwb::UiWorkers "
         "(PWB_BUILD_DATA + implied PWB_BUILD_CONV_22) and Qt6::Widgets; "
-        "the Python pages remain the production path")
+        "the Python pages remained the production path until the 2026-09 Python retirement)")
 endif()
 # END UI-09
 
@@ -1079,7 +1079,7 @@ elseif(PWB_BUILD_PLATFORM)
     message(STATUS
         "UI-11: libs/ui_review skipped — needs Pwb::Data "
         "(PWB_BUILD_DATA) + Pwb::JobQt (PWB_BUILD_CONV_30) + "
-        "Qt6::Widgets; the Python pages remain the production path")
+        "Qt6::Widgets; the Python pages remained the production path until the 2026-09 Python retirement)")
 endif()
 # END UI-11
 
@@ -1134,7 +1134,7 @@ elseif(PWB_BUILD_PLATFORM)
     message(STATUS
         "UI-10: libs/ui_seqviz skipped — enable PWB_BUILD_CONV_22 "
         "(worker ports) plus the platform/data/mapping/well slices for "
-        "the seqviz pages; the Python pages remain the production path")
+        "the seqviz pages; the Python pages remained the production path until the 2026-09 Python retirement)")
 endif()
 # END UI-10
 
@@ -1164,7 +1164,7 @@ elseif(PWB_BUILD_PLATFORM)
         "Pwb::UiDataCore + Pwb::UiShell + Pwb::UiWorkstation + "
         "Pwb::Catalog + Pwb::Project + Pwb::WorkflowRuntime + "
         "Pwb::Prediction + Pwb::ToolPolicy; the Python controllers "
-        "remain the production path")
+        "remained the production path until the 2026-09 Python retirement)")
 endif()
 # END UI-14
 

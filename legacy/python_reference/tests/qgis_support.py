@@ -1,0 +1,93 @@
+# Archived-suite copy of tests/qgis_support.py (kept so the retired suite
+# stays self-runnable; active tree owns the canonical version).
+"""Shared conditionalization for the optional QGIS render bridge (packaging #437).
+
+The QGIS production renderer (``prefer_qgis=True``) builds a vendored QGIS
+core via ``native/qgis_render_bridge`` and is deliberately **opt-in**: the main
+CI gate installs neither QGIS nor the bridge, so every QGIS-path test below
+self-skips there. This module is the single source of truth for that
+conditional so the skip reason stays actionable and ``pytest -m qgis`` can
+select the QGIS tests explicitly.
+"""
+
+from __future__ import annotations
+
+import sys as _sys  # archived-reference shim: the retired package lives under
+from pathlib import Path as _Path  # legacy/python_reference (dev/test tooling only)
+# archived-suite copy: the product root is a sibling of this tests dir.
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "product"))
+
+# Shown in every QGIS skip so a developer knows exactly how to enable the
+# path locally / in a QGIS CI leg.
+QGIS_SKIP_REASON = (
+    "optional qgis_render_bridge is not built; enable with: "
+    "python -m pip install -e \".[qgis-renderer]\" && "
+    "PALEO_WITH_QGIS_RENDERER=1 python -m pip install -e native/qgis_render_bridge"
+)
+
+# Marker name used with ``pytest -m qgis`` to select QGIS-only tests.
+QGIS_MARKER = "qgis"
+
+
+def qgis_bridge_available() -> bool:
+    """True when the ``qgis_render_bridge`` extension is importable."""
+    try:
+        # Windows V7: the vendored-QGIS runtime DLL dirs must join the loader
+        # path before the first bridge import (no-op elsewhere).
+        from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+        ensure_qgis_bridge_dll_dirs()
+    except Exception:
+        pass
+    try:
+        import qgis_render_bridge  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def require_qgis():
+    """Import and return qgis_render_bridge, respecting PALEO_REQUIRE_QGIS."""
+    import os
+    import pytest
+
+    try:
+        from paleo_workbench.mapping.qgis_style import ensure_qgis_bridge_dll_dirs
+
+        ensure_qgis_bridge_dll_dirs()
+    except Exception:
+        pass
+    strict = os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"}
+    if strict:
+        import qgis_render_bridge
+
+        return qgis_render_bridge
+    # pytest>=8.4: importorskip defaults to ModuleNotFoundError only — a
+    # broken bridge DLL raises plain ImportError and must still skip (not
+    # fail) on non-strict legs.
+    return pytest.importorskip("qgis_render_bridge", reason=QGIS_SKIP_REASON, exc_type=ImportError)
+
+
+def require_mapstack():
+    """Import and return qgis_render_bridge.mapstack, respecting PALEO_REQUIRE_QGIS."""
+    import os
+    import pytest
+
+    strict = os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"}
+    if strict:
+        import qgis_render_bridge.mapstack as mapstack
+
+        return mapstack
+    return pytest.importorskip("qgis_render_bridge.mapstack", reason=QGIS_SKIP_REASON, exc_type=ImportError)
+
+
+def qgis_env_status() -> dict[str, object]:
+    """Return runtime diagnostic metadata for QGIS test harness."""
+    import os
+
+    return {
+        "available": qgis_bridge_available(),
+        "strict_mode": os.environ.get("PALEO_REQUIRE_QGIS", "").strip().lower() in {"1", "true", "yes"},
+        "skip_reason": QGIS_SKIP_REASON,
+    }

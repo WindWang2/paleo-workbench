@@ -38,6 +38,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 import paleo_workbench.mapping.composer.components as components  # noqa: E402
 import paleo_workbench.mapping.composer.models as composer_models  # noqa: E402
 import paleo_workbench.mapping.layers as layers_mod  # noqa: E402

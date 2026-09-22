@@ -23,6 +23,10 @@ sys.path.insert(0, str(ROOT))
 
 import numpy as np  # noqa: E402
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.workflow import factor_units as fu  # noqa: E402
 from paleo_workbench.workflow.factor_fusion import (  # noqa: E402
     FactorEvidence,

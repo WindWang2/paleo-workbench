@@ -36,6 +36,10 @@ sys.path.insert(0, str(REPO))
 # _extract_well_name walks its documented fallback chain.
 sys.modules["geoviz"] = None
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.catalog.service import DataCatalogService  # noqa: E402
 from paleo_workbench.project.manager import ProjectManager  # noqa: E402
 from paleo_workbench.resources.ingest_plan import (  # noqa: E402

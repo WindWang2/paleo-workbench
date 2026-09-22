@@ -73,6 +73,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.catalog import queries as py_queries
 from paleo_workbench.catalog import service as py_service_mod
 from paleo_workbench.catalog import service_v11 as py_service_v11

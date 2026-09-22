@@ -45,6 +45,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 import paleo_workbench.mapping.edit_session_set as edit_session_set_mod  # noqa: E402
 import paleo_workbench.mapping.edit_gesture_manager as edit_gesture_manager_mod  # noqa: E402
 import paleo_workbench.mapping.geometry_schema as geometry_schema  # noqa: E402

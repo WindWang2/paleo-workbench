@@ -23,6 +23,10 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.workflow import curve_operations as co  # noqa: E402
 from paleo_workbench.workflow import curve_interpretation as ci  # noqa: E402
 from paleo_workbench.workflow import well_science as ws  # noqa: E402

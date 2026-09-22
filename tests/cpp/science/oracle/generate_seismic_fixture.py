@@ -46,6 +46,12 @@ for _candidate in (_pkg_root.parents):
 
 from geoviz_seismic.loader import SeismicLoader  # noqa: E402
 
+import sys as _sys  # archived-reference shim (legacy/python_reference)
+
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[4] / 'legacy' / 'python_reference' / 'product'))
+
 from paleo_workbench.native_backend import _py_fast_slice_to_indexed8  # noqa: E402
 
 TINY_SGY = REPO_ROOT / "tests" / "fixtures" / "realdata" / "tiny.sgy"

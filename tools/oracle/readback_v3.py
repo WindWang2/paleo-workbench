@@ -71,6 +71,8 @@ def main() -> int:
 
     # 1. Legacy pydantic model still accepts the C++-written project.
     try:
+        import _legacy_reference
+        _legacy_reference.ensure_legacy_reference()  # archived-reference shim
         from paleo_workbench.project.models import ProjectDocument
 
         ProjectDocument.model_validate(document)

@@ -166,6 +166,10 @@ def _install_tool_availability_sentinel() -> None:
 _install_pyside_stub()
 _install_tool_availability_sentinel()
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.ui import (  # noqa: E402
     command_registry as cr,
     deferred_page_bindings as dpb,

@@ -33,6 +33,10 @@ from types import SimpleNamespace
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 import paleo_workbench.project.models as models  # noqa: E402
 
 _seq = itertools.count(1)

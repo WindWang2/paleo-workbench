@@ -8,11 +8,11 @@ Scope: **678** unique Python modules. Native product runtime requirements: **0**
 
 | Classification | Count |
 | --- | ---: |
-| `NATIVE_PRODUCT` | 205 |
+| `NATIVE_PRODUCT` | 208 |
 | `NATIVE_LIBRARY_NOT_WIRED` | 1 |
-| `PARTIAL_NATIVE` | 77 |
+| `PARTIAL_NATIVE` | 79 |
 | `ORACLE_DEV_ONLY` | 0 |
-| `LEGACY_REFERENCE` | 395 |
+| `LEGACY_REFERENCE` | 390 |
 | `UNSUPPORTED_BY_DESIGN` | 0 |
 | `DEAD_REMOVAL_CANDIDATE` | 0 |
 
@@ -77,7 +77,7 @@ Scope: **678** unique Python modules. Native product runtime requirements: **0**
 | `paleo_workbench/catalog/queries.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/catalog/roles_backfill.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/catalog/runtime.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
-| `paleo_workbench/catalog/service.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
+| `paleo_workbench/catalog/service.py` | `Pwb::ClosureWorkflow`<br>`pwb_closure_workflow` | no | yes | yes | yes | no | no | no | `NATIVE_PRODUCT` |
 | `paleo_workbench/catalog/service_v11.py` | `Pwb::Catalog`<br>`pwb_catalog` | no | no | no | no | no | no | no | `PARTIAL_NATIVE` |
 | `paleo_workbench/catalog/service_view.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/catalog/sources.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
@@ -135,7 +135,7 @@ Scope: **678** unique Python modules. Native product runtime requirements: **0**
 | `paleo_workbench/mapping/__init__.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/mapping/action_registry.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/mapping/capability_model.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
-| `paleo_workbench/mapping/cartographic_qa.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
+| `paleo_workbench/mapping/cartographic_qa.py` | `Pwb::Cartography`<br>`cartography_bind_module`<br>`pwb_cartography` | no | yes | yes | yes | no | no | no | `NATIVE_PRODUCT` |
 | `paleo_workbench/mapping/cartography_native.py` | `Pwb::Cartography`<br>`cartography_bind_module`<br>`pwb_cartography` | no | yes | yes | yes | no | no | no | `NATIVE_PRODUCT` |
 | `paleo_workbench/mapping/color_ramps.py` | `Pwb::Cartography`<br>`cartography_bind_module`<br>`pwb_cartography` | no | yes | yes | yes | no | no | no | `NATIVE_PRODUCT` |
 | `paleo_workbench/mapping/composer/__init__.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
@@ -155,7 +155,7 @@ Scope: **678** unique Python modules. Native product runtime requirements: **0**
 | `paleo_workbench/mapping/facies_patterns.py` | `Pwb::UiWidgets`<br>`Pwb::UiWidgetsCore`<br>`Pwb::UiWidgetsQgis`<br>`pwb_ui_widgets`<br>`pwb_ui_widgets_core`<br>`pwb_ui_widgets_qgis` | no | yes | yes | no | no | no | no | `NATIVE_PRODUCT` |
 | `paleo_workbench/mapping/facies_renderer_xml.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/mapping/facies_taxonomy.py` | `Pwb::UiWidgets`<br>`Pwb::UiWidgetsCore`<br>`Pwb::UiWidgetsQgis`<br>`pwb_ui_widgets`<br>`pwb_ui_widgets_core`<br>`pwb_ui_widgets_qgis` | no | yes | yes | no | no | no | no | `NATIVE_PRODUCT` |
-| `paleo_workbench/mapping/factor_layer_products.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
+| `paleo_workbench/mapping/factor_layer_products.py` | `Pwb::UiComposite`<br>`Pwb::UiCompositeQgis`<br>`Pwb::UiCompositeQt`<br>`pwb_ui_composite`<br>`pwb_ui_composite_qgis`<br>`pwb_ui_composite_qt` | no | no | no | no | no | no | no | `PARTIAL_NATIVE` |
 | `paleo_workbench/mapping/feature_query_index.py` | `Pwb::UiPagesMapedit`<br>`pwb_ui_pages_mapedit` | no | yes | yes | no | no | no | no | `NATIVE_PRODUCT` |
 | `paleo_workbench/mapping/geological_invariants.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/mapping/geological_pipeline/__init__.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
@@ -209,10 +209,10 @@ Scope: **678** unique Python modules. Native product runtime requirements: **0**
 | `paleo_workbench/mapping_workspace/__init__.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/mapping_workspace/artifact_keys.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
 | `paleo_workbench/mapping_workspace/capture_spec.py` | `Pwb::UiComposite`<br>`Pwb::UiCompositeQgis`<br>`Pwb::UiCompositeQt`<br>`pwb_ui_composite`<br>`pwb_ui_composite_qgis`<br>`pwb_ui_composite_qt` | no | no | no | no | no | no | no | `PARTIAL_NATIVE` |
-| `paleo_workbench/mapping_workspace/constraints_sync.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
+| `paleo_workbench/mapping_workspace/constraints_sync.py` | `Pwb::UiComposite`<br>`Pwb::UiCompositeQgis`<br>`Pwb::UiCompositeQt`<br>`pwb_ui_composite`<br>`pwb_ui_composite_qgis`<br>`pwb_ui_composite_qt` | no | no | no | no | no | no | no | `PARTIAL_NATIVE` |
 | `paleo_workbench/mapping_workspace/controller.py` | `Pwb::UiComposite`<br>`Pwb::UiCompositeQgis`<br>`Pwb::UiCompositeQt`<br>`pwb_ui_composite`<br>`pwb_ui_composite_qgis`<br>`pwb_ui_composite_qt` | no | no | no | no | no | no | no | `PARTIAL_NATIVE` |
 | `paleo_workbench/mapping_workspace/crs_gate.py` | `Pwb::UiComposite`<br>`Pwb::UiCompositeQgis`<br>`Pwb::UiCompositeQt`<br>`pwb_ui_composite`<br>`pwb_ui_composite_qgis`<br>`pwb_ui_composite_qt` | no | no | no | no | no | no | no | `PARTIAL_NATIVE` |
-| `paleo_workbench/mapping_workspace/dependencies.py` | — | no | no | no | no | no | no | no | `LEGACY_REFERENCE` |
+| `paleo_workbench/mapping_workspace/dependencies.py` | `Pwb::WorkflowInterpretation`<br>`pwb_workflow_interpretation` | no | yes | yes | yes | no | no | no | `NATIVE_PRODUCT` |
 | `paleo_workbench/mapping_workspace/epoch_switching.py` | `Pwb::UiWidgets`<br>`Pwb::UiWidgetsCore`<br>`Pwb::UiWidgetsQgis`<br>`pwb_ui_widgets`<br>`pwb_ui_widgets_core`<br>`pwb_ui_widgets_qgis` | no | yes | yes | no | no | no | no | `NATIVE_PRODUCT` |
 | `paleo_workbench/mapping_workspace/geological_layer_spec.py` | `Pwb::UiComposite`<br>`Pwb::UiCompositeQgis`<br>`Pwb::UiCompositeQt`<br>`pwb_ui_composite`<br>`pwb_ui_composite_qgis`<br>`pwb_ui_composite_qt` | no | no | no | no | no | no | no | `PARTIAL_NATIVE` |
 | `paleo_workbench/mapping_workspace/layer_group_controller.py` | `Pwb::UiComposite`<br>`Pwb::UiCompositeQgis`<br>`Pwb::UiCompositeQt`<br>`pwb_ui_composite`<br>`pwb_ui_composite_qgis`<br>`pwb_ui_composite_qt` | no | no | no | no | no | no | no | `PARTIAL_NATIVE` |

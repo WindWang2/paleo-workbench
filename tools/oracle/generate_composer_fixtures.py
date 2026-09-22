@@ -40,6 +40,10 @@ import _np_stub  # noqa: E402
 _np_stub.install()
 _np_stub.install_pyside_stub()
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench.mapping.composer import (  # noqa: E402
     components as py_components,
     registry as py_registry,

@@ -1,5 +1,11 @@
 # Project: Paleo Workbench Core Convergence
 
+> **Python-retirement status (2026-09-22):** the production Paleo Workbench
+> application is the native C++ product (`pwb-platform`). The Python
+> implementation described in this historical document is retired to
+> `legacy/python_reference/` (reference/oracle only). See
+> `docs/development/python-retirement/` for the retirement ledger.
+
 ## Architecture
 Paleo Workbench is a unified desktop scientific workstation integrating geological mapping, well log analysis, 3D seismic visualization, and spatial data science. The core convergence architecture consists of:
 1. **Runtime Stability Layer**: `OwnedWorkerJob` thread lifecycle management, thread-confined SQLite database sessions in WAL mode, context-scoped deferred OpenGL resource deallocation, and GIL-safe pybind11 C++ bindings.

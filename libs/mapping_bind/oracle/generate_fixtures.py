@@ -34,6 +34,12 @@ sys.path.insert(0, str(REPO_ROOT))
 # Pin the numpy kriging fallback BEFORE any paleo import touches geoviz.
 sys.modules.setdefault("geoviz", None)  # type: ignore[assignment]
 
+import sys as _sys  # archived-reference shim (legacy/python_reference)
+
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / 'legacy' / 'python_reference' / 'product'))
+
 from paleo_workbench.mapping.geological_pipeline.interpolator import (  # noqa: E402
     interpolate_factor,
 )

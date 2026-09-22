@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "source": "Walther 相律的岸线距离秩差编码（geotopo 00-decisions D7）。合法相邻 ⇔ |rank(a)-rank(b)| ≤ max_rank_distance，或在 allowed_pairs 白名单（盆地特殊性相接触，如三角洲前缘滑塌浊积直接进入陆棚）。工程可经 ProjectDocument.facies_adjacency 整体覆盖。",
+    "max_rank_distance": 1
+  },
+  "ranks": {
+    "冲积扇": 0,
+    "三角洲": 1,
+    "滨岸": 2,
+    "潟湖": 2,
+    "潮坪": 2,
+    "碳酸盐台地": 3,
+    "陆棚": 3,
+    "深水盆地": 4
+  },
+  "allowed_pairs": [
+    ["三角洲", "陆棚"],
+    ["三角洲", "深水盆地"]
+  ],
+  "rank_labels": {
+    "0": "陆相（冲积扇）",
+    "1": "过渡（三角洲）",
+    "2": "近滨（滨岸/潟湖/潮坪）",
+    "3": "浅海（碳酸盐台地/陆棚）",
+    "4": "深海（深水盆地）"
+  }
+}

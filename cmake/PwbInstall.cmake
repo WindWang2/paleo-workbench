@@ -10,10 +10,10 @@
 #   bin/*.dll                              runtime closure: QGIS + Qt + MSVC CRT (Windows)
 #   bin/platforms|imageformats|styles/     Qt plugins (Windows)
 #   lib/                                   shared libraries (Linux: libpwb*.so; empty on Windows)
-#   share/paleo-workbench/resources/       application resources
-#   share/paleo-workbench/templates/       document templates
-#   share/paleo-workbench/icons/           application icons
-#   share/paleo-workbench/schema/          JSON schemas
+#   share/paleo-workbench/resources/       native-owned resources (facies
+#                                          data JSONs + ui/assets/icons/**;
+#                                          the retired Python tree is never
+#                                          an install source)
 #   share/paleo-workbench/pwb-package-layout.txt   this manifest
 #   bin/pwb-diagnose[.exe]                 optional install/diagnostic helper
 #
@@ -74,9 +74,8 @@ This manifest documents the install tree produced when PWB_ENABLE_PACKAGING=ON.
   bin/styles/                           Qt style plugins
   lib/                                  shared libraries (Linux: libpwb*.so; empty on Windows)
   share/paleo-workbench/resources/      application resources
-  share/paleo-workbench/templates/      document templates
-  share/paleo-workbench/icons/          application icons
-  share/paleo-workbench/schema/         JSON schemas
+  share/paleo-workbench/resources/      native-owned resources (facies
+                                       data JSONs + ui/assets/icons/**)
   share/paleo-workbench/pwb-package-layout.txt   this manifest
   bin/pwb-diagnose[.exe]                optional install/diagnostic helper
 
@@ -116,15 +115,16 @@ function(pwb_install_native_targets)
 endfunction()
 
 # --------------------------------------------------------------------------- #
-# pwb_install_resources() — install existing repo resource dirs + the QGIS
-# vendor resources dir (when present). Absent dirs are reported and skipped.
+# pwb_install_resources() — install the native-owned repo resource tree + the
+# QGIS vendor resources dir (when present). Absent dirs are reported and
+# skipped. The retired Python implementation (legacy/python_reference) is
+# never an install source.
 # --------------------------------------------------------------------------- #
 function(pwb_install_resources)
-    # Repo-side resource trees (relative to the source root).
-    set(_repo_resources
-        "paleo_workbench/resources"
-        "paleo_workbench/templates"
-        "paleo_workbench/icons")
+    # Product resource tree (relative to the source root): facies data JSONs
+    # and the ui/assets/icons set, owned by the native product since the
+    # Python retirement (see docs/development/python-retirement/).
+    set(_repo_resources "resources")
     foreach(_rel IN LISTS _repo_resources)
         set(_src "${CMAKE_CURRENT_SOURCE_DIR}/${_rel}")
         if(EXISTS "${_src}")
@@ -139,18 +139,6 @@ function(pwb_install_resources)
             message(STATUS "PwbInstall: installing resource dir ${_rel}")
         else()
             message(STATUS "PwbInstall: resource dir ${_rel} absent — skipped")
-        endif()
-    endforeach()
-
-    # JSON schema dir: look for any directory named like *schema* under
-    # paleo_workbench (optional; reported + skipped when absent).
-    file(GLOB _schema_dirs "${CMAKE_CURRENT_SOURCE_DIR}/paleo_workbench/*schema*")
-    foreach(_sd IN LISTS _schema_dirs)
-        if(IS_DIRECTORY "${_sd}")
-            install(DIRECTORY "${_sd}"
-                    DESTINATION "${CMAKE_INSTALL_DATADIR}/paleo-workbench"
-                    PATTERN ".git" EXCLUDE)
-            message(STATUS "PwbInstall: installing schema dir ${_sd}")
         endif()
     endforeach()
 

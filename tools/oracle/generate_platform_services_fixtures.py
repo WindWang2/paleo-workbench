@@ -26,6 +26,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+import _legacy_reference
+
+_legacy_reference.ensure_legacy_reference()  # archived-reference shim
+
 from paleo_workbench import tokens  # noqa: E402
 
 OUT_DIR = ROOT / "tests/cpp/platform/fixtures/platform_services"

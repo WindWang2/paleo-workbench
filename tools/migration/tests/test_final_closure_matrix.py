@@ -18,11 +18,14 @@ def load_module():
 
 class FinalClosureMatrixTest(unittest.TestCase):
     def test_matrix_covers_every_python_module_once(self):
-        matrix = load_module().build_matrix(ROOT)
+        module = load_module()
+        matrix = module.build_matrix(ROOT)
         sources = [row["python_source"] for row in matrix["rows"]]
+        product_dir = module.python_product_dir(ROOT)
+        prefix = "paleo_workbench/"
         expected = sorted(
-            path.relative_to(ROOT).as_posix()
-            for path in (ROOT / "paleo_workbench").rglob("*.py")
+            prefix + path.relative_to(product_dir).as_posix()
+            for path in product_dir.rglob("*.py")
             if "__pycache__" not in path.parts
         )
         self.assertEqual(sources, expected)
