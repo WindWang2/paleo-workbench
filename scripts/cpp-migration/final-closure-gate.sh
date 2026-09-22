@@ -63,8 +63,12 @@ run_configure() {
 }
 
 run_build() {
-    echo "== final closure: build native product"
-    "$Gate" Build -b "$BuildDir" -j "$Jobs" -t "pwb-platform"
+    echo "== final closure: build native product + test targets"
+    # No -t filter: run_tests below executes platform.*/integration.*/data.*/
+    # science.*/seismic.*/mapping.* CTest suites, whose executables are only
+    # produced by building every target in this configure (BUILD_TESTING=ON).
+    # Building just pwb-platform left 62/66 tests Not Run on any branch.
+    "$Gate" Build -b "$BuildDir" -j "$Jobs"
 }
 
 run_tests() {

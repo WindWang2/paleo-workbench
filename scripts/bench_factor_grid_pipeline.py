@@ -209,6 +209,7 @@ def main() -> None:
     payload = {"cases": cases}
     text = json.dumps(payload, indent=2)
     if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(text + "\n", encoding="utf-8")
     print(text)
 

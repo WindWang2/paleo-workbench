@@ -25,7 +25,15 @@ if [ -z "${PALEO_CONDA_PREFIX:-}" ]; then
     done
 fi
 export CONDA_PREFIX="${PALEO_CONDA_PREFIX:-/opt/miniconda3}"
-export PYTHONHOME="$CONDA_PREFIX"
+if [ -x "$CONDA_PREFIX/bin/python" ]; then
+    export PYTHONHOME="$CONDA_PREFIX"
+else
+    # A PYTHONHOME pointing at a non-existent prefix breaks every python
+    # invocation ("No module named encodings"). Keep the default interpreter
+    # instead (ISSUE-033).
+    echo "run_tests.sh: PALEO_CONDA_PREFIX='$CONDA_PREFIX' has no bin/python; keeping system interpreter" >&2
+    unset CONDA_PREFIX
+fi
 # Put the conda interpreter first on PATH: the shell's default `python3`
 # (/usr/sbin/python3, 3.14 here) has no PySide6, and setting PYTHONHOME alone
 # leaves it resolving to that interpreter and failing with

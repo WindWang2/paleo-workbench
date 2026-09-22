@@ -99,12 +99,18 @@ cat > "${PREFIX}/env.sh" <<EOF
 # whose proj.db layout is incompatible with the vendored one).
 export GDAL_VENDORED_PREFIX="${PREFIX}"
 export GDAL_DATA="${PREFIX}/share/gdal"
-export LD_LIBRARY_PATH="${PREFIX}/lib:\${LD_LIBRARY_PATH:-}"
+# Some distros install the vendored libs under lib64; pick whichever the
+# prefix actually produced (ISSUE-024).
+if [ -d "${PREFIX}/lib64" ]; then
+    export LD_LIBRARY_PATH="${PREFIX}/lib64:${PREFIX}/lib:\${LD_LIBRARY_PATH:-}"
+else
+    export LD_LIBRARY_PATH="${PREFIX}/lib:\${LD_LIBRARY_PATH:-}"
+fi
 EOF
 
 # Bindings install under <prefix>/lib/pythonX.Y/site-packages (CMake's
 # Python install scheme). Locate it and prepend to PYTHONPATH.
-OSGEO_SITE="$(find "${PREFIX}/lib" -maxdepth 4 -type d -name site-packages -path "*python*" 2>/dev/null | head -1)"
+OSGEO_SITE="$(find "${PREFIX}/lib" "${PREFIX}/lib64" -maxdepth 4 -type d -name site-packages -path "*python*" 2>/dev/null | head -1)"
 if [ -n "${OSGEO_SITE}" ] && [ -d "${OSGEO_SITE}/osgeo" ]; then
   echo "export PYTHONPATH=\"${OSGEO_SITE}:\${PYTHONPATH:-}\"" >> "${PREFIX}/env.sh"
   echo "osgeo exposed via PYTHONPATH=${OSGEO_SITE}"
