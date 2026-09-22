@@ -112,6 +112,68 @@ int main(int argc, char** argv) {
           "missing well file fails loudly");
     check(!bad_error.isEmpty(), "error message present");
 
+    // 7. #1466: a corrupt (or valid-but-partial) sidecar RESETS the
+    //    workspace — the previous project's wells/picks must never
+    //    survive in memory only to be persisted into the new project.
+    // Each variant re-loads the valid workspace first so a passing
+    // check can never ride on an already-empty state.
+    pwb::app::VizBCrossWellDock contaminated(&center);
+    const auto reload_valid = [&contaminated, &project_dir, &saved]() {
+        contaminated.set_project_directory(project_dir);
+        contaminated.restore_from_project();
+        return contaminated.save_state().dump() == saved.dump() &&
+               contaminated.well_count() >= 2;
+    };
+    check(reload_valid(), "valid sidecar reloads the workspace");
+    {
+        // 7a. Truncated JSON (exactly what a #1457 short write leaves).
+        const QString dir_b = temp.filePath("projectB");
+        QDir().mkpath(dir_b);
+        QFile src(sidecar);
+        src.open(QIODevice::ReadOnly);
+        const QByteArray half = src.read(24);
+        src.close();
+        QFile dst(dir_b + "/cross_well_workspace.json");
+        dst.open(QIODevice::WriteOnly | QIODevice::Truncate);
+        dst.write(half);
+        dst.close();
+        check(reload_valid(), "valid sidecar reloads (pre 7a)");
+        contaminated.set_project_directory(dir_b);
+        contaminated.restore_from_project();
+        check(contaminated.well_count() == 0,
+              "truncated sidecar resets wells (#1466)");
+    }
+    {
+        // 7b. Valid JSON that is not a workspace object.
+        const QString dir_c = temp.filePath("projectC");
+        QDir().mkpath(dir_c);
+        QFile dst(dir_c + "/cross_well_workspace.json");
+        dst.open(QIODevice::WriteOnly | QIODevice::Truncate);
+        dst.write("[1, 2, 3]");
+        dst.close();
+        check(reload_valid(), "valid sidecar reloads (pre 7b)");
+        contaminated.set_project_directory(dir_c);
+        contaminated.restore_from_project();
+        check(contaminated.well_count() == 0,
+              "non-object sidecar resets wells (#1466)");
+    }
+    {
+        // 7c. Valid object with missing keys — the sidecar fully defines
+        //    the workspace; absent keys mean empty, not "keep project A".
+        const QString dir_d = temp.filePath("projectD");
+        QDir().mkpath(dir_d);
+        QFile dst(dir_d + "/cross_well_workspace.json");
+        dst.open(QIODevice::WriteOnly | QIODevice::Truncate);
+        dst.write("{\"view\": {\"depth_top\": 0.0, \"depth_bottom\": 1.0, "
+                  "\"depth_domain\": \"twt\"}}");
+        dst.close();
+        check(reload_valid(), "valid sidecar reloads (pre 7c)");
+        contaminated.set_project_directory(dir_d);
+        contaminated.restore_from_project();
+        check(contaminated.well_count() == 0,
+              "partial sidecar does not keep previous project's wells");
+    }
+
     std::cout << "viz_b dock smoke: " << g_checks << " checks, "
               << g_failures << " failures\n";
     return g_failures == 0 ? 0 : 1;
