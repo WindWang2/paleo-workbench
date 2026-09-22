@@ -20,7 +20,7 @@ Online CI: not awaited (per goal). All numbers below are from actual runs.
 
 - configure (Ninja, `PWB_BUILD_NATIVE_PRODUCT=ON` + testing/integration/packaging): **exit 0**
 - `pwb-platform` target: **built and linked** (40 MB executable)
-- full-tree build (all test executables): see CTest section
+- full-tree build (all targets incl. test executables): **870/870 steps, exit 0**
 - Compile fixups required on top of the stacked base (#1473, MSVC-only evidence):
   1. `libs/providers/src/plugin_loader.cpp` — `::dl_close` → POSIX `::dlclose`
   2. `cmake/PwbFeatures.cmake` — `PWB_BUILD_NATIVE_PRODUCT` now implies
@@ -59,13 +59,18 @@ The final-closure gate's `build` stage builds the `pwb-platform` target
 only; the focused test executables need a full-tree build first (pre-existing
 gate behavior, recorded here). After `cmake --build` (all targets):
 
-- gate `test` stage (regex `^(platform\.|integration\.|data\.|science\.|seismic\.|mapping\.)`, two passes):
-  see the result block appended below after the run.
+- gate `test` stage (regex `^(platform\.|integration\.|data\.|science\.|seismic\.|mapping\.)`, two passes): **100% passed, 0 failed out of 68 — both passes** (CTEST_EXIT=0)
+- full CTest (all 246 registered tests, CTEST_PARALLEL_LEVEL=2):
+  **244/246 after the stacked fixups below** (first full run: 242/246)
+  - `workflow_interpretation.fault_lifecycle` — infinite `test_pid()` recursion from #1473's MSVC portability helper (POSIX branch called itself); busy-looped at 99% CPU. Fixed → passes in 0.03 s.
+  - `closure_science.mock_facies` — same recursion, burned its 120 s timeout. Fixed → passes in 0.06 s.
+  - `prediction.runtime`, `closure_science.core` — **environment**: this host has no `libonnxruntime` (both fail fast with the explicit "ONNX Runtime native library unavailable" message; unrelated to the retirement diff — no retirement change touches libs/prediction or libs/closure_science).
 
-### CTest result (filled after the run)
-
-- pass 1: see below
-- pass 2: see below
+Note: the gate's `build` stage builds the `pwb-platform` target only, so the
+focused/full test runs required a full-tree `cmake --build` first (870/870,
+exit 0). The CONV-32 closure expansion (stacked fixup, see 05) newly builds
+the workflow_interpretation test set in the native-product configure —
+which is how the #1473 recursion bug surfaced.
 
 ## Python-side verification (no pytest on the verification host)
 
