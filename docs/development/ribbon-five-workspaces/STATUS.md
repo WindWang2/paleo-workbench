@@ -14,3 +14,7 @@ STATUS note plus code/`fa9ba744` over any stale “计划草案” wording elsew
 `00-plan.md` header is marked **已落地（historical plan）** as of the
 2026-09 documentation audit; prefer this STATUS note + code over any leftover
 “草案 / 未实现” strings in older design READMEs (those should carry adopted banners).
+
+## Command catalog (pass-2)
+
+Full id/group/primary/install table: [`docs/architecture/ribbon-command-catalog.md`](../../architecture/ribbon-command-catalog.md).
