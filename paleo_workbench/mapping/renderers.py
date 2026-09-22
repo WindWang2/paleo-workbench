@@ -166,6 +166,42 @@ class RenderContext:
         return sx, sy
 
 
+def _screen_points(ctx: "RenderContext", coords) -> str:
+    """Format world coords as SVG points, dropping non-finite vertices (ISSUE-019).
+
+    Interpolated/edge geometries can carry NaN or Inf vertices; formatting
+    them would emit ``nan``/``inf`` into the SVG (invalid geometry, silent
+    render failure in strict viewers)."""
+    import math
+
+    parts = []
+    for p in coords:
+        if len(p) < 2:
+            continue
+        try:
+            x, y = float(p[0]), float(p[1])
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(x) and math.isfinite(y)):
+            continue
+        sx, sy = ctx.world_to_screen(x, y)
+        parts.append(f"{sx:.2f},{sy:.2f}")
+    return " ".join(parts)
+
+
+def _screen_point(ctx: "RenderContext", p) -> tuple[float, float] | None:
+    """Screen coords of one vertex, or None when non-finite (ISSUE-019)."""
+    import math
+
+    try:
+        x, y = float(p[0]), float(p[1])
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(x) and math.isfinite(y)):
+        return None
+    return ctx.world_to_screen(x, y)
+
+
 class LayerRenderer(ABC):
     """Protocol / ABC for all layer renderers."""
 
@@ -219,7 +255,8 @@ class SingleSymbolRenderer(LayerRenderer):
 
             if gtype == "Polygon" and coords:
                 ring = coords[0]
-                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
+                pts_attr = _screen_points(ctx, ring)
+                pts = pts_attr.split(" ") if pts_attr else []
                 if pts:
                     parts.append(
                         f'<polygon points="{" ".join(pts)}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
@@ -228,13 +265,15 @@ class SingleSymbolRenderer(LayerRenderer):
                 for poly in coords:
                     if poly:
                         ring = poly[0]
-                        pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
+                        pts_attr = _screen_points(ctx, ring)
+                        pts = pts_attr.split(" ") if pts_attr else []
                         if pts:
                             parts.append(
                                 f'<polygon points="{" ".join(pts)}" fill="{style.fill}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                             )
             elif gtype == "LineString" and coords:
-                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
+                pts_attr = _screen_points(ctx, coords)
+                pts = pts_attr.split(" ") if pts_attr else []
                 if pts:
                     dash_attr = ""
                     dash = ctx.dash_array(style.line_pattern, style.stroke_width)
@@ -244,7 +283,10 @@ class SingleSymbolRenderer(LayerRenderer):
                         f'<polyline points="{" ".join(pts)}" fill="none" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"{dash_attr}/>'
                     )
             elif gtype == "Point" and coords and len(coords) >= 2:
-                sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
+                _sp = _screen_point(ctx, coords)
+                if _sp is None:
+                    continue
+                sx, sy = _sp
                 r = ctx.to_target(max(1.0, style.marker_size / 2.0))
                 if style.marker is MarkerSymbol.WELL:
                     parts.append(
@@ -316,7 +358,8 @@ class CategorizedRenderer(LayerRenderer):
             coords = geom.get("coordinates", [])
             if gtype == "Polygon" and coords:
                 ring = coords[0]
-                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
+                pts_attr = _screen_points(ctx, ring)
+                pts = pts_attr.split(" ") if pts_attr else []
                 if pts:
                     parts.append(
                         f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
@@ -325,19 +368,24 @@ class CategorizedRenderer(LayerRenderer):
                 for poly in coords:
                     if poly:
                         ring = poly[0]
-                        pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
+                        pts_attr = _screen_points(ctx, ring)
+                        pts = pts_attr.split(" ") if pts_attr else []
                         if pts:
                             parts.append(
                                 f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                             )
             elif gtype == "LineString" and coords:
-                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
+                pts_attr = _screen_points(ctx, coords)
+                pts = pts_attr.split(" ") if pts_attr else []
                 if pts:
                     parts.append(
                         f'<polyline points="{" ".join(pts)}" fill="none" stroke="{fill_color}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                     )
             elif gtype == "Point" and coords and len(coords) >= 2:
-                sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
+                _sp = _screen_point(ctx, coords)
+                if _sp is None:
+                    continue
+                sx, sy = _sp
                 r = ctx.to_target(max(1.0, style.marker_size / 2.0))
                 parts.append(
                     f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="{r:.2f}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(0.5):.2f}"/>'
@@ -423,7 +471,8 @@ class GraduatedRenderer(LayerRenderer):
 
             if gtype == "Polygon" and coords:
                 ring = coords[0]
-                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
+                pts_attr = _screen_points(ctx, ring)
+                pts = pts_attr.split(" ") if pts_attr else []
                 if pts:
                     parts.append(
                         f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
@@ -432,13 +481,15 @@ class GraduatedRenderer(LayerRenderer):
                 for poly in coords:
                     if poly:
                         ring = poly[0]
-                        pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in ring if len(p) >= 2]
+                        pts_attr = _screen_points(ctx, ring)
+                        pts = pts_attr.split(" ") if pts_attr else []
                         if pts:
                             parts.append(
                                 f'<polygon points="{" ".join(pts)}" fill="{fill_color}" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
                             )
             elif gtype == "LineString" and coords:
-                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
+                pts_attr = _screen_points(ctx, coords)
+                pts = pts_attr.split(" ") if pts_attr else []
                 if pts:
                     dash_attr = ""
                     dash = ctx.dash_array(style.line_pattern, style.stroke_width)
@@ -448,7 +499,10 @@ class GraduatedRenderer(LayerRenderer):
                         f'<polyline points="{" ".join(pts)}" fill="none" stroke="{fill_color}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"{dash_attr}/>'
                     )
             elif gtype == "Point" and coords and len(coords) >= 2:
-                sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
+                _sp = _screen_point(ctx, coords)
+                if _sp is None:
+                    continue
+                sx, sy = _sp
                 r = ctx.to_target(max(1.0, style.marker_size / 2.0))
                 if style.marker is MarkerSymbol.WELL:
                     parts.append(
@@ -586,7 +640,8 @@ class ContourRenderer(LayerRenderer):
             props = feat.get("properties") or {}
             level = props.get("level")
 
-            pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
+            pts_attr = _screen_points(ctx, coords)
+            pts = pts_attr.split(" ") if pts_attr else []
             if len(pts) >= 2:
                 parts.append(
                     f'<polyline points="{" ".join(pts)}" fill="none" stroke="{style.stroke}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'
@@ -639,7 +694,10 @@ class WellSymbolRenderer(LayerRenderer):
             props = feat.get("properties") or {}
             if not coords or len(coords) < 2:
                 continue
-            sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
+            _sp = _screen_point(ctx, coords)
+            if _sp is None:
+                continue
+            sx, sy = _sp
             r = ctx.to_target(max(1.5, style.marker_size / 2.0))
 
             # Geological well point symbol
@@ -708,7 +766,10 @@ class AnnotationRenderer(LayerRenderer):
             escaped_text = html.escape(text) if text else ""
 
             if gtype == "Point" and coords and len(coords) >= 2:
-                sx, sy = ctx.world_to_screen(float(coords[0]), float(coords[1]))
+                _sp = _screen_point(ctx, coords)
+                if _sp is None:
+                    continue
+                sx, sy = _sp
                 transform_attr = f' transform="rotate({rotation:.1f} {sx:.2f} {sy:.2f})"' if rotation != 0.0 else ""
 
                 if style.marker_size > 0 and style.fill != "transparent" and props.get("show_marker", False):
@@ -722,7 +783,8 @@ class AnnotationRenderer(LayerRenderer):
                         f'<text x="{sx:.2f}" y="{sy:.2f}" font-family="{font_family}" font-size="{ctx.to_target(font_size):.2f}" font-weight="{font_weight}" fill="{color}"{transform_attr}>{escaped_text}</text>'
                     )
             elif gtype == "LineString" and coords:
-                pts = [f"{ctx.world_to_screen(p[0], p[1])[0]:.2f},{ctx.world_to_screen(p[0], p[1])[1]:.2f}" for p in coords if len(p) >= 2]
+                pts_attr = _screen_points(ctx, coords)
+                pts = pts_attr.split(" ") if pts_attr else []
                 if pts:
                     parts.append(
                         f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" stroke-width="{ctx.to_target(style.stroke_width):.2f}"/>'

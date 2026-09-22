@@ -92,14 +92,24 @@ class MapComposerRenderer:
                 f'</g>'
             )
         elif t == ElementType.SCALE_BAR:
-            length_km = elem.properties.get("length_km", 50)
+            try:
+                length_km = float(elem.properties.get("length_km", 50))
+            except (TypeError, ValueError):
+                length_km = 50.0
+            if not math.isfinite(length_km) or length_km <= 0.0:
+                length_km = 50.0
+            # Half-way label: format the true half value instead of floor
+            # division, which printed "0" for every sub-2 km bar (ISSUE-019).
+            half = length_km / 2.0
+            half_label = f"{half:g}"
+            label = f"{length_km:g}"
             return (
                 f'<g id="{elem.id}">'
                 f'<rect x="{x}" y="{y + h/2 - 1}" width="{w}" height="2" fill="#000000"/>'
                 f'<rect x="{x}" y="{y + h/2 - 1}" width="{w/2}" height="2" fill="#ffffff" stroke="#000000" stroke-width="0.2"/>'
                 f'<text x="{x}" y="{y + h - 1}" font-family="Arial, sans-serif" font-size="3" fill="#000000" text-anchor="start">0</text>'
-                f'<text x="{x + w/2}" y="{y + h - 1}" font-family="Arial, sans-serif" font-size="3" fill="#000000" text-anchor="middle">{length_km//2}</text>'
-                f'<text x="{x + w}" y="{y + h - 1}" font-family="Arial, sans-serif" font-size="3" fill="#000000" text-anchor="end">{length_km} km</text>'
+                f'<text x="{x + w/2}" y="{y + h - 1}" font-family="Arial, sans-serif" font-size="3" fill="#000000" text-anchor="middle">{half_label}</text>'
+                f'<text x="{x + w}" y="{y + h - 1}" font-family="Arial, sans-serif" font-size="3" fill="#000000" text-anchor="end">{label} km</text>'
                 f'</g>'
             )
         elif t == ElementType.LEGEND:
