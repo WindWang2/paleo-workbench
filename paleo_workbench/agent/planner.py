@@ -61,6 +61,30 @@ class TaskGraph:
     def has_failures(self) -> bool:
         return any(node.status == TaskStatus.FAILED for node in self.nodes.values())
 
+    def cascade_skip(self, root_id: str, reason: str) -> list[str]:
+        """Mark all transitive dependents of a failed node SKIPPED (ISSUE-021).
+
+        A node whose dependency FAILED can never become executable, so it
+        would otherwise stay PENDING forever while ``is_finished()`` — which
+        only accepts terminal statuses — remains False: the DAG reports an
+        eternally incomplete run. Skipped dependents carry the causal reason
+        in ``error`` for downstream reporting.
+        """
+        skipped: list[str] = []
+        seen = {root_id}
+        frontier = [root_id]
+        while frontier:
+            current = frontier.pop()
+            for node in self.nodes.values():
+                if current in node.dependencies and node.id not in seen:
+                    seen.add(node.id)
+                    if node.status == TaskStatus.PENDING:
+                        node.status = TaskStatus.SKIPPED
+                        node.error = reason
+                        skipped.append(node.id)
+                    frontier.append(node.id)
+        return skipped
+
 
 class TaskPlanner:
     """Intelligent DAG Planner that breaks domain intent into multi-agent task steps."""
