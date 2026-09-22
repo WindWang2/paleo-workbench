@@ -34,6 +34,7 @@
 #include <pwb/ui_pages_data/qt/home_page.hpp>
 #include <pwb/ui_pages_data/qt/hub_page.hpp>
 #include <pwb/ui_pages_data/qt/navigation_tree_widget.hpp>
+#include <pwb/ui_pages_data/qt/preparation_page.hpp>
 #include <pwb/ui_review/qt/review_export_page.hpp>
 #include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_seqviz/geoviz_provider.hpp>
@@ -401,6 +402,15 @@ void AppShell::build_workspace_host() {
 // BEGIN CLOSURE-MAPPING (08-line adopt)
 void AppShell::adopt_preparation_page(QWidget* page) {
     if (page == nullptr || workstation_ == nullptr) return;
+    // #1455: remember the page so shutdown_workers() reaches its
+    // WorkerHost — the adoption used to drop the pointer, leaving the
+    // prepare/contour threads to the WorkerHost destructor's unbounded
+    // join (window close froze the GUI until the kernel finished).
+    if (auto* preparation =
+            qobject_cast<pwb::ui_pages_data::qt::PreparationPage*>(page);
+        preparation != nullptr) {
+        preparation_page_ = preparation;
+    }
     // ws2 底部阶段行「数据制备」dock —— 占位 hint 退役，真实
     // PreparationPage 入住（pwbAdopted 让占位护栏视作真实面板）。
     workstation_->install_panel("data_prep", as_bottom_tab(
@@ -1488,6 +1498,12 @@ void AppShell::shutdown_workers() {
                 predict_compare_);
         compare != nullptr) {
         compare->shutdown_workers();
+    }
+    // #1455: the adopted preparation page (factor prepare / contour
+    // draft WorkerHost) joins the same bounded shutdown — before the
+    // WorkerHost destructor can ever see a joinable thread.
+    if (preparation_page_ != nullptr) {
+        preparation_page_->shutdown_workers();
     }
     if (workstation_ != nullptr) workstation_->shutdown();
 }
