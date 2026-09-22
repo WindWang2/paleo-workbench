@@ -134,7 +134,11 @@ def _probe_summary(path: Path, resource_type: str, resource_format: str) -> dict
         if resource_format in {"csv", "txt", "md", "json", "geojson"} and summary.get(
             "size_bytes", 0
         ) < 2_000_000:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            from paleo_workbench.resources.text_codec import (
+                decode_text_with_fallback,
+            )
+
+            text = decode_text_with_fallback(path.read_bytes())
             summary["line_count"] = text.count("\n") + (
                 1 if text and not text.endswith("\n") else 0
             )

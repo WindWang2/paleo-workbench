@@ -44,17 +44,10 @@ def read_preview_chunk(path: Path, limit_kib: int) -> tuple[bytes, bool]:
     return data, stat.st_size > limit
 
 
-def decode_text_with_fallback(raw_bytes: bytes) -> str:
-    """Decode bytes attempting UTF-8-sig, then GB18030/GBK, then replace (#1004)."""
-    try:
-        return raw_bytes.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        pass
-    try:
-        return raw_bytes.decode("gb18030")
-    except UnicodeDecodeError:
-        pass
-    return raw_bytes.decode("utf-8-sig", errors="replace")
+# Canonical implementation moved to paleo_workbench.resources.text_codec
+# (ISSUE-010: the same fallback chain is needed by well/tops/import parsers);
+# re-exported here for existing callers.
+from paleo_workbench.resources.text_codec import decode_text_with_fallback  # noqa: F401,E402
 
 
 def text_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewResult:

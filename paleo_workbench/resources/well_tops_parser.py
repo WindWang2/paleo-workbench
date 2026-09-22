@@ -21,7 +21,9 @@ def parse_well_tops(path: str | Path) -> list[WellTop]:
     and short/garbage rows (skipped).
     """
     tops: list[WellTop] = []
-    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    from paleo_workbench.resources.text_codec import read_text_with_fallback
+
+    text = read_text_with_fallback(path)
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
