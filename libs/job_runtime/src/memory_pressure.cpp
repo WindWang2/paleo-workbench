@@ -6,6 +6,7 @@
 #include <chrono>
 #include <charconv>
 #include <fstream>
+#include <vector>
 
 namespace pwb::job {
 namespace {
@@ -214,6 +215,17 @@ MemoryPressureMonitor& pressure_monitor() {
 
 void set_pressure_monitor(std::unique_ptr<MemoryPressureMonitor> monitor) {
     std::lock_guard<std::mutex> lock(g_monitor_mutex);
+    // R3 twin of set_governor's hazard: the live governor holds monitor_
+    // as a raw pointer — destroying the old monitor here left the next
+    // pressure sample dereferencing freed memory. Retire into a bounded
+    // zombie slot (same treatment as resource_governor's set_governor).
+    static std::vector<std::unique_ptr<MemoryPressureMonitor>> zombies;
+    if (g_monitor) {
+        zombies.push_back(std::move(g_monitor));
+        if (zombies.size() > 64) {
+            zombies.erase(zombies.begin());
+        }
+    }
     g_monitor = std::move(monitor);
 }
 
