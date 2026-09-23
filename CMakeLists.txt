@@ -931,6 +931,16 @@ if(PWB_BUILD_PLATFORM)
     include(cmake/PwbQgisSdk.cmake)
     add_subdirectory(libs/tool_policy)
     add_subdirectory(libs/qgis)
+
+# BEGIN PROMPT-7
+# QGIS-native Python runtime (qgispython / PyQGIS / console / plugins).
+# OFF by default: existing builds stay byte-identical until the vendored QGIS
+# closure actually carries src/python and python/ (see
+# docs/development/qgis-native-python-runtime/03-qgispython-bootstrap.md §7).
+if(PALEO_WITH_QGIS_PYTHON)
+    add_subdirectory(libs/qgis_python)
+endif()
+# END PROMPT-7
     add_subdirectory(libs/application)
     add_subdirectory(libs/ui)
     add_subdirectory(libs/platform_services)

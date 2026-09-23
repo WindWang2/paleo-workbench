@@ -2,6 +2,27 @@ cmake_minimum_required(VERSION 3.21)
 project(qgis_render_bridge LANGUAGES CXX)
 
 option(PALEO_WITH_QGIS_RENDERER "Build the optional vendored-QGIS renderer bridge" OFF)
+
+# BEGIN PROMPT-7
+# QGIS-native Python runtime. Both default OFF so an existing configuration is
+# bit-identical; enabling them requires the vendored closure to carry
+# third_party/qgis/src/python (qgispython) and third_party/qgis/python
+# (PyQGIS bindings + built-in plugins) respectively.
+# One gate, not two: upstream third_party/qgis/src/CMakeLists.txt adds
+# src/python (the qgispython support library) ONLY under `if (WITH_BINDINGS)`,
+# so qgispython and the PyQGIS bindings are delivered together. Splitting them
+# would require patching vendored build logic, which this branch deliberately
+# does not do. See
+# docs/development/qgis-native-python-runtime/03-qgispython-bootstrap.md §7.
+option(PALEO_WITH_QGIS_PYTHON "Build the vendored QGIS Python runtime (qgispython + PyQGIS bindings + console + built-in plugins)" OFF)
+if(PALEO_WITH_QGIS_PYTHON AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/qgis/src/python/qgspythonutils.h")
+    message(FATAL_ERROR "PALEO_WITH_QGIS_PYTHON requires third_party/qgis/src/python (run scripts/import_qgis_python_closure.sh)")
+endif()
+if(PALEO_WITH_QGIS_PYTHON AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/qgis/python/CMakeLists.txt")
+    message(FATAL_ERROR "PALEO_WITH_QGIS_PYTHON requires third_party/qgis/python (run scripts/import_qgis_python_closure.sh)")
+endif()
+# END PROMPT-7
+
 set(PALEO_QGIS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/qgis" CACHE PATH
     "Path to the fixed QGIS source snapshot")
 set(PALEO_QGIS_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/qgis_vendor" CACHE PATH
@@ -37,8 +58,11 @@ if(PALEO_WITH_QGIS_RENDERER)
         BINARY_DIR "${PALEO_QGIS_BUILD_DIR}"
         CMAKE_ARGS
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-            -DWITH_PYTHON=OFF
-            -DWITH_BINDINGS=OFF
+            # BEGIN PROMPT-7 — was hard-coded OFF; both flags follow the single
+            # gate because upstream builds src/python only under WITH_BINDINGS.
+            -DWITH_PYTHON=${PALEO_WITH_QGIS_PYTHON}
+            -DWITH_BINDINGS=${PALEO_WITH_QGIS_PYTHON}
+            # END PROMPT-7
             -DWITH_DESKTOP=OFF
             -DWITH_QGIS_PROCESS=OFF
             -DWITH_3D=OFF

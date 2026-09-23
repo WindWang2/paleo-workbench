@@ -24,6 +24,17 @@ Imported components:
   dependencies required by that build closure.
 - Upstream `scripts/`, used by QGIS Core to generate expression source during
   its build.
+- **Extension (Prompt 7):** `src/python/` (the `qgispython` support library —
+  `qgispython.cpp`, `qgspythonutils.h`, `qgspythonutilsimpl.{h,cpp}`) and
+  `python/` (PyQGIS binding sources, the Python console package, the
+  `processing` and `pyplugin_installer` plugins). Imported verbatim from the
+  same immutable tag by `scripts/import_qgis_python_closure.sh`, which refuses
+  to run unless the archive hash matches the value above. Class-D plugins
+  (`grassprovider`, `db_manager`, `MetaSearch`) and `python/PyQt6/server` are
+  excluded on purpose — see
+  `docs/development/qgis-native-python-runtime/07-plugin-runtime-design.md`.
+  Both Python targets stay disabled (`WITH_PYTHON=OFF`, `WITH_BINDINGS=OFF`)
+  unless `PALEO_WITH_QGIS_PYTHON` / `PALEO_WITH_QGIS_BINDINGS` are set.
 
 QGIS Desktop and desktop plugin *targets* are not built by paleo-workbench; their
 source is retained for the complete vector-editing implementation. QGIS server,
