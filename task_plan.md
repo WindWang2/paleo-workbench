@@ -1,108 +1,56 @@
-> **HISTORICAL / scratch** — agent scratch / historical task plan. Not product documentation authority; see [`docs/README.md`](docs/README.md).
+# Task Plan — Prompt 6: QGIS Native Plot / Scientific 2D Visualization Convergence
 
-# 当前任务入口 — C++ 全面转换收尾
+## Goal (Oracle)
 
-当前计划：[C++ task_plan](docs/development/cpp-conversion-planning/task_plan.md)；
-证据：[findings](docs/development/cpp-conversion-planning/findings.md)；
-进度：[progress](docs/development/cpp-conversion-planning/progress.md)。
-以下为已完成的 #1302 Python 工作台历史，其 subagent/C++ 构建约束仅适用于旧任务，
-不应用于当前 C++ 五线开发。
+产品内交互式二维 Plot 基础设施收敛到 `QgsPlotCanvas` / `QgsPlot` / `QgsPlotTool` / `QgsPlotRegistry`（QGIS 4.2 vendored SDK）。Paleo 只保留领域语义、数据绑定、计算、provenance。
 
----
+**Verifiable DoD（本 session 可达子集标记 ✓session）:**
+1. ✓ 交互式 2D plot 统一走 `QgsPlotCanvas`（新 infra + 至少 3 类代表页面迁移）
+2. ✓ ≥3 类代表页面迁移：统计/QC 图 + 交会/散点图 + 测井/曲线页
+3. ✓ 通用 plot toolbar/tool 走 QGIS PlotTool，不自研双轨
+4. map ↔ plot ↔ data selection 联动 seam 建立
+5. 自研 generic plot canvas/chart engine 数量显著下降（有替代矩阵数字）
+6. plot 数据绑定/domain id 回查/style/export 路径统一
+7. 架构 gate：新页面不得新增第二套 plot 基础设施（lint 脚本或文档 gate）
+8. 生命周期：开关项目/面板无 UAF（测试覆盖）
+9. 性能测试：大样本散点/多序列无 O(N²) 重绘路径
+10. build/test `-j <= 6`（常态 -j4）
+11. 两轮 review，P0/P1 = 0
+12. branch push + PR 创建（不 merge）
 
-# Task Plan — Paleo UI Workbench (feat/paleo-ui-workbench)
+## Baseline
 
-## Goal
-古地理编图专属 UI 交互工作台与多期次时空联动系统（M1-M5）：层序时间轴期次差分切换
-+ 洋葱皮、相带画刷调色板 + 吸色管、单因素约束 HUD + 连井剖面光标联动、交互式 QC
-修复向导、全键盘编图流 + FSM。Document-First → TDD（红绿循环，逐 Ticket 原子提交）
-→ Review（回环/泄漏/视觉回归）。
-
-Worktree: C:\Users\wangj.KEVIN\projects\paleo-workbench-paleo-ui
-Branch: feat/paleo-ui-workbench (off main e7214566)
-Docs: docs/development/paleo-ui-workbench/
-Loop exit: docs_generated && ui_tdd_all_green && memory_and_leak_free && visual_review_passed
-
-## Hard constraints
-- subagents ≤ 3 并发（已用 2 Explore，后续 Review ≤ 2）
-- QT_QPA_PLATFORM=offscreen；无交互弹窗
-- 纯 Python/PySide6，不重编 C++ 桥；`-m "not slow and not opengl"`
-- UI 线程零耗时空间运算（O(1) 网格采样/节流）；无 Signal Echo Loop（suppress-flag /
-  source-tag / changed-field 既有模式）
-
-## Environment recipe (verified)
-- 解释器：主仓 .venv（editable finder 在 sys.meta_path 尾部，worktree rootdir 的
-  pythonpath=["."] 前置生效 → 导入 worktree 代码，已验证）
-- `cd /c/Users/wangj.KEVIN/projects/paleo-workbench-paleo-ui && QT_QPA_PLATFORM=offscreen
-  /c/Users/wangj.KEVIN/projects/paleo-workbench/.venv/Scripts/python.exe -m pytest ...`
-- 冒烟：tests/test_facies_taxonomy.py 15 passed @ worktree
-- 无桥 → fallback canvas（测试用 `_force_fallback` monkeypatch 模式，见
-  tests/test_mapping_stage_ui.py L21）
+- origin/main SHA: `192422c60c4eb99ee78a6a410676293ca09053cc`
+- Worktree: `/home/kevin/projects/paleo-qgis-plot`
+- Branch: `feat/qgis-native-plot-scientific-visualization`
+- QGIS: vendored 4.2.0 source `third_party/qgis`; prebuilt SDK 复用自 main worktree `native/qgis_render_bridge/build/qgis-vendor/output`（只读）
+- Qt: system Qt6 (`/usr`), Ninja, Release
+- Build dir: `build/native-product`（本 worktree 独立）
+- deps prefix: `/home/kevin/projects/paleo_project/main/build/qgis-deps-prefix`
 
 ## Phases
-- [x] PHASE 0: worktree + branch + geo-viz-engine 子模块 + 冒烟
-- [ ] PHASE 1: 规划文件 + 文档 00-decisions / 01-interaction-specs /
-      02-state-machine-design / 03-tdd-ui-test-plan / 04-known-limitations
-- [ ] PHASE 2 / Ticket 1: ui/components/stratigraphic_timeline_slider.py +
-      workflow/stratigraphic_epochs.py + mapping_workspace/epoch_switching.py +
-      composite_document/layer_groups 接线；tests/ui/test_stratigraphic_timeline.py
-- [ ] PHASE 3 / Ticket 2: ui/components/facies_palette_widget.py +
-      facies_eyedropper.py + facies_selector.py 画刷上下文；tests/ui/test_facies_palette.py
-- [ ] PHASE 4 / Ticket 3: ui/components/constraint_factor_hud.py +
-      连井光标桥（view_coordination 扩展）；tests/ui/test_constraint_hud.py
-- [ ] PHASE 5 / Ticket 4: ui/components/interactive_qc_hub.py +
-      mapping/qc_quickfix.py + cartographic_qa.py 接线；tests/ui/test_interactive_qc_hub.py
-- [ ] PHASE 6 / Ticket 5: workstation/keybinding_manager.py + mode_state.py(FSM) +
-      shortcuts.py + shell.py 组装 + 提示条；tests/ui/test_keybinding_flow.py
-- [x] PHASE 7: 双轴审查（Standards 双 gate PASS / Spec B1-B4+F 项修复）+
-      echo/泄漏审计测试 + 视觉回归（D13-rev2 政策）+ 像素级洋葱皮证据 +
-      04-visual-qa-verification.md + 全量套件复跑 + PR
 
-## Key architecture anchors (from Explore reports)
-- Shell = WorkstationFrame (ui/workstation/shell.py L96)；dock 注册 dock_framework.py
-  WORKSTATION_DOCKS + shell._PANEL_TOGGLE_TABLE/_shell_docks()
-- CompositeDocument：canvas=QgisCanvasShim|UnifiedMapCanvas；signals map_position_changed/
-  native_identified；set_layer_snapshot(snapshot, changed_hints) 增量镜像；
-  set_extent(extent, record_history, coalesce_history)；无动画 pan
-- 期次锚点：stratigraphy.target_horizon（workflow/stratigraphy.py：set_target_from_boundary/
-  active_target_horizon/horizons_from_data/ensure_horizon_catalog）；PaleoMapDocument.
-  linked_target_horizon；现无按 horizon 换层逻辑（GAP=本任务补齐）
-- 相：resources/facies_taxonomy.json（8相/24亚相/66微相）；属性 facies/sub_facies/
-  micro_facies/level；现无"当前相带"状态（每次捕获弹模态框）；颜色=stage_actions.
-  _categorized_facies_style；花纹=mapping/facies_patterns.py
-- 拾取：composite_editing.identify_all(point, base_layers) L2802（双画布可用）；
-  FeatureQueryIndex.query 顶层优先
-- 撤销：无 QUndoStack；VectorEditSession.begin/end_edit_command（fallback）+
-  NativeEditSessionController gesture（native）
-- 快捷键：shortcuts.register_shortcut（ApplicationShortcut + 同 id 重注册替换）；
-  已占用 Ctrl+S/N/O/F、1-5(hub)、Alt+1/2/3、Ctrl+K、Ctrl+Alt+D、F5、F1、Delete、
-  Ctrl+Z、Ctrl+Shift+Z、Esc(map)
-- QC：TopologyCheckerPanel(zoom/highlight/fix 信号已有)；cartographic_qa.py 纯检测
-  无 UI 无修复；issue dict=make_issue(workflow/qc.py L27)
-- 跨视图：ViewCoordinationController.set_link_cursor_sink((well,md)→engine crosshair)
-  已有；连井 CrossWellHost 未接入 SelectionContext（本任务接线）
-- 泄漏审计：conftest cleanup_qt_deferred_deletes L153 autouse（reap 匿名 parentless）
-- 视觉：visual_qa_v11.py v11_shot_table 模式；像素 diff 非 gate（V5 D8），本任务按
-  prompt 做带阈值 diff 并记录数值
+| Phase | 内容 | 状态 |
+|-------|------|------|
+| 0 | 审计 + 11 份文档 (`docs/development/qgis-native-plot-convergence/`) | done |
+| 1 | `libs/qgis_plot` infra: `PwbPlotCanvas`(QgsPlotCanvas 子类) + plot item + tool 装配 | done |
+| 2 | Wave A 迁移：XyScatterHost(散点) + ComparisonView(QC) + TimeDepth/WellLog(曲线) | done |
+| 3 | 统一 plot toolbar/actions（QGIS tool + QAction 绑定） | done (PwbPlotPanel) |
+| 4 | domain binding 约定（series_id → domain_object_id 回查） | done (SeriesBinding) |
+| 5 | map ↔ plot selection seam（不抢 Prompt 2 的 map truth） | deferred → Wave B（无现役 map↔plot 消费点） |
+| 7 | 退役被替代的 generic plot widget（wave A 范围） | done (plot_widget/cross_plot_widget/qt series.hpp) |
+| 8 | 测试：unit + integration + interaction + scale | done (smoke 30/30)；pa_flow/preview 回归进行中 |
+| - | review 2 轮 + 修复 + PR | R1 内置自查+R2 双轴 subagent 完成、修复完；全量构建+回归进行中 |
 
-## Errors Encountered
-| Error | Attempt | Resolution |
-|-------|---------|------------|
-| (none yet) | | |
+## 边界（与其他 5 条 worktree）
 
-## Decisions
-1. 复用主仓 .venv（已验证 import 解析到 worktree）——不为 worktree 另建 venv
-2. 时间轴期次 = 项目 horizon 目录（权威）+ 内置地质年代方案（寒武系…第四系）标签
-   合并；排序 age 优先（见 00-decisions D3）
-3. 期次差分切换 = 纯计划器（epoch_switching.py）算 show/hide/onion 集合 → 增量可见
-   性/透明度应用（零画布重建）
-4. 相带数字键 1-9 与 hub 导航 1-5 冲突 → 画布域 WidgetWithChildrenShortcut + 工具
-   激活期动态注册；Ticket 2 先以测试实证 Qt 跨上下文优先级再定稿（00-decisions D6）
+- 拥有：`QgsPlotCanvas` 派生、scientific 2D plots、plot tools、map↔plot 联动 seam
+- 不碰：main_window 装配（Prompt 1）、QgsMapCanvas/layer tree（Prompt 2）、project/data core（Prompt 3）、Processing/Task core（Prompt 4）、QgsLayout core（Prompt 5）
+- 跨边界只允许具名 seam，PR 中标注
 
-## Final result (2026-09-14)
-- 11 atomic commits (3fe8496a..1adc274d), 46 files +6283/-191
-- PR #1302 https://github.com/WindWang2/paleo-workbench/pull/1302
-- Loop exit: docs_generated ✅ / ui_tdd_all_green ✅ (98/98 + regressions) /
-  memory_and_leak_free ✅ (Standards gate) / visual_review_passed ✅
-- Full suite: 8361 passed / 81 failed (attributed: pre-existing environmental +
-  no-active-window flakes) — see 04-visual-qa-verification.md §4
+## 风险 / 待决
+
+- `QgsPlotCanvas` 是框架基类（虚函数默认空实现），需 `PwbPlotCanvas` 子类实现 plot-space↔canvas 映射 —— 官方模式（QgsElevationProfileCanvas）
+- QgsPlot 体系无 histogram/scatter/legend 专用 item —— 需 Paleo-specific thin adapter（允许）
+- well-log-engine 子模块边界待审计（subagent 进行中）
+- main worktree 有 ~94 个未提交改动（另一 session 在飞），可能与本方向文件重叠 —— 记录于 overlap ledger

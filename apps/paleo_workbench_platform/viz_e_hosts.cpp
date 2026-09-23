@@ -2,14 +2,14 @@
 // See viz_e_hosts.hpp for the frozen-source map (geoviz/previews/dat.py
 // @0885195, gitlink 08851951f3bbc0beb90886adf52e1928f4383c16).
 //
-// Export contract shared by both hosts: the viz_charts widget export call
-// (which raises on failure, mirroring the Python writers) is wrapped, and
-// success additionally requires the target file to exist with a non-zero
-// size (QFile::exists + QFileInfo::size > 0).
+// Export contract shared by both hosts: the canvas export call returns
+// bool; success additionally requires the target file to exist with a
+// non-zero size (QFile::exists + QFileInfo::size > 0).
 
 #include "viz_e_hosts.hpp"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -19,9 +19,17 @@
 #include <QVBoxLayout>
 
 #include <pwb/viz_charts/qt/colorbar_widget.hpp>
-#include <pwb/viz_charts/qt/plot_widget.hpp>
-#include <pwb/viz_charts/qt/series.hpp>
 #include <pwb/viz_charts/qt/surface_widget.hpp>
+
+#include <pwb/qgis_plot/domain_plots.hpp>
+#include <pwb/qgis_plot/plot_canvas.hpp>
+#include <pwb/qgis_plot/plot_item.hpp>
+#include <pwb/qgis_plot/plot_tools.hpp>
+#include <pwb/qgis_plot/series_binding.hpp>
+
+#include <qgsplot.h>
+#include <qgsplottoolpan.h>
+#include <qgsplottoolzoom.h>
 
 #include <algorithm>
 #include <functional>
@@ -84,18 +92,56 @@ XyScatterHost::XyScatterHost(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     toolbar_ = make_export_toolbar(
         this, this, [this](bool svg) { run_toolbar_export(svg); },
-        [this] { plot_->reset_view(); });
+        [this] { canvas_->zoomFull(); });
+
+    // Plot tools are stock QGIS: one state machine, owned by the canvas.
+    tool_group_ = new QActionGroup(this);
+    tool_group_->setExclusive(true);
+    auto* pan_action =
+        toolbar_->addAction(QStringLiteral("平移"));
+    pan_action->setCheckable(true);
+    pan_action->setChecked(true);
+    pan_action->setActionGroup(tool_group_);
+    auto* zoom_action = toolbar_->addAction(QStringLiteral("框选缩放"));
+    zoom_action->setCheckable(true);
+    zoom_action->setActionGroup(tool_group_);
+    auto* identify_action = toolbar_->addAction(QStringLiteral("选点"));
+    identify_action->setCheckable(true);
+    identify_action->setActionGroup(tool_group_);
+
     title_label_ = new QLabel(this);
     title_label_->setWordWrap(true);
-    plot_ = new pwb::viz_charts::qt::PlotWidget(this);
+    canvas_ = new pwb::qgis_plot::PwbPlotCanvas(this);
+    canvas_->setEqualAspect(true);  // location map convention
+    auto scatter = std::make_unique<pwb::qgis_plot::PwbScatterPlot>();
+    scatter_ = scatter.get();
+    canvas_->addPlot(std::move(scatter));
     message_label_ = new QLabel(this);
     message_label_->setWordWrap(true);
     message_label_->setAlignment(Qt::AlignCenter);
     message_label_->hide();
     layout->addWidget(toolbar_);
     layout->addWidget(title_label_);
-    layout->addWidget(plot_, 1);
+    layout->addWidget(canvas_, 1);
     layout->addWidget(message_label_, 1);
+
+    QObject::connect(pan_action, &QAction::triggered, this, [this] {
+        if (!pan_tool_)
+            pan_tool_ = new QgsPlotToolPan(canvas_);
+        canvas_->setTool(pan_tool_);
+    });
+    QObject::connect(zoom_action, &QAction::triggered, this, [this] {
+        if (!zoom_tool_)
+            zoom_tool_ = new QgsPlotToolZoom(canvas_);
+        canvas_->setTool(zoom_tool_);
+    });
+    QObject::connect(identify_action, &QAction::triggered, this, [this] {
+        if (!identify_tool_)
+            identify_tool_ =
+                new pwb::qgis_plot::PwbPlotToolIdentify(canvas_);
+        canvas_->setTool(identify_tool_);
+    });
+    pan_action->trigger();
 }
 
 void XyScatterHost::show_well_head(const WellHeadPreview& data,
@@ -103,39 +149,51 @@ void XyScatterHost::show_well_head(const WellHeadPreview& data,
     message_label_->hide();
     toolbar_->show();
     title_label_->show();
-    plot_->show();
+    canvas_->show();
 
     // dat.py:1039-1045 — clear, axis labels with the declared unit suffix.
-    plot_->clear();
     const QString unit_suffix =
         data.coordinate_units.empty()
             ? QString()
             : QStringLiteral(" (%1)").arg(
                   QString::fromStdString(data.coordinate_units));
-    plot_->set_axis_labels(QStringLiteral("X%1").arg(unit_suffix),
-                           QStringLiteral("Y%1").arg(unit_suffix));
 
-    // dat.py:1046 — add_series(ScatterSeries(x, y, name=title)); the
-    // default scatter style (circle, 6.0, default blue) comes from the
-    // viz_charts ScatterSeriesData defaults. Well-name labels are the
-    // workbench addition.
-    std::vector<double> x;
-    std::vector<double> y;
-    x.reserve(data.records.size());
-    y.reserve(data.records.size());
-    auto series = std::make_unique<pwb::viz_charts::qt::ScatterSeriesData>();
-    series->name = title;
-    series->labels.reserve(data.records.size());
+    // dat.py:1046 — one scatter series named by the preview title; well-name
+    // labels stay (workbench addition), now drawn by PwbScatterPlot.
+    QgsPlotData plot_data;
+    auto* series = new QgsXyPlotSeries();
+    series->setName(title);
+    QList<std::pair<double, double>> points;
+    QStringList labels;
+    QVector<QString> point_ids;
+    points.reserve(static_cast<qsizetype>(data.records.size()));
+    labels.reserve(static_cast<qsizetype>(data.records.size()));
     for (const WellHeadRecord& record : data.records) {
-        x.push_back(record.x);
-        y.push_back(record.y);
-        series->labels.push_back(QString::fromStdString(record.name));
+        points.append({record.x, record.y});
+        labels.append(QString::fromStdString(record.name));
+        point_ids.append(QString::fromStdString(record.name));
     }
-    series->x = std::move(x);
-    series->y = std::move(y);
-    plot_->add_series(std::move(series));
-    plot_->set_equal_aspect(true);  // workbench addition (location map)
-    plot_->autofit();
+    series->setData(points);
+    plot_data.addSeries(series);
+
+    auto* item = canvas_->plotItems().value(0);
+    item->setPlotData(std::move(plot_data));
+    item->setAxisTitles(QStringLiteral("X%1").arg(unit_suffix),
+                        QStringLiteral("Y%1").arg(unit_suffix));
+    scatter_->setSeriesColors({QColor(64, 156, 255)});
+    scatter_->setMarkerSizePx(6.0);
+    scatter_->setPointLabels(0, labels);
+
+    pwb::qgis_plot::SeriesBinding binding;
+    binding.series_id = QStringLiteral("xy_scatter");
+    binding.name = title;
+    binding.axis_role = QStringLiteral("xy");
+    binding.style_role = QStringLiteral("scatter");
+    binding.unit = QString::fromStdString(data.coordinate_units);
+    binding.point_domain_ids = point_ids;
+    canvas_->setSeriesBindings(0, {binding});
+
+    canvas_->zoomFull();
 
     // Provenance summary: dat.py:979-995 warning vocabulary plus the
     // dat.py:1000-1003 summary rows.
@@ -162,20 +220,20 @@ void XyScatterHost::show_well_head(const WellHeadPreview& data,
 void XyScatterHost::show_unavailable(const QString& reason) {
     toolbar_->hide();
     title_label_->hide();
-    plot_->hide();
+    canvas_->hide();
     message_label_->setText(reason);
     message_label_->show();
 }
 
-pwb::viz_charts::qt::PlotWidget* XyScatterHost::plot() const { return plot_; }
+pwb::qgis_plot::PwbPlotCanvas* XyScatterHost::canvas() const {
+    return canvas_;
+}
 
 bool XyScatterHost::export_svg_to(const QString& path) {
     if (path.isEmpty()) {
         return false;
     }
-    try {
-        plot_->export_svg(path, export_canvas_of(plot_));
-    } catch (...) {
+    if (!canvas_->exportTo(path, export_canvas_of(canvas_))) {
         return false;
     }
     return export_file_written(path);
@@ -185,9 +243,7 @@ bool XyScatterHost::export_pdf_to(const QString& path) {
     if (path.isEmpty()) {
         return false;
     }
-    try {
-        plot_->export_pdf(path, export_canvas_of(plot_));
-    } catch (...) {
+    if (!canvas_->exportTo(path, export_canvas_of(canvas_))) {
         return false;
     }
     return export_file_written(path);

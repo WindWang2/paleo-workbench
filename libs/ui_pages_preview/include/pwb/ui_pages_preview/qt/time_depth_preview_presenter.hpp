@@ -14,6 +14,13 @@
 
 #include <QWidget>
 
+class QLabel;
+
+namespace pwb::qgis_plot {
+class PwbPlotCanvas;
+class PwbScatterPlot;
+}  // namespace pwb::qgis_plot
+
 namespace pwb::ui_pages_preview::qt {
 
 struct TimeDepthPreviewData {
@@ -37,12 +44,18 @@ public:
     [[nodiscard]] const TimeDepthPreviewData& data() const { return data_; }
     [[nodiscard]] QString summary_line() const;
 
-protected:
-    void paintEvent(QPaintEvent* event) override;
+    // QGIS Plot canvas hosting the chart (testing/integration seam).
+    pwb::qgis_plot::PwbPlotCanvas* canvas() const { return canvas_; }
 
 private:
+    void rebuild();
+
     TimeDepthPreviewData data_;
     std::function<double(double)> probe_;
+    pwb::qgis_plot::PwbPlotCanvas* canvas_ = nullptr;
+    pwb::qgis_plot::PwbScatterPlot* plot_ = nullptr;  // owned by the item
+    class QLabel* summary_label_ = nullptr;
+    class QLabel* message_label_ = nullptr;
 };
 
 }  // namespace pwb::ui_pages_preview::qt

@@ -20,6 +20,12 @@
 
 #include <QWidget>
 
+class QLabel;
+
+namespace pwb::qgis_plot {
+class PwbPlotCanvas;
+}  // namespace pwb::qgis_plot
+
 namespace pwb::ui_pages_preview::qt {
 
 struct WellLogPreviewCurve {
@@ -54,11 +60,16 @@ public:
     // 单行摘要（井名/曲线数/采样/深度区间/单位/来源）——测试断言面。
     [[nodiscard]] QString summary_line() const;
 
-protected:
-    void paintEvent(QPaintEvent* event) override;
+    // QGIS Plot canvas hosting the per-curve columns (testing seam).
+    pwb::qgis_plot::PwbPlotCanvas* canvas() const { return canvas_; }
 
 private:
+    void rebuild();
+
     WellLogPreviewData data_;
+    pwb::qgis_plot::PwbPlotCanvas* canvas_ = nullptr;
+    class QLabel* summary_label_ = nullptr;
+    class QLabel* message_label_ = nullptr;
 };
 
 }  // namespace pwb::ui_pages_preview::qt

@@ -20,8 +20,9 @@
 //     skipped-row counts) plus the summary rows ("有效井数", "源记录",
 //     dat.py:1000-1003).
 //   * The QToolBar export chrome (导出 SVG / 导出 PDF / 重置视图) is
-//     workbench-side; the underlying exports are the viz_charts 1:1
-//     PlotWidget/SurfaceWidget ports.
+//     workbench-side; xy_scatter exports go through PwbPlotCanvas::exportTo
+//     (QGIS Plot), surface exports through the retained domain
+//     SurfaceWidget port.
 
 #include <QString>
 #include <QWidget>
@@ -34,13 +35,25 @@ class QToolBar;
 
 namespace pwb::viz_charts::qt {
 class ColorbarWidget;
-class PlotWidget;
 class SurfaceWidget;
 }  // namespace pwb::viz_charts::qt
 
+namespace pwb::qgis_plot {
+class PwbPlotCanvas;
+class PwbScatterPlot;
+class PwbPlotToolIdentify;
+}  // namespace pwb::qgis_plot
+
+class QActionGroup;
+class QgsPlotToolPan;
+class QgsPlotToolZoom;
+
 namespace pwb::viz_e {
 
-// 井位 xy_scatter 宿主：PlotWidget + 工具栏（导出 SVG / 导出 PDF / 重置视图）。
+// 井位 xy_scatter 宿主：QGIS Plot 画布 + 工具栏
+// （pan/zoom/identify 经 QGIS plot tools，导出 SVG / 导出 PDF / 重置视图）。
+// The generic viz_charts PlotWidget is retired here; interaction state lives
+// in QgsPlotTool instances on the canvas, not in a second state machine.
 class XyScatterHost : public QWidget {
     Q_OBJECT
 public:
@@ -54,7 +67,7 @@ public:
     // 诚实降级：消息标签占满整个宿主区域。
     void show_unavailable(const QString& reason);
 
-    pwb::viz_charts::qt::PlotWidget* plot() const;
+    pwb::qgis_plot::PwbPlotCanvas* canvas() const;
 
     // 测试直连导出（不经对话框）；成功写入文件返回 true。不 emit
     // export_requested（该信号只属于用户工具栏导出）。
@@ -71,7 +84,12 @@ private:
     QLabel* title_label_ = nullptr;
     QLabel* message_label_ = nullptr;
     QToolBar* toolbar_ = nullptr;
-    pwb::viz_charts::qt::PlotWidget* plot_ = nullptr;
+    QActionGroup* tool_group_ = nullptr;
+    pwb::qgis_plot::PwbPlotCanvas* canvas_ = nullptr;
+    pwb::qgis_plot::PwbScatterPlot* scatter_ = nullptr;  // owned by the item
+    QgsPlotToolPan* pan_tool_ = nullptr;
+    QgsPlotToolZoom* zoom_tool_ = nullptr;
+    pwb::qgis_plot::PwbPlotToolIdentify* identify_tool_ = nullptr;
 };
 
 // 层面 surface 宿主（与 XyScatterHost 同构）：SurfaceWidget + 工具栏 +
