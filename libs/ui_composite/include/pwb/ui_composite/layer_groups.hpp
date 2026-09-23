@@ -97,6 +97,13 @@ std::string home_group_for_role(const std::string& role_value,
                                     std::nullopt,
                                 const std::string& factor_task_id = "");
 
+// 便捷封装（moved from the retired layer_tree_plan）：membership 的
+// created_stage 字符串解析后走 home_group_for_role。空 stage = 无
+// 阶段路由。
+std::string effective_home_group(const std::string& role,
+                                 const std::string& created_stage,
+                                 const std::string& factor_task_id = "");
+
 // 角色的阶段 membership（= 其 home 组的阶段集合；共享组=全阶段）。
 // membership ≠ visibility。未知角色 → 全阶段。
 std::set<MappingStage> stages_for_role(const std::string& role_value);

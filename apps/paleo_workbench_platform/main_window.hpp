@@ -44,7 +44,7 @@
 // reconcile + stage switches + save-time user-edit adoption; real-time
 // tree-model signal write-back is the Prompt-2 integration point
 // (08-known-limitations §2).
-#include <pwb/qgis/layer_tree_stack.hpp>
+#include <pwb/qgis/layer_tree_composer.hpp>
 #include <pwb/ui_composite/layer_group_controller.hpp>
 #include <pwb/ui_composite/layer_presentation.hpp>
 #include <pwb/ui_composite/layer_stage_controller.hpp>
@@ -620,21 +620,30 @@ public:
     void syncLayerControlOnSave();
 
 private:
-    // Build/attach the control plane over the freshly opened project's
-    // live workspace state + session map, reconcile the desired tree and
-    // restore the stage view (openProject success path).
+    // Build the QGIS-native layer control plane over the freshly opened
+    // project's live workspace state + session map (sidecar restore /
+    // legacy migration / template routing) and restore the stage view
+    // (openProject success path).
     void applyLayerControlForOpen();
-    pwb::qgis::QgsLayerTreeStack* layerTreeStackForTest() {
-        return layer_tree_stack_.get();
+    // Drop the layer control plane (recorder connection first, then the
+    // tree executors, then the referenced workspace state). Called on
+    // reopen and project close; idempotent.
+    void resetLayerControlPlane();
+    pwb::qgis::LayerTreeComposer* layerTreeComposerForTest() {
+        return layer_composer_.get();
     }
+    // QGIS-native tree sidecar path for the open project (empty when no
+    // project is open): <artifacts>/layer-tree.xml, written by
+    // syncLayerControlOnSave through QgsLayerTree::writeXml.
+    std::filesystem::path layerTreeSidecarPath() const;
+    // Native-tree checkbox echo -> per-stage overlay recorder
+    // (disconnected/rebound per project open).
+    QMetaObject::Connection group_visibility_connection_;
     std::unique_ptr<pwb::workspace::MappingWorkspaceState> layer_workspace_;
-    std::unique_ptr<pwb::qgis::QgsLayerTreeStack> layer_tree_stack_;
+    std::unique_ptr<pwb::qgis::LayerTreeComposer> layer_composer_;
     std::unique_ptr<pwb::ui_composite::LayerGroupController> layer_groups_;
     std::unique_ptr<pwb::ui_composite::LayerStageController> layer_stage_;
     std::unique_ptr<pwb::ui_composite::LayerTargets> layer_targets_;
-    // Last composition snapshots (drives the save-time re-reconcile that
-    // persists adopted user tree edits).
-    std::vector<pwb::ui_composite::LayerSnapshotInput> layer_snapshots_;
 #endif
     // END V14-QGIS-CONTROL
     std::function<int()> dirty_close_responder_;
