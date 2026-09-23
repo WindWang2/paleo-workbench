@@ -29,6 +29,7 @@
 
 #include <pwb/domain/json.hpp>
 
+class QgsPrintLayout;
 class QMainWindow;
 
 namespace pwb::app {
@@ -62,19 +63,13 @@ struct Install {
     std::function<std::shared_ptr<pwb::application::PwbDataStore>()>
         store_getter;
 
-    // BEGIN V14-COMPILATION-PUBLISH
-    // Optional native QGIS layout executor for composition export: the
-    // platform binds its CompositionLayoutService (session-backed; the
-    // extent / CRS / mirror-layer description is resolved on the platform
-    // side). When absent — or when it refuses (hybrid elements, no
-    // session, …) — the export falls back to the native composer engine
-    // (SVG + Qt PNG/PDF replay) and the report's engine label says which
-    // path produced the file. Never a silent no-op, never a fake file.
-    std::function<pwb::domain::Json(const std::string& composition_json,
-                                    const std::string& path,
-                                    const std::string& format, double dpi)>
-        layout_export;
-    // END V14-COMPILATION-PUBLISH
+    // BEGIN qgis-native-layout-convergence
+    // Opens the governed layout export dialog (the SAME map_export action
+    // path). Bound by the host window; the native layout editor's export
+    // button rides it — one export authority, one provenance ledger.
+    std::function<void(QgsPrintLayout*)> export_layout_dialog;
+    // END qgis-native-layout-convergence
+
 };
 
 // Installs the mapping-page adopt set + preparation page. Safe to call
@@ -109,41 +104,5 @@ std::shared_ptr<pwb::workflow_runtime::CatalogRepository> factor_catalog(
     QMainWindow* window);
 #endif
 
-// BEGIN V14-COMPILATION-PUBLISH — composition export control surface.
-//
-// The panel's export seam stays synchronous (Python composition_panel
-// `_export` parity: export_composition_reported runs inline and returns a
-// report). Cooperative cancellation + coarse progress ride a per-window
-// token the running export polls at stage boundaries — the same
-// map_export_worker discipline (CancellationToken checkpoints; a
-// cancelled export removes the partial file and reports ok=false, never
-// a success claim).
-//
-// cancel_composition_export: idempotent, no-op when idle; also invoked
-// by notify_project_changed so a project switch cannot let an in-flight
-// export write against the old project.
-void cancel_composition_export(QMainWindow* window);
-
-// Installs a coarse progress sink (0..100 at stage boundaries) for the
-// window's composition exports; an empty function clears it. The sink is
-// invoked on whichever thread the export runs — GUI-thread for the
-// panel's synchronous seam, the worker lane for export_composition_async.
-void set_composition_export_progress(QMainWindow* window,
-                                     std::function<void(int)> progress);
-
-// Worker-capable entry (one export at a time per window — the honest
-// refusal is false when a run is in flight). `composition_json` is the
-// dumped Composition document (transport-stable across the thread hop);
-// GUI-affine canvas seams marshal onto the GUI thread internally.
-// `progress` and `finished` fire on the GUI thread via queued delivery;
-// `finished` receives a report object {ok, engine, path, message,
-// warnings, cancelled} — ok=false with `failure`/`message` on refusals,
-// never a fabricated success.
-bool export_composition_async(
-    QMainWindow* window, const std::string& composition_json,
-    const std::string& path, const std::string& format, double dpi,
-    std::function<void(int)> progress,
-    std::function<void(pwb::domain::Json report)> finished);
-// END V14-COMPILATION-PUBLISH
 
 }  // namespace pwb::app::closure_mapping

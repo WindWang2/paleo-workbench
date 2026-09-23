@@ -8,13 +8,31 @@ add_library(pwb_qgis STATIC
     src/layer_adapter.cpp
     src/map_session.cpp
     src/edit_controller.cpp
-    src/layout_service.cpp
+    # BEGIN qgis-native-layout-convergence
+    # QgsLayoutManager-backed persistent layout authority: slots, the single
+    # PWB custom item, the shared element→native-item materializer, the
+    # authority (templates + migration + persistence) and the unified
+    # QgsLayoutExporter service.
+    src/layout_slots.cpp
+    src/layout_slot_item.cpp
+    src/layout_materializer.cpp
+    src/layout_authority.cpp
+    src/layout_export_service.cpp
+    src/layout_editor_panel.cpp
+    # Q_OBJECT headers must be listed for AUTOMOC (it does not scan the
+    # separate include/ tree on its own).
+    include/pwb/qgis/layout_slot_item.hpp
+    include/pwb/qgis/layout_editor_panel.hpp
+    # END qgis-native-layout-convergence
     # V14-QGIS-CONTROL: the ILayerTreeStack applier over this session's
     # QgsLayerTree (group upsert / keep-set sweep / indexed batch
     # placements / transaction window).
     src/layer_tree_stack.cpp
 )
 add_library(Pwb::Qgis ALIAS pwb_qgis)
+# qgis-native-layout-convergence: Q_OBJECT classes (PwbLayoutSlotItem,
+# LayoutEditorPanel) need moc.
+set_target_properties(pwb_qgis PROPERTIES AUTOMOC ON)
 target_include_directories(pwb_qgis PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pwb_qgis PUBLIC cxx_std_20)
@@ -30,21 +48,15 @@ target_link_libraries(pwb_qgis PUBLIC Pwb::UiComposite)
 if(TARGET Pwb::Domain)
     target_link_libraries(pwb_qgis PUBLIC Pwb::Domain)
 endif()
+# BEGIN qgis-native-layout-convergence
+# The layout authority consumes the mapping_document kernel in its
+# retained roles: geological template definitions (single declarative
+# semantics source) + legacy Composition reader (migration input only —
+# the composer renderer/exporter stay out of the product path).
+if(TARGET Pwb::MappingDocument)
+    target_link_libraries(pwb_qgis PUBLIC Pwb::MappingDocument)
+endif()
+# END qgis-native-layout-convergence
 # Vendored prefix path baked at build time (SDK admission owns the value).
 target_compile_definitions(pwb_qgis PRIVATE
     PALEO_QGIS_PREFIX_PATH="${PALEO_QGIS_SDK_DIR}")
-
-# BEGIN CONV-29
-# Composition/Layout/Export C++ wiring: the composition export service and
-# the shared wire-spec executor (single authority with the pybind bridge —
-# the TU is compiled into both targets). Off by default; Pwb::LayoutExport
-# becomes PUBLIC so consumers (app, platform tests) get the kernel too.
-if(PWB_BUILD_CONV_29)
-    target_sources(pwb_qgis PRIVATE
-        src/composition_layout_service.cpp
-        ${CMAKE_SOURCE_DIR}/native/qgis_render_bridge/src/layout_spec_exec.cpp)
-    target_include_directories(pwb_qgis SYSTEM PRIVATE
-        ${CMAKE_SOURCE_DIR}/native/qgis_render_bridge/src)
-    target_link_libraries(pwb_qgis PUBLIC Pwb::LayoutExport)
-endif()
-# END CONV-29

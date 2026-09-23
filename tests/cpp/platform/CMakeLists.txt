@@ -151,11 +151,9 @@ if(TARGET Pwb::Data AND TARGET Pwb::UiPagesDataQt AND PWB_V14_WELLSEIS)
         TIMEOUT 300)
 endif()
 # END PWB-V14-DATA-LINEAGE
-# BEGIN CONV-29
-if(PWB_BUILD_CONV_29)
-    pwb_add_platform_test(composition_export test_composition_export.cpp)
-endif()
-# END CONV-29
+# BEGIN qgis-native-layout-convergence
+pwb_add_platform_test(layout_convergence test_layout_convergence.cpp)
+# END qgis-native-layout-convergence
 pwb_add_platform_test(adapters_substitutes test_adapters.cpp)
 
 # Composition-root unit battery (native-product closure): service audit +

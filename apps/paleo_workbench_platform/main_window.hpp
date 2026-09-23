@@ -471,6 +471,24 @@ private:
     void openVolumeDialog();
 #endif
     void exportLayoutDialog();
+
+// BEGIN qgis-native-layout-convergence
+public:
+    // Persist every QgsPrintLayout into the project document's "layouts"
+    // section (save hook — one write flow with the ProjectManager path).
+    void syncLayoutsOnSave();
+    // Clear layout dirty flags — called by the save flow ONLY after
+    // commit_save succeeded (failed saves keep layouts dirty).
+    void markLayoutsSaved();
+    // Rebuild layouts from the freshly opened project document (drop the
+    // previous project's layouts first).
+    void restoreLayoutsFromDocument();
+    // The export dialog body; `preferred` is the caller's active layout
+    // (editor export button) or null (governed action → first layout).
+    void export_layout_dialog(QgsPrintLayout* preferred);
+
+private:
+    // END qgis-native-layout-convergence
     void armPan();
     void armZoomIn();
     void armZoomOut();

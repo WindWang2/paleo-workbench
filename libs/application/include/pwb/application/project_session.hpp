@@ -12,6 +12,7 @@
 #include <string>
 
 #include <pwb/qgis/edit_controller.hpp>
+#include <pwb/qgis/layout_authority.hpp>
 #include <pwb/qgis/map_session.hpp>
 #include <pwb/tool_policy/tool_context.hpp>
 
@@ -53,6 +54,13 @@ public:
 
     pwb::qgis::MapSession& map() { return *map_; }
     pwb::qgis::EditController& edit() { return *edit_; }
+
+    // BEGIN qgis-native-layout-convergence
+    // Persistent layout authority over the same session QgsProject
+    // (QgsLayoutManager-backed). Lives with the session so every consumer
+    // (editor panel, export dialog, save/open hooks) shares one instance.
+    pwb::qgis::LayoutAuthority& layout() { return *layout_; }
+    // END qgis-native-layout-convergence
 
     void attachCanvas(QgsMapCanvas* canvas);
     QgsMapCanvas* canvas() const { return canvas_; }
@@ -124,6 +132,7 @@ private:
     std::string frozen_base_version(const std::string& layer_id) const;
 
     std::unique_ptr<pwb::qgis::MapSession> map_;
+    std::unique_ptr<pwb::qgis::LayoutAuthority> layout_;
     std::unique_ptr<pwb::qgis::EditController> edit_;
     std::shared_ptr<IProjectStore> store_;
     QgsMapCanvas* canvas_ = nullptr;

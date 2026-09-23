@@ -129,6 +129,12 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
     // per-layer honest: an empty layer never wipes synced geometry.
     window.syncConstraintGeometryOnSave();
 #endif
+    // BEGIN qgis-native-layout-convergence
+    // Layouts ride the SAME project save (no composition-save + project-
+    // save double write): the authority serializes its QgsPrintLayouts
+    // into the document's "layouts" section right before prepare_save.
+    window.syncLayoutsOnSave();
+    // END qgis-native-layout-convergence
     pwb::project::ProjectManager manager(store->project_file());
     auto prepared = manager.prepare_save(store->document());
     if (!prepared.is_ok()) {
@@ -140,6 +146,9 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
     }
     manager.commit_save(store->document(), prepared.value(),
                         executed.value());
+    // Layouts became clean only now — the write actually committed
+    // (unconditional: syncLayoutsOnSave above is unconditional too).
+    window.markLayoutsSaved();
     if (saved_to != nullptr) {
         *saved_to = QString::fromStdString(store->project_file().string());
     }
