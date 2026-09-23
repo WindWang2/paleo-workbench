@@ -1,5 +1,15 @@
 #include <pwb/application/map_pipeline_runner.hpp>
 
+// CONV-QGIS-PROCESSING phase 4 note: this runner is the product-internal
+// composition of the paleo Processing sequence paleo:extract_factors ->
+// paleo:interpolation_idw/_kriging -> paleo:grid_contours (+
+// classification/polygonization) — the SAME pwb::mapping kernels those
+// algorithms wrap (mapping.cpp/interpolation.cpp in libs/qgis_processing).
+// It stays a direct composition because its inputs are in-memory JSON
+// records and its outputs GeoJSON features (no feature-source/raster
+// staging); the self-check (checkMappingKernel) verifies the equivalent
+// paleo ids are registered so the chain is never private to this file.
+
 #include <pwb/domain/text.hpp>
 
 #include <algorithm>

@@ -27,8 +27,8 @@
 #include <any>
 #include <utility>
 #include "job_center.hpp"
-#include <pwb/job_runtime/qt/job_bridge.hpp>
 #include <pwb/job_runtime/thread_join_guard.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 #endif
 // END CONV-30
 
@@ -109,6 +109,8 @@
 #include <QEventLoop>
 
 #include <pwb/application/adapters/volume_payload.hpp>
+#include <pwb/qgis_processing/algorithm_ids.hpp>
+#include <pwb/qgis_processing/runner.hpp>
 #include <pwb/seismic_viewer/seismic_slice_widget.hpp>
 #include <pwb/viz/seismic_volume.hpp>
 
@@ -806,6 +808,7 @@ void MainWindow::buildUi() {
         pwb::app::closure_mapping::Install closure_install;
         closure_install.window = this;
         closure_install.shell = app_shell_;
+        closure_install.jobs = job_center_.get();
         closure_install.store_getter = [this]()
             -> std::shared_ptr<pwb::application::PwbDataStore> {
             return context_.projectStore();
@@ -2593,7 +2596,7 @@ void MainWindow::submitFactorMapJob(
 
     auto& owner = job_center_->make_owner(this);
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
-                     &pwb::job::qtbridge::JobOwner::cancel);
+                     &pwb::qgis_processing::PwbTaskOwner::cancel);
     pwb::job::JobSpec spec;
     spec.kind = "background.compute";
     spec.title = "地质因子图";
@@ -2604,10 +2607,10 @@ void MainWindow::submitFactorMapJob(
         ctx.check_cancelled();
         return pwb::application::run_map_pipeline(records, request);
     };
-    owner.start(
-        job_center_->scheduler(), std::move(spec),
+    pwb::qgis_processing::start_job_spec(
+        owner, std::move(spec),
         [this, progress, factor_name,
-         crs](const pwb::job::qtbridge::JobOutcome& job_outcome) {
+         crs](const pwb::qgis_processing::CompatJobOutcome& job_outcome) {
             progress->deleteLater();
             if (job_outcome.state == pwb::job::JobState::cancelled) {
                 statusBar()->showMessage(tr("地质因子图已取消。"), 8000);
@@ -3345,9 +3348,26 @@ void MainWindow::runAttributeDialog() {
     QDialog dialog(this);
     dialog.setWindowTitle(tr("计算地震属性"));
     auto* algorithm = new QComboBox(&dialog);
-    for (const auto& info : context_.attributeRunner().algorithms()) {
-        algorithm->addItem(QString::fromStdString(info.display_name),
-                           QString::fromStdString(info.algorithm_id));
+    // CONV-QGIS-PROCESSING phase 4: discovery comes from the registry
+    // (provider "paleo"), not a host-registered kernel map. Sorted by id so
+    // the order is identical to the old std::map kernel listing and stable
+    // regardless of registry internals.
+    {
+        QList<pwb::qgis_processing::PaleoAlgorithmInfo> seismic;
+        for (const pwb::qgis_processing::PaleoAlgorithmInfo& info :
+             pwb::qgis_processing::paleo_algorithm_infos()) {
+            if (info.group_id == QLatin1String("seismic")) {
+                seismic.append(info);
+            }
+        }
+        std::sort(seismic.begin(), seismic.end(),
+                  [](const pwb::qgis_processing::PaleoAlgorithmInfo& a,
+                     const pwb::qgis_processing::PaleoAlgorithmInfo& b) {
+                      return a.id < b.id;
+                  });
+        for (const pwb::qgis_processing::PaleoAlgorithmInfo& info : seismic) {
+            algorithm->addItem(info.display_name, info.id);
+        }
     }
     auto* input = new QComboBox(&dialog);
     for (const std::string& id : versions) {
@@ -3393,24 +3413,36 @@ void MainWindow::runAttributeDialog() {
         algorithm->currentData().toString().toStdString();
     const std::string input_version =
         input->currentData().toString().toStdString();
+    // Parameter branches keyed by the paleo Processing ids (the registry
+    // vocabulary; "paleo:seismic_<name>").
     std::map<std::string, std::string> params;
-    if (algorithm_id == "seismic.rms_amplitude") {
+    if (algorithm_id == "paleo:seismic_rms_amplitude") {
         params["window"] = std::to_string(window->value());
-    } else if (algorithm_id == "seismic.instantaneous_frequency"
-               || algorithm_id == "seismic.sweetness") {
+    } else if (algorithm_id == "paleo:seismic_instantaneous_frequency"
+               || algorithm_id == "paleo:seismic_sweetness") {
         params["sample_interval"] = std::to_string(sample_interval->value());
-    } else if (algorithm_id == "seismic.dip_il"
-               || algorithm_id == "seismic.dip_xl"
-               || algorithm_id == "seismic.dip_azimuth") {
+    } else if (algorithm_id == "paleo:seismic_dip_il"
+               || algorithm_id == "paleo:seismic_dip_xl"
+               || algorithm_id == "paleo:seismic_dip_azimuth") {
         params["dt"] = std::to_string(sample_interval->value());
         params["dx_il"] = std::to_string(spacing->value());
         params["dx_xl"] = std::to_string(spacing->value());
-    } else if (algorithm_id == "seismic.curvature_mean") {
+    } else if (algorithm_id == "paleo:seismic_curvature_mean") {
         params["win_il"] = std::to_string(curvature_window->value());
         params["win_xl"] = std::to_string(curvature_window->value());
         params["win_t"] = std::to_string(curvature_window->value());
     }
 
+#ifdef PWB_WITH_CONV_30
+    // CONV-30 + phase-4: submit() is a synchronous registry run, so the
+    // compute itself moves INTO the supervision job body (background
+    // thread); the finish slot and cancel wiring are unchanged.
+    superviseAttributeRun(algorithm_id, params, input_version);
+    return;
+#else
+    // M1 fallback (no job runtime): submit synchronously on this thread —
+    // modal for the (small) fixture-scale volumes; the outcome is terminal
+    // by the time submit returns.
     std::string error;
     const std::string request_id =
         runAttribute(algorithm_id, params, input_version, &error);
@@ -3419,30 +3451,6 @@ void MainWindow::runAttributeDialog() {
                              QString::fromStdString(error));
         return;
     }
-
-#ifdef PWB_WITH_CONV_30
-    // CONV-30 — non-modal supervision on the job runtime: the compute
-    // itself stays on the TaskRuntime lane (publication semantics), while
-    // progress/cancel/close-quit lifecycle moves to the scheduler. Cancel
-    // propagates cooperatively into the run.
-    superviseAttributeRun(request_id);
-    return;
-#else
-    // M1: modal progress for the (small) fixture-scale volumes; large
-    // volumes get a non-modal progress surface later.
-    QTimer timer(&dialog);
-    timer.setInterval(50);
-    QEventLoop loop;
-    QObject::connect(&timer, &QTimer::timeout, &loop, [&]() {
-        const std::string status = attributeOutcome(request_id).status;
-        if (status == "queued" || status == "running"
-            || status == "publishing") {
-            return;
-        }
-        loop.quit();
-    });
-    timer.start();
-    loop.exec();
     const auto outcome = attributeOutcome(request_id);
     if (outcome.status != "succeeded") {
         QMessageBox::warning(
@@ -3469,59 +3477,75 @@ void MainWindow::runAttributeDialog() {
 }
 
 #if defined(PWB_WITH_CONV_30) && defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-void MainWindow::superviseAttributeRun(const std::string& request_id) {
+void MainWindow::superviseAttributeRun(
+    const std::string& algorithm_id,
+    const std::map<std::string, std::string>& params,
+    const std::string& input_version_id) {
     auto* progress = new QProgressDialog(tr("计算地震属性…"), tr("取消"),
                                          0, 100, this);
     progress->setWindowModality(Qt::NonModal);
     progress->setMinimumDuration(0);
     progress->setValue(1);
     auto& owner = job_center_->make_owner(this);
-    // Dialog cancel reaches the run from BOTH paths: the job token (when
-    // the supervision job is already running) and the runner directly
-    // (when the job is still QUEUED behind another lane and a queued
-    // cancel would drop it before it ever forwarded the cancel).
-    QObject::connect(
-        progress, &QProgressDialog::canceled, this,
-        [this, request_id] {
-            context_.attributeRunner().cancel(request_id);
-        });
+    // Dialog cancel reaches the run through the job token: the task flips
+    // to cancelled, the body's cancel hook (polled by the runner) sees it
+    // and cancels the Processing feedback, which stops the kernel at its
+    // next safe point.
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
-                     &pwb::job::qtbridge::JobOwner::cancel);
+                     &pwb::qgis_processing::PwbTaskOwner::cancel);
     const auto alive = job_center_->alive();
+    // P1-4 hardening: this body outlives the window (the task manager
+    // adopts the task when the owner dies with it), so it must not touch
+    // `this`. The runner and the project store are AppContext-owned, and
+    // main()'s stack order (window destructs first, context after) keeps
+    // them alive past any window teardown — capture them directly.
+    auto* runner = &context_.attributeRunner();
+    const std::shared_ptr<pwb::application::PwbDataStore> store =
+        context_.projectStore();
     pwb::job::JobSpec spec;
     spec.kind = "seismic.attribute";
     spec.title = "地震属性计算";
-    spec.run = [this, request_id, alive](pwb::job::JobContext& ctx)
-        -> std::any {
-        bool cancel_sent = false;
-        for (;;) {
-            // Teardown escape: alive clears before the runner member dies,
-            // so this loop can exit without touching `this` again.
-            if (!alive->load()) return {};
-            // Cooperative cancel propagation: the supervision token flips
-            // the underlying run's TaskHandle; the run then unwinds its
-            // publication exactly like an explicit cancel.
-            if (ctx.token().is_cancelled() && !cancel_sent) {
-                cancel_sent = true;
-                context_.attributeRunner().cancel(request_id);
-            }
-            const auto outcome = attributeOutcome(request_id);
-            if (outcome.status == "queued") {
-                ctx.report_progress(0.05, std::nullopt, "排队中");
-            } else if (outcome.status == "running") {
-                ctx.report_progress(0.5, std::nullopt, "计算中");
-            } else if (outcome.status == "publishing") {
-                ctx.report_progress(0.95, std::nullopt, "发布中");
-            } else {
-                break;  // terminal
-            }
-            ctx.sleep_interruptible(0.05);
+    spec.run = [runner, store, algorithm_id, params, input_version_id, alive](
+                   pwb::job::JobContext& ctx) -> std::any {
+        // Teardown escape: alive clears before the runner member dies,
+        // so a late job never touches `this` again.
+        if (!alive->load()) return {};
+        // Phase 4: the synchronous registry run + catalog publication
+        // happen HERE (task thread); the cancel hook bridges the job
+        // token into the kernel stop token.
+        ctx.report_progress(0.5, std::nullopt, "计算中");
+        std::string error;
+        const std::string request_id = runner->submit(
+            store, algorithm_id, params, input_version_id,
+            &error, [&ctx] { return ctx.token().is_cancelled(); });
+        if (request_id.empty()) {
+            pwb::application::AlgorithmRunner::Outcome outcome;
+            outcome.known = true;
+            outcome.status = "failed";
+            outcome.error_code = "submit.failed";
+            outcome.error = error;
+            return outcome;
         }
-        return attributeOutcome(request_id);
+        if (!alive->load()) {
+            // Window died mid-run: fail the run without touching any
+            // MainWindow member (delivery is suppressed by the released
+            // owner anyway).
+            pwb::application::AlgorithmRunner::Outcome outcome;
+            outcome.known = true;
+            outcome.status = "failed";
+            outcome.error_code = "window.closed";
+            outcome.error = "window closed during attribute run";
+            return outcome;
+        }
+        // submit() is synchronous: the outcome is already terminal. Read
+        // it straight from the runner (the logic attributeOutcome used to
+        // forward to) — no MainWindow members involved.
+        ctx.report_progress(0.95, std::nullopt, "发布中");
+        return runner->outcome(request_id);
     };
-    owner.start(
-        job_center_->scheduler(), std::move(spec),
-        [this, progress](const pwb::job::qtbridge::JobOutcome& job_outcome) {
+    pwb::qgis_processing::start_job_spec(
+        owner, std::move(spec),
+        [this, progress](const pwb::qgis_processing::CompatJobOutcome& job_outcome) {
             progress->deleteLater();
             if (job_outcome.state == pwb::job::JobState::cancelled) {
                 statusBar()->showMessage(tr("属性计算已取消。"), 8000);
@@ -3861,7 +3885,7 @@ void MainWindow::submitSegyJob(const QString& path) {
     auto& owner = job_center_->make_owner(this);
     // Dialog cancel and window/app teardown both land in the job token.
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
-                     &pwb::job::qtbridge::JobOwner::cancel);
+                     &pwb::qgis_processing::PwbTaskOwner::cancel);
     const auto alive = job_center_->alive();
     // #1380: capture the store the import belongs to (never resolve it on
     // the worker after a project switch — that would publish into the wrong
@@ -3918,10 +3942,10 @@ void MainWindow::submitSegyJob(const QString& path) {
         result.staged_path = staged.generic_string();
         return result;
     };
-    owner.start(
-        job_center_->scheduler(), std::move(spec),
+    pwb::qgis_processing::start_job_spec(
+        owner, std::move(spec),
         [this, progress, store, path](
-            const pwb::job::qtbridge::JobOutcome& outcome) {
+            const pwb::qgis_processing::CompatJobOutcome& outcome) {
             progress->deleteLater();
             if (outcome.state == pwb::job::JobState::cancelled) {
                 // Partial artifacts stay on disk (crash-safe contract).

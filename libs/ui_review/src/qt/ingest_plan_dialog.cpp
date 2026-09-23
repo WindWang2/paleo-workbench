@@ -1,6 +1,6 @@
 #include "pwb/ui_review/qt/ingest_plan_dialog.hpp"
 
-#include "pwb/job_runtime/qt/job_bridge.hpp"
+#include <pwb/qgis_processing/job_compat.hpp>
 #include "pwb/ui_review/ingest_columns.hpp"
 #include "pwb/ui_review/tokens.hpp"
 #include "pwb/ui_widgets/object_table.hpp"
@@ -178,17 +178,11 @@ void IngestItemDetailPanel::apply() {
 // -- IngestPlanDialog --------------------------------------------------------------
 
 IngestPlanDialog::IngestPlanDialog(
-    QWidget* parent, IngestDialogHooks hooks, std::filesystem::path root,
-    std::shared_ptr<job::JobScheduler> scheduler)
-    : QDialog(parent),
-      hooks_(std::move(hooks)),
-      root_(std::move(root)),
-      scheduler_(scheduler ? std::move(scheduler)
-                           : std::make_shared<job::JobScheduler>(
-                                 job::JobScheduler::Options{})) {
+    QWidget* parent, IngestDialogHooks hooks, std::filesystem::path root)
+    : QDialog(parent), hooks_(std::move(hooks)), root_(std::move(root)) {
     setWindowTitle(QStringLiteral("规划导入 (Ingest Plan)"));
     resize(1000, 640);
-    job_ = std::make_unique<job::qtbridge::JobOwner>(this);
+    job_ = std::make_unique<pwb::qgis_processing::PwbTaskOwner>(this);
 
     auto* layout = new QVBoxLayout(this);
     layout->setSpacing(tokens::kSpace2);
@@ -363,9 +357,9 @@ void IngestPlanDialog::start_build() {
         };
         return hooks_.build(root, options);
     };
-    job_->start(
-        *scheduler_, std::move(spec),
-        [this](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *job_, std::move(spec),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
             running_ = false;
             switch (outcome.state) {
             case job::JobState::done:
@@ -429,9 +423,9 @@ void IngestPlanDialog::execute() {
         };
         return hooks_.execute(plan, options);
     };
-    job_->start(
-        *scheduler_, std::move(spec),
-        [this](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *job_, std::move(spec),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
             set_running(false);
             switch (outcome.state) {
             case job::JobState::done:

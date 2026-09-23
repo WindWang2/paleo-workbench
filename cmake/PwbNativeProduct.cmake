@@ -90,7 +90,7 @@ set(PWB_NATIVE_PRODUCT_LINK_CLOSURE
     "data_lifecycle|Pwb::UiControllers|pwb-platform|-"
     "qgis_editing|Pwb::UiWorkbench|pwb-platform|PWB_WITH_CONV_27=1"
     "composition_export|Pwb::LayoutExport|Pwb::Qgis|PWB_WITH_CONV_29=1"
-    "job_runtime|Pwb::JobQt|pwb-platform|PWB_WITH_CONV_30=1"
+    "job_runtime|Pwb::QgisProcessing|pwb-platform|PWB_WITH_CONV_30=1"
     "provider_runtime|Pwb::Providers|pwb-platform|PWB_WITH_PROVIDERS=1"
     "prediction_runtime|Pwb::ClosureScienceQt|pwb-platform|PWB_WITH_CLOSURE_SCIENCE=1"
     "geo3d_viewer|Pwb::Geo3DViz|pwb-platform|PWB_WITH_GEO3D_VIZ=1"

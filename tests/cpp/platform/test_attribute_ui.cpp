@@ -1,10 +1,11 @@
 // platform.attribute_ui — M1 end-to-end in the REAL MainWindow with the
 // real B store, real E kernels and D's slice viewer (no substitutes):
 // open a project that carries a PWBVOL1 version, run an attribute through
-// MainWindow::runAttribute (real TaskRuntime + CatalogResultPublisher into
-// B), poll to a durable success with a published version, then display
-// that version in the seismic dock via openVolumeVersion and assert the
-// viewer reached the ok state with a real slice.
+// MainWindow::runAttribute (phase 4: synchronous QgsProcessingRegistry run
+// + CatalogResultPublisher into B), reach a durable success with a
+// published version, then display that version in the seismic dock via
+// openVolumeVersion and assert the viewer reached the ok state with a
+// real slice.
 
 #include <cmath>
 #include <filesystem>

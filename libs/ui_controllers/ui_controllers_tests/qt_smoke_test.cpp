@@ -1,22 +1,25 @@
 // UI-14 — Qt offscreen smoke test: the QObject shells construct, their
 // signals fire, the string-connect wire_* helpers bind real metaobjects,
-// and a JobOwnerRunner drives a real JobScheduler job to completion on
-// the GUI thread. QT_QPA_PLATFORM=offscreen (ctest pins it).
+// and a JobOwnerRunner drives a real QgsTaskManager task to completion on
+// the GUI thread (QgsApplication supplies the manager; the product's
+// JobCenter normally installs the shared gate). QT_QPA_PLATFORM=offscreen
+// (ctest pins it).
 
+#include <atomic>
 #include <cstdio>
 #include <functional>
 #include <string>
 #include <vector>
 
 #include <QAction>
-#include <QApplication>
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QObject>
 #include <QThread>
 #include <QToolBar>
 
-#include <pwb/job_runtime/job_scheduler.hpp>
+#include <qgsapplication.h>
+
 #include <pwb/ui_controllers/qt/data_lifecycle_controller.hpp>
 #include <pwb/ui_controllers/qt/job_owner_runner.hpp>
 #include <pwb/ui_controllers/qt/map_action_controller.hpp>
@@ -143,8 +146,7 @@ void test_selection_context_and_coordination() {
 }
 
 void test_job_owner_runner() {
-    job::JobScheduler scheduler(job::JobScheduler::Options{.max_workers = 1});
-    JobOwnerRunner runner(scheduler);
+    JobOwnerRunner runner;
     CHECK(!runner.is_running());
 
     std::atomic<bool> finished{false};
@@ -168,8 +170,7 @@ void test_job_owner_runner() {
 }
 
 void test_project_controller_shell() {
-    job::JobScheduler scheduler(job::JobScheduler::Options{.max_workers = 1});
-    ProjectController controller(scheduler);
+    ProjectController controller;
 
     project::ProjectDocument doc =
         project::ProjectDocument::create_new("demo", "");
@@ -190,8 +191,7 @@ void test_project_controller_shell() {
 }
 
 void test_data_lifecycle_shell() {
-    job::JobScheduler scheduler(job::JobScheduler::Options{.max_workers = 1});
-    DataLifecycleController controller(scheduler);
+    DataLifecycleController controller;
     CHECK(controller.catalog_job() != nullptr);
     CHECK(controller.verify_job() != nullptr);
 
@@ -204,8 +204,7 @@ void test_data_lifecycle_shell() {
 }
 
 void test_workflow_shell() {
-    job::JobScheduler scheduler(job::JobScheduler::Options{.max_workers = 1});
-    WorkflowController controller(scheduler);
+    WorkflowController controller;  // null gate — straight to the manager
 
     project::ProjectDocument doc =
         project::ProjectDocument::create_new("demo", "");
@@ -236,7 +235,9 @@ void test_workflow_shell() {
 }  // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    // QgsApplication (not plain QApplication): the task bridge hands
+    // every runner task to QgsApplication::taskManager().
+    QgsApplication app(argc, argv, true);
     struct Case {
         const char* name;
         void (*fn)();

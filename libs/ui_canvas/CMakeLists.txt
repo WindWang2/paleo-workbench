@@ -46,7 +46,7 @@ target_link_libraries(pwb_ui_canvas_core
 # Qt Widgets shells: every Q_OBJECT header is listed as a source so
 # AUTOMOC discovers the classes in this split include/ layout.
 if(TARGET Qt6::Widgets AND TARGET Pwb::UiWidgets
-   AND TARGET Pwb::UiPagesPreviewQt AND TARGET Pwb::JobQt)
+   AND TARGET Pwb::UiPagesPreviewQt AND TARGET Pwb::QgisProcessing)
     add_library(pwb_ui_canvas STATIC
         src/qt/fallback_map_backend.cpp
         src/qt/unified_map_canvas.cpp
@@ -73,7 +73,7 @@ if(TARGET Qt6::Widgets AND TARGET Pwb::UiWidgets
     target_compile_features(pwb_ui_canvas PUBLIC cxx_std_20)
     target_link_libraries(pwb_ui_canvas
         PUBLIC Pwb::UiCanvasCore Pwb::UiWidgets Pwb::UiPagesPreviewQt
-               Pwb::JobQt Qt6::Widgets Qt6::Svg Qt6::PrintSupport)
+               Pwb::QgisProcessing Qt6::Widgets Qt6::Svg Qt6::PrintSupport)
 
     # QGIS-coupled surfaces: snapshot codec + snapshot render backend +
     # symbology bridge. Only where the vendored SDK was admitted; the

@@ -60,6 +60,7 @@ if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA AND TARGET Pwb::SeismicViewer
         AND TARGET Pwb::SeismicService AND TARGET Pwb::SeismicAttributes)
     pwb_viz_d_test(viz_d.closure closure_seismic_test.cpp)
     target_sources(viz_d.closure PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../apps/paleo_workbench_platform/algorithm_exec.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../apps/paleo_workbench_platform/closure_seismic_install.cpp
     )
     target_include_directories(viz_d.closure PRIVATE
@@ -67,7 +68,7 @@ if(PWB_BUILD_PLATFORM AND PWB_BUILD_DATA AND TARGET Pwb::SeismicViewer
     )
     target_link_libraries(viz_d.closure PRIVATE
         Pwb::SeismicService Pwb::SeismicAttributes Pwb::UiWellseisQt
-        Qt6::Widgets)
+        Pwb::Science Qt6::Widgets)
     set_tests_properties(viz_d.closure PROPERTIES
         ENVIRONMENT
             "QT_QPA_PLATFORM=offscreen;VIZ_D_FIXTURES=${CMAKE_CURRENT_SOURCE_DIR}/fixtures;VIZ_D_CLOSURE_ARTIFACT_DIR=${CMAKE_CURRENT_BINARY_DIR}"

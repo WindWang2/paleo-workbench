@@ -39,8 +39,8 @@ endif()
 if(TARGET Pwb::Cartography)
     target_link_libraries(pwb_ui_workstation PUBLIC Pwb::Cartography)
 endif()
-if(TARGET Pwb::JobRuntime)
-    target_link_libraries(pwb_ui_workstation PUBLIC Pwb::JobRuntime)
+if(TARGET Pwb::JobContracts)
+    target_link_libraries(pwb_ui_workstation PUBLIC Pwb::JobContracts)
 endif()
 
 # Qt Widgets shells (UI-12). Every Q_OBJECT header is listed as a source

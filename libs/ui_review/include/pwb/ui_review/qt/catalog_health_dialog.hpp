@@ -1,8 +1,9 @@
 #pragma once
 
 // UI-11 — catalog_health_dialog.py Qt shell: audit statistics + issues
-// table + 快速/深度检查 workers (JobOwner, cooperative cancel) + the
-// relink_requested signal. The audit itself is never mutating.
+// table + 快速/深度检查 workers (PwbTaskOwner on the QGIS task bridge,
+// cooperative cancel) + the relink_requested signal. The audit itself is
+// never mutating.
 
 #include "pwb/ui_review/catalog_api.hpp"
 
@@ -15,8 +16,7 @@ class QLabel;
 class QPushButton;
 class QTableView;
 
-namespace pwb::job { class JobScheduler; }
-namespace pwb::job::qtbridge { class JobOwner; }
+namespace pwb::qgis_processing { class PwbTaskOwner; }
 namespace pwb::ui_widgets {
 class ObjectTableModel;
 class PwbEmptyState;
@@ -30,9 +30,9 @@ class CatalogHealthDialog : public QDialog {
 public:
     // service_provider mirrors the Python kwarg: a callable returning
     // the bound ICatalogApi (nullptr = 未连接数据目录).
-    CatalogHealthDialog(
-        QWidget* parent, std::function<ICatalogApi*()> service_provider,
-        std::shared_ptr<job::JobScheduler> scheduler = nullptr);
+    explicit CatalogHealthDialog(
+        QWidget* parent,
+        std::function<ICatalogApi*()> service_provider);
     ~CatalogHealthDialog() override;
 
     // run_audit(deep=False) — starts the worker audit (no-op while busy
@@ -68,8 +68,7 @@ private:
     void update_empty_state();
 
     std::function<ICatalogApi*()> service_provider_;
-    std::shared_ptr<job::JobScheduler> scheduler_;
-    std::unique_ptr<job::qtbridge::JobOwner> job_;
+    std::unique_ptr<pwb::qgis_processing::PwbTaskOwner> job_;
 
     QLabel* summary_label_ = nullptr;
     ui_widgets::ObjectTableModel* model_ = nullptr;

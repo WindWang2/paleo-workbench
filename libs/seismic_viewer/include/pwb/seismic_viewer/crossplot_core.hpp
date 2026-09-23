@@ -16,11 +16,29 @@
 //     limits with the hi = lo + 1 degenerate guard.
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
 
+namespace pwb::science {
+class IAlgorithm;
+}
+
 namespace pwb::seismic_viewer::crossplot {
+
+// Attribute-kernel executor injection: id ("seismic.envelope" /
+// "seismic.instantaneous_frequency") -> a FRESH owned kernel instance,
+// null when unknown. IAlgorithm::run is non-const by SDK contract, so each
+// call mints its own instance (the registry prototype cannot be lent — it
+// is owned by the registry and run() mutates). The product binds this over
+// the paleo algorithm vocabulary (apps/paleo_workbench_platform/
+// algorithm_exec.cpp: "seismic.envelope" and "paleo:seismic_envelope" both
+// resolve); null keeps the headless default (direct kernel factories in
+// crossplot_core.cpp) so standalone tests keep working unchanged.
+using AlgorithmResolver =
+    std::function<std::unique_ptr<pwb::science::IAlgorithm>(const std::string&)>;
 
 // --- lithology crossplot (headless stats) -----------------------------------
 
@@ -74,7 +92,8 @@ struct AttributeCrossplotData {
 // worker bit-for-bit.
 [[nodiscard]] AttributeCrossplotData
 prepare_attribute_crossplot(std::span<const float> plane, std::int64_t n_samples,
-                            std::int64_t n_traces, double sample_interval_s);
+                            std::int64_t n_traces, double sample_interval_s,
+                            AlgorithmResolver resolver = nullptr);
 
 // nanpercentile(1) / nanpercentile(99) limits with the CrossplotCanvas
 // degenerate guard (hi = lo + 1 when collapsed/empty).

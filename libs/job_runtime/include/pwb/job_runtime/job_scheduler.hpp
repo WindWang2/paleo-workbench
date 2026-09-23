@@ -56,16 +56,9 @@
 
 namespace pwb::job {
 
-class JobScheduler;
-
-// Lease handle returned by the admission hook; release() is called exactly
-// once, when the job reaches a terminal state (or when a claimed job is
-// un-admitted due to a lost race).
-class AdmissionLease {
-public:
-    virtual ~AdmissionLease() = default;
-    virtual void release() = 0;
-};
+// AdmissionLease (the admission-hook lease protocol) lives in
+// job_contract.hpp since the Wave D target split — the governor mints
+// leases without linking the scheduler.
 
 class JobScheduler {
 public:

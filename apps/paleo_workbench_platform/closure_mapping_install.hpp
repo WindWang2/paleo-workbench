@@ -33,6 +33,7 @@ class QMainWindow;
 
 namespace pwb::app {
 class AppShell;
+class JobCenter;
 }
 
 namespace pwb::application {
@@ -75,6 +76,12 @@ struct Install {
                                     const std::string& format, double dpi)>
         layout_export;
     // END V14-COMPILATION-PUBLISH
+
+    // The composition root's JobCenter (may be null in reduced hosts):
+    // the preparation worker lanes take their PwbTaskOwner slots from it
+    // (close-protocol registration + the shared admission gate). Null
+    // falls back to window-parented owners.
+    JobCenter* jobs = nullptr;
 };
 
 // Installs the mapping-page adopt set + preparation page. Safe to call

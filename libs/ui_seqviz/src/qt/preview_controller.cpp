@@ -2,7 +2,7 @@
 
 #include <QTimer>
 
-#include <pwb/job_runtime/job_scheduler.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 
 namespace pwb::ui_seqviz::qt {
 
@@ -10,6 +10,7 @@ namespace job = pwb::job;
 using ui_data_core::AssetObjectData;
 using ui_data_core::PreviewJobOutcome;
 using ui_data_core::PreviewResult;
+namespace qgis_processing = pwb::qgis_processing;
 
 PreviewRequestController::PreviewRequestController(
     ui_data_core::PreviewProvider provider, QObject* parent,
@@ -52,9 +53,10 @@ PreviewRequestController::PreviewRequestController(
     // Python `_on_thread_finished` — the next pending request starts only
     // after the worker thread is fully released, deferred through a 0ms
     // timer (#951: terminal signal and thread.finished ordering).
-    connect(&job_owner_, &job::qtbridge::JobOwner::released, this, [this] {
-        QTimer::singleShot(0, this, [this] { core_.pump_pending(); });
-    });
+    connect(&job_owner_, &pwb::qgis_processing::PwbTaskOwner::released,
+            this, [this] {
+                QTimer::singleShot(0, this, [this] { core_.pump_pending(); });
+            });
 }
 
 PreviewRequestController::~PreviewRequestController() {
@@ -123,9 +125,9 @@ void PreviewRequestController::start_asset_job(
             provider, snapshot, generation, request_kind,
             request_disk.get(), epoch, cache_generation);
     };
-    job_owner_.start(
-        job::global_scheduler(), std::move(spec),
-        [this, generation](const job::qtbridge::JobOutcome& outcome) {
+    qgis_processing::start_job_spec(
+        job_owner_, std::move(spec),
+        [this, generation](const qgis_processing::CompatJobOutcome& outcome) {
             on_job_finished(outcome);
         });
 }
@@ -139,15 +141,15 @@ void PreviewRequestController::start_media_job(
     spec.run = [result, generation](job::JobContext&) -> std::any {
         return ui_data_core::run_media_preload_job(result, generation);
     };
-    job_owner_.start(
-        job::global_scheduler(), std::move(spec),
-        [this, generation](const job::qtbridge::JobOutcome& outcome) {
+    qgis_processing::start_job_spec(
+        job_owner_, std::move(spec),
+        [this, generation](const qgis_processing::CompatJobOutcome& outcome) {
             on_job_finished(outcome);
         });
 }
 
 void PreviewRequestController::on_job_finished(
-    const job::qtbridge::JobOutcome& outcome) {
+    const qgis_processing::CompatJobOutcome& outcome) {
     if (outcome.state == job::JobState::cancelled) {
         // Python has no cancelled handler for previews — drop the
         // delivery (invalidate() semantics).

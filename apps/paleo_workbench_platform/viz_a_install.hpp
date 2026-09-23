@@ -7,7 +7,7 @@
 //      queued delivery to the well-log dock host via load_document —
 //      atomic document+presentation transaction; stale deliveries from a
 //      superseded open are dropped by a generation guard).
-// Late outcomes after window close are dropped by the JobOwner lifecycle.
+// Late outcomes after window close are dropped by the task-owner lifecycle.
 // The function is a no-op returning false when the well-log dock is absent.
 
 #pragma once

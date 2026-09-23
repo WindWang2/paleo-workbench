@@ -307,13 +307,15 @@ public:
 #endif
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     // Submits one attribute run over a PWBVOL1 version into the real B
-    // store (register -> payload -> publish). Returns the request id or ""
-    // + *error.
+    // store (register -> payload -> publish). The submit is SYNCHRONOUS
+    // (registry run + publication complete before it returns); hosts that
+    // need a non-modal surface wrap it in superviseAttributeRun. Returns
+    // the request id or "" + *error.
     std::string runAttribute(
         const std::string& algorithm_id,
         const std::map<std::string, std::string>& params,
         const std::string& input_version_id, std::string* error);
-    // Polls a runAttribute request ("" status = unknown id).
+    // Terminal outcome of a runAttribute request ("" status = unknown id).
     pwb::application::AlgorithmRunner::Outcome attributeOutcome(
         const std::string& request_id);
 #endif
@@ -500,10 +502,14 @@ private:
     void runAttributeDialog();
 #endif
 #if defined(PWB_WITH_CONV_30) && defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-    // CONV-30 — non-modal supervision of one attribute run: polls the
-    // runner outcome on a scheduler job, reports progress to the dialog
-    // and propagates cooperative cancel into the run.
-    void superviseAttributeRun(const std::string& request_id);
+    // CONV-30 + phase 4 — non-modal supervision of one attribute run: the
+    // synchronous registry run + catalog publication execute inside the
+    // job body (task thread); the job token bridges cooperative cancel
+    // into the kernel, the finish slot applies the published version.
+    void superviseAttributeRun(
+        const std::string& algorithm_id,
+        const std::map<std::string, std::string>& params,
+        const std::string& input_version_id);
 #endif
 #ifdef PWB_WITH_CONV_01
     void geologicalFactorMapDialog();
@@ -650,10 +656,10 @@ private:
     QAction* theme_actions_[3] = {nullptr, nullptr, nullptr};
     QAction* density_action_ = nullptr;
 #ifdef PWB_WITH_CONV_30
-    // CONV-30 — product job runtime: bounded scheduler + page ownership
-    // (close protocol) + app-quit drain. Declared last so it is
+    // CONV-30 — product task bridge: QgsTaskManager-backed owners + page
+    // ownership (close protocol) + app-quit drain. Declared last so it is
     // DESTROYED FIRST (reverse member order): its owner vector frees the
-    // QObject-child JobOwners while the surfaces above are still alive.
+    // QObject-child task owners while the surfaces above are still alive.
     std::unique_ptr<JobCenter> job_center_;
 #endif
 #ifdef PWB_WITH_UI_PAGES_PREVIEW_QT

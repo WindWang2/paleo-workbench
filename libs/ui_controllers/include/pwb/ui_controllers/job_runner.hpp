@@ -7,9 +7,9 @@
 // runner that guarantees the *finished* observer lands back on the owner
 // (GUI) thread — exactly the result_connections semantics of
 // OwnedWorkerJob.start. The Qt binding lives in
-// pwb_ui_controllers_qt (JobOwnerRunner over job::qtbridge::JobOwner);
-// InlineJobRunner below executes synchronously for tests and Qt-free
-// hosts.
+// pwb_ui_controllers_qt (JobOwnerRunner over the QGIS task bridge —
+// PwbTaskOwner/PaleoFunctionTask); InlineJobRunner below executes
+// synchronously for tests and Qt-free hosts.
 //
 // `target` mirrors OwnedWorkerJob.target: the object the job is bound to
 // (the live project document for save/prepare/verify jobs). Completion
@@ -20,7 +20,6 @@
 #include <functional>
 
 #include <pwb/job_runtime/job_contract.hpp>
-#include <pwb/job_runtime/job_scheduler.hpp>
 
 namespace pwb::ui_controllers {
 

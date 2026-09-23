@@ -9,8 +9,7 @@
 #include <QPainter>
 #include <QWidget>
 
-#include <pwb/job_runtime/job_scheduler.hpp>
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/ui_canvas/qt/unified_map_canvas.hpp>
 #include <pwb/ui_widgets/map_chrome.hpp>
 #include <pwb/ui_widgets/ui_context.hpp>
@@ -163,14 +162,7 @@ UnifiedMapCanvas* unified_map_canvas_from(QWidget* widget) {
 // ---------------------------------------------------------------------------
 
 MapExportWorker::MapExportWorker(MapExportSpec spec, QObject* parent)
-    : QObject(parent), spec_(std::move(spec)) {
-    // One background lane — Python's dedicated OwnedWorkerJob thread.
-    pwb::job::JobScheduler::Options options;
-    options.max_workers = 1;
-    options.interactive_workers = 0;
-    scheduler_ = std::make_unique<pwb::job::JobScheduler>(options);
-    job_ = new pwb::job::qtbridge::JobOwner(this);
-}
+    : QObject(parent), spec_(std::move(spec)), job_(this) {}
 
 MapExportWorker::~MapExportWorker() { shutdown(0); }
 
@@ -221,43 +213,40 @@ void MapExportWorker::start() {
             throw;
         }
     };
-    job_->start(*scheduler_, std::move(job),
-                [this](const pwb::job::qtbridge::JobOutcome& outcome) {
-                    switch (outcome.state) {
-                    case pwb::job::JobState::done:
-                    case pwb::job::JobState::degraded: {
-                        const auto* report =
-                            std::any_cast<MapExportReport>(&outcome.result);
-                        if (report != nullptr) {
-                            report_ = *report;
-                        }
-                        emit finished(
-                            QString::fromStdString(spec_.path));
-                        break;
-                    }
-                    case pwb::job::JobState::failed:
-                        emit failed(
-                            QString::fromStdString(outcome.error));
-                        break;
-                    case pwb::job::JobState::cancelled:
-                        emit cancelled();
-                        break;
-                    default:
-                        break;
-                    }
-                });
+    pwb::qgis_processing::start_job_spec(
+        job_, std::move(job),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
+            switch (outcome.state) {
+            case pwb::job::JobState::done:
+            case pwb::job::JobState::degraded: {
+                const auto* report =
+                    std::any_cast<MapExportReport>(&outcome.result);
+                if (report != nullptr) {
+                    report_ = *report;
+                }
+                emit finished(QString::fromStdString(spec_.path));
+                break;
+            }
+            case pwb::job::JobState::failed:
+                emit failed(QString::fromStdString(outcome.error));
+                break;
+            case pwb::job::JobState::cancelled:
+                emit cancelled();
+                break;
+            default:
+                break;
+            }
+        });
 }
 
 void MapExportWorker::cancel() {
-    job_->cancel();  // cooperative — threading.Event.set parity
+    job_.cancel();  // cooperative — threading.Event.set parity
 }
 
-bool MapExportWorker::is_running() const { return job_->is_running(); }
+bool MapExportWorker::is_running() const { return job_.is_running(); }
 
 bool MapExportWorker::shutdown(int wait_ms) {
-    const bool joined = job_->shutdown(wait_ms);
-    scheduler_->shutdown(false, wait_ms / 1000.0);
-    return joined;
+    return job_.shutdown(wait_ms);
 }
 
 }  // namespace pwb::ui_canvas

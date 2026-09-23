@@ -27,7 +27,7 @@
 #include <mutex>
 #include <typeinfo>
 
-#include <pwb/job_runtime/job_scheduler.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/ui_seqviz/page_tokens.hpp>
 #include <pwb/ui_seqviz/qt/panel_float_button.hpp>
 #include <pwb/ui_shell/dock_manager.hpp>
@@ -50,12 +50,11 @@ StratigraphyCorrelationPage::StratigraphyCorrelationPage(
     : QWidget(parent), persistence_(persistence) {
     setObjectName("StratigraphyCorrelationPage");
 
-    load_job_ = new job::qtbridge::JobOwner(this);
-    connect(load_job_, &job::qtbridge::JobOwner::released, this, [this] {
-        load_btn_->setEnabled(true);
-    });
-    dtw_job_ = new job::qtbridge::JobOwner(this);
-    connect(dtw_job_, &job::qtbridge::JobOwner::released, this,
+    load_job_ = new pwb::qgis_processing::PwbTaskOwner(this);
+    connect(load_job_, &pwb::qgis_processing::PwbTaskOwner::released, this,
+            [this] { load_btn_->setEnabled(true); });
+    dtw_job_ = new pwb::qgis_processing::PwbTaskOwner(this);
+    connect(dtw_job_, &pwb::qgis_processing::PwbTaskOwner::released, this,
             [this] { sync_backend_stack(); });
 
     auto* outer = new QVBoxLayout(this);
@@ -782,9 +781,9 @@ void StratigraphyCorrelationPage::run_dtw() {
         std::move(input));
     dtw_btn_->setEnabled(false);
     status_label_->setText("DTW 传播中…（再次点击可取消）");
-    dtw_job_->start(
-        job::global_scheduler(), std::move(spec),
-        [this, rec_box](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *dtw_job_, std::move(spec),
+        [this, rec_box](const pwb::qgis_processing::CompatJobOutcome& outcome) {
             // Apply the recommendation before the pairs (the Python
             // recommendation_ready signal lands first on the GUI too).
             {
@@ -997,9 +996,9 @@ void StratigraphyCorrelationPage::load_section() {
         std::move(input));
     load_btn_->setEnabled(false);
     status_label_->setText("正在加载连井剖面…");
-    load_job_->start(
-        job::global_scheduler(), std::move(spec),
-        [this](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *load_job_, std::move(spec),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
             switch (outcome.state) {
             case job::JobState::done:
             case job::JobState::degraded: {

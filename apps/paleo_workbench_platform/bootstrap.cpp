@@ -16,6 +16,8 @@
 #include <pwb/platform_services/qt_session_policy.hpp>
 #include <pwb/platform_services/settings_service.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+#include <pwb/qgis_processing/provider.hpp>
+#include <pwb/qgis_processing/runner.hpp>
 
 #include <exception>
 
@@ -60,6 +62,16 @@ int run_capabilities(QTextStream& out) {
             << QStringLiteral(" — ") << cap.detail << "\n";
     }
     out << "env python-runtime " << env.python_runtime_state << "\n";
+    // Phase 4: the algorithm inventory the registry (provider "paleo")
+    // exposes — the E2E/batch capability outlet. Idempotent install: the
+    // capabilities mode has no JobCenter, so make sure the provider is up
+    // before listing (AppContext's runner already did it in full builds).
+    pwb::qgis_processing::install_paleo_provider();
+    const QStringList algorithm_ids = pwb::qgis_processing::paleo_algorithm_ids();
+    for (const QString& id : algorithm_ids) {
+        out << "algorithm " << id << "\n";
+    }
+    out << "algorithm-count " << algorithm_ids.size() << "\n";
     out.flush();
     return 0;
 }

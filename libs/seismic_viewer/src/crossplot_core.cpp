@@ -8,9 +8,10 @@
 #include <vector>
 
 #include <pwb/science/algorithm.hpp>
-#include <pwb/science/registry.hpp>
 #include <pwb/science/types.hpp>
 #include <pwb/seismic_attributes/attributes.hpp>
+
+#include <string_view>
 
 namespace pwb::seismic_viewer::crossplot {
 namespace {
@@ -37,21 +38,25 @@ double percentile_of(std::vector<double> values, double q) {
 // volume wrapping the slice plane; returns the per-sample output re-indexed
 // to the numpy flatten order of the (n_samples, n_traces) source. An empty
 // vector + diagnostic on failure (never a throw across this boundary).
+// `resolver` (when given) is the product's executor authority (fresh owned
+// kernel per call — see the AlgorithmResolver contract); null falls back
+// to constructing the frozen kernels directly (headless parity; no
+// TU-local registry — the paleo Processing provider owns discovery).
 bool run_trace_kernel(const char* algorithm_id, std::span<const float> plane,
                       std::int64_t n_samples, std::int64_t n_traces,
-                      double sample_interval_s, std::vector<float>& out,
-                      std::string& diagnostic) {
-    static pwb::science::AlgorithmRegistry registry;
-    static const bool registered = [] {
-        const auto report =
-            pwb::seismic_attributes::register_seismic_attributes(registry, "viz-d-crossplot");
-        return !report.registered_ids.empty();
-    }();
-    if (!registered) {
-        diagnostic = "seismic attribute kernels failed to register";
-        return false;
+                      double sample_interval_s,
+                      const AlgorithmResolver& resolver,
+                      std::vector<float>& out, std::string& diagnostic) {
+    std::unique_ptr<pwb::science::IAlgorithm> algorithm;
+    if (resolver) {
+        algorithm = resolver(algorithm_id);
+    } else if (std::string_view(algorithm_id) == "seismic.envelope") {
+        algorithm = pwb::seismic_attributes::make_envelope("viz-d-crossplot");
+    } else if (std::string_view(algorithm_id)
+               == "seismic.instantaneous_frequency") {
+        algorithm = pwb::seismic_attributes::make_instantaneous_frequency(
+            "viz-d-crossplot");
     }
-    pwb::science::IAlgorithm* algorithm = registry.find(algorithm_id);
     if (algorithm == nullptr) {
         diagnostic = std::string("algorithm not registered: ") + algorithm_id;
         return false;
@@ -160,7 +165,8 @@ LithologyCrossplot analyze_lithology_crossplot(std::span<const double> gr,
 AttributeCrossplotData prepare_attribute_crossplot(std::span<const float> plane,
                                                    std::int64_t n_samples,
                                                    std::int64_t n_traces,
-                                                   double sample_interval_s) {
+                                                   double sample_interval_s,
+                                                   AlgorithmResolver resolver) {
     AttributeCrossplotData data;
     if (plane.size() != static_cast<std::size_t>(n_samples * n_traces) ||
         n_samples <= 0 || n_traces <= 0 || !(sample_interval_s > 0.0)) {
@@ -171,12 +177,12 @@ AttributeCrossplotData prepare_attribute_crossplot(std::span<const float> plane,
     std::vector<float> envelope;
     std::string diagnostic;
     if (!run_trace_kernel("seismic.instantaneous_frequency", plane, n_samples, n_traces,
-                          sample_interval_s, frequency, diagnostic)) {
+                          sample_interval_s, resolver, frequency, diagnostic)) {
         data.diagnostic = diagnostic;
         return data;
     }
     if (!run_trace_kernel("seismic.envelope", plane, n_samples, n_traces,
-                          sample_interval_s, envelope, diagnostic)) {
+                          sample_interval_s, resolver, envelope, diagnostic)) {
         data.diagnostic = diagnostic;
         return data;
     }

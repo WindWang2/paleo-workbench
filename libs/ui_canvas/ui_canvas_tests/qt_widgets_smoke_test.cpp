@@ -4,7 +4,7 @@
 // canvas consumes a synchronous fake backend and a fake scalar source;
 // export degrades honestly without a QGIS factory.
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
@@ -415,7 +415,9 @@ PWB_TEST(native_canvas_epoch_invalidates_pending_rasters) {
 }
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    // QgsApplication: the raster controller / export worker tasks run on
+    // QgsApplication::taskManager().
+    QgsApplication app(argc, argv, true);
     qRegisterMetaType<pwb::ui_canvas::Json>("pwb::ui_canvas::Json");
     qRegisterMetaType<pwb::ui_canvas::RenderFrame>(
         "pwb::ui_canvas::RenderFrame");

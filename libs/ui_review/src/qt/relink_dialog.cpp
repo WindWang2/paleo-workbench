@@ -1,7 +1,7 @@
 #include "pwb/ui_review/qt/relink_dialog.hpp"
 
 #include "pwb/domain/stage.hpp"
-#include "pwb/job_runtime/qt/job_bridge.hpp"
+#include <pwb/qgis_processing/job_compat.hpp>
 #include "pwb/ui_review/relink_summary.hpp"
 #include "pwb/ui_review/tokens.hpp"
 #include "pwb/ui_widgets/object_table.hpp"
@@ -41,18 +41,13 @@ QString stage_label_for(const catalog::MissingSource& entry) {
 }  // namespace
 
 RelinkSourcesDialog::RelinkSourcesDialog(
-    QWidget* parent, std::function<ICatalogApi*()> service_provider,
-    std::shared_ptr<job::JobScheduler> scheduler)
-    : QDialog(parent),
-      service_provider_(std::move(service_provider)),
-      scheduler_(scheduler ? std::move(scheduler)
-                           : std::make_shared<job::JobScheduler>(
-                                 job::JobScheduler::Options{})) {
+    QWidget* parent, std::function<ICatalogApi*()> service_provider)
+    : QDialog(parent), service_provider_(std::move(service_provider)) {
     setWindowTitle(QStringLiteral("缺失源与重新链接 (Relink)"));
     resize(880, 540);
-    // One job per role: shutdown happens ONLY on dialog close.
-    scan_job_ = std::make_unique<job::qtbridge::JobOwner>(this);
-    relink_job_ = std::make_unique<job::qtbridge::JobOwner>(this);
+    // One task per role: shutdown happens ONLY on dialog close.
+    scan_job_ = std::make_unique<pwb::qgis_processing::PwbTaskOwner>(this);
+    relink_job_ = std::make_unique<pwb::qgis_processing::PwbTaskOwner>(this);
 
     auto* layout = new QVBoxLayout(this);
     layout->setSpacing(tokens::kSpace2);
@@ -214,8 +209,9 @@ void RelinkSourcesDialog::start_scan() {
         return service->find_missing_sources(
             [&ctx] { return ctx.token().is_cancelled(); });
     };
-    scan_job_->start(*scheduler_, std::move(spec),
-                     [this](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *scan_job_, std::move(spec),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
         busy_ = false;
         progress_->setVisible(false);
         sync_buttons();
@@ -378,8 +374,9 @@ void RelinkSourcesDialog::apply_relinks(
         }
         return result;
     };
-    relink_job_->start(*scheduler_, std::move(spec),
-                       [this](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *relink_job_, std::move(spec),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
         busy_ = false;
         progress_->setVisible(false);
         sync_buttons();

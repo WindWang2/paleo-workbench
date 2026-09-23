@@ -22,12 +22,9 @@
 #include <memory>
 #include <vector>
 
-namespace pwb::job {
-class JobScheduler;
-}  // namespace pwb::job
-namespace pwb::job::qtbridge {
-class JobOwner;
-}  // namespace pwb::job::qtbridge
+namespace pwb::qgis_processing {
+class PwbTaskOwner;
+}  // namespace pwb::qgis_processing
 namespace pwb::ui_widgets {
 class ObjectTableModel;
 }  // namespace pwb::ui_widgets
@@ -101,8 +98,7 @@ class IngestPlanDialog : public QDialog {
     Q_OBJECT
 public:
     IngestPlanDialog(QWidget* parent, IngestDialogHooks hooks,
-                     std::filesystem::path root,
-                     std::shared_ptr<job::JobScheduler> scheduler = nullptr);
+                     std::filesystem::path root);
     ~IngestPlanDialog() override;
 
     // Python attribute surface.
@@ -143,8 +139,7 @@ private:
 
     IngestDialogHooks hooks_;
     std::filesystem::path root_;
-    std::shared_ptr<job::JobScheduler> scheduler_;
-    std::unique_ptr<job::qtbridge::JobOwner> job_;
+    std::unique_ptr<pwb::qgis_processing::PwbTaskOwner> job_;
     std::optional<data::IngestPlan> plan_;
     bool running_ = false;
 

@@ -73,7 +73,9 @@ TaskRequest request_for_spec(const JobSpec& spec, const std::string& job_id) {
     return request;
 }
 
-JobScheduler::AdmissionHook scheduler_admission_hook(ResourceGovernor& governor) {
+std::function<std::shared_ptr<AdmissionLease>(const JobSpec&,
+                                              const std::string&)>
+scheduler_admission_hook(ResourceGovernor& governor) {
     return [&governor](const JobSpec& spec,
                        const std::string& job_id) -> std::shared_ptr<AdmissionLease> {
         std::unique_ptr<ResourceLease> lease =
@@ -107,20 +109,7 @@ std::map<std::string, bool> apply_all_budgets(const ResourceBudget& budget,
     return out;
 }
 
-ResourceGovernor& ensure_global_governance(const ResourceBudget* budget_or_null,
-                                           JobScheduler* scheduler,
-                                           const BudgetSinks& sinks) {
-    if (budget_or_null != nullptr) {
-        // Python order: engine caches pushed BEFORE the governor rebind so
-        // a pressure sample sees the new caps already in effect.
-        apply_all_budgets(*budget_or_null, sinks);
-        configure_runtime_budget(*budget_or_null);
-    }
-    ResourceGovernor& governor = global_governor();
-    JobScheduler& sched =
-        scheduler != nullptr ? *scheduler : global_scheduler();
-    sched.set_admission(scheduler_admission_hook(governor));
-    return governor;
-}
+// ensure_global_governance moved to job_scheduler.cpp in the Wave D target
+// split — it binds a JobScheduler, so it lives with the scheduler target.
 
 }  // namespace pwb::job

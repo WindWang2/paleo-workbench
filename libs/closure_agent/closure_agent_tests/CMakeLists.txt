@@ -41,6 +41,13 @@ target_link_libraries(closure_agent.model PRIVATE Pwb::ClosureAgent)
 add_test(NAME closure_agent.model COMMAND closure_agent.model)
 set_tests_properties(closure_agent.model PROPERTIES TIMEOUT 120)
 
+# Phase 4 — Processing algorithm tool conversion (Qt/QGIS-free helper).
+add_executable(closure_agent.processing_tools processing_tools_test.cpp)
+target_compile_features(closure_agent.processing_tools PRIVATE cxx_std_20)
+target_link_libraries(closure_agent.processing_tools PRIVATE Pwb::ClosureAgent)
+add_test(NAME closure_agent.processing_tools COMMAND closure_agent.processing_tools)
+set_tests_properties(closure_agent.processing_tools PROPERTIES TIMEOUT 120)
+
 # Workflow adapter — only when the line-02 engine is part of this configure.
 if(TARGET Pwb::ClosureAgentWorkflow)
     add_executable(closure_agent.workflow workflow_adapter_test.cpp)

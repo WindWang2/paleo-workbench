@@ -20,6 +20,7 @@
 #include <QThread>
 
 #include "app_shell.hpp"
+#include "job_center.hpp"
 
 #include <pwb/ui_map/mapping_page.hpp>
 
@@ -63,6 +64,7 @@
 #include <pwb/cartography/color_ramps.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/job_runtime/job_contract.hpp>
+#include <pwb/qgis_processing/task_bridge.hpp>
 #include <pwb/layout_export/layout_export.hpp>
 #include <pwb/mapping_document/composition.hpp>
 #include <pwb/mapping_document/composition_session.hpp>
@@ -106,7 +108,7 @@ QString qstr(const std::string& s) {
 
 namespace {
 
-// App-lifetime delivery pump for WorkerHost::Client::marshal (the
+// App-lifetime delivery pump for WorkerLane::Client::marshal (the
 // job_bridge DeliveryPump pattern): a plain QObject on the GUI thread,
 // parented to the app, so a worker-side invokeMethod can never target a
 // dead receiver. Per-run suppression is the released flag re-checked
@@ -139,44 +141,34 @@ WorkerDeliveryPump* worker_delivery_pump() {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Off-thread worker host — runs the injected worker body on one joinable
-// std::thread and marshals terminal callbacks back to the GUI thread. The
-// page's guards prevent overlapping runs; the host joins before a
-// replacement run and on destruction (worker lifecycle ownership).
+// Off-thread worker lanes — QgsTaskManager edition (the retired WorkerHost
+// contract over PwbTaskOwner): the injected worker body runs as a
+// PaleoFunctionTask body on a task-manager thread; terminal/progress
+// callbacks marshal back to the GUI thread through the app-lifetime pump
+// above. The page's guards prevent overlapping runs; each lane is
+// single-flight (start refuses a second concurrent task).
 //
-// #1455 hardening: the worker body NEVER touches this QObject. It runs
-// against a per-run heap Control block shared with the host, plus a
-// copyable Client handle whose marshal() hops through an app-lifetime
-// delivery pump guarded by the run's released flag. A shutdown that times
-// out detaches the thread — the abandoned body keeps only shared_ptr
-// state, so it cannot use-after-free the host after the window dies, and
-// its queued deliveries are dropped at delivery time.
+// #1455 hardening kept: the worker body NEVER touches the lane object. It
+// runs against a per-run released flag shared with the lane, plus a
+// copyable Client handle whose marshal() hops through the app-lifetime
+// delivery pump guarded by that flag. A shutdown that times out abandons
+// the body — QgsTaskManager keeps the task alive (adoption inherent), the
+// abandoned body holds only shared_ptr state, and its queued deliveries
+// are dropped at delivery time.
 // ---------------------------------------------------------------------------
-class WorkerHost : public QObject {
-    Q_OBJECT
+class WorkerLane {
 public:
-    // Everything the worker body may touch lives here — shared ownership
-    // between the GUI thread and the (possibly abandoned) worker thread.
-    // One Control per run: a stale finish can never clobber the next
-    // run's latch (the #1449 generation guard, made structural).
-    struct Control {
-        std::atomic<bool> cancelled{false};
-        std::atomic<bool> busy{false};
-        std::atomic<bool> finished{false};  // set when the body returns
-    };
-
-    // Copyable worker-side handle (capture BY VALUE inside bodies and
-    // bridges — it never dangles). marshal() targets the app-lifetime
-    // pump; a delivery queued before the run was released is dropped at
-    // delivery time, never committed.
+    // Copyable worker-side handle (capture BY VALUE inside bodies — it
+    // never dangles). marshal() targets the app-lifetime pump; a delivery
+    // queued before the run was released is dropped at delivery time,
+    // never committed.
     class Client {
     public:
-        bool cancelled() const { return control_->cancelled.load(); }
         void marshal(std::function<void()> fn) const {
             auto* pump = worker_delivery_pump();
             // Post-app-exit guard: ~QCoreApplication destroys the pump
-            // while a shutdown-timeout-detached body may still run —
-            // instance() nulls early, so drop rather than touch it.
+            // while a shutdown-abandoned body may still run — instance()
+            // nulls early, so drop rather than touch it.
             if (pump == nullptr || QCoreApplication::instance() == nullptr) {
                 return;
             }
@@ -191,128 +183,107 @@ public:
         }
 
     private:
-        friend class WorkerHost;
-        Client(std::shared_ptr<Control> control,
-               std::shared_ptr<std::atomic<bool>> released)
-            : control_(std::move(control)), released_(std::move(released)) {}
-        std::shared_ptr<Control> control_;
+        friend class WorkerLane;
+        explicit Client(std::shared_ptr<std::atomic<bool>> released)
+            : released_(std::move(released)) {}
         std::shared_ptr<std::atomic<bool>> released_;
     };
 
-    using Body = std::function<void(Client&)>;
+    // Cancel observation moved onto PaleoTaskBodyContext (the retired
+    // Client::cancelled poll is ctx.cancel_requested() now).
+    using Body = std::function<void(
+        Client&, pwb::qgis_processing::PaleoTaskBodyContext&)>;
 
-    explicit WorkerHost(QObject* parent) : QObject(parent) {}
-    ~WorkerHost() override;
+    WorkerLane(pwb::qgis_processing::PwbTaskOwner* owner, void** target_slot)
+        : owner_(owner), target_slot_(target_slot) {}
+
+    ~WorkerLane() {
+        // Last-resort release (#1455 parity): drop the run's queued pump
+        // deliveries. The lane NEVER touches the owner here — it may
+        // already be gone (JobCenter members die before the window's
+        // QObject children); the owner cancels through its own teardown
+        // paths (JobCenter::shutdown_workers / ~PwbTaskOwner), and the
+        // task keeps running under QgsTaskManager. The normal path runs
+        // shutdown() first through AppShell::shutdown_workers.
+        if (released_ != nullptr) released_->store(true);
+    }
 
     // target mirrors Python OwnedWorkerJob.target: the page's guards
     // compare it against the bound project so stale completions drop.
-    void run(void* target, Body body) {
-        join();
-        target_ = target;
-        // Fresh control + guard per run (JobOwner::start discipline): a
+    void run(void* target, QString kind, QString title, Body body) {
+        if (owner_ == nullptr) return;
+        // Defensive single-flight (the page's guards normally prevent
+        // overlap): the retired host joined the previous run here —
+        // release it and give it a bounded drain instead.
+        if (busy_) shutdown(2000);
+        *target_slot_ = target;
+        // Fresh release guard per run (task-owner start discipline): a
         // delivery already queued for the PREVIOUS run keeps its own
         // guard and stays suppressed after its shutdown.
-        control_ = std::make_shared<Control>();
-        released_ = std::make_shared<std::atomic<bool>>(false);
-        control_->busy.store(true);
-        thread_ = std::thread([control = control_, released = released_,
-                               body = std::move(body)]() mutable {
-            Client client(control, released);
-            body(client);
-            control->finished.store(true, std::memory_order_release);
-            control->busy.store(false, std::memory_order_release);
-        });
+        auto released = std::make_shared<std::atomic<bool>>(false);
+        released_ = released;
+        // busy_ is the retired Control::busy flag, NOT owner_->is_running():
+        // the task STATUS flips on the worker thread only after the
+        // blocking finished() handshake reached the GUI — a page that
+        // observed the marshalled terminal callback (queued BEFORE the
+        // body returned) could still see is_running() true and pop a
+        // "still running" modal. Clearing the flag on the body thread
+        // right after the terminal marshal restores the old
+        // happens-before: label visible ⇒ not busy.
+        auto busy = busy_;
+        busy->store(true, std::memory_order_release);
+        owner_->start(
+            std::move(kind), std::move(title),
+            [body = std::move(body), released,
+             busy](pwb::qgis_processing::PaleoTaskBodyContext& ctx) -> bool {
+                Client client(released);
+                body(client, ctx);
+                // Marshals exactly one terminal callback itself
+                // (completed/cancelled/failed); the task-level outcome is
+                // projection only.
+                busy->store(false, std::memory_order_release);
+                return true;
+            },
+            [busy](const pwb::qgis_processing::PaleoTaskOutcome&) {
+                // No owner-level finish: the body's marshalled terminal
+                // callback IS the page contract. This only clears the busy
+                // flag for terminal paths that never ran the body (a task
+                // cancelled while QUEUED).
+                busy->store(false, std::memory_order_release);
+            });
     }
 
-    void cancel() { control_->cancelled.store(true); }
-    bool cancelled() const { return control_->cancelled.load(); }
+    void cancel() {
+        if (owner_ != nullptr) owner_->cancel();
+    }
 
-    bool busy() const { return control_->busy.load(); }
-    void* target() const { return target_; }
+    bool busy() const { return busy_->load(std::memory_order_acquire); }
+    void* target() const { return *target_slot_; }
 
-    // OwnedWorkerJob.shutdown parity: request cancellation, then join —
-    // BOUNDED by wait_ms (page teardown / window close must not freeze the
-    // GUI for the full kernel duration). The run is released BEFORE the
-    // wait (JobOwner::shutdown parity): pump deliveries outlive the host,
-    // so an already-queued callback must never fire into the page that is
-    // being torn down. On timeout the worker is abandoned as detached: it
-    // keeps only its shared_ptr control block and client handle, so the
-    // host (and the window below it) can die safely while it runs to its
-    // next cancellation point.
+    // OwnedWorkerJob.shutdown parity: release the run's queued deliveries
+    // FIRST (an already-queued callback must never fire into the page
+    // being torn down), cancel, then bounded wait — page teardown /
+    // window close must not freeze the GUI for the full kernel duration.
+    // On timeout the task keeps running under QgsTaskManager; its guards
+    // discard late results.
     bool shutdown(int wait_ms) {
-        if (!thread_.joinable()) return true;
-        release_run();
-        cancel();
-        if (wait_ms > 0) {
-            if (wait_join(wait_ms)) {
-                control_->busy.store(false);
-                target_ = nullptr;
-                return true;
-            }
-            thread_.detach();  // abandoned; guards discard its result
-            control_->busy.store(false);
-            target_ = nullptr;
-            return false;
-        }
-        join();
-        return !thread_.joinable();
-    }
-
-    void join() {
-        if (thread_.joinable()) {
-            cancel();  // cooperative stop request
-            thread_.join();
-            control_->busy.store(false);
-            target_ = nullptr;
-        }
-    }
-
-    // Timed join: std::thread has no timed join, so the body sets
-    // finished when it returns and we poll joinability at 5 ms.
-    bool wait_join(int ms) {
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
-        while (true) {
-            if (control_->finished.load(std::memory_order_acquire)) {
-                if (thread_.joinable()) thread_.join();
-                control_->finished.store(false, std::memory_order_relaxed);
-                return true;
-            }
-            if (std::chrono::steady_clock::now() >= deadline) {
-                return !thread_.joinable() && !control_->finished.load();
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
+        if (released_ != nullptr) released_->store(true);
+        busy_->store(false, std::memory_order_release);
+        *target_slot_ = nullptr;
+        return owner_ == nullptr || owner_->shutdown(wait_ms);
     }
 
 private:
-    // Drop the current run's queued deliveries (shutdown/detach/dtor).
-    void release_run() {
-        if (released_) released_->store(true);
-    }
-
-    std::thread thread_;
-    std::shared_ptr<Control> control_ = std::make_shared<Control>();
+    pwb::qgis_processing::PwbTaskOwner* owner_ = nullptr;  // not owned
+    void** target_slot_ = nullptr;
+    // Worker-side busy flag (the retired Control::busy): set on run(),
+    // cleared on the body thread right after the terminal marshal (and
+    // on terminal-without-body / shutdown paths).
+    std::shared_ptr<std::atomic<bool>> busy_ =
+        std::make_shared<std::atomic<bool>>(false);
     std::shared_ptr<std::atomic<bool>> released_ =
         std::make_shared<std::atomic<bool>>(false);
-    void* target_ = nullptr;
 };
-
-WorkerHost::~WorkerHost() {
-    // Last-resort stop (#1455): BOUNDED — release the run (drop queued
-    // deliveries), cancel, wait, and on timeout detach the (now safely
-    // abandoned) thread instead of an unbounded GUI-thread join. The
-    // normal path never gets here: the page's shutdown_workers ran first
-    // through AppShell::shutdown_workers.
-    if (thread_.joinable()) {
-        release_run();
-        cancel();
-        if (!wait_join(3000)) {
-            thread_.detach();
-        }
-    }
-    release_run();
-}
 
 namespace {
 
@@ -695,6 +666,14 @@ public:
     Install install;
     MapDocumentBank* bank = nullptr;
     pwb::ui_pages_data::qt::PreparationPage* preparation = nullptr;
+    // Worker lanes over the QGIS task bridge (the retired WorkerHost):
+    // one QgsTask-backed owner per lane; the owners are parented to this
+    // window (JobCenter registration when available) and die with it.
+    std::unique_ptr<WorkerLane> prepare_lane;
+    std::unique_ptr<WorkerLane> contour_lane;
+    // The page's stale-completion guard values (target identity per lane).
+    void* prepare_target = nullptr;
+    void* contour_target = nullptr;
 #if PWB_WITH_FACTOR_KERNEL
     // V14-FACTOR: process-live grid cache + the persisted factor_map
     // provenance rail (one workflow seam contract, GUI-thread-confined like
@@ -721,11 +700,10 @@ public:
     // Composition export control: a fresh CancellationToken is installed
     // per run (copies share the stop state — cancel_composition_export
     // drives whatever run is in flight, from any thread). export_progress
-    // is the host-installed coarse sink; export_host owns the async lane
-    // (created lazily by export_composition_async).
+    // is the host-installed coarse sink; the export itself runs
+    // synchronously on the caller's thread.
     pwb::job::CancellationToken export_token;
     std::function<void(int)> export_progress;
-    WorkerHost* export_host = nullptr;
     // END V14-COMPILATION-PUBLISH
 };
 
@@ -1718,7 +1696,27 @@ bool install(const Install& install) {
     preparation->set_boundary_panel(
         new pwb::ui_pages_mapedit::BoundaryPanel(preparation));
 
-    auto* host = new WorkerHost(install.window);
+    // Worker lanes (the retired WorkerHost): one QgsTask-backed owner per
+    // lane. Through the JobCenter when available (close-protocol
+    // registration + the shared admission gate); window-parented owners
+    // as the reduced-host fallback.
+    pwb::qgis_processing::PwbTaskOwner* prepare_owner = nullptr;
+    pwb::qgis_processing::PwbTaskOwner* contour_owner = nullptr;
+    if (install.jobs != nullptr) {
+        prepare_owner = &install.jobs->make_owner(install.window);
+        contour_owner = &install.jobs->make_owner(install.window);
+    } else {
+        prepare_owner =
+            new pwb::qgis_processing::PwbTaskOwner(install.window);
+        contour_owner =
+            new pwb::qgis_processing::PwbTaskOwner(install.window);
+    }
+    context->prepare_lane = std::make_unique<WorkerLane>(
+        prepare_owner, &context->prepare_target);
+    context->contour_lane = std::make_unique<WorkerLane>(
+        contour_owner, &context->contour_target);
+    WorkerLane* const prepare_lane = context->prepare_lane.get();
+    WorkerLane* const contour_lane = context->contour_lane.get();
 
     // Project store seam — returns the STORE (shared_ptr), never a raw
     // pointer into its document: every caller holds the store alive for
@@ -1745,19 +1743,23 @@ bool install(const Install& install) {
         &pwb::factor_production::current_factor_prepare_generation);
 
     // OwnedWorkerJob seams — the page's running/target/cancel guards need
-    // a live job binding (review P1-7); WorkerHost owns the thread.
+    // a live job binding (review P1-7); each lane owns its slot.
     preparation->set_prepare_job(
         pwb::ui_pages_data::qt::WorkerJobApi{
-            [host] { return host->busy(); },
-            [host](int wait_ms) { return host->shutdown(wait_ms); },
-            [host] { host->cancel(); },
-            [host]() -> void* { return host->target(); }});
+            [prepare_lane] { return prepare_lane->busy(); },
+            [prepare_lane](int wait_ms) {
+                return prepare_lane->shutdown(wait_ms);
+            },
+            [prepare_lane] { prepare_lane->cancel(); },
+            [prepare_lane]() -> void* { return prepare_lane->target(); }});
     preparation->set_contour_job(
         pwb::ui_pages_data::qt::WorkerJobApi{
-            [host] { return host->busy(); },
-            [host](int wait_ms) { return host->shutdown(wait_ms); },
-            [host] { host->cancel(); },
-            [host]() -> void* { return host->target(); }});
+            [contour_lane] { return contour_lane->busy(); },
+            [contour_lane](int wait_ms) {
+                return contour_lane->shutdown(wait_ms);
+            },
+            [contour_lane] { contour_lane->cancel(); },
+            [contour_lane]() -> void* { return contour_lane->target(); }});
     preparation->set_snapshot_task_count_fn(
         [project_store_fn](void*, const std::string&, int) {
             const auto store = project_store_fn();
@@ -1772,11 +1774,11 @@ bool install(const Install& install) {
 #if PWB_WITH_FACTOR_KERNEL
     // BEGIN V14-FACTOR PREPARE — the REAL batch grid kernel: the host
     // thread builds the narrow scientific snapshot (fingerprint inputs
-    // match classification, Python parity), the WorkerHost thread runs the
-    // scheduler over the fully-bound seams (classify → reuse → per-task
-    // isolated interpolation), and exactly one terminal callback is
-    // marshalled back to the GUI thread. The cancel bridge polls
-    // host->cancelled() onto the job token (50 ms granularity, Python
+    // match classification, Python parity), the worker lane's task thread
+    // runs the scheduler over the fully-bound seams (classify → reuse →
+    // per-task isolated interpolation), and exactly one terminal callback
+    // is marshalled back to the GUI thread. The cancel bridge polls the
+    // task context onto the job token (50 ms granularity, Python
     // CancellationToken parity).
     context->factor_grids =
         std::make_shared<pwb::factor_production::LiveFactorGridStore>();
@@ -1790,7 +1792,7 @@ bool install(const Install& install) {
             context->factor_grids, kernel_config);
         auto grids = context->factor_grids;
         preparation->set_prepare_worker_fn(
-            [host, project_store_fn, seams, grids](
+            [prepare_lane, project_store_fn, seams, grids](
                 void* project, const std::string& method, int gen,
                 std::function<void(
                     const pwb::ui_pages_data::qt::PrepareProgressView&)>
@@ -1813,20 +1815,23 @@ bool install(const Install& install) {
                     /*target_horizon=*/std::nullopt,
                     /*factor_types=*/std::nullopt, seams);
             }
-            host->run(project,
-                      [snapshot = std::move(snapshot), seams, grids,
-                       progress, completed, failed, cancelled, gen,
-                       method](WorkerHost::Client& client) {
+            prepare_lane->run(
+                project, QStringLiteral("background.compute"),
+                QStringLiteral("单因素图制备"),
+                [snapshot = std::move(snapshot), seams, grids,
+                 progress, completed, failed, cancelled, gen,
+                 method](WorkerLane::Client& client,
+                         pwb::qgis_processing::PaleoTaskBodyContext& ctx) {
                 try {
                     job::CancellationToken token;
                     std::atomic<bool> body_done{false};
-                    // The cancel bridge polls the Client handle (a
-                    // by-value copy — shared_ptr state only, never the
-                    // host QObject, so it stays legal even on the
-                    // abandoned/detached path #1455 guards).
-                    std::thread cancel_bridge([client, &token, &body_done] {
+                    // The cancel bridge polls the task context (pure
+                    // shared state — never the lane object, so it stays
+                    // legal even on the shutdown-abandoned path #1455
+                    // guards).
+                    std::thread cancel_bridge([&ctx, &token, &body_done] {
                         while (!body_done.load(std::memory_order_relaxed)) {
-                            if (client.cancelled()) {
+                            if (ctx.cancel_requested()) {
                                 token.cancel();
                                 return;
                             }
@@ -1929,7 +1934,7 @@ bool install(const Install& install) {
     // tasks carry the explicit kernel-missing error; the page shows the
     // honest failure instead of a fabricated product.
     preparation->set_prepare_worker_fn(
-        [host](void* project, const std::string& method, int gen,
+        [prepare_lane](void* project, const std::string& method, int gen,
                std::function<void(const pwb::ui_pages_data::qt::PrepareProgressView&)>
                    progress,
                std::function<void(const pwb::ui_pages_data::qt::PrepareResultView&)>
@@ -1937,8 +1942,12 @@ bool install(const Install& install) {
                std::function<void(const QString&)>,
                std::function<void()> cancelled) {
         (void)project;
-        host->run(project, [method, gen, progress, completed,
-                            cancelled](WorkerHost::Client& client) {
+        prepare_lane->run(
+            project, QStringLiteral("background.compute"),
+            QStringLiteral("单因素图制备"),
+            [method, gen, progress, completed,
+             cancelled](WorkerLane::Client& client,
+                        pwb::qgis_processing::PaleoTaskBodyContext& ctx) {
             pwb::ui_pages_data::qt::PrepareProgressView start;
             start.generation = gen;
             start.phase = "classify";
@@ -1949,7 +1958,7 @@ bool install(const Install& install) {
             result.generation = gen;
             result.method = method;
             for (int i = 0; i < 1; ++i) {
-                if (client.cancelled()) {
+                if (ctx.cancel_requested()) {
                     client.marshal([cancelled] { cancelled(); });
                     return;
                 }
@@ -1978,7 +1987,7 @@ bool install(const Install& install) {
     // cache → catalog version payload → legacy inline parameters. Without
     // completed grids it honestly yields zero drafts.
     preparation->set_contour_worker_fn(
-        [host, project_store_fn, context](
+        [contour_lane, project_store_fn, context](
             void* project, std::function<void(void*)> completed,
             std::function<void(const QString&)> failed) {
         // Keep the store alive for the whole worker run (captured on the
@@ -2084,11 +2093,15 @@ bool install(const Install& install) {
                 tasks_json = *it;
             }
         }
-        host->run(project, [completed = std::move(completed),
-                            failed = std::move(failed), store,
-                            tasks_json = std::move(tasks_json),
-                            resolved_grids = std::move(resolved_grids)](
-                           WorkerHost::Client& client) {
+        contour_lane->run(
+            project, QStringLiteral("background.compute"),
+            QStringLiteral("等值线初稿"),
+            [completed = std::move(completed),
+             failed = std::move(failed), store,
+             tasks_json = std::move(tasks_json),
+             resolved_grids = std::move(resolved_grids)](
+                WorkerLane::Client& client,
+                pwb::qgis_processing::PaleoTaskBodyContext& ctx) {
             try {
                 // Shared result payload: the ledger JSON the GUI-thread
                 // commit writes back, plus the created-draft count.
@@ -2138,11 +2151,11 @@ bool install(const Install& install) {
                     // squares kernel observes the token, so a shutdown's
                     // cancel actually interrupts the compile instead of
                     // waiting out the whole pass (#1455). The bridge polls
-                    // the Client copy — never the host QObject.
+                    // the task context — never the lane object.
                     std::atomic<bool> body_done{false};
-                    std::thread cancel_bridge([client, &token, &body_done] {
+                    std::thread cancel_bridge([&ctx, &token, &body_done] {
                         while (!body_done.load(std::memory_order_relaxed)) {
-                            if (client.cancelled()) {
+                            if (ctx.cancel_requested()) {
                                 token.cancel();
                                 return;
                             }

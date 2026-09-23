@@ -50,10 +50,11 @@ class JobCenter;
 
 namespace pwb::job {
 class JobContext;
-namespace qtbridge {
-class JobOwner;
 }
-}  // namespace pwb::job
+
+namespace pwb::qgis_processing {
+class PwbTaskOwner;
+}  // namespace pwb::qgis_processing
 
 namespace pwb::ui_pages_data::qt {
 class DataWorkspace;
@@ -171,7 +172,7 @@ private Q_SLOTS:
         const std::optional<pwb::ui_pages_data::AssetRow>& asset);
 
 private:
-    // Worker-side outcome envelope (std::any payload through the JobOwner).
+    // Worker-side outcome envelope (std::any payload through the owner).
     struct BasePreviewOutcome {
         bool ok = false;
         pwb::ui_pages_data::qt::PreviewResultView view;
@@ -205,7 +206,7 @@ private:
     std::uint64_t surface_generation_ = 0;
     // Base-preview job bookkeeping (generation guard + cancel).
     std::uint64_t base_generation_ = 0;
-    pwb::job::qtbridge::JobOwner* base_owner_ = nullptr;
+    pwb::qgis_processing::PwbTaskOwner* base_owner_ = nullptr;
     BasePreviewFn base_builder_;
     pwb::ui_pages_data::qt::AssetSelectionBus* selection_bus_ = nullptr;
 };

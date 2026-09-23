@@ -10,11 +10,19 @@
 
 namespace pwb::ui_controllers::qt {
 
-WorkflowController::WorkflowController(job::JobScheduler& scheduler,
-                                       QObject* parent)
-    : QObject(parent), scheduler_(scheduler) {
-    recompute_job_ = std::make_unique<JobOwnerRunner>(scheduler_, this);
-    prepare_job_ = std::make_unique<JobOwnerRunner>(scheduler_, this);
+WorkflowController::WorkflowController(
+    pwb::qgis_processing::PwbTaskGate* gate, QObject* parent)
+    : QObject(parent), gate_(gate) {
+    // A host-provided gate becomes the process-shared admission point
+    // when none is installed (JobCenter normally installs one before any
+    // window exists); null keeps the no-admission path — tasks go
+    // straight to QgsTaskManager.
+    if (gate_ != nullptr &&
+        pwb::qgis_processing::shared_task_gate() == nullptr) {
+        pwb::qgis_processing::set_shared_task_gate(gate_);
+    }
+    recompute_job_ = std::make_unique<JobOwnerRunner>(this);
+    prepare_job_ = std::make_unique<JobOwnerRunner>(this);
     // The worker progress hop: QMetaObject::invokeMethod queued onto this
     // object's thread (QueuedConnection parity — a QTimer(0) post is the
     // same contract and needs no receiver object).

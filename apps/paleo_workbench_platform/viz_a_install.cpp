@@ -6,7 +6,7 @@
 #include "job_center.hpp"
 
 #include <pwb/ingest/preview/las_wle_bridge.hpp>
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/ui_workers/well_identity.hpp>
 #include <pwb/ui_workers/well_log_load.hpp>
 #include <pwb/ui_workers/wle_load.hpp>
@@ -139,9 +139,9 @@ bool install(QMainWindow* window, JobCenter* jobs) {
 
         window->statusBar()->showMessage(QObject::tr("测井曲线加载中…"));
 
-        owner.start(
-            jobs->scheduler(), std::move(spec),
-            [window, host, path, generation, request](const pwb::job::qtbridge::JobOutcome& outcome) {
+        pwb::qgis_processing::start_job_spec(
+            owner, std::move(spec),
+            [window, host, path, generation, request](const pwb::qgis_processing::CompatJobOutcome& outcome) {
                 // Stale delivery: a newer open superseded this request.
                 if (generation->load() != request) {
                     window->statusBar()->showMessage(
@@ -215,9 +215,10 @@ bool install(QMainWindow* window, JobCenter* jobs) {
                         .arg(diag_note),
                     5000);
             });
-        // Cancel surface: the JobOwner cooperatively cancels via its token
-        // (wired to shutdown_workers on close); the worker checks the token
-        // plus `phase` at its checkpoints and drops late payloads.
+        // Cancel surface: the task owner cooperatively cancels via the
+        // body's token (wired to shutdown_workers on close); the worker
+        // checks the token plus `phase` at its checkpoints and drops late
+        // payloads.
     });
     return true;
 }

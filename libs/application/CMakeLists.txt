@@ -16,6 +16,15 @@ if(TARGET Pwb::Data AND TARGET Pwb::Science AND TARGET Pwb::Visualization
         src/adapters/data_store.cpp
         src/adapters/catalog_publisher.cpp
         src/algorithm_runner.cpp)
+    # CONV-QGIS-PROCESSING phase 4: algorithm_runner delegates discovery and
+    # execution to QgsProcessingRegistry. This directory is processed BEFORE
+    # libs/qgis_processing mounts (root CMakeLists ordering), so an alias
+    # TARGET probe here could never fire — the link uses the PLAIN target
+    # name, resolved at generate time like the ui_wellseis precedent.
+    # PRIVATE: the public algorithm_runner.hpp stays std-only; the registry
+    # delegation (Qt/QGIS includes) lives in the .cpp. CMake still places
+    # the archive on every consumer's link line (static-lib LINK_ONLY).
+    target_link_libraries(pwb_application PRIVATE pwb_qgis_processing)
     target_link_libraries(pwb_application PUBLIC
         Pwb::Data Pwb::Science Pwb::Visualization Pwb::Workflow)
     target_compile_definitions(pwb_application PUBLIC
