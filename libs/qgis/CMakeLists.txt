@@ -7,6 +7,8 @@ add_library(pwb_qgis STATIC
     src/qgis_runtime_entry.cpp
     src/layer_adapter.cpp
     src/map_session.cpp
+    src/map_project_store.cpp
+    src/layer_factory.cpp
     src/edit_controller.cpp
     src/layout_service.cpp
     # V14-QGIS-CONTROL: the ILayerTreeStack applier over this session's
