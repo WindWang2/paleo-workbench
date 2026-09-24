@@ -100,6 +100,9 @@ public slots:
 signals:
     void prediction_updated();
     void send_to_mapping_requested();
+    // Stable resource id of the newly selected seismic source — the ws1
+    // link/RunSpec wiring consumes this; never a row index.
+    void seismic_selection_changed(const QString& resource_id);
 
 protected:
     void closeEvent(QCloseEvent* event) override;

@@ -3,6 +3,7 @@
 #include <pwb/closure_science/inference_service.hpp>
 #include <pwb/closure_science/model_seed.hpp>
 #include <pwb/closure_science/providers.hpp>
+#include <pwb/closure_science/run_spec_service.hpp>
 #include <pwb/closure_science/task_journal.hpp>
 #include <pwb/catalog/model_registry.hpp>
 #include <pwb/catalog/service_core.hpp>
@@ -284,9 +285,111 @@ public:
         return std::nullopt;
     }
 
+    // Selection-dialog data: try-lock the document so a dialog opened while
+    // a run holds the lock degrades to an honest "busy" answer instead of
+    // freezing the GUI thread until the run finishes.
+    std::vector<WellCandidate> well_candidates(
+        const std::optional<std::string>& model_version_id,
+        std::string* error) {
+        auto context = catalog();
+        if (context == nullptr) {
+            if (error != nullptr) *error = catalog_error();
+            return {};
+        }
+        std::unique_lock<std::mutex> lock(document_mutex_,
+                                          std::try_to_lock);
+        if (!lock.owns_lock()) {
+            if (error != nullptr) {
+                *error = "推断进行中，选择数据请稍后再试";
+            }
+            return {};
+        }
+        return list_well_candidates(context->core->document(),
+                                    context->resources, model_version_id);
+    }
+
+    std::vector<ModelCandidate> model_candidates(std::string* error) {
+        auto context = catalog();
+        if (context == nullptr) {
+            if (error != nullptr) *error = catalog_error();
+            return {};
+        }
+        std::unique_lock<std::mutex> lock(document_mutex_,
+                                          std::try_to_lock);
+        if (!lock.owns_lock()) {
+            if (error != nullptr) {
+                *error = "推断进行中，模型选择请稍后再试";
+            }
+            return {};
+        }
+        return list_model_candidates(context->core->document());
+    }
+
     [[nodiscard]] bool is_running() {
         const std::lock_guard<std::mutex> lock(worker_mutex_);
         return worker_active_;
+    }
+
+    // Cooperative cancel: the provider observes cancel_requested_ at its
+    // tile-group seams and execute_run records the terminal "cancelled"
+    // status — a late result can never relabel the run as success.
+    bool request_cancel() {
+        const std::lock_guard<std::mutex> lock(worker_mutex_);
+        if (!worker_active_) return false;
+        cancel_requested_.store(true);
+        return true;
+    }
+
+    // The predict.run RunSpec path: single-flight, preflight under the
+    // document lock, then the SAME start_inference + launch_worker the
+    // page runs use (one execution lifecycle, never a second stack).
+    SciencePageBinding::SpecRunResult start_spec_run(
+        const pwb::prediction::PredictionRunSpec& spec,
+        QPointer<QObject> page) {
+        SciencePageBinding::SpecRunResult out;
+        {
+            const std::lock_guard<std::mutex> lock(worker_mutex_);
+            if (worker_active_) {
+                out.errors.push_back("已有推断在运行（不可并发运行同一 RunSpec）");
+                return out;
+            }
+        }
+        auto context = catalog();
+        if (context == nullptr) {
+            out.errors.push_back(catalog_error());
+            return out;
+        }
+        PreflightReport preflight;
+        {
+            // No run is active, so the document lock is free: preflight
+            // sees the quiescent catalog the run will open against.
+            const std::lock_guard<std::mutex> lock(document_mutex_);
+            preflight = preflight_run(context->core->document(),
+                                      context->resources, spec);
+        }
+        if (!preflight.ok) {
+            out.errors = std::move(preflight.errors);
+            return out;
+        }
+        auto run = start_inference(
+            context->core->document(), context->save_hook(),
+            StartInferenceRequest{preflight.spec.model_version_id,
+                                  preflight.input_version_ids,
+                                  run_parameters_from_spec(preflight.spec)});
+        if (!run.is_ok()) {
+            out.errors.push_back(run.error().message);
+            return out;
+        }
+        out.run_id = run.value().id.str();
+        std::string launch_error;
+        launch_worker(context, out.run_id, page, &launch_error);
+        if (!launch_error.empty()) {
+            out.errors.push_back(launch_error);
+            out.run_id.clear();
+            return out;
+        }
+        out.started = true;
+        return out;
     }
 
     bool shutdown(int wait_ms) {
@@ -521,6 +624,17 @@ public:
             }
         } else {
             task["model_metadata"]["link_failed"] = true;
+        }
+        // Project-document publish (GUI thread — this hook runs inside the
+        // page's materialize_task): ws2/ws3 overlays, the m5 comparison and
+        // the pages' own update_state read the "prediction_tasks" section;
+        // without this publish a finished run stays invisible to them. A
+        // publish failure is flagged on the task, never fabricated.
+        if (config_.publish_task) {
+            const domain::DataError published = config_.publish_task(task);
+            if (published.code != domain::ErrorCode::Ok) {
+                task["model_metadata"]["publish_failed"] = published.message;
+            }
         }
         return task_to_slice(task);
     }
@@ -779,6 +893,34 @@ void SciencePageBinding::attach(
 
 bool SciencePageBinding::shutdown_workers(int wait_ms) {
     return impl_->shutdown(wait_ms);
+}
+
+void SciencePageBinding::set_publish_task(
+    std::function<domain::DataError(const Json& task)> publish_task) {
+    impl_->config_.publish_task = std::move(publish_task);
+}
+
+bool SciencePageBinding::request_cancel() {
+    return impl_->request_cancel();
+}
+
+bool SciencePageBinding::is_running() const {
+    return impl_->is_running();
+}
+
+std::vector<WellCandidate> SciencePageBinding::well_candidates(
+    const std::optional<std::string>& model_version_id, std::string* error) {
+    return impl_->well_candidates(model_version_id, error);
+}
+
+std::vector<ModelCandidate> SciencePageBinding::model_candidates(
+    std::string* error) {
+    return impl_->model_candidates(error);
+}
+
+SciencePageBinding::SpecRunResult SciencePageBinding::start_spec_run(
+    const pwb::prediction::PredictionRunSpec& spec, QObject* completion_page) {
+    return impl_->start_spec_run(spec, QPointer<QObject>(completion_page));
 }
 
 std::vector<Json> SciencePageBinding::restored_tasks() const {
